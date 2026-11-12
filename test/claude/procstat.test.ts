@@ -1,0 +1,81 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import { argvFromCmdline, procStartFromStat } from '../../src/claude/procstat.ts';
+
+const TAIL = '4194304 1 0 0 0 1 0 0 0 20 0 11 0';
+
+test('procStartFromStat reads field 22 of an ordinary stat line', () => {
+  const line = `4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} 51234567 1048576 4096`;
+  assert.equal(procStartFromStat(line), 51234567);
+});
+
+test('procStartFromStat counts after the LAST closing parenthesis', () => {
+  const line = `4242 (a) b) S 4100 4242 4100 34816 4242 ${TAIL} 51234567 1048576 4096`;
+  assert.equal(procStartFromStat(line), 51234567);
+});
+
+test('procStartFromStat survives spaces in the command name', () => {
+  assert.equal(procStartFromStat(`4242 (my prog) S 4100 4242 4100 34816 4242 ${TAIL} 7 0 0`), 7);
+});
+
+test('procStartFromStat ignores the trailing newline of a real /proc read', () => {
+  assert.equal(
+    procStartFromStat(`4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} 51234567 1 2\n`),
+    51234567,
+  );
+});
+
+test('procStartFromStat accepts a line that ends exactly at field 22', () => {
+  assert.equal(procStartFromStat(`4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} 9`), 9);
+});
+
+test('procStartFromStat gives null for empty and malformed input', () => {
+  assert.equal(procStartFromStat(''), null);
+  assert.equal(procStartFromStat('garbage'), null);
+  assert.equal(procStartFromStat('4242 (claude) S 1 2 3'), null);
+  assert.equal(procStartFromStat('4242 (claude)'), null);
+});
+
+test('procStartFromStat gives null when field 22 is not digits', () => {
+  assert.equal(procStartFromStat(`4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} x 0 0`), null);
+  assert.equal(procStartFromStat(`4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} -5 0 0`), null);
+  assert.equal(
+    procStartFromStat(`4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} 12x 0 0`),
+    null,
+  );
+});
+
+const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+test('argvFromCmdline splits on NUL and drops the final empty element', () => {
+  assert.deepEqual(argvFromCmdline(bytes('claude\0--model\0opus\0')), [
+    'claude',
+    '--model',
+    'opus',
+  ]);
+});
+
+test('argvFromCmdline keeps a last argument that has no terminating NUL', () => {
+  assert.deepEqual(argvFromCmdline(bytes('claude\0x')), ['claude', 'x']);
+});
+
+test('argvFromCmdline keeps empty arguments in the middle', () => {
+  assert.deepEqual(argvFromCmdline(bytes('claude\0\0x\0')), ['claude', '', 'x']);
+});
+
+test('argvFromCmdline gives [] for empty input', () => {
+  assert.deepEqual(argvFromCmdline(bytes('')), []);
+});
+
+test('argvFromCmdline decodes UTF-8', () => {
+  assert.deepEqual(argvFromCmdline(bytes('claude\0-n\0čeština\0')), ['claude', '-n', 'čeština']);
+});
+
+test('argvFromCmdline keeps a leading byte-order mark as part of the first argument', () => {
+  assert.deepEqual(argvFromCmdline(bytes('﻿claude\0')), ['﻿claude']);
+});
+
+test('argvFromCmdline replaces invalid UTF-8 instead of throwing', () => {
+  assert.deepEqual(argvFromCmdline(Uint8Array.from([0x61, 0xff, 0x62, 0])), ['a�b']);
+});
