@@ -1,60 +1,26 @@
-// The launcher is exercised with fake "node" executables that print what they were given, so these
-// tests check which binary is chosen and how it is called without depending on the machine's Node.
+// Most tests use fake "node" executables that print what they were given, so they check which
+// binary is chosen and how it is called without depending on the machine's Node. The last block
+// runs the real thing.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const launcher = fileURLToPath(new URL('../bin/skydeck', import.meta.url));
-const bootstrap = realpathSync(fileURLToPath(new URL('../bin/bootstrap.mjs', import.meta.url)));
+import pkg from '../../package.json' with { type: 'json' };
+import { sandbox } from '../helpers/sandbox.ts';
+import type { Sandbox } from '../helpers/sandbox.ts';
 
-interface Sandbox {
-  home: string;
-  bin: string;
-  root: string;
-  env: (extra?: Record<string, string>) => Record<string, string>;
-}
+const launcher = fileURLToPath(new URL('../../bin/skydeck', import.meta.url));
+const bootstrap = realpathSync(fileURLToPath(new URL('../../bin/bootstrap.mjs', import.meta.url)));
 
-/** The utilities the launcher itself needs, linked into the sandbox so PATH holds nothing else. */
-const LAUNCHER_TOOLS = ['dirname', 'readlink'];
-
-/**
- * A throwaway HOME and a PATH of one directory holding only the tools the launcher needs, so a
- * `node` on the machine can never be picked up by accident. Nothing else is inherited.
- */
-function sandbox(t: TestContext): Sandbox {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'skydeck-launcher-')));
-  t.after(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
-  const home = join(root, 'home');
-  const bin = join(root, 'bin');
-  mkdirSync(home);
-  mkdirSync(bin);
-  for (const tool of LAUNCHER_TOOLS) {
-    const real = ['/usr/bin', '/bin'].map((d) => join(d, tool)).find((p) => existsSync(p));
-    assert.ok(real, `${tool} not found on this machine`);
-    symlinkSync(real, join(bin, tool));
-  }
-  return {
-    home,
-    bin,
-    root,
-    env: (extra = {}) => ({ PATH: bin, HOME: home, ...extra }),
-  };
+/** A sandbox whose PATH holds only the programs the launcher itself uses. */
+function launcherSandbox(t: TestContext): Sandbox {
+  const s = sandbox(t);
+  s.link('dirname', 'readlink');
+  return s;
 }
 
 function writeFakeNode(path: string, name: string): void {
@@ -64,6 +30,14 @@ function writeFakeNode(path: string, name: string): void {
     `#!/bin/sh\necho "node=${name}"\necho "cache=$NODE_COMPILE_CACHE"\nfor a in "$@"; do echo "arg=$a"; done\n`,
   );
   chmodSync(path, 0o755);
+}
+
+/** Makes `<dir>/node` a symlink to a fake node that reports itself as `name`. */
+function pin(s: Sandbox, dir: string, name: string): void {
+  const target = join(s.root, 'pinned', name, 'node');
+  writeFakeNode(target, name);
+  mkdirSync(dir, { recursive: true });
+  symlinkSync(target, join(dir, 'node'));
 }
 
 interface Launched {
@@ -93,12 +67,10 @@ function launch(
 }
 
 describe('bin/skydeck: which node it runs', () => {
-  test('SKYDECK_NODE wins over the data-dir link and over node on PATH', (t) => {
-    const s = sandbox(t);
+  test('SKYDECK_NODE wins over the pinned link and over node on PATH', (t) => {
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
-    writeFakeNode(join(s.root, 'elsewhere', 'node'), 'data-dir');
-    mkdirSync(join(s.home, '.local/share/skydeck'), { recursive: true });
-    symlinkSync(join(s.root, 'elsewhere', 'node'), join(s.home, '.local/share/skydeck/node'));
+    pin(s, join(s.skydeckHome, 'data'), 'pinned');
     writeFakeNode(join(s.root, 'explicit', 'my-node'), 'explicit');
 
     const r = launch(launcher, [], s.env({ SKYDECK_NODE: join(s.root, 'explicit', 'my-node') }));
@@ -106,33 +78,62 @@ describe('bin/skydeck: which node it runs', () => {
     assert.equal(r.node, 'explicit');
   });
 
-  test('$XDG_DATA_HOME/skydeck/node is used when SKYDECK_NODE is unset, ahead of node on PATH', (t) => {
-    const s = sandbox(t);
+  test('$SKYDECK_HOME/data/node is used when SKYDECK_NODE is unset, ahead of node on PATH', (t) => {
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
-    writeFakeNode(join(s.root, 'pinned', 'node'), 'data-dir');
-    const data = join(s.root, 'xdg-data');
-    mkdirSync(join(data, 'skydeck'), { recursive: true });
-    symlinkSync(join(s.root, 'pinned', 'node'), join(data, 'skydeck/node'));
-
-    const r = launch(launcher, [], s.env({ XDG_DATA_HOME: data }));
-
-    assert.equal(r.node, 'data-dir');
-  });
-
-  test('without XDG_DATA_HOME the link is looked up under $HOME/.local/share', (t) => {
-    const s = sandbox(t);
-    writeFakeNode(join(s.bin, 'node'), 'path');
-    writeFakeNode(join(s.root, 'pinned', 'node'), 'data-dir');
-    mkdirSync(join(s.home, '.local/share/skydeck'), { recursive: true });
-    symlinkSync(join(s.root, 'pinned', 'node'), join(s.home, '.local/share/skydeck/node'));
+    pin(s, join(s.skydeckHome, 'data'), 'pinned');
 
     const r = launch(launcher, [], s.env());
 
-    assert.equal(r.node, 'data-dir');
+    assert.equal(r.node, 'pinned');
+  });
+
+  test('SKYDECK_HOME replaces the XDG and HOME locations instead of adding to them', (t) => {
+    const s = launcherSandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    const xdgData = join(s.root, 'xdg-data');
+    pin(s, join(xdgData, 'skydeck'), 'xdg');
+    pin(s, join(s.home, '.local/share/skydeck'), 'home');
+
+    const r = launch(launcher, [], s.env({ XDG_DATA_HOME: xdgData }));
+
+    assert.equal(r.node, 'path');
+  });
+
+  test('an empty SKYDECK_HOME counts as unset', (t) => {
+    const s = launcherSandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    const xdgData = join(s.root, 'xdg-data');
+    pin(s, join(xdgData, 'skydeck'), 'xdg');
+
+    const r = launch(launcher, [], s.env({ SKYDECK_HOME: '', XDG_DATA_HOME: xdgData }));
+
+    assert.equal(r.node, 'xdg');
+  });
+
+  test('without SKYDECK_HOME, $XDG_DATA_HOME/skydeck/node is used ahead of node on PATH', (t) => {
+    const s = launcherSandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    const xdgData = join(s.root, 'xdg-data');
+    pin(s, join(xdgData, 'skydeck'), 'xdg');
+
+    const r = launch(launcher, [], s.env({ SKYDECK_HOME: undefined, XDG_DATA_HOME: xdgData }));
+
+    assert.equal(r.node, 'xdg');
+  });
+
+  test('without SKYDECK_HOME and XDG_DATA_HOME the link is under $HOME/.local/share', (t) => {
+    const s = launcherSandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    pin(s, join(s.home, '.local/share/skydeck'), 'home');
+
+    const r = launch(launcher, [], s.env({ SKYDECK_HOME: undefined }));
+
+    assert.equal(r.node, 'home');
   });
 
   test('falls back to node on PATH when there is no link', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
 
     const r = launch(launcher, [], s.env());
@@ -141,10 +142,21 @@ describe('bin/skydeck: which node it runs', () => {
   });
 
   test('falls back to node on PATH when the link is dangling', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
-    mkdirSync(join(s.home, '.local/share/skydeck'), { recursive: true });
-    symlinkSync(join(s.root, 'gone', 'node'), join(s.home, '.local/share/skydeck/node'));
+    mkdirSync(join(s.skydeckHome, 'data'));
+    symlinkSync(join(s.root, 'gone', 'node'), join(s.skydeckHome, 'data', 'node'));
+
+    const r = launch(launcher, [], s.env());
+
+    assert.equal(r.node, 'path');
+  });
+
+  test('a link that points at a directory is skipped in favour of node on PATH', (t) => {
+    const s = launcherSandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    mkdirSync(join(s.skydeckHome, 'data'));
+    symlinkSync(s.root, join(s.skydeckHome, 'data', 'node'));
 
     const r = launch(launcher, [], s.env());
 
@@ -152,7 +164,7 @@ describe('bin/skydeck: which node it runs', () => {
   });
 
   test('says what is wrong and exits 127 when there is no node to run', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
 
     const r = launch(launcher, [], s.env({ SKYDECK_NODE: join(s.root, 'no-such-node') }));
 
@@ -161,7 +173,7 @@ describe('bin/skydeck: which node it runs', () => {
   });
 
   test('refuses a directory or a file that is not executable as SKYDECK_NODE', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     const notExecutable = join(s.root, 'not-executable');
     writeFileSync(notExecutable, '#!/bin/sh\nexit 0\n');
     chmodSync(notExecutable, 0o644);
@@ -174,19 +186,8 @@ describe('bin/skydeck: which node it runs', () => {
     }
   });
 
-  test('a data-dir link that points at a directory is skipped in favour of node on PATH', (t) => {
-    const s = sandbox(t);
-    writeFakeNode(join(s.bin, 'node'), 'path');
-    mkdirSync(join(s.home, '.local/share/skydeck'), { recursive: true });
-    symlinkSync(s.root, join(s.home, '.local/share/skydeck/node'));
-
-    const r = launch(launcher, [], s.env());
-
-    assert.equal(r.node, 'path');
-  });
-
   test('says the same when node is missing from PATH', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
 
     const r = launch(launcher, [], s.env());
 
@@ -197,7 +198,7 @@ describe('bin/skydeck: which node it runs', () => {
 
 describe('bin/skydeck: how it calls node', () => {
   test('runs bootstrap.mjs with every argument passed through untouched', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
 
     const r = launch(launcher, ['--flag', 'two words', '', '$HOME', '*'], s.env());
@@ -206,7 +207,7 @@ describe('bin/skydeck: how it calls node', () => {
   });
 
   test('runs the real bootstrap.mjs when reached through a chain of symlinks', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
     mkdirSync(join(s.root, 'a'));
     mkdirSync(join(s.root, 'b'));
@@ -219,7 +220,7 @@ describe('bin/skydeck: how it calls node', () => {
   });
 
   test('resolves its own location physically, through a symlinked directory', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
     symlinkSync(dirname(launcher), join(s.root, 'linked-bin'));
 
@@ -229,7 +230,7 @@ describe('bin/skydeck: how it calls node', () => {
   });
 
   test('is not misled by CDPATH when started by a relative path', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
     const checkout = dirname(dirname(launcher));
     // With CDPATH=<s.root>, a plain `cd bin` would land in <s.root>/bin instead of <checkout>/bin.
@@ -239,7 +240,7 @@ describe('bin/skydeck: how it calls node', () => {
   });
 
   test('NODE_COMPILE_CACHE defaults to $XDG_CACHE_HOME/skydeck/compile-cache', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
 
     const r = launch(launcher, [], s.env({ XDG_CACHE_HOME: '/xdg/cache' }));
@@ -248,7 +249,7 @@ describe('bin/skydeck: how it calls node', () => {
   });
 
   test('NODE_COMPILE_CACHE defaults to $HOME/.cache/skydeck/compile-cache without XDG_CACHE_HOME', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
 
     const r = launch(launcher, [], s.env());
@@ -256,8 +257,8 @@ describe('bin/skydeck: how it calls node', () => {
     assert.equal(r.cache, join(s.home, '.cache/skydeck/compile-cache'));
   });
 
-  test('an NODE_COMPILE_CACHE that is already set is left alone', (t) => {
-    const s = sandbox(t);
+  test('a NODE_COMPILE_CACHE that is already set is left alone', (t) => {
+    const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
 
     const r = launch(
@@ -270,7 +271,7 @@ describe('bin/skydeck: how it calls node', () => {
   });
 
   test('the exit code of node is the exit code of the launcher', (t) => {
-    const s = sandbox(t);
+    const s = launcherSandbox(t);
     const failing = join(s.bin, 'node');
     writeFileSync(failing, '#!/bin/sh\nexit 7\n');
     chmodSync(failing, 0o755);
@@ -278,5 +279,31 @@ describe('bin/skydeck: how it calls node', () => {
     const r = launch(launcher, [], s.env());
 
     assert.equal(r.status, 7);
+  });
+});
+
+describe('bin/skydeck with the real node', () => {
+  function run(t: TestContext, args: string[]) {
+    const s = launcherSandbox(t);
+    return spawnSync(launcher, args, {
+      encoding: 'utf8',
+      env: s.env({ SKYDECK_NODE: process.execPath }),
+    });
+  }
+
+  test('--version prints the package version and nothing on stderr', (t) => {
+    const r = run(t, ['--version']);
+
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, `${pkg.version}\n`);
+    assert.equal(r.stderr, '');
+  });
+
+  test('an unknown command prints the usage on stderr and exits 2', (t) => {
+    const r = run(t, ['frobnicate']);
+
+    assert.equal(r.status, 2);
+    assert.equal(r.stdout, '');
+    assert.match(r.stderr, /^Usage:/m);
   });
 });

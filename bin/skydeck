@@ -3,7 +3,9 @@
 #
 # Node is chosen by, in order:
 #   1. $SKYDECK_NODE
-#   2. the symlink ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node, if it points at an executable
+#   2. the symlink <dataDir>/node, if it points at an executable, where <dataDir> is
+#      $SKYDECK_HOME/data when SKYDECK_HOME is set (tests), else
+#      ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck (design 9.1)
 #   3. `node` from PATH
 # so the launcher does not depend on the shell's default Node version.
 
@@ -32,7 +34,11 @@ runnable() {
   esac
 }
 
-linked_node=${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node
+if [ -n "${SKYDECK_HOME:-}" ]; then
+  linked_node=$SKYDECK_HOME/data/node
+else
+  linked_node=${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node
+fi
 if [ -n "${SKYDECK_NODE:-}" ]; then
   node=$SKYDECK_NODE
 elif runnable "$linked_node"; then
