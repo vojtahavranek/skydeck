@@ -115,22 +115,45 @@ describe('bin/bootstrap.mjs: Node version check', () => {
   });
 });
 
-describe('bin/bootstrap.mjs run on a Node that is too old', () => {
-  test('prints the one line on stderr, nothing on stdout, and exits 1 without loading the CLI', () => {
-    // Pretend to be Node 20 by overriding process.versions.node before the bootstrap runs.
-    const pretend = 'Object.defineProperty(process.versions, "node", { value: "20.0.0" })';
-    const bootstrap = fileURLToPath(new URL('../bin/bootstrap.mjs', import.meta.url));
+describe('bin/bootstrap.mjs process-level behaviour', () => {
+  const bootstrap = fileURLToPath(new URL('../bin/bootstrap.mjs', import.meta.url));
 
-    const r = spawnSync(
+  /** Runs the bootstrap on the running Node after a data: module has run, with an empty environment. */
+  function bootstrapAfter(preload: string, env: Record<string, string> = {}) {
+    return spawnSync(
       process.execPath,
-      ['--import', `data:text/javascript,${encodeURIComponent(pretend)}`, bootstrap, '--version'],
-      { encoding: 'utf8' },
+      ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, bootstrap, '--version'],
+      { encoding: 'utf8', env },
     );
+  }
+
+  test('on a Node that is too old: one line on stderr, nothing on stdout, exit 1, CLI not loaded', () => {
+    // Pretend to be Node 20 by overriding process.versions.node before the bootstrap runs.
+    const r = bootstrapAfter('Object.defineProperty(process.versions, "node", { value: "20.0.0" })');
 
     assert.equal(r.status, 1);
     assert.equal(r.stdout, '');
     assert.equal(r.stderr, `${checkNodeVersion('20.0.0')}\n`);
   });
+
+  // The failure must not depend on how Node treats unhandled rejections: with "none" or "warn" a
+  // bare promise chain would exit 0 here, and a broken install would look like success.
+  for (const mode of ['strict', 'throw', 'warn', 'none']) {
+    test(`a CLI that fails to load exits 1 and shows the error (--unhandled-rejections=${mode})`, () => {
+      const r = bootstrapAfter(
+        `import { registerHooks } from 'node:module';
+         registerHooks({ resolve(specifier, context, next) {
+           if (specifier.endsWith('/cli/main.ts')) throw new Error('boom: cannot load the CLI');
+           return next(specifier, context);
+         } });`,
+        { NODE_OPTIONS: `--unhandled-rejections=${mode}` },
+      );
+
+      assert.equal(r.status, 1);
+      assert.equal(r.stdout, '');
+      assert.match(r.stderr, /boom: cannot load the CLI/);
+    });
+  }
 });
 
 describe('bin/skydeck as a child process', () => {
