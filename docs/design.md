@@ -185,8 +185,9 @@ The scan reads each file incrementally from the stored byte offset; only files w
 modification time changed are opened. A last line without a newline is left for the next scan. A
 file that shrank is read again from the start. From the records it keeps, per file: the session
 id, the first `cwd` (the project directory), the `entrypoint`, the latest `ai-title` and
-`custom-title`, the times of the first record, the last record and the last `user` record, and
-the pull requests named in `pr-link` records. It keeps no text of any message.
+`custom-title`, the times of the first record, the last record and the last `user` record, the
+type of the last record that is a `user` or `assistant` record, and the pull requests named in
+`pr-link` records. It keeps no text of any message.
 
 A transcript whose `entrypoint` is not `cli` is recorded but its session is never listed.
 A known transcript whose file has disappeared is marked missing with the time it was noticed.
@@ -231,7 +232,7 @@ Marks are shown next to the state.
 | Mark | Rule |
 |---|---|
 | `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. |
-| `was-working` | `ended-unexpectedly`, and a leftover live-session file of that dead process (same pid and process start) says `status` `busy`. |
+| `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `user`/`assistant` record of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
 | `continued` | The session is the target of a `clear` or `fork` link. `show` names the session it continues. |
 | `expired` | Its transcript is missing. It cannot be resumed. |
 | `expiring` | Its transcript was last modified more than (retention − 5) days ago, where retention is `cleanupPeriodDays` from the settings file, default 30. |
@@ -510,6 +511,7 @@ CREATE TABLE transcripts (
   first_record_ns  INTEGER,
   last_record_ns   INTEGER,
   last_user_ns     INTEGER,
+  last_turn_role   TEXT,                -- user | assistant: type of the last such record
   missing_since_ns INTEGER
 );
 CREATE INDEX transcripts_by_session ON transcripts (session_id);
@@ -657,9 +659,10 @@ inspecting local files, unless marked otherwise.
 | `--mcp-config`, `--settings`, `--add-dir`, `--plugin-dir` are not restored by `--resume`; a permission flag on the command line overrides the restored mode. | documentation |
 | Transcripts are deleted after `cleanupPeriodDays` (default 30). | documentation |
 | `--session-id <uuid>` starts a session with a chosen id. | documentation |
-| `-n <name>` together with `--resume` names the resumed session. | **to verify during implementation**; if not, the label is passed for new sessions only |
-| Which `SessionEnd` reason, if any, is reported when the terminal is closed (SIGHUP). | **to verify during implementation**; the rules in 6.3 and 7.8 hold either way |
-| `$CLAUDE_CODE_ENTRYPOINT` in a hook's environment names the entry point. | **to verify during implementation**; the `-p`/`--print` rule holds either way |
+| `-n <name>` together with `--resume <id>` keeps the session id and gives the session that name; a later `-n` wins over a stored name, and a resume without `-n` keeps the stored name. | observed |
+| Closing the terminal (SIGHUP, or the terminal side of the pty closing) fires `SessionEnd` with reason `other` and removes the live-session file, also in the middle of a turn. SIGKILL fires nothing and leaves the file with its last `status`. | observed |
+| In a hook's environment `$CLAUDE_CODE_ENTRYPOINT` is `cli` for an interactive session and `sdk-cli` for `claude -p`. Hooks fire for `-p` runs, and their command line contains `-p`. After `/clear`, the environment and the hook input both carry the new session id. | observed |
+| A session that never received a prompt has no transcript. | observed |
 
 ## 15. How changes are made
 
