@@ -379,9 +379,17 @@ Claude Code flags and their shapes (no value, one value, optional value, several
 `--flag=value` is understood). A flag that is not in the table is kept, together with a following
 argument that does not start with `-`.
 
+Arguments are read as Claude Code's own parser reads them: a flag that takes several values
+consumes the arguments after it up to the next one that starts with `-`, so a prompt written
+directly after such a flag is taken as one of its values; `--flag=value` consumes nothing more;
+`--` ends the flags, and it and everything after it are positional arguments.
+
 - Removed: `--resume`/`-r` and its value, `--continue`/`-c`, `--session-id` and its value,
   `--fork-session`, `--name`/`-n` and its value, `--worktree`/`-w` and its value, `--bg`,
-  `--from-pr` and its value, and positional arguments (an initial prompt).
+  `--from-pr` and its value, and positional arguments (an initial prompt). Also removed are the
+  flags that choose which session is opened or where it runs: `--teleport` and `--cloud` with
+  their values, and `--desktop`. Flags that only configure how the session runs, including
+  `--remote-control`, are kept.
 - Added, directly after the program: `--resume <session id>`, then `-n <label>` when the session
   has a label.
 - Kept, in order: everything else — including `--mcp-config`, `--settings`, `--add-dir`,
