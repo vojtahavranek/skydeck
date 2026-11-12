@@ -11,8 +11,8 @@ if (problem !== undefined) {
 // No top-level await: it would be a syntax error on a Node older than 14.8, before the message above.
 // Both outcomes are handled explicitly so a failure to load the CLI exits 1 however Node is
 // configured to treat unhandled rejections (--unhandled-rejections=warn and =none exit 0).
-import('../src/cli/main.ts')
-  .then(({ main, processIo }) => main(process.argv.slice(2), processIo()))
+Promise.all([import('../src/cli/main.ts'), import('../src/cli/context.ts')])
+  .then(([{ main }, { processContext }]) => main(process.argv.slice(2), processContext()))
   .then(
     (code) => {
       process.exitCode = code;

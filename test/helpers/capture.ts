@@ -1,4 +1,4 @@
-import type { Io } from '../../src/cli/main.ts';
+import type { Io } from '../../src/cli/context.ts';
 
 export interface Captured {
   io: Io;
