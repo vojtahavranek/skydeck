@@ -115,6 +115,24 @@ describe('bin/bootstrap.mjs: Node version check', () => {
   });
 });
 
+describe('bin/bootstrap.mjs run on a Node that is too old', () => {
+  test('prints the one line on stderr, nothing on stdout, and exits 1 without loading the CLI', () => {
+    // Pretend to be Node 20 by overriding process.versions.node before the bootstrap runs.
+    const pretend = 'Object.defineProperty(process.versions, "node", { value: "20.0.0" })';
+    const bootstrap = fileURLToPath(new URL('../bin/bootstrap.mjs', import.meta.url));
+
+    const r = spawnSync(
+      process.execPath,
+      ['--import', `data:text/javascript,${encodeURIComponent(pretend)}`, bootstrap, '--version'],
+      { encoding: 'utf8' },
+    );
+
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, '');
+    assert.equal(r.stderr, `${checkNodeVersion('20.0.0')}\n`);
+  });
+});
+
 describe('bin/skydeck as a child process', () => {
   const launcher = fileURLToPath(new URL('../bin/skydeck', import.meta.url));
 

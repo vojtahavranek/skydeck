@@ -8,5 +8,7 @@ if (problem !== undefined) {
   process.exit(1);
 }
 
-const { main, processIo } = await import('../src/cli/main.ts');
-process.exitCode = main(process.argv.slice(2), processIo());
+// No top-level await: it would be a syntax error on a Node older than 14.8, before the message above.
+import('../src/cli/main.ts').then(({ main, processIo }) => {
+  process.exitCode = main(process.argv.slice(2), processIo());
+});

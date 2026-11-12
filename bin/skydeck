@@ -3,9 +3,12 @@
 #
 # Node is chosen by, in order:
 #   1. $SKYDECK_NODE
-#   2. the symlink ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node, if it points at something
+#   2. the symlink ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node, if it points at an executable
 #   3. `node` from PATH
 # so the launcher does not depend on the shell's default Node version.
+
+# A set CDPATH would make the relative `cd`s below land in the wrong directory.
+unset CDPATH
 
 # Find the real location of this file; it may be reached through (a chain of) symlinks.
 self=$0
@@ -19,16 +22,26 @@ while [ -h "$self" ]; do
 done
 root=$(cd -P -- "$(dirname -- "$self")/.." && pwd) || exit 1
 
+# True if $1 can be run: an executable regular file when it is a path, a command on PATH when it
+# is a bare name. (`-x` alone is true for directories, and `command -v` of a path only checks that
+# it exists, so neither is enough by itself.)
+runnable() {
+  case $1 in
+    */*) [ -f "$1" ] && [ -x "$1" ] ;;
+    *) command -v "$1" >/dev/null 2>&1 ;;
+  esac
+}
+
 linked_node=${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node
 if [ -n "${SKYDECK_NODE:-}" ]; then
   node=$SKYDECK_NODE
-elif [ -x "$linked_node" ]; then
+elif runnable "$linked_node"; then
   node=$linked_node
 else
   node=node
 fi
 
-if ! command -v "$node" >/dev/null 2>&1; then
+if ! runnable "$node"; then
   echo "skydeck: cannot run '$node'; install Node.js or set SKYDECK_NODE to a node binary." >&2
   exit 127
 fi

@@ -65,8 +65,8 @@ interface Launched {
   args: string[];
 }
 
-function launch(command: string, args: string[], env: Record<string, string>): Launched {
-  const result = spawnSync(command, args, { env, encoding: 'utf8' });
+function launch(command: string, args: string[], env: Record<string, string>, cwd?: string): Launched {
+  const result = spawnSync(command, args, { env, cwd, encoding: 'utf8' });
   const lines = result.stdout.split('\n');
   const field = (key: string) => lines.find((l) => l.startsWith(`${key}=`))?.slice(key.length + 1);
   return {
@@ -146,6 +146,31 @@ describe('bin/skydeck: which node it runs', () => {
     assert.match(r.stderr, /cannot run '.*no-such-node'.*SKYDECK_NODE/);
   });
 
+  test('refuses a directory or a file that is not executable as SKYDECK_NODE', (t) => {
+    const s = sandbox(t);
+    const notExecutable = join(s.root, 'not-executable');
+    writeFileSync(notExecutable, '#!/bin/sh\nexit 0\n');
+    chmodSync(notExecutable, 0o644);
+
+    for (const bad of [s.root, notExecutable]) {
+      const r = launch(launcher, [], s.env({ SKYDECK_NODE: bad }));
+
+      assert.equal(r.status, 127, bad);
+      assert.match(r.stderr, /cannot run '.*'.*SKYDECK_NODE/, bad);
+    }
+  });
+
+  test('a data-dir link that points at a directory is skipped in favour of node on PATH', (t) => {
+    const s = sandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    mkdirSync(join(s.home, '.local/share/skydeck'), { recursive: true });
+    symlinkSync(s.root, join(s.home, '.local/share/skydeck/node'));
+
+    const r = launch(launcher, [], s.env());
+
+    assert.equal(r.node, 'path');
+  });
+
   test('says the same when node is missing from PATH', (t) => {
     const s = sandbox(t);
 
@@ -177,6 +202,26 @@ describe('bin/skydeck: how it calls node', () => {
     const r = launch(join(s.root, 'b', 'skydeck'), ['x'], s.env());
 
     assert.deepEqual(r.args, [bootstrap, 'x']);
+  });
+
+  test('resolves its own location physically, through a symlinked directory', (t) => {
+    const s = sandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    symlinkSync(dirname(launcher), join(s.root, 'linked-bin'));
+
+    const r = launch(join(s.root, 'linked-bin', 'skydeck'), [], s.env());
+
+    assert.deepEqual(r.args, [bootstrap]);
+  });
+
+  test('is not misled by CDPATH when started by a relative path', (t) => {
+    const s = sandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+    const checkout = dirname(dirname(launcher));
+    // With CDPATH=<s.root>, a plain `cd bin` would land in <s.root>/bin instead of <checkout>/bin.
+    const r = launch('bin/skydeck', [], s.env({ CDPATH: s.root }), checkout);
+
+    assert.deepEqual(r.args, [bootstrap]);
   });
 
   test('NODE_COMPILE_CACHE defaults to $XDG_CACHE_HOME/skydeck/compile-cache', (t) => {
