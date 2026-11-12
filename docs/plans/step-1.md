@@ -123,17 +123,17 @@ Each is binding for the implementer. The last column names the task that records
 
 | # | Decision | Why | Design update |
 |---|---|---|---|
-| D1 | Nanosecond times are `bigint` in TypeScript (type `Ns`); the store reads with `readBigInts: true` and converts every non-time integer column to `number`. | `node:sqlite` on Node 24.19 throws `ERR_OUT_OF_RANGE` when it reads an integer above 2^53 as a number; `time_ns` values are ~1.8·10^18. Verified while writing this plan. | 4 (9.2) |
+| D1 | Nanosecond times are `bigint` in TypeScript (type `Ns`); the store reads with `readBigInts: true` and converts every non-time integer column to `number`. | `node:sqlite` on Node 24.19 throws `ERR_OUT_OF_RANGE` when it reads an integer above 2^53 as a number; `time_ns` values are ~1.8·10^18. Verified while writing this plan. | 4 (9.2: integers are read as BigInt; times are `bigint`) |
 | D2 | Live-session file shapes as observed on Claude Code 2.1.323: `procStart` is a **decimal string**; `startedAt`, `updatedAt`, `statusUpdatedAt` are epoch **milliseconds** (numbers); `status` also takes the value `shell` (falls to state `running` by the 6.2 rule). | Read from 177 local files (keys and types only). | 6 (14) |
 | D3 | `claudeHome` precedence: configuration key `claudeHome`, then `$CLAUDE_CONFIG_DIR`, then `<home>/.claude`. Configured paths must be absolute. | 9.1 lists both, no order. | 1 (9.1) |
 | D4 | Configuration `terminal` defaults to `here`. | 7.6 names no default. | 1 (9.1) |
-| D5 | The `--here` handoff file is a POSIX `sh` fragment in which every word is quoted by `shellQuote`; the launcher evaluates it after Node exits. Its path is in `$SKYDECK_HANDOFF`, created by the launcher. | The launcher must `exec` an argument list it receives from Node; `sh` cannot read NUL-separated lists. Quoting is exact, so no word is reinterpreted. | 7 (7.6) |
+| D5 | The `--here` handoff file is a POSIX `sh` fragment in which every word is quoted by `shellQuote`; the launcher evaluates it after Node exits. Its path is in `$SKYDECK_HANDOFF`, created by the launcher. | The launcher must `exec` an argument list it receives from Node; `sh` cannot read NUL-separated lists. Quoting is exact, so no word is reinterpreted. | 7 (7.6: "commands are run as argument lists; the one exception is the `--here` handoff, a generated `sh` fragment in which every word is quoted by the same function as the printed fallback") |
 | D6 | Spool `<random>` is the hook shell's `$$`; the temporary name is `.<final name>.tmp`; ingest reads only names ending in `.ev`. A missing `CLAUDE_PID` gives `claude_pid` empty and the name part `0`. | 5.2 lists only `sh`, `date`, `cat`, `base64`, `mkdir`, `mv`. | 3 (5.2) |
 | D7 | An event without `claude_pid` is stored with `pid` 0 and `proc_start` NULL; it belongs to no live process. | `pid` is `NOT NULL`. | 5 (5.3) |
 | D8 | A transcript's session id is its file name (the UUID). | 5.6 "per file: the session id". | — |
 | D9 | Shared error classes (with their exit codes) live in `src/platform/errors.ts`. | `platform` is the one module everybody may import. | — |
 | D10 | Field-22 parsing and `cmdline` decoding live in `src/claude/procstat.ts`; the path-flag rewrite lives in `src/claude/launch.ts`. Files inside `src/claude/` may import each other. | 5.3 and 5.5 both need field 22; 5.3 needs the flag shapes. | — |
-| D11 | A pull request never fetched successfully and without an error counts as `cant-read` for the chip, shown as "can't read, last read never". | 7.3 has no level for it. | 9 (7.3) |
+| D11 | A pull request never fetched, with no failed attempt, is its own level `unfetched`, shown as "not fetched", ranked directly after `cant-read`. `skydeck pr add` fetches the pull request it attaches at once (same timeout; a failure leaves it `cant-read`). `skydeck ls` and `show` take `--refresh`, which fetches stale and unfetched pull requests before printing; without it they never touch the network. | 7.3 has no level for it; a fresh attachment should not look broken. | 9 (7.3: the level), 15 (7.3: `pr add`), 14 (7.3, 7.5: `--refresh`) |
 | D12 | The fallback title is `YYYY-MM-DD HH:MM <basename of dir>` in UTC (`?` when there is no dir). | Deterministic tests. | 11 (7.1) |
 | D13 | `Context` gains `platform`; `Io` gains `isTTY`, `size`, `readLine`, `keys` (task 1, once). Commands open the database through `withDeck` (task 12). | Brief 18: the platform task extends `Context` once. | — |
 | D14 | `$VISUAL`, else `$EDITOR`, else `vi`; the value is split on spaces; the note file path is appended. | 7.1 only says `$EDITOR`. | 15 (7.1) |
@@ -145,10 +145,12 @@ Each is binding for the implementer. The last column names the task that records
 | D20 | Install offers the first-run "mark as done" only once (kv `first_run_offered`). | 8 "Running it again changes nothing". | 17 (8) |
 | D21 | An `observed` event's time is the clock at reconcile; its launch command gets the same path-flag rewrite as a spooled one. | 5.4 is silent. | 8 (5.4) |
 | D22 | `<ref>` by label searches the sessions `ls --all` would show (done ones included), not only the default list. | Otherwise `skydeck undone <label>` could never work. | 11 (7.5) |
-| D23 | Exit codes of `restore`: 0 when every selected session started (or was handed off), 1 when any was refused, failed to open or timed out, 5 when stopped by the memory check or cancelled at the prompt. | 7.5 names 5 only. | 18 (7.5) |
+| D23 | Exit codes of `restore`: 0 when every selected session started (or was handed off), 1 when any was refused, failed to open or timed out, 5 when stopped by the memory check or cancelled at the prompt. | 7.5 names 5 only. | 18 (7.8) |
 | D24 | `resume --tab` (or a `tab` default) without a tab adapter configured prints the command and exits 1; `label`/`group` take the remaining positionals joined by one space. | 7.5/7.6 are silent. | 15 (7.5: joined text), 16 (7.6: no tab adapter) |
 | D25 | `src/sessions/` may import `src/github.ts` (`prKey`, `prLevel`, `chipFor` — pure functions): the scan attaches pull requests by key, the list model computes the chip. | Design 11 leaves `github` out of the sessions row. | 8 (11) |
 | D26 | `SKYDECK_HOME`, `XDG_*_HOME` and `CLAUDE_CONFIG_DIR` count only when non-empty and absolute — in `resolvePlaces`, in the hook and in the launcher alike. | 9.1 "the hook resolves stateDir by the same rule". | 1 (9.1) |
+| D27 | A session that is not running and has no transcript is not listed (nothing to resume; a session that never received a prompt has no transcript, design 14). | 7.2 would list it forever. | 11 (7.2) |
+| D28 | Resume removes the flags that choose which session is opened or where it runs — besides 7.6's list, `--teleport`, `--cloud`, `--desktop` with their values; flags that configure how it runs (including `--remote-control`) are kept. | 7.6 predates these flags. | 2 (7.6) |
 
 ## 2. Contracts
 
@@ -779,6 +781,10 @@ export const FLAGS: readonly FlagSpec[] = [
   { names: ['-w', '--worktree'], shape: 'optional', remove: true, path: false },
   { names: ['--bg', '--background'], shape: 'none', remove: true, path: false },
   { names: ['--from-pr'], shape: 'optional', remove: true, path: false },
+  // they choose which session is opened or where it runs (D28)
+  { names: ['--teleport'], shape: 'optional', remove: true, path: false },
+  { names: ['--cloud'], shape: 'optional', remove: true, path: false },
+  { names: ['--desktop'], shape: 'none', remove: true, path: false },
   // path flags (5.3), kept
   { names: ['--mcp-config'], shape: 'many', remove: false, path: true },
   { names: ['--add-dir'], shape: 'many', remove: false, path: true },
@@ -799,14 +805,14 @@ export const FLAGS: readonly FlagSpec[] = [
     .map((name) => ({ names: [name], shape: 'one' as const, remove: false, path: false })),
   // kept, optional value
   { names: ['-d', '--debug'], shape: 'optional', remove: false, path: false },
-  ...['--prompt-suggestions', '--remote-control', '--cloud', '--teleport']
+  ...['--prompt-suggestions', '--remote-control']
     .map((name) => ({ names: [name], shape: 'optional' as const, remove: false, path: false })),
   // kept, no value
   { names: ['-p', '--print'], shape: 'none', remove: false, path: false },
   { names: ['-h', '--help'], shape: 'none', remove: false, path: false },
   { names: ['-v', '--version'], shape: 'none', remove: false, path: false },
   ...['--allow-dangerously-skip-permissions', '--ax-screen-reader', '--bare', '--brief', '--chrome',
-      '--dangerously-skip-permissions', '--desktop', '--disable-slash-commands',
+      '--dangerously-skip-permissions', '--disable-slash-commands',
       '--exclude-dynamic-system-prompt-sections', '--forward-subagent-text', '--ide',
       '--include-hook-events', '--include-partial-messages', '--no-chrome',
       '--no-session-persistence', '--replay-user-messages', '--restricted', '--safe-mode',
@@ -1067,21 +1073,28 @@ export function batchArgs(keys: readonly PrKey[]): string[];
 export function parseBatch(keys: readonly PrKey[], result: RunResult, atNs: Ns): Map<string, PrFetchResult>;
 
 /**
- * Fetches prsDue(...) in batches through `gh api graphql` (runner, GH_TIMEOUT_MS), saves every
- * result with store.savePrResult. Never throws for gh failures.
+ * Fetches exactly the given pull requests (urls of existing prs rows) in batches through
+ * `gh api graphql` (runner, GH_TIMEOUT_MS), saves every result with store.savePrResult. Never
+ * throws for gh failures; no call at all for an empty list.
  */
+export function fetchPrs(
+  deps: { runner: Runner; clock: Clock; store: Store },
+  urls: readonly string[],
+): Promise<{ fetched: number; failed: number }>;
+
+/** fetchPrs of the urls of prsDue(store.prs(), now, refreshMinutes, force). */
 export function refreshPrs(
   deps: { runner: Runner; clock: Clock; store: Store },
   options: { force: boolean; refreshMinutes: number },
 ): Promise<{ fetched: number; failed: number }>;
 
 /** 7.3 chip, worst first. */
-export const CHIP_ORDER = ['cant-read', 'checks-failing', 'changes-requested', 'checks-pending',
+export const CHIP_ORDER = ['cant-read', 'unfetched', 'checks-failing', 'changes-requested', 'checks-pending',
   'review-required', 'draft', 'approved-green', 'merged', 'closed'] as const;
 export type ChipLevel = (typeof CHIP_ORDER)[number];
 
 /**
- * Level of one pull request: error non-null or state null → cant-read (D11); merged → merged;
+ * Level of one pull request: error non-null → cant-read; state null (never fetched, D11) → unfetched; merged → merged;
  * closed → closed; otherwise (open or draft) the first that applies of: checks failing →
  * checks-failing; review changes-requested → changes-requested; checks pending → checks-pending;
  * review review-required → review-required; draft → draft; else approved-green.
@@ -1286,7 +1299,7 @@ export function buildRows(input: {
   sessions: readonly DerivedSession[]; metas: readonly SessionMeta[];
   prs: readonly PrRow[]; sessionPrs: readonly SessionPrRow[]; groupPattern: string;
 }): ListRow[];
-/** 7.2: entrypoint other than cli → false; done (unless showAll) → false; expired with no label, group, note or PR → false. */
+/** 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with showAll); done (unless showAll) → false; expired with no label, group, note or PR → false. */
 export function isListed(row: ListRow, showAll: boolean): boolean;
 /** Case-insensitive substring match on title, group, note, dir, and per PR "<repo>", "<number>", "<repo>#<number>". Empty filter matches all. */
 export function matchesFilter(row: ListRow, filter: string): boolean;
@@ -1487,8 +1500,8 @@ and does its work inside `withDeck(ctx, { refresh: true }, …)` unless its task
 
 | File | `name` | `summary` | `usage` (first line) | Task |
 |---|---|---|---|---|
-| `ls.ts` | `ls` | `Print the session list` | `skydeck ls [--all] [--json]` | 14 |
-| `show.ts` | `show` | `Show one session` | `skydeck show <ref> [--json]` | 14 |
+| `ls.ts` | `ls` | `Print the session list` | `skydeck ls [--all] [--json] [--refresh]` | 14 |
+| `show.ts` | `show` | `Show one session` | `skydeck show <ref> [--json] [--refresh]` | 14 |
 | `label.ts` | `label` | `Set or clear a session's label` | `skydeck label <ref> [<text>]` | 15 |
 | `group.ts` | `group` | `Set or clear a session's group` | `skydeck group <ref> [<text>]` | 15 |
 | `note.ts` | `note` | `Edit a session's note` | `skydeck note <ref> [--set <text>]` | 15 |
@@ -1514,7 +1527,7 @@ export function formatChip(chip: { level: ChipLevel; count: number }): string;
 /**
  * One pull request on one line (design 7.3: never "closed" when unreadable):
  * level cant-read → "<url>  can't read, last read <isoFromNs(okAtNs) or 'never'>" plus " (<error>)"
- * when error is set; otherwise "<url>  <level>".
+ * when error is set; level unfetched → "<url>  not fetched" (D11); otherwise "<url>  <level>".
  */
 export function formatPrLine(pr: PrView): string;
 
@@ -1921,12 +1934,12 @@ whose home, `SKYDECK_HOME` and Claude home are inside the sandbox.
 
 ### Task 2: Pure helpers — `/proc` parsing, launch flags, pull-request keys
 
-**Depends on:** task 0 · **Wave:** 1 · **Design:** 5.3 (field 22, cmdline, path flags), 5.5, 7.3 (key), 7.6, 7.7 · **Contracts:** 2.5.1, 2.5.2, 2.6 (`PrKey`, `prKey`) · **Decisions:** D18 (update design 7.6)
+**Depends on:** task 0 · **Wave:** 1 · **Design:** 5.3 (field 22, cmdline, path flags), 5.5, 7.3 (key), 7.6, 7.7 · **Contracts:** 2.5.1, 2.5.2, 2.6 (`PrKey`, `prKey`) · **Decisions:** D18, D28 (update design 7.6)
 
 **Files**
 - Create: `src/claude/procstat.ts`, `src/claude/launch.ts`
 - Create: `src/github.ts` holding only `PrKey` and `prKey` (task 9 adds the rest of 2.6 to this file)
-- Modify: `docs/design.md` 7.6 (D18)
+- Modify: `docs/design.md` 7.6 (D18; D28: the removed-flags rule and the three added flags)
 - Test: `test/claude/procstat.test.ts`, `test/claude/launch.test.ts`, `test/github-key.test.ts`
 
 **Exported API**
@@ -1982,7 +1995,7 @@ null for: 'https://gitlab.com/o/r/pull/1', 'https://github.com/o/r/issues/1', 'h
 
 `FLAGS`: every name starts with `-` and appears once; the names with `path: true` are exactly
 `--mcp-config --add-dir --settings --plugin-dir`; the names with `remove: true` are exactly
-`-r --resume -c --continue --session-id --fork-session -n --name -w --worktree --bg --background --from-pr`.
+`-r --resume -c --continue --session-id --fork-session -n --name -w --worktree --bg --background --from-pr --teleport --cloud --desktop`.
 
 `parseLaunchArgs` (input → tokens of each item; `F` flag with spec, `U` unknown flag, `P` positional). For every case, the concatenated tokens equal the input:
 
@@ -2027,6 +2040,7 @@ same, label 'fix retry'                                            → [...R,'-n
 ['claude','--session-id','x','--fork-session']                     → R
 ['claude','-n','old name','--name=other']                          → R
 ['claude','-w','feature','--bg','--from-pr','123']                 → R
+['claude','--teleport','abc','--cloud','--desktop','--remote-control','rc'] → [...R,'--remote-control','rc']   (D28)
 ['claude','-w','--model','opus']                                   → [...R,'--model','opus']
 ['claude','--dangerously-skip-permissions','--permission-mode','plan'] → [...R,'--dangerously-skip-permissions','--permission-mode','plan']
 ['claude','--mcp-config','/a.json','/b.json','--add-dir','/x','--settings','/s.json'] → [...R, …the same seven tokens]
@@ -2167,7 +2181,7 @@ the six allowed.
 
 **Files**
 - Create: `src/store/types.ts`, `src/store/migrations.ts`, `src/store/store.ts`
-- Modify: `docs/design.md` 9.2 (D1: one sentence on reading integers as BigInt)
+- Modify: `docs/design.md` 9.2 (D1: integers are read as BigInt and times are `bigint`)
 - Test: `test/store/store.test.ts`
 
 **Exported API**
@@ -2498,7 +2512,7 @@ no message text is kept.
   programs the handoff block uses; add two cases: a relative `SKYDECK_HOME` does not select
   `<SKYDECK_HOME>/data/node`, and a relative `XDG_DATA_HOME` does not select `<XDG_DATA_HOME>/skydeck/node`
   (both fall back to `$HOME/.local/share/skydeck/node`)
-- Modify: `docs/design.md` 7.6 (D5, D15)
+- Modify: `docs/design.md` 7.6 (D5: the sentence "Commands are always run as argument lists, never through a shell string" becomes "commands are run as argument lists; the one exception is the `--here` handoff, a generated `sh` fragment in which every word is quoted by the same function as the printed fallback"; D15)
 - Test: `test/text/text.test.ts`, `test/terminals/terminals.test.ts`, `test/bin/launcher-handoff.test.ts`
 
 **Exported API**
@@ -2748,8 +2762,9 @@ export const GH_TIMEOUT_MS = 10_000;
 export function prsDue(prs: readonly PrRow[], nowNs: Ns, refreshMinutes: number, force: boolean): PrRow[];
 export function batchArgs(keys: readonly PrKey[]): string[];
 export function parseBatch(keys: readonly PrKey[], result: RunResult, atNs: Ns): Map<string, PrFetchResult>;
+export function fetchPrs(deps: { runner: Runner; clock: Clock; store: Store }, urls: readonly string[]): Promise<{ fetched: number; failed: number }>;
 export function refreshPrs(deps: { runner: Runner; clock: Clock; store: Store }, options: { force: boolean; refreshMinutes: number }): Promise<{ fetched: number; failed: number }>;
-export const CHIP_ORDER: readonly ['cant-read', 'checks-failing', 'changes-requested', 'checks-pending', 'review-required', 'draft', 'approved-green', 'merged', 'closed'];
+export const CHIP_ORDER: readonly ['cant-read', 'unfetched', 'checks-failing', 'changes-requested', 'checks-pending', 'review-required', 'draft', 'approved-green', 'merged', 'closed'];
 export type ChipLevel = (typeof CHIP_ORDER)[number];
 export function prLevel(pr: PrRow): ChipLevel;
 export function chipFor(prs: readonly PrRow[]): { level: ChipLevel; count: number } | null;
@@ -2782,12 +2797,14 @@ export function chipFor(prs: readonly PrRow[]): { level: ChipLevel; count: numbe
 - A batch answered `timedOut` → its rows keep their previous `state`, get `error 'gh timed out after 10 s'`, `triedAtNs T0`; `failed` counts them; no throw.
 - `merged` rows are never sent; a non-due `open` row is not sent unless `force`.
 - No due rows → no `gh` call.
+- `fetchPrs(deps, [url1])` with a non-due open row → one `gh` call with one alias, the row updated; `fetchPrs(deps, [])` → no call.
 
 `prLevel` / `chipFor`
 
 ```
 pr({ state: 'open', error: 'x' })                                  → cant-read
-pr({ state: null })                                                → cant-read      (D11)
+pr({ state: null })                                                → unfetched      (D11)
+pr({ state: null, error: 'x' })                                    → cant-read
 pr({ state: 'merged' }) / pr({ state: 'closed' })                  → merged / closed
 open, checks failing, review changes-requested                     → checks-failing
 open, checks pending, review changes-requested                     → changes-requested
@@ -2800,6 +2817,8 @@ open, checks null, review null                                     → approved-
 chipFor([])                                                        → null
 chipFor([approved-green row, checks-failing row, merged row])      → { level: 'checks-failing', count: 3 }
 chipFor([merged row, closed row])                                  → { level: 'merged', count: 2 }
+chipFor([unfetched row, checks-failing row])                       → { level: 'unfetched', count: 2 }
+chipFor([cant-read row, unfetched row])                            → { level: 'cant-read', count: 2 }
 ```
 
 **Steps**
@@ -2928,11 +2947,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 
 ### Task 11: List model, references, label rules
 
-**Depends on:** 3 (`settingsPath`, `cleanupPeriodDays`), 7, 8 (for `test/helpers/deck.ts`), 9, 10 · **Wave:** 4 · **Design:** 6 (wiring), 7.1 (title, group, label rules), 7.2, 7.3 (chip), 7.4 (order, filter, sanitiser), 7.5 (`<ref>`) · **Contracts:** 2.8.4 · **Decisions:** D12 (update design 7.1), D22 (update design 7.5)
+**Depends on:** 3 (`settingsPath`, `cleanupPeriodDays`), 7, 8 (for `test/helpers/deck.ts`), 9, 10 · **Wave:** 4 · **Design:** 6 (wiring), 7.1 (title, group, label rules), 7.2, 7.3 (chip), 7.4 (order, filter, sanitiser), 7.5 (`<ref>`) · **Contracts:** 2.8.4 · **Decisions:** D12 (update design 7.1), D22 (update design 7.5), D27 (update design 7.2)
 
 **Files**
 - Create: `src/sessions/list.ts`, `src/sessions/load.ts`, `src/sessions/refs.ts`, `src/sessions/labels.ts`
-- Modify: `docs/design.md` 7.1 (D12), 7.5 (D22)
+- Modify: `docs/design.md` 7.1 (D12), 7.2 (D27), 7.5 (D22)
 - Test: `test/sessions/list.test.ts`, `test/sessions/refs.test.ts`, `test/sessions/load.test.ts`, `test/sessions/labels.test.ts`
 
 **Exported API**
@@ -2987,7 +3006,8 @@ descending; the null group last; ties by name ascending. Rows by rank — `waiti
 - PRs: attached auto `…/pull/2`, manual `…/pull/1`, detached `…/pull/3` → `prs` urls `[…/pull/1, …/pull/2]`,
   `repo 'o/r'`, `level` from `prLevel`, `chip` from `chipFor`; no PRs → `chip null`.
 - `shortId` = first 8 characters; `hasNote` true iff note non-null; `done` = `session.hidden`.
-- `isListed`: transcript entrypoint `'sdk-ts'` → false even with showAll; no transcript → true; done → false, showAll → true;
+- `isListed`: transcript entrypoint `'sdk-ts'` → false even with showAll; no transcript and not running → false, also with
+  showAll (D27); no transcript but running → true; done → false, showAll → true;
   expired with nothing attached → false (also with showAll); expired with a note / a label / a group / an attached PR → true;
   expired with only a detached PR → false.
 - `buildList` order, `nowNs T0`: group `A` rows — `a1 waiting T0−5m`, `a2 not-running+ended-unexpectedly T0−1m`,
@@ -3176,8 +3196,8 @@ selected row stops being visible, the selection moves to the first visible row (
   `'working     A very long…    5m  0b5f3c1e'` (length 40).
 - `formatChip({ level: 'merged', count: 1 })` → `'1pr:merged'`.
 - `formatPrLine`: level `draft` → `'https://github.com/o/r/pull/1  draft'`; level `cant-read`, `okAtNs T0`, error `'HTTP 401'` →
-  `"https://github.com/o/r/pull/1  can't read, last read 2026-11-12T09:00:00.000Z (HTTP 401)"`; `cant-read`, `okAtNs null`, no error →
-  `"https://github.com/o/r/pull/1  can't read, last read never"`.
+  `"https://github.com/o/r/pull/1  can't read, last read 2026-11-12T09:00:00.000Z (HTTP 401)"`; `cant-read`, `okAtNs null`, error `'x'` →
+  `"https://github.com/o/r/pull/1  can't read, last read never (x)"`; level `unfetched` → `'https://github.com/o/r/pull/1  not fetched'`.
 
 `tui/model.test.ts`
 1. `initModel([R1,R2,R3], T0)` → `order` from `buildList(rows, { showAll: true, filter: '', nowNs })`, i.e. `[{ name: 'A', ids: [S1,S2] }, { name: null, ids: [S3] }]`; `visibleRows` `[R1,R2]`; `selected S1`; `mode 'list'`.
@@ -3218,13 +3238,14 @@ selected row stops being visible, the selection moves to the first visible row (
 
 ### Task 14: `ls` and `show` — text, JSON, a recorded day end to end
 
-**Depends on:** 12, 13 (`formatRow`, `formatPrLine`) · **Wave:** 6 · **Design:** 7.2, 7.3 ("can't read"), 7.4 (row content), 7.5 (`ls`, `show`, `--json`, exit codes), 12 (commands, end to end) · **Contracts:** 2.9.4 (`output.ts`), 2.10.5
+**Depends on:** 9 (`refreshPrs`, `fetchPrs`), 12, 13 (`formatRow`, `formatPrLine`) · **Wave:** 6 · **Design:** 7.2, 7.3 ("can't read", cached status), 7.4 (row content), 7.5 (`ls`, `show`, `--json`, exit codes), 12 (commands, end to end) · **Contracts:** 2.9.4 (`output.ts`), 2.10.5 · **Decisions:** D11 (`--refresh`; update design 7.3 and the `ls`/`show` rows of 7.5)
 
 **Files**
 - Create: `src/cli/output.ts`
 - Create: `src/cli/commands/ls.ts`, `src/cli/commands/show.ts` (each `export const command: Command`)
 - Create fixtures: `test/fixtures/day/` — `spool/*.ev`, `claude/projects/<folder>/<uuid>.jsonl`,
   `claude/sessions/*.json`, `proc.json` (the fake `/proc`: boot id, processes), `expected-ls.json`
+- Modify: `docs/design.md` 7.3 (`ls`/`show` print the cached status unless `--refresh`) and the `ls`/`show` rows of 7.5 (D11)
 - Test: `test/cli/output.test.ts`, `test/cli/commands/ls.test.ts`, `test/cli/commands/show.test.ts`, `test/e2e/day.test.ts`
 
 **Exported API**
@@ -3249,11 +3270,15 @@ export function listJson(model: ListModel): ListJson;
 export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson;
 export function formatList(model: ListModel, nowNs: Ns, width: number): string;
 export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): string;
-// src/cli/commands/ls.ts — name 'ls', usage 'skydeck ls [--all] [--json]\n'; flags all, json; no positionals
+// src/cli/commands/ls.ts — name 'ls', usage 'skydeck ls [--all] [--json] [--refresh]\n'; flags all, json, refresh; no positionals
 export const command: Command;
-// src/cli/commands/show.ts — name 'show', usage 'skydeck show <ref> [--json]\n'; flag json; one positional
+// src/cli/commands/show.ts — name 'show', usage 'skydeck show <ref> [--json] [--refresh]\n'; flags json, refresh; one positional
 export const command: Command;
 ```
+
+**`--refresh` (D11).** Without it `ls` and `show` never touch the network. With it, before printing:
+`ls` runs `refreshPrs({ runner, clock, store }, { force: false, refreshMinutes: config.prRefreshMinutes })`;
+`show` runs `fetchPrs` on the urls of `prsDue` restricted to that session's attached pull requests.
 
 **Formats (contract).** `formatList`: per group a line with its name (`no group` for null), then
 each row as `'  ' + formatRow(row, nowNs, width − 2)`; one empty line between groups; `'no sessions\n'`
@@ -3276,7 +3301,7 @@ lines indented by two spaces when there is a note.
 - `formatList` of two groups → `'ABC-123\n  <row>\n\nno group\n  <row>\n'`; empty → `'no sessions\n'`.
 - `formatShow` of a row whose `session.launch` is `['claude','--model','opus']` contains `'id:        ' + S1`,
   `'launch:    claude --model opus'` (the recorded command, `shellJoin`), and `'launch:    unknown'` when `launch` is null;
-  a never-read PR → `"pr:        https://github.com/o/r/pull/1  can't read, last read never"`; an open PR with review
+  a never-fetched PR → `'pr:        https://github.com/o/r/pull/1  not fetched'`; an open PR with review
   `approved` and checks `passing` → `'pr:        https://github.com/o/r/pull/1  approved-green review approved checks passing'`;
   note `'a\nb'` → `'note:\n  a\n  b'`.
 
@@ -3286,6 +3311,10 @@ lines indented by two spaces when there is a note.
 - `ls --all` shows a session marked done in the store that `ls` hides.
 - `show --help` → 0; `show` → 2 (missing `<ref>`); `show nope1234` → 3; `show <S1 prefix>` → 0 with `formatShow`;
   `show <S1> --json` → parses, `id` S1.
+- S1 with one never-fetched PR and one open PR fetched 1 minute ago; S2 with a never-fetched PR. `ls` and `show 0b5f`
+  without `--refresh` → `runner.calls` empty. `ls --refresh` with gh answering both unfetched PRs `open` → one `gh` call
+  (the fresh one is not sent); `ls --json` then shows both `state 'open'`. `show 0b5f --refresh` → one `gh` call with only
+  S1's unfetched PR. gh `timedOut` → exit 0, the PR shows `can't read`.
 
 `day.test.ts` — the recorded day. Copy `test/fixtures/day/` into a `testDeck` (spool into `spoolDir`,
 `claude/` into `claudeHome`, every copied file's mtime set to 09:04 with `fs.utimesSync`),
@@ -3332,7 +3361,7 @@ S6 and S9 are absent; `getKv('dropped_scripted')` is `'1'` afterwards; the run e
 
 **Steps**
 - [ ] Write the fixtures, `expected-ls.json` (by hand) and the four test files. `npm test` → fails.
-- [ ] Implement `output.ts`, `ls.ts`, `show.ts`.
+- [ ] Implement `output.ts`, `ls.ts`, `show.ts`; update design 7.3 and 7.5 (D11).
 - [ ] `npm run format`; `npm run check` → pass. Commit `Add ls and show with stable JSON, and the recorded-day test`; open the PR.
 
 **Done when:** all cases pass; `ls --json` matches the hand-written expectation for the day.
@@ -3341,12 +3370,12 @@ S6 and S9 are absent; `getKv('dropped_scripted')` is `'1'` afterwards; the run e
 
 ### Task 15: `label`, `group`, `note`, `done`, `undone`, `pr`
 
-**Depends on:** 9, 11, 12 · **Wave:** 5 · **Design:** 7.1, 7.3 (manual attach, detach, refresh), 7.5 · **Contracts:** 2.8.5, 2.9.4 · **Decisions:** D14 (update design 7.1), D24 (joined text; update design 7.5)
+**Depends on:** 9, 11, 12 · **Wave:** 5 · **Design:** 7.1, 7.3 (manual attach, detach, refresh), 7.5 · **Contracts:** 2.8.5, 2.9.4 · **Decisions:** D11 (`pr add` fetches; update design 7.3), D14 (update design 7.1), D24 (joined text; update design 7.5)
 
 **Files**
 - Create: `src/sessions/meta.ts`, `src/cli/notes.ts`
 - Create: `src/cli/commands/label.ts`, `group.ts`, `note.ts`, `done.ts`, `undone.ts`, `pr.ts` (each `export const command: Command`)
-- Modify: `docs/design.md` 7.1 (D14), 7.5 (D24)
+- Modify: `docs/design.md` 7.1 (D14), 7.3 (D11: `pr add` fetches at once), 7.5 (D24)
 - Test: `test/sessions/meta.test.ts`, `test/cli/notes.test.ts`, and `test/cli/commands/<name>.test.ts` for the six commands
 
 **Exported API**
@@ -3371,7 +3400,9 @@ Command behaviour: each resolves `<ref>` with `resolveRef(ref, loadRows(deck))` 
 joined by one space (D24), cleaned with `cleanLabel`/`cleanGroup`; no text clears. Each command
 prints one confirmation line on stdout: `0b5f3c1e label: fix retry`, `0b5f3c1e label cleared`,
 `0b5f3c1e group: ABC-9`, `0b5f3c1e note saved`, `0b5f3c1e done`, `0b5f3c1e undone`,
-`0b5f3c1e: attached https://github.com/o/r/pull/1`, `0b5f3c1e: detached https://github.com/o/r/pull/1`.
+`0b5f3c1e: attached https://github.com/o/r/pull/1 (<status>)` — `<status>` is what `formatPrLine` prints after the url and its two spaces —, `0b5f3c1e: detached https://github.com/o/r/pull/1`.
+`pr add` attaches, then fetches that pull request at once with `fetchPrs(deps, [url])` (D11; same
+timeout); a failed fetch leaves it `cant-read` and the command still exits `EXIT.ok`.
 `note` without `--set` calls `editNote`. `pr refresh` runs
 `refreshPrs({ runner, clock, store }, { force: true, refreshMinutes: config.prRefreshMinutes })`
 and prints `fetched <n>, failed <m>`.
@@ -3406,7 +3437,9 @@ results are checked in the store (`d.deck.store.meta`, `sessionPrs`, `prs`) or w
 - A done session with a later `user` record in its transcript is listed again without `undone`.
 
 `commands/pr.test.ts` (`fakeRunner` answering `gh`)
-- `pr add 0b5f https://github.com/o/r/pull/1` → 0; the S1 row has that PR with `state null`.
+- `pr add 0b5f https://github.com/o/r/pull/1` with gh answering it open, no review, checks passing → 0, one `gh` call, stdout
+  `'0b5f3c1e: attached https://github.com/o/r/pull/1 (approved-green)\n'`; the S1 row has that PR with `state 'open'`.
+- The same with gh `timedOut` → 0, stdout ends `(can't read, last read never (gh timed out after 10 s))`; the PR level is `cant-read`.
 - `pr add 0b5f not-a-url` → 2; `pr rm 0b5f https://github.com/o/r/pull/9` → 1; `pr rm 0b5f https://github.com/o/r/pull/1` → 0 and the row has no PR.
 - An auto-attached PR removed with `pr rm` stays detached after a rescan sees its `pr-link` again.
 - `pr refresh` with gh answering one ok open PR → stdout `'fetched 1, failed 0\n'`; the PR row `state 'open'`.
@@ -3587,12 +3620,12 @@ nothing but the two hook entries is ever written into Claude Code's settings.
 
 ### Task 18: `restore`
 
-**Depends on:** 16 · **Wave:** 6 · **Design:** 7.6 (guard), 7.8, principle 7, 12 (resume and restore) · **Contracts:** 2.8.7 · **Decisions:** D17, D19, D23 (update design 7.8, 7.5)
+**Depends on:** 16 · **Wave:** 6 · **Design:** 7.6 (guard), 7.8, principle 7, 12 (resume and restore) · **Contracts:** 2.8.7 · **Decisions:** D17, D19, D23 (update design 7.8)
 
 **Files**
 - Create: `src/sessions/restore.ts`
 - Create: `src/cli/commands/restore.ts` (`export const command: Command`)
-- Modify: `docs/design.md` 7.8 (D17, D19), 7.5 (D23)
+- Modify: `docs/design.md` 7.8 (D17, D19, D23)
 - Test: `test/sessions/restore.test.ts`, `test/cli/commands/restore.test.ts`
 
 **Exported API**
@@ -3640,7 +3673,7 @@ export const command: Command;
 
 **Test cases**
 
-`restore.test.ts` (`testDeck`; events written through the store; current boot `BOOT_B`; `BOOT_A` earlier with last event `T0`; `BOOT_C` older with last event `T0 − 1 day`)
+`restore.test.ts` (`testDeck`; events written through the store; every session below has a transcript unless stated; current boot `BOOT_B`; `BOOT_A` earlier with last event `T0`; `BOOT_C` older with last event `T0 − 1 day`)
 
 | Session | History | Default set? | `all`? | preselected |
 |---|---|---|---|---|
@@ -3683,7 +3716,7 @@ export const command: Command;
 
 **Steps**
 - [ ] Write both test files. `npm test` → fails.
-- [ ] Implement `src/sessions/restore.ts` and the command; update design 7.8 and 7.5.
+- [ ] Implement `src/sessions/restore.ts` and the command; update design 7.8.
 - [ ] `npm run format`; `npm run check` → pass. Commit `Restore what was open before the last restart`; open the PR.
 
 **Done when:** all cases pass; restore never resumes a running session and never opens more than
@@ -3841,11 +3874,11 @@ and `docs/design.md` no longer disagrees with the code.
 | 5.6 Transcripts | 6 (reading, last turn role), 4 (`last_turn_role`), 8 (incremental scan, missing) |
 | 6.1–6.3 Derived state, states, marks | 10 (`was-working` from a leftover busy live file or a last `user` turn record) |
 | 7.1 Labels, groups, notes, done, first run | 11 (title, group), 10 (done visibility), 15 (commands), 17 (first-run offer) |
-| 7.2 Which sessions are listed | 11 |
-| 7.3 Pull requests | 2 (keys), 9 (status, cache, chip), 8 (automatic), 15 (manual, refresh), 19 (background refresh) |
+| 7.2 Which sessions are listed | 11 (incl. D27: not running and no transcript → not listed) |
+| 7.3 Pull requests | 2 (keys), 9 (status, cache, chip, `unfetched`), 8 (automatic), 15 (manual, fetch on `pr add`, `pr refresh`), 14 (`--refresh`), 19 (background refresh) |
 | 7.4 The list | 7 (sanitiser), 11 (order, filter, sanitising the rows), 13 (reduce/render), 19 (terminal) |
 | 7.5 Commands, `<ref>`, exit codes, JSON | 0 (`EXIT`, one file per command), 12 (error mapping), 11 (`<ref>`), 14 (`ls`/`show`/JSON), 15–18, 19 (bare `skydeck`) |
-| 7.6 Resume | 2 (command), 7 (where), 16 (guard, lock, directory) |
+| 7.6 Resume | 2 (command, D28 removed flags), 7 (where, the handoff exception), 16 (guard, lock, directory) |
 | 7.7 New | 2, 16 |
 | 7.8 Restore | 18 |
 | 8 Install, uninstall, doctor | 17; `docs/install.md` in 20 |
