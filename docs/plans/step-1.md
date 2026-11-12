@@ -2982,7 +2982,7 @@ descending; the null group last; ties by name ascending. Rows by rank — `waiti
 - Titles: label `'L'` → `('L','label')`; no label, customTitle `'C'` and aiTitle `'A'` → `('C','name')`; aiTitle only →
   `('A','generated')`; nothing, `firstSeenNs T0`, dir `/home/dev/projects/demo` → `('2026-11-12 09:00 demo','fallback')`; dir null → `'2026-11-12 09:00 ?'`.
 - Sanitised: aiTitle `'x\x1b]0;pwn\x07y'` → `'xy'`; `stateDetail 'a\nb'` → `'a b'`; PR title `'t\x1b[2Jt'` → `'tt'`; label `'L'` unchanged.
-- Groups: meta group `'G'` → `'G'`; title `'DE-123 fix'` → `'DE-123'`; `'fix DE-123'` → `null`; label `'ABC-9: x'` → `'ABC-9'`;
+- Groups: meta group `'G'` → `'G'`; title `'ABC-123 fix'` → `'ABC-123'`; `'fix ABC-123'` → `null`; label `'ABC-9: x'` → `'ABC-9'`;
   `groupPattern '^\\[\\w+\\]'` with title `'[ops] rotate'` → `'[ops]'`.
 - PRs: attached auto `…/pull/2`, manual `…/pull/1`, detached `…/pull/3` → `prs` urls `[…/pull/1, …/pull/2]`,
   `repo 'o/r'`, `level` from `prLevel`, `chip` from `chipFor`; no PRs → `chip null`.
@@ -3008,7 +3008,7 @@ descending; the null group last; ties by name ascending. Rows by rank — `waiti
 
 `labels.test.ts`
 - `cleanLabel('  fix retry ')` → `'fix retry'`; `cleanLabel('a\nb')`, `cleanLabel('   ')`, `cleanLabel('-x')` → `UsageError`.
-- `cleanGroup(' DE-1 ')` → `'DE-1'`; `cleanGroup('a\rb')`, `cleanGroup('')` → `UsageError`.
+- `cleanGroup(' ABC-1 ')` → `'ABC-1'`; `cleanGroup('a\rb')`, `cleanGroup('')` → `UsageError`.
 
 `load.test.ts` (`testDeck`)
 - One start spool event for S1 already ingested by `refresh`, a trusted live file `busy`, a transcript with aiTitle `'Fix retry'` →
@@ -3273,7 +3273,7 @@ lines indented by two spaces when there is a note.
 - `listJson` → `{ version: 1, generatedAt: isoFromNs(model.generatedAtNs), sessions: <flatRows order> }`.
 - `showJson` → the session object followed by `note`, `launch`, `links` (only links from/to the row, by time,
   `at` ISO), `holders` (`pid`, `bootId`, `procStart`, `since`).
-- `formatList` of two groups → `'DE-123\n  <row>\n\nno group\n  <row>\n'`; empty → `'no sessions\n'`.
+- `formatList` of two groups → `'ABC-123\n  <row>\n\nno group\n  <row>\n'`; empty → `'no sessions\n'`.
 - `formatShow` of a row whose `session.launch` is `['claude','--model','opus']` contains `'id:        ' + S1`,
   `'launch:    claude --model opus'` (the recorded command, `shellJoin`), and `'launch:    unknown'` when `launch` is null;
   a never-read PR → `"pr:        https://github.com/o/r/pull/1  can't read, last read never"`; an open PR with review
@@ -3315,14 +3315,14 @@ every record carries `cwd` and `entrypoint 'cli'` unless stated; `user`/`assista
 | S2 | `user` 08:30 … `assistant` 08:44; `ai-title 'Clean up logging'` | `/home/dev/projects/web` | `assistant` |
 | S3 | `user` 08:46, `assistant` 08:48, `user` 08:50 (a turn in progress); no title | `/home/dev/projects/web` | `user` |
 | S4 | `user` 08:55:10, `assistant` 08:55:40; `custom-title 'quick check'` | `/home/dev/projects/api` | `assistant` |
-| S5 | `user` 09:00, `assistant` 09:01, `user` 09:02; `ai-title 'DE-123 add retries'` | `/home/dev/projects/api` | `user` |
+| S5 | `user` 09:00, `assistant` 09:01, `user` 09:02; `ai-title 'ABC-123 add retries'` | `/home/dev/projects/api` | `user` |
 | S6 | `user` 08:20 with `entrypoint 'sdk-ts'` | `/home/dev/projects/api` | `user` |
 
 Expected list order and key fields:
 
 | # | id | title / source | group | state, since | marks | other |
 |---|---|---|---|---|---|---|
-| 1 | S5 | `DE-123 add retries` / generated | `DE-123` | working, 09:01 | `[]` | dir `/home/dev/projects/api` |
+| 1 | S5 | `ABC-123 add retries` / generated | `ABC-123` | working, 09:01 | `[]` | dir `/home/dev/projects/api` |
 | 2 | S3 | `2026-11-12 08:45 web` / fallback | null | not-running, 08:50 | `['ended-unexpectedly','was-working','continued']` | `continuedFrom` S2 (was-working from the transcript) |
 | 3 | S1 | `Fix retry loop` / generated | null | not-running, 08:40 | `['ended-unexpectedly','was-working']` | one PR `acme/api` #12, state null |
 | 4 | S4 | `quick check` / name | null | not-running, 08:56 | `[]` | (deliberate exit) |
@@ -3370,7 +3370,7 @@ Command behaviour: each resolves `<ref>` with `resolveRef(ref, loadRows(deck))` 
 `withDeck(ctx, { refresh: true }, …)`. The text of `label`/`group` is the remaining positionals
 joined by one space (D24), cleaned with `cleanLabel`/`cleanGroup`; no text clears. Each command
 prints one confirmation line on stdout: `0b5f3c1e label: fix retry`, `0b5f3c1e label cleared`,
-`0b5f3c1e group: DE-9`, `0b5f3c1e note saved`, `0b5f3c1e done`, `0b5f3c1e undone`,
+`0b5f3c1e group: ABC-9`, `0b5f3c1e note saved`, `0b5f3c1e done`, `0b5f3c1e undone`,
 `0b5f3c1e: attached https://github.com/o/r/pull/1`, `0b5f3c1e: detached https://github.com/o/r/pull/1`.
 `note` without `--set` calls `editNote`. `pr refresh` runs
 `refreshPrs({ runner, clock, store }, { force: true, refreshMinutes: config.prRefreshMinutes })`
@@ -3400,7 +3400,7 @@ results are checked in the store (`d.deck.store.meta`, `sessionPrs`, `prs`) or w
 - Each: `--help` → 0 with its usage; a missing `<ref>` → 2; `nope1234` as ref → 3.
 - `label 0b5f fix the retry` → 0, stdout `'0b5f3c1e label: fix the retry\n'`, stored `'fix the retry'`; `label 0b5f` → cleared.
 - `label 0b5f -- -x` → 2 (cleanLabel).
-- `group 0b5f DE-9` → stored `'DE-9'`; the `loadRows` row then has `group 'DE-9'`.
+- `group 0b5f ABC-9` → stored `'ABC-9'`; the `loadRows` row then has `group 'ABC-9'`.
 - `note 0b5f --set 'remember'` → stored; `note 0b5f --set ''` → cleared; `note 0b5f` with stdin not a TTY → 2.
 - `done 0b5f` → 0; the row is no longer `isListed(row, false)`; `isListed(row, true)` and `done true`; `undone 0b5f` → listed again.
 - A done session with a later `user` record in its transcript is listed again without `undone`.
@@ -3483,8 +3483,8 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `resume 0b5f --here --tab` → 2. `resume nope1234` → 3. A running S1 → 4 naming the pid. Twice within 60 s → second 4.
 - A session without a recorded launch command → 0 and stderr `'skydeck: original flags unknown; resuming with defaults\n'`.
 - Never a permission flag: the handoff of a session launched without one contains no `--dangerously-skip-permissions` and no `--permission-mode`.
-- `new --label 'fix it' --group DE-1 -- --model opus` → 0; handoff
-  `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> -n 'fix it' --model opus\n`; `meta(<uuid1>)` label `'fix it'`, group `'DE-1'`.
+- `new --label 'fix it' --group ABC-1 -- --model opus` → 0; handoff
+  `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> -n 'fix it' --model opus\n`; `meta(<uuid1>)` label `'fix it'`, group `'ABC-1'`.
 - `new --label -x` → 2.
 
 **Steps**
