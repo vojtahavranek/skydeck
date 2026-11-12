@@ -1,0 +1,40 @@
+#!/bin/sh
+# skydeck launcher: picks the Node.js binary and runs bin/bootstrap.mjs with the same arguments.
+#
+# Node is chosen by, in order:
+#   1. $SKYDECK_NODE
+#   2. the symlink ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node, if it points at something
+#   3. `node` from PATH
+# so the launcher does not depend on the shell's default Node version.
+
+# Find the real location of this file; it may be reached through (a chain of) symlinks.
+self=$0
+while [ -h "$self" ]; do
+  dir=$(cd -P -- "$(dirname -- "$self")" && pwd) || exit 1
+  target=$(readlink -- "$self") || exit 1
+  case $target in
+    /*) self=$target ;;
+    *) self=$dir/$target ;;
+  esac
+done
+root=$(cd -P -- "$(dirname -- "$self")/.." && pwd) || exit 1
+
+linked_node=${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node
+if [ -n "${SKYDECK_NODE:-}" ]; then
+  node=$SKYDECK_NODE
+elif [ -x "$linked_node" ]; then
+  node=$linked_node
+else
+  node=node
+fi
+
+if ! command -v "$node" >/dev/null 2>&1; then
+  echo "skydeck: cannot run '$node'; install Node.js or set SKYDECK_NODE to a node binary." >&2
+  exit 127
+fi
+
+# Cache compiled modules between runs; the start-up time of a short command is mostly compiling.
+NODE_COMPILE_CACHE=${NODE_COMPILE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/skydeck/compile-cache}
+export NODE_COMPILE_CACHE
+
+exec "$node" "$root/bin/bootstrap.mjs" "$@"
