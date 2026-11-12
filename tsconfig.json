@@ -1,11 +1,15 @@
 {
   "compilerOptions": {
     "target": "es2025",
+    "lib": ["es2025"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
     "noEmit": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,

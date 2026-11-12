@@ -2,7 +2,16 @@
 // tests check which binary is chosen and how it is called without depending on the machine's Node.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
@@ -65,7 +74,12 @@ interface Launched {
   args: string[];
 }
 
-function launch(command: string, args: string[], env: Record<string, string>, cwd?: string): Launched {
+function launch(
+  command: string,
+  args: string[],
+  env: Record<string, string>,
+  cwd?: string,
+): Launched {
   const result = spawnSync(command, args, { env, cwd, encoding: 'utf8' });
   const lines = result.stdout.split('\n');
   const field = (key: string) => lines.find((l) => l.startsWith(`${key}=`))?.slice(key.length + 1);
@@ -246,7 +260,11 @@ describe('bin/skydeck: how it calls node', () => {
     const s = sandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
 
-    const r = launch(launcher, [], s.env({ NODE_COMPILE_CACHE: '/my/cache', XDG_CACHE_HOME: '/xdg/cache' }));
+    const r = launch(
+      launcher,
+      [],
+      s.env({ NODE_COMPILE_CACHE: '/my/cache', XDG_CACHE_HOME: '/xdg/cache' }),
+    );
 
     assert.equal(r.cache, '/my/cache');
   });

@@ -129,7 +129,9 @@ describe('bin/bootstrap.mjs process-level behaviour', () => {
 
   test('on a Node that is too old: one line on stderr, nothing on stdout, exit 1, CLI not loaded', () => {
     // Pretend to be Node 20 by overriding process.versions.node before the bootstrap runs.
-    const r = bootstrapAfter('Object.defineProperty(process.versions, "node", { value: "20.0.0" })');
+    const r = bootstrapAfter(
+      'Object.defineProperty(process.versions, "node", { value: "20.0.0" })',
+    );
 
     assert.equal(r.status, 1);
     assert.equal(r.stdout, '');
