@@ -46,6 +46,23 @@ test('procStartFromStat gives null when field 22 is not digits', () => {
   );
 });
 
+test('procStartFromStat gives null for a start time that is not a safe integer', () => {
+  assert.equal(
+    procStartFromStat(`4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} 9007199254740991 0 0`),
+    9007199254740991,
+  );
+  assert.equal(
+    procStartFromStat(`4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} 9007199254740992 0 0`),
+    null,
+  );
+  assert.equal(
+    procStartFromStat(
+      `4242 (claude) S 4100 4242 4100 34816 4242 ${TAIL} 100000000000000000000 0 0`,
+    ),
+    null,
+  );
+});
+
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 test('argvFromCmdline splits on NUL and drops the final empty element', () => {

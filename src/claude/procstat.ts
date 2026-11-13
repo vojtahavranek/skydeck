@@ -6,7 +6,7 @@ const START_INDEX = 19;
 /**
  * Field 22 (starttime) of a /proc/<pid>/stat line, counted after the LAST ')' — the command name
  * (field 2) is parenthesised and may itself contain spaces and parentheses. null when the field is
- * absent or not digits.
+ * absent, not digits, or too large to be compared exactly (not a safe integer).
  */
 export function procStartFromStat(line: string): number | null {
   const close = line.lastIndexOf(')');
@@ -17,7 +17,8 @@ export function procStartFromStat(line: string): number | null {
     .split(/\s+/);
   const start = fields[START_INDEX];
   if (start === undefined || !/^[0-9]+$/.test(start)) return null;
-  return Number(start);
+  const value = Number(start);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 // A byte-order mark is a character like any other in an argument: keep it.
