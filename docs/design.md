@@ -976,8 +976,9 @@ Specified in [design-step-2.md](design-step-2.md), which also says how step 2 am
 - **Terminals are held by a small process separate from the app**: one python3 keeper per
   terminal owns the pty, and one Node.js server keeps each terminal's screen state, so that
   restarting or updating the server never ends a session and a reconnect shows the exact screen.
-- **WSL lifetime.** While the window has terminals, skydeck keeps a `wsl.exe` running so that WSL
-  does not stop by itself (or the user's `.wslconfig` does); the page notices when WSL has stopped
+- **WSL lifetime.** While the window has terminals, skydeck tries to keep WSL from stopping by
+  itself by holding a `wsl.exe` (that this works is not verified yet), or the user's `.wslconfig`
+  keeps it; `doctor` says which protection is in effect, and the page notices when WSL has stopped
   anyway and offers restore.
 - **Keys follow the developer's terminal:** Ctrl+V pastes text, Ctrl+Shift+V sends the raw key
   (Claude Code's image paste), Shift+Enter inserts a newline, Ctrl+Click opens links; scrollback
@@ -987,7 +988,10 @@ Specified in [design-step-2.md](design-step-2.md), which also says how step 2 am
   from the live-session file, not from a new hook.
 - **Safety.** Foreign text is rendered as text, never as markup. Programs in a terminal can
   write to the clipboard but not read it. The local server listens on the loopback interface
-  only and requires a secret, an exact origin and an exact host.
+  only, requires an exact origin and host, and proves a secret in both directions without
+  sending it; the command line talks to it over a unix socket.
+- **Open.** What only the real Claude Code or the Windows desktop can settle is listed as manual
+  checks in design-step-2.md section 18.
 
 ## 14. Claude Code behaviour this design relies on
 
