@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { checkNodeVersion } from '../../../bin/node-version.mjs';
 import { HOOK_EVENTS, hookStatus, settingsPath } from '../../claude/settings.ts';
-import { listTranscriptFiles } from '../../claude/transcripts.ts';
+import { lookAtClaudeFolders } from '../../claude/folders.ts';
 import type { Env, Ns, RunResult } from '../../platform/types.ts';
 import type { Deck } from '../../sessions/deck.ts';
 import { describeError } from '../../sessions/problems.ts';
@@ -264,38 +264,24 @@ function linesOf(value: string): string[] {
 
 /**
  * The refresh skips what it cannot read without a word (an unreadable sessions folder reads as no
- * live sessions), so doctor looks itself: `sessions` can be listed, and every folder and file under
- * `projects` can be looked at (design 5.6).
+ * live sessions), so doctor looks itself (design 5.6), through src/claude/ (design 11).
  */
 function checkClaudeFolders(deck: Deck, report: Report): void {
-  const { files } = deck.platform;
-  const { claudeHome } = deck.places;
-  const sessions = join(claudeHome, 'sessions');
-  const projects = join(claudeHome, 'projects');
-
-  const sessionsInfo = files.stat(sessions);
-  if (sessionsInfo === null) {
-    report('info', `${sessions} does not exist yet`);
-  } else if (sessionsInfo.kind !== 'dir') {
-    report('problem', `${sessions} is not a folder`);
-  } else {
-    try {
-      files.list(sessions);
-      report('ok', `${sessions} can be read`);
-    } catch (error) {
-      report('problem', `cannot read ${sessions} (${describeError(error)})`);
-    }
+  const { sessions, projects } = lookAtClaudeFolders(deck.platform.files, deck.places.claudeHome);
+  if (sessions.missing) {
+    report('info', `${sessions.path} does not exist yet`);
+  } else if (sessions.unreadable.length === 0) {
+    report('ok', `${sessions.path} can be read`);
   }
-
-  if (files.stat(projects) === null) {
-    report('info', `${projects} does not exist yet`);
-    return;
+  for (const { path, reason } of sessions.unreadable) {
+    report('problem', `cannot read ${path} (${reason})`);
   }
-  const listing = listTranscriptFiles(files, claudeHome);
-  if (listing.unreadable.length === 0) {
-    report('ok', `transcripts: ${plural(listing.files.length, 'file')} under ${projects}`);
+  if (projects.missing) {
+    report('info', `${projects.path} does not exist yet`);
+  } else if (projects.unreadable.length === 0) {
+    report('ok', `transcripts: ${plural(projects.transcripts, 'file')} under ${projects.path}`);
   }
-  for (const { path, reason } of listing.unreadable) {
+  for (const { path, reason } of projects.unreadable) {
     report('problem', `transcripts: cannot read ${path} (${reason})`);
   }
 }
