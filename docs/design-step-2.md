@@ -518,8 +518,9 @@ hibernation (WSL issue #8696, section 21): then nothing in WSL answers and 6.3's
 
 ### 7.1 The keeper
 
-`bin/skydeck-keeper` is one python3 file, standard library only (`pty`, `os`, `select`,
-`socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `time`), about 810 lines
+`bin/skydeck-keeper` is one python3 file, standard library only (`pty`, `os`, `sys`, `select`,
+`socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `time`; `sys` for the
+exception hook that keeps an error's message out of `keepers.log`), about 810 lines
 (about 700 without comments and blank lines; the first estimate counted the prototype's loop, and
 the rules below — claim, start deadline, pid line, queues and caps, linger — and the checks of every
 input it reads add the rest),
@@ -551,7 +552,9 @@ have resumed the session since, and starting it then could run one session twice
 
 The keeper:
 
-1. makes itself non-dumpable (2), creates its socket (mode 600; the directory is 700) and writes
+1. makes itself non-dumpable (2) before it reads the spec — when `prctl` fails it writes
+   `keeper -: dumpable` and goes on, dumpable, under the 1-byte soft core limit it inherits from
+   `serve` (ruled, plan task 9) — creates its socket (mode 600; the directory is 700) and writes
    its `<id>.pid` line (4.2) with `started` 0. It does **not** start the program. A connection alone never starts it either: only the start message `G` of a
    screen side does (8.1), and only while the clock (`time.time_ns()`) is before `startBy`. Then it
    forks the program with `pty.fork()` at the current size, sends `T` with the program's pid and

@@ -212,7 +212,7 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
     const spec = { ...box.spec(), cols: MARKER, argv: [MARKER] };
     const k = await box.start({ rawSpec: JSON.stringify(spec), waitReady: false });
     const end = await within(k.exited, 'the keeper ended');
-    assert.notEqual(end.code, 0);
+    assert.equal(end.code, 2, 'a refused spec exits 2');
     assert.deepEqual(checkLog(box.keepersLog), [`keeper ${spec.id}: bad-spec`]);
     assert.equal(existsSync(spec.socket), false);
   });
@@ -220,7 +220,7 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
   test('a spec that is not JSON: one line by kind', async (t) => {
     const box = keeperSandbox(t);
     const k = await box.start({ rawSpec: `{"id": "${MARKER}`, waitReady: false });
-    await within(k.exited, 'the keeper ended');
+    assert.equal((await within(k.exited, 'the keeper ended')).code, 2);
     assert.deepEqual(checkLog(box.keepersLog), ['keeper -: bad-spec']);
   });
 
@@ -228,7 +228,7 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
     const box = keeperSandbox(t);
     const spec = { ...box.spec(), id: MARKER };
     const k = await box.start({ rawSpec: JSON.stringify(spec), waitReady: false });
-    await within(k.exited, 'the keeper ended');
+    assert.equal((await within(k.exited, 'the keeper ended')).code, 2);
     assert.deepEqual(checkLog(box.keepersLog), ['keeper -: bad-spec']);
   });
 
@@ -268,7 +268,7 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
       const meta = { ...spec.meta, ...change };
       const k = await box.start({ rawSpec: JSON.stringify({ ...spec, meta }), waitReady: false });
       const end = await within(k.exited, 'the keeper ended');
-      assert.notEqual(end.code, 0);
+      assert.equal(end.code, 2, 'a refused spec exits 2');
       assert.deepEqual(checkLog(box.keepersLog), [`keeper ${spec.id}: bad-spec`]);
       assert.equal(existsSync(spec.socket), false);
     });
@@ -283,7 +283,7 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
       const spec = box.spec();
       const socket = join(box.termsDir, name);
       const k = await box.start({ rawSpec: JSON.stringify({ ...spec, socket }), waitReady: false });
-      await within(k.exited, 'the keeper ended');
+      assert.equal((await within(k.exited, 'the keeper ended')).code, 2);
       assert.deepEqual(checkLog(box.keepersLog), [`keeper ${spec.id}: bad-spec`]);
       assert.deepEqual(readdirSync(box.termsDir), [], 'no socket under a shortened name');
     });
@@ -302,7 +302,7 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
     const spec = box.spec({ argv: [MARKER] });
     const k = await box.start({ spec, faults: { json }, waitReady: false });
     const end = await within(k.exited, 'the keeper ended');
-    assert.notEqual(end.code, 0);
+    assert.equal(end.code, 1, 'an uncaught exception ends python3 with 1');
     assert.deepEqual(checkLog(box.keepersLog), ['keeper -: TypeError']);
   });
 
@@ -322,7 +322,7 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
     const { client } = await k.claim();
     client.send('P', new TextEncoder().encode(`${MARKER}${MARKER}`));
     const end = await within(k.exited, 'the keeper ended');
-    assert.notEqual(end.code, 0);
+    assert.equal(end.code, 1, 'an uncaught exception ends python3 with 1');
     assert.deepEqual(checkLog(box.keepersLog), [`keeper ${k.spec.id}: TypeError`]);
   });
 });
