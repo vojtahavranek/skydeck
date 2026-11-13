@@ -476,7 +476,9 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
   null (S2 7.6); `exited`, when not null, as `X` below, with `notStarted` set exactly when
   `started` is false. The keeper refuses a spec that would make it write a `hello` these rules
   refuse (ruled by the plan owner, task 9): `id`, `startBy`, `lock` and every `meta` field are
-  checked by them when the spec arrives, and the socket must be an absolute path without NUL; a
+  checked by them when the spec arrives (times at most 19 digits, `coreSoft` at most 20), the
+  `hello` echoes only the seven `meta` fields of 2.3, and the socket must be an absolute path
+  without NUL; a
   refused spec is one line `keeper <id>: bad-spec` (`-` without a valid id), exit 2, nothing
   created or started.
 - **`T` started**: `pid` from 1, `procStart` from 0.
@@ -494,13 +496,18 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
   held; held bytes are sent as they are when the next read shows they do not go on as one, or when
   the program has ended (before `X`). Nothing is dropped or reordered. Escape sequences split
   across records are not the keeper's (task 33).
+- **`N`'s reason** (ruled by the plan owner, task 9): UTF-8, at most 1,024 bytes (`MAX_REASON`). A
+  longer one closes the connection as soon as its header shows it (`bad-refusal`), as any frame the
+  keeper cannot parse; the server (task 16) keeps its reasons within that. An empty reason becomes
+  "the server refused the start".
 - **The input queue** (ruled by the plan owner, task 9; S2 7.1 step 5): it holds at most 4 MiB, and
   no input byte is ever dropped while the program runs. An `I` frame that would take it above
   4 MiB is not appended: it stays unread in the connection, and the keeper reads nothing more from
   that connection — parks and resizes wait as well — until the program has read enough to make
   room. The server then cannot write to the keeper and refuses further input with `notice
   input-full` (task 16). A single `I` frame larger than 4 MiB could never fit: it closes the
-  connection (`input-too-long`). The server sends at most 64 KiB per frame.
+  connection (`input-too-long`) as soon as its header shows the length. The server sends at most
+  64 KiB per frame.
 - **The pid line's temporary file** (task 15's rule): the keeper writes `terms/.<id>.<pid>.tmp` and
   renames it to `terms/<id>.pid`, so the temporary never has the `<12 hex>.pid` shape that
   `listKeeperLines` reads.
@@ -1805,7 +1812,9 @@ by the `hello` rules (2.3).
   naming the reason on the pty; the pid line is written through `.<id>.<pid>.tmp`, never a name of
   the `<12 hex>.pid` shape that task 15's `listKeeperLines` reads (seen with `fs.watch`). The
   dumpable checks always run; only the `coreSoft` check is skipped where the hard core limit is 0
-  (ruled).
+  (ruled). From review 2: the socket and the pid line are mode 600; input before `G` is dropped,
+  never given to the program later; `N` after the start does nothing; the program does not inherit
+  python3's ignored SIGPIPE and SIGXFSZ.
 - `stream.test.ts`: output, input and resizes arrive as records in order with numbers from 1;
   `Z 100 30` → the pty size changes (the stand-in records it) and an `R` record comes back;
   `P` with record number n → the keeper keeps the snapshot and drops records ≤ n; a new
@@ -1815,7 +1824,9 @@ by the `hello` rules (2.3).
   of more than 4 MiB closes it, one of exactly 4 MiB is taken whole; a character split across two
   reads at each of its bytes is one record, bytes that cannot begin a character are not held, held
   bytes that do not go on as one and those left when the program ends are sent as they are, and a
-  resize while a character is half read comes after it (ruled, 2.3); a first frame other than `C`
+  resize while a character is half read comes after it, or comes out at the end (ruled, 2.3); an
+  `N` reason above 1,024 bytes closes the connection, one of exactly 1,024 is taken; an `I` frame
+  announced above 4 MiB closes it at its header (review 2); a first frame other than `C`
   closes that connection, and the keeper still serves the next; an unparseable frame (type `Q`)
   closes the connection and the keeper lives on; the keeper only accepts its own uid (a test that
   can connect as another uid is skipped with a reason when it cannot).
@@ -1824,7 +1835,9 @@ by the `hello` rules (2.3).
   over its cap → the keeper stops reading the connection (the test's writes block) and resumes
   when the program reads; the tail cap → oldest records dropped and `hello.gap` true on the next
   claim; the send-queue cap with a client that does not read → the connection is closed, the
-  keeper keeps reading the pty, and a new claim gets snapshot and tail.
+  keeper keeps reading the pty, and a new claim gets snapshot and tail. From review 2: a claim's
+  snapshot and tail are not held to the send cap, its live records are; the tail cap counts 64 bytes
+  per record, so many small records cannot outgrow it.
 - `exit.test.ts`: `/exit` → `X` `{ code: 0 }` after the last `D`; `/fail 3` → 3; a program that
   kills itself with `SIGKILL` (`sh -c 'kill -KILL $$'`, so that the test signals nothing itself,
   A34; ruled) → `signal` 9; a spec and a frame carrying a marker string that make the keeper fail
@@ -1834,7 +1847,9 @@ by the `hello` rules (2.3).
   connection → it ends after the linger, also when it was never started and never connected to
   (ruled); a `meta` the `hello` rules refuse → `bad-spec`; the exception hook, reached through a
   module put before the standard library's, logs only the class name of an error that quotes the
-  spec or a frame (ruled); killing the keeper (`SIGKILL`) → the stand-in records
+  spec or a frame (ruled); a `startBy` or `coreSoft` with too many digits → `bad-spec`, exit 2; a
+  `meta` field the spec adds is not echoed; what the pty still holds when the program is reaped
+  comes before `X`, whatever the tail cap (review 2); killing the keeper (`SIGKILL`) → the stand-in records
   `hup` and its `SessionEnd` with reason `other` is in the spool; `I` after the exit is dropped.
 
 **Done when:** every case passes on python3 3.12 in CI and locally; the file uses only the

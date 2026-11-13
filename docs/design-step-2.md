@@ -519,8 +519,9 @@ hibernation (WSL issue #8696, section 21): then nothing in WSL answers and 6.3's
 ### 7.1 The keeper
 
 `bin/skydeck-keeper` is one python3 file, standard library only (`pty`, `os`, `sys`, `select`,
-`socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `time`; `sys` for the
-exception hook that keeps an error's message out of `keepers.log`), about 810 lines
+`socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `resource`, `collections`,
+`time`; `sys` for the exception hook that keeps an error's message out of `keepers.log`, `ctypes`
+for `prctl`, `resource` for the program's core limit, `collections` for the tail), about 810 lines
 (about 700 without comments and blank lines; the first estimate counted the prototype's loop, and
 the rules below — claim, start deadline, pid line, queues and caps, linger — and the checks of every
 input it reads add the rest),
@@ -594,7 +595,8 @@ The keeper:
    `notice input-full` ("the program is not reading its input") rather than queue without end.
    Parks and resizes travel on the same connection and wait as well; the server makes no park
    while it cannot write to the keeper, so the tail may reach its cap and set gap (step 6, 7.3).
-6. keeps at most 8 MiB of tail. When the tail would grow beyond that (no server parked for a long
+6. keeps at most 8 MiB of tail, counting 64 bytes for each record besides its own, so that many tiny
+   records cannot outgrow it. When the tail would grow beyond that (no server parked for a long
    time while the program wrote a lot), it drops the oldest records and sets **gap**: the snapshot
    it holds no longer leads to the current screen (7.3).
 7. sends to the server without blocking: when more than 8 MiB is queued for a connection, it closes
@@ -791,7 +793,7 @@ keeper). Protocol version 1:
 | `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
 | `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output (when
 `exec` then fails, `X` with code 127 follows); a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
-| `N` do not start | server → keeper | UTF-8 reason. The program is never started (7.1, step 2). |
+| `N` do not start | server → keeper | UTF-8 reason, at most 1,024 bytes (a longer one closes the connection, as any frame the keeper cannot parse). The program is never started (7.1, step 2). |
 | `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. |
 | `D` output | keeper → server | One record: bytes as read from the pty, except that a record never ends inside a UTF-8 character: the first bytes of a character the program has not finished writing go with the next record (7.1 step 4). After `H` (and `S`) come the tail's records, then live ones. |
 | `R` resize | keeper → server | One record: JSON `{cols, rows}`, the size the pty was set to. |
