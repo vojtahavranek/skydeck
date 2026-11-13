@@ -1334,6 +1334,24 @@ test('a process that moved on left the session at its first later event, not at 
   assert.deepEqual(s.marks, ['ended-unexpectedly']);
 });
 
+test('a move that reconcile noticed later ranks at the process’s last event for the session', () => {
+  // P1 (no hook) was observed on S1; `claude --resume S1` ran elsewhere (P2), and P2 was killed;
+  // the next refresh observed P1 on S2. The observed event's time is that refresh, not the move.
+  const s = session(
+    {
+      events: [
+        observed(P1, S1, T0),
+        start(P2, S1, T0 + 10n * SEC, 'resume'),
+        observed(P1, S2, T0 + 100n * SEC),
+      ],
+      isAlive: alive(P1),
+    },
+    S1,
+  );
+  assert.deepEqual(s.lastHolding, { process: P2, endedAtNs: null, endDetail: null, alive: false });
+  assert.deepEqual(s.marks, ['ended-unexpectedly']);
+});
+
 test('a moved-on holding ends at the first event of the process after it', () => {
   const s = session(
     {

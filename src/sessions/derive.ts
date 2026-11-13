@@ -247,7 +247,8 @@ interface HoldingRank {
  * first event after it (it moved on to another session without one). One the process still had at
  * its last event goes on while the process is alive; a process that is gone without an end event
  * ended when it was last seen: its last event, or the last write of the live file it left naming
- * the session (`lastWriteNs`), whichever is later.
+ * the session (`lastWriteNs`), whichever is later. A move that only reconcile saw (the next event
+ * is `observed`) is ranked at the process's last event for the session.
  */
 function lastHoldingOf(
   sessionEvents: readonly EventRow[],
@@ -292,9 +293,12 @@ function holdingOf(
   }
   const after = processEvents[processEvents.indexOf(last) + 1];
   if (after !== undefined) {
+    // An `observed` event is stamped when reconcile noticed the move, which can be much later than
+    // the move itself: only the process's last event for the session is known to be before it.
+    const movedAt = after.kind === 'observed' ? last : after;
     return {
       holding: { process, alive, endedAtNs: after.timeNs, endDetail: 'moved-on' },
-      rank: { goesOn: false, atNs: after.timeNs, eventId: after.id },
+      rank: { goesOn: false, atNs: movedAt.timeNs, eventId: movedAt.id },
     };
   }
   const seenNs = alive ? last.timeNs : (latest(last.timeNs, lastWriteNs(process)) ?? last.timeNs);

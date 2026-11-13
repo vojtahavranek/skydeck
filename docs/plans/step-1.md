@@ -3685,7 +3685,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
   with an event naming the session (`pid` ≠ 0; none → null), `E` = its latest event naming the
   session. `E` is an `end` → `{ endedAtNs: E.timeNs, endDetail: E.detail }`, ending at `E`.
   Otherwise `A` = the process's first event after `E`: there is one → `{ endedAtNs: A.timeNs,
-  endDetail: 'moved-on' }`, ending at `A`; none → `{ endedAtNs: null, endDetail: null }`, going on
+  endDetail: 'moved-on' }`, ending at `A` (at `E` when `A` is `observed`: reconcile's time is not the move's); none → `{ endedAtNs: null, endDetail: null }`, going on
   while the process is alive, else ending when it was last seen: the later of `E.timeNs` and the
   `mtimeNs` of its leftover live files (same pid and procStart) naming the session, tie by `E.id`.
   The last holding is the one that goes on, else the one that ended last (time, then event id).
