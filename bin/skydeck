@@ -110,8 +110,10 @@ fi
 # ignores SIGPIPE and SIGXFSZ, which would stay ignored across exec, so each is set back to what
 # the caller had: ignored when the caller ignored it, else the default (as python's own
 # subprocess does when the caller's choice is unknown).
-# Nothing in it may keep node from starting: every step but the exec is optional and guarded, and
-# every write tolerates a closed stderr (sys.stderr is then None).
+# Nothing in it may keep node from starting: every step but the exec is optional and guarded,
+# every write tolerates a closed stderr (sys.stderr is then None), and the two signals are handed
+# back only right before the exec (ignored again if it fails), so that until then a write to a
+# pipe nobody reads or past the file size limit is an error python catches, not its death.
 skydeck_core_limit='
 import os, sys
 
@@ -120,6 +122,16 @@ def say(line):
     try:
         sys.stderr.write(line)
         sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def set_signals(ignore):
+    try:
+        import signal
+        for name in ("SIGPIPE", "SIGXFSZ"):
+            number = getattr(signal, name)
+            signal.signal(number, signal.SIG_IGN if ignore(number) else signal.SIG_DFL)
     except Exception:
         pass
 
@@ -148,17 +160,9 @@ else:
     env.pop("LC_CTYPE", None)
 env.pop("SKYDECK_CORE_SOFT", None)
 try:
-    import signal
-    try:
-        ignored_mask = int(ignored, 16)
-    except ValueError:
-        ignored_mask = 0
-    for name in ("SIGPIPE", "SIGXFSZ"):
-        number = getattr(signal, name)
-        caller_ignored = ignored_mask >> (number - 1) & 1
-        signal.signal(number, signal.SIG_IGN if caller_ignored else signal.SIG_DFL)
-except Exception:
-    pass
+    caller_mask = int(ignored, 16)
+except ValueError:
+    caller_mask = 0
 try:
     import resource
     soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
@@ -168,9 +172,11 @@ try:
     env["SKYDECK_CORE_SOFT"] = "unlimited" if soft == resource.RLIM_INFINITY else str(soft)
 except Exception as error:
     report_limit_not_set(log, error)
+set_signals(lambda number: caller_mask >> (number - 1) & 1)
 try:
     os.execvpe(command[0], command, env)
 except Exception as error:
+    set_signals(lambda number: True)
     say("skydeck: cannot run %r: %s\n" % (command[0], getattr(error, "strerror", None) or error))
 os._exit(127)
 '

@@ -1170,8 +1170,10 @@ by itself, back to the caller's disposition (ignored when the launcher's `SigIgn
 `/proc/self/status` has them, else the default); writes the server.log line to stderr when that
 file cannot be written; and, when Node.js cannot be executed, prints `skydeck: cannot run
 '<node>': <reason>` and exits 127, as the launcher does, instead of a traceback. Nothing in the
-program may keep Node.js from starting: every step but the exec is guarded, and every write
-tolerates a closed stderr (ruled, pull request #36). The `--here` handoff unsets
+program may keep Node.js from starting: every step but the exec is guarded, every write
+tolerates a closed stderr, and SIGPIPE and SIGXFSZ are handed back only right before the exec
+(ignored again if it fails), so a write to a pipe nobody reads or past the file size limit stays
+an error python catches (ruled, pull request #36). The `--here` handoff unsets
 `SKYDECK_LAUNCHER_CACHE` together with `SKYDECK_HANDOFF`: no program the launcher hands over to
 gets the marker, also not one the caller had. The launcher stays
 POSIX `sh` (shellcheck clean); the python is a short program held in a shell variable and passed
@@ -1191,8 +1193,11 @@ linked into the sandbox where needed)
   `SKYDECK_CORE_SOFT`; node sees `LC_CTYPE` as the caller had it, also unset and empty; node's
   ignored-signal set (`SigIgn` of `/proc/self/status`) equals that of a `serve` started without
   python3, also when the caller ignores SIGPIPE, SIGXFSZ or another signal; a Node.js that cannot
-  be executed gives the one line and exit 127; with stderr closed, a hard limit of 0 and no state
-  directory node still runs, and a Node.js that cannot be executed still gives exit 127.
+  be executed gives the one line and exit 127; with stderr closed or a pipe nobody reads, a hard
+  limit of 0 and no state directory node still runs, and a Node.js that cannot be executed still
+  gives exit 127; with a hard limit of 0 and a `server.log` over `ulimit -f`, node still runs and
+  the line goes to stderr. Cases that need the limit to be settable skip where the machine's hard
+  limit is 0.
 - `serve` without python3 on `PATH`: node runs, no `SKYDECK_CORE_SOFT`.
 - `ls` (any other command): no python3 started (a python3 stub that records its calls is never
   called), limits unchanged.

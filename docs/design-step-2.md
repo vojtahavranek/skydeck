@@ -71,7 +71,9 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   locale) and sets the two signals python3 ignores by itself (SIGPIPE, SIGXFSZ) back to what the
   caller had (an ignored signal stays ignored across `exec`), since the server's environment
   becomes every program's (7.4). Nothing in the program may keep Node.js from starting: every
-  step but the `exec` is optional, and a closed stderr stops none of them. Keepers inherit the limit; each keeper's
+  step but the `exec` is optional, and a closed stderr, a pipe nobody reads or a log over the
+  file size limit stops none of them (the two signals are handed back only right before the
+  `exec`). Keepers inherit the limit; each keeper's
   child sets the soft limit back to that value before it `exec`s the program, so `claude` keeps
   the user's own limit (7.1). When the program cannot set the limit (the hard limit is 0, or
   `setrlimit` fails), it still starts Node.js, without `SKYDECK_CORE_SOFT`, and writes one line

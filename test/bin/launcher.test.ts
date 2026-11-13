@@ -436,6 +436,21 @@ const hardIsUnlimited = ownCoreHardLimit() === 'unlimited';
 const needsUnlimitedHard = hardIsUnlimited
   ? false
   : 'the hard core limit of this machine is not unlimited';
+/** For the cases where the launcher must be able to set the limit (a container may forbid dumps). */
+const needsHardAboveZero =
+  ownCoreHardLimit() === '0' ? 'the hard core limit of this machine is 0' : false;
+
+/**
+ * Shell lines that make the wrapper's stderr a pipe whose reader has already exited, as in
+ * `skydeck serve 2>&1 | true`: a write to it fails (SIGPIPE, or EPIPE when that is ignored). The
+ * reader is a `true` on a fifo that has exited before the launcher starts, so there is no timing.
+ */
+function stderrToAPipeNobodyReads(s: Sandbox): string {
+  const fifo = join(s.root, 'stderr.fifo');
+  const made = spawnSync('mkfifo', [fifo], { encoding: 'utf8' });
+  assert.equal(made.status, 0, made.stderr);
+  return [`true <'${fifo}' &`, 'reader=$!', `exec 2>'${fifo}'`, 'wait "$reader"'].join('\n');
+}
 
 /** A launcher sandbox with the reporting node on PATH and, when `python` is true, python3. */
 function serveSandbox(t: TestContext, python: boolean): Sandbox {
@@ -459,18 +474,22 @@ const LIMIT_NOT_SET =
   /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z launcher: the soft core limit could not be set to 1 byte \(.+\); core dumps of the server are not prevented$/;
 
 describe('bin/skydeck serve: the core limit (S2 2)', () => {
-  test('with python3: node sees the soft limit it had in SKYDECK_CORE_SOFT, runs with a soft limit of 1 byte and the same hard limit', (t) => {
-    const s = serveSandbox(t, true);
+  test(
+    'with python3: node sees the soft limit it had in SKYDECK_CORE_SOFT, runs with a soft limit of 1 byte and the same hard limit',
+    { skip: needsHardAboveZero },
+    (t) => {
+      const s = serveSandbox(t, true);
 
-    const r = launchReported('ulimit -S -c 0', ['serve'], s.env());
+      const r = launchReported('ulimit -S -c 0', ['serve'], s.env());
 
-    assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.field('node'), 'reporting');
-    assert.equal(r.field('before-soft'), '0');
-    assert.equal(r.field('core-soft'), '0');
-    assert.equal(r.field('limit-soft'), '1');
-    assert.equal(r.field('limit-hard'), r.field('before-hard'));
-  });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.field('node'), 'reporting');
+      assert.equal(r.field('before-soft'), '0');
+      assert.equal(r.field('core-soft'), '0');
+      assert.equal(r.field('limit-soft'), '1');
+      assert.equal(r.field('limit-hard'), r.field('before-hard'));
+    },
+  );
 
   test(
     'a soft and a hard limit that are numbers: the soft one in bytes, the hard one kept',
@@ -500,13 +519,17 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     assert.equal(r.field('limit-hard'), 'unlimited');
   });
 
-  test('a SKYDECK_CORE_SOFT the caller had is replaced by the limit found', (t) => {
-    const s = serveSandbox(t, true);
+  test(
+    'a SKYDECK_CORE_SOFT the caller had is replaced by the limit found',
+    { skip: needsHardAboveZero },
+    (t) => {
+      const s = serveSandbox(t, true);
 
-    const r = launchReported('ulimit -S -c 0', ['serve'], s.env({ SKYDECK_CORE_SOFT: '12345' }));
+      const r = launchReported('ulimit -S -c 0', ['serve'], s.env({ SKYDECK_CORE_SOFT: '12345' }));
 
-    assert.equal(r.field('core-soft'), '0');
-  });
+      assert.equal(r.field('core-soft'), '0');
+    },
+  );
 
   test('hard limit 0: node still runs, without SKYDECK_CORE_SOFT, and server.log gains one line', (t) => {
     const s = serveSandbox(t, true);
@@ -597,6 +620,8 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
 
   test('with python3: a node that cannot be executed is one line on stderr and exit 127, as without', (t) => {
     const s = serveSandbox(t, true);
+    // Where the limit cannot be set (a hard limit of 0), its line goes to server.log, not stderr.
+    serverLogWithOneLine(join(s.skydeckHome, 'state'));
     // Executable, so the launcher's check passes, but its interpreter does not exist.
     const broken = join(s.root, 'broken-node');
     writeFileSync(broken, '#!/no/such/interpreter\n');
@@ -618,6 +643,47 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     assert.equal(r.field('core-soft'), 'unset');
   });
 
+  test('with python3: hard limit 0, no state directory and stderr a pipe nobody reads: node still runs', (t) => {
+    const s = serveSandbox(t, true);
+    const setup = `ulimit -S -c 0 && ulimit -H -c 0\n${stderrToAPipeNobodyReads(s)}`;
+
+    const r = launchReported(setup, ['serve'], s.env());
+
+    assert.equal(r.status, 0);
+    assert.equal(r.field('node'), 'reporting');
+  });
+
+  test('with python3: a node that cannot be executed, with stderr a pipe nobody reads, still exits 127', (t) => {
+    const s = serveSandbox(t, true);
+    const broken = join(s.root, 'broken-node');
+    writeFileSync(broken, '#!/no/such/interpreter\n');
+    chmodSync(broken, 0o755);
+
+    const r = launchReported(
+      stderrToAPipeNobodyReads(s),
+      ['serve'],
+      s.env({ SKYDECK_NODE: broken }),
+    );
+
+    assert.equal(r.status, 127);
+  });
+
+  test('with python3: hard limit 0 and a server.log over the file size limit: node still runs, the line goes to stderr', (t) => {
+    const s = serveSandbox(t, true);
+    const log = join(s.skydeckHome, 'state', 'server.log');
+    mkdirSync(dirname(log), { recursive: true });
+    const before = 'x'.repeat(4095) + '\n';
+    writeFileSync(log, before);
+
+    // `ulimit -f 1`: 512 or 1024 bytes, both below what server.log holds already.
+    const r = launchReported('ulimit -S -c 0 && ulimit -H -c 0 && ulimit -f 1', ['serve'], s.env());
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.field('node'), 'reporting');
+    assert.match(r.stderr.trimEnd(), LIMIT_NOT_SET);
+    assert.equal(readFileSync(log, 'utf8'), before);
+  });
+
   test('with python3: a node that cannot be executed, with stderr closed, still exits 127', (t) => {
     const s = serveSandbox(t, true);
     const broken = join(s.root, 'broken-node');
@@ -637,23 +703,27 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     assert.equal(r.status, 7);
   });
 
-  test('with python3: node gets the environment any command gets, plus SKYDECK_CORE_SOFT only', (t) => {
-    const s = serveSandbox(t, true);
-    // No LANG or LC_*: python3 would set LC_CTYPE=C.UTF-8 in its own environment (PEP 538).
-    const plain = launchReported('ulimit -S -c 0', ['ls'], s.env());
-    const serve = launchReported('ulimit -S -c 0', ['serve'], s.env());
-    // The handoff file has a new name on every run.
-    const comparable = (env: string[]) => env.filter((l) => !l.includes('SKYDECK_HANDOFF='));
+  test(
+    'with python3: node gets the environment any command gets, plus SKYDECK_CORE_SOFT only',
+    { skip: needsHardAboveZero },
+    (t) => {
+      const s = serveSandbox(t, true);
+      // No LANG or LC_*: python3 would set LC_CTYPE=C.UTF-8 in its own environment (PEP 538).
+      const plain = launchReported('ulimit -S -c 0', ['ls'], s.env());
+      const serve = launchReported('ulimit -S -c 0', ['serve'], s.env());
+      // The handoff file has a new name on every run.
+      const comparable = (env: string[]) => env.filter((l) => !l.includes('SKYDECK_HANDOFF='));
 
-    assert.deepEqual(
-      comparable(serve.env).filter((l) => !l.includes('SKYDECK_CORE_SOFT=')),
-      comparable(plain.env),
-    );
-    assert.ok(
-      serve.env.some((l) => l.includes('SKYDECK_CORE_SOFT=')),
-      serve.env.join('\n'),
-    );
-  });
+      assert.deepEqual(
+        comparable(serve.env).filter((l) => !l.includes('SKYDECK_CORE_SOFT=')),
+        comparable(plain.env),
+      );
+      assert.ok(
+        serve.env.some((l) => l.includes('SKYDECK_CORE_SOFT=')),
+        serve.env.join('\n'),
+      );
+    },
+  );
 
   test('with python3: node sees LC_CTYPE as the caller had it, also when it was unset or empty', (t) => {
     const s = serveSandbox(t, true);
