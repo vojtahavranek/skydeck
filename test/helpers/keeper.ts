@@ -495,6 +495,13 @@ export async function answerStart(client: KeeperClient): Promise<void> {
   await client.waitForOutput(CPR, 15_000);
   client.send('I', CPR_ANSWER);
   await client.waitForOutput(PROMPT, 15_000);
+  // The stand-in gave up on its DA1 after 2 s (a loaded machine): the late answer would become
+  // typed input and fail a later step, far from the cause.
+  assert.equal(
+    client.output().includes('no answer to DA1'),
+    false,
+    'the stand-in timed out its DA1',
+  );
 }
 
 /** Claims, sends G, answers the start queries and waits for the prompt. */

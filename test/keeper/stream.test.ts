@@ -398,7 +398,7 @@ describe('keeper: records end at character boundaries (ruled)', { concurrency: t
 
   test('a resize behind a half character comes out when the program ends', async (t) => {
     const box = keeperSandbox(t);
-    const k = await box.start({ spec: { argv: ['sh', '-c', `printf 'a\\342'; sleep 1`] } });
+    const k = await box.start({ spec: { argv: ['sh', '-c', `printf 'a\\342'; sleep 3`] } });
     const { client } = await k.claim();
     client.send('G');
     await until(() => raw(client).includes('a'), 'the first record');
