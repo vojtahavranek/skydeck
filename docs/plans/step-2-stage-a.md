@@ -1841,8 +1841,9 @@ and a random source; no socket.
   string of 43 bytes, a nonce that is not one, an origin that is not a string, a secret of another
   size.
 - `raiseAlarm` writes the time and keeps the first one (one transaction; ruled); the secret's bytes never appear in any string the module returns
-  except `wrapSecret`'s ciphertext (checked by searching every returned string for the
-  base64url of the secret).
+  except `wrapSecret`'s ciphertext (checked by searching every returned string, and every error
+  of each thrown case provoked with the secret or a token as an argument, for the secret's and the
+  token's base64url, base64, hex and decimal forms; ruled, review 2).
 
 **Done when:** the vector is pinned and every token state of S2 8.3's `GET /token/<id>` is reachable.
 

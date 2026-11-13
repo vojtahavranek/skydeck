@@ -399,9 +399,10 @@ function failureKind(error: unknown): string {
     if (!(error instanceof Error)) {
       return `a thrown ${error === null ? 'null' : typeof error}`;
     }
-    const name = /^[A-Za-z][A-Za-z0-9]*$/.test(error.name) ? error.name : 'Error';
+    const name: unknown = error.name;
+    const kind = typeof name === 'string' && /^[A-Za-z][A-Za-z0-9]*$/.test(name) ? name : 'Error';
     const code: unknown = (error as { code?: unknown }).code;
-    return typeof code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(code) ? `${name} (${code})` : name;
+    return typeof code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(code) ? `${kind} (${code})` : kind;
   } catch {
     return 'an error that cannot be read';
   }

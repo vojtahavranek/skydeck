@@ -494,6 +494,7 @@ test("an alarm failure's kind never carries its message", (t) => {
     Object.assign(new TypeError(marker), { code: 42 }),
     Object.assign(new Error(marker), { code: `E ${marker}` }),
     Object.assign(new Error(marker), { name: `Bad ${marker}` }),
+    Object.assign(new Error(marker), { name: { toString: () => 'Plausible' } }),
     unreadable,
     marker,
     { message: marker },
@@ -511,6 +512,7 @@ test("an alarm failure's kind never carries its message", (t) => {
   assert.deepEqual(kinds, [
     'Error',
     'TypeError',
+    'Error',
     'Error',
     'Error',
     'an error that cannot be read',
