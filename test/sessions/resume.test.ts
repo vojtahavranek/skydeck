@@ -1,12 +1,5 @@
 import assert from 'node:assert/strict';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -20,12 +13,13 @@ import {
   LOCK_TTL_NS,
   acquireLock,
   checkResumable,
-  lockPath,
+  lockKey,
   prepareNew,
   prepareResume,
   sweepLocks,
 } from '../../src/sessions/resume.ts';
 import type { DerivedSession, Holder } from '../../src/sessions/types.ts';
+import type { Store } from '../../src/store/store.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { ds, meta, rowOf } from '../helpers/derived.ts';
@@ -58,13 +52,13 @@ function refusal(fn: () => unknown): string {
   throw new assert.AssertionError({ message: 'nothing was refused' });
 }
 
+/** The value of the session's resume lock, null when there is none. */
 function lockOf(d: TestDeck, sessionId: string): string | null {
-  const path = lockPath(d.deck.places, sessionId);
-  return existsSync(path) ? readFileSync(path, 'utf8') : null;
+  return d.deck.store.getKv(lockKey(sessionId));
 }
 
-function writeLock(d: TestDeck, sessionId: string, content: string): void {
-  writeFileSync(lockPath(d.deck.places, sessionId), content);
+function writeLock(d: TestDeck, sessionId: string, value: string): void {
+  d.deck.store.setKv(lockKey(sessionId), value);
 }
 
 function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): void {
@@ -83,6 +77,43 @@ function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): void {
     name: null,
     payload: null,
   });
+}
+
+/** What node:sqlite throws when the database is locked (SQLITE_BUSY = 5). */
+const locked = (): Error =>
+  Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });
+
+/**
+ * The deck with its store watched: `depths` gets, for every kv read, write and delete, how many
+ * store transactions were open at that moment.
+ */
+function watched(d: TestDeck): {
+  deck: typeof d.deck;
+  depths: number[];
+  transactions: () => number;
+} {
+  const store = d.deck.store;
+  const depths: number[] = [];
+  let depth = 0;
+  let count = 0;
+  const deck = deckWith(d.deck, {
+    store: {
+      transaction<T>(fn: () => T): T {
+        depth++;
+        count++;
+        try {
+          return store.transaction(fn);
+        } finally {
+          depth--;
+        }
+      },
+      getKv: (key) => (depths.push(depth), store.getKv(key)),
+      setKv: (key, value) => (depths.push(depth), store.setKv(key, value)),
+      deleteKv: (key) => (depths.push(depth), store.deleteKv(key)),
+      kvEntries: (prefix) => (depths.push(depth), store.kvEntries(prefix)),
+    } satisfies Partial<Store>,
+  });
+  return { deck, depths, transactions: () => count };
 }
 
 // --- checkResumable ----------------------------------------------------------------------------------
@@ -207,31 +238,29 @@ test('checkResumable lets a dead session with an existing directory through', (t
   checkResumable(rowOf(dead(d)), d.platform.files);
 });
 
-// --- lockPath, acquireLock -------------------------------------------------------------------------
+// --- lockKey, acquireLock --------------------------------------------------------------------------
 
 test('LOCK_TTL_NS is 60 seconds', () => {
   assert.equal(LOCK_TTL_NS, 60n * NS_PER_SECOND);
 });
 
-test('lockPath is <locksDir>/<id>.lock', (t) => {
-  const d = testDeck(t);
-  assert.equal(lockPath(d.deck.places, S1), join(d.deck.places.locksDir, `${S1}.lock`));
+test('lockKey is the kv key resume_lock:<id>', () => {
+  assert.equal(lockKey(S1), `resume_lock:${S1}`);
 });
 
-test('lockPath refuses anything but a session id', (t) => {
-  const d = testDeck(t);
+test('lockKey refuses anything but a session id', () => {
   for (const bad of ['../x', S1.toUpperCase(), `${S1}/x`, '']) {
-    assert.throws(() => lockPath(d.deck.places, bad), RangeError);
+    assert.throws(() => lockKey(bad), RangeError);
   }
 });
 
-test('acquireLock creates the lock with the time as content', (t) => {
+test('acquireLock stores the lock with the time as its value', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1);
-  assert.equal(lockOf(d, S1), `${T0}\n`);
+  assert.equal(lockOf(d, S1), `${T0}`);
 });
 
-test('acquireLock refuses within 60 s and says how long to wait', (t) => {
+test('acquireLock refuses within 60 s, says how long to wait and leaves the lock as it is', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1);
   d.clock.setNs(T0 + 10n * SEC);
@@ -239,7 +268,7 @@ test('acquireLock refuses within 60 s and says how long to wait', (t) => {
     refusal(() => acquireLock(d.deck, S1)),
     '0b5f3c1e is being resumed (10 s ago); try again in 50 s',
   );
-  assert.equal(lockOf(d, S1), `${T0}\n`);
+  assert.equal(lockOf(d, S1), `${T0}`);
 });
 
 test('acquireLock rounds the age down and the wait up', (t) => {
@@ -257,7 +286,7 @@ test('acquireLock replaces a lock older than 60 s', (t) => {
   acquireLock(d.deck, S1);
   d.clock.setNs(T0 + 61n * SEC);
   acquireLock(d.deck, S1);
-  assert.equal(lockOf(d, S1), `${T0 + 61n * SEC}\n`);
+  assert.equal(lockOf(d, S1), `${T0 + 61n * SEC}`);
 });
 
 test('acquireLock replaces a lock exactly 60 s old', (t) => {
@@ -265,7 +294,7 @@ test('acquireLock replaces a lock exactly 60 s old', (t) => {
   acquireLock(d.deck, S1);
   d.clock.setNs(T0 + 60n * SEC);
   acquireLock(d.deck, S1);
-  assert.equal(lockOf(d, S1), `${T0 + 60n * SEC}\n`);
+  assert.equal(lockOf(d, S1), `${T0 + 60n * SEC}`);
 });
 
 test('acquireLock replaces a lock when the session started at or after the lock', (t) => {
@@ -275,7 +304,7 @@ test('acquireLock replaces a lock when the session started at or after the lock'
     startEvent(d, S1, startNs);
     d.clock.setNs(T0 + 5n * SEC);
     acquireLock(d.deck, S1);
-    assert.equal(lockOf(d, S1), `${T0 + 5n * SEC}\n`);
+    assert.equal(lockOf(d, S1), `${T0 + 5n * SEC}`);
   }
 });
 
@@ -295,163 +324,141 @@ test('acquireLock locks each session on its own', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1);
   acquireLock(d.deck, S2);
-  assert.equal(lockOf(d, S2), `${T0}\n`);
+  assert.equal(lockOf(d, S2), `${T0}`);
 });
 
-test('acquireLock dates a lock it cannot read the time of by its modification time', (t) => {
-  const d = testDeck(t);
-  writeLock(d, S1, 'not a time\n');
-  const seconds = Number((T0 - 5n * SEC) / NS_PER_SECOND);
-  utimesSync(lockPath(d.deck.places, S1), seconds, seconds);
-  assert.equal(
-    refusal(() => acquireLock(d.deck, S1)),
-    '0b5f3c1e is being resumed (5 s ago); try again in 55 s',
-  );
-  const old = Number((T0 - 61n * SEC) / NS_PER_SECOND);
-  utimesSync(lockPath(d.deck.places, S1), old, old);
-  acquireLock(d.deck, S1);
-  assert.equal(lockOf(d, S1), `${T0}\n`);
+test('acquireLock replaces a lock whose value is not a time', (t) => {
+  for (const value of ['', 'soon', '12x', '-5', ' 1']) {
+    const d = testDeck(t);
+    writeLock(d, S1, value);
+    acquireLock(d.deck, S1);
+    assert.equal(lockOf(d, S1), `${T0}`, JSON.stringify(value));
+  }
 });
 
 test('acquireLock treats a lock dated a little in the future as fresh, one far ahead as stale', (t) => {
   const d = testDeck(t);
-  writeLock(d, S1, `${T0 + 10n * SEC}\n`);
+  writeLock(d, S1, `${T0 + 10n * SEC}`);
   assert.equal(
     refusal(() => acquireLock(d.deck, S1)),
     '0b5f3c1e is being resumed (0 s ago); try again in 70 s',
   );
-  writeLock(d, S1, `${T0 + 61n * SEC}\n`);
+  writeLock(d, S1, `${T0 + 60n * SEC}`);
   acquireLock(d.deck, S1);
-  assert.equal(lockOf(d, S1), `${T0}\n`);
+  assert.equal(lockOf(d, S1), `${T0}`);
 });
 
-test('acquireLock refuses when another resume took the lock while it replaced a stale one', (t) => {
+test('acquireLock reads and writes the lock inside one transaction', (t) => {
   const d = testDeck(t);
-  writeLock(d, S1, `${T0 - 120n * SEC}\n`);
-  // Between this resume reading the stale lock and moving it aside, another one replaces it.
-  const path = lockPath(d.deck.places, S1);
-  let swapped = false;
+  writeLock(d, S1, `${T0 - 120n * SEC}`);
+  const w = watched(d);
+  acquireLock(w.deck, S1);
+  assert.equal(w.transactions(), 1);
+  assert.ok(w.depths.length >= 2, String(w.depths));
+  assert.ok(
+    w.depths.every((depth) => depth === 1),
+    String(w.depths),
+  );
+  d.clock.setNs(T0 + SEC);
+  refusal(() => acquireLock(w.deck, S1));
+  assert.equal(w.transactions(), 2);
+  assert.ok(
+    w.depths.every((depth) => depth === 1),
+    String(w.depths),
+  );
+});
+
+test('acquireLock lets a failure of the database through', (t) => {
+  const d = testDeck(t);
+  const failure = locked();
   const deck = deckWith(d.deck, {
-    files: {
-      rename(from: string, to: string): void {
-        if (from === path && !swapped) {
-          swapped = true;
-          writeFileSync(path, `${T0 - SEC}\n`);
-        }
-        d.platform.files.rename(from, to);
+    store: {
+      getKv(): string | null {
+        throw failure;
       },
     },
   });
-  assert.match(
-    refusal(() => acquireLock(deck, S1)),
-    /being resumed \(1 s ago\)/,
-  );
-  assert.equal(lockOf(d, S1), `${T0 - SEC}\n`);
-  assert.deepEqual(
-    readdirSync(d.deck.places.locksDir).filter((name) => name !== `${S1}.lock`),
-    [],
-  );
-});
-
-test('acquireLock creates the lock when the stale one vanished meanwhile', (t) => {
-  const d = testDeck(t);
-  writeLock(d, S1, `${T0 - 120n * SEC}\n`);
-  const path = lockPath(d.deck.places, S1);
-  const deck = deckWith(d.deck, {
-    files: {
-      rename(from: string, to: string): void {
-        if (from === path) {
-          d.platform.files.remove(path); // swept by another skydeck
-        }
-        d.platform.files.rename(from, to);
-      },
-    },
-  });
-  acquireLock(deck, S1);
-  assert.equal(lockOf(d, S1), `${T0}\n`);
-});
-
-test('acquireLock gives up when the lock keeps changing under it', (t) => {
-  const d = testDeck(t);
-  const deck = deckWith(d.deck, {
-    files: { createExclusive: () => false, readText: () => null },
-  });
-  assert.equal(
-    refusal(() => acquireLock(deck, S1)),
-    '0b5f3c1e: its resume lock keeps changing; try again',
-  );
+  assert.throws(() => acquireLock(deck, S1), failure);
 });
 
 // --- sweepLocks ------------------------------------------------------------------------------------
 
 test('sweepLocks removes stale locks, keeps fresh ones and counts what it removed', (t) => {
   const d = testDeck(t);
-  writeLock(d, S1, `${T0 - 61n * SEC}\n`); // too old
-  writeLock(d, S2, `${T0 - 5n * SEC}\n`); // followed by a start
+  writeLock(d, S1, `${T0 - 61n * SEC}`); // too old
+  writeLock(d, S2, `${T0 - 5n * SEC}`); // followed by a start
   startEvent(d, S2, T0 - 2n * SEC);
-  writeLock(d, S3, `${T0 - 5n * SEC}\n`); // fresh
+  writeLock(d, S3, `${T0 - 5n * SEC}`); // fresh
   assert.equal(sweepLocks(d.deck), 2);
   assert.equal(lockOf(d, S1), null);
   assert.equal(lockOf(d, S2), null);
-  assert.equal(lockOf(d, S3), `${T0 - 5n * SEC}\n`);
+  assert.equal(lockOf(d, S3), `${T0 - 5n * SEC}`);
 });
 
-test('sweepLocks leaves every other name in the directory alone', (t) => {
+test('sweepLocks removes a lock whose value is not a time, and one far in the future', (t) => {
   const d = testDeck(t);
-  const { locksDir } = d.deck.places;
-  const others = [
-    `.${S1}.lock.0a1b2c3d4e5f.tmp`,
-    `${S1}.lock.bak`,
-    'notes.txt',
-    `${S1.toUpperCase()}.lock`,
-    'x.lock',
-  ];
-  for (const name of others) {
-    writeFileSync(join(locksDir, name), `${T0 - 600n * SEC}\n`);
-  }
+  writeLock(d, S1, 'soon');
+  writeLock(d, S2, `${T0 + 60n * SEC}`);
+  writeLock(d, S3, `${T0 + 59n * SEC}`);
+  assert.equal(sweepLocks(d.deck), 2);
+  assert.deepEqual(
+    d.deck.store.kvEntries('resume_lock:').map((entry) => entry.key),
+    [lockKey(S3)],
+  );
+});
+
+test('sweepLocks leaves every other kv entry alone', (t) => {
+  const d = testDeck(t);
+  d.deck.store.setKv('settings_hash', 'abc');
+  d.deck.store.setKv('first_scan_done', '1');
   assert.equal(sweepLocks(d.deck), 0);
-  assert.deepEqual(readdirSync(locksDir).sort(), [...others].sort());
+  assert.equal(d.deck.store.getKv('settings_hash'), 'abc');
+  assert.equal(d.deck.store.getKv('first_scan_done'), '1');
 });
 
-test('sweepLocks skips a lock it cannot read and goes on', (t) => {
+test('sweepLocks reads again and removes inside one transaction', (t) => {
   const d = testDeck(t);
-  writeLock(d, S1, `${T0 - 61n * SEC}\n`);
-  writeLock(d, S2, `${T0 - 61n * SEC}\n`);
-  const bad = lockPath(d.deck.places, S1);
+  writeLock(d, S1, `${T0 - 61n * SEC}`);
+  writeLock(d, S2, `${T0 - 61n * SEC}`);
+  const w = watched(d);
+  assert.equal(sweepLocks(w.deck), 2);
+  assert.equal(w.transactions(), 1);
+  // A look first (outside), then, inside the transaction, the list again and every removal.
+  assert.deepEqual(w.depths, [0, 1, 1, 1]);
+});
+
+test('sweepLocks without a stale lock takes no write transaction', (t) => {
+  const d = testDeck(t);
+  writeLock(d, S1, `${T0 - 5n * SEC}`);
+  const w = watched(d);
+  assert.equal(sweepLocks(w.deck), 0);
+  assert.equal(w.transactions(), 0);
+  assert.equal(lockOf(d, S1), `${T0 - 5n * SEC}`);
+});
+
+test('sweepLocks keeps a lock that became fresh between its look and its transaction', (t) => {
+  const d = testDeck(t);
+  writeLock(d, S1, `${T0 - 61n * SEC}`);
+  const store = d.deck.store;
+  let looks = 0;
   const deck = deckWith(d.deck, {
-    files: {
-      readText(path: string): string | null {
-        if (path === bad) {
-          throw new Error('EACCES: permission denied');
+    store: {
+      kvEntries(prefix: string) {
+        if (++looks === 2) {
+          store.setKv(lockKey(S1), `${T0}`); // another resume took it over meanwhile
         }
-        return d.platform.files.readText(path);
-      },
-    },
-  });
-  assert.equal(sweepLocks(deck), 1);
-  assert.notEqual(lockOf(d, S1), null);
-  assert.equal(lockOf(d, S2), null);
-});
-
-test('sweepLocks returns 0 when the directory cannot be listed', (t) => {
-  const d = testDeck(t);
-  const deck = deckWith(d.deck, {
-    files: {
-      list(): string[] {
-        throw new Error('EACCES: permission denied');
+        return store.kvEntries(prefix);
       },
     },
   });
   assert.equal(sweepLocks(deck), 0);
+  assert.equal(lockOf(d, S1), `${T0}`);
 });
 
 test('sweepLocks lets a failure of the database through', (t) => {
   const d = testDeck(t);
-  writeLock(d, S1, `${T0 - 5n * SEC}\n`);
-  const failure = Object.assign(new Error('database is locked'), {
-    code: 'ERR_SQLITE_ERROR',
-    errcode: 5,
-  });
+  writeLock(d, S1, `${T0 - 5n * SEC}`);
+  const failure = locked();
   const deck = deckWith(d.deck, {
     store: {
       hasStartSince(): boolean {
@@ -460,34 +467,23 @@ test('sweepLocks lets a failure of the database through', (t) => {
     },
   });
   assert.throws(() => sweepLocks(deck), failure);
-});
-
-test('sweepLocks keeps a lock that a resume replaced while it looked at the old one', (t) => {
-  const d = testDeck(t);
-  writeLock(d, S1, `${T0 - 120n * SEC}\n`);
-  const path = lockPath(d.deck.places, S1);
-  let swapped = false;
-  const deck = deckWith(d.deck, {
-    files: {
-      rename(from: string, to: string): void {
-        if (from === path && !swapped) {
-          swapped = true;
-          writeFileSync(path, `${T0 - SEC}\n`); // a resume replaced the stale lock
-        }
-        d.platform.files.rename(from, to);
-      },
-    },
-  });
-  assert.equal(sweepLocks(deck), 0);
-  assert.equal(lockOf(d, S1), `${T0 - SEC}\n`);
-  assert.deepEqual(readdirSync(d.deck.places.locksDir), [`${S1}.lock`]);
+  assert.equal(lockOf(d, S1), `${T0 - 5n * SEC}`);
 });
 
 test('refresh sweeps the locks at its end', (t) => {
   const d = testDeck(t);
-  writeLock(d, S1, `${T0 - 61n * SEC}\n`);
+  writeLock(d, S1, `${T0 - 61n * SEC}`);
   refresh(d.deck);
   assert.equal(lockOf(d, S1), null);
+});
+
+test('no lock is a file: the locks directory stays empty', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1);
+  mkdirSync(d.deck.places.locksDir, { recursive: true });
+  writeFileSync(join(d.deck.places.locksDir, `${S2}.lock`), `${T0 - 600n * SEC}\n`);
+  assert.equal(sweepLocks(d.deck), 0); // a file there is not a lock any more
+  assert.equal(lockOf(d, S1), `${T0}`);
 });
 
 // --- prepareResume ---------------------------------------------------------------------------------
@@ -508,7 +504,7 @@ test('prepareResume builds the command and takes the lock', (t) => {
     unknownFlags: [],
   });
   assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '-n', 'fix', '--model', 'opus']);
-  assert.equal(lockOf(d, S1), `${T0}\n`);
+  assert.equal(lockOf(d, S1), `${T0}`);
 });
 
 test('prepareResume runs the configured program', (t) => {
@@ -517,7 +513,7 @@ test('prepareResume runs the configured program', (t) => {
   assert.deepEqual(prepared.argv, ['/opt/claude/bin/claude', '--resume', S1]);
 });
 
-test('prepareResume names the flags it does not pass on', (t) => {
+test('prepareResume names the flags it cannot pass on', (t) => {
   const d = testDeck(t);
   const launch = ['claude', '--frob', 'x', '--model', 'opus'];
   const prepared = prepareResume(d.deck, rowWith(d, dead(d, { launch })));
@@ -563,7 +559,7 @@ test('prepareResume refuses a session whose directory is gone and takes no lock'
 
 test('prepareResume guards before it locks: a stale lock of a running session stays as it is', (t) => {
   const d = testDeck(t);
-  const stale = `${T0 - 120n * SEC}\n`;
+  const stale = `${T0 - 120n * SEC}`;
   writeLock(d, S1, stale);
   assert.equal(
     refusal(() => prepareResume(d.deck, rowWith(d, running(d, [4242])))),
@@ -616,5 +612,69 @@ test('prepareNew refuses a bad label or group before it stores anything', (t) =>
 test('prepareNew takes no lock', (t) => {
   const d = testDeck(t);
   prepareNew(d.deck, { label: null, group: null, extra: [] });
-  assert.deepEqual(readdirSync(d.deck.places.locksDir), []);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
+/** The UsageError prepareNew throws for these extra flags; nothing may be stored. */
+function refusedExtra(d: TestDeck, extra: string[]): string {
+  try {
+    prepareNew(d.deck, { label: 'x', group: 'G', extra });
+  } catch (error) {
+    assert.ok(error instanceof UsageError, `not a UsageError: ${String(error)}`);
+    assert.deepEqual(d.deck.store.allMeta(), []);
+    return error.message;
+  }
+  throw new assert.AssertionError({ message: `${JSON.stringify(extra)} was not refused` });
+}
+
+test('prepareNew refuses a flag that resumes or continues a session: -r <id>, -c', (t) => {
+  const d = testDeck(t);
+  assert.match(refusedExtra(d, ['-r', S1]), /^cannot pass -r to claude:/);
+  assert.match(refusedExtra(d, ['--model', 'opus', '-c']), /cannot pass -c to claude/);
+  assert.match(refusedExtra(d, ['--resume']), /cannot pass --resume to claude/);
+  assert.match(refusedExtra(d, [`-r${S1}`]), /cannot pass -r to claude/);
+});
+
+test('prepareNew refuses such a flag inside a cluster of short flags, naming the cluster', (t) => {
+  const d = testDeck(t);
+  assert.match(refusedExtra(d, ['-cp']), /cannot pass -cp \(--continue\) to claude/);
+  assert.match(refusedExtra(d, ['-pc']), /cannot pass -pc \(--continue\) to claude/);
+});
+
+test('prepareNew refuses --session-id=<uuid> and the other flags on the removed list', (t) => {
+  const d = testDeck(t);
+  assert.match(refusedExtra(d, [`--session-id=${S1}`]), /cannot pass --session-id to claude/);
+  for (const flag of [
+    '--fork-session',
+    '--teleport',
+    '--from-pr',
+    '-n',
+    '--worktree',
+    '--prefill',
+  ]) {
+    assert.match(
+      refusedExtra(d, [flag, ...(flag === '-n' || flag === '--prefill' ? ['v'] : [])]),
+      new RegExp(`cannot pass ${flag} to claude`),
+    );
+  }
+});
+
+test('prepareNew passes other flags and a prompt on as they are', (t) => {
+  const d = testDeck(t);
+  const prepared = prepareNew(d.deck, {
+    label: null,
+    group: null,
+    extra: ['--model', 'x', 'fix the bug', '--frob', '--', '-r'],
+  });
+  assert.deepEqual(prepared.argv, [
+    'claude',
+    '--session-id',
+    UUID1,
+    '--model',
+    'x',
+    'fix the bug',
+    '--frob',
+    '--',
+    '-r',
+  ]);
 });
