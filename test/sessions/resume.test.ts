@@ -34,7 +34,12 @@ import { BOOT_A, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 const UUID1 = '00000000-0000-4000-8000-000000000001';
 
 function holder(pid: number, sinceNs: Ns = T0): Holder {
-  return { process: { bootId: BOOT_A, pid, procStart: 51234567 }, sinceNs, live: null };
+  return {
+    process: { bootId: BOOT_A, pid, procStart: 51234567 },
+    sinceNs,
+    live: null,
+    scripted: false,
+  };
 }
 
 /** A not-running session S1 in an existing directory, with a transcript. */

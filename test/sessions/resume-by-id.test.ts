@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -7,7 +7,7 @@ import { RefError, ResumeRefusedError } from '../../src/platform/errors.ts';
 import { statLine } from '../helpers/platform.ts';
 import { loadRows } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
-import { lockKey } from '../../src/sessions/resume.ts';
+import { isLockHeld, lockKey, prepareResume } from '../../src/sessions/resume.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import { testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
@@ -78,6 +78,119 @@ test('prepareResumeById refreshes first: a start event still in the spool is see
     '0b5f3c1e is running (pid 4343)',
   );
   assert.equal(lockOf(d, S1), null);
+});
+
+/** A scripted run (process `pid`, alive) starts on S1; its start event waits in the spool. */
+function scriptedRunHolds(
+  d: TestDeck,
+  pid: number,
+  how: { entrypointEnv: string; argv: string[] },
+  timeNs: bigint = T0 - 1n * SEC,
+): void {
+  d.proc.setProcess(pid, { stat: statLine(pid, 51234567), cmdline: how.argv });
+  const fields = {
+    event: 'SessionStart' as const,
+    timeNs,
+    pid,
+    pwd: d.sandbox.home,
+    entrypointEnv: how.entrypointEnv,
+    argv: how.argv,
+    input: hookInput('SessionStart', S1, { source: 'resume', cwd: d.sandbox.home }),
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 9)), spoolText(fields));
+}
+
+test('prepareResumeById refuses a session a live scripted run holds, like an interactive holder', async (t) => {
+  const runs = {
+    'claude -p --resume (entry point sdk-cli)': {
+      entrypointEnv: 'sdk-cli',
+      argv: ['claude', '-p', '--resume', S1, 'summarise'],
+    },
+    'claude -cp (entry point unknown)': { entrypointEnv: '', argv: ['claude', '-cp'] },
+  };
+  for (const [name, how] of Object.entries(runs)) {
+    await t.test(name, (t) => {
+      const d = testDeck(t);
+      resumableSession(d);
+      scriptedRunHolds(d, 5555, how);
+      assert.equal(
+        refusal(() => prepareResumeById(d.deck, S1)),
+        '0b5f3c1e is running (pid 5555)',
+      );
+      assert.equal(lockOf(d, S1), null);
+    });
+  }
+});
+
+const PRINT_RESUME = { entrypointEnv: 'sdk-cli', argv: ['claude', '-p', '--resume', S1] };
+
+test('a scripted run that starts between a resume’s decision and its lock makes the lock refuse', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  refresh(d.deck);
+  const row = loadRows(d.deck).find((candidate) => candidate.id === S1);
+  assert.ok(row);
+  assert.equal(row.session.holders.length, 0); // the decision: S1 is not running
+  scriptedRunHolds(d, 5555, PRINT_RESUME);
+  refresh(d.deck); // another skydeck's refresh ingests the scripted start
+  assert.equal(
+    refusal(() => prepareResume(d.deck, row)),
+    "the session's state changed while preparing; run the command again",
+  );
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('a scripted start never releases a resume lock: it is not the claude the resume started', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  prepareResumeById(d.deck, S1); // the lock, taken at T0
+  scriptedRunHolds(d, 5555, PRINT_RESUME, T0 + 5n * SEC);
+  d.clock.setNs(T0 + 10n * SEC);
+  refresh(d.deck); // ingests the scripted start, then sweeps the locks
+  assert.equal(d.deck.store.events().at(-1)?.kind, 'scripted');
+  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(isLockHeld(d.deck, S1), true);
+});
+
+test('prepareResumeById refuses a session a stale live file hides: the hook said the process holds it', (t) => {
+  // Process 4242 started on S2, then /resume'd S1 inside the session; its live file, written before
+  // the switch, still names S2.
+  const d = testDeck(t);
+  writeTranscript(d, S1, [{ ...userRecord(S1, T0 - 300n * SEC), cwd: d.sandbox.home }]);
+  d.proc.setProcess(4242, { stat: statLine(4242, 51234567), cmdline: ['claude'] });
+  const started = {
+    event: 'SessionStart' as const,
+    timeNs: T0 - 120n * SEC,
+    pid: 4242,
+    input: hookInput('SessionStart', S2, { source: 'startup', cwd: d.sandbox.home }),
+  };
+  const end = {
+    event: 'SessionEnd' as const,
+    timeNs: T0 - 20n * SEC,
+    pid: 4242,
+    input: hookInput('SessionEnd', S2, { reason: 'resume' }),
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(started, 1)), spoolText(started));
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(end, 2)), spoolText(end));
+  spoolStart(d, 4242, T0 - 10n * SEC, 3); // start(S1, resume)
+  const file = join(d.deck.places.claudeHome, 'sessions', '4242.json');
+  writeFileSync(
+    file,
+    JSON.stringify({
+      pid: 4242,
+      sessionId: S2,
+      cwd: d.sandbox.home,
+      procStart: '51234567',
+      entrypoint: 'cli',
+      status: 'idle',
+    }),
+  );
+  const minuteAgo = Number((T0 - 60n * SEC) / SEC);
+  utimesSync(file, minuteAgo, minuteAgo);
+  assert.equal(
+    refusal(() => prepareResumeById(d.deck, S1)),
+    '0b5f3c1e is running (pid 4242)',
+  );
 });
 
 test('prepareResumeById refuses a session for the other reasons of the guard, with no lock', (t) => {

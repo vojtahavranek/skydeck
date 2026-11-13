@@ -1,6 +1,10 @@
 import type { Ns } from '../platform/types.ts';
 
-export type EventKind = 'start' | 'end' | 'observed';
+/**
+ * `scripted`: a scripted run (`claude -p`, an SDK run) started on a session skydeck already knew
+ * (design 5.3). It says only that its process holds the session while it is alive.
+ */
+export type EventKind = 'start' | 'end' | 'observed' | 'scripted';
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
 
@@ -9,7 +13,7 @@ export interface EventRow {
   spoolName: string | null; // null for observed events
   timeNs: Ns;
   kind: EventKind;
-  detail: StartDetail | EndDetail | ''; // '' for observed
+  detail: StartDetail | EndDetail | ''; // '' for observed and scripted
   rawDetail: string | null; // source / reason as received
   sessionId: string;
   bootId: string;

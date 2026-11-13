@@ -94,6 +94,9 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
   const ids = [...new Set([...eventsBySession.keys(), ...transcriptOf.keys()])].sort(compareText);
   return ids.map((id): DerivedSession => {
     const sessionEvents = eventsBySession.get(id) ?? [];
+    // A `scripted` event says only that its process holds the session (5.3): it supplies no
+    // directory, launch command or last holding.
+    const ownEvents = sessionEvents.filter((event) => event.kind !== 'scripted');
     const transcript = transcriptOf.get(id) ?? null;
     const doneAtNs = metaOf.get(id)?.doneAtNs ?? null;
 
@@ -106,7 +109,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
           (liveFilesOfPid.get(process.pid) ?? []).find(
             (file) => isFileOf(file, process) && file.sessionId === id && input.isTrusted(file),
           ) ?? null;
-        return { process, sinceNs: event.timeNs, live };
+        return { process, sinceNs: event.timeNs, live, scripted: event.kind === 'scripted' };
       });
 
     // A dead process's last sign of life while it held the session: the last write of the live
@@ -115,7 +118,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       (liveFilesOfPid.get(process.pid) ?? [])
         .filter((file) => isFileOf(file, process) && file.sessionId === id)
         .reduce<Ns | null>((seen, file) => latest(seen, file.mtimeNs), null);
-    const lastHolding = lastHoldingOf(sessionEvents, eventsOfProcess, isAlive, lastWriteNs);
+    const lastHolding = lastHoldingOf(ownEvents, eventsOfProcess, isAlive, lastWriteNs);
     const lastActivityNs =
       latest(transcript?.lastRecordNs ?? null, sessionEvents.at(-1)?.timeNs ?? null) ??
       transcript?.mtimeNs ??
@@ -167,10 +170,9 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       holders,
       marks: MARK_ORDER.filter((mark) => has[mark]),
       continuedFrom: continuedBy?.fromSession ?? null,
-      dir: transcript?.firstCwd ?? sessionEvents.find((event) => event.cwd !== null)?.cwd ?? null,
+      dir: transcript?.firstCwd ?? ownEvents.find((event) => event.cwd !== null)?.cwd ?? null,
       launch:
-        sessionEvents.findLast((event) => event.kind !== 'end' && event.argv !== null)?.argv ??
-        null,
+        ownEvents.findLast((event) => event.kind !== 'end' && event.argv !== null)?.argv ?? null,
       transcript,
       lastHolding,
       // The events are in (time, id) order, so the highest id is not necessarily the last one.

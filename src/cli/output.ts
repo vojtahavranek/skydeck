@@ -244,7 +244,10 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
     lines.push(field('link:', `${link.kind} ${from} -> ${to} at ${isoFromNs(link.timeNs)}`));
   }
   for (const holder of row.session.holders) {
-    lines.push(field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}`));
+    const what = holder.scripted ? ' (scripted run)' : '';
+    lines.push(
+      field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}${what}`),
+    );
   }
   lines.push(...row.prs.map(prField));
   // A note is free multi-line text: sanitised line by line, so that its line breaks stay. Lines

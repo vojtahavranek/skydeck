@@ -307,6 +307,142 @@ test('scripted runs are dropped and counted in kv', (t) => {
   assert.deepEqual(d.deck.store.events(), []);
 });
 
+/** A transcript row for `sessionId` with `entrypoint`, as the scan saves it. */
+function knownTranscript(d: TestDeck, sessionId: string, entrypoint: string | null): void {
+  d.deck.store.saveTranscript({
+    path: `/claude/projects/demo/${sessionId}.jsonl`,
+    sessionId,
+    sizeRead: 10,
+    fileSize: 10,
+    mtimeNs: T0,
+    firstCwd: '/home/dev/projects/demo',
+    entrypoint,
+    aiTitle: null,
+    customTitle: null,
+    firstRecordNs: T0,
+    lastRecordNs: T0,
+    lastUserNs: T0,
+    lastTurnRole: 'assistant',
+    missingSinceNs: null,
+  });
+}
+
+const RESUME_PRINT = ['claude', '-p', '--resume', S1, '--model', 'opus', 'summarise'];
+
+test('a scripted start of a session skydeck knows is kept as a `scripted` event, and only that', async (t) => {
+  const scriptedRun = (seq: number): SpoolFields =>
+    start(S1, 'resume', T60 + BigInt(seq) * SEC, {
+      pid: 5555,
+      entrypointEnv: 'sdk-cli',
+      argv: RESUME_PRINT,
+      input: hookInput('SessionStart', S1, { source: 'resume', session_title: 'its name' }),
+    });
+
+  await t.test('known from an event of an interactive run', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'startup', T0), 1);
+    put(d, end(S1, 'prompt_input_exit', T0 + SEC), 2);
+    put(d, scriptedRun(3), 3);
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 3 });
+    const kept = d.deck.store.events()[2];
+    assert.deepEqual(
+      kept && {
+        kind: kept.kind,
+        detail: kept.detail,
+        rawDetail: kept.rawDetail,
+        sessionId: kept.sessionId,
+        pid: kept.pid,
+        procStart: kept.procStart,
+        argv: kept.argv,
+        name: kept.name,
+      },
+      {
+        kind: 'scripted',
+        detail: '',
+        rawDetail: 'resume',
+        sessionId: S1,
+        pid: 5555,
+        procStart: 51234567,
+        argv: null, // a scripted run never supplies the launch command
+        name: null,
+      },
+    );
+    assert.equal(d.deck.store.getKv('dropped_scripted'), null);
+    assert.deepEqual(d.deck.store.links(), []);
+  });
+
+  await t.test('`claude -p -c`: the hook names the continued session, the same path', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'startup', T0), 1);
+    put(
+      d,
+      start(S1, 'startup', T60, {
+        pid: 5555,
+        entrypointEnv: 'sdk-cli',
+        argv: ['claude', '-p', '-c'],
+      }),
+      2,
+    );
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 2 });
+    assert.deepEqual(
+      d.deck.store.events().map((e) => [e.kind, e.pid, e.argv]),
+      [
+        ['start', 4242, ['claude']],
+        ['scripted', 5555, null],
+      ],
+    );
+  });
+
+  await t.test('without a pid it names no process that could hold the session: dropped', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'startup', T0), 1);
+    put(d, { ...scriptedRun(2), pid: null }, 2);
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1, scripted: 1 });
+    assert.equal(d.deck.store.getKv('dropped_scripted'), '1');
+  });
+
+  for (const entrypoint of ['cli', null]) {
+    await t.test(`known only from its transcript (entry point ${String(entrypoint)})`, (t) => {
+      const d = testDeck(t);
+      knownTranscript(d, S1, entrypoint);
+      put(d, scriptedRun(1), 1);
+      assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1 });
+      assert.equal(d.deck.store.events()[0]?.kind, 'scripted');
+    });
+  }
+});
+
+test('scripted runs of sessions skydeck does not know stay dropped and counted', async (t) => {
+  await t.test('a new session, or one only a scripted run made', (t) => {
+    const d = testDeck(t);
+    knownTranscript(d, S2, 'sdk-cli'); // a session a scripted run made earlier
+    put(d, start(S1, 'startup', T0, { entrypointEnv: 'sdk-cli', argv: ['claude', '-p'] }), 1);
+    put(d, end(S1, 'other', T0 + SEC, { entrypointEnv: 'sdk-cli' }), 2);
+    put(
+      d,
+      start(S2, 'resume', T0 + 2n * SEC, {
+        entrypointEnv: 'sdk-cli',
+        argv: ['claude', '-p', '--resume', S2],
+      }),
+      3,
+    );
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, scripted: 3 });
+    assert.deepEqual(d.deck.store.events(), []);
+    assert.equal(d.deck.store.getKv('dropped_scripted'), '3');
+  });
+
+  await t.test('the end of a scripted run is dropped, also for a known session', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'startup', T0), 1);
+    put(d, end(S1, 'other', T0 + SEC, { pid: 5555, entrypointEnv: 'sdk-cli' }), 2);
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1, scripted: 1 });
+    assert.deepEqual(
+      d.deck.store.events().map((e) => e.kind),
+      ['start'],
+    );
+  });
+});
+
 /** Ingests each group of files in its own run. */
 function ingestRuns(d: TestDeck, ...runs: SpoolFields[][]): void {
   let seq = 0;

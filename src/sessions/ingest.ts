@@ -43,9 +43,10 @@ const LINK_KINDS: Readonly<Partial<Record<SpoolEvent['detail'], LinkKind>>> = {
  * Never throws for one file: a spool file that is not a regular file, cannot be read, or does not
  * parse (for any reason) is moved to spool/bad/; one whose row cannot be saved (any error the row
  * causes, the store's included), or that cannot be moved or removed, stays where it is. A failure
- * of the database as a whole is thrown at once, and the file stays. A scripted run is
- * counted once its file is removed. Each such problem is recorded in kv `ingest_problems` (replaced
- * on every run).
+ * of the database as a whole is thrown at once, and the file stays. A scripted event that is
+ * dropped (5.3: every one but the start of a process on a session skydeck knows) is counted once
+ * its file is removed; a kept one counts as ingested. Each such problem is recorded in kv
+ * `ingest_problems` (replaced on every run).
  */
 export function ingestSpool(deck: Deck): IngestResult {
   const { files } = deck.platform;
@@ -54,6 +55,7 @@ export function ingestSpool(deck: Deck): IngestResult {
   const problems: string[] = [];
   const names = listOrNote(files, spoolDir, problems);
   const movedToBad = new Set<string>();
+  const known: KnownSessions = { fromTranscripts: null };
 
   for (const name of names) {
     if (name.startsWith('.') || !name.endsWith('.ev')) {
@@ -75,7 +77,7 @@ export function ingestSpool(deck: Deck): IngestResult {
       continue;
     }
     try {
-      if (event.scripted) {
+      if (event.scripted && !holdsKnownSession(deck, event, known)) {
         // Counted once the file is gone, so that a file that cannot be removed is not counted again.
         if (removeOrNote(files, path, `spool file ${name}`, problems)) {
           deck.store.addToKv('dropped_scripted', 1);
@@ -116,13 +118,59 @@ function readSpoolFile(files: Files, path: string): string | null {
   return files.readText(path);
 }
 
+/** The sessions a transcript makes known, read once per ingest and only when a scripted run needs them. */
+interface KnownSessions {
+  fromTranscripts: ReadonlySet<string> | null;
+}
+
+/**
+ * 5.3 "Scripted runs": whether a scripted event is kept — a start of a process (a pid) on a session
+ * skydeck already knows, from an event or from a transcript that the list would show (entry point
+ * `cli`, or none). A scripted run that starts its own session, and every scripted end, is dropped.
+ */
+function holdsKnownSession(deck: Deck, event: SpoolEvent, known: KnownSessions): boolean {
+  if (event.kind !== 'start' || event.pid === 0) {
+    return false;
+  }
+  const { store } = deck;
+  if (store.latestEventIdOfSession(event.sessionId) !== null) {
+    return true;
+  }
+  known.fromTranscripts ??= new Set(
+    store
+      .transcripts()
+      .filter((row) => row.entrypoint === null || row.entrypoint === 'cli')
+      .map((row) => row.sessionId),
+  );
+  return known.fromTranscripts.has(event.sessionId);
+}
+
 /**
  * Inserts the event and, for a start that clears, resumes or forks, the link from the session the
  * same process held before (5.3 "Links"), in one transaction. Returns the new id, or null when the
- * spool file was ingested before.
+ * spool file was ingested before. A scripted start (of a known session) is stored as an event of
+ * kind `scripted`, which says only that its process holds the session: no detail, launch command
+ * or name, and no link.
  */
 function insert(deck: Deck, event: SpoolEvent): number | null {
   const { store } = deck;
+  if (event.scripted) {
+    return store.insertEvent({
+      spoolName: event.spoolName,
+      timeNs: event.timeNs,
+      kind: 'scripted',
+      detail: '',
+      rawDetail: event.rawDetail,
+      sessionId: event.sessionId,
+      bootId: event.bootId,
+      pid: event.pid,
+      procStart: event.procStart,
+      cwd: event.cwd,
+      argv: null,
+      name: null,
+      payload: event.payload,
+    });
+  }
   const linkKind = event.kind === 'start' ? LINK_KINDS[event.detail] : undefined;
   return store.transaction(() => {
     // Before inserting, so that the new event is not its own predecessor. pid 0: no process (D7).
