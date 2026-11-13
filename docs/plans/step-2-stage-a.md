@@ -1257,6 +1257,10 @@ export interface VendorOptions { from: string /* holds node_modules/@xterm */; t
 /** Checks everything, then replaces `<to>/vendor/xterm/` and `<to>/vendor/MANIFEST.json`;
  *  throws before writing anything. Returns the manifest's entries. */
 export function vendor(options: VendorOptions): ManifestEntry[];
+/** `text` with each replacement made; throws unless each old text occurs exactly once. Exported so
+ *  that its refusals (an old text missing, an old text twice) are tested directly: through
+ *  `vendor` the upstream sha256 check refuses any other bundle first (ruled on #48). */
+export function applyPatch(text: string, replacements: ReadonlyArray<readonly [string, string]>): string;
 // `node scripts/vendor.ts [<directory>]`: from the checkout into <directory> (the checkout by default).
 ```
 
