@@ -1839,6 +1839,10 @@ Each file is `export const command: Command = { name, summary, run }`. Every com
 `--help` (exit 0, `usage` on stdout) and one usage error (exit 2).
 
 ```ts
+// src/cli/clip.ts (task 13)
+/** The start of `text` at most `width` UTF-16 units long, never ending inside a surrogate pair (not a count of terminal cells). */
+export function clip(text: string, width: number): string;
+
 // src/cli/row.ts (task 13)
 /** One list row on one line (format: task 13). */
 export function formatRow(row: ListRow, nowNs: Ns, width: number): string;
@@ -1909,7 +1913,12 @@ export type TuiEffect =
   | { kind: 'resume'; id: string };
 /** Key names: 'up' 'down' 'enter' 'escape' 'backspace' 'ctrl-c', or one printable character. */
 export function initModel(rows: readonly ListRow[], nowNs: Ns): TuiModel;
-/** reorder true: recompute `order` with buildList. false: keep `order`, drop vanished ids, append new ids to the end of their group (a new group goes last). */
+/**
+ * reorder true: recompute `order` with buildList. false: keep `order`, drop rows that are gone or no longer listed at all,
+ * append new rows, and rows whose group changed, to the end of their group (a new group goes last), drop emptied groups.
+ * When the selected row is no longer visible the selection moves to the first visible row and an open detail or input is
+ * closed (`mode` is 'list' afterwards).
+ */
 export function withRows(model: TuiModel, rows: readonly ListRow[], nowNs: Ns, reorder: boolean): TuiModel;
 export function withMessage(model: TuiModel, message: string | null): TuiModel;
 /** Rows of `order` that are listed (showAll) and match the filter, in order. */
@@ -3720,9 +3729,9 @@ export function parseCommandArgs(args: readonly string[], spec: ArgSpec): Parsed
 **Depends on:** 7, 9, 11 · **Wave:** 5 · **Design:** 7.4 (row content, keys, filter, order under the cursor, pure functions), 12 (list) · **Contracts:** 2.9.4 (`row.ts`), 2.9.5 (model, render)
 
 **Files**
-- Create: `src/cli/row.ts`, `src/cli/tui/model.ts`, `src/cli/tui/render.ts`
+- Create: `src/cli/clip.ts` (2.9.4; added by ruling), `src/cli/row.ts`, `src/cli/tui/model.ts`, `src/cli/tui/render.ts`
 - Create: `test/helpers/rows.ts` (`listRow(over: Partial<ListRow> & { id: string }): ListRow` with a minimal `DerivedSession` and sensible defaults: state `not-running`, title `'t'`, `sinceNs = lastActivityNs = T0`)
-- Test: `test/cli/row.test.ts`, `test/cli/tui/model.test.ts`, `test/cli/tui/render.test.ts`
+- Test: `test/cli/clip.test.ts`, `test/cli/row.test.ts`, `test/cli/tui/model.test.ts`, `test/cli/tui/render.test.ts`
 
 **Exported API**
 
@@ -3779,10 +3788,14 @@ filter mode; `a` → toggle `showAll` and recompute `order`; `r` → effect `ref
 Detail mode: `escape`, `enter` and `q` → list mode; `l g n d p R` act as in list mode. Filter
 mode: printable characters append, `backspace` deletes, `enter` → list mode keeping the filter,
 `escape` → list mode with the filter cleared. Input mode: printable append, `backspace` deletes,
-`escape` cancels, `enter` → effect (`label`/`group` with the text; `pr` text starting with `-` →
-`pr-rm` with the rest, else `pr-add`), back to list mode. `ctrl-c` → `quit` in every mode. Any
-key clears `message`. With no visible rows, every action key gives effect `none`. When the
-selected row stops being visible, the selection moves to the first visible row (or null).
+`escape` cancels, `enter` → effect (`label`/`group` with the text; `pr` text, trimmed, starting
+with `-` → `pr-rm` with the rest, else `pr-add`; an empty text or a lone `-` → `none`), back to
+list mode. `ctrl-c` → `quit` in every mode. Any key clears `message`. With no visible rows, every
+action key gives effect `none`. When the selected row stops being visible (a key, or `withRows`),
+the selection moves to the first visible row (or null) and an open detail or input is closed, so
+that nothing is applied to a row the user did not choose; a filter being typed stays open.
+`withRows` without reorder also drops rows that are no longer listed at all, moves a row whose
+group changed to the end of its new group and drops groups left empty.
 
 **Test cases** (`R1` group `A`, waiting, id S1, label `'alpha'`, `lastActivityNs T0`; `R2` group `A`, not-running, id S2, title `'beta'`, `T0−1m`; `R3` no group, id S3, `done: true`; `nowNs T0`)
 
