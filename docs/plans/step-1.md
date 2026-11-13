@@ -216,8 +216,8 @@ export interface Files {
   list(dir: string): string[];
   /** Replaces the file atomically: writes `.<name>.<random>.tmp` beside it, then renames. */
   writeText(path: string, text: string, mode?: number): void;
-  /** Creates the file only if it does not exist (O_EXCL). false when it already exists. */
-  createExclusive(path: string, text: string): boolean;
+  /** Creates the file only if it does not exist (O_EXCL). false when it already exists. With `mode` it has exactly that mode from the start (task 17, ruled in pull request #20). */
+  createExclusive(path: string, text: string, mode?: number): boolean;
   /** mkdir -p; `mode` applies to directories it creates. */
   mkdirp(path: string, mode?: number): void;
   rename(from: string, to: string): void;
@@ -1307,13 +1307,14 @@ export function cleanupPeriodDays(settingsText: string | null): number;
 ```ts
 export interface FolderLook {
   path: string;
-  missing: boolean;               // does not exist (yet)
+  missing: boolean;               // nothing at all is there (yet)
   unreadable: UnreadableEntry[];  // the folder itself, or (projects) anything under it, with the error code
 }
 /**
- * For doctor (design 8, 5.6, 11). Never throws for what it cannot read. sessions: missing, or
- * unreadable when it cannot be looked at or listed, or is not a folder (ENOTDIR). projects:
- * missing, or listTranscriptFiles(files, claudeHome).unreadable, with the number of transcripts found.
+ * For doctor (design 8, 5.6, 11). Never throws for what it cannot read. Each folder: missing only
+ * when lstat finds nothing; unreadable when it is a symbolic link to nothing (ENOENT), not a folder
+ * (ENOTDIR), or cannot be looked at (or, sessions, listed). projects, when it is a folder:
+ * listTranscriptFiles(files, claudeHome).unreadable, with the number of transcripts found.
  */
 export function lookAtClaudeFolders(files: Files, claudeHome: string): { sessions: FolderLook; projects: FolderLook & { transcripts: number } };
 ```
@@ -2232,7 +2233,7 @@ export interface Files {
   readBytes(path: string, start: number, end: number): Uint8Array;
   list(dir: string): string[];
   writeText(path: string, text: string, mode?: number): void;
-  createExclusive(path: string, text: string): boolean;
+  createExclusive(path: string, text: string, mode?: number): boolean;
   mkdirp(path: string, mode?: number): void;
   rename(from: string, to: string): void;
   remove(path: string): void;
@@ -4393,7 +4394,27 @@ found (D15); the `spool/bad/` problem gives the number of files, their age range
 removed after seven days; the lines in kv `ingest_problems`, `reconcile_problems`,
 `scan_problems` are each a `problem` (`last refresh: <step>: <line>`, sanitised); the readability of
 `<claudeHome>/sessions` and `<claudeHome>/projects` comes from `lookAtClaudeFolders` (2.5.7): a
-missing folder is `info` (`does not exist yet`), an unreadable one a `problem`.
+missing folder is `info` (`does not exist yet`), an unreadable one (a file, a symbolic link to
+nothing, no permission) a `problem`.
+
+From the code-quality review (also ruled in pull request #20): install runs in this order —
+`resolveDeckPlaces`; every check that can stop it (link paths; settings file readable and JSON; a
+settings path that is a symbolic link to nothing is refused, naming the link and its target; the
+Claude home exists when there is no settings file); show the entries and ask; read the settings
+file again and stop (exit 1, nothing written or created) when it is no longer the text shown; only
+then `withDeck`: links, the same re-read right before writing, the backup (`createExclusive` with
+mode 600, so it is never readable by others, not even for a moment; `Files.createExclusive` gains
+an optional `mode`, 2.2.1), the write, kv. So a refusal or a no leaves no directory, database or
+link behind. A failure to write the settings file or to make a link is a `SkydeckError` naming the
+path, and a failed settings write removes the backup that run made. Uninstall opens the database
+with `openStore` itself, not through `withDeck`, so it never re-creates a directory; its write and
+remove failures are `SkydeckError`s naming the path, and it deletes the kv keys only after
+everything was undone. Doctor does not use `withDeck` and creates nothing: a `config.json` that
+cannot be read is a `problem` (`configuration: …`) and the checks that need the configuration
+(hook entries, Claude Code's folders, the terminal) are skipped; a database that is missing or
+cannot be opened is a `problem` and the checks that need it (writable, last event, scripted runs,
+last refresh) are skipped; every other check still runs. A failing `gh auth status` reads
+`gh is not logged in, or GitHub cannot be reached (gh auth status: exit <n>); run gh auth status to see why`.
 
 **Exported API**
 
@@ -4403,7 +4424,7 @@ export const command: Command;   // in each of the three files
 ```
 
 **Behaviour fixed here** (design 8):
-- **install**, inside `withDeck(ctx, { refresh: false }, …)`: (1) `openDeck` creates the directories and the database. (2) Symlinks:
+- **install** (the order of these steps and the checks before them: see the rulings above), inside `withDeck(ctx, { refresh: false }, …)`: (1) `openDeck` creates the directories and the database. (2) Symlinks:
   `hookPath` → `<appRoot>/bin/skydeck-hook`, `binLink` → `<appRoot>/bin/skydeck` (creating
   `~/.local/bin`), `nodeLink` → `platform.nodePath`. (3) `addHookEntries(<settings text or null>, hookPath)`;
   when `changed`: print to stderr `skydeck will add these hook entries to <settingsPath>:` and the
@@ -4419,7 +4440,8 @@ export const command: Command;   // in each of the three files
   `firstRunDoneAfterDays`; when > 0 ask `Mark <n> sessions older than <d> days as done? [y/N] `
   and on yes set their `doneAtNs` with `store.updateMeta(id, { doneAtNs: now }, now)`; set `first_run_offered`. Return `EXIT.ok`.
 - **uninstall** never creates anything: `resolveDeckPlaces`; when `dbPath` exists, it reads and
-  deletes the kv keys through `withDeck(ctx, { refresh: false }, …)`, otherwise kv counts as empty.
+  deletes the kv keys through `openStore(dbPath)` (not `withDeck`, which would re-create
+  directories; ruled above), otherwise kv counts as empty.
   When kv `settings_hash` equals the sha256 of the current settings text → restore:
   backup path, when that file still exists → copy it over `settings.json` (the backup stays);
   `none` → remove `settings.json`.
@@ -4428,10 +4450,10 @@ export const command: Command;   // in each of the three files
   links, each only when it is a symlink pointing where install pointed it. Never remove a backup
   file, with or without `--purge`; print one line per `<settingsPath>.skydeck-backup-*` file
   (ruled by the plan owner in pull request #20). Delete kv
-  `settings_hash`, `settings_backup`. `--purge` → after `withDeck` has returned (the store is
-  closed), `removeTree` dataDir, stateDir, configDir. Return `EXIT.ok`.
-- **doctor** uses `withDeck(ctx, { refresh: false }, …)` and counts the spool as it is (nothing is
-  ingested); one line per check, `ok       <text>`, `info     <text>` or `problem  <text>`;
+  `settings_hash`, `settings_backup`. `--purge` → after the store is
+  closed, `removeTree` dataDir, stateDir, configDir. Return `EXIT.ok`.
+- **doctor** reads the configuration and opens an existing database itself (not `withDeck`; ruled
+  above), creates nothing, and counts the spool as it is (nothing is ingested); one line per check, `ok       <text>`, `info     <text>` or `problem  <text>`;
   exit 1 when any line is a problem. Problems: an event without its hook entry
   (`hookStatus`); `hookPath` not resolving to a regular file (`files.stat` kind `file`); `checkNodeVersion(platform.nodeVersion)`
   (from `bin/node-version.mjs`) returns a message; the database not writable (`setKv('doctor_probe', <now>)`
