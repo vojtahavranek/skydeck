@@ -48,7 +48,11 @@ export function windowChord(e, zone) {
   if (!hasOnly(e, 'ctrl', 'shift')) {
     return null;
   }
-  switch (e.key.toLowerCase()) {
+  const typed = lowerKey(e);
+  if (typed === '') {
+    return null;
+  }
+  switch (typed) {
     case 'p':
       return { kind: 'later', stage: 'E' };
     case 'j':
@@ -89,7 +93,7 @@ export function terminalKey(e) {
   if (e.key === 'Enter' && hasOnly(e, 'shift')) {
     return { send: '\n' };
   }
-  if (e.key.toLowerCase() === 'v') {
+  if (lowerKey(e) === 'v') {
     if (hasOnly(e, 'ctrl')) {
       return 'browser';
     }
@@ -214,6 +218,16 @@ function hasOnly(e, ...modifiers) {
 }
 
 /**
+ * The character typed, lower-cased; '' for an event without a `key` (Chromium dispatches a
+ * keydown without one when an autofill suggestion is picked), which is then no key of any table.
+ * @param {KeyLike} e
+ * @returns {string}
+ */
+function lowerKey(e) {
+  return typeof e.key === 'string' ? e.key.toLowerCase() : '';
+}
+
+/**
  * Alt+F4 closes a window on Windows with or without Shift; Ctrl+Alt+F4 does not.
  * @param {KeyLike} e
  * @returns {boolean}
@@ -233,7 +247,7 @@ function isReload(e) {
   if (e.key === 'F5') {
     return hasOnly(e) || hasOnly(e, 'shift') || hasOnly(e, 'ctrl');
   }
-  if (e.key.toLowerCase() === 'r') {
+  if (lowerKey(e) === 'r') {
     return hasOnly(e, 'ctrl') || hasOnly(e, 'ctrl', 'shift');
   }
   return isBrowserRefresh(e);

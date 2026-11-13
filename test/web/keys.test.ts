@@ -344,6 +344,27 @@ describe('listKey (S2 12.9)', () => {
   });
 });
 
+describe('an event without a key (Chromium sends a keydown with no `key` for autofill)', () => {
+  const keyless = { ...ev('', 'KeyA'), key: undefined } as unknown as KeyLike;
+  const keylessCtrlShift = { ...cs('', 'Digit1'), key: undefined } as unknown as KeyLike;
+
+  test('is nothing of the window’s, the terminal’s or the list’s, and never throws', () => {
+    for (const zone of ZONES) {
+      assert.equal(windowChord(keyless, zone), null);
+      assert.equal(windowChord(keylessCtrlShift, zone), null);
+    }
+    assert.equal(terminalKey(keyless), null);
+    assert.equal(listKey(keyless), null);
+  });
+
+  test('is cancelled exactly when the page acted on it', () => {
+    for (const zone of ZONES) {
+      assert.equal(cancels(keyless, zone, false), false);
+      assert.equal(cancels(keyless, zone, true), true);
+    }
+  });
+});
+
 describe('cancels (S2 12.9, what the page cancels)', () => {
   const altF4 = ev('F4', 'F4', 'alt');
 
