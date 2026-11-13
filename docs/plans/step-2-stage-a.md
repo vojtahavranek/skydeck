@@ -1873,7 +1873,9 @@ frame-ancestors 'none'` (no port is needed) with the other headers of S2 8.2.1 (
 - Reads of any size (ruled, #44): a sequence of every frame kind fed in one read, split at every
   byte and one byte per read does the same; a frame sent one byte per read is read in linear time
   (its last byte at once); a long run of empty continuation frames keeps no memory (a heap
-  bound); a control frame whose length takes the 16- or 64-bit form → close 1002.
+  bound); a control frame whose length takes the 16- or 64-bit form → close 1002; every breach
+  also fed one byte per read; a peer that resets the connection after the 101 or right after a
+  refused request leaves nothing uncaught.
 - `buffered` grows while the client does not read (a paused socket) and `onDrain` fires once it
   reads again.
 

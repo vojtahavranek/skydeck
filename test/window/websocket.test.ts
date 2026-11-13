@@ -943,7 +943,8 @@ describe('WebSocket: protocol errors', () => {
     });
   }
 
-  for (const length of [2n ** 32n, 2n ** 32n + 5n, 2n ** 53n + 1n, 2n ** 63n - 1n]) {
+  const lengths64 = [2n ** 32n, 2n ** 32n + 5n, 2n ** 53n + 1n, 2n ** 63n - 1n];
+  for (const length of lengths64) {
     test(`a 64-bit length of ${length} → close 1009`, async (t) => {
       const served = await serve(t);
       const r = await raw(t, served.port, upgradeRequest(served.port));
@@ -953,6 +954,31 @@ describe('WebSocket: protocol errors', () => {
 
       assert.equal(await serverCloseCode(r), 1009);
       assert.equal(await within('onClose', accepted.closed), 1009);
+      assert.equal(accepted.messages.items.length, 0);
+    });
+  }
+
+  const breaches: [string, Buffer, number][] = [
+    ['an unmasked frame', clientFrame(OP.binary, Buffer.from('A'), { masked: false }), 1002],
+    ...violations.map(([name, bytes]): [string, Buffer, number] => [name, bytes, 1002]),
+    ...lengths64.map((length): [string, Buffer, number] => [
+      `a 64-bit length of ${length}`,
+      clientFrame(OP.binary, bytesOf(5), { length64: length }),
+      1009,
+    ]),
+  ];
+  for (const [name, bytes, code] of breaches) {
+    test(`${name}, one byte per read → close ${code}`, async (t) => {
+      const d = direct(t);
+      const accepted = d.accepted as Accepted;
+
+      for (const byte of bytes) d.peer.write(Uint8Array.of(byte));
+
+      assert.equal(await within('onClose', accepted.closed), code);
+      const isClose = (f: ServerFrame): boolean => f.opcode === OP.close;
+      await until('the close frame', () => framesAfterHandshake(d).some(isClose));
+      const close = framesAfterHandshake(d).find(isClose) as ServerFrame;
+      assert.equal(close.payload.readUInt16BE(0), code);
       assert.equal(accepted.messages.items.length, 0);
     });
   }
@@ -1011,6 +1037,10 @@ describe('WebSocket: protocol errors', () => {
 
   test('MAX_MESSAGE is 1 MiB', () => {
     assert.equal(MAX_MESSAGE, MiB);
+  });
+
+  test('CLOSE_WAIT_MS is 5 seconds', () => {
+    assert.equal(CLOSE_WAIT_MS, 5_000);
   });
 });
 
@@ -1140,21 +1170,25 @@ describe('WebSocket: reads of any size', () => {
     }
   });
 
-  test('a frame of 200,000 bytes that arrives one byte per read is read in linear time', async (t) => {
+  test('a frame of 400,000 bytes that arrives one byte per read is read in linear time', async (t) => {
     const d = direct(t);
     const accepted = d.accepted as Accepted;
-    const payload = bytesOf(200_000);
+    const payload = bytesOf(400_000);
     const frame = clientFrame(OP.binary, payload);
+    const started = performance.now();
 
     for (let i = 0; i < frame.length - 1; i++) d.peer.write(frame.subarray(i, i + 1));
     await until('every byte but the last to be read', () => d.peer.writableLength === 0);
-    const started = performance.now();
+    const lastStarted = performance.now();
     d.peer.write(frame.subarray(frame.length - 1));
     const message = await accepted.messages.next('the message');
-    const ms = performance.now() - started;
+    const lastMs = performance.now() - lastStarted;
+    const allMs = performance.now() - started;
 
     assertMessage(message, { binary: payload }, 'one byte per read');
-    assert.ok(ms < 1000, `the last read took ${Math.round(ms)} ms`);
+    // About 0.3 s here; a reader that copies what it gathered on every read takes over 20 s.
+    assert.ok(allMs < 5000, `the whole frame took ${Math.round(allMs)} ms`);
+    assert.ok(lastMs < 1000, `the last read took ${Math.round(lastMs)} ms`);
   });
 
   test('empty continuation frames keep no memory', async (t) => {
@@ -1288,5 +1322,40 @@ describe('WebSocket: a peer that does not finish closing, and destroy() (ruled, 
     assert.equal(await within('onClose', accepted.closed), 4003);
     assert.equal(socket.destroyed, true);
     assert.equal(served.clock.timers(), 0);
+  });
+});
+
+describe('WebSocket: a peer that resets the connection', () => {
+  test('after the 101, while the server sends: onClose gets 1006 and nothing is left uncaught', async (t) => {
+    const served = await serve(t, { echo: false });
+    const r = await raw(t, served.port, upgradeRequest(served.port));
+    const accepted = await acceptedOf(served);
+    r.socket.pause();
+    for (let frames = 0; accepted.conn.buffered <= MiB && frames < 1100; frames++) {
+      accepted.conn.sendBinary(bytesOf(60_000));
+    }
+
+    r.socket.resetAndDestroy();
+
+    assert.equal(await within('onClose', accepted.closed), 1006);
+    await delay(100); // a write error that nobody listened for would surface now
+  });
+
+  test('right after a refused request: nothing is left uncaught', async (t) => {
+    const served = await serve(t);
+    const request = upgradeRequest(served.port, { 'Sec-WebSocket-Key': undefined });
+
+    for (let i = 0; i < 100; i++) {
+      const socket = connect({ port: served.port, host: '127.0.0.1' });
+      t.after(() => socket.destroy());
+      socket.on('error', () => {});
+      await within('connect', once(socket, 'connect'));
+      socket.write(request);
+      socket.resetAndDestroy();
+    }
+    await delay(300); // the refusals still under way end now
+
+    assert.ok(served.accepted.items.length > 0, 'some requests reached acceptWebSocket');
+    assert.ok(served.accepted.items.every((item) => item === null));
   });
 });
