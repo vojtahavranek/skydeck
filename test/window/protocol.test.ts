@@ -293,6 +293,14 @@ describe('parsePageMessage: string limits, in UTF-8 bytes', () => {
       // Two bytes per character: half the limit in characters is the whole limit in bytes.
       assert.equal(page({ ...message, [field]: 'é'.repeat(limit / 2) }).ok, true);
       refused(page({ ...message, [field]: 'é'.repeat(limit / 2 + 1) }));
+      // Three bytes per character (€, CJK): the limit is exact, never a count of characters.
+      const threes = Math.floor(limit / 3);
+      const exact = '€'.repeat(threes) + 'a'.repeat(limit - 3 * threes);
+      assert.equal(page({ ...message, [field]: exact }).ok, true);
+      refused(page({ ...message, [field]: '€'.repeat(threes + 1) }));
+      // Four bytes per character (a surrogate pair).
+      assert.equal(page({ ...message, [field]: '🙂'.repeat(limit / 4) }).ok, true);
+      refused(page({ ...message, [field]: `${'🙂'.repeat(limit / 4)}a` }));
     });
   }
 

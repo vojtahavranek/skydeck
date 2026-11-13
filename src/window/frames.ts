@@ -45,8 +45,9 @@ export function encodeFrame(type: FrameType, payload: Uint8Array = new Uint8Arra
  * length above MAX_PAYLOAD makes `push` return { error: 'unknown-type' | 'too-long' } and the
  * reader is unusable afterwards (the caller closes the connection). The type is judged as soon as
  * its byte arrives and the length as soon as the header is complete, before any payload. Frames
- * completed earlier in the same push are not returned with an error. Each payload is a copy: the
- * caller may reuse a chunk once `push` returns.
+ * completed earlier in the same push are not returned with an error. Each payload is a copy, and
+ * the part of a chunk not yet consumed is copied before `push` returns: the caller may reuse a
+ * chunk once `push` returns.
  */
 export function frameReader(): {
   push(chunk: Uint8Array): Frame[] | { error: 'unknown-type' | 'too-long' };
@@ -104,6 +105,13 @@ export function frameReader(): {
         if (buffered < current.length) break;
         frames.push({ type: current.type, payload: take(current.length) });
         current = null;
+      }
+      // Keep no reference to the caller's chunk: copy what is left of it (earlier entries of the
+      // queue are such copies already).
+      const last = queue.length - 1;
+      if (last >= 0 && queue[last] === chunk) {
+        queue[last] = last === 0 ? chunk.slice(offset) : chunk.slice();
+        if (last === 0) offset = 0;
       }
       return frames;
     },
@@ -291,14 +299,14 @@ function isStatus(min: number): (value: number) => boolean {
   return (value) => Number.isInteger(value) && value >= min && value <= STATUS_MAX;
 }
 
-/** Exactly one of `code` and `signal` for a program that ran; neither, and a reason, for one that
+/** Exactly one of `code` and `signal` for a program that ran; neither, and a non-empty reason, for one that
  *  never started. */
 function readExit(where: string, fields: Fields): KeeperExit {
   const exit: KeeperExit = {
     code: field(where, fields, 'code', 'number', isStatus(0), true),
     signal: field(where, fields, 'signal', 'number', isStatus(1), true),
     atNs: field(where, fields, 'atNs', 'string', isNsText),
-    notStarted: field(where, fields, 'notStarted', 'string', () => true, true),
+    notStarted: field(where, fields, 'notStarted', 'string', (v: string) => v !== '', true),
   };
   const ran = exit.notStarted === null;
   if (

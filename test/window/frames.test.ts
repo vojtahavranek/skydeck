@@ -169,6 +169,44 @@ describe('frameReader', () => {
     });
   });
 
+  test('a chunk reused after push returns does not change a frame still incomplete', () => {
+    const frame = encodeFrame('D', utf8('hello'));
+    const buffer = new Uint8Array(frame.length);
+    const reader = frameReader();
+    buffer.set(frame.subarray(0, 7));
+    assert.deepEqual(reader.push(buffer.subarray(0, 7)), []);
+    buffer.fill(0x5a);
+    buffer.set(frame.subarray(7));
+    assert.deepEqual(reader.push(buffer.subarray(0, frame.length - 7)), [
+      { type: 'D', payload: utf8('hello') },
+    ]);
+  });
+
+  test('a chunk reused after only part of a header was pushed does not change the header', () => {
+    const frames = concat(encodeFrame('D', utf8('hi')), encodeFrame('C'));
+    const buffer = new Uint8Array(frames.length);
+    const reader = frameReader();
+    buffer.set(frames.subarray(0, 4));
+    assert.deepEqual(reader.push(buffer.subarray(0, 4)), []);
+    buffer.fill(0xff);
+    buffer.set(frames.subarray(4));
+    assert.deepEqual(reader.push(buffer.subarray(0, frames.length - 4)), [
+      { type: 'D', payload: utf8('hi') },
+      { type: 'C', payload: new Uint8Array(0) },
+    ]);
+  });
+
+  test('chunks left over from earlier pushes stay intact when the latest is reused', () => {
+    const frame = encodeFrame('D', utf8('abcdefgh'));
+    const reader = frameReader();
+    const parts = [frame.slice(0, 3), frame.slice(3, 6), frame.slice(6, 9)];
+    for (const part of parts) {
+      assert.deepEqual(reader.push(part), []);
+      part.fill(0);
+    }
+    assert.deepEqual(reader.push(frame.slice(9)), [{ type: 'D', payload: utf8('abcdefgh') }]);
+  });
+
   test('a payload does not change when the pushed chunk is changed later', () => {
     const reader = frameReader();
     const chunk = encodeFrame('D', new Uint8Array([1, 2, 3]));
@@ -201,6 +239,16 @@ describe('snapshots (S and P)', () => {
     });
     const big = Number.MAX_SAFE_INTEGER;
     assert.equal(decodeSnapshot(encodeSnapshot(big, 65535, 65535, 'x'))?.seq, big);
+  });
+
+  test('decodes a payload that is a view into a larger buffer (a frame read off a socket)', () => {
+    const frame = encodeFrame('S', encodeSnapshot(2 ** 40, 120, 40, 'é'));
+    assert.deepEqual(decodeSnapshot(frame.subarray(5)), {
+      seq: 2 ** 40,
+      cols: 120,
+      rows: 40,
+      data: 'é',
+    });
   });
 
   test('a payload shorter than 12 bytes is null', () => {
@@ -346,6 +394,16 @@ describe('parseHello', () => {
       { ...HELLO, exited: { code: null, signal: null, atNs: '1', notStarted: 'x' } },
     ],
     [
+      'never started, exited with an empty reason',
+      {
+        ...HELLO,
+        started: false,
+        pid: null,
+        procStart: null,
+        exited: { code: null, signal: null, atNs: '1', notStarted: '' },
+      },
+    ],
+    [
       'never started, but exited with a code',
       { ...HELLO, started: false, pid: null, procStart: null, exited: EXIT },
     ],
@@ -427,6 +485,7 @@ describe('parseExit (X)', () => {
     ['neither code nor signal, though started', { ...EXIT, code: null }],
     ['not started, with a code', { ...EXIT, notStarted: 'the deadline passed' }],
     ['not started, with a signal', { ...EXIT, code: null, signal: 9, notStarted: 'x' }],
+    ['not started, with an empty reason', { ...EXIT, code: null, notStarted: '' }],
   ] as [string, unknown][]) {
     test(`${name} → refused`, () => {
       refused(parseExit(json(value)));
