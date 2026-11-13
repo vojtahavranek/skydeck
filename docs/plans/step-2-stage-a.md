@@ -1153,16 +1153,23 @@ check of 2.1 passes; step 1's tests pass.
 `NODE_COMPILE_CACHE` the launcher chose itself (ruled by the plan owner, pull request #36).
 
 **Files**
-- Modify: `bin/skydeck`, `test/bin/launcher.test.ts`
+- Modify: `bin/skydeck`, `test/bin/launcher.test.ts`, `test/bin/launcher-handoff.test.ts` (the
+  handoff cases, beside the existing ones; ruled, pull request #36)
 
 **Behaviour.** S2 2 exactly: for the first argument `serve` only; the python program sets
 `RLIMIT_CORE` soft to 1 keeping the hard limit, puts the soft limit it found into
-`SKYDECK_CORE_SOFT` (decimal bytes or `unlimited`), and execs Node.js with the same arguments and
-the caller's environment (its own `LC_CTYPE` change undone, SIGPIPE and SIGXFSZ back to their
-default); when the hard limit is 0 or `setrlimit` fails it execs Node.js without
-`SKYDECK_CORE_SOFT` and appends one line to `<stateDir>/server.log` (resolved as the launcher
-resolves `<dataDir>`, D26; to stderr when that file cannot be written); without `python3` on
-`PATH`, Node.js is started directly, without an inherited `SKYDECK_CORE_SOFT`. The launcher stays
+`SKYDECK_CORE_SOFT` (decimal bytes or `unlimited`), and execs Node.js with the same arguments;
+when the hard limit is 0 or `setrlimit` fails it execs Node.js without `SKYDECK_CORE_SOFT` and
+appends one line to `<stateDir>/server.log` (resolved as the launcher resolves `<dataDir>`, D26);
+without `python3` on `PATH`, Node.js is started directly, without an inherited
+`SKYDECK_CORE_SOFT`. A program between the launcher and Node.js hands on the environment and the
+signal dispositions as it found them, so the python program also (ruled, pull request #36):
+gives back the caller's `LC_CTYPE`, set, empty or unset (python3 sets it to `C.UTF-8` in its own
+environment under a C or POSIX locale, PEP 538); sets SIGPIPE and SIGXFSZ, which python3 ignores
+by itself, back to the caller's disposition (ignored when the launcher's `SigIgn` in
+`/proc/self/status` has them, else the default); writes the server.log line to stderr when that
+file cannot be written; and, when Node.js cannot be executed, prints `skydeck: cannot run
+'<node>': <reason>` and exits 127, as the launcher does, instead of a traceback. The launcher stays
 POSIX `sh` (shellcheck clean); the python is a short program held in a shell variable and passed
 as the single `-c` argument, no file. The marker (S2 5.2): set to the cache's value only when the
 launcher chose the cache itself (the caller's `NODE_COMPILE_CACHE` unset or empty); a
@@ -1176,8 +1183,11 @@ linked into the sandbox where needed)
 - `serve` with hard limit 0 (`ulimit -H -c 0` in the test's shell): node runs without
   `SKYDECK_CORE_SOFT` and `server.log` gains one line; without a state directory the line is on
   stderr.
-- `serve` with python3: node's environment and ignored signals are those of any other command,
-  plus `SKYDECK_CORE_SOFT`.
+- `serve` with python3: node's environment is that of any other command, plus
+  `SKYDECK_CORE_SOFT`; node sees `LC_CTYPE` as the caller had it, also unset and empty; node's
+  ignored-signal set (`SigIgn` of `/proc/self/status`) equals that of a `serve` started without
+  python3, also when the caller ignores SIGPIPE, SIGXFSZ or another signal; a Node.js that cannot
+  be executed gives the one line and exit 127.
 - `serve` without python3 on `PATH`: node runs, no `SKYDECK_CORE_SOFT`.
 - `ls` (any other command): no python3 started (a python3 stub that records its calls is never
   called), limits unchanged.

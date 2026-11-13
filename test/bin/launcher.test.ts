@@ -372,6 +372,7 @@ function writeReportingNode(path: string, name = 'reporting'): void {
       'echo "cache=${NODE_COMPILE_CACHE-unset}"',
       'echo "marker=${SKYDECK_LAUNCHER_CACHE-unset}"',
       'echo "core-soft=${SKYDECK_CORE_SOFT-unset}"',
+      'echo "ctype=${LC_CTYPE-unset}"',
       'for a in "$@"; do echo "arg=$a"; done',
       'report_core_limit limit',
       'while IFS= read -r line; do',
@@ -620,7 +621,6 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     // No LANG or LC_*: python3 would set LC_CTYPE=C.UTF-8 in its own environment (PEP 538).
     const plain = launchReported('ulimit -S -c 0', ['ls'], s.env());
     const serve = launchReported('ulimit -S -c 0', ['serve'], s.env());
-    const withCtype = launchReported('ulimit -S -c 0', ['serve'], s.env({ LC_CTYPE: 'C' }));
     // The handoff file has a new name on every run.
     const comparable = (env: string[]) => env.filter((l) => !l.includes('SKYDECK_HANDOFF='));
 
@@ -632,20 +632,47 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
       serve.env.some((l) => l.includes('SKYDECK_CORE_SOFT=')),
       serve.env.join('\n'),
     );
-    assert.ok(
-      withCtype.env.some((l) => /LC_CTYPE='?C'?$/.test(l)),
-      withCtype.env.join('\n'),
-    );
   });
 
-  test('with python3: node ignores the same signals as for any other command', (t) => {
+  test('with python3: node sees LC_CTYPE as the caller had it, also when it was unset or empty', (t) => {
     const s = serveSandbox(t, true);
+    const cases: ReadonlyArray<readonly [given: string | undefined, seen: string]> = [
+      [undefined, 'unset'], // python3 itself would set C.UTF-8 here
+      ['', ''],
+      ['C', 'C'], // python3 itself would change it to C.UTF-8
+      ['POSIX', 'POSIX'],
+      ['C.UTF-8', 'C.UTF-8'],
+    ];
+    for (const [given, seen] of cases) {
+      const r = launchReported('', ['serve'], s.env({ LC_CTYPE: given }));
 
-    const plain = launchReported('', ['ls'], s.env());
-    const serve = launchReported('', ['serve'], s.env());
+      assert.equal(r.field('ctype'), seen, String(given));
+    }
+  });
 
-    assert.ok(plain.field('ignored'), plain.stdout);
-    assert.equal(serve.field('ignored'), plain.field('ignored'));
+  describe('with python3: node ignores exactly the signals it ignores when started without python3', () => {
+    // An ignored signal stays ignored across exec, so the caller's choice must reach node as it
+    // was, while the two python3 ignores by itself (SIGPIPE, SIGXFSZ) must not.
+    const callers: ReadonlyArray<readonly [name: string, setup: string]> = [
+      ['the caller ignores nothing', ''],
+      ['the caller ignores SIGPIPE', "trap '' PIPE"],
+      ['the caller ignores SIGXFSZ', "trap '' XFSZ"],
+      ['the caller ignores SIGPIPE, SIGXFSZ and SIGUSR1', "trap '' PIPE XFSZ USR1"],
+    ];
+    for (const [name, setup] of callers) {
+      test(name, (t) => {
+        const withPython = serveSandbox(t, true);
+        const without = serveSandbox(t, false);
+
+        const viaPython = launchReported(setup, ['serve'], withPython.env());
+        const direct = launchReported(setup, ['serve'], without.env());
+        const other = launchReported(setup, ['ls'], withPython.env());
+
+        assert.match(direct.field('ignored') ?? '', /^\s*[0-9a-f]{16}$/);
+        assert.equal(viaPython.field('ignored'), direct.field('ignored'));
+        assert.equal(other.field('ignored'), direct.field('ignored'));
+      });
+    }
   });
 
   test('any other command: python3 is never started and the limits are unchanged', (t) => {

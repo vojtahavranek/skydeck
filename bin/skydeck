@@ -105,20 +105,28 @@ fi
 # SKYDECK_CORE_SOFT, and appends one line saying so to server.log (to stderr when that cannot be
 # written). Run with -I, so nothing from the environment or the working directory reaches python.
 # Node must start as it would without python in between: python3 sets LC_CTYPE in its own
-# environment when the locale is C (PEP 538), so the caller's LC_CTYPE is given back, and the
-# signals python ignores (SIGPIPE, SIGXFSZ; an ignored signal stays ignored across exec) are reset
-# to their default, as python's own subprocess does.
+# environment when the locale is C (PEP 538), so the caller's LC_CTYPE is given back; and python3
+# ignores SIGPIPE and SIGXFSZ, which would stay ignored across exec, so each is set back to what
+# the caller had: ignored when the caller ignored it, else the default (as python's own
+# subprocess does when the caller's choice is unknown).
 skydeck_core_limit='
 import datetime, os, resource, signal, sys
 
-log, ctype_was_set, ctype, command = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+log, ctype_was_set, ctype, ignored = sys.argv[1:5]
+command = sys.argv[5:]
 env = dict(os.environ)
 if ctype_was_set:
     env["LC_CTYPE"] = ctype
 else:
     env.pop("LC_CTYPE", None)
+try:
+    ignored_mask = int(ignored, 16)
+except ValueError:
+    ignored_mask = 0
 for name in ("SIGPIPE", "SIGXFSZ"):
-    signal.signal(getattr(signal, name), signal.SIG_DFL)
+    number = getattr(signal, name)
+    caller_ignored = ignored_mask >> (number - 1) & 1
+    signal.signal(number, signal.SIG_IGN if caller_ignored else signal.SIG_DFL)
 env.pop("SKYDECK_CORE_SOFT", None)
 try:
     soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
@@ -172,10 +180,20 @@ skydeck_status=0
   if [ "${1-}" != serve ]; then
     exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
   elif runnable python3; then
-    # After the program: where to log, the caller's LC_CTYPE (set or not, and its value), then
-    # node's command line.
+    # The signals this shell ignores are the ones the caller ignored (a non-interactive shell
+    # ignores none by itself; the traps above catch, they do not ignore, and a subshell resets
+    # them): the SigIgn mask of /proc/self/status, empty when it cannot be read.
+    skydeck_ignored=
+    if [ -r /proc/self/status ]; then
+      while IFS= read -r skydeck_line; do
+        case $skydeck_line in SigIgn:*) skydeck_ignored=${skydeck_line#SigIgn:} ;; esac
+      done </proc/self/status
+    fi
+    # After the program: where to log, the caller's LC_CTYPE (set or not, and its value), the
+    # caller's ignored signals, then node's command line.
     exec python3 -I -c "$skydeck_core_limit" "$skydeck_state/server.log" \
-      "${LC_CTYPE+set}" "${LC_CTYPE-}" "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
+      "${LC_CTYPE+set}" "${LC_CTYPE-}" "$skydeck_ignored" \
+      "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
   else
     # Without python3 the server's core dumps are not prevented (S2 2); a SKYDECK_CORE_SOFT the
     # caller had must not pass for a limit that was set.

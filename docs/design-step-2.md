@@ -68,8 +68,9 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   the soft limit it found into `SKYDECK_CORE_SOFT` (its number of bytes in decimal, or
   `unlimited`), and `exec`s Node.js. Node.js starts as it would without python3 in between: the
   program gives back the caller's `LC_CTYPE` (python3 sets it in its own environment under a C
-  locale) and resets the signals python3 ignores (SIGPIPE, SIGXFSZ) to their default, since the
-  server's environment becomes every program's (7.4). Keepers inherit the limit; each keeper's
+  locale) and sets the two signals python3 ignores by itself (SIGPIPE, SIGXFSZ) back to what the
+  caller had (an ignored signal stays ignored across `exec`), since the server's environment
+  becomes every program's (7.4). Keepers inherit the limit; each keeper's
   child sets the soft limit back to that value before it `exec`s the program, so `claude` keeps
   the user's own limit (7.1). When the program cannot set the limit (the hard limit is 0, or
   `setrlimit` fails), it still starts Node.js, without `SKYDECK_CORE_SOFT`, and writes one line
