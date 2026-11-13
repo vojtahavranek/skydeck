@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  appendFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -18,7 +19,7 @@ import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import pkg from '../../package.json' with { type: 'json' };
-import { vendor } from '../../scripts/vendor.ts';
+import { applyPatch, vendor } from '../../scripts/vendor.ts';
 import type { ManifestEntry } from '../../src/window/vendor.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 
@@ -388,8 +389,112 @@ describe('the licence check', () => {
   });
 });
 
+const SERIALIZE = 'vendor/xterm/addon-serialize/lib/addon-serialize.mjs';
+
+/** The two clauses of addon-serialize 0.14.0's `_diffStyle` that turn bold and dim off with 22. */
+const BUGGY_CLAUSES = [
+  'e.isBold()!==r.isBold()&&t.push(e.isBold()?1:22)',
+  'e.isDim()!==r.isDim()&&t.push(e.isDim()?2:22)',
+];
+
+const sha256Of = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+
+describe("the patch of addon-serialize's bundle (ruled on #48)", () => {
+  const installed = readFileSync(join(checkout, 'node_modules/@xterm', SERIALIZE.slice(13)));
+  const vendored = readFileSync(join(checkout, SERIALIZE));
+  const entry = committed.find((e) => e.path === SERIALIZE);
+
+  test('the manifest keeps the upstream hash and pins the patched one', () => {
+    assert.equal(entry?.upstreamSha256, sha256Of(installed));
+    assert.equal(entry?.sha256, sha256Of(vendored));
+    assert.notEqual(entry?.sha256, entry?.upstreamSha256);
+    assert.match(entry?.patch ?? '', /_diffStyle/);
+    assert.match(entry?.patch ?? '', /22/);
+  });
+
+  test('the bundle differs from the installed one only inside _diffStyle, without the two clauses', () => {
+    const before = installed.toString('utf8');
+    const after = vendored.toString('utf8');
+    let start = 0;
+    while (start < before.length && before[start] === after[start]) start++;
+    let end = 0;
+    while (end < before.length && before.at(-1 - end) === after.at(-1 - end)) end++;
+    const fn = before.indexOf('_diffStyle(e,r){');
+    const fnEnd = before.indexOf('_nextCell(', fn);
+
+    assert.ok(fn >= 0 && fnEnd > fn, 'no _diffStyle in the installed bundle');
+    assert.ok(start >= fn && before.length - end <= fnEnd, 'the patch reaches outside _diffStyle');
+    for (const clause of BUGGY_CLAUSES) {
+      assert.equal(before.split(clause).length, 2, `${clause} is not in the installed bundle once`);
+      assert.equal(after.includes(clause), false, `${clause} is still in the vendored bundle`);
+    }
+  });
+
+  test('no other entry carries upstreamSha256 or patch', () => {
+    assert.deepEqual(
+      committed
+        .filter((e) => e.upstreamSha256 !== undefined || e.patch !== undefined)
+        .map((e) => e.path),
+      [SERIALIZE],
+    );
+  });
+
+  test('running the script twice gives the same bytes', (t) => {
+    const s = sandbox(t);
+
+    vendor({ from: checkout, to: s.root });
+    const first = tree(join(s.root, 'vendor'), s.root).map((p) => readFileSync(join(s.root, p)));
+    vendor({ from: checkout, to: s.root });
+    const second = tree(join(s.root, 'vendor'), s.root).map((p) => readFileSync(join(s.root, p)));
+
+    assert.deepEqual(second, first);
+    assertCommittedVendor(s.root);
+  });
+
+  test('applyPatch replaces each text that occurs exactly once, and refuses any other count', () => {
+    assert.equal(
+      applyPatch('a-b-c', [
+        ['a', 'x'],
+        ['-c', ''],
+      ]),
+      'x-b',
+    );
+    assert.throws(() => applyPatch('a-b-a', [['a', 'x']]), /2 times/);
+    assert.throws(() => applyPatch('a-b', [['c', 'x']]), /0 times/);
+  });
+
+  for (const [name, breakIt, error] of [
+    [
+      'a bundle that is not the one the patch was written for',
+      (root: string) =>
+        appendFileSync(join(root, 'from/node_modules/@xterm', SERIALIZE.slice(13)), '\n'),
+      /addon-serialize.*not the file/,
+    ],
+    [
+      'another version of addon-serialize',
+      (root: string) => alterPackage(root, 'addon-serialize', { version: '0.15.0' }),
+      /@xterm\/addon-serialize 0\.15\.0.*patch/,
+    ],
+  ] as const) {
+    test(`refuses ${name}, and leaves an existing vendor/ as it was`, (t) => {
+      const root = fixtureModules(t);
+      cpSync(join(checkout, 'vendor'), join(root, 'vendor'), { recursive: true });
+      breakIt(root);
+
+      assert.throws(() => vendor({ from: join(root, 'from'), to: root }), error);
+      assertCommittedVendor(root);
+    });
+  }
+});
+
 describe('the third-party notices', () => {
   const text = readFileSync(join(checkout, NOTICES), 'utf8');
+
+  test("say that addon-serialize's bundle is modified, how, and why", () => {
+    assert.ok(text.includes(SERIALIZE), text);
+    assert.match(text, /modified/);
+    assert.match(text, /SGR 22/);
+  });
 
   test('name the bundle that contains the code, and its package and version', () => {
     assert.ok(

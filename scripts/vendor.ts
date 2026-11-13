@@ -77,8 +77,66 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 `,
   },
 ];
+/** A change skydeck makes to one vendored file (S2 16.6). */
+interface Patch {
+  path: string;
+  package: string;
+  /** The version, and the sha256 of the file as that version ships it, the patch was written for. */
+  version: string;
+  upstreamSha256: string;
+  /** What the patch changes and why; the manifest's `patch`. */
+  note: string;
+  /** Exact texts and their replacements, each text found exactly once. */
+  replacements: Array<[string, string]>;
+}
+
+/**
+ * @xterm/addon-serialize 0.14.0's `_diffStyle` (ruled on #48). The minified clauses read, in
+ * the source (addons/addon-serialize/src/SerializeAddon.ts):
+ * `if (cell.isBold() !== oldCell.isBold()) { sgrSeq.push(cell.isBold() ? 1 : 22); }` and the same
+ * for dim with 2. Unfixed on xterm.js's master on 2026-11-13 (0.15.0 betas included): drop the
+ * patch when a release fixes it.
+ */
+const PATCHES: Patch[] = [
+  {
+    path: 'vendor/xterm/addon-serialize/lib/addon-serialize.mjs',
+    package: '@xterm/addon-serialize',
+    version: '0.14.0',
+    upstreamSha256: '6c93dff90bef3b7aac8664fa4c1cb4026bf4b701f3014a1fb88edde943dab906',
+    note: 'skydeck: _diffStyle turned bold off and dim off both with SGR 22, which turns off both, so a rebuilt cell lost its bold after a dim one, or one of bold and dim when only the other went off. Patched: when bold or dim changes and either goes off, SGR 22 first, then 1 and 2 for what the cell has; otherwise only the codes that go on. Unfixed upstream on 2026-11-13; drop the patch when a release fixes it.',
+    replacements: [
+      [
+        'e.isBold()!==r.isBold()&&t.push(e.isBold()?1:22),',
+        '(e.isBold()!==r.isBold()||e.isDim()!==r.isDim())&&(!e.isBold()&&r.isBold()||!e.isDim()&&r.isDim()?(t.push(22),e.isBold()&&t.push(1),e.isDim()&&t.push(2)):(e.isBold()!==r.isBold()&&t.push(1),e.isDim()!==r.isDim()&&t.push(2))),',
+      ],
+      [',e.isDim()!==r.isDim()&&t.push(e.isDim()?2:22)', ''],
+    ],
+  },
+];
+
+/** `text` with each replacement made; throws unless each old text occurs exactly once. */
+export function applyPatch(
+  text: string,
+  replacements: ReadonlyArray<readonly [string, string]>,
+): string {
+  let out = text;
+  for (const [old, replacement] of replacements) {
+    const count = out.split(old).length - 1;
+    if (count !== 1) {
+      throw new Error(`a text of the patch occurs ${count} times, not once: ${old}`);
+    }
+    out = out.replace(old, () => replacement);
+  }
+  return out;
+}
+
 const NOTICES = [
   'Third-party code in the vendored xterm.js files',
+  '',
+  'vendor/xterm/addon-serialize/lib/addon-serialize.mjs, the bundle of @xterm/addon-serialize',
+  '0.14.0, is modified by skydeck (scripts/vendor.ts): its _diffStyle turned bold off and dim off',
+  'both with SGR 22, which turns off both; it now writes SGR 22 first when either goes off, then',
+  'SGR 1 and 2 for what the cell keeps. Everything else in the file is as the package ships it.',
   '',
   'vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs, the bundle of',
   `@xterm/addon-unicode-graphemes ${UNICODE_GRAPHEMES_CHECKED}, contains adapted copies of two packages by Devon Govett:`,
@@ -141,6 +199,21 @@ function repositoryKey(repository: unknown): string | null {
   return host && owner && name ? `${host}/${owner}/${name}` : null;
 }
 
+/** The file as `patch` changes it, after checking that it is the file the patch was written for. */
+function patched(patch: Patch, version: string, bytes: Uint8Array): Uint8Array {
+  if (version !== patch.version) {
+    throw new Error(
+      `${patch.package} ${version} is not the version the patch of ${patch.path} was written for (${patch.version}): check whether it still needs the patch and update scripts/vendor.ts`,
+    );
+  }
+  if (createHash('sha256').update(bytes).digest('hex') !== patch.upstreamSha256) {
+    throw new Error(
+      `${patch.package} ${version}: ${patch.path} is not the file the patch was written for; run npm ci`,
+    );
+  }
+  return Buffer.from(applyPatch(Buffer.from(bytes).toString('utf8'), patch.replacements), 'utf8');
+}
+
 /** The manifest entries and bytes of everything `vendor/` will hold, checked, nothing written. */
 function collect(from: string): Array<{ entry: ManifestEntry; bytes: Uint8Array }> {
   const read = (name: string, path: string): Uint8Array | null => {
@@ -183,7 +256,15 @@ function collect(from: string): Array<{ entry: ManifestEntry; bytes: Uint8Array 
     const base = `vendor/xterm/${dir}`;
     const typings = files.find((f) => f.endsWith('.d.ts'));
     for (const file of files) {
-      add(`${base}/${file}`, needed(name, file), name, version);
+      const path = `${base}/${file}`;
+      const patch = PATCHES.find((p) => p.path === path);
+      if (patch === undefined) {
+        add(path, needed(name, file), name, version);
+      } else {
+        const entry = add(path, patched(patch, version, needed(name, file)), name, version);
+        entry.upstreamSha256 = patch.upstreamSha256;
+        entry.patch = patch.note;
+      }
       if (file.endsWith('.mjs') && typings !== undefined) {
         // The bundle's types are the package's typings, re-exported by the package's name (the
         // typings of the addons import '@xterm/xterm' by name and augment their own module, so a

@@ -171,8 +171,8 @@ function sgrOf(cell: IBufferCell): string {
  * Puts the cursor where it is in `term`. The serialise addon puts it one column too far left when
  * the last row is full, so a CUP always follows. A cursor past the last column (a character was
  * just printed there; the next one wraps) cannot be reached by CUP: the last character of that
- * row is printed again instead, with its attributes, which leaves the cursor past it. The pen is
- * then that character's, as it is in `term` unless SGR changed after that character.
+ * row is printed again instead, with its attributes, which leaves the cursor past it (the pen is
+ * set back afterwards, `penOf`).
  */
 function cursorPosition(term: Terminal): string {
   const buffer = term.buffer.active;
@@ -194,6 +194,16 @@ function cursorPosition(term: Terminal): string {
   return `\x1b[${row};${at + 1}H\x1b[0m${sgrOf(cell)}${cell.getChars() || ' '}`;
 }
 
+/**
+ * The pen (the attributes the next character gets), read from the xterm.js internal the vendored
+ * serialise addon itself reads for its pen; null if this xterm.js has none (a test pins it).
+ */
+function penOf(term: Terminal): IBufferCell | null {
+  const core = (term as unknown as { _core?: { _inputHandler?: { _curAttrData?: IBufferCell } } })
+    ._core;
+  return core?._inputHandler?._curAttrData ?? null;
+}
+
 /** S2 7.2's additions to the serialise addon's snapshot. */
 function additions(term: Terminal, t: Tracked): string {
   let out = t.cursorHidden ? '\x1b[?25l' : '\x1b[?25h';
@@ -205,7 +215,10 @@ function additions(term: Terminal, t: Tracked): string {
   // Read through xterm.js's public API, so they need no tracking: the screen side sets neither.
   if (term.modes.synchronizedOutputMode) out += '\x1b[?2026h';
   if (term.options.convertEol) out += '\x1b[20h';
-  return out + cursorPosition(term);
+  out += cursorPosition(term);
+  // Last, so that nothing above (the re-printed cell) changes it again.
+  const pen = penOf(term);
+  return pen === null ? out : `${out}\x1b[0m${sgrOf(pen)}`;
 }
 
 /**

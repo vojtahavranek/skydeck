@@ -1,5 +1,10 @@
 Third-party code in the vendored xterm.js files
 
+vendor/xterm/addon-serialize/lib/addon-serialize.mjs, the bundle of @xterm/addon-serialize
+0.14.0, is modified by skydeck (scripts/vendor.ts): its _diffStyle turned bold off and dim off
+both with SGR 22, which turns off both; it now writes SGR 22 first when either goes off, then
+SGR 1 and 2 for what the cell keeps. Everything else in the file is as the package ships it.
+
 vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs, the bundle of
 @xterm/addon-unicode-graphemes 0.4.0, contains adapted copies of two packages by Devon Govett:
 tiny-inflate and unicode-trie (in xterm.js: addons/addon-unicode-graphemes/src/third-party/).

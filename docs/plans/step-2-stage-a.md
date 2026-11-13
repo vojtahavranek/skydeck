@@ -1122,8 +1122,12 @@ development dependencies the server's tests need (`ws`).
 versions (A5); `npm ci` fetches them from the registry and checks each tarball against the
 `integrity` (sha512) in `package-lock.json`. `npm run vendor` (`node scripts/vendor.ts`) copies the
 files of A3 from `node_modules/@xterm/*` into `vendor/xterm/`, writes the `.d.mts` shims and
-`vendor/MANIFEST.json` (`{ files: [{ path, package, version, sha256, licenseFrom?, licenseReason? }] }`, sorted by
-path). The committed `vendor/` is what users run; **nothing is fetched at install time**: users do
+`vendor/MANIFEST.json` (`{ files: [{ path, package, version, sha256, licenseFrom?, licenseReason?, upstreamSha256?, patch? }] }`, sorted by
+path). One file is patched (ruled on #48, built by task 12): `@xterm/addon-serialize` 0.14.0's
+bundle, whose `_diffStyle` loses bold or dim when either goes off (SGR 22 turns off both). The
+script checks the installed bundle's version and sha256, replaces the two clauses (each exactly
+once), records `upstreamSha256` and `patch` beside the patched file's `sha256`, and the notices
+file says the bundle is modified and how (S2 16.6). The committed `vendor/` is what users run; **nothing is fetched at install time**: users do
 not run `npm ci` (docs/install.md), and `install` runs no package manager. `doctor` (task 24) and
 the server (task 14) check the files against the manifest.
 
@@ -1145,7 +1149,7 @@ every other vendored file; a test pins each licence text to the sha256 of the pu
 ```ts
 // src/window/vendor.ts
 /** `path` is relative to the checkout (`vendor/xterm/xterm/lib/xterm.mjs`). */
-export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string; licenseReason?: string }
+export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string; licenseReason?: string; upstreamSha256?: string; patch?: string }
 /** null when the manifest is missing, unreadable or not a manifest — also when any entry's path
  *  lies outside `vendor/xterm/`, has a segment that is empty, `.` or `..` or holds anything but
  *  ASCII letters, digits, `.`, `_` and `-` (no backslash, space or control character), or is
@@ -3254,3 +3258,9 @@ Rulings on task 12's findings (2026-11-13):
     past the last column (the pen can then differ in one case, named in S2 7.2), and answers OSC
     10 and 11 with xterm.js's default colours until a page has sent its theme. The scroll region,
     the saved cursor and the character sets stay known limits (S2 7.2, check W26).
+11. **From task 12's review 2.** Ruled: `@xterm/addon-serialize` 0.14.0 loses bold or dim when
+    either goes off (SGR 22 turns off both); its vendored bundle is patched at vendor time, in
+    task 12's pull request (task 2's script and manifest gain the patch, S2 16.6). The snapshot
+    ends with the pen read from the headless terminal's own state (the internal the serialise
+    addon reads; a test pins it), so S2 7.2 has no pen limit. Modes 2026 and 20 are restored; tab
+    stops join the known limits.

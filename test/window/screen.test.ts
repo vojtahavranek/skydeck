@@ -625,9 +625,40 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
     });
   }
 
+  // @xterm/addon-serialize 0.14.0 turns bold off and dim off both with SGR 22, which turns off
+  // both; scripts/vendor.ts patches the vendored bundle. Each case also leaves a pen behind.
+  const BOLD_DIM_CASES: { name: string; bytes: string }[] = [
+    { name: 'dim, then bold', bytes: '\x1b[2mab\x1b[22m\x1b[1mcd' },
+    { name: 'bold, then dim', bytes: '\x1b[1mab\x1b[22m\x1b[2mcd' },
+    { name: 'bold and dim, then dim', bytes: '\x1b[1;2mab\x1b[22;2mcd' },
+    { name: 'bold and dim, then bold', bytes: '\x1b[1;2mab\x1b[22;1mcd' },
+    { name: 'bold and dim, then neither', bytes: '\x1b[1;2mab\x1b[22mcd' },
+    { name: 'neither, then bold and dim', bytes: 'ab\x1b[1;2mcd' },
+    {
+      name: 'dim text with a bold word inside, as chalk writes it',
+      bytes: '\x1b[2mone \x1b[1mtwo\x1b[22m\x1b[2m three\x1b[22m',
+    },
+  ];
+
+  for (const c of BOLD_DIM_CASES) {
+    test(`bold and dim: ${c.name}`, async () => {
+      const a = open({ cols: 20, rows: 3, snapshot: null });
+      await a.screen.output(utf8(c.bytes));
+
+      const b = await rebuilt(a.screen);
+
+      assertSameScreen(a.term, b.term);
+      await a.screen.output(utf8('Z'));
+      await b.screen.output(utf8('Z'));
+      assertSameScreen(a.term, b.term);
+      a.screen.dispose();
+      b.screen.dispose();
+    });
+  }
+
   // A cursor past the last column after a character whose attributes the pen no longer has: the
-  // character is re-printed with its own attributes, so the screen and the cursor are exact. The
-  // pen is then that character's, not the program's (a known limit, S2 7.2).
+  // character is re-printed with its own attributes, so the screen and the cursor are exact, and
+  // the pen is then set back to the program's, so the next character is too.
   const PEN_CASES: { name: string; last: string }[] = [
     {
       name: 'every attribute, RGB and 256-colour',
@@ -650,10 +681,59 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
 
       assert.equal(a.term.buffer.active.cursorX, 10);
       assertSameScreen(a.term, b.term);
+      await a.screen.output(utf8('Z'));
+      await b.screen.output(utf8('Z'));
+      assertSameScreen(a.term, b.term);
       a.screen.dispose();
       b.screen.dispose();
     });
   }
+
+  test('a full-width dim border closed at the end of a record: the next plain text is plain', async () => {
+    const a = open({ cols: 10, rows: 3, snapshot: null });
+    await a.screen.output(utf8(`\x1b[2m${'─'.repeat(10)}\x1b[22m`));
+
+    const b = await rebuilt(a.screen);
+    await a.screen.output(utf8('\r\nplain'));
+    await b.screen.output(utf8('\r\nplain'));
+
+    assertSameScreen(a.term, b.term);
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
+  test('the pen is read from internals the vendored xterm.js has', async () => {
+    const term = new modules.Terminal({ cols: 10, rows: 2, allowProposedApi: true });
+    await new Promise<void>((resolve) => term.write('\x1b[1;31m', resolve));
+
+    const pen = (term as unknown as { _core?: { _inputHandler?: { _curAttrData?: IBufferCell } } })
+      ._core?._inputHandler?._curAttrData;
+
+    assert.ok(
+      pen,
+      'xterm.js has no _core._inputHandler._curAttrData: the screen side cannot restore the pen',
+    );
+    for (const method of [
+      'isBold',
+      'isDim',
+      'isItalic',
+      'isUnderline',
+      'isBlink',
+      'isInverse',
+      'isInvisible',
+      'isStrikethrough',
+      'isOverline',
+      'getFgColorMode',
+      'getFgColor',
+      'getBgColorMode',
+      'getBgColor',
+    ] as const) {
+      assert.equal(typeof pen[method], 'function', method);
+    }
+    assert.ok(pen.isBold());
+    assert.equal(pen.getFgColor(), 1);
+    term.dispose();
+  });
 
   for (const endInAlternate of [false, true]) {
     test(`a snapshot at every record boundary plus the records after it equals the whole stream (${endInAlternate ? 'alternate' : 'normal'} screen at the end)`, async () => {
@@ -681,6 +761,38 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
       a.screen.dispose();
     });
   }
+
+  test('a Claude-like stream (full-width dim borders, bold inside dim) at 20 x 6: a snapshot at every record boundary rebuilds it', async () => {
+    const steps: Step[] = [];
+    for (let i = 0; i < 12; i++) {
+      steps.push({ out: `\x1b[2m${'─'.repeat(20)}` }); // ends past the last column
+      steps.push({ out: '\x1b[22m' }); // the pen goes back to plain at the record's end
+      steps.push({ out: `\r\nplain \x1b[2m⎿ \x1b[1mRead\x1b[22m\x1b[2m(file ${i})\x1b[22m` });
+      steps.push({ out: `\r\n\x1b[1;2m* \x1b[22;1mdone\x1b[22m plain ${i}\r\n` });
+      if (i === 6) steps.push({ size: [18, 6] });
+    }
+    const whole = open({ cols: 20, rows: 6, snapshot: null });
+    await applyAll(whole.screen, steps);
+    const a = open({ cols: 20, rows: 6, snapshot: null });
+    const snaps: { cols: number; rows: number; data: string }[] = [];
+    for (const step of steps) {
+      snaps.push(await a.screen.snapshot());
+      await apply(a.screen, step);
+    }
+
+    for (const [at, snap] of snaps.entries()) {
+      const b = open({ cols: snap.cols, rows: snap.rows, snapshot: snap.data });
+      await applyAll(b.screen, steps.slice(at));
+      try {
+        assertSameScreen(whole.term, b.term);
+      } catch (error) {
+        assert.fail(`snapshot before record ${at}: ${String(error)}`);
+      }
+      b.screen.dispose();
+    }
+    whole.screen.dispose();
+    a.screen.dispose();
+  });
 
   test('a snapshot requested while records are queued covers all of them, and none after', async () => {
     const steps = recordedStream(false);

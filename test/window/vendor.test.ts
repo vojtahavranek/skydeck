@@ -59,6 +59,17 @@ describe('readManifest', () => {
     assert.match(license?.licenseReason ?? '', /no LICENSE in the package/);
   });
 
+  test("keeps a patched file's upstreamSha256 and patch", () => {
+    const entries = readManifest(files, checkout);
+
+    const serialize = entries?.find(
+      (e) => e.path === 'vendor/xterm/addon-serialize/lib/addon-serialize.mjs',
+    );
+    assert.match(serialize?.upstreamSha256 ?? '', /^[0-9a-f]{64}$/);
+    assert.notEqual(serialize?.upstreamSha256, serialize?.sha256);
+    assert.match(serialize?.patch ?? '', /22/);
+  });
+
   test('no manifest → null', (t) => {
     const root = copyOfVendor(t);
     rmSync(join(root, 'vendor/MANIFEST.json'));
@@ -84,6 +95,22 @@ describe('readManifest', () => {
     [
       'a licenseFrom that is not a string',
       JSON.stringify({ files: [{ ...entry(XTERM), licenseFrom: 1 }] }),
+    ],
+    [
+      'an upstreamSha256 that is not 64 hex',
+      JSON.stringify({ files: [{ ...entry(XTERM), upstreamSha256: 'abc', patch: 'p' }] }),
+    ],
+    [
+      'a patch that is not a string',
+      JSON.stringify({ files: [{ ...entry(XTERM), upstreamSha256: SHA, patch: 1 }] }),
+    ],
+    [
+      'an upstreamSha256 without a patch',
+      JSON.stringify({ files: [{ ...entry(XTERM), upstreamSha256: SHA }] }),
+    ],
+    [
+      'a patch without an upstreamSha256',
+      JSON.stringify({ files: [{ ...entry(XTERM), patch: 'p' }] }),
     ],
     ['a path outside vendor/xterm/', JSON.stringify({ files: [entry('bin/skydeck')] })],
     ['a path with ..', JSON.stringify({ files: [entry('vendor/xterm/../../bin/skydeck')] })],
