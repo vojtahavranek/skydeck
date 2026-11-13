@@ -65,9 +65,9 @@ text. More than one match is an error that lists the candidates; no match is an 
 exit 3).
 
 Exit codes: 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not found
-or ambiguous; 4 resume refused; 5 restore stopped before finishing. Also: 141 when the reader of
-standard output closed it (`skydeck ls | head`) and the command had succeeded; 127 when the launcher
-finds no `node`; and once `resume`, `new` or `restore` has handed the terminal to `claude`, the status
+or ambiguous; 4 resume refused; 5 restore stopped before finishing. Also: 141 when a write to
+standard output failed because its reader had closed it (`skydeck doctor | head -1`) and the command
+had succeeded; 127 when the launcher finds no `node`; and once `resume`, `new` or `restore` has handed the terminal to `claude`, the status
 is `claude`'s own.
 
 In the interactive list: `j`/`k` or the arrows move, `Enter` shows the detail, `l` label, `g` group,

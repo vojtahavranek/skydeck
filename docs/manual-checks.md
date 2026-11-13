@@ -239,9 +239,9 @@ skydeck
 
 Expected: the title line reads
 `skydeck  <n> sessions  <a> waiting · <b> working · <c> running · <d> not-running`
-(a state with no session is left out; `running` is a session that a process holds but whose
-live-session file cannot be read, for example the file of a scripted run, which leaves none), and
-the cursor is on a row. Leave the list open.
+(a state with no session is left out; `running` is a session that a process holds while its
+live-session file cannot be read or shows a status other than `busy`, `idle` and `waiting`; a
+scripted run leaves no such file), and the cursor is on a row. Leave the list open.
 
 In A, start `claude` in `~/skydeck-try`. Expected, within about 5 seconds and without a key press:
 the new session appears in the list, the counts in the title line change, and the cursor stays on

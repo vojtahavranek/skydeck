@@ -193,7 +193,7 @@ added the hook entries to /home/you/.claude/settings.json; the file as it was is
 skydeck is installed
 ```
 
-When there is no settings file yet (only Claude Code's folder, as on a fresh machine), the question
+When there is no settings file yet (only Claude Code's folder, as can be the case on a fresh machine), the question
 is the same, no backup is made, and the line reads
 `added the hook entries to /home/you/.claude/settings.json (a new file)`. Uninstall later removes
 that file again, as long as nobody changed it since: `removed /home/you/.claude/settings.json: there
