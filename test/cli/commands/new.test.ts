@@ -153,9 +153,10 @@ test('new -- --from-pr, --fork-session, --prefill-b64=<text> and --teleport are 
 
 test('new -- -n <name> is refused and points to --label', async (t) => {
   const d = deck(t);
-  assert.equal(await main(['new', '--label', 'x', '--', '-n', 'other'], d.ctx), 2);
+  assert.equal(await main(['new', '--', '-n', 'x'], d.ctx), 2);
   assert.ok(d.stderr().startsWith('skydeck: cannot pass -n to claude:'), d.stderr());
   assert.ok(d.stderr().includes('--label'), d.stderr());
+  assert.equal(await main(['new', '--label', 'x', '--', '--name=other'], d.ctx), 2);
   assert.deepEqual(d.deck.store.allMeta(), []);
   assert.equal(existsSync(handoffPath(d)), false);
 });

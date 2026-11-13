@@ -47,6 +47,8 @@ export interface DerivedSession {
   launch: string[] | null;
   transcript: TranscriptRow | null;
   lastHolding: LastHolding | null;
+  /** The highest id among the events that name the session; null when it is known only from a transcript. */
+  lastEventId: number | null;
   doneAtNs: Ns | null;
   hidden: boolean; // done, and no activity after doneAtNs (7.1)
 }

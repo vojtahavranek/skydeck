@@ -55,6 +55,7 @@ export function ds(
     launch: null,
     transcript: transcript === null ? null : transcriptRow(over.id, transcript),
     lastHolding: null,
+    lastEventId: null,
     doneAtNs: null,
     hidden: false,
     ...rest,

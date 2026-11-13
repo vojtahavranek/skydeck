@@ -77,6 +77,8 @@ export function checkResumable(row: ListRow, files: Files): void {
   }
 }
 
+const STATE_CHANGED = "the session's state changed while preparing; run the command again";
+
 /** The time a lock holds (its kv value); null when the value is not one. */
 function lockTimeOf(value: string): Ns | null {
   return /^[0-9]{1,30}$/.test(value) ? BigInt(value) : null;
@@ -95,14 +97,26 @@ function freshAge(store: Store, sessionId: string, takenNs: Ns | null, nowNs: Ns
   return ageNs;
 }
 
+/** What a decision to resume was based on: the highest id among the session's events, null for none. */
+export interface SawEvents {
+  latestEventId: number | null;
+}
+
 /**
  * D16. In one store transaction (BEGIN IMMEDIATE, which no two skydecks hold at once): reads the
  * session's lock; when it holds — younger than LOCK_TTL_NS (a time less than LOCK_TTL_NS in the
  * future counts as now), and no start event for the session at or after it (hasStartSince) — throws
  * ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s" (n rounded down, m
- * rounded up); otherwise writes the lock with the clock's time. A value that is not a time is stale.
+ * rounded up). A value that is not a time is stale.
+ *
+ * `saw`, when given, is what the decision to resume was made on. Still inside the transaction and
+ * before the lock is written, the session's latest event id is read again; when it is not the one
+ * `saw` names, another skydeck acted on the session since (it may have resumed it, and a sweep may
+ * have removed its lock as stale once its start event was ingested), and the call throws
+ * ResumeRefusedError "the session's state changed while preparing; run the command again". Without
+ * `saw` nothing is compared. Otherwise writes the lock with the clock's time.
  */
-export function acquireLock(deck: Deck, sessionId: string): void {
+export function acquireLock(deck: Deck, sessionId: string, saw?: SawEvents): void {
   const key = lockKey(sessionId);
   const { store, platform } = deck;
   store.transaction(() => {
@@ -115,6 +129,9 @@ export function acquireLock(deck: Deck, sessionId: string): void {
       throw new ResumeRefusedError(
         `${sessionId.slice(0, 8)} is being resumed (${ago} s ago); try again in ${wait} s`,
       );
+    }
+    if (saw !== undefined && store.latestEventIdOfSession(sessionId) !== saw.latestEventId) {
+      throw new ResumeRefusedError(STATE_CHANGED);
     }
     store.setKv(key, `${nowNs}`);
   });
@@ -161,18 +178,26 @@ export interface PreparedLaunch {
   kind: 'resume' | 'new';
 }
 
+/** Without the boot id every recorded process looks dead (5.5), so no session is seen running. */
+const BOOT_ID_UNKNOWN = 'cannot tell which sessions are running: the boot id could not be read';
+
 /**
- * checkResumable, acquireLock, buildResumeCommand(config.claudeCommand, row.session.launch, id,
- * row.label) — in this order, so a session that is refused takes no lock. `unknownFlags` is
+ * Refuses (ResumeRefusedError, first of all) when the current boot id cannot be read, then
+ * checkResumable, acquireLock (given the latest event id the row was derived from, so a session
+ * that has been acted on since is refused), buildResumeCommand(config.claudeCommand,
+ * row.session.launch, id, row.label) — in this order, so a session that is refused takes no lock. `unknownFlags` is
  * unknownFlags(row.session.launch) ([] without a launch command).
  */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
+  if (deck.platform.proc.bootId() === null) {
+    throw new ResumeRefusedError(BOOT_ID_UNKNOWN);
+  }
   checkResumable(row, deck.platform.files);
   const cwd = row.session.dir;
   if (cwd === null) {
     throw new Error('checkResumable let a session without a directory through'); // unreachable
   }
-  acquireLock(deck, row.id);
+  acquireLock(deck, row.id, { latestEventId: row.session.lastEventId });
   const launch = row.session.launch;
   const command = buildResumeCommand({
     claudeCommand: deck.config.claudeCommand,

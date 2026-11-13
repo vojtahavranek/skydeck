@@ -166,6 +166,21 @@ function session(given: Given, id: string): DerivedSession {
   return found;
 }
 
+// ---- the latest event (what a resume decided on) ------------------------------------------------
+
+test('lastEventId is the highest id among the events of the session, whatever their times', () => {
+  const first = start(P1, S1, T0 + 9n * SEC, 'startup');
+  const second = end(P1, S1, T0, 'exit'); // a later id, an earlier time
+  const other = start(P2, S2, T0 + 20n * SEC, 'startup');
+  const events = [first, other, second];
+  assert.equal(session({ events }, S1).lastEventId, second.id);
+  assert.equal(session({ events }, S2).lastEventId, other.id);
+});
+
+test('lastEventId is null for a session known only from its transcript', () => {
+  assert.equal(session({ transcripts: [tr(S1)] }, S1).lastEventId, null);
+});
+
 // ---- states (cases 1-5) -----------------------------------------------------------------------
 
 test('1: a holder whose live file is busy is working, since its status time', () => {
@@ -1290,6 +1305,7 @@ test('every derived session carries the fields of the contract', () => {
     'holders',
     'id',
     'lastActivityNs',
+    'lastEventId',
     'lastHolding',
     'launch',
     'marks',

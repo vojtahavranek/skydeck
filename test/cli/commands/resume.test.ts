@@ -106,6 +106,27 @@ test('resume --here --tab is a usage error', async (t) => {
   assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
 });
 
+test('resume with an unknown boot id is refused, takes no lock and starts nothing', async (t) => {
+  const d = deck(t, { config: { terminal: 'wezterm' } });
+  session(d, { argv: ['claude', '--model', 'opus'], running: true });
+  d.proc.setBootId(null); // without it every recorded process looks dead, a running session too
+  for (const args of [
+    ['resume', '0b5f'],
+    ['resume', '0b5f', '--tab'],
+    ['resume', '0b5f', '--here'],
+  ]) {
+    assert.equal(await main(args, d.ctx), 4, args.join(' '));
+  }
+  assert.equal(
+    d.stderr(),
+    'skydeck: cannot tell which sessions are running: the boot id could not be read\n'.repeat(3),
+  );
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+  assert.equal(existsSync(handoffPath(d)), false);
+  assert.deepEqual(d.runner.calls, []);
+});
+
 test('resume <prefix> with the default terminal hands the command to the launcher', async (t) => {
   const d = deck(t);
   const dir = session(d, { argv: ['claude', '--model', 'opus'] });

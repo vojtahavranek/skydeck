@@ -61,8 +61,8 @@ function writeLock(d: TestDeck, sessionId: string, value: string): void {
   d.deck.store.setKv(lockKey(sessionId), value);
 }
 
-function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): void {
-  d.deck.store.insertEvent({
+function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): number {
+  const id = d.deck.store.insertEvent({
     spoolName: `${timeNs}-4242-${sessionId}.ev`,
     timeNs,
     kind: 'start',
@@ -77,6 +77,8 @@ function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): void {
     name: null,
     payload: null,
   });
+  assert.ok(id !== null);
+  return id;
 }
 
 /** What node:sqlite throws when the database is locked (SQLITE_BUSY = 5). */
@@ -111,6 +113,7 @@ function watched(d: TestDeck): {
       setKv: (key, value) => (depths.push(depth), store.setKv(key, value)),
       deleteKv: (key) => (depths.push(depth), store.deleteKv(key)),
       kvEntries: (prefix) => (depths.push(depth), store.kvEntries(prefix)),
+      latestEventIdOfSession: (id) => (depths.push(depth), store.latestEventIdOfSession(id)),
     } satisfies Partial<Store>,
   });
   return { deck, depths, transactions: () => count };
@@ -368,6 +371,80 @@ test('acquireLock reads and writes the lock inside one transaction', (t) => {
   );
 });
 
+const CHANGED = "the session's state changed while preparing; run the command again";
+
+test('acquireLock takes the lock when the session still has the latest event it was decided on', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 10n * SEC);
+  acquireLock(d.deck, S1, { latestEventId: seen });
+  assert.equal(lockOf(d, S1), `${T0}`);
+  d.clock.setNs(T0 + 61n * SEC);
+  acquireLock(d.deck, S2, { latestEventId: null }); // none seen, none there
+  assert.equal(lockOf(d, S2), `${T0 + 61n * SEC}`);
+});
+
+test('acquireLock refuses, and writes no lock, when the session has a newer event than the decision saw', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 10n * SEC);
+  startEvent(d, S1, T0 - 1n * SEC); // another skydeck resumed the session since
+  assert.equal(
+    refusal(() => acquireLock(d.deck, S1, { latestEventId: seen })),
+    CHANGED,
+  );
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('acquireLock refuses when the decision saw no event and one has appeared', (t) => {
+  const d = testDeck(t);
+  startEvent(d, S1, T0 - 1n * SEC);
+  assert.equal(
+    refusal(() => acquireLock(d.deck, S1, { latestEventId: null })),
+    CHANGED,
+  );
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('acquireLock ignores the events of other sessions', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 10n * SEC);
+  startEvent(d, S2, T0 - 1n * SEC);
+  acquireLock(d.deck, S1, { latestEventId: seen });
+  assert.equal(lockOf(d, S1), `${T0}`);
+});
+
+test('acquireLock without a decision to compare with does not look at the events', (t) => {
+  const d = testDeck(t);
+  startEvent(d, S1, T0 - 1n * SEC);
+  acquireLock(d.deck, S1);
+  assert.equal(lockOf(d, S1), `${T0}`);
+});
+
+test('acquireLock leaves a stale lock as it is when the state changed', (t) => {
+  const d = testDeck(t);
+  const stale = `${T0 - 120n * SEC}`;
+  writeLock(d, S1, stale);
+  const seen = startEvent(d, S1, T0 - 130n * SEC);
+  startEvent(d, S1, T0 - 1n * SEC);
+  assert.equal(
+    refusal(() => acquireLock(d.deck, S1, { latestEventId: seen })),
+    CHANGED,
+  );
+  assert.equal(lockOf(d, S1), stale);
+});
+
+test('acquireLock reads the latest event inside its transaction, before it writes the lock', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 10n * SEC);
+  const w = watched(d);
+  acquireLock(w.deck, S1, { latestEventId: seen });
+  assert.equal(w.transactions(), 1);
+  assert.ok(w.depths.length >= 3, String(w.depths)); // the lock, the latest event, the write
+  assert.ok(
+    w.depths.every((depth) => depth === 1),
+    String(w.depths),
+  );
+});
+
 test('acquireLock lets a failure of the database through', (t) => {
   const d = testDeck(t);
   const failure = locked();
@@ -579,6 +656,100 @@ test('prepareResume refuses a second resume within 60 s', (t) => {
   );
 });
 
+test('prepareResume decides on the latest event its row saw: a session resumed since is refused, with no lock', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 120n * SEC);
+  const row = rowWith(d, dead(d, { lastEventId: seen })); // the look
+  startEvent(d, S1, T0 - 1n * SEC); // another skydeck resumed it, and its start was ingested
+  assert.equal(
+    refusal(() => prepareResume(d.deck, row)),
+    CHANGED,
+  );
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('prepareResume refuses a session that another skydeck resumed and whose lock a sweep has removed', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 120n * SEC);
+  const lookedAt = rowWith(d, dead(d, { lastEventId: seen })); // B looks: not running
+  acquireLock(d.deck, S1, { latestEventId: seen }); // A takes the lock …
+  d.clock.setNs(T0 + 3n * SEC);
+  startEvent(d, S1, T0 + 2n * SEC); // … its claude starts, the start event is ingested …
+  assert.equal(sweepLocks(d.deck), 1); // … and a sweep removes the lock: a start event was seen
+  assert.equal(lockOf(d, S1), null);
+  assert.equal(
+    refusal(() => prepareResume(d.deck, lookedAt)), // B takes its lock now
+    CHANGED,
+  );
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('prepareResume refuses a session whose event arrives between its checks and its lock', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 120n * SEC);
+  const real = d.platform.files;
+  let inserted = false;
+  const deck = deckWith(d.deck, {
+    files: {
+      stat(path) {
+        // checkResumable looks at the directory after the guard has read the row, before the lock
+        if (!inserted) {
+          inserted = true;
+          startEvent(d, S1, T0 - 1n * SEC);
+        }
+        return real.stat(path);
+      },
+    },
+  });
+  assert.equal(
+    refusal(() => prepareResume(deck, rowWith(d, dead(d, { lastEventId: seen })))),
+    CHANGED,
+  );
+  assert.ok(inserted);
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('prepareResume resumes a session that has not changed since its row was read', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 120n * SEC);
+  const prepared = prepareResume(d.deck, rowWith(d, dead(d, { lastEventId: seen })));
+  assert.equal(prepared.sessionId, S1);
+  assert.equal(lockOf(d, S1), `${T0}`);
+});
+
+const BOOT_UNKNOWN = 'cannot tell which sessions are running: the boot id could not be read';
+
+test('prepareResume refuses when the boot id is unknown, and takes no lock', (t) => {
+  const d = testDeck(t);
+  d.proc.setBootId(null);
+  assert.equal(
+    refusal(() => prepareResume(d.deck, rowWith(d, dead(d)))),
+    BOOT_UNKNOWN,
+  );
+  assert.equal(lockOf(d, S1), null);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
+test('an unknown boot id is refused before anything else: no process looks alive without it', (t) => {
+  const d = testDeck(t);
+  d.proc.setBootId(null);
+  const noTranscript = rowOf(ds({ id: S1, dir: d.sandbox.home, transcript: null }));
+  assert.equal(
+    refusal(() => prepareResume(d.deck, noTranscript)),
+    BOOT_UNKNOWN,
+  );
+  // the refusal is the guard's own: exit 4, like the other refusals of 7.6
+  assert.throws(() => prepareResume(d.deck, rowWith(d, dead(d))), ResumeRefusedError);
+});
+
+test('prepareResume works again once the boot id can be read', (t) => {
+  const d = testDeck(t);
+  d.proc.setBootId(null);
+  refusal(() => prepareResume(d.deck, rowWith(d, dead(d))));
+  d.proc.setBootId(BOOT_A);
+  assert.equal(prepareResume(d.deck, rowWith(d, dead(d))).sessionId, S1);
+});
+
 // --- prepareNew ------------------------------------------------------------------------------------
 
 test('prepareNew stores the cleaned label and group and builds the command', (t) => {
@@ -609,6 +780,13 @@ test('prepareNew refuses a bad label or group before it stores anything', (t) =>
   assert.throws(() => prepareNew(d.deck, { label: '-x', group: 'G', extra: [] }), UsageError);
   assert.throws(() => prepareNew(d.deck, { label: 'x', group: 'a\nb', extra: [] }), UsageError);
   assert.deepEqual(d.deck.store.allMeta(), []);
+});
+
+test('prepareNew does not need the boot id: it resumes nothing', (t) => {
+  const d = testDeck(t);
+  d.proc.setBootId(null);
+  const prepared = prepareNew(d.deck, { label: null, group: null, extra: [] });
+  assert.deepEqual(prepared.argv, ['claude', '--session-id', UUID1]);
 });
 
 test('prepareNew takes no lock', (t) => {

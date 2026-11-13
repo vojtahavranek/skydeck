@@ -164,6 +164,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
         null,
       transcript,
       lastHolding,
+      // The events are in (time, id) order, so the highest id is not necessarily the last one.
+      lastEventId: sessionEvents.reduce<number | null>(
+        (highest, event) => (highest === null || event.id > highest ? event.id : highest),
+        null,
+      ),
       doneAtNs,
       hidden: doneAtNs !== null && !activityAfter(doneAtNs, transcript, sessionEvents),
     };

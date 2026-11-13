@@ -61,6 +61,8 @@ export interface Store {
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
   /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
   hasStartSince(sessionId: string, sinceNs: Ns): boolean;
+  /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
+  latestEventIdOfSession(sessionId: string): number | null;
   /** All links ordered by time_ns. */
   links(): LinkRow[];
 
@@ -532,6 +534,11 @@ class SqliteStore implements Store {
         sinceNs,
       ) !== undefined
     );
+  }
+
+  latestEventIdOfSession(sessionId: string): number | null {
+    const row = this.#get('SELECT MAX(id) AS id FROM events WHERE session_id = ?', sessionId);
+    return row === undefined ? null : optInt(row, 'id');
   }
 
   links(): LinkRow[] {

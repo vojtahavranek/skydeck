@@ -570,6 +570,30 @@ describe('hasStartSince', () => {
   });
 });
 
+describe('latestEventIdOfSession', () => {
+  test('is null for a session without events', (t) => {
+    const { store } = fresh(t);
+    store.insertEvent(ev({ sessionId: S2 }));
+
+    assert.equal(store.latestEventIdOfSession(S1), null);
+  });
+
+  test('is the highest id among the events of the session, whatever their times and kinds', (t) => {
+    const { store } = fresh(t);
+    store.insertEvent(ev({ spoolName: 'a.ev', timeNs: T0 + 9n * SEC }));
+    const later = store.insertEvent(
+      ev({ spoolName: 'b.ev', kind: 'end', detail: 'exit', timeNs: T0, argv: null }),
+    );
+    store.insertEvent(ev({ spoolName: 'c.ev', sessionId: S2, timeNs: T0 + 20n * SEC }));
+
+    assert.equal(store.latestEventIdOfSession(S1), later);
+    const observed = store.insertEvent(
+      ev({ spoolName: null, kind: 'observed', detail: '', timeNs: T0 - SEC }),
+    );
+    assert.equal(store.latestEventIdOfSession(S1), observed);
+  });
+});
+
 describe('links', () => {
   test('a link comes back as it was inserted', (t) => {
     const { store } = fresh(t);

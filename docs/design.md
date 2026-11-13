@@ -483,16 +483,23 @@ set are not part of a launch command and are not restored.
 **The directory** is the session's project directory. If it no longer exists, resume is refused.
 A session without a transcript cannot be resumed.
 
-**The guard (principle 7).** Resume runs ingest and reconcile and refuses (exit 4) when the
-session is running, naming the holder. It then takes a lock for the session; if the lock exists
-and is younger than 60 seconds, resume is refused and says how long to wait.
+**The guard (principle 7).** Resume runs ingest and reconcile. It refuses (exit 4) when the
+current boot id cannot be read, because every recorded process then looks dead and a running
+session cannot be seen ("cannot tell which sessions are running: the boot id could not be read");
+`new` resumes nothing and does not need it. It refuses when the session is running, naming the
+holder. It then takes a lock for the session; if the lock exists and is younger than 60 seconds,
+resume is refused and says how long to wait.
 The lock is removed when a `start` event for the session appears or after 60 seconds. The lock
 is an entry `resume_lock:<session id>` in the database's `kv` table, holding the time it was
 taken in nanoseconds (so its age does not depend on any file's modification time). Reading the
 lock and writing it happen in one database transaction, which no two skydecks hold at once, so
-of several resumes started together exactly one gets the lock. A lock dated 60 seconds or more
-in the future, or holding something other than a time, counts as stale too; stale locks are
-deleted, again in one transaction, at the end of every refresh.
+of several resumes started together exactly one gets the lock. Inside that transaction the
+session's latest event is read again, and resume is refused ("the session's state changed while
+preparing; run the command again") when it is not the one its decision was made on: in between,
+another skydeck may have resumed the session, and a sweep may have removed its lock because its
+start event had been ingested. A lock dated 60 seconds or more in the future, or holding
+something other than a time, counts as stale too; stale locks are deleted, again in one
+transaction, at the end of every refresh.
 
 **Where.** `--here` replaces skydeck with `claude` in the current terminal: the command line tool
 hands the directory and the argument list back to the `bin/skydeck` launcher through a handoff
