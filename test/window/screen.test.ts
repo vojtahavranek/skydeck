@@ -92,6 +92,10 @@ interface CoreState {
   cursorStyle: string | undefined;
   cursorBlink: boolean | undefined;
   cursorBlinkOption: boolean | undefined;
+  /** Mode 2026, read through the public API. */
+  synchronizedOutput: boolean;
+  /** Mode 20 (LNM), which xterm.js keeps as its `convertEol` option. */
+  newLineMode: boolean | undefined;
 }
 
 interface Core {
@@ -118,6 +122,8 @@ function coreState(term: Terminal): CoreState {
     cursorStyle: core.coreService.decPrivateModes.cursorStyle,
     cursorBlink: core.coreService.decPrivateModes.cursorBlink,
     cursorBlinkOption: core.optionsService.rawOptions.cursorBlink,
+    synchronizedOutput: term.modes.synchronizedOutputMode,
+    newLineMode: term.options.convertEol,
   };
 }
 
@@ -214,11 +220,11 @@ function line(i: number): string {
  * Colours, wide characters, 300 lines, two resizes, the alternate screen, modes 2004, 1004,
  * 1000+1006, 25 off and DECSCUSR 4. Each step is one record; no record splits a sequence.
  */
-function recordedStream(endInAlternate: boolean): Step[] {
+function recordedStream(endInAlternate: boolean, lines = 300): Step[] {
   const steps: Step[] = [{ out: '\x1b[?2004h\x1b[?1004h\x1b[?1000h\x1b[?1006h' }];
-  for (let i = 0; i < 300; i++) {
-    if (i === 120) steps.push({ size: [100, 30] });
-    if (i === 240) steps.push({ size: [70, 20] });
+  for (let i = 0; i < lines; i++) {
+    if (i === Math.floor(lines * 0.4)) steps.push({ size: [100, 30] });
+    if (i === Math.floor(lines * 0.8)) steps.push({ size: [70, 20] });
     steps.push({ out: line(i) });
   }
   steps.push({
@@ -406,6 +412,8 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
         cursorStyle: 'underline',
         cursorBlink: false,
         cursorBlinkOption: false,
+        synchronizedOutput: false,
+        newLineMode: false,
       });
       assert.equal(a.term.modes.bracketedPasteMode, true);
       assert.equal(a.term.modes.sendFocusMode, true);
@@ -494,15 +502,33 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
     },
     {
       // As in xterm.js 6.0.0: its full reset leaves the cursor hidden and the options as they are.
-      name: 'RIS resets the mouse encoding and the style, not the visibility nor mode 12',
-      bytes: '\x1b[?25l\x1b[?1006h\x1b[4 q\x1b[?12h\x1bc',
+      name: 'RIS resets the mouse encoding, the style and 2026, not the visibility nor modes 12 and 20',
+      bytes: '\x1b[?25l\x1b[?1006h\x1b[4 q\x1b[?12h\x1b[?2026h\x1b[20h\x1bc',
       expect: {
         cursorHidden: true,
         mouseEncoding: 'DEFAULT',
         cursorStyle: undefined,
         cursorBlink: undefined,
         cursorBlinkOption: true,
+        synchronizedOutput: false,
+        newLineMode: true,
       },
+    },
+    {
+      name: 'synchronized output (2026) on',
+      bytes: '\x1b[?2026h',
+      expect: { synchronizedOutput: true },
+    },
+    {
+      name: 'synchronized output on, then off',
+      bytes: '\x1b[?2026h\x1b[?2026l',
+      expect: { synchronizedOutput: false },
+    },
+    { name: 'new-line mode (20) on', bytes: '\x1b[20h', expect: { newLineMode: true } },
+    {
+      name: 'new-line mode on, then off',
+      bytes: '\x1b[20h\x1b[20l',
+      expect: { newLineMode: false },
     },
     {
       name: 'DECSTR resets visibility and style, not the mouse encoding',
@@ -626,6 +652,33 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
       assertSameScreen(a.term, b.term);
       a.screen.dispose();
       b.screen.dispose();
+    });
+  }
+
+  for (const endInAlternate of [false, true]) {
+    test(`a snapshot at every record boundary plus the records after it equals the whole stream (${endInAlternate ? 'alternate' : 'normal'} screen at the end)`, async () => {
+      const steps = recordedStream(endInAlternate, 40);
+      const whole = open({ cols: 80, rows: 24, snapshot: null });
+      await applyAll(whole.screen, steps);
+      const a = open({ cols: 80, rows: 24, snapshot: null });
+      const snaps: { cols: number; rows: number; data: string }[] = [];
+      for (const step of steps) {
+        snaps.push(await a.screen.snapshot());
+        await apply(a.screen, step);
+      }
+
+      for (const [at, snap] of snaps.entries()) {
+        const b = open({ cols: snap.cols, rows: snap.rows, snapshot: snap.data });
+        await applyAll(b.screen, steps.slice(at));
+        try {
+          assertSameScreen(whole.term, b.term);
+        } catch (error) {
+          assert.fail(`snapshot before record ${at}: ${String(error)}`);
+        }
+        b.screen.dispose();
+      }
+      whole.screen.dispose();
+      a.screen.dispose();
     });
   }
 

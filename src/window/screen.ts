@@ -6,7 +6,11 @@ import type { IBufferCell, Terminal } from '@xterm/headless';
 import type { XtermModules } from './xterm.ts';
 
 export interface ScreenSide {
-  /** Applies a record in order; resolves when applied. While replaying, query answers are dropped. */
+  /**
+   * Applies a record in order; resolves when applied. While replaying, query answers are dropped.
+   * Rejects with the error when `answer` throws for this record's answers; the record is applied
+   * all the same.
+   */
   output(bytes: Uint8Array): Promise<void>;
   /** Applies a resize in order. A size outside 1–65,535 gives a promise rejected with a RangeError. */
   resize(cols: number, rows: number): Promise<void>;
@@ -198,6 +202,9 @@ function additions(term: Terminal, t: Tracked): string {
   const style = cursorStyleParam(t);
   if (style !== null) out += `\x1b[${style} q`;
   if (t.blinkOption !== null) out += t.blinkOption ? '\x1b[?12h' : '\x1b[?12l';
+  // Read through xterm.js's public API, so they need no tracking: the screen side sets neither.
+  if (term.modes.synchronizedOutputMode) out += '\x1b[?2026h';
+  if (term.options.convertEol) out += '\x1b[20h';
   return out + cursorPosition(term);
 }
 

@@ -1823,7 +1823,7 @@ export function loadXterm(appRoot: string): Promise<XtermModules>;
 
 // src/window/screen.ts
 export interface ScreenSide {
-  /** Applies a record in order; resolves when applied. While replaying, query answers are dropped. */
+  /** Applies a record in order; resolves when applied. While replaying, query answers are dropped. Rejects with the error when `answer` throws for this record's answers; the record is applied all the same. */
   output(bytes: Uint8Array): Promise<void>;
   /** Applies a resize in order. A size outside 1–65,535 gives a promise rejected with a RangeError. */
   resize(cols: number, rows: number): Promise<void>;

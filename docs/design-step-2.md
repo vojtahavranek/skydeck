@@ -609,7 +609,8 @@ The serialise addon does not restore everything (section 21). The server adds wh
 the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own
 handling of DECSET and DECRST, DECSCUSR, RIS and DECSTR: cursor visibility (mode 25), the mouse
 encoding (SGR, mode 1006; SGR pixels, mode 1016), the cursor style (DECSCUSR) and the cursor's
-blinking (mode 12, which xterm.js keeps as an option apart from DECSCUSR); then the cursor
+blinking (mode 12, which xterm.js keeps as an option apart from DECSCUSR); and, read through
+xterm.js's API, synchronized output (mode 2026) and new-line mode (mode 20); then the cursor
 position. The addon puts the cursor one column too far left when the last row is full, so the
 position is set with CUP — except when the cursor stands past the last column (a character was
 just printed there and the next one wraps), which CUP cannot reach: then the last character of
@@ -620,8 +621,8 @@ Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain U
 (9.6).
 
 Known limits: a snapshot does not restore the scroll region (DECSTBM), the saved cursor (DECSC,
-and so where leaving the alternate screen puts the cursor) or the character sets (`ESC ( 0`);
-xterm.js's API does not show them, and Claude Code's normal screen is not known to use them
+and so where leaving the alternate screen puts the cursor), the character sets (`ESC ( 0`) or tab
+stops set by the program (HTS, TBC); xterm.js's API does not show them, and Claude Code's normal screen is not known to use them
 (check W26).
 
 A record can end inside an escape sequence or inside a UTF-8 character, and a snapshot taken
