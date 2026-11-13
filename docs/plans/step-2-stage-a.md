@@ -767,12 +767,31 @@ export function rotateLog(files: Files, path: string): void;
 //   terms/<id>.pid (a keeper): "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f 1 0"
 //   — pid, process start (field 22), boot id, and for a keeper its KEEPER_VERSION and started 0|1,
 //   separated by one space. Tasks 7 (sh), 8 (TypeScript) and 9 (python) write and read this form.
-//   The boot id and the version are any token without whitespace (tests invent boot ids); pid and
-//   process start decimal integers (safe integers). The final '\n' may be missing when read.
+//   The boot id and the version are any token without whitespace (tests invent boot ids); pid
+//   (1 or more) and process start (0 or more) decimal integers (safe integers). The final '\n' may
+//   be missing when read.
 export interface PidLine { pid: number; procStart: number; bootId: string; keeper?: { version: string; started: boolean } }
-/** Throws only for a text field that would break the line: empty, or holding whitespace. */
+/** Throws for a pid that is not a positive whole number, a process start that is not a
+ *  non-negative whole number, and an empty boot id or version or one holding whitespace. */
 export function formatPidLine(line: PidLine): string;
-export function parsePidLine(text: string): PidLine | null;
+export function parsePidLine(text: string): PidLine | null; // null for pid 0, too
+/** Design 5.5, three-valued. 'unknown' = it could not tell: no current boot id (`bootId` null),
+ *  a /proc read that failed (the platform threw), a stat line whose process start cannot be read.
+ *  'dead' = another boot, no process with the pid, or another process start.
+ *  NOTHING IS EVER REMOVED, ENDED OR GIVEN UP ON 'unknown': only 'dead' allows removing a socket or
+ *  a pid file. Who uses which:
+ *  - pidLineState, acting only on 'dead': removing a keeper's socket and pid file
+ *    (removeDeadKeeperFiles, the server's rediscovery, tasks 15 and 16); giving up a recorded
+ *    runtime directory (resolveRuntimeDir 'take': only when every keeper line in it is 'dead');
+ *    taking the server lock from the server it names (takeServerLock); `uninstall --purge`
+ *    (refuses unless every keeper is 'dead'); the keep-alive (task 7, sh) ends only when the
+ *    server's and every keeper's line is dead, never when it cannot read the boot id.
+ *  - isPidLineAlive ("known alive"): showing and counting (doctor, listKeeperLines' `alive`), and
+ *    before signalling a process (stopServer, the tests' killKeepersIn): only a process known alive
+ *    is signalled. */
+export type PidLineState = 'alive' | 'dead' | 'unknown';
+export function pidLineState(line: PidLine, proc: Proc, bootId: string | null): PidLineState;
+/** pidLineState(...) === 'alive'. */
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean;
 
 // src/window/client.ts (task 18): the command line's side of server.sock
@@ -1243,11 +1262,13 @@ export const CLAUDE_CHILD_VARIABLES: readonly string[];
  *  decimal bytes or `unlimited`, an origin that is not an absolute path). */
 export function serverEnvironment(env: Env): { env: Record<string, string>; coreSoft: string | null; origin: string | null };
 /** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). Removes
- *  SKYDECK_ENV_ORIGIN too (S2 7.4's list); SKYDECK_HOME and SKYDECK_NODE pass (the hook needs them). */
+ *  SKYDECK_ENV_ORIGIN too (S2 7.4's list); SKYDECK_HOME and SKYDECK_NODE pass (the hook needs them).
+ *  Prefix rules: WEZTERM_, KONSOLE_, VSCODE_ (S2 7.4 says why); every other name is exact. */
 export function programEnvironment(serverEnv: Readonly<Record<string, string>>, options: { cwd: string; interop: string | null }): Record<string, string>;
 // src/window/windows.ts
 /** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/, and for one
- *  with a '.' or '..' segment or a backslash in a name (it would leave the drive or split a name). */
+ *  with a segment Windows cannot have: '.' or '..', a control character, " * : < > ? | or a
+ *  backslash, a trailing space or dot. */
 export function windowsPath(linuxPath: string): string | null;
 /** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
 export function deriveProfileDir(files: Files): { ok: true; dir: string } | { ok: false; error: string };
@@ -1256,10 +1277,11 @@ export function deriveProfileDirUnder(files: Files, usersRoot: string): { ok: tr
 /** S2 5.3: the arguments for msedge.exe. */
 export function edgeArgs(port: number, token: string, profileDir: string): string[];
 /** S2 9.6: the URL to open (re-serialised), or null when it must not be opened; the re-serialised
- *  URL must also be at most 2,048 characters. */
+ *  URL must also be at most 2,048 characters and hold no '"' and no backslash. */
 export function linkToOpen(url: string): string | null;
 // src/window/flags.ts
-/** S2 12.6: words separated by whitespace, '…' and "…" group words, no escapes; an unclosed quote is an error. */
+/** S2 12.6: words separated by whitespace, '…' and "…" group words, no escapes; an unclosed quote
+ *  or a NUL is an error. */
 export function splitFlags(text: string): { ok: true; flags: string[] } | { ok: false; error: string };
 // src/claude/procstat.ts
 export function parentPidFromStat(line: string): number | null; // field 4, after the last ')'
