@@ -10,9 +10,9 @@
 const SEPARATOR = /^\s$/;
 
 /**
- * S2 12.6: words separated by whitespace, '…' and "…" group words, no escapes; an unclosed quote is
- * an error, and so is a NUL anywhere (no program can be given it). Quoted and unquoted parts next to each other form one word, and a quoted empty text is an
- * empty word, as in a shell.
+ * S2 12.6: words separated by any whitespace, '…' and "…" group words, no escapes; an unclosed
+ * quote is an error, and so is a NUL anywhere (no program can be given it). Quoted and unquoted
+ * parts next to each other form one word, and a quoted empty text is an empty word, as in a shell.
  */
 export function splitFlags(
   text: string,
