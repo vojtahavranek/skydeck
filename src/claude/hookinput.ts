@@ -61,7 +61,7 @@ export const END_DETAILS: Readonly<Record<string, SpoolEvent['detail']>> = Objec
 
 /** A spool file that cannot be used: ingest moves it to `spool/bad/` (design 5.3). */
 export class SpoolParseError extends Error {
-  constructor(message: string) {
+  constructor(message?: string) {
     super(message);
     this.name = new.target.name;
   }

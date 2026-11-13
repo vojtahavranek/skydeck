@@ -263,6 +263,15 @@ describe('parseSpoolFile: kind and detail', () => {
     assert.equal(event.rawDetail, null);
   });
 
+  test('an empty source or reason is kept as received, not taken for absent', () => {
+    const started = parse(startWith({ source: '' }));
+    assert.equal(started.detail, 'unknown');
+    assert.equal(started.rawDetail, '');
+    const ended = parse(endWith({ reason: '' }));
+    assert.equal(ended.detail, 'other');
+    assert.equal(ended.rawDetail, '');
+  });
+
   test('a source that is the name of an inherited property is unknown, not a function', () => {
     for (const source of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
       const event = parse(startWith({ source }));
@@ -641,6 +650,13 @@ describe('parseSpoolFile: files that cannot be parsed', () => {
     // A `pwd=/a` line AFTER the -- line is part of the payload, which is not JSON then.
     const text = `${good}pwd=/a\n`;
     assert.throws(() => parseText(text), SpoolParseError);
+  });
+
+  test('SpoolParseError can be made without a message, as `class … extends Error {}` can', () => {
+    const error = new SpoolParseError();
+    assert.ok(error instanceof Error);
+    assert.equal(error.name, 'SpoolParseError');
+    assert.equal(error.message, '');
   });
 
   test('SpoolParseError is an Error with a message that says what is wrong', () => {

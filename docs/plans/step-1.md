@@ -1067,10 +1067,12 @@ export class SpoolParseError extends Error {}
 
 /**
  * Parses one spool file (format: section 2.10.1). Throws SpoolParseError when: the name does not
- * match ^[0-9]+-[0-9]+-[0-9]+\.ev$; there is no line '--'; a key appears twice before it; v is not
- * 1; event is not SessionStart or SessionEnd; time_ns is not digits; boot_id is empty; claude_pid
- * is neither empty nor digits; the hook input is not a JSON object; no session id (input
- * session_id, else session_env) is a UUID. The hook writes a value that contained a newline or a
+ * match ^[0-9]+-[0-9]+-[0-9]+\.ev$; there is no line '--'; a line before it has no '='; a key
+ * appears twice before it; v is not 1; event is not SessionStart or SessionEnd; time_ns is not
+ * digits, or is larger than a signed 64-bit integer (the database column); boot_id is missing or
+ * empty; claude_pid is neither empty nor digits, or is digits that are not a safe integer; the
+ * argv_b64 of a SessionStart is not base64; the hook input is not a JSON object; no session id
+ * (input session_id, else session_env) is a UUID. The hook writes a value that contained a newline or a
  * carriage return as empty, and a claude_pid that is not all digits as empty (name part 0), so pwd,
  * session_env and entrypoint_env may be empty: empty means "unknown", never a valid value. The
  * launch command is normalised: `argv` is storableArgv(absolutizePathFlags(recorded, cwd, exists)),
