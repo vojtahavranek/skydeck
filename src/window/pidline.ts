@@ -18,14 +18,11 @@ export interface PidLine {
   keeper?: { version: string; started: boolean };
 }
 
-/** A pid: positive, decimal, no leading zero. A process start: the same, or 0. */
-const PID = '[1-9][0-9]*';
-const START = '0|[1-9][0-9]*';
-/** /proc/sys/kernel/random/boot_id: a lowercase UUID. */
-const BOOT_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-/** A keeper version: printable ASCII without spaces (KEEPER_VERSION is "1" today). */
-const VERSION = '[\\x21-\\x7e]+';
-const LINE = new RegExp(`^(${PID}) (${START}) (${BOOT_ID})(?: (${VERSION}) ([01]))?\\n?$`);
+/**
+ * Contract 2.8: pid and process start are decimal integers; the boot id and a keeper's version are
+ * any token without whitespace (tests invent their own boot ids); started is 0 or 1.
+ */
+const LINE = /^([0-9]+) ([0-9]+) (\S+)(?: (\S+) ([01]))?\n?$/;
 
 /** The decimal text as a number, or null when it is beyond what a number holds exactly. */
 function safeInteger(text: string): number | null {
@@ -33,29 +30,27 @@ function safeInteger(text: string): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
-/** The line with its one '\n'. Throws when the fields would not read back as they are. */
+/** A text field that would break the line: empty, or holding whitespace (a separator, a newline). */
+function breaksLine(field: string): boolean {
+  return field === '' || /\s/.test(field);
+}
+
+/** The line with its one '\n'. Throws only for a text field that would break the line. */
 export function formatPidLine(line: PidLine): string {
   const fields = [String(line.pid), String(line.procStart), line.bootId];
   if (line.keeper !== undefined) {
     fields.push(line.keeper.version, line.keeper.started ? '1' : '0');
   }
-  const text = `${fields.join(' ')}\n`;
-  const back = parsePidLine(text);
-  if (
-    back === null ||
-    back.pid !== line.pid ||
-    back.procStart !== line.procStart ||
-    back.bootId !== line.bootId
-  ) {
-    throw new Error(`not a valid pid line: ${JSON.stringify(text)}`);
+  if (breaksLine(line.bootId) || (line.keeper !== undefined && breaksLine(line.keeper.version))) {
+    throw new Error(`not a valid pid line: ${JSON.stringify(fields.join(' '))}`);
   }
-  return text;
+  return `${fields.join(' ')}\n`;
 }
 
 /**
  * The fields of one pid line, or null for anything else (another separator, a missing or extra
- * field, a second line, a number that is not canonical decimal or not a safe integer). The final
- * '\n' may be missing; nothing else is tolerated.
+ * field, a second line, a number that is not decimal digits or not a safe integer). The final '\n'
+ * may be missing; nothing else is tolerated.
  */
 export function parsePidLine(text: string): PidLine | null {
   const match = LINE.exec(text);

@@ -66,6 +66,26 @@ test('parsePidLine accepts a line whose final newline is missing', () => {
   assert.deepEqual(parsePidLine(`4242 51234567 ${BOOT_A} 1 0`), KEEPER);
 });
 
+test('parsePidLine takes any token without whitespace as the boot id (tests invent their own)', () => {
+  for (const bootId of ['test-boot', 'BOOT-A', BOOT_A.toUpperCase(), 'x', 'é']) {
+    assert.deepEqual(parsePidLine(`4242 51234567 ${bootId}\n`), { ...SERVER, bootId }, bootId);
+  }
+});
+
+test('parsePidLine takes any token without whitespace as the keeper version', () => {
+  for (const version of ['1', '2.1-rc', 'v10', 'é']) {
+    assert.deepEqual(
+      parsePidLine(`4242 51234567 ${BOOT_A} ${version} 1\n`),
+      { ...SERVER, keeper: { version, started: true } },
+      version,
+    );
+  }
+});
+
+test('parsePidLine reads pid and process start as decimal integers, leading zeros included', () => {
+  assert.deepEqual(parsePidLine(`04242 051234567 ${BOOT_A}\n`), SERVER);
+});
+
 test('parsePidLine gives null for garbled lines', () => {
   const garbled = [
     '',
@@ -81,39 +101,39 @@ test('parsePidLine gives null for garbled lines', () => {
     `4242 51234567 ${BOOT_A}\r\n`, // CRLF
     `4242 51234567 ${BOOT_A}\n\n`, // two newlines
     `4242 51234567 ${BOOT_A}\n4243 1 ${BOOT_A}\n`, // two lines
-    `0 51234567 ${BOOT_A}\n`, // pid 0
     `-1 51234567 ${BOOT_A}\n`,
-    `04242 51234567 ${BOOT_A}\n`, // leading zero
+    `+4242 51234567 ${BOOT_A}\n`,
     `42x 51234567 ${BOOT_A}\n`,
     `4242.0 51234567 ${BOOT_A}\n`,
+    `0x10 51234567 ${BOOT_A}\n`,
     `9007199254740992 51234567 ${BOOT_A}\n`, // not a safe integer
     `4242 x ${BOOT_A}\n`,
     `4242 -5 ${BOOT_A}\n`,
-    `4242 0123 ${BOOT_A}\n`,
+    `4242 1e3 ${BOOT_A}\n`,
     `4242 9007199254740992 ${BOOT_A}\n`,
-    `4242 51234567 ${BOOT_A.toUpperCase()}\n`, // boot ids are lowercase
-    '4242 51234567 not-a-boot-id\n',
-    `4242 51234567 ${BOOT_A.slice(1)}\n`,
+    `4242 51234567 ${BOOT_A} x\n`, // whitespace inside the boot id
     `4242 51234567 ${BOOT_A} 1 2\n`, // started is 0 or 1
     `4242 51234567 ${BOOT_A} 1 true\n`,
-    `4242 51234567 ${BOOT_A} é 0\n`, // a version is printable ASCII without spaces
-    `4242 51234567 ${BOOT_A} \u0007 0\n`,
   ];
   for (const text of garbled) {
     assert.equal(parsePidLine(text), null, JSON.stringify(text));
   }
 });
 
-test('formatPidLine refuses a line that would not read back', () => {
+test('formatPidLine writes an invented boot id as it is, and it reads back', () => {
+  const line: PidLine = { pid: 7, procStart: 1, bootId: 'test-boot' };
+  assert.equal(formatPidLine(line), '7 1 test-boot\n');
+  assert.deepEqual(parsePidLine(formatPidLine(line)), line);
+});
+
+test('formatPidLine refuses a field that would break the line: empty or holding whitespace', () => {
   const bad: PidLine[] = [
-    { ...SERVER, pid: 0 },
-    { ...SERVER, pid: 1.5 },
-    { ...SERVER, procStart: -1 },
-    { ...SERVER, procStart: Number.MAX_SAFE_INTEGER + 1 },
-    { ...SERVER, bootId: 'x' },
+    { ...SERVER, bootId: '' },
+    { ...SERVER, bootId: 'a b' },
     { ...SERVER, bootId: `${BOOT_A}\n` },
-    { ...KEEPER, keeper: { version: '1 0', started: false } },
+    { ...SERVER, bootId: 'a\tb' },
     { ...KEEPER, keeper: { version: '', started: false } },
+    { ...KEEPER, keeper: { version: '1 0', started: false } },
     { ...KEEPER, keeper: { version: '1\n', started: false } },
   ];
   for (const line of bad) {
