@@ -183,7 +183,7 @@ Each is binding for the implementer. The last column names the task that records
 | A19 | Server tests run the server in the test process through `runServer` (2.5.4) with the real platform's sockets and real keepers; only `serve`'s exit codes, its core limit and its `CLAUDECODE` refusal are tested through `bin/skydeck serve` as a child process. | Speed and direct access to the server's state; the launcher is tested where it matters. | — |
 | A20 | The start deadline (S2 7.1 `startBy`) is computed by `startDeadline` in `src/sessions/launch.ts` (2.7): for a resume, the time in the lock's value plus `LOCK_TTL_NS − LOCK_START_TOLERANCE_NS`; for `new`, the clock at `prepareNew` plus the same. `PreparedLaunch` gains `preparedAtNs`. | S2 7.1 defines the value; one function computes it for `launchPrepared` and `runRestore`. | 4 (11.1) |
 | A21 | Terminal ids are 12 lowercase hex characters from `platform.randomBytes(6)`; server ids and window ids 16 hex characters from 8 bytes. | S2 3 fixes the terminal id only. | — |
-| A22 | Validators of foreign input (`parsePageMessage`, `parseControlBody`, the keeper's `hello`) return `{ ok: false, kind }` with a fixed kind string instead of throwing, so that a caller can log the kind and never a message (S2 2, 5.2). | Node's `JSON.parse` error quotes its input. | — |
+| A22 | Validators of foreign input (`parsePageMessage`, `parseControlRequest`, the keeper's `hello`) return `{ ok: false, kind }` with a fixed kind string instead of throwing, so that a caller can log the kind and never a message (S2 2, 5.2). | Node's `JSON.parse` error quotes its input. | — |
 | A23 | `skydeck serve` and `skydeck window` share `src/window/lifecycle.ts` (task 22) for finding, starting and stopping a server; `uninstall` uses the same stop. | S2 16.2: "stops it as `skydeck window --stop` does". | — |
 | A24 | The server's tick reuses step 1's refresh rule of the interactive list (fix 4): the rows are reloaded when the refresh saved something, a live file or its trust changed, `Store.dataVersion()` moved, a tick failed, or a minute passed. | S2 10.1 names that rule. | — |
 | A25 | `result` carries `sessionId`: the session a successful `resume` or `new` started, else null. | The page must select the new terminal's row (S2 11.3), and only the server knows a new session's id. | 1 (8.2.3) |
@@ -443,8 +443,8 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
   exited, else null; `signal` is the number (1–255) of the signal that killed it, else null —
   never negative: python's `os.waitstatus_to_exitcode` returns `−N` for a death by signal `N`,
   which the keeper sends as `code: null, signal: N`. A program that ran has exactly one of the
-  two; one that never started has neither, and `notStarted` holds the reason (a failed `exec` is a
-  program that ran: `code` 127).
+  two; one that never started has neither, and `notStarted` holds the reason, never empty (a failed
+  `exec` is a program that ran: `code` 127).
 
 ### 2.4 The stand-in: `test/fixtures/standin/` (task 3)
 
@@ -2512,7 +2512,9 @@ session into a terminal pane that says "terminal view comes with task 28".
 - `web/keys.js`, `web/format.js` (task 31) and task 27's `web/list-text.js` use no DOM, so that
   node:test and the root `tsc` can load them; every module of `web/` is checked by `tsc -p web`.
 - Create: `web/tsconfig.json` (DOM library, `allowJs`, `checkJs`, `noEmit`, the vendored `.d.mts`
-  shims and `src/window/protocol.ts` in reach)
+  shims and `src/window/protocol.ts` in reach; `protocol.ts` needs an ES2024 library or later for
+  `String.prototype.isWellFormed` and `allowImportingTsExtensions` for its `.ts` import of
+  `src/claude/session-id.ts`)
 - Modify: `package.json` (`"typecheck": "tsc --noEmit && tsc --noEmit -p web"`)
 - Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`
 
