@@ -456,10 +456,31 @@ function stderrToAPipeNobodyReads(s: Sandbox): string {
 function serveSandbox(t: TestContext, python: boolean): Sandbox {
   const s = launcherSandbox(t);
   writeReportingNode(join(s.bin, 'node'));
-  if (python) {
-    s.link('python3');
-  }
-  return s;
+  assert.ok(!python || machinePython3, 'no python3 in /usr/bin or /bin');
+  // The launcher runs /usr/bin/python3 and nothing else; inside a test sandbox
+  // (SKYDECK_TEST_NO_WINDOWS=1) SKYDECK_TEST_PYTHON3 names it instead (A31). Without python3 it
+  // names a path where nothing is.
+  const python3 = python ? machinePython3 : join(s.root, 'no-python3');
+  return {
+    ...s,
+    env: (extra) =>
+      s.env({ SKYDECK_TEST_NO_WINDOWS: '1', SKYDECK_TEST_PYTHON3: python3, ...extra }),
+  };
+}
+
+/** The machine's own python3, which the cases that run the launcher's program use. */
+const machinePython3 = ['/usr/bin/python3', '/bin/python3'].find((p) => existsSync(p));
+const needsUsrBinPython3 = existsSync('/usr/bin/python3')
+  ? false
+  : 'this machine has no /usr/bin/python3';
+
+/** A fake python3 at `path` that records its arguments in `<path>.called` and exits 99. */
+function writeRecordingPython3(path: string): string {
+  const called = `${path}.called`;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done >> '${called}'\nexit 99\n`);
+  chmodSync(path, 0o755);
+  return called;
 }
 
 /** `<stateDir>/server.log` of the sandbox (SKYDECK_HOME set), with one earlier line in it. */
@@ -587,7 +608,7 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     }
   });
 
-  test('without python3 on PATH: node runs directly, with its limits as they were and no SKYDECK_CORE_SOFT', (t) => {
+  test('without python3: node runs directly, with its limits as they were and no SKYDECK_CORE_SOFT', (t) => {
     const s = serveSandbox(t, false);
 
     const r = launchReported('ulimit -S -c 0', ['serve'], s.env({ SKYDECK_CORE_SOFT: '12345' }));
@@ -768,17 +789,88 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
 
   test('any other command: python3 is never started and the limits are unchanged', (t) => {
     const s = serveSandbox(t, false);
-    const called = join(s.root, 'python3-called');
-    writeFileSync(join(s.bin, 'python3'), `#!/bin/sh\necho "$@" >> '${called}'\nexit 99\n`);
-    chmodSync(join(s.bin, 'python3'), 0o755);
+    const calledOnPath = writeRecordingPython3(join(s.bin, 'python3'));
+    const stub = join(s.root, 'stub', 'python3');
+    const called = writeRecordingPython3(stub);
 
     for (const args of [[], ['ls'], ['ls', 'serve'], ['--help'], ['Serve'], ['window']]) {
-      const r = launchReported('ulimit -S -c 0', args, s.env());
+      const r = launchReported('ulimit -S -c 0', args, s.env({ SKYDECK_TEST_PYTHON3: stub }));
 
       assert.equal(r.status, 0, `${args.join(' ')}: ${r.stderr}`);
       assert.equal(r.field('node'), 'reporting', args.join(' '));
       assert.equal(r.field('limit-soft'), r.field('before-soft'), args.join(' '));
       assert.equal(r.field('limit-hard'), r.field('before-hard'), args.join(' '));
+    }
+    assert.equal(existsSync(called), false);
+    assert.equal(existsSync(calledOnPath), false);
+  });
+});
+
+describe('bin/skydeck serve: which python3 runs (S2 2)', () => {
+  /** Hard limit 0 makes the program write its line to server.log: the proof that it ran. */
+  function ranThePythonProgram(s: Sandbox, extra: Record<string, string | undefined>): Reported {
+    const log = serverLogWithOneLine(join(s.skydeckHome, 'state'));
+    const r = launchReported('ulimit -S -c 0 && ulimit -H -c 0', ['serve'], s.env(extra));
+    assert.equal(r.field('node'), 'reporting', r.stderr);
+    assert.match(readFileSync(log, 'utf8').split('\n')[1] ?? '', LIMIT_NOT_SET);
+    return r;
+  }
+
+  test('/usr/bin/python3, never a python3 on PATH', { skip: needsUsrBinPython3 }, (t) => {
+    const s = serveSandbox(t, false);
+    const calledOnPath = writeRecordingPython3(join(s.bin, 'python3'));
+
+    ranThePythonProgram(s, { SKYDECK_TEST_PYTHON3: undefined });
+
+    assert.equal(existsSync(calledOnPath), false);
+  });
+
+  test(
+    'SKYDECK_TEST_PYTHON3 without SKYDECK_TEST_NO_WINDOWS=1 is ignored',
+    { skip: needsUsrBinPython3 },
+    (t) => {
+      const s = serveSandbox(t, false);
+      const stub = join(s.root, 'stub', 'python3');
+      const called = writeRecordingPython3(stub);
+
+      for (const mark of [undefined, '', '0', 'yes', '1 ']) {
+        ranThePythonProgram(s, { SKYDECK_TEST_NO_WINDOWS: mark, SKYDECK_TEST_PYTHON3: stub });
+      }
+
+      assert.equal(existsSync(called), false);
+    },
+  );
+
+  test('inside a test sandbox SKYDECK_TEST_PYTHON3 is the python3 that runs, as `-I -S -c <program>`', (t) => {
+    const s = serveSandbox(t, false);
+    const stub = join(s.root, 'stub', 'python3');
+    const called = writeRecordingPython3(stub);
+
+    const r = launchReported('', ['serve'], s.env({ SKYDECK_TEST_PYTHON3: stub }));
+
+    assert.equal(r.status, 99);
+    assert.deepEqual(readFileSync(called, 'utf8').split('\n').slice(0, 3), ['-I', '-S', '-c']);
+  });
+
+  test('a python3 that is missing, a directory, not executable or not an absolute path counts as none', (t) => {
+    const s = serveSandbox(t, false);
+    const notExecutable = join(s.root, 'not-executable-python3');
+    writeFileSync(notExecutable, '#!/bin/sh\nexit 99\n');
+    chmodSync(notExecutable, 0o644);
+    const relativeStub = join(s.root, 'stub', 'python3');
+    const called = writeRecordingPython3(relativeStub);
+
+    for (const python3 of [join(s.root, 'missing'), s.root, notExecutable, 'stub/python3', '']) {
+      const r = launchReported(
+        'ulimit -S -c 0',
+        ['serve'],
+        s.env({ SKYDECK_TEST_PYTHON3: python3, SKYDECK_CORE_SOFT: '12345' }),
+      );
+
+      assert.equal(r.status, 0, `${python3}: ${r.stderr}`);
+      assert.equal(r.field('node'), 'reporting', python3);
+      assert.equal(r.field('core-soft'), 'unset', python3);
+      assert.equal(r.field('limit-soft'), r.field('before-soft'), python3);
     }
     assert.equal(existsSync(called), false);
   });

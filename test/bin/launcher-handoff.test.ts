@@ -254,6 +254,7 @@ describe('bin/skydeck: the handoff', () => {
       'node',
       'cache',
       'marker',
+      'python3',
       'core_limit',
       'tmp',
       'handoff',

@@ -9,8 +9,8 @@
 #      an environment variable counts only when it is an absolute path (D26)
 #   3. `node` from PATH
 # so the launcher does not depend on the shell's default Node version. For `serve` (the window's
-# server) node is started through a short python3 program that keeps its core dumps from being
-# written (S2 2; see below).
+# server) node is started through a short program run by /usr/bin/python3 that keeps its core
+# dumps from being written (S2 2; see below).
 #
 # It also runs the handoff `skydeck resume --here` asks for (design 7.6): node writes a shell
 # fragment to the file named by $SKYDECK_HANDOFF, and once node has exited the launcher runs it, so
@@ -42,6 +42,14 @@ runnable() {
   case $1 in
     */*) [ -f "$1" ] && [ -x "$1" ] ;;
     *) command -v "$1" >/dev/null 2>&1 ;;
+  esac
+}
+
+# True if $1 is an absolute path to an executable regular file; never looked up on PATH.
+absolute_executable() {
+  case $1 in
+    /*) [ -f "$1" ] && [ -x "$1" ] ;;
+    *) return 1 ;;
   esac
 }
 
@@ -104,7 +112,8 @@ fi
 # into SKYDECK_CORE_SOFT (bytes in decimal, or `unlimited`; the keepers give it back to the
 # programs they start) and execs node. When the limit cannot be set it still execs node, without
 # SKYDECK_CORE_SOFT, and appends one line saying so to server.log (to stderr when that cannot be
-# written). Run with -I, so nothing from the environment or the working directory reaches python.
+# written). Run with -I -S, so nothing from the environment, the working directory or the site
+# directories (their .pth files) reaches python; it needs the standard library only.
 # Node must start as it would without python in between: python3 sets LC_CTYPE in its own
 # environment when the locale is C (PEP 538), so the caller's LC_CTYPE is given back; and python3
 # ignores SIGPIPE and SIGXFSZ, which would stay ignored across exec, so each is set back to what
@@ -199,6 +208,16 @@ trap 'exit 130' HUP INT TERM
 trap 'exit 131' QUIT
 SKYDECK_HANDOFF=$skydeck_handoff
 export SKYDECK_HANDOFF
+# The python3 for `serve` is the distribution's, /usr/bin/python3, and never one found on PATH: a
+# version manager's shim there (pyenv, asdf) changes PATH and sets its own variables before it
+# starts the real python, and those would reach node, the server and every program in the window.
+# Missing or not executable, it counts as no python3. Inside a test sandbox, marked by
+# SKYDECK_TEST_NO_WINDOWS=1, SKYDECK_TEST_PYTHON3 replaces it (plan A31); it must be absolute.
+skydeck_python3=/usr/bin/python3
+if [ "${SKYDECK_TEST_NO_WINDOWS-}" = 1 ] && [ -n "${SKYDECK_TEST_PYTHON3+set}" ]; then
+  skydeck_python3=$SKYDECK_TEST_PYTHON3
+fi
+
 skydeck_status=0
 # Node runs in a subshell: the variables set for it here never reach the launcher's own
 # environment, which the handoff's program inherits.
@@ -211,7 +230,7 @@ skydeck_status=0
   fi
   if [ "${1-}" != serve ]; then
     exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
-  elif runnable python3; then
+  elif absolute_executable "$skydeck_python3"; then
     # The signals this shell ignores are the ones the caller ignored (a non-interactive shell
     # ignores none by itself; the traps above catch, they do not ignore, and a subshell resets
     # them): the SigIgn mask of /proc/self/status, empty when it cannot be read.
@@ -223,12 +242,12 @@ skydeck_status=0
     fi
     # After the program: where to log, the caller's LC_CTYPE (set or not, and its value), the
     # caller's ignored signals, then node's command line.
-    exec python3 -I -c "$skydeck_core_limit" "$skydeck_state/server.log" \
+    exec "$skydeck_python3" -I -S -c "$skydeck_core_limit" "$skydeck_state/server.log" \
       "${LC_CTYPE+set}" "${LC_CTYPE-}" "$skydeck_ignored" \
       "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
   else
-    # Without python3 the server's core dumps are not prevented (S2 2); a SKYDECK_CORE_SOFT the
-    # caller had must not pass for a limit that was set.
+    # Without /usr/bin/python3 the server's core dumps are not prevented (S2 2); a
+    # SKYDECK_CORE_SOFT the caller had must not pass for a limit that was set.
     unset SKYDECK_CORE_SOFT
     exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
   fi

@@ -63,8 +63,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   protected another way: a core limit of 0 does **not** stop a piped dump — in the kernel's pipe
   path only a soft limit of exactly 1 byte aborts the dump (`fs/coredump.c`, read for Linux 6.6) —
   and `sh`'s `ulimit -c` counts in blocks and cannot say 1 byte. So the launcher starts `serve`
-  through a short python3 program passed with `python3 -I -c` (no file; python3 is already
-  required for the window) that sets the soft core limit to 1 byte, keeps the hard limit, puts
+  through a short program passed with `/usr/bin/python3 -I -S -c` (no file; python3 is already
+  required for the window). It is the distribution's python3 and never one found on `PATH`: a
+  version manager's shim there (pyenv, asdf) changes `PATH` and sets its own variables before it
+  starts the real python3, and those would reach every program in the window. The program sets the soft core limit to 1 byte, keeps the hard limit, puts
   the soft limit it found into `SKYDECK_CORE_SOFT` (its number of bytes in decimal, or
   `unlimited`), and `exec`s Node.js. Node.js starts as it would without python3 in between: the
   program gives back the caller's `LC_CTYPE` (python3 sets it in its own environment under a C
@@ -77,8 +79,8 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   child sets the soft limit back to that value before it `exec`s the program, so `claude` keeps
   the user's own limit (7.1). When the program cannot set the limit (the hard limit is 0, or
   `setrlimit` fails), it still starts Node.js, without `SKYDECK_CORE_SOFT`, and writes one line
-  saying so to `server.log` (to stderr when that file cannot be written). Without python3 the
-  launcher starts `serve` directly, and the server's dumps are not prevented (it cannot open
+  saying so to `server.log` (to stderr when that file cannot be written). Without
+  `/usr/bin/python3` (missing, or not executable) the launcher starts `serve` directly, and the server's dumps are not prevented (it cannot open
   terminals then anyway, 14). That a limit of 1 aborts the dump on this
   machine's kernel (6.18, not read) is **UNVERIFIED** (check W24).
 - **Principle 6 (nothing is destroyed or moved automatically; skydeck never stops a process)** is
@@ -203,7 +205,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 
 | Where | Change | Stage |
 |---|---|---|
-| `bin/skydeck` (launcher) | For `serve`: Node.js is started through a short program passed with `python3 -I -c` that sets the soft core limit to 1 byte and records the old one (2); without python3, directly. For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside a `NODE_COMPILE_CACHE` the launcher chose itself, so the server can drop the launcher's cache variable from the programs' environment and keep one the user set (5.2, 7.4); the program of the `--here` handoff gets no marker. Tests in `test/bin/` for both. | A |
+| `bin/skydeck` (launcher) | For `serve`: Node.js is started through a short program passed with `/usr/bin/python3 -I -S -c` (never a python3 from `PATH`) that sets the soft core limit to 1 byte and records the old one (2); without `/usr/bin/python3`, directly. For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside a `NODE_COMPILE_CACHE` the launcher chose itself, so the server can drop the launcher's cache variable from the programs' environment and keep one the user set (5.2, 7.4); the program of the `--here` handoff gets no marker. Tests in `test/bin/` for both. | A |
 | `src/platform/` | New interfaces: detached processes with a given environment, long-lived children, TCP and unix sockets, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value and the start deadline; the `Terminal` names gain `window` (11.1, 11.2). | A |
@@ -2046,7 +2048,7 @@ folder, as in manual-checks.md.
 | W21 | **Real claude**: a turn that ends in a session that is not selected shows "finished · not seen"; selecting it for 1.5 s clears it; a permission dialog shows "asks". | B | 10.3, 12.4 |
 | W22 | **Real claude**: a session started in a WSL terminal shows "running in another terminal", Resume is refused with the guard's message, and after `/exit` it resumes into the window. | A | 7.9 |
 | W23 | **Real claude**: which `CLAUDE*` variables Claude Code sets for the programs it runs — print the variable names (never their values) in a session's `!env` against a plain shell's — to confirm 7.4's list. And `skydeck window` run from a session's `!` command refuses (5.1). | A | 5.1, 7.4 |
-| W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `python3 -I -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
+| W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404 (the page suite tests this in Chromium, 17.4)? | A | 15.3 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
