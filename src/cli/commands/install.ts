@@ -3,16 +3,21 @@
 // one-time offer to mark old sessions as done (7.1, D20). Running it again changes nothing.
 //
 // The settings file is the one place where skydeck changes Claude Code's configuration
-// (principle 2), so that step adds nothing but the two entries, never touches other hooks, and
-// records what uninstall needs to undo exactly this change.
+// (principle 2), so that step adds nothing but the two entries, never touches other hooks, never
+// writes over a change it did not show, and records what uninstall needs to undo exactly this
+// change. Every check that can stop install runs before anything is created, so a refusal, or a
+// no, leaves nothing behind (ruled by the plan owner).
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 
 import { addHookEntries, hookEntry, settingsPath } from '../../claude/settings.ts';
+import type { SettingsEdit } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
+import type { Places } from '../../platform/paths.ts';
 import { NS_PER_DAY, isoFromNs } from '../../platform/time.ts';
-import type { Files } from '../../platform/types.ts';
+import type { Files, Platform } from '../../platform/types.ts';
 import type { Deck } from '../../sessions/deck.ts';
+import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import { isListed } from '../../sessions/list.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { describeError } from '../../sessions/problems.ts';
@@ -42,6 +47,22 @@ const SPEC: ArgSpec = {
 const NO_FILE = 'none';
 /** Backups made in one second take `-2`, `-3`, …; this many is more than any real use makes. */
 const MAX_BACKUPS_PER_SECOND = 1000;
+/** The settings file can hold tokens: its backup is the user's alone, from the start. */
+const BACKUP_MODE = 0o600;
+
+interface Link {
+  path: string;
+  target: string;
+}
+
+/** What install found before it changed anything. */
+interface Prepared {
+  settingsPath: string;
+  /** The settings file's text when it was read (and shown), null when there was none. */
+  text: string | null;
+  edit: SettingsEdit;
+  links: Link[];
+}
 
 export const command: Command = {
   name: 'install',
@@ -52,11 +73,22 @@ export const command: Command = {
       ctx.io.stdout(SPEC.usage);
       return EXIT.ok;
     }
-    return withDeck(ctx, { refresh: false }, async (deck) => {
-      makeLinks(ctx, deck);
-      if (!(await addHooks(ctx, deck))) {
+    const { places } = resolveDeckPlaces(ctx.platform);
+    const prepared = prepare(ctx.platform, places);
+    if (prepared.edit.changed) {
+      showChange(ctx, places.hookPath, prepared);
+      if (!isYes(await ctx.io.readLine('Add them? [y/N] '))) {
         ctx.io.stderr('settings not changed\n');
         return EXIT.failure;
+      }
+      requireUnchanged(ctx.platform.files, prepared);
+    }
+    return withDeck(ctx, { refresh: false }, async (deck) => {
+      makeLinks(ctx, deck.platform.files, prepared.links);
+      if (prepared.edit.changed) {
+        writeSettings(ctx, deck, prepared);
+      } else {
+        ctx.io.stdout('hook entries already present\n');
       }
       refreshWithProgress(ctx, deck);
       await offerFirstRun(ctx, deck);
@@ -67,8 +99,7 @@ export const command: Command = {
 };
 
 /** Each link and where install points it (uninstall.ts removes exactly these). */
-function links(deck: Deck): { path: string; target: string }[] {
-  const { places, platform } = deck;
+function linksFor(platform: Platform, places: Places): Link[] {
   return [
     { path: places.hookPath, target: join(platform.appRoot, 'bin', 'skydeck-hook') },
     { path: places.binLink, target: join(platform.appRoot, 'bin', 'skydeck') },
@@ -77,14 +108,16 @@ function links(deck: Deck): { path: string; target: string }[] {
 }
 
 /**
- * Creates the links, or points a link left by another checkout at this one. Something that is not
- * a symbolic link is never replaced (it is not skydeck's); all three are checked before any is made.
- * A link that already points where it should is not touched.
+ * Every check that can stop install, before anything is created (ruled by the plan owner): a link
+ * path that holds something that is not a symbolic link (never replaced: it is not skydeck's); a
+ * settings file that cannot be read or is not JSON; a settings path that is a symbolic link to
+ * nothing (never replaced by a file); no settings file and no Claude Code directory (never made
+ * up: most likely claudeHome or CLAUDE_CONFIG_DIR names the wrong place).
  */
-function makeLinks(ctx: Context, deck: Deck): void {
-  const { files } = deck.platform;
-  const wanted = links(deck);
-  for (const { path } of wanted) {
+function prepare(platform: Platform, places: Places): Prepared {
+  const { files } = platform;
+  const links = linksFor(platform, places);
+  for (const { path } of links) {
     const info = files.lstat(path);
     if (info !== null && info.kind !== 'symlink') {
       throw new SkydeckError(
@@ -92,58 +125,20 @@ function makeLinks(ctx: Context, deck: Deck): void {
       );
     }
   }
-  for (const { path, target } of wanted) {
-    if (files.readlink(path) === target) {
-      continue;
-    }
-    files.mkdirp(dirname(path));
-    files.symlink(target, path);
-    ctx.io.stdout(`linked ${sanitize(path)} -> ${sanitize(target)}\n`);
-  }
-}
-
-/**
- * Design 8 (3). Adds the two entries when they are missing, after showing them and asking. Returns
- * false when the user did not say yes (nothing is written then).
- */
-async function addHooks(ctx: Context, deck: Deck): Promise<boolean> {
-  const { files } = deck.platform;
-  const { claudeHome, hookPath } = deck.places;
-  const path = settingsPath(claudeHome);
+  const path = settingsPath(places.claudeHome);
   const text = readSettings(files, path);
-  const edit = addHookEntries(text, hookPath);
-  if (!edit.changed) {
-    ctx.io.stdout('hook entries already present\n');
-    return true;
-  }
-  if (text === null && files.stat(claudeHome)?.kind !== 'dir') {
-    // Most likely claudeHome or CLAUDE_CONFIG_DIR names the wrong place: do not make it up.
+  if (text === null && files.lstat(path)?.kind === 'symlink') {
     throw new SkydeckError(
-      `Claude Code's directory ${claudeHome} does not exist; run claude once, or set claudeHome`,
+      `${path} is a symbolic link to ${files.readlink(path) ?? '?'}, which does not exist; ` +
+        'create that file or remove the link, then run skydeck install again',
     );
   }
-  // The exact groups that will be appended, by event; jsonText escapes, rather than drops, any
-  // character of the path a terminal would act on, so what is shown is what is written.
-  ctx.io.stderr(`skydeck will add these hook entries to ${sanitize(path)}:\n`);
-  ctx.io.stderr(
-    jsonText(Object.fromEntries(edit.events.map((event) => [event, [hookEntry(hookPath, event)]]))),
-  );
-  if (!isYes(await ctx.io.readLine('Add them? [y/N] '))) {
-    return false;
+  if (text === null && files.stat(places.claudeHome)?.kind !== 'dir') {
+    throw new SkydeckError(
+      `Claude Code's directory ${places.claudeHome} does not exist; run claude once, or set claudeHome`,
+    );
   }
-  const backup = backUp(deck, path, text);
-  files.writeText(path, edit.text);
-  const { store } = deck;
-  store.transaction(() => {
-    store.setKv('settings_backup', backup);
-    store.setKv('settings_hash', sha256(edit.text));
-  });
-  ctx.io.stdout(
-    backup === NO_FILE
-      ? `added the hook entries to ${sanitize(path)} (a new file)\n`
-      : `added the hook entries to ${sanitize(path)}; the file as it was is kept in ${sanitize(backup)}\n`,
-  );
-  return true;
+  return { settingsPath: path, text, edit: addHookEntries(text, places.hookPath), links };
 }
 
 function readSettings(files: Files, path: string): string | null {
@@ -155,11 +150,94 @@ function readSettings(files: Files, path: string): string | null {
 }
 
 /**
+ * The exact groups that will be appended, by event. jsonText escapes, rather than drops, any
+ * character of the path a terminal would act on, so what is shown is what is written.
+ */
+function showChange(ctx: Context, hookPath: string, prepared: Prepared): void {
+  const added = Object.fromEntries(
+    prepared.edit.events.map((event) => [event, [hookEntry(hookPath, event)]]),
+  );
+  ctx.io.stderr(`skydeck will add these hook entries to ${sanitize(prepared.settingsPath)}:\n`);
+  ctx.io.stderr(jsonText(added));
+}
+
+/**
+ * The settings file must still be what was read and shown: the user may have saved it while the
+ * question was open (or another session's /model did), and writing the old text plus the entries
+ * would undo that change.
+ */
+function requireUnchanged(files: Files, prepared: Prepared): void {
+  if (readSettings(files, prepared.settingsPath) !== prepared.text) {
+    throw new SkydeckError(
+      `${prepared.settingsPath} changed while the question was open; nothing was written; ` +
+        'run skydeck install again',
+    );
+  }
+}
+
+/**
+ * Creates the links, or points a link left by another checkout at this one. A link that already
+ * points where it should is not touched. (prepare() has refused anything that is not a link.)
+ */
+function makeLinks(ctx: Context, files: Files, links: readonly Link[]): void {
+  for (const { path, target } of links) {
+    if (files.readlink(path) === target) {
+      continue;
+    }
+    try {
+      files.mkdirp(dirname(path));
+      files.symlink(target, path);
+    } catch (error) {
+      throw new SkydeckError(`cannot create the link ${path} (${describeError(error)})`);
+    }
+    ctx.io.stdout(`linked ${sanitize(path)} -> ${sanitize(target)}\n`);
+  }
+}
+
+/**
+ * Design 8 (3) after the yes: checks once more, right before writing, that the file is what was
+ * shown; keeps it in a new backup; writes the entries; records the backup and the hash. A write
+ * that fails is an ordinary error naming the file, and the backup this run made of the unchanged
+ * file is removed again.
+ */
+function writeSettings(ctx: Context, deck: Deck, prepared: Prepared): void {
+  const { files } = deck.platform;
+  const { settingsPath: path, text, edit } = prepared;
+  requireUnchanged(files, prepared);
+  const backup = backUp(deck, path, text);
+  try {
+    files.writeText(path, edit.text);
+  } catch (error) {
+    let kept = '';
+    if (backup !== NO_FILE) {
+      try {
+        files.remove(backup);
+      } catch {
+        kept = `; its backup stays in ${backup}`;
+      }
+    }
+    throw new SkydeckError(
+      `cannot write ${path} (${describeError(error)}); it was not changed${kept}`,
+    );
+  }
+  const { store } = deck;
+  store.transaction(() => {
+    store.setKv('settings_backup', backup);
+    store.setKv('settings_hash', sha256(edit.text));
+  });
+  ctx.io.stdout(
+    backup === NO_FILE
+      ? `added the hook entries to ${sanitize(path)} (a new file)\n`
+      : `added the hook entries to ${sanitize(path)}; the file as it was is kept in ${sanitize(backup)}\n`,
+  );
+}
+
+/**
  * Ruled by the plan owner: every install that changes the file first keeps what is there in a new
  * file `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC, the platform clock; `-2`, `-3`, …
- * when that name is taken), readable by the user only, as the file can hold secrets. An older
- * backup is never touched or reused: restoring it could undo what the user changed since. Returns
- * what uninstall may restore: the new backup's path, or NO_FILE when there was no file.
+ * when that name is taken), created with mode 600 from the start. An older backup is never touched
+ * or reused: restoring it could undo what the user changed since. Returns what uninstall may
+ * restore: the new backup's path, or NO_FILE when there was no file.
  */
 function backUp(deck: Deck, path: string, text: string | null): string {
   if (text === null) {
@@ -172,12 +250,19 @@ function backUp(deck: Deck, path: string, text: string | null): string {
   const base = `${path}.skydeck-backup-${stamp}`;
   for (let n = 1; n <= MAX_BACKUPS_PER_SECOND; n++) {
     const backup = n === 1 ? base : `${base}-${n}`;
-    if (files.createExclusive(backup, text)) {
-      files.chmod(backup, 0o600);
+    let created: boolean;
+    try {
+      created = files.createExclusive(backup, text, BACKUP_MODE);
+    } catch (error) {
+      throw new SkydeckError(
+        `cannot write a backup of ${path} (${describeError(error)}); it was not changed`,
+      );
+    }
+    if (created) {
       return backup;
     }
   }
-  throw new SkydeckError(`cannot find a free name for a backup beside ${path}`);
+  throw new SkydeckError(`cannot find a free name for a backup of ${path}; it was not changed`);
 }
 
 /**

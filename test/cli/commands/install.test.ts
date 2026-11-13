@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   statSync,
   symlinkSync,
@@ -14,8 +16,11 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 import { command } from '../../../src/cli/commands/install.ts';
+import { main } from '../../../src/cli/main.ts';
 import { hookEntry } from '../../../src/claude/settings.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
+import type { Files } from '../../../src/platform/types.ts';
+import { capture } from '../../helpers/capture.ts';
 import {
   backupAtT0,
   backups,
@@ -42,6 +47,22 @@ const kv = (d: TestPlatform, key: 'settings_hash' | 'settings_backup' | 'first_r
   withStore(d.places, (store) => store.getKv(key));
 
 const backupOf = (d: TestPlatform): string => backupAtT0(d.places);
+
+const exists = (path: string): boolean => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** A refusal left nothing behind: no skydeck directory, database or link of its own. */
+function nothingCreated(d: TestPlatform): void {
+  assert.deepEqual(readdirSync(d.sandbox.skydeckHome), []);
+  assert.equal(exists(d.places.hookPath), false);
+  assert.equal(exists(d.places.nodeLink), false);
+}
 
 describe('install: links and hook entries', () => {
   test('with no settings file and the answer y: the three links, the two entries, backup "none" and the hash', async (t) => {
@@ -92,9 +113,10 @@ describe('install: links and hook entries', () => {
     assert.equal(kv(d, 'settings_hash'), sha256(text));
   });
 
-  test('the backup is readable by the user only: settings can hold secrets', async (t) => {
+  test('the backup is readable by the user only, whatever the mode of the settings file', async (t) => {
     const d = testPlatform(t);
-    writeFileSync(settingsFile(d.places), '{"env":{"TOKEN":"x"}}', { mode: 0o600 });
+    writeFileSync(settingsFile(d.places), '{"env":{"TOKEN":"x"}}');
+    chmodSync(settingsFile(d.places), 0o644); // the usual mode, whatever the umask
 
     await run(d.platform, ['install'], { lines: ['y'] });
 
@@ -105,7 +127,7 @@ describe('install: links and hook entries', () => {
     ['the answer n', ['n']],
     ['no answer (no terminal)', []],
   ] as const) {
-    test(`${why}: exit 1, settings not changed, no backup and no hash`, async (t) => {
+    test(`${why}: exit 1, settings not changed, nothing created`, async (t) => {
       const d = testPlatform(t);
       writeFileSync(settingsFile(d.places), '{"model":"opus"}');
 
@@ -115,8 +137,8 @@ describe('install: links and hook entries', () => {
       assert.ok(r.stderr.endsWith('Add them? [y/N] settings not changed\n'), r.stderr);
       assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"opus"}');
       assert.deepEqual(backups(d.places), []);
-      assert.equal(kv(d, 'settings_hash'), null);
-      assert.equal(kv(d, 'settings_backup'), null);
+      nothingCreated(d);
+      assert.equal(exists(d.places.binLink), false);
     });
   }
 
@@ -200,7 +222,7 @@ describe('install: links and hook entries', () => {
     });
   });
 
-  test('a settings file that is not JSON: exit 1, nothing written to it', async (t) => {
+  test('a settings file that is not JSON: exit 1, nothing written to it, nothing created', async (t) => {
     const d = testPlatform(t);
     writeFileSync(settingsFile(d.places), '{"model":');
 
@@ -210,9 +232,10 @@ describe('install: links and hook entries', () => {
     assert.match(r.stderr, /settings\.json is not valid JSON/);
     assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":');
     assert.deepEqual(backups(d.places), []);
+    nothingCreated(d);
   });
 
-  test('a Claude Code directory that does not exist is not created: exit 1 naming it', async (t) => {
+  test('a Claude Code directory that does not exist is not created: exit 1 naming it, nothing created', async (t) => {
     const d = testPlatform(t, { env: (s) => ({ CLAUDE_CONFIG_DIR: join(s.root, 'no-claude') }) });
 
     const r = await run(d.platform, ['install'], { lines: ['y'] });
@@ -220,9 +243,11 @@ describe('install: links and hook entries', () => {
     assert.equal(r.code, 1);
     assert.match(r.stderr, /no-claude/);
     assert.equal(existsSync(join(d.sandbox.root, 'no-claude')), false);
+    nothingCreated(d);
+    assert.equal(exists(d.places.binLink), false);
   });
 
-  test('a file that is not a symbolic link where a link goes is left alone: exit 1, settings untouched', async (t) => {
+  test('a file that is not a symbolic link where a link goes is left alone: exit 1, nothing created', async (t) => {
     const d = testPlatform(t);
     mkdirSync(join(d.sandbox.home, '.local', 'bin'), { recursive: true });
     writeFileSync(d.places.binLink, '#!/bin/sh\necho mine\n');
@@ -233,7 +258,111 @@ describe('install: links and hook entries', () => {
     assert.match(r.stderr, /not a symbolic link/);
     assert.equal(readFileSync(d.places.binLink, 'utf8'), '#!/bin/sh\necho mine\n');
     assert.equal(existsSync(settingsFile(d.places)), false);
-    assert.equal(existsSync(d.places.hookPath), false);
+    nothingCreated(d);
+  });
+
+  test('a settings path that is a symbolic link to nothing is refused, naming the link and its target', async (t) => {
+    const d = testPlatform(t);
+    const target = join(d.sandbox.root, 'dotfiles', 'claude-settings.json');
+    symlinkSync(target, settingsFile(d.places));
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 1);
+    assert.ok(r.stderr.includes(settingsFile(d.places)), r.stderr);
+    assert.ok(r.stderr.includes(target), r.stderr);
+    assert.equal(readlinkSync(settingsFile(d.places)), target);
+    assert.deepEqual(r.prompts, []);
+    nothingCreated(d);
+  });
+
+  test('a settings file changed while the question was open: exit 1, the change kept, nothing written or created', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+    const captured = capture({ lines: ['y'] });
+    const io = {
+      ...captured.io,
+      readLine: (prompt: string) => {
+        // The user saves the file (or another session's /model does) before answering.
+        writeFileSync(settingsFile(d.places), '{"model":"sonnet","theme":"dark"}');
+        return captured.io.readLine(prompt);
+      },
+    };
+
+    const code = await main(['install'], { io, platform: d.platform });
+
+    assert.equal(code, 1);
+    assert.match(captured.stderr(), /settings\.json changed while the question was open/);
+    assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"sonnet","theme":"dark"}');
+    assert.deepEqual(backups(d.places), []);
+    nothingCreated(d);
+  });
+
+  test('a settings file changed after the answer, before the write: still never written over', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+    const real = d.platform.files;
+    const files: Files = {
+      ...real,
+      symlink(target: string, path: string): void {
+        // Saved by someone else while install makes its links, after the user said yes.
+        writeFileSync(settingsFile(d.places), '{"model":"sonnet"}');
+        real.symlink(target, path);
+      },
+    };
+
+    const r = await run({ ...d.platform, files }, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /changed while the question was open/);
+    assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"sonnet"}');
+    assert.deepEqual(backups(d.places), []);
+  });
+
+  test('a settings file that cannot be written: a plain error naming it, and no backup left behind', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+    const real = d.platform.files;
+    const files: Files = {
+      ...real,
+      writeText(path: string, text: string, mode?: number): void {
+        if (path === settingsFile(d.places)) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        real.writeText(path, text, mode);
+      },
+    };
+
+    for (const attempt of [1, 2]) {
+      const r = await run({ ...d.platform, files }, ['install'], { lines: ['y'] });
+      assert.equal(r.code, 1, `attempt ${attempt}`);
+      assert.match(r.stderr, /cannot write .*settings\.json \(EACCES\); it was not changed/);
+      assert.doesNotMatch(r.stderr, /internal error/);
+    }
+    assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"opus"}');
+    assert.deepEqual(backups(d.places), []);
+    withStore(d.places, (store) => assert.equal(store.getKv('settings_hash'), null));
+  });
+
+  test('a link that cannot be made: a plain error naming it', async (t) => {
+    const d = testPlatform(t);
+    const real = d.platform.files;
+    const files: Files = {
+      ...real,
+      symlink(target: string, path: string): void {
+        if (path === d.places.binLink) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        real.symlink(target, path);
+      },
+    };
+
+    const r = await run({ ...d.platform, files }, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /cannot create the link .*\.local\/bin\/skydeck \(EACCES\)/);
+    assert.doesNotMatch(r.stderr, /internal error/);
+    assert.equal(existsSync(settingsFile(d.places)), false);
   });
 
   test('a symbolic link from an earlier checkout is pointed at this one', async (t) => {
