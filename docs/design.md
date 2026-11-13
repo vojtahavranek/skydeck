@@ -222,8 +222,9 @@ It keeps no text of any message.
 
 A transcript whose `entrypoint` is not `cli` is recorded but its session is never listed.
 A known transcript whose file has disappeared is marked missing with the time it was noticed.
-A folder that cannot be read is skipped, so that one odd entry never stops a command; the
-transcripts in it then look as if they had disappeared.
+A folder or file that cannot be read does not stop the scan: the rest is read, and the listing is
+then partial, so that refresh marks no transcript missing; `skydeck doctor` names what could not
+be read (8).
 
 The first scan on a machine reads everything once (hundreds of megabytes take some seconds); on a
 terminal it shows a one-line progress indicator on stderr.

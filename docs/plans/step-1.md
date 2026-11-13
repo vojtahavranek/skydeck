@@ -1141,13 +1141,21 @@ export interface TranscriptFile { path: string; sessionId: string; size: number;
  * UUID + '.jsonl', regular files only. Sorted by path. Folder names are never parsed.
  *
  * Ruled at review: "regular" is read with lstat, so a symbolic link to a file is not listed; a
- * symbolic link to a project folder is followed (a relocated folder still counts). Sorted by the
- * whole path in UTF-16 code units, not by folder and then name. The name's id must satisfy
- * `isSessionId` (2.5.4). An entry that cannot be looked at or listed (a symbolic link loop,
- * permissions) is skipped and the rest is listed; so is an unreadable `projects` directory
- * ([]): nothing in one folder or file may stop a refresh. A listing can therefore be partial.
+ * symbolic link to a project folder is followed (a relocated folder still counts). `files` is sorted
+ * by the whole path in UTF-16 code units, not by folder and then name. The name's id must satisfy
+ * `isSessionId` (2.5.4).
+ *
+ * Ruled at review: it never throws for one bad entry. A folder or file that cannot be looked at or
+ * listed (a symbolic link loop, permissions), or an unreadable `projects` directory, goes into
+ * `unreadable` (sorted by path, with the error code) and the rest is listed. A listing with
+ * anything in `unreadable` is partial, and what is missing from it must not be taken for deleted:
+ * task 8 marks no transcript missing then, and `doctor` (task 17) reports the entries. A path that
+ * is simply not there (ENOENT) is not unreadable.
  */
-export function listTranscriptFiles(files: Files, claudeHome: string): TranscriptFile[];
+export function listTranscriptFiles(files: Files, claudeHome: string): { files: TranscriptFile[]; unreadable: UnreadableEntry[] };
+
+/** A folder or file that could not be looked at or listed, and why: the error code ('ELOOP', 'EACCES'), else 'unknown error'. */
+export interface UnreadableEntry { path: string; reason: string }
 
 export interface TranscriptFacts {
   firstCwd: string | null;        // first record carrying a non-empty string cwd (ruled at review: an empty one is no value)
@@ -2786,7 +2794,8 @@ export function isAlive(p: ProcessKey, proc: Proc, currentBootId: string | null)
 export function isLiveFileTrusted(f: LiveFile, proc: Proc): boolean;
 // src/claude/transcripts.ts
 export interface TranscriptFile { path: string; sessionId: string; size: number; mtimeNs: Ns }
-export function listTranscriptFiles(files: Files, claudeHome: string): TranscriptFile[];
+export interface UnreadableEntry { path: string; reason: string }
+export function listTranscriptFiles(files: Files, claudeHome: string): { files: TranscriptFile[]; unreadable: UnreadableEntry[] };
 export interface TranscriptFacts {
   firstCwd: string | null; entrypoint: string | null; aiTitle: string | null; customTitle: string | null;
   firstRecordNs: Ns | null; lastRecordNs: Ns | null; lastUserNs: Ns | null;
@@ -2815,8 +2824,11 @@ export function readTranscript(files: Files, file: TranscriptFile, previous: { f
 - Layout: `C/projects/-home-dev-projects-demo/<S1>.jsonl`, `C/projects/other/<S2>.jsonl`,
   `C/projects/-home-dev-projects-demo/<S1>/subagents/agent-1.jsonl`, `…/<S1>.jsonl.bak`,
   `…/<S1> (copy).jsonl`, `…/<S1 uppercased>.jsonl`, `…/notes.txt`, a directory `…/<S3>.jsonl/` →
-  `listTranscriptFiles` returns exactly the first two, sorted by path, with `sessionId`, `size`, `mtimeNs`.
-  `C/projects` missing → `[]`.
+  `listTranscriptFiles(...).files` is exactly the first two, sorted by path, with `sessionId`, `size`, `mtimeNs`;
+  `unreadable` is `[]`. `C/projects` missing → `{ files: [], unreadable: [] }`.
+- A symbolic link loop in `C/projects`, a folder of mode `000` (skipped when root) and a failing `stat`, `list` or `lstat` →
+  the rest is listed and the entry is in `unreadable` with its path and error code (`ELOOP`, `EACCES`); `projects` itself unreadable →
+  `{ files: [], unreadable: [{ path: <projects>, reason }] }`; an entry that is gone (`stat` null) is not reported.
 - `foldLines(EMPTY_FACTS, [user line cwd '/w', entrypoint 'cli', timestamp '2026-11-12T09:00:00.000Z'])` →
   `firstCwd '/w'`, `entrypoint 'cli'`, `firstRecordNs = lastRecordNs = lastUserNs = T0`,
   `lastTurnRole 'user'`.
@@ -3045,7 +3057,9 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   the row's facts and `sizeRead`, or null) → `saveTranscript` with `missingSinceNs null`, then
   for each `prKey(url)` that is non-null: `ensurePr`, `attachPr(sessionId, url, 'auto', now)`
   (counting distinct new attachments). Rows whose path was not listed and `missingSinceNs` null
-  get `missingSinceNs = now`. At the end `setKv('first_scan_done', '1')`.
+  get `missingSinceNs = now` — except when `listTranscriptFiles` reported any `unreadable` entry:
+  the listing is partial, so in that refresh no row is marked missing (the scan still reads what it
+  can; `missing` is 0). At the end `setKv('first_scan_done', '1')`.
 
 **Test cases** (`testDeck(t)`; `put(fields, seq)` writes `spoolText(fields)` as `spoolName(fields, seq)` into `spoolDir`; `P` = pid 4242 / procStart 51234567 / `BOOT_A`)
 
@@ -3101,6 +3115,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 5. Rewrite S1's file shorter → re-read from the start; facts come only from the new content.
 6. Delete S2's file → its row `missingSinceNs` = clock now, `missing 1`; scan again at a later clock → `missingSinceNs` unchanged;
    file restored → `missingSinceNs null`.
+6a. A project folder that cannot be read (a failing `list` through a wrapped `Files`) holding S2's transcript → S2's row is NOT marked
+   missing, `missing 0`; the other transcripts are still read.
 7. `pr-link` urls `https://github.com/O/R/pull/7/files`, `https://github.com/o/r/pull/8`, `https://github.com/o/r/pull/7`, `https://example.com/x` →
    `prs()` urls `['https://github.com/o/r/pull/7', 'https://github.com/o/r/pull/8']`; both attached to S1 with origin `auto`; `prsAttached 2`.
 8. `detachPr(S1, …/pull/7)`, then rewrite the file shorter with the same `pr-link` (full re-read) → still detached.
@@ -3958,7 +3974,9 @@ export const command: Command;   // in each of the three files
   (`hookStatus`); `hookPath` not resolving to a regular file (`files.stat` kind `file`); `checkNodeVersion(platform.nodeVersion)`
   (from `bin/node-version.mjs`) returns a message; the database not writable (`setKv('doctor_probe', <now>)`
   throws); files in `spool/bad/`; more than 1000 files in the spool; `gh --version` not found;
-  `gh auth status` exit code ≠ 0; terminal `wezterm` and `wezterm cli list` fails. Info: spool
+  `gh auth status` exit code ≠ 0; terminal `wezterm` and `wezterm cli list` fails; an entry of
+  `<claudeHome>/projects` that cannot be read (`listTranscriptFiles(platform.files, deck.places.claudeHome).unreadable`, one
+  line each: `transcripts: cannot read <path> (<reason>)`, the path through the sanitiser). Info: spool
   count, age of the last event (`last event <formatAge> ago` or `no events yet`), the last 5 lines
   of `hook.log` (or `hook.log is empty`), `scripted runs dropped: <n>`.
 
@@ -3988,14 +4006,14 @@ export const command: Command;   // in each of the three files
 1. After a complete install with one event → 0; every line starts with `ok` or `info`; contains `info     last event`.
 2. Each problem alone → 1 with a `problem` line: no hook entries; `H` dangling (re-point `H` at a temporary file, then delete that file — never touch the repository's `bin/skydeck-hook`);
    `nodeVersion '24.11.0'`; a file in `spool/bad/`; 1001 files in the spool; `gh` not found; `gh auth status` code 1;
-   config terminal `wezterm` with `wezterm cli list` code 1.
+   config terminal `wezterm` with `wezterm cli list` code 1; a symbolic link loop in `<claudeHome>/projects` (`transcripts: cannot read … (ELOOP)`).
 3. `hook.log` with 7 lines → output contains its last 5 lines, not the first 2.
 4. `dropped_scripted 3` → `info     scripted runs dropped: 3`.
 
 **Steps**
 - [ ] Write the three test files. `npm test` → fails.
 - [ ] Implement the three commands.
-- [ ] Update design 8 (D20). `npm run format`; `npm run check` → pass. Commit `Add install, uninstall and doctor`; open the PR.
+- [ ] Update design 8 (D20; and the list of what `doctor` reports: a project folder or transcript that cannot be read, see 5.6). `npm run format`; `npm run check` → pass. Commit `Add install, uninstall and doctor`; open the PR.
 
 **Done when:** all cases pass; install twice changes once; foreign hook entries always survive;
 nothing but the two hook entries is ever written into Claude Code's settings.

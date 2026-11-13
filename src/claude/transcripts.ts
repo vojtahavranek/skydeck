@@ -5,7 +5,7 @@
 import { join } from 'node:path';
 
 import { nsFromIso } from '../platform/time.ts';
-import type { FileInfo, Files, Ns } from '../platform/types.ts';
+import type { Files, Ns } from '../platform/types.ts';
 import { isSessionId } from './live.ts';
 
 export interface TranscriptFile {
@@ -17,46 +17,61 @@ export interface TranscriptFile {
 
 const EXTENSION = '.jsonl';
 
-/** The names in a directory; none when it cannot be listed (permissions, a symbolic link loop). */
-function listOrEmpty(files: Files, dir: string): string[] {
+/** A folder or file that could not be looked at or listed, and why (the error code, e.g. 'ELOOP'). */
+export interface UnreadableEntry {
+  path: string;
+  reason: string;
+}
+
+function reasonOf(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && code !== '' ? code : 'unknown error';
+}
+
+/** `look()`, or undefined (after noting `path` in `unreadable`) when it throws. */
+function attempt<T>(unreadable: UnreadableEntry[], path: string, look: () => T): T | undefined {
   try {
-    return files.list(dir);
-  } catch {
-    return [];
+    return look();
+  } catch (error) {
+    unreadable.push({ path, reason: reasonOf(error) });
+    return undefined;
   }
 }
 
-/** The file's info, or null when it is not there or cannot be looked at. */
-function infoOrNull(look: () => FileInfo | null): FileInfo | null {
-  try {
-    return look();
-  } catch {
-    return null;
-  }
-}
+const byPath = (a: { path: string }, b: { path: string }): number =>
+  a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
 
 /**
  * <claudeHome>/projects/<folder>/<uuid>.jsonl, exactly two levels deep, name exactly a lowercase
- * UUID + '.jsonl', regular files only (a symbolic link to a file is not one; a symbolic link to a
- * folder is followed, so that a relocated project folder still counts). Sorted by path. Folder
- * names are never parsed. An entry that cannot be looked at or listed (a symbolic link loop,
- * permissions) is skipped, and the rest is listed: nothing in one folder may stop a refresh.
+ * UUID + '.jsonl' (`isSessionId`), regular files only (a symbolic link to a file is not one; a
+ * symbolic link to a folder is followed, so that a relocated project folder still counts). `files`
+ * is sorted by path. Folder names are never parsed.
+ *
+ * Never throws for one bad entry: a folder or file that cannot be looked at or listed (a symbolic
+ * link loop, permissions), or an unreadable `projects` directory, is noted in `unreadable` (sorted
+ * by path, each with the error code) and the rest is listed. A listing with anything in
+ * `unreadable` is partial: what is missing from it must not be taken for deleted.
  */
-export function listTranscriptFiles(files: Files, claudeHome: string): TranscriptFile[] {
+export function listTranscriptFiles(
+  files: Files,
+  claudeHome: string,
+): { files: TranscriptFile[]; unreadable: UnreadableEntry[] } {
   const root = join(claudeHome, 'projects');
   const found: TranscriptFile[] = [];
-  for (const folder of listOrEmpty(files, root)) {
+  const unreadable: UnreadableEntry[] = [];
+  for (const folder of attempt(unreadable, root, () => files.list(root)) ?? []) {
     const folderPath = join(root, folder);
-    if (infoOrNull(() => files.stat(folderPath))?.kind !== 'dir') {
+    const folderInfo = attempt(unreadable, folderPath, () => files.stat(folderPath));
+    if (folderInfo?.kind !== 'dir') {
       continue;
     }
-    for (const name of listOrEmpty(files, folderPath)) {
+    for (const name of attempt(unreadable, folderPath, () => files.list(folderPath)) ?? []) {
       const sessionId = name.endsWith(EXTENSION) ? name.slice(0, -EXTENSION.length) : '';
       if (!isSessionId(sessionId)) {
         continue;
       }
       const path = join(folderPath, name);
-      const info = infoOrNull(() => files.lstat(path));
+      const info = attempt(unreadable, path, () => files.lstat(path));
       if (info?.kind !== 'file') {
         continue;
       }
@@ -64,7 +79,7 @@ export function listTranscriptFiles(files: Files, claudeHome: string): Transcrip
     }
   }
   // By the whole path (code units): 'a-b/x' sorts before 'a/x', though 'a' sorts before 'a-b'.
-  return found.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return { files: found.sort(byPath), unreadable: unreadable.sort(byPath) };
 }
 
 export interface TranscriptFacts {

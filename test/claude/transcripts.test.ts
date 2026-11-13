@@ -91,7 +91,7 @@ test('listTranscriptFiles returns the uuid.jsonl files two levels deep, sorted b
   writeFileSync(join(demo, S1, 'subagents', `${S3}.jsonl`), 'three levels\n');
   writeFileSync(join(c, 'projects', 'README.md'), 'text\n');
 
-  const listed = listTranscriptFiles(platform.files, c);
+  const { files: listed, unreadable } = listTranscriptFiles(platform.files, c);
   assert.deepEqual(
     listed.map((f) => [f.path, f.sessionId, f.size]),
     [
@@ -101,6 +101,7 @@ test('listTranscriptFiles returns the uuid.jsonl files two levels deep, sorted b
   );
   assert.equal(listed[0]?.mtimeNs, statSync(join(demo, `${S1}.jsonl`), { bigint: true }).mtimeNs);
   assert.equal(listed[1]?.mtimeNs, statSync(join(other, `${S2}.jsonl`), { bigint: true }).mtimeNs);
+  assert.deepEqual(unreadable, []);
 });
 
 test('listTranscriptFiles sorts by the whole path, not by folder name then file name', (t) => {
@@ -111,7 +112,7 @@ test('listTranscriptFiles sorts by the whole path, not by folder name then file 
   mkdirSync(join(projects, 'a-b'), { recursive: true });
   writeFileSync(join(projects, 'a', `${S1}.jsonl`), '\n');
   writeFileSync(join(projects, 'a-b', `${S1}.jsonl`), '\n');
-  const paths = listTranscriptFiles(platform.files, places.claudeHome).map((f) => f.path);
+  const paths = listTranscriptFiles(platform.files, places.claudeHome).files.map((f) => f.path);
   assert.deepEqual(paths, [...paths].sort());
   assert.deepEqual(paths, [
     join(projects, 'a-b', `${S1}.jsonl`),
@@ -130,13 +131,19 @@ test('listTranscriptFiles ignores symbolic links to files, follows a symbolic li
   symlinkSync(real, join(projects, 'moved'));
   symlinkSync(join(sandbox.root, 'outside.jsonl'), join(projects, 'plain', `${S1}.jsonl`));
   symlinkSync(join(projects, 'nowhere'), join(projects, 'plain', `${S3}.jsonl`));
+  const { files, unreadable } = listTranscriptFiles(platform.files, places.claudeHome);
   assert.deepEqual(
-    listTranscriptFiles(platform.files, places.claudeHome).map((f) => f.path),
+    files.map((f) => f.path),
     [join(projects, 'moved', `${S2}.jsonl`)],
   );
+  // A link that is not a transcript, or points nowhere, is not something skydeck failed to read.
+  assert.deepEqual(unreadable, []);
 });
 
-/** `files`, except that `method` throws (as the real one does for ELOOP or EACCES) on a path containing `needle`. */
+/**
+ * `files`, except that `method` throws on a path containing `needle`, with an error that has `code`
+ * (as the real ones do for ELOOP or EACCES), or none when `code` is ''.
+ */
 function failingOn(
   files: Files,
   method: 'stat' | 'lstat' | 'list',
@@ -148,7 +155,9 @@ function failingOn(
       if (prop !== method) return Reflect.get(target, prop, receiver) as unknown;
       return (path: string) => {
         if (path.includes(needle)) {
-          throw Object.assign(new Error(`${code}: ${path}`), { code });
+          throw code === ''
+            ? new Error(`failed: ${path}`)
+            : Object.assign(new Error(`${code}: ${path}`), { code });
         }
         return target[method](path);
       };
@@ -156,7 +165,17 @@ function failingOn(
   });
 }
 
-test('listTranscriptFiles skips an entry whose stat, list or lstat fails, and lists the rest', (t) => {
+/** `files`, except that `stat` says a path is gone (null) when it contains `needle`. */
+function vanishing(files: Files, needle: string): Files {
+  return new Proxy(files, {
+    get(target, prop, receiver) {
+      if (prop !== 'stat') return Reflect.get(target, prop, receiver) as unknown;
+      return (path: string) => (path.includes(needle) ? null : target.stat(path));
+    },
+  });
+}
+
+test('listTranscriptFiles reports an entry whose stat, list or lstat fails, and lists the rest', (t) => {
   const { platform, places } = testPlatform(t);
   const projects = join(places.claudeHome, 'projects');
   for (const folder of ['denied', 'half', 'looping']) {
@@ -165,52 +184,99 @@ test('listTranscriptFiles skips an entry whose stat, list or lstat fails, and li
   }
   writeFileSync(join(projects, 'half', `${S2}.jsonl`), 'x\n');
   const at = (folder: string, id = S1): string => join(projects, folder, `${id}.jsonl`);
-  const listed = (files: Files): string[] =>
-    listTranscriptFiles(files, places.claudeHome).map((f) => f.path);
+  const listed = (files: Files) => {
+    const { files: found, unreadable } = listTranscriptFiles(files, places.claudeHome);
+    return { paths: found.map((f) => f.path), unreadable };
+  };
 
-  // stat of a folder fails (a symbolic link loop): that folder is skipped
-  assert.deepEqual(listed(failingOn(platform.files, 'stat', 'looping', 'ELOOP')), [
-    at('denied'),
-    at('half'),
-    at('half', S2),
-  ]);
-  // list of a folder fails (permissions): that folder is skipped
-  assert.deepEqual(listed(failingOn(platform.files, 'list', 'denied', 'EACCES')), [
-    at('half'),
-    at('half', S2),
-    at('looping'),
-  ]);
-  // lstat of one file fails: that file is skipped
-  assert.deepEqual(listed(failingOn(platform.files, 'lstat', `half/${S2}`, 'EACCES')), [
-    at('denied'),
-    at('half'),
-    at('looping'),
-  ]);
+  // stat of a folder fails (a symbolic link loop): that folder is reported and skipped
+  assert.deepEqual(listed(failingOn(platform.files, 'stat', 'looping', 'ELOOP')), {
+    paths: [at('denied'), at('half'), at('half', S2)],
+    unreadable: [{ path: join(projects, 'looping'), reason: 'ELOOP' }],
+  });
+  // list of a folder fails (permissions): the same
+  assert.deepEqual(listed(failingOn(platform.files, 'list', 'denied', 'EACCES')), {
+    paths: [at('half'), at('half', S2), at('looping')],
+    unreadable: [{ path: join(projects, 'denied'), reason: 'EACCES' }],
+  });
+  // lstat of one file fails: that file is reported and skipped
+  assert.deepEqual(listed(failingOn(platform.files, 'lstat', `half/${S2}`, 'EACCES')), {
+    paths: [at('denied'), at('half'), at('looping')],
+    unreadable: [{ path: at('half', S2), reason: 'EACCES' }],
+  });
 });
 
-test('listTranscriptFiles gives [] when the projects directory cannot be listed', (t) => {
+test('listTranscriptFiles gives a reason even for an error without a code, and sorts what it reports', (t) => {
   const { platform, places } = testPlatform(t);
-  mkdirSync(join(places.claudeHome, 'projects', 'p'), { recursive: true });
-  writeFileSync(join(places.claudeHome, 'projects', 'p', `${S1}.jsonl`), 'x\n');
-  const denied = failingOn(platform.files, 'list', join(places.claudeHome, 'projects'), 'EACCES');
-  // Every path under projects matches the needle, but only the listing of projects itself is asked first.
-  assert.deepEqual(listTranscriptFiles(denied, places.claudeHome), []);
+  const projects = join(places.claudeHome, 'projects');
+  for (const folder of ['a', 'a-b', 'b']) {
+    mkdirSync(join(projects, folder), { recursive: true });
+    writeFileSync(join(projects, folder, `${S1}.jsonl`), 'x\n');
+  }
+  // Found in the order a/<id>, then a-b; by path 'a-b' sorts before 'a/…' ('-' < '/').
+  const failing = failingOn(
+    failingOn(platform.files, 'list', join(projects, 'a-b'), ''),
+    'lstat',
+    join(projects, 'a', S1),
+    'EACCES',
+  );
+  const { files, unreadable } = listTranscriptFiles(failing, places.claudeHome);
+  assert.deepEqual(
+    files.map((f) => f.path),
+    [join(projects, 'b', `${S1}.jsonl`)],
+  );
+  assert.deepEqual(unreadable, [
+    { path: join(projects, 'a-b'), reason: 'unknown error' },
+    { path: join(projects, 'a', `${S1}.jsonl`), reason: 'EACCES' },
+  ]);
 });
 
-test('listTranscriptFiles skips a symbolic link loop in projects', (t) => {
+test('listTranscriptFiles does not report a folder or file that is gone by the time it is looked at', (t) => {
+  const { platform, places } = testPlatform(t);
+  const projects = join(places.claudeHome, 'projects');
+  mkdirSync(join(projects, 'gone'), { recursive: true });
+  mkdirSync(join(projects, 'here'), { recursive: true });
+  writeFileSync(join(projects, 'gone', `${S1}.jsonl`), 'x\n');
+  writeFileSync(join(projects, 'here', `${S1}.jsonl`), 'x\n');
+  const { files, unreadable } = listTranscriptFiles(
+    vanishing(platform.files, 'gone'),
+    places.claudeHome,
+  );
+  assert.deepEqual(
+    files.map((f) => f.path),
+    [join(projects, 'here', `${S1}.jsonl`)],
+  );
+  assert.deepEqual(unreadable, []);
+});
+
+test('listTranscriptFiles reports the projects directory when it cannot be listed', (t) => {
+  const { platform, places } = testPlatform(t);
+  const projects = join(places.claudeHome, 'projects');
+  mkdirSync(join(projects, 'p'), { recursive: true });
+  writeFileSync(join(projects, 'p', `${S1}.jsonl`), 'x\n');
+  const denied = failingOn(platform.files, 'list', projects, 'EACCES');
+  assert.deepEqual(listTranscriptFiles(denied, places.claudeHome), {
+    files: [],
+    unreadable: [{ path: projects, reason: 'EACCES' }],
+  });
+});
+
+test('listTranscriptFiles reports a symbolic link loop in projects', (t) => {
   const { platform, places } = testPlatform(t);
   const projects = join(places.claudeHome, 'projects');
   mkdirSync(join(projects, 'good'), { recursive: true });
   writeFileSync(join(projects, 'good', `${S1}.jsonl`), 'x\n');
   symlinkSync(join(projects, 'loop'), join(projects, 'loop'));
+  const { files, unreadable } = listTranscriptFiles(platform.files, places.claudeHome);
   assert.deepEqual(
-    listTranscriptFiles(platform.files, places.claudeHome).map((f) => f.path),
+    files.map((f) => f.path),
     [join(projects, 'good', `${S1}.jsonl`)],
   );
+  assert.deepEqual(unreadable, [{ path: join(projects, 'loop'), reason: 'ELOOP' }]);
 });
 
 test(
-  'listTranscriptFiles skips a project folder with mode 000',
+  'listTranscriptFiles reports a project folder with mode 000',
   { skip: process.getuid?.() === 0 },
   (t) => {
     const { platform, places } = testPlatform(t);
@@ -221,10 +287,12 @@ test(
     writeFileSync(join(projects, 'closed', `${S2}.jsonl`), 'x\n');
     chmodSync(join(projects, 'closed'), 0o000);
     try {
+      const { files, unreadable } = listTranscriptFiles(platform.files, places.claudeHome);
       assert.deepEqual(
-        listTranscriptFiles(platform.files, places.claudeHome).map((f) => f.path),
+        files.map((f) => f.path),
         [join(projects, 'good', `${S1}.jsonl`)],
       );
+      assert.deepEqual(unreadable, [{ path: join(projects, 'closed'), reason: 'EACCES' }]);
     } finally {
       chmodSync(join(projects, 'closed'), 0o700); // the sandbox cannot remove it otherwise
     }
@@ -232,7 +300,7 @@ test(
 );
 
 test(
-  'listTranscriptFiles gives [] when projects has mode 000',
+  'listTranscriptFiles reports projects itself when it has mode 000',
   { skip: process.getuid?.() === 0 },
   (t) => {
     const { platform, places } = testPlatform(t);
@@ -240,18 +308,27 @@ test(
     mkdirSync(join(projects, 'p'), { recursive: true });
     chmodSync(projects, 0o000);
     try {
-      assert.deepEqual(listTranscriptFiles(platform.files, places.claudeHome), []);
+      assert.deepEqual(listTranscriptFiles(platform.files, places.claudeHome), {
+        files: [],
+        unreadable: [{ path: projects, reason: 'EACCES' }],
+      });
     } finally {
       chmodSync(projects, 0o700);
     }
   },
 );
 
-test('listTranscriptFiles gives [] when projects is missing or empty', (t) => {
+test('listTranscriptFiles gives nothing, and reports nothing, when projects is missing or empty', (t) => {
   const { platform, places } = testPlatform(t);
-  assert.deepEqual(listTranscriptFiles(platform.files, places.claudeHome), []);
+  assert.deepEqual(listTranscriptFiles(platform.files, places.claudeHome), {
+    files: [],
+    unreadable: [],
+  });
   mkdirSync(join(places.claudeHome, 'projects'));
-  assert.deepEqual(listTranscriptFiles(platform.files, places.claudeHome), []);
+  assert.deepEqual(listTranscriptFiles(platform.files, places.claudeHome), {
+    files: [],
+    unreadable: [],
+  });
 });
 
 test('listTranscriptFiles lists an empty file, and reads folder names as opaque text', (t) => {
@@ -259,7 +336,7 @@ test('listTranscriptFiles lists an empty file, and reads folder names as opaque 
   const folder = join(places.claudeHome, 'projects', '-weird (folder) – ünï.jsonl');
   mkdirSync(folder, { recursive: true });
   writeFileSync(join(folder, `${S1}.jsonl`), '');
-  const [file] = listTranscriptFiles(platform.files, places.claudeHome);
+  const [file] = listTranscriptFiles(platform.files, places.claudeHome).files;
   assert.equal(file?.size, 0);
   assert.equal(file?.sessionId, S1);
 });
