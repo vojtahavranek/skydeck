@@ -7,23 +7,40 @@ import { openDeck, resolveDeckPlaces } from '../../src/sessions/deck.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import type { Store } from '../../src/store/store.ts';
 import type { CaptureOptions } from './capture.ts';
-import { testContext } from './context.ts';
+import { testContext, testContextOn } from './context.ts';
 import type { TestCtx } from './context.ts';
-import type { TestPlatform, TestPlatformOptions } from './platform.ts';
+import { realTestPlatform } from './platform.ts';
+import type { RealTestPlatform, TestPlatform, TestPlatformOptions } from './platform.ts';
 
 export type TestDeck = TestCtx & TestPlatform & { deck: Deck };
+/** testDeck(t, { real: true }): the deck on realTestPlatform (A36). */
+export type RealTestDeck = TestCtx & RealTestPlatform & { deck: Deck };
+
+type DeckOptions = CaptureOptions & { config?: Record<string, unknown> };
 
 /**
  * testContext(t, options); writes `config` (if given) to config.json; mkdirp
  * <claudeHome>/projects and <claudeHome>/sessions; deck = openDeck(platform), closed in t.after.
  * <claudeHome> is the one the deck resolves, so a `claudeHome` in `config` is honoured.
+ * With `real: true` the platform is realTestPlatform(t, { bootId, env }) instead.
  */
 export function testDeck(
   t: TestContext,
-  options: TestPlatformOptions & CaptureOptions & { config?: Record<string, unknown> } = {},
-): TestDeck {
-  const { config, ...rest } = options;
-  const context = testContext(t, rest);
+  options: DeckOptions & { real: true; bootId?: string; env?: TestPlatformOptions['env'] },
+): RealTestDeck;
+export function testDeck(
+  t: TestContext,
+  options?: DeckOptions & Omit<TestPlatformOptions, 'realProcesses'> & { real?: false },
+): TestDeck;
+export function testDeck(
+  t: TestContext,
+  options: DeckOptions & Omit<TestPlatformOptions, 'realProcesses'> & { real?: boolean } = {},
+): TestDeck | RealTestDeck {
+  const { config, real, ...rest } = options;
+  const context =
+    real === true
+      ? testContextOn(realTestPlatform(t, { bootId: rest.bootId, env: rest.env }), rest)
+      : testContext(t, rest);
   if (config !== undefined) {
     mkdirSync(context.places.configDir, { recursive: true });
     writeFileSync(context.places.configPath, JSON.stringify(config));

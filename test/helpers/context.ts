@@ -43,14 +43,31 @@ function noPlatform(): Platform {
 export function testContext(): TestCtx;
 export function testContext(
   t: TestContext,
-  options?: TestPlatformOptions & CaptureOptions,
+  options?: Omit<TestPlatformOptions, 'realProcesses'> & CaptureOptions,
 ): TestCtx & TestPlatform;
 export function testContext(
   t?: TestContext,
-  options: TestPlatformOptions & CaptureOptions = {},
+  options: Omit<TestPlatformOptions, 'realProcesses'> & CaptureOptions = {},
 ): TestCtx | (TestCtx & TestPlatform) {
+  if (t === undefined) {
+    const captured = capture(options);
+    return { ctx: { io: captured.io, platform: noPlatform() }, ...recorded(captured) };
+  }
+  return testContextOn(testPlatform(t, options), options);
+}
+
+/** A `Context` like testContext's, on a test platform the caller built (realTestPlatform). */
+export function testContextOn<T extends { platform: Platform }>(
+  tp: T,
+  options: CaptureOptions = {},
+): TestCtx & T {
   const captured = capture(options);
-  const shared = {
+  return { ctx: { io: captured.io, platform: tp.platform }, ...recorded(captured), ...tp };
+}
+
+/** What a test reads back from the captured io. */
+function recorded(captured: ReturnType<typeof capture>): Omit<TestCtx, 'ctx'> {
+  return {
     stdout: captured.stdout,
     stderr: captured.stderr,
     prompts: captured.prompts,
@@ -58,9 +75,4 @@ export function testContext(
     openKeys: captured.openKeys,
     terminate: captured.terminate,
   };
-  if (t === undefined) {
-    return { ctx: { io: captured.io, platform: noPlatform() }, ...shared };
-  }
-  const tp = testPlatform(t, options);
-  return { ctx: { io: captured.io, platform: tp.platform }, ...shared, ...tp };
 }

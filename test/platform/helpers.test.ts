@@ -1,16 +1,37 @@
 import assert from 'node:assert/strict';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import type { TestContext } from 'node:test';
 
+import { isAlive } from '../../src/claude/live.ts';
+import { procStartFromStat } from '../../src/claude/procstat.ts';
 import { main } from '../../src/cli/main.ts';
+import { loadConfig } from '../../src/platform/config.ts';
+import { realPlatform } from '../../src/platform/real.ts';
 import type { RunResult } from '../../src/platform/types.ts';
 import { capture } from '../helpers/capture.ts';
 import { testContext } from '../helpers/context.ts';
+import { testDeck } from '../helpers/deck.ts';
+import { killKeepersIn } from '../helpers/kill.ts';
 import {
   BOOT_A,
   BOOT_B,
   fakeClock,
   fakeProc,
+  fakeProcesses,
   fakeRunner,
+  realTestPlatform,
   runResult,
   S1,
   S2,
@@ -20,6 +41,9 @@ import {
   T0,
   testPlatform,
 } from '../helpers/platform.ts';
+import { sandbox } from '../helpers/sandbox.ts';
+import type { Sandbox } from '../helpers/sandbox.ts';
+import { writeWindowConfig } from '../helpers/window-config.ts';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -537,5 +561,621 @@ describe('testContext', () => {
     assert.equal(await c.ctx.io.readLine('Go? '), 'yes');
     assert.deepEqual(c.prompts, ['Go? ']);
     assert.equal(c.ctx.platform.clock.nowNs(), T0 + SEC);
+  });
+});
+
+describe('fakeClock: after', () => {
+  test('fires once from advanceMs at its time, in time order with every', () => {
+    const clock = fakeClock(T0);
+    const seen: string[] = [];
+    clock.every(2000, () => {
+      seen.push(`every${(clock.nowNs() - T0) / SEC}`);
+    });
+    clock.after(3000, () => {
+      seen.push(`after${(clock.nowNs() - T0) / SEC}`);
+    });
+
+    clock.advanceMs(2999);
+    const before = [...seen];
+    clock.advanceMs(10_000);
+
+    assert.deepEqual(before, ['every2']);
+    assert.deepEqual(seen, [
+      'every2',
+      'after3',
+      'every4',
+      'every6',
+      'every8',
+      'every10',
+      'every12',
+    ]);
+    assert.equal(clock.timers(), 1, 'the one of after is gone once it fired');
+  });
+
+  test('of two due at once, the one started first fires first; sleep fires them too', async () => {
+    const clock = fakeClock(T0);
+    const seen: string[] = [];
+    clock.after(1000, () => seen.push('a'));
+    clock.every(1000, () => seen.push('e'));
+    clock.after(1000, () => seen.push('b'));
+
+    await clock.sleep(1000);
+
+    assert.deepEqual(seen, ['a', 'e', 'b']);
+  });
+
+  test('the returned function cancels it; calling it again does nothing', () => {
+    const clock = fakeClock(T0);
+    let calls = 0;
+    const cancel = clock.after(1000, () => {
+      calls++;
+    });
+
+    cancel();
+    cancel();
+    clock.advanceMs(5000);
+
+    assert.equal(calls, 0);
+    assert.equal(clock.timers(), 0);
+  });
+
+  test('a callback may start another timer, which fires in the same advance when it falls due', () => {
+    const clock = fakeClock(T0);
+    const seen: bigint[] = [];
+    clock.after(1000, () => {
+      seen.push(clock.nowNs() - T0);
+      clock.after(1000, () => seen.push(clock.nowNs() - T0));
+    });
+
+    clock.advanceMs(5000);
+
+    assert.deepEqual(seen, [SEC, 2n * SEC]);
+  });
+
+  test('after 0 fires at the next advance, not at once', () => {
+    const clock = fakeClock(T0);
+    let calls = 0;
+
+    clock.after(0, () => {
+      calls++;
+    });
+    const atOnce = calls;
+    clock.advanceMs(0);
+
+    assert.equal(atOnce, 0);
+    assert.equal(calls, 1);
+  });
+
+  test('setNs keeps the time that was left, as a real timer after the wall clock jumped', () => {
+    const clock = fakeClock(T0);
+    let calls = 0;
+    clock.after(5000, () => {
+      calls++;
+    });
+    clock.advanceMs(2000);
+
+    clock.setNs(T0 + 300n * SEC);
+    clock.advanceMs(2999);
+    const before = calls;
+    clock.advanceMs(1);
+
+    assert.equal(before, 0);
+    assert.equal(calls, 1);
+  });
+
+  test('refuses a time that is not a whole number of milliseconds a timer can wait', () => {
+    const clock = fakeClock(T0);
+
+    for (const ms of [-1, 1.5, Number.NaN, 2 ** 31]) {
+      assert.throws(() => clock.after(ms, () => {}), RangeError, String(ms));
+    }
+    assert.equal(clock.timers(), 0);
+  });
+});
+
+describe('fakeProc: fdTarget and tcpListening', () => {
+  test('fdTarget answers what setFdTarget gave, null otherwise', () => {
+    const proc = fakeProc();
+
+    proc.setFdTarget(42, 3, 'socket:[1234]');
+    proc.setFdTarget(42, 4, '/dev/pts/1');
+    proc.setFdTarget(42, 4, null);
+
+    assert.equal(proc.fdTarget(42, 3), 'socket:[1234]');
+    assert.equal(proc.fdTarget(42, 4), null);
+    assert.equal(proc.fdTarget(43, 3), null);
+  });
+
+  test('tcpListening: nothing listens by default; the listening ports and null can be set', () => {
+    const proc = fakeProc({ tcpListening: [47613] });
+    const empty = fakeProc();
+
+    const before = [proc.tcpListening(47613), proc.tcpListening(47614), empty.tcpListening(1)];
+    proc.setTcpListening(null);
+
+    assert.deepEqual(before, [true, false, false]);
+    assert.equal(proc.tcpListening(47613), null);
+  });
+});
+
+describe('fakeProcesses', () => {
+  const options = { cwd: '/', env: { PATH: '/x' } };
+
+  test('records startDetached calls; by default answers new pids whose exit never comes', async () => {
+    const processes = fakeProcesses();
+
+    const a = await processes.startDetached('/opt/edge', ['--app=x'], options);
+    const b = await processes.startDetached('sh', [], { ...options, input: 'spec' });
+    let exited = false;
+    void a.exited.then(() => {
+      exited = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.notEqual(a.pid, b.pid);
+    assert.deepEqual(processes.calls, [
+      { command: '/opt/edge', args: ['--app=x'], options },
+      { command: 'sh', args: [], options: { ...options, input: 'spec' } },
+    ]);
+    assert.equal(exited, false);
+  });
+
+  test('a handler answers, and its rejection is the rejection', async () => {
+    const processes = fakeProcesses((call) => {
+      if (call.command === 'missing') {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }
+      return { pid: 77, exited: Promise.resolve({ code: 0, signal: null }) };
+    });
+
+    const child = await processes.startDetached('ok', [], options);
+
+    assert.equal(child.pid, 77);
+    assert.deepEqual(await child.exited, { code: 0, signal: null });
+    await assert.rejects(processes.startDetached('missing', [], options), { code: 'ENOENT' });
+  });
+
+  test('refuses a Windows program always: EWINDOWS, the handler is not asked, the call is kept in refused', async () => {
+    let asked = 0;
+    const processes = fakeProcesses(() => {
+      asked++;
+      return { pid: 1, exited: new Promise(() => {}) };
+    });
+
+    for (const command of ['wsl.exe', '/mnt/c/x/msedge.exe', 'X.EXE', '/mnt/c/Windows/notepad']) {
+      await assert.rejects(
+        processes.startDetached(command, ['a'], options),
+        { code: 'EWINDOWS' },
+        command,
+      );
+    }
+
+    assert.equal(asked, 0);
+    assert.deepEqual(processes.calls, []);
+    assert.deepEqual(
+      processes.refused.map((call) => call.command),
+      ['wsl.exe', '/mnt/c/x/msedge.exe', 'X.EXE', '/mnt/c/Windows/notepad'],
+    );
+    assert.deepEqual(processes.refused[0], { command: 'wsl.exe', args: ['a'], options });
+  });
+
+  test('signal answers from the set of live pids and records every call', () => {
+    const processes = fakeProcesses(undefined, [10]);
+
+    const answers = [processes.signal(10, 'SIGTERM'), processes.signal(11, 'SIGKILL')];
+    processes.live.delete(10);
+
+    assert.deepEqual(answers, [true, false]);
+    assert.equal(processes.signal(10, 'SIGKILL'), false);
+    assert.deepEqual(processes.signals, [
+      { pid: 10, signal: 'SIGTERM' },
+      { pid: 11, signal: 'SIGKILL' },
+      { pid: 10, signal: 'SIGKILL' },
+    ]);
+  });
+});
+
+describe('testPlatform: step 2 members', () => {
+  test('randomBytes counts 0, 1, 2, … across calls', (t) => {
+    const { platform } = testPlatform(t);
+
+    assert.deepEqual([...platform.randomBytes(4)], [0, 1, 2, 3]);
+    assert.deepEqual([...platform.randomBytes(4)], [4, 5, 6, 7]);
+    assert.ok(platform.randomBytes(1) instanceof Uint8Array);
+  });
+
+  test('pid 4000, the real uid, user name tester', (t) => {
+    const { platform } = testPlatform(t);
+
+    assert.equal(platform.pid, 4000);
+    assert.equal(platform.uid, process.getuid?.());
+    assert.equal(platform.userName, 'tester');
+  });
+
+  test('the processes are fake and are the ones it returns; they refuse Windows programs', async (t) => {
+    const tp = testPlatform(t);
+
+    await tp.platform.processes.startDetached('sh', [], { cwd: '/', env: {} });
+    await assert.rejects(
+      tp.platform.processes.startDetached('/mnt/c/Windows/System32/wsl.exe', [], {
+        cwd: '/',
+        env: {},
+      }),
+      { code: 'EWINDOWS' },
+    );
+
+    assert.equal(tp.platform.processes, tp.processes);
+    assert.equal(tp.processes.calls.length, 1);
+    assert.equal(tp.processes.refused.length, 1);
+  });
+
+  test('realProcesses: true gives real processes that still refuse Windows programs, whatever the environment', async (t) => {
+    const tp = testPlatform(t, {
+      realProcesses: true,
+      env: { SKYDECK_TEST_NO_WINDOWS: undefined },
+    });
+    tp.sandbox.link('sh');
+    const env = tp.platform.env as Record<string, string>;
+
+    const child = await tp.platform.processes.startDetached('sh', ['-c', 'echo $$ > ran'], {
+      cwd: tp.sandbox.root,
+      env,
+    });
+    await child.exited;
+    writeFileSync(`${tp.sandbox.bin}/cmd.exe`, `#!/bin/sh\necho x > ${tp.sandbox.root}/marker\n`, {
+      mode: 0o755,
+    });
+
+    assert.equal(readFileSync(`${tp.sandbox.root}/ran`, 'utf8'), `${child.pid}\n`);
+    await assert.rejects(
+      tp.platform.processes.startDetached('cmd.exe', [], { cwd: tp.sandbox.root, env }),
+      { code: 'EWINDOWS' },
+    );
+    assert.equal(existsSync(`${tp.sandbox.root}/marker`), false);
+  });
+
+  test('net is the real one: a test listens on a unix socket in the sandbox', async (t) => {
+    const { platform, sandbox: s } = testPlatform(t);
+    const path = `${s.root}/x.sock`;
+    const listener = await platform.net.listenHttp(
+      { path },
+      { request: (_req, res) => res.end('{"ok":true}') },
+    );
+    t.after(() => listener.close());
+
+    const answer = await platform.net.requestUnix(path, {
+      method: 'GET',
+      path: '/',
+      timeoutMs: 5000,
+    });
+
+    assert.deepEqual(answer, { status: 200, body: { ok: true } });
+  });
+});
+
+describe('sandbox: step 2', () => {
+  test('env() carries SKYDECK_TEST_NO_WINDOWS=1, which a test can remove', (t) => {
+    const s = sandbox(t);
+
+    assert.equal(s.env()['SKYDECK_TEST_NO_WINDOWS'], '1');
+    assert.equal('SKYDECK_TEST_NO_WINDOWS' in s.env({ SKYDECK_TEST_NO_WINDOWS: undefined }), false);
+  });
+
+  test('link of a program that is already linked does nothing', (t) => {
+    const s = sandbox(t);
+
+    s.link('sh');
+    s.link('sh', 'cat');
+
+    assert.ok(existsSync(`${s.bin}/sh`));
+    assert.ok(existsSync(`${s.bin}/cat`));
+  });
+});
+
+describe('realTestPlatform (A36)', () => {
+  const PROGRAMS = [
+    'python3',
+    'sh',
+    'sleep',
+    'date',
+    'cat',
+    'base64',
+    'mkdir',
+    'mv',
+    'rm',
+    'dirname',
+    'readlink',
+  ];
+
+  test('the real clock, /proc, boot id and pid', (t) => {
+    const { platform } = realTestPlatform(t);
+    const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    const procStart = procStartFromStat(platform.proc.stat(process.pid) ?? '');
+
+    const diff = platform.clock.nowNs() - BigInt(Date.now()) * 1_000_000n;
+
+    assert.ok(diff > -5_000_000_000n && diff < 5_000_000_000n, `off by ${diff} ns`);
+    assert.equal(platform.proc.bootId(), bootId);
+    assert.equal(platform.pid, process.pid);
+    assert.equal(platform.uid, process.getuid?.());
+    assert.equal(platform.userName, userInfo().username);
+    assert.equal(
+      isAlive({ pid: platform.pid, procStart, bootId }, platform.proc, platform.proc.bootId()),
+      true,
+    );
+  });
+
+  test('the members it returns are the ones the platform uses', (t) => {
+    const tp = realTestPlatform(t);
+
+    assert.equal(tp.platform.clock, tp.clock);
+    assert.equal(tp.platform.proc, tp.proc);
+    assert.equal(tp.platform.runner, tp.runner);
+    assert.equal(tp.platform.processes, tp.processes);
+  });
+
+  test('bootId overrides only the boot id; every other /proc read stays real', (t) => {
+    const { platform } = realTestPlatform(t, { bootId: BOOT_B });
+
+    assert.equal(platform.proc.bootId(), BOOT_B);
+    assert.ok(platform.proc.stat(process.pid)?.startsWith(`${process.pid} (`));
+    assert.notEqual(platform.proc.memAvailableMb(), null);
+  });
+
+  test('lives inside the sandbox with its environment; appRoot is the checkout', (t) => {
+    const tp = realTestPlatform(t, { env: (s) => ({ EXTRA: s.root }) });
+
+    assert.equal(tp.platform.env['SKYDECK_HOME'], tp.sandbox.skydeckHome);
+    assert.equal(tp.platform.env['PATH'], tp.sandbox.bin);
+    assert.equal(tp.platform.env['SKYDECK_TEST_NO_WINDOWS'], '1');
+    assert.equal(tp.platform.env['EXTRA'], tp.sandbox.root);
+    assert.equal(tp.platform.homeDir, tp.sandbox.home);
+    assert.equal(tp.platform.cwd, tp.sandbox.home);
+    assert.equal(tp.places.dataDir, `${tp.sandbox.skydeckHome}/data`);
+    assert.equal(tp.platform.nodeVersion, process.versions.node);
+    assert.notEqual(tp.platform.files.stat(`${tp.platform.appRoot}/bin/skydeck`), null);
+  });
+
+  test('the programs a keeper, the stand-in, the hook and the launcher need are on its PATH', async (t) => {
+    const { platform, sandbox: s } = realTestPlatform(t);
+    const env = platform.env as Record<string, string>;
+
+    const found = await platform.runner.run('sh', ['-c', 'command -v python3; command -v sh'], {
+      env,
+    });
+
+    for (const program of PROGRAMS) {
+      assert.ok(existsSync(`${s.bin}/${program}`), program);
+    }
+    assert.equal(found.stdout, `${s.bin}/python3\n${s.bin}/sh\n`);
+  });
+
+  test('a keeper-like python3 -c started detached with the sandbox environment runs', async (t) => {
+    const { platform, sandbox: s } = realTestPlatform(t);
+
+    const child = await platform.processes.startDetached(
+      'python3',
+      ['-c', 'import os, sys; open(sys.argv[1], "w").write(str(os.getsid(0)))', `${s.root}/sid`],
+      { cwd: s.root, env: platform.env as Record<string, string> },
+    );
+
+    assert.deepEqual(await child.exited, { code: 0, signal: null });
+    assert.equal(readFileSync(`${s.root}/sid`, 'utf8'), String(child.pid));
+  });
+
+  test('its processes and runner refuse Windows programs whatever the environment says', async (t) => {
+    const { platform, sandbox: s } = realTestPlatform(t, {
+      env: { SKYDECK_TEST_NO_WINDOWS: undefined },
+    });
+    writeFileSync(`${s.bin}/cmd.exe`, `#!/bin/sh\necho x > ${s.root}/marker\n`, { mode: 0o755 });
+    const options = { cwd: s.root, env: platform.env as Record<string, string> };
+
+    await assert.rejects(platform.processes.startDetached('cmd.exe', [], options), {
+      code: 'EWINDOWS',
+    });
+    await assert.rejects(platform.runner.run('cmd.exe', [], options), { code: 'EWINDOWS' });
+
+    assert.equal(existsSync(`${s.root}/marker`), false);
+  });
+
+  test('testDeck(t, { real: true }) opens a deck on it', (t) => {
+    const d = testDeck(t, { real: true, config: { claudeCommand: '/bin/true' } });
+
+    assert.equal(d.platform.pid, process.pid);
+    assert.equal(d.deck.platform, d.platform);
+    assert.equal(d.deck.config.claudeCommand, '/bin/true');
+    assert.equal(d.deck.places.dbPath, `${d.sandbox.skydeckHome}/data/skydeck.db`);
+    assert.ok(existsSync(d.deck.places.dbPath));
+    assert.equal(
+      d.platform.proc.bootId(),
+      readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(),
+    );
+  });
+});
+
+describe('writeWindowConfig (A32)', () => {
+  test('writes a config.json that parses, with the Edge stub and the keep-alive off', (t) => {
+    const s = sandbox(t);
+
+    const { edgeStub } = writeWindowConfig(s);
+    const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
+
+    assert.deepEqual(config.window, {
+      port: 47613,
+      edge: edgeStub,
+      profileDir: null,
+      keepAlive: 'off',
+    });
+    assert.ok(edgeStub.startsWith(`${s.root}/`), edgeStub);
+    assert.ok(!/\.exe$/i.test(edgeStub) && !edgeStub.startsWith('/mnt/'), edgeStub);
+  });
+
+  test('what the test passes is merged over it', (t) => {
+    const s = sandbox(t);
+
+    const { edgeStub } = writeWindowConfig(s, { keepAlive: 'wsl', port: 47000 });
+    const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
+
+    assert.deepEqual(config.window, {
+      port: 47000,
+      edge: edgeStub,
+      profileDir: null,
+      keepAlive: 'wsl',
+    });
+  });
+
+  test('keeps the other keys of a config.json that is already there', (t) => {
+    const s = sandbox(t);
+    mkdirSync(`${s.skydeckHome}/config`);
+    writeFileSync(
+      `${s.skydeckHome}/config/config.json`,
+      JSON.stringify({ claudeCommand: '/x/standin', window: { port: 1 } }),
+    );
+
+    writeWindowConfig(s);
+    const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
+
+    assert.equal(config.claudeCommand, '/x/standin');
+    assert.equal(config.window.port, 1);
+    assert.equal(config.window.keepAlive, 'off');
+  });
+
+  test('a key the configuration does not know is written as given, so a test can see it refused', (t) => {
+    const s = sandbox(t);
+
+    writeWindowConfig(s, { colour: 1 });
+
+    assert.throws(
+      () => loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`),
+      /window\.colour/,
+    );
+  });
+
+  test('running the Edge stub records its arguments, one entry per run', async (t) => {
+    const s = sandbox(t);
+    const { edgeStub, edgeCalls } = writeWindowConfig(s);
+    const { runner } = realPlatform();
+
+    const before = edgeCalls();
+    const first = await runner.run(
+      edgeStub,
+      ['--app=http://127.0.0.1:1/#t', 'a b', '', 'two\nlines'],
+      { env: s.env() },
+    );
+    await runner.run(edgeStub, [], { env: s.env() });
+
+    assert.deepEqual(before, []);
+    assert.equal(first.code, 0, first.stderr);
+    assert.deepEqual(edgeCalls(), [['--app=http://127.0.0.1:1/#t', 'a b', '', 'two\nlines'], []]);
+  });
+});
+
+describe('killKeepersIn (A34)', () => {
+  /** A `sleep` this test started, ended when the test ends if still running. */
+  async function sleeper(
+    t: TestContext,
+    s: Sandbox,
+  ): Promise<{ pid: number; procStart: number; exited: Promise<unknown> }> {
+    s.link('sleep');
+    const platform = realPlatform();
+    const child = await platform.processes.startDetached('sleep', ['30'], {
+      cwd: s.root,
+      env: s.env(),
+    });
+    let ended = false;
+    const exited = child.exited.then(() => {
+      ended = true;
+    });
+    t.after(async () => {
+      if (!ended) {
+        platform.processes.signal(child.pid, 'SIGKILL');
+        await exited;
+      }
+    });
+    const procStart = procStartFromStat(platform.proc.stat(child.pid) ?? '');
+    assert.ok(procStart !== null);
+    return { pid: child.pid, procStart, exited };
+  }
+
+  const BOOT = (): string => readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+
+  function writeLine(dir: string, id: string, line: string): void {
+    mkdirSync(`${dir}/terms`, { recursive: true });
+    writeFileSync(`${dir}/terms/${id}.pid`, `${line}\n`);
+  }
+
+  function outside(t: TestContext): string {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'skydeck-outside-')));
+    t.after(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+    return dir;
+  }
+
+  const alive = (pid: number): boolean => realPlatform().proc.stat(pid) !== null;
+
+  test('a directory outside the sandbox fails the assertion and nothing is signalled', async (t) => {
+    const s = sandbox(t);
+    const keeper = await sleeper(t, s);
+    const dir = outside(t);
+    writeLine(dir, 'aaaaaaaaaaaa', `${keeper.pid} ${keeper.procStart} ${BOOT()} 1 1`);
+
+    assert.throws(() => killKeepersIn(s, dir), assert.AssertionError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(alive(keeper.pid), true);
+  });
+
+  test('a symlink inside the sandbox that points out fails the assertion too', async (t) => {
+    const s = sandbox(t);
+    const keeper = await sleeper(t, s);
+    const dir = outside(t);
+    writeLine(dir, 'aaaaaaaaaaaa', `${keeper.pid} ${keeper.procStart} ${BOOT()} 1 1`);
+    symlinkSync(dir, `${s.root}/run`);
+    mkdirSync(`${s.root}/run2`);
+    symlinkSync(`${dir}/terms`, `${s.root}/run2/terms`);
+
+    assert.throws(() => killKeepersIn(s, `${s.root}/run`), assert.AssertionError);
+    assert.throws(() => killKeepersIn(s, `${s.root}/run2`), assert.AssertionError);
+    assert.throws(() => killKeepersIn(s, `${s.root}/run/../../`), assert.AssertionError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(alive(keeper.pid), true);
+  });
+
+  test('the sandbox root itself is not a runtime directory under it', (t) => {
+    const s = sandbox(t);
+
+    assert.throws(() => killKeepersIn(s, s.root), assert.AssertionError);
+  });
+
+  test('inside: a live keeper line is killed; a dead line, another process start and another boot are skipped', async (t) => {
+    const s = sandbox(t);
+    const keeper = await sleeper(t, s);
+    const reused = await sleeper(t, s);
+    const otherBoot = await sleeper(t, s);
+    const dir = `${s.skydeckHome}/run`;
+    writeLine(dir, 'aaaaaaaaaaaa', `${keeper.pid} ${keeper.procStart} ${BOOT()} 1 1`);
+    writeLine(dir, 'bbbbbbbbbbbb', `${reused.pid} ${reused.procStart + 1} ${BOOT()} 1 1`);
+    writeLine(dir, 'cccccccccccc', `${otherBoot.pid} ${otherBoot.procStart} ${BOOT_B} 1 1`);
+    writeLine(dir, 'dddddddddddd', `999999999 1 ${BOOT()} 1 0`);
+    writeLine(dir, 'eeeeeeeeeeee', 'garbage');
+    writeFileSync(
+      `${dir}/terms/.ffffffffffff.pid.1a2b.tmp`,
+      `${reused.pid} ${reused.procStart} ${BOOT()} 1 1\n`,
+    );
+
+    killKeepersIn(s, dir);
+    await keeper.exited;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(alive(reused.pid), true, 'another process start');
+    assert.equal(alive(otherBoot.pid), true, 'another boot');
+  });
+
+  test('a runtime directory that does not exist (yet) is nothing to do', (t) => {
+    const s = sandbox(t);
+
+    killKeepersIn(s, `${s.skydeckHome}/run`);
   });
 });
