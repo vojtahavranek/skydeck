@@ -3612,7 +3612,7 @@ descending; the null group last; ties by name ascending. Rows by rank — `waiti
   (`usage.ts` throws `UsageError('bad')`, `ref.ts` throws a `RefError` with two candidates,
   `refused.ts`, `stopped.ts`, `failure.ts` (`SkydeckError`), `internal.ts` (`new Error('boom')`),
   `ok.ts` returns `EXIT.ok`; and, for the cases below that the first list does not cover,
-  `usage-text.ts`, `internal-text.ts`, `escapes.ts`, `internal-escapes.ts`) and a `README.md`;
+  `usage-text.ts`, `internal-text.ts`, `unprintable.ts`, `escapes.ts`, `internal-escapes.ts`) and a `README.md`;
   each exports `command` named like its file
 - Test: `test/cli/dispatch-errors.test.ts`, `test/cli/deck.test.ts`, `test/cli/args.test.ts`
 
@@ -3645,7 +3645,8 @@ export function parseCommandArgs(args: readonly string[], spec: ArgSpec): Parsed
 7. The scaffold's `test/cli/main.test.ts` passes unchanged.
 8. `usage-text` (`UsageError("unknown option '--nope'\nskydeck x [--all]\n")`) → stderr
    `"skydeck: unknown option '--nope'\nskydeck x [--all]\n"` (no blank line); `internal-text`
-   (throws the string `'plain text'`) → `'skydeck: internal error: plain text\n'`.
+   (throws the string `'plain text'`) → `'skydeck: internal error: plain text\n'`; `unprintable`
+   (throws `Object.create(null)`) → `'skydeck: internal error: unprintable value\n'`.
 9. `escapes` (a `RefError` whose message and candidate title contain escape sequences, `\r` and `\n`)
    and `internal-escapes` → the text printed has them removed (line breaks of the `SkydeckError`
    message kept, in the internal error replaced by spaces).
