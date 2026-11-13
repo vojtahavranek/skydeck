@@ -498,38 +498,73 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
 - **Its environment.** `STANDIN_RECORD`: the JSON-lines file it appends to (each record
   `{ pid, ms, ev, … }`). `CLAUDE_CONFIG_DIR`: where it writes its live-session file.
   `SKYDECK_HOME`: where the hook it runs writes. **All three must be absolute paths, or it exits 2
-  before doing anything** (A33); there are no defaults. It runs the hook at
-  `<repo>/bin/skydeck-hook` (or `$STANDIN_HOOK`).
+  before doing anything** (A33); there are no defaults. `STANDIN_MAX_SECONDS` (optional): a
+  number of seconds from 1 to 600 that shortens its life; any other value, the empty string
+  included, is refused the same way (exit 2 before doing anything). It always runs the hook at
+  `<repo>/bin/skydeck-hook`; no variable changes which program that is.
 - **Arguments.** `--session-id <id>`, `--resume <id>` or `-r <id>`, `-n <name>`; everything else is
-  recorded and ignored.
+  recorded and ignored. With neither `--session-id` nor `--resume` it makes up a session id.
 - **At start** it records `{ ev: 'start', argv, cwd, envNames, env: { TERM, COLORTERM, PWD,
-  WSL_INTEROP }, coreSoft }` (`envNames`: the sorted names of its environment; `coreSoft`: the soft
-  "Max core file size" of `/proc/self/limits` as written there), sets raw mode, sends DA1
-  (`ESC [ c`) and waits up to 2 s for the answer (recorded as `{ ev: 'da1', answer }`; without one
-  it writes `no answer to DA1` on the screen), then CPR (`ESC [ 6 n`, `{ ev: 'cpr', answer }`),
-  runs the hook with `SessionStart` (source `startup` or `resume`) and `CLAUDE_PID` = its pid,
-  writes `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json` (status `idle`, `procStart` as a decimal string
-  from its own `/proc/self/stat`, the shapes of `test/fixtures/claude/sessions/idle.json`), and
-  draws `standin <short id>> `.
-- **Input.** Every chunk is recorded as `{ ev: 'input', hex }`. Printable text is echoed. `\r`
-  ends a line: a line that starts with `/` is a command. `\n` (Ctrl+J) is echoed as `⏎`.
-- **Commands.** `/exit` — `SessionEnd` reason `prompt_input_exit`, live file removed, exit 0.
-  `/fail <n>` — exit `n` without an end event. `/clear` — `SessionEnd` `clear`, a new session id,
-  `SessionStart` `clear`, the live file names the new id. `/busy`, `/idle`, `/waiting <what>` —
-  the live file's status (and `waitingFor`). `/alt`, `/main` — enter and leave the alternate
-  screen, drawing a frame on it. `/mouse` — modes 1000 and 1006 on. `/hide-cursor` — mode 25 off.
-  `/cursor <n>` — DECSCUSR `n`. `/red <text>` — the text in SGR 31. `/lines <n>` — `n` numbered
-  lines. `/flood <bytes>` — that many bytes of numbered lines as fast as it can. `/stall <s>` — reads
-  no input for `s` seconds. `/osc52 <text>` — an OSC 52 clipboard write of `text`. `/link <url>
-  <text>` — an OSC 8 link. `/query` — DA1, DA2, CPR, DECRQM 2026, DECRQSS `m`, XTVERSION, OSC 10 `?`
-  and OSC 11 `?` again; each answer recorded as `{ ev: 'answer', query, answer }`. `/title <text>`
-  — OSC 2. `/wide` — a row with 🙂, a ZWJ sequence and a skin-tone emoji.
-- **Signals.** `SIGWINCH` — records `{ ev: 'resize', cols, rows }` and redraws. `SIGHUP` — records
-  `{ ev: 'hup' }`, `SessionEnd` reason `other`, exit 129. It records `{ ev: 'exit', code }` last.
+  WSL_INTEROP }, coreSoft, cols, rows }` (`argv`: its arguments without the program; `envNames`:
+  the sorted names of its environment — `sh` adds `PWD` even when the caller did not give it;
+  `env` values are null when unset; `coreSoft`: the soft "Max core file size" of
+  `/proc/self/limits` as written there; `cols`, `rows`: the terminal's size, null when its output
+  is not a terminal), sets raw mode, sends DA1 (`ESC [ c`) and waits up to 2 s for the answer
+  (recorded as `{ ev: 'da1', answer }`; without one it writes `no answer to DA1` on the screen and
+  records `answer: null`), then CPR (`ESC [ 6 n`, `{ ev: 'cpr', answer }`; when DA1 had no answer,
+  CPR is sent but not waited for and recorded with `answer: null`), runs the hook with
+  `SessionStart` (source `startup` or `resume`, `session_title` when `-n` is given) and
+  `CLAUDE_PID` = its pid, `CLAUDE_CODE_SESSION_ID` = the session id and `CLAUDE_CODE_ENTRYPOINT`
+  = `cli`, writes `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json` (status `idle`, `procStart` as a
+  decimal string from its own `/proc/self/stat`, `name` when `-n` is given, `version` `standin`,
+  the shapes of `test/fixtures/claude/sessions/idle.json` without `nameSource`; written whole,
+  through a rename), turns bracketed paste (mode 2004) on, as Claude Code does, and draws
+  `standin <short id>> ` (the first 8 characters of the session id).
+- **Input.** Every chunk it reads is recorded as `{ ev: 'input', hex }`, with one exception: while
+  one of its own queries is open (DA1 and CPR at start, `/query`), what arrives goes to the query;
+  the answers are recorded as `da1`, `cpr` or `answer` and never as input, and the bytes that
+  answer nothing are recorded as ONE `input` record when the query closes (all answered, or 2 s).
+  Printable text is echoed. `\r` ends a line: a line that starts with `/` is a command. `\n`
+  (Ctrl+J) is echoed as `⏎`; every other control character in caret notation (`\x16` as `^V`,
+  ESC as `^[`, so a bracketed paste shows `^[[200~…^[[201~`). Lines end in `\n`: Node's raw mode
+  keeps the terminal's ONLCR, as it does for Claude Code, so the terminal receives `\r\n`.
+- **Commands.** `/exit` — the alternate screen left when it is on, bracketed paste off,
+  `SessionEnd` reason `prompt_input_exit`, live file removed, exit 0. `/fail <n>` — exit `n` mod
+  256 (the status the process really has, recorded as such) without an end event; the live file
+  stays, as after a crash. `/clear` — `SessionEnd` `clear`, a new session id, `SessionStart` `clear`, the live file
+  names the new id (and no `-n` name any more). `/busy`, `/idle`, `/waiting <what>` — the live
+  file's status (and `waitingFor`, removed by `/busy` and `/idle`). `/alt`, `/main` — enter and
+  leave the alternate screen, drawing a box around the whole screen on it. `/mouse` — modes 1000
+  and 1006 on. `/hide-cursor` — mode 25 off. `/cursor <n>` — DECSCUSR `n`. `/red <text>` — the
+  text in SGR 31. `/lines <n>` — `n` numbered lines (`line 1` …). `/flood <bytes>` — that many
+  bytes of numbered lines as fast as it can (bytes the program writes; the terminal sees one more
+  CR per line). `/stall <s>` — reads no input for `s` seconds (`stalling <s> s` on the screen;
+  what arrives meanwhile is read afterwards). `/osc52 <text>` — an OSC 52 clipboard write of
+  `text`. `/link <url> <text>` — an OSC 8 link. `/query` — DA1, DA2, CPR, DECRQM 2026, DECRQSS
+  `m`, XTVERSION, OSC 10 `?` and OSC 11 `?` again in one write; each answer recorded as
+  `{ ev: 'answer', query, answer }` with `query` one of `DA1`, `DA2`, `CPR`, `DECRQM 2026`,
+  `DECRQSS m`, `XTVERSION`, `OSC 10`, `OSC 11`; answers may come in any order; the stand-in waits
+  until every query has one or 2 s passed. `/title <text>` — OSC 2. `/wide` — a row with 🙂, a ZWJ
+  sequence and a skin-tone emoji. Any other `/word` — `unknown command: /word`.
+- **Signals.** `SIGWINCH` with a changed size — records `{ ev: 'resize', cols, rows }` and redraws
+  (`size <cols>x<rows>` and the prompt on the main screen, the box on the alternate one). A
+  SIGWINCH that leaves the size as it was records nothing and draws nothing: a server that needs a
+  redraw at the same size must change the size and change it back (S2 7.3: one column narrower and
+  back). `SIGHUP` — records `{ ev: 'hup' }`, `SessionEnd` reason `other`, live file removed, exit
+  129; a SIGHUP while it still waits for DA1 or CPR sends that `SessionEnd` with no `SessionStart`
+  before it (the start hook has not run yet), a case ingest must survive. It records
+  `{ ev: 'exit', code }` last.
 - **It ends itself** (A33), exit 0: when the directory of `STANDIN_RECORD` is gone (checked every
-  second) at once, running no hook and writing nothing (no record, no live file, no spool
-  directory created again); 10 minutes after it started (`STANDIN_MAX_SECONDS` shortens it, for
-  its own test) with `SessionEnd` reason `other` and its live file removed.
+  second, and before every hook run, record and live-file write) at once, running no hook and
+  writing nothing (no record, no live file, no spool directory created again); 10 minutes after
+  it started (`STANDIN_MAX_SECONDS` shortens it, for its own test) with `SessionEnd` reason
+  `other` and its live file removed. Both are timers: while a write to
+  its terminal blocks (`/flood` into a pty that nobody reads, e.g. a keeper under SIGSTOP), they
+  wait, and it ends once the terminal is read again or its holder is gone (then the write fails
+  or it gets SIGHUP).
+- **Reading the records.** `readRecords` leaves out a last line that is not complete yet; record
+  times (`ms`) are wall-clock milliseconds, which can step back on WSL — measure durations in the
+  test with `performance.now()`.
 
 ### 2.5 The server's internal interfaces: `src/window/hub.ts` (task 1)
 
@@ -1378,18 +1413,40 @@ linked into the sandbox where needed)
 
 **Goal.** `bin/skydeck-keepalive <runtimeDir>`: the inner script `wsl.exe` runs. It writes its own
 pid line and `$WSL_INTEROP`, then stays while the server or any keeper is alive, judged by design
-5.5's rule with `sh` builtins only.
+5.5's rule with `sh` builtins only (plus `sleep`, `mv` and `rm`, see below).
 
 **Files**
 - Create: `bin/skydeck-keepalive`
 - Test: `test/bin/keepalive.test.ts`
 
-**Behaviour.** S2 6.1: `sh` builtins, `sleep` and `mv` only. It writes `keepalive.pid` (`<pid>
+**Behaviour.** S2 6.1: `sh` builtins, `sleep`, `mv` and `rm` only; `rm` removes nothing but
+`keepalive.pid` at exit (below) and the script's own temporary file after a failed write (ruled by
+the plan owner in pull request #34: no builtin deletes a file). It writes `keepalive.pid` (`<pid>
 <process start> <boot id>`, the format of 2.8, process start from field 22 of `/proc/$$/stat`
 after the last `)`) and `keepalive.interop` (`$WSL_INTEROP`, empty when unset), each through a
 temporary name and `mv`. Every 10 seconds (`SKYDECK_TEST_KEEPALIVE_SECONDS` overrides, for tests only)
 it reads `server.pid` and `terms/*.pid` and exits 0 when none names a process alive on the current
-boot with the same process start. It removes `keepalive.pid` when it exits.
+boot with the same process start. It removes `keepalive.pid` when it exits, only while that file
+still holds its own line.
+
+Also ruled by the plan owner in pull request #34: `keepalive.interop` holds the value exactly, with
+no newline added, and is empty (zero bytes) when it is unset and also when the value contains a
+newline or a carriage return; the reader (task 19) still checks that what it reads is an absolute
+path. Liveness has three answers, as for task 8's `pidLineState`: alive, dead (another boot id; no
+`/proc/<pid>/stat`; another process start) and unknown (the boot id cannot be read; the stat
+cannot be read or holds no process start). The script exits 0 only when every line is dead; an
+unknown line keeps it like a live one; a garbled line names no process and keeps nothing. The
+script creates its files under `umask 077`. It refuses wrong arguments (none, more than one, a
+relative path, not a directory) with a usage line on stderr and exit 2, writing nothing; it exits 1
+when at start it cannot read the boot id or its own process start (it cannot write its own line and
+has judged nothing yet), when it cannot write its files, or when `sleep` fails.
+`SKYDECK_TEST_KEEPALIVE_SECONDS` counts only as a whole number of at least 1 without leading zeros;
+anything else gives the 10 seconds. `SKYDECK_TEST_PROC` (tests only, an absolute path) stands in for
+`/proc` where the boot id and the watched processes are read, so that a test can make an entry
+unreadable; the script's own process start always comes from the real `/proc`. On SIGHUP, SIGINT
+or SIGTERM it exits at once with 129, 130 or 143 and the same cleanup: its `sleep` runs in the
+background and is killed, so that a signal does not wait for the interval and "removes
+`keepalive.pid` when it exits" also holds for a terminated script.
 
 **Tests** (platform: none; real `sh`, real processes, the interval set to 1 s)
 - with a `server.pid` naming a live `sleep` → still running after 3 s; after the `sleep` is killed

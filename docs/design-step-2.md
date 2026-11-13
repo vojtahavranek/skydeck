@@ -170,7 +170,7 @@ Added to design 11:
 | Module | Job | May import |
 |---|---|---|
 | `bin/skydeck-keeper` | The keeper (7.1), python3. | — |
-| `bin/skydeck-keepalive` | The keep-alive's inner script (6.1): `sh` builtins, `sleep` and `mv` only. | — |
+| `bin/skydeck-keepalive` | The keep-alive's inner script (6.1): `sh` builtins, `sleep`, `mv` and `rm` only (`rm` for its own `keepalive.pid` and temporary file). | — |
 | `src/claude/terminal.ts` | What Claude Code sets in its children's environment (7.4); the meaning of a live-file status change for a turn end (10.3). | platform |
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses. | platform, text, store, claude, sessions, terminals, github |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
@@ -419,7 +419,9 @@ of the distribution alive while the window has anything to keep:
 - The script loops: every 10 seconds it checks whether `server.pid` or any `terms/*.pid` names a
   process that is alive by design 5.5's rule — the boot id from `/proc/sys/kernel/random/boot_id`,
   the process start as field 22 of `/proc/<pid>/stat` after its last `)`, both read with `sh`
-  builtins; when none is, it exits, and `wsl.exe` with it. So it outlives a server restart (a new
+  builtins. A line it cannot judge (the boot id cannot be read; the stat cannot be read or holds
+  no process start) counts as alive (4.2); it exits only when every line is known dead or gone,
+  and `wsl.exe` with it. So it outlives a server restart (a new
   server finds `keepalive.pid` alive by the same rule and starts no second one), and it holds WSL
   while terminals run even after `skydeck window --stop`. A stale file from an earlier boot or of a
   reused pid counts as dead.

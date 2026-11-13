@@ -1,0 +1,197 @@
+#!/bin/sh
+# skydeck keep-alive: skydeck-keepalive <runtime directory>   (design-step-2 6.1, plan task 7)
+#
+# The server starts this through interop, detached, as
+#   wsl.exe -d <distribution> -u <user> --exec /bin/sh <checkout>/bin/skydeck-keepalive <runtimeDir>
+# so that one Windows client of the distribution, and with it WSL, stays alive while the window
+# has anything to keep. In the runtime directory it writes, each through a temporary name and a
+# rename, so that a reader never sees a part of one:
+#   keepalive.pid      its own pid line, "<pid> <process start> <boot id>" (plan contract 2.8);
+#   keepalive.interop  its $WSL_INTEROP exactly, no newline added; empty when that is unset or
+#                      holds a newline or a carriage return (design-step-2 6.4).
+# Then, every 10 seconds, it judges server.pid and every terms/*.pid by design 5.5's rule, which
+# has three answers: alive, dead (another boot; no process with the pid; another process start)
+# and unknown (the boot id cannot be read; the process's stat cannot be read or has no process
+# start). It exits 0 only when every line is dead; an unknown line keeps it, like a live one. A
+# garbled line names no process and keeps nothing. On SIGHUP, SIGINT or SIGTERM it exits at once,
+# 128 + the signal's number. Whenever it exits it removes keepalive.pid, as long as that still
+# holds its own line.
+#
+# Rules: sh builtins plus sleep, mv and rm only, and rm removes nothing but keepalive.pid (above)
+# and its own temporary file after a failed write; nothing on stdout. Exit 2: wrong arguments (a
+# usage line on stderr); exit 1: at start it could not read the boot id or its own process start
+# (it cannot write its line, and has judged nothing yet), it could not write its files (the
+# shell's message on stderr), or sleep failed.
+#
+# For tests only (plan A31): SKYDECK_TEST_KEEPALIVE_SECONDS sets the interval, a whole number of
+# at least 1 written without leading zeros (anything else gives the 10 seconds); SKYDECK_TEST_PROC,
+# an absolute path, stands in for /proc where the boot id and the watched processes are read (its
+# own process start always comes from the real /proc).
+
+# The files are the user's own, like the runtime directory (mode 700).
+umask 077
+
+nl='
+'
+cr=$(printf '\r')
+
+dir=
+proc=/proc
+own_line=
+tmp=
+sleeper=
+
+usage() {
+  printf 'usage: skydeck-keepalive <runtime directory>\n' >&2
+  exit 2
+}
+
+# Sets $boot_id to the current boot id, or empty when it cannot be read.
+read_boot_id() {
+  boot_id=
+  { read -r boot_id <"$proc/sys/kernel/random/boot_id"; } 2>/dev/null
+}
+
+# Sets $proc_start to the process start in the stat file $1: field 22, counted after the last ")"
+# (design 5.5). Empty when the file cannot be read or has another form. The process name before
+# that ")" can hold ")", spaces and even newlines; the fields after it never hold a newline, so the
+# file's last line holds them all. The file is read in a subshell: a shell may exit on a
+# redirection that fails for a compound command (POSIX 2.8.1), and the process can end at any time.
+read_proc_start() {
+  proc_start=
+  last=$(
+    stat_line=
+    { while IFS= read -r stat_part; do stat_line=$stat_part; done <"$1"; } 2>/dev/null
+    printf '%s' "$stat_line"
+  )
+  case $last in
+    *")"*) ;;
+    *) return 0 ;;
+  esac
+  set -f
+  # The fields are split on purpose: one state letter and numbers, separated by single spaces.
+  # shellcheck disable=SC2086
+  set -- ${last##*")"}
+  set +f
+  [ $# -ge 20 ] || return 0
+  shift 19
+  case $1 in
+    '' | *[!0-9]*) ;;
+    *) proc_start=$1 ;;
+  esac
+}
+
+# True unless the file $1 is known dead: it holds a pid line (plan contract 2.8; a keeper's two
+# extra fields are ignored) that design 5.5's rule judges alive or cannot judge. A missing, empty
+# or garbled file names no process and is false.
+line_not_dead() {
+  pid=
+  start=
+  boot=
+  { IFS=' ' read -r pid start boot _ <"$1"; } 2>/dev/null
+  case $pid in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  case $start in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  [ -n "$boot" ] || return 1
+  # Unknown: without the current boot id nothing can be judged.
+  [ -n "$boot_id" ] || return 0
+  [ "$boot" = "$boot_id" ] || return 1
+  # No process has the pid. (If it ends between this test and the read below, the read fails and
+  # the line counts as unknown for one more interval.)
+  [ -e "$proc/$pid/stat" ] || return 1
+  read_proc_start "$proc/$pid/stat"
+  # Unknown: the stat cannot be read or holds no process start.
+  [ -n "$proc_start" ] || return 0
+  [ "$proc_start" = "$start" ]
+}
+
+# True when the server or any keeper is alive or cannot be judged.
+any_not_dead() {
+  read_boot_id
+  line_not_dead "$dir/server.pid" && return 0
+  for file in "$dir"/terms/*.pid; do
+    # Without a match the pattern stays as it is, and names no file.
+    [ -f "$file" ] || continue
+    line_not_dead "$file" && return 0
+  done
+  return 1
+}
+
+# Writes the text $2 to the file $1 in the runtime directory through a temporary name and a rename.
+write_file() {
+  tmp=$dir/.$1.$$.tmp
+  printf '%s' "$2" >"$tmp" || return 1
+  mv -f -- "$tmp" "$dir/$1" || return 1
+  tmp=
+}
+
+cleanup() {
+  if [ -n "$sleeper" ]; then
+    kill "$sleeper" 2>/dev/null
+  fi
+  if [ -n "$tmp" ]; then
+    rm -f -- "$tmp"
+  fi
+  if [ -n "$own_line" ]; then
+    line=
+    { IFS= read -r line <"$dir/keepalive.pid"; } 2>/dev/null
+    # Another keep-alive may have written its own line since; that one stays.
+    if [ "$line" = "$own_line" ]; then
+      rm -f -- "$dir/keepalive.pid"
+    fi
+  fi
+}
+
+main() {
+  [ $# -eq 1 ] || usage
+  case $1 in
+    /*) ;;
+    *) usage ;;
+  esac
+  [ -d "$1" ] || usage
+  dir=$1
+
+  interval=${SKYDECK_TEST_KEEPALIVE_SECONDS-}
+  case $interval in
+    '' | *[!0-9]* | 0*) interval=10 ;;
+  esac
+  case ${SKYDECK_TEST_PROC-} in
+    /*) proc=$SKYDECK_TEST_PROC ;;
+  esac
+
+  trap cleanup EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  read_boot_id
+  [ -n "$boot_id" ] || exit 1
+  read_proc_start "/proc/$$/stat"
+  [ -n "$proc_start" ] || exit 1
+
+  # A value with a newline or a carriage return is written empty, as the hook does (it never has
+  # one in practice).
+  interop=${WSL_INTEROP-}
+  case $interop in
+    *"$nl"* | *"$cr"*) interop= ;;
+  esac
+  # keepalive.interop first: whoever sees keepalive.pid can read it.
+  write_file keepalive.interop "$interop" || exit 1
+  own_line="$$ $proc_start $boot_id"
+  write_file keepalive.pid "$own_line$nl" || exit 1
+
+  while :; do
+    # In the background, so that a signal is handled at once rather than after the sleep.
+    sleep "$interval" &
+    sleeper=$!
+    # A sleep that fails would make this a busy loop.
+    wait "$sleeper" || exit 1
+    sleeper=
+    any_not_dead || exit 0
+  done
+}
+
+main "$@"
