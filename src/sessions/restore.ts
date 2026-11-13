@@ -12,6 +12,7 @@ import { sanitize } from '../text/sanitize.ts';
 import { shellQuote } from '../text/shell.ts';
 import type { Deck } from './deck.ts';
 import { ingestSpool } from './ingest.ts';
+import { launchSpec } from './launch.ts';
 import type { ListRow } from './list.ts';
 import { loadRows } from './load.ts';
 import { refresh } from './refresh.ts';
@@ -193,7 +194,7 @@ async function runInTabs(run: Run, entries: readonly RestoreEntry[]): Promise<vo
         continue;
       }
       const { prepared, lock, afterEventId } = taken;
-      const result = await openSafely(run.terminal, { cwd: prepared.cwd, argv: prepared.argv });
+      const result = await openSafely(run.terminal, launchSpec(prepared, lock));
       // A call that timed out may have opened the tab anyway: its session is waited for like the
       // others, so that no more than one batch is starting at a time.
       if (result.ok || result.timedOut) {
@@ -284,8 +285,8 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
         continue; // refused: the next one is handed off instead
       }
       handoffTried = true;
-      const { prepared } = taken;
-      const result = await openSafely(run.terminal, { cwd: prepared.cwd, argv: prepared.argv });
+      const { prepared, lock } = taken;
+      const result = await openSafely(run.terminal, launchSpec(prepared, lock));
       if (result.ok) {
         run.outcome.handedOff = entry.row.id;
         run.report(`resuming ${entry.row.shortId} ${entry.row.title} in this terminal`);
@@ -296,7 +297,7 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       // printed for the user to run, and the lock stays so that no other skydeck starts the session
       // meanwhile. After a timeout nothing is printed and the lock stays: the program may have
       // started. With nothing started and nothing printable, the lock is released.
-      const command = settleFailedLaunch(run.deck, prepared, taken.lock, result.timedOut);
+      const command = settleFailedLaunch(run.deck, prepared, lock, result.timedOut);
       if (command !== null) {
         printLine(run, entry.row, command);
       } else if (!result.timedOut) {

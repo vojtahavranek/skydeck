@@ -10,10 +10,10 @@ import { refresh } from '../../src/sessions/refresh.ts';
 import { planRestore, runRestore } from '../../src/sessions/restore.ts';
 import type { RestoreEntry, RestoreOutcome } from '../../src/sessions/restore.ts';
 import { ResumeRefusedError } from '../../src/platform/errors.ts';
-import { acquireLock, lockKey, prepareResume } from '../../src/sessions/resume.ts';
+import { acquireLock, lockKey, prepareResume, readLock } from '../../src/sessions/resume.ts';
 import { handoffScript, hereTerminal } from '../../src/terminals/here.ts';
 import { shellQuote } from '../../src/text/shell.ts';
-import type { OpenResult, Terminal } from '../../src/terminals/types.ts';
+import type { LaunchSpec, OpenResult, Terminal } from '../../src/terminals/types.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { ds, rowOf } from '../helpers/derived.ts';
 import { BOOT_A, BOOT_B, SEC, T0 } from '../helpers/platform.ts';
@@ -420,11 +420,89 @@ test('five sessions that all start are opened in batches of 2, 2, 1, each after 
   // The third open comes after both sessions of the first batch started, the fifth after the second batch.
   assert.deepEqual(reportedAtOpen, [0, 0, 2, 2, 4]);
   assert.deepEqual(sleeps, []);
-  assert.deepEqual(tabs.specs[0], { cwd: projectDir(d), argv: ['claude', '--resume', sid(1)] });
+  assert.deepEqual(
+    { cwd: tabs.specs[0]?.cwd, argv: tabs.specs[0]?.argv },
+    { cwd: projectDir(d), argv: ['claude', '--resume', sid(1)] },
+  );
   assert.deepEqual(
     lines,
     [1, 2, 3, 4, 5].map((n) => `started ${sid(n).slice(0, 8)} ${titleOf(entries, sid(n))}`),
   );
+});
+
+/** What a terminal needs beyond the command (S2 11.1): the session, the lock, the deadline, the label. */
+function launchFields(spec: LaunchSpec | undefined): Record<string, unknown> {
+  return {
+    sessionId: spec?.sessionId,
+    kind: spec?.kind,
+    lock: spec?.lock,
+    startByNs: spec?.startByNs,
+    label: spec?.label,
+  };
+}
+
+/** The deadline of a resume (A20): 55 s after the time its lock records. */
+function deadlineOf(lock: string | null | undefined): bigint | null {
+  return lock === null || lock === undefined ? null : BigInt(lock.split(':')[0] ?? '') + 55n * SEC;
+}
+
+test('restore gives a terminal that opens tabs each launch with the lock it took, its deadline and label', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  d.deck.store.updateMeta(sid(2), { label: 'fix it' }, T0);
+  const locks: (string | null)[] = [];
+  const tabs = fakeTabs(d, {
+    onOpen: (_count, id) => {
+      locks.push(readLock(d.deck, id)); // the lock as it is while the terminal opens
+      d.clock.advanceMs(1500); // the next prepare takes its lock later
+    },
+  });
+  await run(d, tabs.terminal, entries.slice(0, 2));
+  assert.equal(locks.length, 2);
+  assert.notEqual(locks[0], locks[1]);
+  assert.deepEqual(tabs.specs.map(launchFields), [
+    {
+      sessionId: sid(1),
+      kind: 'resume',
+      lock: locks[0],
+      startByNs: deadlineOf(locks[0]),
+      label: null,
+    },
+    {
+      sessionId: sid(2),
+      kind: 'resume',
+      lock: locks[1],
+      startByNs: deadlineOf(locks[1]),
+      label: 'fix it',
+    },
+  ]);
+  assert.match(locks[0] ?? '', /^[0-9]+:[0-9]+$/);
+});
+
+test('restore hands a session off here with the lock it took, its deadline and label', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  d.deck.store.updateMeta(sid(1), { label: 'fix it' }, T0);
+  const specs: LaunchSpec[] = [];
+  const locks: (string | null)[] = [];
+  const handoff = here(d);
+  const recorded: Terminal = {
+    ...handoff,
+    open: (spec) => {
+      specs.push(spec);
+      locks.push(readLock(d.deck, spec.sessionId));
+      return handoff.open(spec);
+    },
+  };
+  await run(d, recorded, entries.slice(0, 2));
+  assert.deepEqual(specs.map(launchFields), [
+    {
+      sessionId: sid(1),
+      kind: 'resume',
+      lock: locks[0],
+      startByNs: deadlineOf(locks[0]),
+      label: 'fix it',
+    },
+  ]);
+  assert.match(locks[0] ?? '', /^[0-9]+:[0-9]+$/);
 });
 
 test('a session that does not start in time is reported after 3 checks a second apart; the next batch still runs', async (t) => {

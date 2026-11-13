@@ -137,6 +137,11 @@ export function lockEventId(value: string): number | null {
   return parseLock(value)?.afterEventId ?? null;
 }
 
+/** The time the lock value records (when it was taken or last renewed); null for a value that is not a lock. */
+export function lockTakenNs(value: string): Ns | null {
+  return parseLock(value)?.takenNs ?? null;
+}
+
 /**
  * Whether the claude a resume started has started: the session has a start event of a real process
  * (store.hasProcessStartSince) with an id greater than `afterEventId` (the latest event id the lock
@@ -317,6 +322,10 @@ export interface PreparedLaunch {
   unknownFlags: string[];
   /** 'new': the session does not exist until claude starts, so there is nothing to resume yet. */
   kind: 'resume' | 'new';
+  /** The clock when prepareResume / prepareNew ran: where a new session's start deadline counts from (A20). */
+  preparedAtNs: Ns;
+  /** The label the command passes as the session's name; null for none. */
+  label: string | null;
 }
 
 /**
@@ -400,6 +409,7 @@ export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
     throw new Error('checkResumable let a session without a directory through'); // unreachable
   }
   acquireLock(deck, row.id, { latestEventId: row.session.lastEventId });
+  const preparedAtNs = deck.platform.clock.nowNs();
   const launch = row.session.launch;
   const command = buildResumeCommand({
     claudeCommand: deck.config.claudeCommand,
@@ -414,6 +424,8 @@ export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
     flagsKnown: command.flagsKnown,
     unknownFlags: launch === null ? [] : unknownFlags(launch),
     kind: 'resume',
+    preparedAtNs,
+    label: row.label,
   };
 }
 
@@ -442,20 +454,49 @@ function refuseSessionFlags(extra: readonly string[]): void {
 }
 
 /**
- * 7.7: platform.uuid(), stores label/group (cleaned) as meta, buildNewCommand, cwd = platform.cwd;
- * `flagsKnown` true, `unknownFlags` []. UsageError, and nothing stored, for a label or group that
- * cleanLabel/cleanGroup refuse and for an extra flag that refuseSessionFlags refuses. No
- * meta row is written when there is neither a label nor a group.
+ * Refuses (UsageError) a directory a new session cannot start in: "the directory <dir> is not
+ * absolute", "… does not exist" (nothing there, or no directory: a file), "… cannot be checked
+ * (<reason>)". The directory is sanitised in the message: the window's form passes what was typed.
+ */
+function refuseDirectory(files: Files, dir: string): void {
+  const shown = sanitize(dir);
+  if (!isAbsolute(dir)) {
+    throw new UsageError(`the directory ${shown} is not absolute`);
+  }
+  let kind: string | null;
+  try {
+    kind = files.stat(dir)?.kind ?? null;
+  } catch (error) {
+    throw new UsageError(`the directory ${shown} cannot be checked (${describeError(error)})`);
+  }
+  if (kind !== 'dir') {
+    throw new UsageError(`the directory ${shown} does not exist`);
+  }
+}
+
+/**
+ * 7.7: platform.uuid(), stores label/group (cleaned) as meta, buildNewCommand, cwd = `dir` (the
+ * command passes platform.cwd, the window the directory of its form; S2 11.1); `flagsKnown` true,
+ * `unknownFlags` [], `preparedAtNs` the clock, `label` the cleaned label. UsageError, and nothing
+ * stored, for a label or group that cleanLabel/cleanGroup refuse, for an extra flag that
+ * refuseSessionFlags refuses and for a directory that is not absolute or not an existing directory
+ * (refuseDirectory). No meta row is written when there is neither a label nor a group.
  */
 export function prepareNew(
   deck: Deck,
-  options: { label: string | null; group: string | null; extra: readonly string[] },
+  options: {
+    dir: string;
+    label: string | null;
+    group: string | null;
+    extra: readonly string[];
+  },
 ): PreparedLaunch {
   const label = options.label === null ? null : cleanLabel(options.label);
   const group = options.group === null ? null : cleanGroup(options.group);
   refuseSessionFlags(options.extra);
   const { platform } = deck;
-  const cwd = platform.cwd;
+  refuseDirectory(platform.files, options.dir);
+  const cwd = options.dir;
   const sessionId = platform.uuid();
   const argv = buildNewCommand({
     claudeCommand: deck.config.claudeCommand,
@@ -463,8 +504,18 @@ export function prepareNew(
     label,
     extra: options.extra,
   });
+  const preparedAtNs = platform.clock.nowNs();
   if (label !== null || group !== null) {
-    deck.store.updateMeta(sessionId, { label, group }, platform.clock.nowNs());
+    deck.store.updateMeta(sessionId, { label, group }, preparedAtNs);
   }
-  return { sessionId, cwd, argv, flagsKnown: true, unknownFlags: [], kind: 'new' };
+  return {
+    sessionId,
+    cwd,
+    argv,
+    flagsKnown: true,
+    unknownFlags: [],
+    kind: 'new',
+    preparedAtNs,
+    label,
+  };
 }
