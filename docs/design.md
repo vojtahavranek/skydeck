@@ -441,12 +441,17 @@ commands for the others.
 | `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db`, the `node` and `skydeck-hook` links. |
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `locks/`, `hook.log`. |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
-| `claudeHome` | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
+| `claudeHome` | the configuration key `claudeHome`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
 
 `SKYDECK_HOME`, when set, replaces the first three with `$SKYDECK_HOME/data`, `/state`,
 `/config`; tests use it. The hook resolves `stateDir` by the same rule.
 
-Configuration keys, all optional: `terminal` (`here` or `wezterm`), `wezterm.domain`,
+An environment variable (`SKYDECK_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`,
+`CLAUDE_CONFIG_DIR`) counts only when it is non-empty and an absolute path; otherwise it is treated
+as unset. The program, the hook and the launcher all apply this rule. A path in `config.json`
+(`claudeHome`) must be absolute.
+
+Configuration keys, all optional: `terminal` (`here` or `wezterm`; default `here`), `wezterm.domain`,
 `groupPattern`, `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
 `restoreStartTimeoutSeconds`, `claudeHome`, `claudeCommand`. Unknown keys are an error.
 
