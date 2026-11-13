@@ -896,7 +896,10 @@ proof equal to Node.js's — was run in headless Chromium in review (section 21)
 | `key` | `gIGCg4SFhoeIiYqL8-uwKEfl-QQONxqvTE8BdkWwIYHdwQkWN6_IJiXkHtLOZknj-CrYjV5peDDAyWDo` |
 
 **The alarm.** A second proof for a used token means that somebody else had the token, and so,
-probably, now has the secret (15.2). The server then records the time in `kv` `window_alarm`; the
+probably, now has the secret (15.2). The server then records the time in `kv` `window_alarm` —
+once: the time of the first such proof stays until `--new-secret` clears it, and a token presented
+again and again is recorded at its first reuse only, so a loop of proofs costs no store write; the
+verdict (4004) stands even when the record cannot be written, which the server logs. The
 page that got 4004 says `this window's launch address was used by another program, which may now
 have skydeck's key; run skydeck window --new-secret`; a `skydeck window` still waiting for that
 token (it asks the server, `GET /token/<id>`, 8.3) says the same and exits 1; and `doctor` reports

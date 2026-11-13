@@ -154,6 +154,41 @@ export function serverProof(
 }
 
 /**
+ * The bytes of a page's proof, or null when nothing should be compared with it: it is not a
+ * string of 43 bytes (an HMAC-SHA256 in base64url), or the nonces or the origin it was made over
+ * are not what a proof can be made over.
+ */
+function proofBytes(given: unknown, sN: unknown, cN: unknown, origin: unknown): Buffer | null {
+  return typeof given === 'string' &&
+    Buffer.byteLength(given, 'utf8') === PROOF_LENGTH &&
+    isNonce(sN as string) &&
+    isNonce(cN as string) &&
+    typeof origin === 'string'
+    ? Buffer.from(given, 'utf8')
+    : null;
+}
+
+/**
+ * Mode `key` (S2 8.2.2 step 4): whether `proof` is the page's proof made with the secret, compared
+ * in constant time (`timingSafeEqual` on two 43-byte buffers). False, without comparing anything
+ * and without throwing, for a proof that is not a string of 43 bytes, an sN or cN that is not a
+ * nonce (isNonce), or a secret that is not 32 bytes. The server never compares proofs itself.
+ */
+export function keyProofMatches(
+  secret: Uint8Array,
+  proof: string,
+  sN: string,
+  cN: string,
+  origin: string,
+): boolean {
+  const given = proofBytes(proof, sN, cN, origin);
+  if (given === null || !(secret instanceof Uint8Array) || secret.length !== KEY_BYTES) {
+    return false;
+  }
+  return timingSafeEqual(given, Buffer.from(pageProof(secret, 'key', sN, cN, origin), 'utf8'));
+}
+
+/**
  * The welcome's `key` in mode `launch` (S2 8.2.2): the secret encrypted with AES-256-GCM under
  * HKDF-SHA256(token, salt = UTF-8 of sN + cN, info = "skydeck key 1", 32 bytes), as base64url of
  * the 12-byte IV, the ciphertext and the 16-byte tag. `iv` comes from the platform's random source
@@ -207,14 +242,18 @@ export interface Tokens {
   /**
    * Constant-time check of `proof` against every token a proof can still reach (waiting, used or
    * reused; see createTokens); a match marks it used, a proof with a used token marks it reused
-   * and calls onAlarm. Never throws.
+   * (and, on that token's first reuse, raises the alarm). Never throws: `alarmFailure` is the kind
+   * of the alarm callback's failure (an error's name and code, never its message), else null.
    */
   check(
     proof: string,
     sN: string,
     cN: string,
     origin: string,
-  ): { kind: 'match'; token: Uint8Array } | { kind: 'reused' } | { kind: 'none' };
+  ):
+    | { kind: 'match'; token: Uint8Array }
+    | { kind: 'reused'; alarmFailure: string | null }
+    | { kind: 'none' };
   forgetAll(): void;
 }
 
@@ -225,6 +264,8 @@ interface HeldToken {
   dropped: boolean;
   /** Its timer ran out. */
   timedOut: boolean;
+  /** onAlarm returned for this token's reuse (it is not called again for the token). */
+  alarmRaised: boolean;
   /** Stops its timer; null once the token waits no longer. */
   stopTimer: (() => void) | null;
 }
@@ -247,8 +288,13 @@ function stopTimer(held: HeldToken): void {
 /**
  * The server's launch tokens, in memory only (S2 8.2.2): never in the store or a file, forgotten
  * when the server ends. A used token is remembered for the server's whole life (a few bytes each),
- * so that a second use is always recognised; `onAlarm` is called for each such second use, after
- * the token is marked `reused` (the server records it with raiseAlarm).
+ * so that a second use is always recognised.
+ *
+ * The alarm: a proof with a used token marks it `reused` first; then, on that token's first reuse,
+ * `onAlarm` is called (the server records the time with raiseAlarm). A later reuse of the same
+ * token calls it again only when every earlier call failed, so a process that presents one used
+ * token in a loop costs no store write per presentation. The verdict is `reused` whatever `onAlarm`
+ * does: its failure (a refused store write, a locked database) comes back in the result by kind.
  *
  * `check` takes a page's proof in mode `launch`. A proof that is not a string of 43 bytes, or nonces
  * that are not nonces, match nothing and are compared with nothing. Otherwise the proof is compared,
@@ -278,6 +324,7 @@ export function createTokens(
         use: 'unused',
         dropped: false,
         timedOut: false,
+        alarmRaised: false,
         stopTimer: null,
       };
       entry.stopTimer = clock.after(seconds * 1000, () => {
@@ -301,15 +348,10 @@ export function createTokens(
       return true;
     },
     check(given, sN, cN, origin) {
-      if (
-        typeof given !== 'string' ||
-        Buffer.byteLength(given, 'utf8') !== PROOF_LENGTH ||
-        !isNonce(sN) ||
-        !isNonce(cN)
-      ) {
+      const givenBytes = proofBytes(given, sN, cN, origin);
+      if (givenBytes === null) {
         return { kind: 'none' };
       }
-      const givenBytes = Buffer.from(given, 'utf8');
       const nowNs = clock.nowNs();
       let found: HeldToken | null = null;
       for (const entry of held.values()) {
@@ -331,8 +373,16 @@ export function createTokens(
         return { kind: 'match', token: Uint8Array.from(found.token) };
       }
       found.use = 'reused';
-      onAlarm();
-      return { kind: 'reused' };
+      if (found.alarmRaised) {
+        return { kind: 'reused', alarmFailure: null };
+      }
+      try {
+        onAlarm();
+      } catch (error) {
+        return { kind: 'reused', alarmFailure: failureKind(error) };
+      }
+      found.alarmRaised = true;
+      return { kind: 'reused', alarmFailure: null };
     },
     forgetAll() {
       for (const entry of held.values()) {
@@ -343,7 +393,30 @@ export function createTokens(
   };
 }
 
-/** S2 8.2.2: a used launch token was presented again; `kv` `window_alarm` holds the time (ns, decimal). */
+/** An error's name and, when it has one, its code, for a log line; never its message. */
+function failureKind(error: unknown): string {
+  try {
+    if (!(error instanceof Error)) {
+      return `a thrown ${error === null ? 'null' : typeof error}`;
+    }
+    const name = /^[A-Za-z][A-Za-z0-9]*$/.test(error.name) ? error.name : 'Error';
+    const code: unknown = (error as { code?: unknown }).code;
+    return typeof code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(code) ? `${name} (${code})` : name;
+  } catch {
+    return 'an error that cannot be read';
+  }
+}
+
+/**
+ * S2 8.2.2: a used launch token was presented again. `kv` `window_alarm` holds the time (ns,
+ * decimal) of the first such presentation: a recorded time is kept (`--new-secret` clears it); a
+ * value that is not one is replaced. Read and written in one transaction.
+ */
 export function raiseAlarm(store: Store, nowNs: Ns): void {
-  store.setKv('window_alarm', nowNs.toString());
+  store.transaction(() => {
+    const recorded = store.getKv('window_alarm');
+    if (recorded === null || !/^[0-9]+$/.test(recorded)) {
+      store.setKv('window_alarm', nowNs.toString());
+    }
+  });
 }

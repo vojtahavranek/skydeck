@@ -5,12 +5,13 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { inspect } from 'node:util';
 
-import { openStore } from '../../src/store/store.ts';
+import { StoreNewerError, openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import {
   createTokens,
   ensureSecret,
   isNonce,
+  keyProofMatches,
   pageProof,
   raiseAlarm,
   replaceSecret,
@@ -51,6 +52,9 @@ const WRAPPED = 'gIGCg4SFhoeIiYqL8-uwKEfl-QQONxqvTE8BdkWwIYHdwQkWN6_IJiXkHtLOZkn
 /** Two other nonces, for a second connection. */
 const SN2 = b64(counting(0xa0));
 const CN2 = b64(counting(0xc0));
+
+/** What check gives for a used token presented again, when the alarm did not fail. */
+const REUSED = { kind: 'reused', alarmFailure: null };
 
 test("the vector's inputs are the bytes the design names", () => {
   assert.equal(b64(SECRET), SECRET_TEXT);
@@ -318,12 +322,31 @@ test('replaceSecret creates a secret where there was none', (t) => {
   assert.match(deck.store.getKv('window_secret') ?? '', /^[A-Za-z0-9_-]{43}$/);
 });
 
-test('raiseAlarm writes the time in ns as a decimal string', (t) => {
+test('raiseAlarm writes the time in ns as a decimal string and keeps the first one', (t) => {
   const { deck } = testDeck(t);
   raiseAlarm(deck.store, T0 + 5n);
   assert.equal(deck.store.getKv('window_alarm'), String(T0 + 5n));
   raiseAlarm(deck.store, T0 + 9n);
-  assert.equal(deck.store.getKv('window_alarm'), String(T0 + 9n));
+  assert.equal(deck.store.getKv('window_alarm'), String(T0 + 5n));
+});
+
+test('raiseAlarm reads and writes inside one transaction, and writes nothing when an alarm is recorded', (t) => {
+  const { deck } = testDeck(t);
+  const { store, calls } = watched(deck.store);
+  raiseAlarm(store, T0);
+  assert.deepEqual(calls, ['getKv inside', 'setKv inside']);
+  calls.length = 0;
+  raiseAlarm(store, T0 + 1n);
+  assert.deepEqual(calls, ['getKv inside']);
+});
+
+test('raiseAlarm replaces a recorded value that is not a time', (t) => {
+  const { deck } = testDeck(t);
+  for (const bad of ['', 'x', '-5', '1.5', ' 5']) {
+    deck.store.setKv('window_alarm', bad);
+    raiseAlarm(deck.store, T0);
+    assert.equal(deck.store.getKv('window_alarm'), String(T0), JSON.stringify(bad));
+  }
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -375,23 +398,126 @@ test('the same proof again is reused and raises the alarm once', (t) => {
   const { tokens, alarms } = tokenRig(t);
   const { id, token } = tokens.mint(30);
   tokens.check(launchProof(token), SN, CN, ORIGIN);
-  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'reused' });
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), REUSED);
   assert.equal(alarms(), 1);
   assert.equal(tokens.state(id), 'reused');
 });
 
-test('a used token presented on another connection is reused too, and each time raises the alarm', (t) => {
+test('a used token presented again and again is reused each time, the alarm raised on the first only', (t) => {
   const { tokens, alarms } = tokenRig(t);
   const { id, token } = tokens.mint(30);
   tokens.check(launchProof(token), SN, CN, ORIGIN);
-  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), {
-    kind: 'reused',
-  });
-  assert.deepEqual(tokens.check(launchProof(token, CN2, SN2), CN2, SN2, ORIGIN), {
-    kind: 'reused',
-  });
-  assert.equal(alarms(), 2);
+  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), REUSED);
+  assert.deepEqual(tokens.check(launchProof(token, CN2, SN2), CN2, SN2, ORIGIN), REUSED);
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), REUSED);
+  assert.equal(alarms(), 1);
   assert.equal(tokens.state(id), 'reused');
+});
+
+test('each token raises the alarm on its own first reuse', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const first = tokens.mint(30);
+  const second = tokens.mint(600);
+  for (const { token } of [first, second]) {
+    tokens.check(launchProof(token), SN, CN, ORIGIN);
+    tokens.check(launchProof(token), SN, CN, ORIGIN);
+    tokens.check(launchProof(token), SN, CN, ORIGIN);
+  }
+  assert.equal(alarms(), 2);
+});
+
+test('the alarm callback sees the token already reused', (t) => {
+  const { platform, clock } = testPlatform(t);
+  const seen: (string | null)[] = [];
+  let id = '';
+  const tokens = createTokens(clock, platform.randomBytes, () => {
+    seen.push(tokens.state(id));
+  });
+  const minted = tokens.mint(30);
+  id = minted.id;
+  tokens.check(launchProof(minted.token), SN, CN, ORIGIN);
+  tokens.check(launchProof(minted.token), SN, CN, ORIGIN);
+  assert.deepEqual(seen, ['reused']);
+});
+
+/** Tokens whose alarm callback throws `failures[i]` on its i-th call while there is one, else returns. */
+function failingAlarms(
+  t: TestContext,
+  failures: unknown[],
+): { tokens: Tokens; calls: () => number } {
+  const { platform, clock } = testPlatform(t);
+  let calls = 0;
+  const tokens = createTokens(clock, platform.randomBytes, () => {
+    calls += 1;
+    if (calls <= failures.length) {
+      throw failures[calls - 1];
+    }
+  });
+  return { tokens, calls: () => calls };
+}
+
+test('a failing alarm callback does not change the verdict: reused, and the failure by kind', (t) => {
+  const locked = Object.assign(new Error('database is locked: SELECT 1 FROM kv'), {
+    code: 'ERR_SQLITE_ERROR',
+  });
+  const { tokens, calls } = failingAlarms(t, [locked]);
+  const { id, token } = tokens.mint(30);
+  tokens.check(launchProof(token), SN, CN, ORIGIN);
+  const result = tokens.check(launchProof(token), SN, CN, ORIGIN);
+  assert.deepEqual(result, { kind: 'reused', alarmFailure: 'Error (ERR_SQLITE_ERROR)' });
+  assert.equal(tokens.state(id), 'reused');
+  assert.equal(calls(), 1);
+});
+
+test('after a failed alarm the next reuse tries again; once raised, it is not raised again', (t) => {
+  const { tokens, calls } = failingAlarms(t, [new StoreNewerError('the store is newer'), 'x']);
+  const { token } = tokens.mint(30);
+  tokens.check(launchProof(token), SN, CN, ORIGIN);
+  const again = () => tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN);
+  assert.deepEqual(again(), { kind: 'reused', alarmFailure: 'StoreNewerError' });
+  assert.deepEqual(again(), { kind: 'reused', alarmFailure: 'a thrown string' });
+  assert.deepEqual(again(), REUSED);
+  assert.deepEqual(again(), REUSED);
+  assert.equal(calls(), 3);
+});
+
+test("an alarm failure's kind never carries its message", (t) => {
+  const marker = 'MARKER-8f3a';
+  const unreadable = new Error(marker);
+  Object.defineProperty(unreadable, 'name', {
+    get() {
+      throw new Error(marker);
+    },
+  });
+  const failures = [
+    new Error(marker),
+    Object.assign(new TypeError(marker), { code: 42 }),
+    Object.assign(new Error(marker), { code: `E ${marker}` }),
+    Object.assign(new Error(marker), { name: `Bad ${marker}` }),
+    unreadable,
+    marker,
+    { message: marker },
+    null,
+  ];
+  const { tokens } = failingAlarms(t, failures);
+  const { token } = tokens.mint(30);
+  tokens.check(launchProof(token), SN, CN, ORIGIN);
+  const kinds: unknown[] = [];
+  for (let i = 0; i < failures.length; i += 1) {
+    const result = tokens.check(launchProof(token), SN, CN, ORIGIN);
+    assert.equal(result.kind, 'reused');
+    kinds.push(result.kind === 'reused' ? result.alarmFailure : null);
+  }
+  assert.deepEqual(kinds, [
+    'Error',
+    'TypeError',
+    'Error',
+    'Error',
+    'an error that cannot be read',
+    'a thrown string',
+    'a thrown object',
+    'a thrown null',
+  ]);
 });
 
 test('changing the token that check returned changes nothing the tokens hold', (t) => {
@@ -404,7 +530,7 @@ test('changing the token that check returned changes nothing the tokens hold', (
   if (result.kind === 'match') {
     result.token.fill(0);
   }
-  assert.deepEqual(tokens.check(launchProof(copy), SN, CN, ORIGIN), { kind: 'reused' });
+  assert.deepEqual(tokens.check(launchProof(copy), SN, CN, ORIGIN), REUSED);
 });
 
 test('after 30 s an unused token is expired and its proof matches nothing', (t) => {
@@ -477,9 +603,7 @@ test('a used token that was dropped is still recognised: a later proof is reused
   tokens.check(launchProof(token), SN, CN, ORIGIN);
   assert.equal(tokens.drop(id), true);
   assert.equal(tokens.state(id), 'used');
-  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), {
-    kind: 'reused',
-  });
+  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), REUSED);
   assert.equal(tokens.state(id), 'reused');
   assert.equal(alarms(), 1);
 });
@@ -508,9 +632,7 @@ test("a used token stays known for the server's life, long after its expiry", (t
     tokens.drop(tokens.mint(30).id);
   }
   assert.equal(tokens.state(id), 'used');
-  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), {
-    kind: 'reused',
-  });
+  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), REUSED);
   assert.equal(alarms(), 1);
 });
 
@@ -594,15 +716,16 @@ test('check with a nonce that is not one matches nothing and throws nothing', (t
   assert.equal(tokens.state(id), 'waiting');
 });
 
-test('check with a proof or nonce that is not a string matches nothing and throws nothing', (t) => {
+test('check with a proof, nonce or origin that is not a string matches nothing and throws nothing', (t) => {
   const { tokens } = tokenRig(t);
   const { id, token } = tokens.mint(30);
   const proof = launchProof(token);
-  for (const notText of [42, null, undefined, {}, ['x'], Buffer.from(proof)]) {
+  for (const notText of [42, null, undefined, {}, ['x'], Buffer.from(proof), Symbol('x')]) {
     const value = notText as unknown as string;
     assert.deepEqual(tokens.check(value, SN, CN, ORIGIN), { kind: 'none' });
     assert.deepEqual(tokens.check(proof, value, CN, ORIGIN), { kind: 'none' });
     assert.deepEqual(tokens.check(proof, SN, value, ORIGIN), { kind: 'none' });
+    assert.deepEqual(tokens.check(proof, SN, CN, value), { kind: 'none' });
   }
   assert.equal(tokens.state(id), 'waiting');
 });
@@ -686,6 +809,83 @@ test('a proof of another length is none without comparing', (t) => {
   }
   assert.deepEqual(lengths, []);
   assert.equal(tokens.state(id), 'waiting');
+});
+
+// ---------------------------------------------------------------------------------------------
+// Mode key: keyProofMatches, with check's rules.
+
+test("keyProofMatches accepts the page's proof of the vector", () => {
+  assert.equal(keyProofMatches(SECRET, KEY_PAGE, SN, CN, ORIGIN), true);
+  const proof = pageProof(SECRET, 'key', SN2, CN2, 'http://127.0.0.1:47614');
+  assert.equal(keyProofMatches(SECRET, proof, SN2, CN2, 'http://127.0.0.1:47614'), true);
+});
+
+test('keyProofMatches refuses the server label, mode launch, another origin, other nonces or key', () => {
+  for (const proof of [
+    KEY_SERVER,
+    pageProof(SECRET, 'launch', SN, CN, ORIGIN),
+    pageProof(SECRET, 'key', SN, CN, 'http://127.0.0.1:47614'),
+    pageProof(SECRET, 'key', CN, SN, ORIGIN),
+    pageProof(SECRET, 'key', SN2, CN, ORIGIN),
+    pageProof(TOKEN, 'key', SN, CN, ORIGIN),
+  ]) {
+    assert.equal(keyProofMatches(SECRET, proof, SN, CN, ORIGIN), false);
+  }
+  assert.equal(keyProofMatches(TOKEN, KEY_PAGE, SN, CN, ORIGIN), false);
+  assert.equal(keyProofMatches(SECRET, KEY_PAGE, SN2, CN, ORIGIN), false);
+  assert.equal(keyProofMatches(SECRET, KEY_PAGE, SN, CN, 'http://127.0.0.1:47614'), false);
+});
+
+test('keyProofMatches compares the whole proof: one character changed anywhere is refused', () => {
+  for (const at of [0, 1, 21, 41, 42]) {
+    const other = KEY_PAGE[at] === 'A' ? 'B' : 'A';
+    const changed = `${KEY_PAGE.slice(0, at)}${other}${KEY_PAGE.slice(at + 1)}`;
+    assert.equal(keyProofMatches(SECRET, changed, SN, CN, ORIGIN), false, `position ${at}`);
+  }
+});
+
+test('keyProofMatches compares once, with timingSafeEqual on equal-length buffers', (t) => {
+  const lengths = spyTimingSafeEqual(t);
+  assert.equal(keyProofMatches(SECRET, KEY_PAGE, SN, CN, ORIGIN), true);
+  assert.equal(keyProofMatches(SECRET, KEY_SERVER, SN, CN, ORIGIN), false);
+  assert.deepEqual(lengths, [
+    [43, 43],
+    [43, 43],
+  ]);
+});
+
+test('keyProofMatches refuses, without comparing or throwing, what is not a proof, a nonce or a secret', (t) => {
+  const lengths = spyTimingSafeEqual(t);
+  const notText = [42, null, undefined, {}, ['x'], Buffer.from(KEY_PAGE), Symbol('x')].map(
+    (value) => value as unknown as string,
+  );
+  for (const proof of [
+    KEY_PAGE.slice(0, 42),
+    `${KEY_PAGE}A`,
+    `${KEY_PAGE}=`,
+    '',
+    `${KEY_PAGE.slice(0, 42)}é`,
+    'x'.repeat(1_024),
+    ...notText,
+  ]) {
+    assert.equal(keyProofMatches(SECRET, proof, SN, CN, ORIGIN), false);
+  }
+  for (const nonce of [SN.slice(1), `${SN}=`, `${SN.slice(0, 42)}9`, ...notText]) {
+    assert.equal(keyProofMatches(SECRET, KEY_PAGE, nonce, CN, ORIGIN), false);
+    assert.equal(keyProofMatches(SECRET, KEY_PAGE, SN, nonce, ORIGIN), false);
+  }
+  for (const origin of notText) {
+    assert.equal(keyProofMatches(SECRET, KEY_PAGE, SN, CN, origin), false);
+  }
+  for (const secret of [
+    SECRET.subarray(1),
+    new Uint8Array(0),
+    Uint8Array.from([...SECRET, 0]),
+    ...[null, SECRET_TEXT, Array.from(SECRET)].map((value) => value as unknown as Uint8Array),
+  ]) {
+    assert.equal(keyProofMatches(secret, KEY_PAGE, SN, CN, ORIGIN), false);
+  }
+  assert.deepEqual(lengths, []);
 });
 
 // ---------------------------------------------------------------------------------------------
