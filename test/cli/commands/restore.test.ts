@@ -11,13 +11,14 @@ import { acquireLock } from '../../../src/sessions/resume.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
 import { testContext } from '../../helpers/context.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
-import { BOOT_A, BOOT_B, SEC, T0, fakeRunner, runResult } from '../../helpers/platform.ts';
+import { BOOT_A, BOOT_B, SEC, T0, fakeRunner, runResult, statLine } from '../../helpers/platform.ts';
 import {
   BOOT_C,
   DAY,
   HOUR,
   MINUTE,
   NOW,
+  PROC_START,
   addSession,
   projectDir,
   restoreDeck,
@@ -306,6 +307,23 @@ test('restore refuses to run when the boot id cannot be read', async (t) => {
   assert.equal(await main(['restore', '--yes'], d.ctx), 1);
   assert.ok(d.stderr().includes('boot id'), d.stderr());
   assert.equal(existsSync(handoffPath(d)), false);
+});
+
+test('restore decides on the boot id its rows were loaded with: a read that failed there is never mixed with one that worked', async (t) => {
+  // Whichever read of the boot id fails, a session running now is never offered: without the boot
+  // id every process looks dead, and its session would look as if it had ended unexpectedly.
+  for (let failing = 1; failing <= 6; failing++) {
+    const d = machine(t);
+    addSession(d, sid(7), { boot: BOOT_B, pid: 107, startNs: NOW - HOUR });
+    d.proc.setProcess(107, { stat: statLine(107, PROC_START), cmdline: ['claude'] });
+    const real = d.proc.bootId;
+    let reads = 0;
+    d.proc.bootId = () => (++reads === failing ? null : real());
+    const code = await main(['restore', '--all', '--dry-run'], d.ctx);
+    const out = d.stdout();
+    assert.equal(out.includes('00000007'), false, `read ${failing} failed:\n${out}`);
+    assert.equal(code, out === '' ? 1 : 0, `read ${failing} failed: ${d.stderr()}`);
+  }
 });
 
 test('restore --dry-run never prints a command that holds control characters', async (t) => {

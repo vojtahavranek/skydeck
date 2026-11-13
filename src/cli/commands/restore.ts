@@ -101,9 +101,18 @@ export const command: Command = {
   },
 };
 
-/** The entries planRestore gives for the rows in list order (`ls --all`). */
+/**
+ * The entries planRestore gives for the rows in list order (`ls --all`), with the boot id the rows
+ * were derived with as the current one: never a second read, so a read that failed for the rows and
+ * one that worked are not mixed (design 7.6). No rows: nothing to restore.
+ */
 function plan(deck: Deck, all: boolean): RestoreEntry[] {
-  const bootId = deck.platform.proc.bootId();
+  const loaded = loadRows(deck);
+  const [first] = loaded;
+  if (first === undefined) {
+    return [];
+  }
+  const { bootId } = first.session;
   if (bootId === null) {
     // Without it every process looks dead: this boot's running sessions would be offered, and the
     // guard could not see that they run (principle 7).
@@ -112,7 +121,7 @@ function plan(deck: Deck, all: boolean): RestoreEntry[] {
     );
   }
   const rows = flatRows(
-    buildList(loadRows(deck), { showAll: true, filter: '', nowNs: deck.platform.clock.nowNs() }),
+    buildList(loaded, { showAll: true, filter: '', nowNs: deck.platform.clock.nowNs() }),
   );
   return planRestore(rows, deck.store.events(), bootId, all);
 }
