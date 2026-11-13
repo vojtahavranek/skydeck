@@ -210,7 +210,8 @@ function sectionPayload(
  *   open — running, or starting in a terminal of the window — whatever its done mark (S2 12.10);
  *   the row of a `new` terminal whose session has none yet, while the terminal is there (A28).
  * - Sections (S2 12.1, `sectionOf`): Open, This week, Earlier; Earlier folded unless the view
- *   unfolds it, with its count and time span and no rows.
+ *   unfolds it or a filter is set (S2 12.8, ruled), a folded one with its count and time span and
+ *   no rows.
  * - The filter (design 7.4, `matchesFilter`) chooses the rows of the sections and `doneHidden`; it
  *   never shows a done session in stage A. `counts` are the title bar's: every listed row once,
  *   by state, the starting ones and those running elsewhere apart, whatever the filter.
@@ -265,11 +266,15 @@ export function buildListMessage(
     }
   }
 
+  // S2 12.8 (ruled for stage A): while a filter is set every section is unfolded, so that a match
+  // in Earlier is seen.
   const unfolded = new Set(view.unfolded);
+  const folded = (name: SectionName) =>
+    name === 'earlier' && view.filter === '' && !unfolded.has(name);
   const sections = SECTIONS.map((name) => {
     const entries = shown.get(name) ?? [];
     entries.sort(name === 'open' ? compareOpen : compareRecent);
-    return sectionPayload(name, entries, name === 'earlier' && !unfolded.has(name));
+    return sectionPayload(name, entries, folded(name));
   });
 
   return {

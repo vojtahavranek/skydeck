@@ -1880,11 +1880,26 @@ export interface ViewInput {
   selected: SelectedPayload | null;
   nowNs: Ns;
 }
+/** Ruled by the plan owner (task 13, #45): listed are design 7.2's rows (`isListed` with
+ *  `showDone`), every open row (running, or starting in the window) whatever its done mark
+ *  (S2 12.10), and a `new` terminal's own row while the terminal is there. The filter picks the
+ *  sections' rows and the done rows `doneHidden` counts (only those that match it); `counts`
+ *  ignore it. While a filter is set every section is unfolded (S2 12.8); otherwise Earlier is
+ *  folded unless `view.unfolded` names it, and a folded section carries `count`, `firstNs` and
+ *  `lastNs` with `rows: []`. `elsewhere` is taken only for a row that is running. `selected` is
+ *  passed on only when its `sessionId` equals `view.selected`, else null. */
 export function buildListMessage(input: ViewInput): Omit<ListMessage, 'terminals'> & { terminals: Omit<TerminalPayload, 'ownsSize'>[] };
 // src/window/view/sections.ts — the parts, exported for tests
 export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'week' | 'earlier';
+/** Ruled (#45): `starting` when the terminal's program holds no session (`sessionId` null), the
+ *  terminal may still start one (not `ended`, `lost` or `not-started`) and the row is not
+ *  running. `noteHead`: the note's first three lines as step 1 shows a note (`formatNoteLines`'s
+ *  rule: split at every line break, each line sanitised, empty lines at the start and end
+ *  dropped). */
 export function rowPayload(row: ListRow, extra: { terminal: TerminalInfo | null; elsewhere: { pid: number; tty: string | null } | null }): RowPayload;
-export function projectDirs(rows: readonly ListRow[]): string[]; // most recent first, unique
+/** Most recent first, unique; left out: a directory the sanitiser changes, and one that is not
+ *  absolute (ruled, #45). */
+export function projectDirs(rows: readonly ListRow[]): string[];
 ```
 
 **Files**
@@ -1903,12 +1918,16 @@ export function projectDirs(rows: readonly ListRow[]): string[]; // most recent 
 - Done: hidden with `doneHidden` counted; `showDone` lists them; a running done session stays
   under open with its `done` mark (S2 12.10).
 - Filter (design 7.4): matches title, group, note, directory, pull requests; a filter does not
-  show done sessions in stage A (that is stage E).
-- Rows: `noteHead` is at most the note's first three lines; `chip` is design 7.3's; `slot` and
-  `terminal` from the terminal; `elsewhere` with pid and tty; `attention` and `stack` null.
+  show done sessions in stage A (that is stage E); while a filter is set every section is
+  unfolded (S2 12.8, ruled in #45).
+- Rows: `noteHead` is at most the note's first three lines as step 1 shows a note; `chip` is
+  design 7.3's; `slot` and `terminal` from the terminal; `elsewhere` with pid and tty;
+  `attention` and `stack` null.
 - Starting: a resume terminal whose program holds no session yet marks the expected session's
   row `starting`; a `new` terminal without a session row gives a row with the new id, `starting`,
-  titled with the label or `new session in <dir>` (A28); once the session has a row, that row.
+  titled with the label or `new session in <dir>` (A28); once the session has a row, that row; a
+  `new` program that ends before its session started leaves its row, no longer starting, until
+  the terminal is closed (ruled in #45).
 - Counts: per state of the listed rows, `starting` and `elsewhere` separately.
 - Terminals carry `state` and `notReported` from `TerminalInfo` (`reconnecting` included).
 - `projectDirs`: unique, most recent activity first, sanitised paths excluded when they differ

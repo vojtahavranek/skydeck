@@ -781,7 +781,26 @@ test('filter: applies to Open and Earlier too, and the counts of the sections fo
   );
   assert.deepEqual(ids(message, 'open'), [S1]);
   assert.equal(section(message, 'earlier').count, 1);
-  assert.equal(section(message, 'earlier').folded, true);
+  assert.deepEqual(ids(message, 'earlier'), [S3]);
+});
+
+test('filter: while a filter is set every section is unfolded (S2 12.8, ruled)', () => {
+  const list = rows([
+    ds({ id: S1, lastActivityNs: NOW - 30n * DAY, transcript: { aiTitle: 'parser old' } }),
+    ds({ id: S2, lastActivityNs: NOW - 60n * DAY, transcript: { aiTitle: 'parser older' } }),
+    ds({ id: S3, transcript: { aiTitle: 'parser new' } }),
+  ]);
+  const filtered = buildListMessage(input({ rows: list, view: { filter: 'parser' } }));
+  for (const s of filtered.sections) {
+    assert.equal(s.folded, false, s.name);
+  }
+  assert.deepEqual(ids(filtered, 'earlier'), [S1, S2]);
+  assert.equal(section(filtered, 'earlier').count, 2);
+  // Without a filter, Earlier folds again (the view did not unfold it).
+  const plain = buildListMessage(input({ rows: list, view: { filter: '' } }));
+  assert.equal(section(plain, 'earlier').folded, true);
+  assert.deepEqual(section(plain, 'earlier').rows, []);
+  assert.equal(section(plain, 'earlier').count, 2);
 });
 
 test('filter: the title bar counts do not depend on the filter', () => {
