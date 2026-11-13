@@ -150,7 +150,7 @@ The places of design 9.1 stay. Step 2 adds:
 | `<runtimeDir>` | The server chooses it by the first rule that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck-<store id>` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run-<store id>`. `<store id>` is the first 8 hex digits of the sha256 of the store's path, so two installations never share a runtime directory. The server records the directory it uses in the store (`kv` `window_runtime_dir`, 10.2) when it takes its lock, and leaves the record while any keeper lives. **A starting server follows the record first**: when it names a directory that exists and holds a keeper alive by its `.pid` line, the server uses that directory, whatever its own environment would give, so that it finds the keepers a server started with another environment left there; a record whose directory is missing or holds nothing alive is ignored, and the server chooses by the rule and replaces the record. **Commands follow the record**, not their own environment — a command run without `XDG_RUNTIME_DIR` (from cron, `wsl.exe --exec`, `sudo -u`) still finds the server and the keepers — and resolve the rule themselves only when there is no record. `uninstall --purge` looks in the recorded directory and in every directory the rule can give (16.2). The keep-alive script is given the directory as an argument (6.1). Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the others are not, so the server treats anything there from another boot as stale (6.3, 7.8). A test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
 | `<runtimeDir>/server.json` | The running server: `pid`, `procStart`, `bootId`, `port`, `serverId` (random per start), `build` (16.5), `checkout` (its `appRoot`), `startedAt`, and where its environment came from (5.2). Mode 600. Written after the server listens, removed when it stops. |
 | `<runtimeDir>/server.sock` | The server's unix socket for the command line (8.3), mode 600. |
-| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
+| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A reader that cannot tell — the boot id cannot be read, or reading `/proc` fails — counts the line as unknown, not dead: nothing is ever removed, ended or given up on an unknown line; only a dead one allows removing a socket or a `.pid` file. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
 | `<runtimeDir>/keeper-<build>.py` | The keeper's code as the server read it at start (16.5): what new keepers run. Written by the server at start through a temporary name and a rename, mode 600. A running keeper has read its code when it started, so the server removes the files of other builds at start. |
 | `<runtimeDir>/keepalive.interop` | The keep-alive's `$WSL_INTEROP` (6.4). |
 | `<runtimeDir>/terms/<terminal id>.sock` | A keeper's unix socket, mode 600, in a directory of mode 700. |
@@ -618,9 +618,20 @@ The server's environment (5.2), with:
 
 - removed: the variables that say which terminal or multiplexer a process runs in
   (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `WT_SESSION`, `WT_PROFILE_ID`, every `WEZTERM_*`,
-  `TMUX`, `TMUX_PANE`, `STY`, `VTE_VERSION`, `KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, `KONSOLE_*`),
-  `SKYDECK_HANDOFF`, `SKYDECK_LAUNCHER_CACHE` and the launcher's `NODE_COMPILE_CACHE` (5.2), and
-  `SKYDECK_CORE_SOFT` (2; its value goes into the keeper's spec instead);
+  `TMUX`, `TMUX_PANE`, `STY`, `VTE_VERSION`, `KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, `KONSOLE_*`,
+  every `VSCODE_*`), and those that describe the terminal the server was started from rather than
+  the new one: `GPG_TTY` and `SSH_TTY` (a pinentry would draw on that tty), and
+  `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION` (an editor's Claude Code extension; every
+  session would reach that editor), and `GIT_ASKPASS` when `VSCODE_GIT_ASKPASS_MAIN` is set beside
+  it (it is then the editor's askpass script, which runs the `VSCODE_*` names removed here and
+  would answer git with empty credentials; a `GIT_ASKPASS` the user set stays). `WEZTERM_`,
+  `KONSOLE_` and `VSCODE_` are the only prefix rules: those programs set a family of variables
+  whose names change between versions (an editor's integrated terminal sets many `VSCODE_*`,
+  pointing at that editor's sockets); every other name is exact. Also removed:
+  `SKYDECK_HANDOFF`, `SKYDECK_LAUNCHER_CACHE` and the launcher's `NODE_COMPILE_CACHE` (5.2),
+  `SKYDECK_CORE_SOFT` (2; its value goes into the keeper's spec instead) and `SKYDECK_ENV_ORIGIN`
+  (5.2: where the server's environment came from). The other `SKYDECK_*` variables pass:
+  `SKYDECK_HOME` and `SKYDECK_NODE` are the user's settings, and the hook needs them;
 - removed, as a second line of defence behind 5.1's refusal to start a server inside a Claude Code
   session: the variables Claude Code sets for the programs it runs, so that no program in the
   window looks like another session's child or carries its messaging token. The list lives in
@@ -1092,8 +1103,11 @@ Ctrl+click on a URL in a terminal (an OSC 8 link, or plain text that looks like 
 send `act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so
 for one whose text is not its URL the page first shows the target and opens it only on a second
 click. The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme
-`http` or `https`, and is re-serialised by the WHATWG URL parser (so it cannot start with `-`), by
-running
+`http` or `https`, and is still at most 2,048 characters once the WHATWG URL parser has
+re-serialised it (so it cannot start with `-`; percent-encoding can make it several times longer,
+and the re-serialised URL is what Edge gets), and holds no `"` and no backslash: it becomes one
+argument of a Windows program, and either can change how that program splits its command line. It
+opens it by running
 `window.edge` with that URL as its only argument (no profile folder): it opens in the user's own
 Edge profile, where they are logged in, not in the window's profile. The page itself never
 navigates away: it cancels drag and drop over the window, which would otherwise open a dropped file
@@ -1446,8 +1460,11 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
   the label, the group and extra flags. A label that starts with a ticket key gives the group
-  through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by spaces;
-  `'…'` and `"…"` group words (no escapes, no variables); design 7.7's refusals apply. It starts in
+  through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by
+  any whitespace (spaces, tabs, line breaks, the no-break space of a pasted text: nothing can hide
+  inside one word);
+  `'…'` and `"…"` group words (no escapes, no variables); a NUL is refused (no program can be given
+  it); design 7.7's refusals apply. It starts in
   the window (11.3).
 
 ### 12.7 The restore banner
@@ -1761,7 +1778,8 @@ Before what it does in step 1:
   profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
 `--purge` refuses (exit 1) while any keeper is alive — by its `.pid` line and design 5.5's rule,
-never by connecting to it (7.1) — naming the open terminals. It looks for `.pid` lines in every
+never by connecting to it (7.1); a line that cannot be told dead counts as alive (4.2) — naming the
+open terminals. It looks for `.pid` lines in every
 directory that can be the runtime directory: the one the store records and each one the rule of
 4.2 can give (`$SKYDECK_HOME/run`, `$XDG_RUNTIME_DIR/skydeck-<store id>`, `<stateDir>/run-<store
 id>`), because the command may run with another environment than the server did. Purging
