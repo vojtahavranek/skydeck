@@ -184,9 +184,17 @@ sends and maps keys. Everything that orders, groups, filters or judges attention
 `src/window/view/` and tested without a browser.
 
 `src/platform/` gains what the server needs from the outside world, so that tests pass fakes:
-starting a detached process with a given environment, a long-lived child with pipes, listening on
-TCP, connecting to and listening on unix sockets, and reading `/proc/<pid>/stat` for a parent
-pid. Design 11's rule stands: nothing outside `src/platform/` starts a program or opens a socket.
+starting a detached process in a session of its own with a given environment and signalling a
+process (`Platform.processes`); an HTTP server on TCP or on a unix socket, connecting to a unix
+socket and one JSON request over it (`Platform.net`); a one-shot timer (`Clock.after`); random
+bytes (`Platform.randomBytes`); this process's pid, uid and user name; a file's permission bits and
+owner (`FileInfo.mode`, `uid`); the target of a process's file descriptor and whether a TCP port
+has a listener (`Proc.fdTarget`, `Proc.tcpListening`, read from `/proc/net/tcp` and `tcp6`). A
+process's parent pid is read from `/proc/<pid>/stat` (`Proc.stat`) by a pure helper of
+`src/claude/`. Design 11's rule stands, widened: nothing outside `src/platform/` starts a
+program, signals another process, opens a socket, reads `/proc` or the process's environment, or
+draws randomness. A long-lived child with pipes is not built in stage A, where nothing needs one
+(the keeper, `serve`, Edge and `wsl.exe` are all detached); the stage that needs it adds it.
 
 ### 4.4 Changes to step 1's code
 
@@ -196,7 +204,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | Where | Change | Stage |
 |---|---|---|
 | `bin/skydeck` (launcher) | For `serve`: Node.js is started through a `python3 -I -c` line that sets the soft core limit to 1 byte and records the old one (2); without python3, directly. For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside `NODE_COMPILE_CACHE`, so the server can drop the launcher's cache variable from the programs' environment (5.2, 7.4). Tests in `test/bin/` for both. | A |
-| `src/platform/` | New interfaces: detached processes with a given environment, long-lived children, TCP and unix sockets, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
+| `src/platform/` | New interfaces: detached processes with a given environment, signals, TCP and unix sockets, a one-shot timer, random bytes, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value and the start deadline; the `Terminal` names gain `window` (11.1, 11.2). | A |
 | `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). | A |
@@ -1775,7 +1783,7 @@ New keys, all optional:
 | Key | Default | What it does |
 |---|---|---|
 | `terminal` | `"here"` | Gains the value `"window"` (11.4). |
-| `window.port` | `47613` | The server's port on `127.0.0.1` (5.2). A positive integer below 65536. |
+| `window.port` | `47613` | The server's port on `127.0.0.1` (5.2). A whole number from 1 to 65535: 0 ("the system picks") is not a setting; tests give it to the server directly (17). |
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
@@ -1821,7 +1829,29 @@ in a managed Edge is one more unknown.
 Design 12's rules hold: tests are written before the code they test, never start the real
 `claude`, never read or write the real `~/.claude`, never use the network, run under a temporary
 `SKYDECK_HOME` and `claudeHome`. Added: tests never start a Windows program, and a server under
-test listens on a port the system picks (`window.port` 0 in tests only).
+test listens on a port the system picks (port 0, given to the server directly; `window.port`
+accepts 1–65535 only, 16.4).
+
+**No Windows program, enforced.** The development machine has a real `msedge.exe`, `wsl.exe` and
+`/run/WSL/1_interop`, so the rule is built in rather than only asked for. The test sandbox's
+environment carries `SKYDECK_TEST_NO_WINDOWS=1`; while it is set — in skydeck's own environment
+or in the one given to the child — the real platform refuses to start a program that is under
+`/mnt/` or ends in `.exe` (any case), also when the name reaches such a file through `PATH` or a
+symbolic link: the start fails with the code `EWINDOWS` and nothing runs. The processes of the
+test platforms refuse them always, whatever any environment says. Every test that starts a server
+gives it a sandbox `config.json` whose `window.edge` is a stub that records its arguments and whose
+`keepAlive` is `off`, unless the test is about them, and points the first interop candidate (6.4)
+into the sandbox. Without the variable nothing is refused: the rule belongs to the tests, not to
+skydeck.
+
+**Two test platforms.** Logic is tested on a platform with a fake clock, a fake `/proc` and fake
+processes. Every test that starts a keeper, the stand-in or a server, or judges a real process
+alive, uses the second one: the real clock, the real `/proc` (only the boot id it reports can be
+overridden, to show the server what a WSL restart looks like, 6.3), this process's pid, real
+processes that refuse Windows programs always, and the programs a keeper, the stand-in, the hook
+and the launcher need linked into the sandbox. With the fake clock a keeper's start deadline would
+lie in its real past and its `.pid` line would count as dead. A test that starts keepers ends them
+itself, and only after checking that the runtime directory lies inside its sandbox.
 
 ### 17.1 The stand-in program
 
