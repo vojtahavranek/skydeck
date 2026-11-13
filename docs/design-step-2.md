@@ -172,8 +172,10 @@ The places of design 9.1 stay. Step 2 adds:
 | the Edge profile folder | A Windows folder (5.4). Edge creates and writes it; skydeck never writes or removes it. |
 
 A unix socket path must be shorter than 108 bytes. With a fallback under `<stateDir>` or
-`$SKYDECK_HOME` and a long home directory it can be longer; then the server refuses to start (for
-`server.sock`) or to open terminals, says why, and `doctor` reports it.
+`$SKYDECK_HOME` and a long home directory it can be longer. The longest is a keeper's,
+`<runtimeDir>/terms/<terminal id>.sock`; when it would not fit, the server refuses to start
+(`serve` exits 12, 5.2), says why, and `doctor` reports it. It does not start without terminals:
+a server that can list sessions but open none is of no use, and one rule is easier to explain.
 
 ### 4.3 Code layout
 

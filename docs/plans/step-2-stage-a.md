@@ -876,37 +876,73 @@ export function createTokens(clock: Clock, random: (n: number) => Uint8Array, on
 export function raiseAlarm(store: Store, nowNs: Ns): void; // kv window_alarm
 
 // src/window/runtime.ts (task 15)
+/** S2 5.2: `serve` exits 12. message `the runtime directory <dir> cannot be used: <reason>`. */
+export class RuntimeDirError extends SkydeckError { readonly dir: string; readonly reason: string }
 export interface RuntimeFiles { dir: string; serverJson: string; serverSock: string; serverPid: string; keepalivePid: string; keepaliveInterop: string; interop: string; termsDir: string; keeperFile(build: string): string; termSock(id: string): string; termPid(id: string): string }
+/** keeperFile throws for a build that is not [A-Za-z0-9_-]+, termSock and termPid for an id that
+ *  is not a terminal id (12 lowercase hex, 2.3): no name leads outside the directory. */
 export function runtimeFiles(dir: string): RuntimeFiles;
 /** S2 4.2. 'follow' (commands): the store's record whenever there is one, whatever it holds;
  *  runtimeDirByRule only without a record. 'take' (a starting server): the record only when its
  *  directory exists and holds a keeper alive by its .pid line, else runtimeDirByRule; then writes
- *  kv window_runtime_dir. */
+ *  kv window_runtime_dir. In both modes a record that is empty or not an absolute path counts as
+ *  no record (skydeck never writes one; ruled, task 15). 'take' gives a record up only when every
+ *  keeper line in it is 'dead' (an 'unknown' one keeps it). The rule's XDG_RUNTIME_DIR check: a
+ *  directory owned by `platform.uid`, mode without group or other bits, and
+ *  /var/lib/systemd/linger/<userName> exists; a check that throws passes it over. */
 export function resolveRuntimeDir(deck: Deck, mode: 'follow' | 'take'): { dir: string; rule: RuntimeRule | 'record' };
 /** Creates the directory (0o700) and terms/ (0o700); refuses (RuntimeDirError, reason) when it is
- *  not the user's, not 0o700, or a socket path would be 108 bytes or more. */
+ *  not the user's, not 0o700, or a socket path would be 108 bytes or more. The socket path
+ *  checked is the longest one, a keeper's terms/<id>.sock (the directory + 24 bytes), before
+ *  anything is created: `serve` refuses to start (12) rather than run without terminals (ruled,
+ *  task 15; S2 4.2). A directory it creates gets exactly 0o700 whatever the umask; an existing one
+ *  that is a symbolic link, not a directory, another uid's or of another mode is refused, never
+ *  changed. */
 export function prepareRuntimeDir(platform: Platform, files: RuntimeFiles): void;
 /** S2 16.5: writes <dir>/keeper-<build>.py (0o600, through a temporary name) and removes the
- *  keeper files of other builds. */
+ *  keeper files of other builds and the temporaries a cut-short write of one left behind (ruled,
+ *  task 15): only regular files directly in <dir> named `keeper-<build>.py` or
+ *  `.keeper-<build>.py.<12 lowercase hex>.tmp` (Files.writeText's temporary), the forms this
+ *  function creates; anything else stays. */
 export function writeKeeperFile(files: Files, runtime: RuntimeFiles, build: string, code: string): void;
 /** S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
- *  whose socket refuses connections; a line that is 'unknown' never removes anything by itself. */
+ *  whose socket refuses connections (ECONNREFUSED; a socket without a .pid line, or beside one that
+ *  is not a pid line, too); a line that is 'unknown' never removes anything by itself. Resolves to
+ *  the terminal ids whose files it removed, in order. */
 export function removeDeadKeeperFiles(platform: Platform, runtime: RuntimeFiles): Promise<string[]>;
 export interface ServerJson { pid: number; procStart: number; bootId: string; port: number; serverId: string; build: string; checkout: string; startedAt: NsText; envOrigin: { dir: string; atNs: NsText } }
+/** null when the file is missing or does not hold a valid value; a field a newer skydeck adds is
+ *  ignored; a read error other than "missing" is thrown. Valid (ruled, task 15; tasks 18, 22, 23 and
+ *  24 write their fixtures through writeServerJson with such values): pid a safe integer ≥ 1;
+ *  procStart a safe integer ≥ 0; bootId, serverId and build non-empty strings without whitespace;
+ *  port a whole number 1–65535 (the bound port, never 0: A6); checkout and envOrigin.dir absolute
+ *  paths without NUL; startedAt and envOrigin.atNs canonical decimal ns text (no sign, no leading
+ *  zero, ≤ 2^63 − 1). */
 export function readServerJson(files: Files, path: string): ServerJson | null;
-export function writeServerJson(files: Files, path: string, value: ServerJson): void; // 0o600, atomic
-/** S2 5.2: kv window_server in one transaction, taken when the server it names is dead by design
- *  5.5's rule. */
+/** 0o600, atomic. Throws for a value readServerJson would read as null. */
+export function writeServerJson(files: Files, path: string, value: ServerJson): void;
+/** S2 5.2: kv window_server `<pid>:<process start>:<boot id>:<checkout>` in one transaction, taken
+ *  when free or when the server it names is 'dead' by design 5.5's rule (pidLineState), never on
+ *  'unknown'; a stored value that does not parse names no server and is taken. Throws (ruled, task
+ *  15) for a `value` that is not a lock: pid not a safe integer ≥ 1, procStart not one ≥ 0, a boot
+ *  id that is empty or holds ':' or whitespace, a checkout that is not an absolute path or holds NUL. */
 export function takeServerLock(deck: Deck, value: { pid: number; procStart: number; bootId: string; checkout: string }): { taken: true } | { taken: false; holder: { pid: number; checkout: string } };
+/** Removes the lock only when it names this process's pid (`platform.pid`). */
 export function releaseServerLock(deck: Deck): void;
 /** Keepers by their .pid lines (S2 4.2), whatever their state (pidLineState, 2.8), for doctor,
  *  uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
  *  server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
- *  is 'alive' or 'unknown'). */
+ *  is 'alive' or 'unknown'). Reads only regular files terms/<terminal id>.pid (a keeper's
+ *  temporary must not have that name); one that holds no pid line is skipped; the boot id is read
+ *  once, and every line is 'unknown' when it cannot be read. */
 export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; state: PidLineState }[];
 
 // src/window/log.ts (task 15)
-/** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1. */
+/** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1.
+ *  The line is passed through `sanitize` (one line: breaks become spaces, escapes removed). The
+ *  file is only appended to (other writers' lines, the launcher's and Node.js's, stay) and is
+ *  rotated before a line is appended; the function never throws: a line it cannot append goes to
+ *  stderr. */
 export function serverLog(platform: Platform, path: string, foreground: boolean): (line: string) => void;
 /** Renames `path` to `<path>.1` when it is 1 MiB or more (keepers.log, which keepers append to). */
 export function rotateLog(files: Files, path: string): void;
@@ -1995,6 +2031,10 @@ their files, how the server and the commands find that place (the store's record
 
 **Files**
 - Create: `src/window/runtime.ts`, `src/window/log.ts`
+- Create: `test/fixtures/server-lock-child.ts` (one would-be server for the lock race test, as
+  step 1's `resume-lock-child.ts`; ruled, task 15)
+- Modify: `docs/design-step-2.md` 4.2 (a socket path that does not fit: `serve` refuses to start;
+  ruled, task 15)
 - Test: `test/window/runtime.test.ts`, `test/window/log.test.ts`
 
 **Behaviour** (besides 2.8): `runtime.ts` exports the runtime directory, its files, the keeper
