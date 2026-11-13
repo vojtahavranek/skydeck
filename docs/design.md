@@ -85,7 +85,9 @@ The hook is `bin/skydeck-hook`, a POSIX `sh` script. It writes one small file pe
 spool directory and exits. Rules (principle 3):
 
 - It prints nothing to stdout or stderr. (Claude Code adds the stdout of some hooks to the
-  conversation, and exit code 2 blocks.) Its own errors go to `hook.log` in the state directory.
+  conversation, and exit code 2 blocks.) Its own errors go to `hook.log` in the state directory,
+  one line each: a newline inside an error message becomes a space, so every line starts with its
+  time.
 - It always exits 0.
 - It uses only `sh`, `date`, `cat`, `base64`, `mkdir` and `mv`.
 - It does no interpretation. Everything else happens at ingest (5.3).
@@ -309,6 +311,9 @@ Marks are shown next to the state.
   else `vi`: the value is split on spaces and the path of a temporary file holding the note
   (`<stateDir>/note-<session id>.md`, removed afterwards) is appended; stdin must be a terminal.
   When the text cannot be stored the file is kept, and the next edit of that note continues with it.
+  A file kept like that is never removed by an editor that fails. When the editor fails on a file
+  that this edit made, the file is removed only while it still holds what the edit put there: text
+  the editor changed but never stored stays.
   `skydeck note <ref> --set <text>` sets it without an editor (and removes such a kept file), and an
   empty note is no note.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
@@ -427,7 +432,9 @@ found or ambiguous; 4 resume refused; 5 restore stopped before finishing.
                              "review": null, "checks": null, "okAt": null, "error": null } ] } ] }
 ```
 
-Times are UTC ISO 8601 with milliseconds. Sessions are in list order. A pull request's `state`,
+Times are UTC ISO 8601 with milliseconds. `dir` is the project directory as stored (the text views
+show it sanitised, 7.4), so that it can be used as a path; the characters a terminal would act on
+are written as `\uXXXX` escapes like in any other string of the JSON. Sessions are in list order. A pull request's `state`,
 `review`, `checks` and `okAt` are null until it has been fetched. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
 `launch` (argument list or null), `unknownFlags` (the names of the flags in `launch` that skydeck
@@ -608,7 +615,13 @@ stopped by the memory check or cancelled at the prompt.
   database; (2) creates the links `<dataDir>/skydeck-hook` and `~/.local/bin/skydeck`, and
   `<dataDir>/node` pointing at the Node.js binary it runs under; (3) shows the exact change to
   `<claudeHome>/settings.json`, asks, writes a backup beside it, adds the two hook entries and
-  records the backup's path and a hash of the resulting file; (4) runs ingest, reconcile and the
+  records the backup's path and a hash of the resulting file. The file is parsed and written back
+  in skydeck's formatting (JSON, 2-space indentation, a newline at the end), as Claude Code itself
+  writes it; when writing it back unchanged would not give the same bytes, the question has one
+  more line that says the rest of the file will be rewritten in skydeck's formatting and names the
+  backup (its name is fixed when the question is asked), and when a number would lose digits (an
+  integer a double cannot hold, which is the one case where content and not formatting changes)
+  it names the key. Neither refuses; (4) runs ingest, reconcile and the
   first transcript scan; (5) makes the first-run offer (7.1), once: a later install does not offer
   it again, whatever the answer was. Running it again changes nothing. Hook entries that belong to
   something else are never touched. Every install that changes the settings file writes a new
@@ -626,11 +639,15 @@ stopped by the memory check or cancelled at the prompt.
   fails is an error naming the file, and leaves no backup of its own behind.
 - **`skydeck uninstall`**: restores the recorded backup only when the settings file still has the
   recorded hash and that backup still exists (when there was no file before install, it removes
-  the file); in every other case it removes exactly the entries whose command names
-  `<hookPath>`. Removes the links that still point where install pointed them. It never removes a
-  backup, not even with `--purge`, and names each one. It creates nothing: no directory, database
-  or file, also none the user removed after install. The database stays unless `--purge` is
-  given.
+  the file); in every other case it removes exactly the entries install wrote, that is the hook
+  objects whose whole command is what install writes for the event they sit under (a hook that
+  merely names `<hookPath>`, or an entry of an install with another hook path, is not skydeck's and
+  stays; install, doctor and uninstall use this one test). That path rewrites the file in
+  skydeck's formatting too: when this changes more than the removed entries, it first keeps the
+  file as it is in a new backup (named and protected like install's) and says where. Removes the
+  links that still point where install pointed them. It never removes a backup, not even with
+  `--purge`, and names each one. It creates nothing but that backup: no directory, database or
+  file, also none the user removed after install. The database stays unless `--purge` is given.
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
   resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with
   their ages (they are removed after seven days); age of the last event; the last lines of
