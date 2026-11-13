@@ -1951,7 +1951,10 @@ Driven over its socket by `node:test` with real python3 (CI has it):
   not started, with `X` `notStarted`, and the program is never run (the stand-in records every
   start in a file the test reads); `hello` says `started` truly before and after;
 - the `.pid` line: written at start with `started` 0, rewritten with 1 at the start, removed at
-  the end; non-dumpable (`/proc/<pid>/status` shows `Dumpable: 0` where the test can read it);
+  the end; non-dumpable — the kernel then gives the process's `/proc/<pid>/` files to root, so
+  the check is that its `status` is owned by uid 0 and that the same user cannot open its
+  `environ` (`EACCES`), while its program's files are the user's again after `exec` (`status` has
+  no `Dumpable` line on this kernel, 6.18; checked by both plan reviews);
 - input: a paste of 8 MiB into a stand-in that does not read for a while neither stops the
   keeper's output nor loses bytes; the queue limit and the server's `input-full`;
 - output, input, resize as records in order; `R` echoed;

@@ -30,4 +30,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - run: shellcheck bin/skydeck*
+      # By name: bin/skydeck-keeper is python, not sh (plan A14).
+      - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive
+      - run: python3 -m py_compile bin/skydeck-keeper
