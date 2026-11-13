@@ -1,0 +1,164 @@
+{
+  "files": [
+    {
+      "path": "vendor/xterm/THIRD-PARTY-NOTICES",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "cfe9abdd2be0358e6739511562a2f98c9ec30a8e50f9aff06bb24575c5971d1b"
+    },
+    {
+      "path": "vendor/xterm/addon-fit/LICENSE",
+      "package": "@xterm/addon-fit",
+      "version": "0.11.0",
+      "sha256": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
+    },
+    {
+      "path": "vendor/xterm/addon-fit/lib/addon-fit.d.mts",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "41946b56814f50013bda2d3bdff1ffc29bd6b8241d6f93a945a2babb69e5ca56"
+    },
+    {
+      "path": "vendor/xterm/addon-fit/lib/addon-fit.mjs",
+      "package": "@xterm/addon-fit",
+      "version": "0.11.0",
+      "sha256": "2d87e1bddc73be9111de8beee5370c3bb7aac9c94e18e6f245f02ca741ef1769"
+    },
+    {
+      "path": "vendor/xterm/addon-fit/typings/addon-fit.d.ts",
+      "package": "@xterm/addon-fit",
+      "version": "0.11.0",
+      "sha256": "aad8b53a1210375cd5f15381958adfb3fa86d095b8bf703b622c58f9a2792e20"
+    },
+    {
+      "path": "vendor/xterm/addon-search/LICENSE",
+      "package": "@xterm/addon-search",
+      "version": "0.16.0",
+      "sha256": "689ceb10716bd7a87a804c14951d7c2b818cbd60aab83d540902470ce3b13444"
+    },
+    {
+      "path": "vendor/xterm/addon-search/lib/addon-search.d.mts",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "19a319c7a561ae902d1046eda260084e51a4ff74708c6c0a58c22c8cf87381ce"
+    },
+    {
+      "path": "vendor/xterm/addon-search/lib/addon-search.mjs",
+      "package": "@xterm/addon-search",
+      "version": "0.16.0",
+      "sha256": "3ea90162233f867b938cd29b8ad98f589643436bbb5445bd11b825dc99ff0c04"
+    },
+    {
+      "path": "vendor/xterm/addon-search/typings/addon-search.d.ts",
+      "package": "@xterm/addon-search",
+      "version": "0.16.0",
+      "sha256": "29d2e330e8f999363271b3ca4cb93900e7294e7bf227eab48337d4a034baafb1"
+    },
+    {
+      "path": "vendor/xterm/addon-serialize/LICENSE",
+      "package": "@xterm/addon-serialize",
+      "version": "0.14.0",
+      "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+      "licenseFrom": "@xterm/xterm",
+      "licenseReason": "no LICENSE in the package; its package.json declares MIT and the repository of @xterm/xterm"
+    },
+    {
+      "path": "vendor/xterm/addon-serialize/lib/addon-serialize.d.mts",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "fba0ad98f1ab5f1eebff3bb6c0f37cdaffe374a958f6e863707e9d3b9c2b7615"
+    },
+    {
+      "path": "vendor/xterm/addon-serialize/lib/addon-serialize.mjs",
+      "package": "@xterm/addon-serialize",
+      "version": "0.14.0",
+      "sha256": "6c93dff90bef3b7aac8664fa4c1cb4026bf4b701f3014a1fb88edde943dab906"
+    },
+    {
+      "path": "vendor/xterm/addon-serialize/typings/addon-serialize.d.ts",
+      "package": "@xterm/addon-serialize",
+      "version": "0.14.0",
+      "sha256": "ab358d5241c4c8f64d333e182189c97cbc5e581610c817b2284aaf0386e99ac5"
+    },
+    {
+      "path": "vendor/xterm/addon-unicode-graphemes/LICENSE",
+      "package": "@xterm/addon-unicode-graphemes",
+      "version": "0.4.0",
+      "sha256": "a26afeeba9ab0a19502a73df658d8fb09186d0906c81af6c04d334064971e81f"
+    },
+    {
+      "path": "vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.d.mts",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "9d9ab418858e250de3d365789dc91eecc1a18d23562291720add8f06d8876a4f"
+    },
+    {
+      "path": "vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs",
+      "package": "@xterm/addon-unicode-graphemes",
+      "version": "0.4.0",
+      "sha256": "8844a07489b9f23a4aa80b7e1667efe799088bfe17ec2d8d7050ba8679efbaa5"
+    },
+    {
+      "path": "vendor/xterm/addon-unicode-graphemes/typings/addon-unicode-graphemes.d.ts",
+      "package": "@xterm/addon-unicode-graphemes",
+      "version": "0.4.0",
+      "sha256": "c94e1304a754447ddadf3dee23d01ba3dc53b0c055efaea89b53fb58ea355cc0"
+    },
+    {
+      "path": "vendor/xterm/headless/LICENSE",
+      "package": "@xterm/headless",
+      "version": "6.0.0",
+      "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+      "licenseFrom": "@xterm/xterm",
+      "licenseReason": "no LICENSE in the package; its package.json declares MIT and the repository of @xterm/xterm"
+    },
+    {
+      "path": "vendor/xterm/headless/lib-headless/xterm-headless.d.mts",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "e398c794e278ffac640b4660177ced207b88f4854de6984f595cd541c776ec23"
+    },
+    {
+      "path": "vendor/xterm/headless/lib-headless/xterm-headless.mjs",
+      "package": "@xterm/headless",
+      "version": "6.0.0",
+      "sha256": "b27576b6bef6610be97e55a959319baa8a6b1a4fae629d49926971a536428c7a"
+    },
+    {
+      "path": "vendor/xterm/headless/typings/xterm-headless.d.ts",
+      "package": "@xterm/headless",
+      "version": "6.0.0",
+      "sha256": "d157ac3b7ddd0c72fb522631860ebd8b12009a55c1fd8f4730c72c244f6b9640"
+    },
+    {
+      "path": "vendor/xterm/xterm/LICENSE",
+      "package": "@xterm/xterm",
+      "version": "6.0.0",
+      "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+    },
+    {
+      "path": "vendor/xterm/xterm/css/xterm.css",
+      "package": "@xterm/xterm",
+      "version": "6.0.0",
+      "sha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
+    },
+    {
+      "path": "vendor/xterm/xterm/lib/xterm.d.mts",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "c1b214b25100358d055960ee49950289532b2c3036552ab843155f0035c6e728"
+    },
+    {
+      "path": "vendor/xterm/xterm/lib/xterm.mjs",
+      "package": "@xterm/xterm",
+      "version": "6.0.0",
+      "sha256": "b336ec65a086c056d4804b3d4c2347da5663d3f23c3f25be866467bd8857ad59"
+    },
+    {
+      "path": "vendor/xterm/xterm/typings/xterm.d.ts",
+      "package": "@xterm/xterm",
+      "version": "6.0.0",
+      "sha256": "99028aeff2d441798b242790750ee385ba621b460db5a7e2341ae1cab7f3e2af"
+    }
+  ]
+}
