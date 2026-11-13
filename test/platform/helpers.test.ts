@@ -331,6 +331,19 @@ describe('capture', () => {
     assert.equal((await first.next()).done, true, 'a reader given back reads nothing more');
   });
 
+  test('terminate calls every onTerminate callback with the signal until it unsubscribes', () => {
+    const c = capture();
+    const seen: string[] = [];
+    const first = c.io.onTerminate((signal) => seen.push(`a ${signal}`));
+    c.io.onTerminate((signal) => seen.push(`b ${signal}`));
+
+    c.terminate('SIGTERM');
+    first();
+    c.terminate('SIGHUP');
+
+    assert.deepEqual(seen, ['a SIGTERM', 'b SIGTERM', 'b SIGHUP']);
+  });
+
   test('resize changes the size and calls every onResize callback until it unsubscribes', () => {
     const c = capture({ size: { columns: 100, rows: 30 } });
     const seen: string[] = [];

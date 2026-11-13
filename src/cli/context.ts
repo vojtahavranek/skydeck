@@ -21,7 +21,16 @@ export type Io = {
    * stdout is no terminal. Returns the function that unsubscribes it.
    */
   onResize(callback: () => void): () => void;
+  /**
+   * Calls `callback` when the process is asked to end (SIGTERM) or its terminal went away (SIGHUP),
+   * so that it can give the terminal back; the process then ends as the signal would have ended it.
+   * Returns the function that unsubscribes it.
+   */
+  onTerminate(callback: (signal: TerminateSignal) => void): () => void;
 };
+
+/** The signals `Io.onTerminate` reports. */
+export type TerminateSignal = 'SIGTERM' | 'SIGHUP';
 
 /** Everything a command may reach for, passed in so tests can substitute fakes. */
 export type Context = { io: Io; platform: Platform };
@@ -90,6 +99,31 @@ function processIo(): Io {
       return () => {
         process.stdout.off('resize', listener);
       };
+    },
+    onTerminate(callback) {
+      const signals: TerminateSignal[] = ['SIGTERM', 'SIGHUP'];
+      const listeners = signals.map((signal) => {
+        const listener = (): void => {
+          try {
+            callback(signal);
+          } finally {
+            // A listener replaces Node's own handling of the signal, which ends the process: once
+            // nobody listens any more, end it the way the signal would have.
+            unsubscribe();
+            if (process.listenerCount(signal) === 0) {
+              process.kill(process.pid, signal);
+            }
+          }
+        };
+        process.on(signal, listener);
+        return { signal, listener };
+      });
+      const unsubscribe = (): void => {
+        for (const { signal, listener } of listeners) {
+          process.off(signal, listener);
+        }
+      };
+      return unsubscribe;
     },
     keys() {
       const stdin = process.stdin;

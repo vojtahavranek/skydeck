@@ -1,4 +1,4 @@
-import type { Io } from '../../src/cli/context.ts';
+import type { Io, TerminateSignal } from '../../src/cli/context.ts';
 
 export interface CaptureOptions {
   /** Whether each stream reports itself as a terminal; default false. */
@@ -29,6 +29,8 @@ export interface Captured {
    * The real one holds the terminal in raw mode and keeps the process alive until then.
    */
   openKeys: () => number;
+  /** Calls every onTerminate callback with `signal`, as the real one does when the process gets it. */
+  terminate: (signal: TerminateSignal) => void;
 }
 
 /** An `Io` that records what is written to it and answers reads from `options`. */
@@ -42,6 +44,7 @@ export function capture(options: CaptureOptions = {}): Captured {
   let size = options.size ?? { columns: 80, rows: 24 };
   const resized = new Set<() => void>();
   let openKeys = 0;
+  const terminating = new Set<(signal: TerminateSignal) => void>();
   return {
     io: {
       stdout: (text) => {
@@ -85,6 +88,15 @@ export function capture(options: CaptureOptions = {}): Captured {
         };
         return iterator;
       },
+      onTerminate: (callback) => {
+        const listener = (signal: TerminateSignal): void => {
+          callback(signal);
+        };
+        terminating.add(listener);
+        return () => {
+          terminating.delete(listener);
+        };
+      },
       onResize: (callback) => {
         // A wrapper per subscription, so that subscribing the same function twice is two subscriptions.
         const listener = (): void => {
@@ -100,6 +112,11 @@ export function capture(options: CaptureOptions = {}): Captured {
     stderr: () => err,
     prompts,
     openKeys: () => openKeys,
+    terminate: (signal) => {
+      for (const listener of [...terminating]) {
+        listener(signal);
+      }
+    },
     resize: (next) => {
       size = next;
       for (const listener of [...resized]) {

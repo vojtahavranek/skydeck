@@ -13,6 +13,7 @@ import { loadRows } from '../../../src/sessions/load.ts';
 import { attachManualPr, markDone, setLabel } from '../../../src/sessions/meta.ts';
 import { refresh } from '../../../src/sessions/refresh.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
+import { shellQuote } from '../../../src/text/shell.ts';
 import { testDeck } from '../../helpers/deck.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
 import { S1, S2, S3, SEC, T0, fakeRunner, runResult } from '../../helpers/platform.ts';
@@ -25,8 +26,10 @@ import {
 } from '../../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../../helpers/spool.ts';
 
-const ENTER = '\x1b[?1049h\x1b[?25l';
-const LEAVE = '\x1b[?25h\x1b[?1049l';
+/** The alternate screen, the cursor hidden, autowrap off (a row wider than the terminal is cut, not wrapped). */
+const ENTER = '\x1b[?1049h\x1b[?25l\x1b[?7l';
+/** Autowrap and the cursor back, the normal screen back. */
+const LEAVE = '\x1b[?7h\x1b[?25h\x1b[?1049l';
 const CLEAR = '\x1b[H\x1b[2J';
 const PR1 = 'https://github.com/o/r/pull/1';
 const PR2 = 'https://github.com/o/r/pull/2';
@@ -259,6 +262,21 @@ test('p, a URL, enter attaches the pull request by hand', async (t) => {
   assert.ok(lastLines(d).includes('saved'));
 });
 
+test('p fetches the pull request it attached at once, in the background, as pr add does', async (t) => {
+  const runner = gh(() => runResult({ stdout: OPEN_GREEN }));
+  const d = listDeck(t, ['p', PR1, '\r', 'q']);
+
+  assert.equal(await main([], patient(withRunner(d, runner))), 0);
+
+  assert.deepEqual(
+    ghCalls(runner).map((call) => call.args.filter((arg) => /^n\d+=/.test(arg))),
+    [['n0=1']],
+  );
+  assert.equal(d.deck.store.prs().find((row) => row.url === PR1)?.state, 'open');
+  const chip = formatChip({ level: 'approved-green', count: 1 });
+  assert.ok((frames(d).at(-1) ?? []).join('\n').includes(chip));
+});
+
 test('p with -URL detaches it; a URL that is not attached, or no URL at all, shows why', async (t) => {
   const d = listDeck(t, ['p', `-${PR1}`, '\r', 'p', `-${PR2}`, '\r', 'p', 'nope', '\r', 'q']);
   attachManualPr(d.deck, S1, PR1);
@@ -345,9 +363,11 @@ test('R with a tab adapter opens a tab and stays in the list', async (t) => {
   assert.equal(spawned.length, 1);
   assert.deepEqual(spawned[0]?.args.slice(-4), ['--', 'claude', '--resume', S1]);
   assert.ok(spawned[0]?.args.includes(dir));
-  // The launch's warning is the message; it says what happened instead of "opened … in a new tab".
+  // What happened first, then the launch's warning.
   assert.ok(
-    lastLines(d).includes('original flags unknown; resuming with defaults'),
+    lastLines(d).includes(
+      `opened ${short(S1)} in a new tab  original flags unknown; resuming with defaults`,
+    ),
     lastLines(d).join('\n'),
   );
   assert.equal(d.stderr(), '');
@@ -374,21 +394,54 @@ test('R with a tab adapter and a known launch command says the tab was opened', 
   assert.ok(lastLines(d).includes(`opened ${short(S1)} in a new tab`), lastLines(d).join('\n'));
 });
 
-test('R with a tab that fails to open shows the reason and the command in the message line', async (t) => {
+test('R with a tab that fails to open: the message says so first; the command is printed when the list ends', async (t) => {
   const runner = fakeRunner((call) =>
     call.command === 'wezterm' ? runResult({ code: 1, stderr: 'no window\n' }) : runResult({}),
   );
-  const d = listDeck(t, ['R', 'q'], {
-    config: { terminal: 'wezterm' },
-    size: { columns: 400, rows: 24 },
-  });
-  resumable(d);
+  const d = listDeck(t, ['R', 'j', 'q'], { config: { terminal: 'wezterm' } });
+  const dir = resumable(d);
+  let stderrWhileListed = '';
+  const ctx = withRunner(d, runner);
+  const io = ctx.io;
+  ctx.io = {
+    ...io,
+    keys: () => {
+      const keys = io.keys();
+      return {
+        next: async () => {
+          stderrWhileListed = d.stderr();
+          return keys.next();
+        },
+        return: async () => (await keys.return?.()) ?? { done: true, value: undefined },
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+      };
+    },
+  };
 
-  assert.equal(await main([], withRunner(d, runner)), 0);
+  assert.equal(await main([], ctx), 0);
 
-  const message = lastLines(d).find((line) => line.includes('no window'));
-  assert.ok(message !== undefined, lastLines(d).join('\n'));
-  assert.match(message, /to start it yourself, run:/);
+  const message = lastLines(d).find((line) => line.startsWith('opening')) ?? '';
+  assert.ok(
+    message.startsWith(
+      `opening ${short(S1)} in a new tab failed; the details are printed when the list ends`,
+    ),
+    lastLines(d).join('\n'),
+  );
+  assert.ok(message.length <= 80, 'at 80 columns the outcome is what is seen');
+  assert.equal(stderrWhileListed, '', 'nothing written under the list');
+  assert.equal(
+    d.stderr(),
+    [
+      'skydeck: original flags unknown; resuming with defaults',
+      'skydeck: no window',
+      'skydeck: to start it yourself, run:',
+      `cd -- ${shellQuote(dir)} && ${['claude', '--resume', S1].map(shellQuote).join(' ')}`,
+      '',
+    ].join('\n'),
+  );
+  assert.ok(d.stdout().endsWith(LEAVE));
 });
 
 test('n runs the editor outside the alternate screen and stores the note', async (t) => {
@@ -444,17 +497,18 @@ test('a fetch that ends while the editor runs paints nothing over it; the list s
   assert.ok((frames(d).at(-1) ?? []).join('\n').includes(chip));
 });
 
-test('n: the line editNote writes, and its failure, are shown in the message line', async (t) => {
+test('n: the outcome comes first in the message line, then the line editNote wrote', async (t) => {
   const runner = fakeRunner(undefined, () => 1);
-  const d = listDeck(t, ['n', 'q'], { size: { columns: 400, rows: 24 } });
+  const d = listDeck(t, ['n', 'q']);
   writeFileSync(join(d.deck.places.stateDir, `note-${S1}.md`), 'kept');
 
   assert.equal(await main([], withRunner(d, runner)), 0);
 
   assert.equal(d.stderr(), '');
-  const message = lastLines(d).find((line) => line.includes('an earlier edit of this note'));
+  const message = lastLines(d).find((line) => line.startsWith('editor exited 1'));
   assert.ok(message !== undefined, lastLines(d).join('\n'));
-  assert.match(message, /editor exited 1/);
+  assert.ok(message.startsWith('editor exited 1  an earlier edit of this note was not saved'));
+  assert.ok(message.length <= 80);
   assert.equal(d.deck.store.meta(S1)?.note ?? null, null);
 });
 
@@ -622,6 +676,64 @@ test('r ingests what is new, and asks about every pull request of the listed ses
   const asked = ghCalls(runner).map((call) => call.args.filter((arg) => /^n\d+=/.test(arg)));
   assert.deepEqual(asked, [['n0=2'], ['n0=1']]);
 });
+
+test(
+  'r while the pull requests of an earlier r are being fetched starts no second fetch and says one runs',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const runner = hangingGh();
+    const d = listDeck(t, ['r', 'j', 'r', 'q']);
+    attachManualPr(d.deck, S1, PR1);
+    d.deck.store.savePrResult(PR1, {
+      ok: true,
+      atNs: T0 - MINUTE,
+      title: 'Fix the retry',
+      state: 'open',
+      review: null,
+      checks: 'passing',
+    });
+
+    assert.equal(await main([], withRunner(d, runner)), 0);
+
+    assert.equal(ghCalls(runner).length, 1);
+    assert.equal(lastLines(d).at(-1), 'refreshing pull requests…');
+  },
+);
+
+for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+  test(
+    `${signal} gives the terminal back before the process ends`,
+    { timeout: 5000 },
+    async (t) => {
+      let atSignal: { leftLast: boolean; openKeys: number; aborted: boolean } | undefined;
+      const runner = hangingGh();
+      let d: TestDeck | undefined;
+      d = listDeck(t, [
+        () => {
+          const deck = d as TestDeck;
+          deck.terminate(signal);
+          atSignal = {
+            leftLast: deck.stdout().endsWith(LEAVE),
+            openKeys: deck.openKeys(),
+            aborted: ghCalls(runner)[0]?.options?.signal?.aborted === true,
+          };
+          return 'j';
+        },
+      ]);
+      attachManualPr(d.deck, S1, PR1);
+
+      assert.equal(await main([], withRunner(d, runner)), 0);
+      const written = d.stdout();
+      d.terminate(signal);
+
+      assert.deepEqual(atSignal, { leftLast: true, openKeys: 0, aborted: true });
+      assert.equal(written.split(LEAVE).length, 2, 'left once');
+      assert.equal(d.stdout(), written, 'the list no longer listens');
+    },
+  );
+}
 
 test('after every key the window scrolls by the least that keeps the selected row in view', async (t) => {
   const d = listDeck(t, ['j', 'j', 'k', 'q'], { size: { columns: 80, rows: 4 } });
