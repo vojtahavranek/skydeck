@@ -1379,4 +1379,23 @@ describe('WebSocket: a listener that throws (ruled, #44)', () => {
     assert.equal(await within('onClose', accepted.closed), 1006);
     assert.equal(accepted.messages.items.length, 1, 'the frame after it was not read');
   });
+
+  for (const [name, frame, code] of [
+    ['a breach', clientFrame(OP.binary, Buffer.from('A'), { masked: false }), 1002],
+    ["the peer's close", clientFrame(OP.close, closePayload(4000)), 4000],
+  ] as const) {
+    test(`an onClose listener that throws on ${name}: the socket is destroyed, the code kept`, async (t) => {
+      const d = direct(t);
+      const accepted = d.accepted as Accepted;
+      accepted.conn.onClose(() => {
+        throw new Error('listener failed');
+      });
+      await tick();
+
+      assert.throws(() => d.peer.write(frame), /listener failed/);
+
+      assert.equal(d.socket.destroyed, true);
+      assert.equal(await within('onClose', accepted.closed), code);
+    });
+  }
 });

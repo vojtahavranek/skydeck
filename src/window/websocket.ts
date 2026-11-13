@@ -31,8 +31,9 @@ export interface WebSocketConnection {
   close(code: number, reason?: string): void;
   /** Destroys the socket at once, with no close frame; onClose gets 1006 unless it had a code. */
   destroy(): void;
-  // Each onX adds a listener; earlier ones stay. When a listener throws, the socket is destroyed
-  // (onClose gets 1006 unless it had a code) and the error is thrown on.
+  // Each onX adds a listener; earlier ones stay. When a listener that a read calls throws (onText,
+  // onBinary, or onClose for a close the read caused), the socket is destroyed (onClose gets 1006
+  // unless it had a code) and the error is thrown on.
   onText(listener: (text: string) => void): void;
   onBinary(listener: (bytes: Uint8Array) => void): void;
   onDrain(listener: () => void): void;
@@ -437,6 +438,19 @@ class Connection implements WebSocketConnection {
   #receive(chunk: Buffer): void {
     if (this.#state !== 'open') return; // after a close frame, what still comes is dropped
     try {
+      this.#parse(chunk);
+    } catch (error) {
+      // A listener the read called threw (onText, onBinary, or onClose from a close the read
+      // caused): the rest of this read is not parsed, so the connection could only go on from the
+      // middle of a frame. It ends here, and the error goes on (ruled, #44).
+      this.destroy();
+      throw error;
+    }
+  }
+
+  /** Reads the frames in `chunk`; a breach of the protocol closes with its code. */
+  #parse(chunk: Buffer): void {
+    try {
       let at = 0;
       while (this.#state === 'open') {
         if (!this.#inPayload) {
@@ -460,14 +474,8 @@ class Connection implements WebSocketConnection {
         this.#frame();
       }
     } catch (error) {
-      if (error instanceof Breach) {
-        this.#closeWith(error.code);
-        return;
-      }
-      // A listener threw: the rest of this read is not parsed, so the connection could only go on
-      // from the middle of a frame. It ends here, and the error goes on (ruled, #44).
-      this.destroy();
-      throw error;
+      if (!(error instanceof Breach)) throw error;
+      this.#closeWith(error.code);
     }
   }
 
