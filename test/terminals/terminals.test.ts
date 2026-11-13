@@ -8,10 +8,19 @@ import { HANDOFF_ENV, handoffScript, hereTerminal } from '../../src/terminals/he
 import { terminalFor } from '../../src/terminals/index.ts';
 import type { LaunchSpec } from '../../src/terminals/index.ts';
 import { weztermTerminal } from '../../src/terminals/wezterm.ts';
-import { fakeRunner, runResult, S1, testPlatform } from '../helpers/platform.ts';
+import { fakeRunner, runResult, S1, T0, testPlatform } from '../helpers/platform.ts';
 import type { RunCall } from '../helpers/platform.ts';
 
-const spec: LaunchSpec = { cwd: '/w', argv: ['claude', '--resume', S1] };
+/** The fields after argv are the window terminal's; `here` and `wezterm` use cwd and argv only. */
+const spec: LaunchSpec = {
+  cwd: '/w',
+  argv: ['claude', '--resume', S1],
+  sessionId: S1,
+  kind: 'resume',
+  lock: `${T0}:0`,
+  startByNs: T0,
+  label: null,
+};
 
 describe('handoffScript', () => {
   test('quotes only the words that need it', () => {
@@ -109,7 +118,7 @@ describe('hereTerminal', () => {
     const file = join(sandbox.root, 'h');
     const terminal = hereTerminal({ files: platform.files, env: { SKYDECK_HANDOFF: file } });
 
-    await assert.rejects(terminal.open({ cwd: '/w', argv: [] }), /empty argument list/);
+    await assert.rejects(terminal.open({ ...spec, argv: [] }), /empty argument list/);
 
     assert.equal(platform.files.readText(file), null);
   });
@@ -173,7 +182,7 @@ describe('weztermTerminal', () => {
 
   test('passes the arguments as a list: nothing is quoted or split', async () => {
     const runner = fakeRunner(() => runResult({ code: 0 }));
-    const odd: LaunchSpec = { cwd: '/w x', argv: ['claude', '-n', "it's a label", ''] };
+    const odd: LaunchSpec = { ...spec, cwd: '/w x', argv: ['claude', '-n', "it's a label", ''] };
 
     await weztermTerminal({ runner, env: {} }, null).open(odd);
 

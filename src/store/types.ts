@@ -123,6 +123,12 @@ export type KvKey =
   | 'ingest_problems'
   | 'reconcile_problems'
   | 'scan_problems'
+  // The window (S2 10.2):
+  | 'window_secret' // the secret (S2 15.2): 32 random bytes, base64url
+  | 'window_server' // the lock of the one server (S2 5.2)
+  | 'window_runtime_dir' // the runtime directory the server uses (S2 4.2)
+  | 'window_alarm' // when a used launch token was presented a second time (S2 8.2.2)
+  | 'window_launching' // the lock of the one command that starts Edge (S2 5.1)
   // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
   // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
   // version wrote); one per session id.

@@ -8,7 +8,7 @@ import type { ArgSpec, ParsedArgs } from '../args.ts';
 import type { Command } from '../command.ts';
 import { withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
-import { launchPrepared } from '../launching.ts';
+import { launchWhere } from '../launching.ts';
 
 const SPEC: ArgSpec = {
   usage: `skydeck resume <ref> [--here | --tab]
@@ -49,7 +49,7 @@ export const command: Command = {
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const row = resolveRef(ref, loadRows(deck));
       // The guard refreshes again by itself and decides on the rows of that refresh, not on these.
-      const outcome = await launchPrepared(deck, prepareResumeById(deck, row.id), where);
+      const outcome = await launchWhere(deck, prepareResumeById(deck, row.id), where);
       for (const line of outcome.lines) {
         ctx.io.stderr(`${line}\n`);
       }
