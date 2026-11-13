@@ -69,11 +69,12 @@ function run(
   event: string,
   env: Record<string, string | undefined> = {},
   input: string = INPUT,
+  cwd: string = s.root,
 ): Ran {
   const result = spawnSync(hook, [event], {
     input,
     env: s.env({ CLAUDE_CODE_SESSION_ID: S1, CLAUDE_CODE_ENTRYPOINT: 'cli', ...env }),
-    cwd: s.root,
+    cwd,
     encoding: 'utf8',
   });
   assert.equal(result.error, undefined);
@@ -233,6 +234,69 @@ describe('hook: the spool file', () => {
   });
 });
 
+describe('hook: a value can never add a line to the file', () => {
+  test('a working directory with a newline in its name is written as an empty pwd', (t) => {
+    const s = hookSandbox(t);
+    const dir = join(s.root, 'd\nentrypoint_env=sdk-cli\nclaude_pid=1');
+    mkdirSync(dir);
+
+    const ran = run(s, 'SessionStart', { CLAUDE_PID: undefined }, INPUT, dir);
+
+    assertSilent(ran);
+    const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+    const { head, body } = split(content);
+    assert.deepEqual(
+      head.map((line) => line.split('=')[0]),
+      [
+        'v',
+        'event',
+        'time_ns',
+        'claude_pid',
+        'session_env',
+        'entrypoint_env',
+        'boot_id',
+        'stat',
+        'pwd',
+        'argv_b64',
+      ],
+    );
+    assert.ok(head.includes('pwd='));
+    assert.ok(head.includes('entrypoint_env=cli'));
+    assert.ok(head.includes('claude_pid='));
+    assert.equal(body, INPUT);
+  });
+
+  test('a session id and an entrypoint with a newline are written empty', (t) => {
+    const s = hookSandbox(t);
+
+    const ran = run(s, 'SessionEnd', {
+      CLAUDE_PID: undefined,
+      CLAUDE_CODE_SESSION_ID: `${S1}\nclaude_pid=1`,
+      CLAUDE_CODE_ENTRYPOINT: 'cli\nargv_b64=eA==',
+    });
+
+    assertSilent(ran);
+    const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+    const { head } = split(content);
+    assert.equal(head.length, 9);
+    assert.ok(head.includes('session_env='));
+    assert.ok(head.includes('entrypoint_env='));
+    assert.ok(head.includes('claude_pid='));
+    assert.equal(head.filter((line) => line.startsWith('argv_b64=')).length, 0);
+  });
+
+  test('a CLAUDE_PID with a newline is recorded as no pid', (t) => {
+    const s = hookSandbox(t);
+
+    const ran = run(s, 'SessionEnd', { CLAUDE_PID: '1\nargv_b64=eA==' });
+
+    assertSilent(ran);
+    const [name, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+    assert.match(name, /^[0-9]{19}-0-[0-9]+\.ev$/);
+    assert.equal(split(content).head.length, 9);
+  });
+});
+
 describe('hook: failures stay silent and exit 0', () => {
   test('a state directory that cannot be created', (t) => {
     if (process.getuid?.() === 0) {
@@ -310,6 +374,39 @@ describe('hook: failures stay silent and exit 0', () => {
     const log = readFileSync(join(state, 'hook.log'), 'utf8');
     assert.match(log, /SessionStart/);
     assert.match(log, /garbage/);
+  });
+
+  test('a write that fails leaves only the temporary file, never an .ev file', (t) => {
+    const s = hookSandbox(t);
+    rmSync(join(s.bin, 'cat'));
+    writeFileSync(join(s.bin, 'cat'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const state = join(s.skydeckHome, 'state');
+
+    const ran = run(s, 'SessionStart', { CLAUDE_PID: undefined });
+
+    assertSilent(ran);
+    const names = readdirSync(join(state, 'spool'));
+    assert.deepEqual(
+      names.filter((name) => name.endsWith('.ev')),
+      [],
+    );
+    assert.notEqual(readFileSync(join(state, 'hook.log'), 'utf8'), '');
+  });
+
+  test('the spool directory is closed to others even under a default ACL', (t) => {
+    const s = hookSandbox(t);
+    const state = join(s.skydeckHome, 'state');
+    mkdirSync(state);
+    const acl = spawnSync('setfacl', ['-d', '-m', 'g::rwx,o::rx', state], { stdio: 'ignore' });
+    if (acl.error !== undefined || acl.status !== 0) {
+      t.skip('setfacl is not available or the file system has no ACLs');
+      return;
+    }
+
+    const ran = run(s, 'SessionStart', { CLAUDE_PID: undefined });
+
+    assertSilent(ran);
+    assert.equal(statSync(join(state, 'spool')).mode & 0o077, 0);
   });
 
   test('a HOME that is not absolute and no other variable gives up quietly', (t) => {

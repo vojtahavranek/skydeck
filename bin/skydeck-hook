@@ -10,6 +10,11 @@
 # The spool holds working directories and launch command lines, so it is private to the user.
 umask 077
 
+# A line break in a value would add header lines to the spool file, so such a value is written
+# empty (a value never contains one in practice; a directory name can).
+nl='
+'
+
 # Appends one line to hook.log, creating the state directory when it is missing. Failing to log is
 # not worth a second error.
 log() {
@@ -42,6 +47,13 @@ resolve_state() {
 
 main() {
   event=${1-}
+  session_env=${CLAUDE_CODE_SESSION_ID-}
+  entrypoint_env=${CLAUDE_CODE_ENTRYPOINT-}
+  cwd=${PWD-}
+  case $event in *"$nl"*) event= ;; esac
+  case $session_env in *"$nl"*) session_env= ;; esac
+  case $entrypoint_env in *"$nl"*) entrypoint_env= ;; esac
+  case $cwd in *"$nl"*) cwd= ;; esac
   # First, so that the time is as close to the event as it can be.
   time_ns=$(date +%s%N)
 
@@ -78,7 +90,10 @@ main() {
   tmp=$spool/.$name.tmp
 
   if [ ! -d "$spool" ]; then
-    if ! err=$(mkdir -p -- "$spool" 2>&1); then
+    # -m applies to the spool directory only, which is what is wanted: it closes the directory to
+    # others even where a default ACL on the parent overrides the umask.
+    # shellcheck disable=SC2174
+    if ! err=$(mkdir -p -m 700 -- "$spool" 2>&1); then
       log "$err"
       return
     fi
@@ -88,8 +103,8 @@ main() {
   if ! err=$(
     {
       printf 'v=1\nevent=%s\ntime_ns=%s\nclaude_pid=%s\nsession_env=%s\nentrypoint_env=%s\nboot_id=%s\nstat=%s\npwd=%s\n' \
-        "$event" "$time_ns" "$pid" "${CLAUDE_CODE_SESSION_ID-}" "${CLAUDE_CODE_ENTRYPOINT-}" \
-        "$boot_id" "$stat" "${PWD-}" &&
+        "$event" "$time_ns" "$pid" "$session_env" "$entrypoint_env" \
+        "$boot_id" "$stat" "$cwd" &&
         if [ "$event" = SessionStart ]; then printf 'argv_b64=%s\n' "$argv"; fi &&
         printf -- '--\n' &&
         cat
