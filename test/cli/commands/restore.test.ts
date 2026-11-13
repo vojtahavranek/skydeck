@@ -9,6 +9,7 @@ import { isoFromNs } from '../../../src/platform/time.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
 import { acquireLock } from '../../../src/sessions/resume.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
+import { shellQuote } from '../../../src/text/shell.ts';
 import { testContext } from '../../helpers/context.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
 import {
@@ -179,7 +180,7 @@ test('restore --yes hands off the first preselected session and prints a skydeck
   const out = d.stdout();
   assert.ok(
     out.includes(
-      `to resume these yourself, run:\n00000002 ${titleOf(d, sid(2))} in ${projectDir(d)}:\n${resumeLine(sid(2))}\n`,
+      `to resume these yourself, run:\n00000002 ${shellQuote(titleOf(d, sid(2)))} in ${shellQuote(projectDir(d))}:\n${resumeLine(sid(2))}\n`,
     ),
     out,
   );

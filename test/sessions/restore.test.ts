@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -11,6 +12,7 @@ import type { RestoreEntry, RestoreOutcome } from '../../src/sessions/restore.ts
 import { ResumeRefusedError } from '../../src/platform/errors.ts';
 import { acquireLock, lockKey, prepareResume } from '../../src/sessions/resume.ts';
 import { handoffScript, hereTerminal } from '../../src/terminals/here.ts';
+import { shellQuote } from '../../src/text/shell.ts';
 import type { OpenResult, Terminal } from '../../src/terminals/types.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { ds, rowOf } from '../helpers/derived.ts';
@@ -833,11 +835,56 @@ test('without tabs the first session is handed off here and a skydeck resume of 
   assert.deepEqual(lines, [
     `resuming 00000001 ${titleOf(entries, sid(1))} in this terminal`,
     'to resume these yourself, run:',
-    `00000002 ${titleOf(entries, sid(2))} in ${dir}:`,
+    `00000002 ${shellQuote(titleOf(entries, sid(2)))} in ${shellQuote(dir)}:`,
     resumeLine(sid(2)),
-    `00000003 ${titleOf(entries, sid(3))} in ${dir}:`,
+    `00000003 ${shellQuote(titleOf(entries, sid(3)))} in ${shellQuote(dir)}:`,
     resumeLine(sid(3)),
   ]);
+});
+
+test('the line that names a printed session quotes its title and directory: pasted, it runs nothing', async (t) => {
+  // A failed hand-off prints its own command, the next session its skydeck resume line: each after
+  // a line that names the session. A user who selects the name line with the command pastes both.
+  const d = restoreDeck(t, { config: TAB_CONFIG, env: { SKYDECK_HANDOFF: undefined } });
+  const titles = [
+    'Port notes -> README.md; $(touch TITLE_RAN) `touch TICK_RAN`',
+    "it's done; touch SEMI_RAN",
+  ];
+  const dir = join(d.sandbox.root, 'proj $(touch DIR_RAN)');
+  titles.forEach((title, index) => {
+    const n = index + 1;
+    addSession(d, sid(n), {
+      boot: BOOT_A,
+      pid: 100 + n,
+      startNs: T0 - HOUR,
+      activityNs: T0 - BigInt(n) * MINUTE,
+      dir,
+    });
+    d.deck.store.updateMeta(sid(n), { label: title }, T0);
+  });
+  const entries = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, false);
+  const { outcome, lines } = await run(d, here(d), entries);
+  const quotedDir = `'${d.sandbox.root}/proj $(touch DIR_RAN)'`;
+  const names = [
+    `00000001 'Port notes -> README.md; $(touch TITLE_RAN) \`touch TICK_RAN\`' in ${quotedDir}:`,
+    `00000002 'it'\\''s done; touch SEMI_RAN' in ${quotedDir}:`,
+  ];
+  assert.deepEqual(lines.slice(-5), [
+    'to resume these yourself, run:',
+    names[0],
+    outcome.printed[0],
+    names[1],
+    resumeLine(sid(2)),
+  ]);
+  // Fed to a shell, each name line runs a command that does not exist, and nothing else.
+  const scratch = join(d.sandbox.root, 'scratch');
+  mkdirSync(scratch);
+  writeFileSync(join(scratch, 'README.md'), 'notes\n');
+  for (const name of names) {
+    spawnSync('sh', ['-s'], { cwd: scratch, input: `${name}\n`, encoding: 'utf8' });
+  }
+  assert.deepEqual(readdirSync(scratch), ['README.md']);
+  assert.equal(readFileSync(join(scratch, 'README.md'), 'utf8'), 'notes\n');
 });
 
 test('the line that names a printed session shows its label when it has one', async (t) => {
@@ -852,7 +899,7 @@ test('the line that names a printed session shows its label when it has one', as
   d.deck.store.updateMeta(sid(2), { label: 'fix it' }, T0);
   const entries = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, false);
   const { lines } = await run(d, here(d), entries);
-  assert.ok(lines.includes(`00000002 fix it in ${projectDir(d)}:`), lines.join('\n'));
+  assert.ok(lines.includes(`00000002 'fix it' in ${shellQuote(projectDir(d))}:`), lines.join('\n'));
   assert.equal(/[\x00-\x09\x0b-\x1f\x7f]/.test(lines.join('\n')), false, JSON.stringify(lines));
 });
 
@@ -899,9 +946,9 @@ test('without tabs a handoff that fails prints that session’s command too and 
   ]);
   assert.deepEqual(lines.slice(-5), [
     'to resume these yourself, run:',
-    `00000001 ${titleOf(entries, sid(1))} in ${dir}:`,
+    `00000001 ${shellQuote(titleOf(entries, sid(1)))} in ${shellQuote(dir)}:`,
     `cd -- ${dir} && claude --resume ${sid(1)}`,
-    `00000002 ${titleOf(entries, sid(2))} in ${dir}:`,
+    `00000002 ${shellQuote(titleOf(entries, sid(2)))} in ${shellQuote(dir)}:`,
     resumeLine(sid(2)),
   ]);
   // The user may run sid(1)'s printed command now: its lock keeps other skydecks off it.

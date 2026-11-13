@@ -624,9 +624,11 @@ later, and the session may have been resumed elsewhere meanwhile: `skydeck resum
 and takes the lock at the moment it is run, where a raw command would start a second process on one
 transcript (principle 7). The line is always printable: a session id holds no control character.
 Before each printed command restore prints one line that names its session — short id, title and
-directory, sanitised as in the list — because with `--yes` no list was shown; the command keeps a
-line of its own so that it can be pasted alone (not a trailing `#` comment: zsh takes none in an
-interactive shell).
+directory, sanitised as in the list and quoted for a shell — because with `--yes` no list was
+shown. The line sits right under the command it names, so a user may paste the two together:
+quoted, it is a command that does not exist and does nothing else, where a title such as
+`notes -> README.md` would empty a file. The command keeps a line of its own so that it can be
+pasted alone (not a trailing `#` comment: zsh takes none in an interactive shell).
 If the handoff itself fails, that session's own command is printed too and, as with `resume`, its
 lock stays for its 60 seconds, so that no other skydeck starts the session while the user runs the
 command; when that command cannot be printed, the lock is released. `--dry-run` shows each

@@ -64,14 +64,18 @@ export interface History {
   argv?: readonly string[];
   /** The time of the transcript's last record (an assistant record); default startNs + 1 minute. */
   activityNs?: Ns;
+  /** The session's project directory (created); default projectDir(d). */
+  dir?: string;
 }
 
 /**
  * Session `id` with a transcript on disk (a user record, then an assistant record: no turn in
- * progress) in projectDir(d), and its start (and end) event written through the store.
+ * progress) in its directory (history.dir, else projectDir(d)), and its start (and end) event
+ * written through the store.
  */
 export function addSession(d: TestDeck, id: string, history: History): void {
-  const dir = projectDir(d);
+  const dir = history.dir ?? projectDir(d);
+  mkdirSync(dir, { recursive: true });
   const activityNs = history.activityNs ?? history.startNs + MINUTE;
   const record = (type: string, atNs: Ns): string =>
     `${JSON.stringify({ type, sessionId: id, timestamp: isoFromNs(atNs), cwd: dir, entrypoint: 'cli' })}\n`;

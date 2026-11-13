@@ -9,6 +9,7 @@ import type { Ns } from '../platform/types.ts';
 import type { EventRow } from '../store/types.ts';
 import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
+import { shellQuote } from '../text/shell.ts';
 import type { Deck } from './deck.ts';
 import { ingestSpool } from './ingest.ts';
 import type { ListRow } from './list.ts';
@@ -341,16 +342,19 @@ const UNPRINTABLE = 'the command contains control characters and cannot be print
 
 /**
  * A line for the user to run, to `printed` and `report`, after a header line the first time. Before
- * it, a line that names the session (short id, title, directory; all sanitised in the row): with
- * --yes no list was shown, and the line itself names only an id. Not a `#` comment after the
- * command: zsh takes none in an interactive shell. The command keeps a line of its own, so that it
- * can be pasted alone.
+ * it, a line that names the session: `<short> <title> in <dir>:`, with the title and the directory
+ * (sanitised in the row) quoted for a shell. With --yes no list was shown, and the command names only
+ * an id. The name line sits right under "run:", so a user may paste it along with the command: quoted,
+ * it is a command that does not exist and nothing else, where a title such as `notes -> README.md`
+ * would truncate a file. Not a `#` comment after the command: zsh takes none in an interactive shell.
+ * The command keeps a line of its own, so that it can be pasted alone.
  */
 function printLine(run: Run, row: ListRow, line: string): void {
   if (run.outcome.printed.length === 0) {
     run.report('to resume these yourself, run:');
   }
-  run.report(`${row.shortId} ${row.title}${row.dir === null ? '' : ` in ${row.dir}`}:`);
+  const where = row.dir === null ? '' : ` in ${shellQuote(row.dir)}`;
+  run.report(`${row.shortId} ${shellQuote(row.title)}${where}:`);
   run.outcome.printed.push(line);
   run.report(line);
 }

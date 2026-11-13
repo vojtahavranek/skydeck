@@ -4683,9 +4683,11 @@ export const command: Command;
   the guard and takes the lock at that moment, where a raw `claude --resume` line would start a
   second process on a session resumed meanwhile (principle 7). It is always printable, so a session
   whose own command holds a control character is no failure here. Before each printed command (this
-  one and the failed hand-off's), one line names the session: `<short> <title> in <dir>:` (the row's
-  sanitised title and directory), because with `--yes` no list was shown; the command keeps a line
-  of its own so it can be pasted alone. `resumeLine` puts only a lowercase UUID into the line
+  one and the failed hand-off's), one line names the session: `<short> <q title> in <q dir>:` (the
+  row's sanitised title and directory, each quoted with `shellQuote`: pasted along with the command,
+  the line runs a command that does not exist and nothing else — unquoted, a title such as
+  `notes -> README.md` would empty a file), because with `--yes` no list was shown; the command keeps
+  a line of its own so it can be pasted alone. `resumeLine` puts only a lowercase UUID into the line
   (RangeError otherwise). The failed hand-off above keeps
   printing its own command (restore holds its lock, as `resume` does after a failed launch), and
   `--dry-run` keeps showing the real command lines (information, not something to paste).
@@ -4742,8 +4744,10 @@ export const command: Command;
 5. `open` returns `{ ok: false, error: 'boom', timedOut: false }` → `failed` with `'boom'`.
 6. Without tabs (`hereTerminal` with `SKYDECK_HANDOFF`) and three entries → first `handedOff` (handoff file
    written), two lines in `printed`, each `skydeck resume <id> --here` (fix-2; before it, the raw
-   `cd -- <dir> && claude --resume <id> …`), and in `report` each after a line `<short> <title> in <dir>:`
-   (the label when there is one); only one resume lock exists.
+   `cd -- <dir> && claude --resume <id> …`), and in `report` each after a line `<short> <q title> in <q dir>:`
+   (the label when there is one; `shellQuote`d); only one resume lock exists. A title holding `->`, `;`, `$(…)`,
+   a backtick or a `'`, and a directory with a space and `$(…)`, give the exact quoted line, and the name lines
+   fed to `sh -s` in a scratch folder create and change nothing.
 7. (Ruled.) `open` returns `{ ok: false, …, timedOut: true }` and the session starts → `started`, and the
    next batch waited for it; it never starts → `timedOut` after 3 sleeps, lock kept, no command printed.
 8. (Ruled.) A second restore run from inside the first one's `open()` on the same entries: every session is
