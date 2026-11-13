@@ -5,9 +5,14 @@
 #   1. $SKYDECK_NODE
 #   2. the symlink <dataDir>/node, if it points at an executable, where <dataDir> is
 #      $SKYDECK_HOME/data when SKYDECK_HOME is set (tests), else
-#      ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck (design 9.1)
+#      ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck (design 9.1);
+#      an environment variable counts only when it is an absolute path (D26)
 #   3. `node` from PATH
 # so the launcher does not depend on the shell's default Node version.
+#
+# It also runs the handoff `skydeck resume --here` asks for (design 7.6): node writes a shell
+# fragment to the file named by $SKYDECK_HANDOFF, and once node has exited the launcher runs it, so
+# that `claude` replaces this shell and no wrapper process stays behind.
 
 # A set CDPATH would make the relative `cd`s below land in the wrong directory.
 unset CDPATH
@@ -34,11 +39,17 @@ runnable() {
   esac
 }
 
-if [ -n "${SKYDECK_HOME:-}" ]; then
-  linked_node=$SKYDECK_HOME/data/node
-else
-  linked_node=${XDG_DATA_HOME:-$HOME/.local/share}/skydeck/node
-fi
+# D26: SKYDECK_HOME and XDG_DATA_HOME count only when they are absolute paths (which also rules out
+# an empty value); a relative one would depend on the directory the user happens to be in.
+case ${SKYDECK_HOME:-} in
+  /*) linked_node=$SKYDECK_HOME/data/node ;;
+  *)
+    case ${XDG_DATA_HOME:-} in
+      /*) linked_node=$XDG_DATA_HOME/skydeck/node ;;
+      *) linked_node=$HOME/.local/share/skydeck/node ;;
+    esac
+    ;;
+esac
 if [ -n "${SKYDECK_NODE:-}" ]; then
   node=$SKYDECK_NODE
 elif runnable "$linked_node"; then
@@ -53,7 +64,30 @@ if ! runnable "$node"; then
 fi
 
 # Cache compiled modules between runs; the start-up time of a short command is mostly compiling.
-NODE_COMPILE_CACHE=${NODE_COMPILE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/skydeck/compile-cache}
+if [ -z "${NODE_COMPILE_CACHE:-}" ]; then
+  case ${XDG_CACHE_HOME:-} in
+    /*) NODE_COMPILE_CACHE=$XDG_CACHE_HOME/skydeck/compile-cache ;;
+    *) NODE_COMPILE_CACHE=$HOME/.cache/skydeck/compile-cache ;;
+  esac
+fi
 export NODE_COMPILE_CACHE
 
-exec "$node" "$root/bin/bootstrap.mjs" "$@"
+# The handoff file: node writes "cd -- <dir> || exit 1" and "exec <program and arguments>", every
+# word quoted for sh (src/terminals/here.ts), and exits. The launcher reads it, deletes it and only
+# then runs it, so no handoff file outlives the launcher, and the exec'd program does not inherit
+# the variable. Without a handoff the launcher exits with node's status.
+handoff=$(mktemp "${TMPDIR:-/tmp}/skydeck-handoff.XXXXXX") || exit 1
+trap 'rm -f -- "$handoff"' EXIT
+trap 'exit 130' HUP INT TERM
+SKYDECK_HANDOFF=$handoff
+export SKYDECK_HANDOFF
+status=0
+"$node" "$root/bin/bootstrap.mjs" "$@" || status=$?
+if [ -s "$handoff" ]; then
+  script=$(cat -- "$handoff")
+  rm -f -- "$handoff"
+  trap - EXIT
+  unset SKYDECK_HANDOFF
+  eval "$script"
+fi
+exit "$status"
