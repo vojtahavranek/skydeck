@@ -795,7 +795,8 @@ export function prepareRuntimeDir(platform: Platform, files: RuntimeFiles): void
 /** S2 16.5: writes <dir>/keeper-<build>.py (0o600, through a temporary name) and removes the
  *  keeper files of other builds. */
 export function writeKeeperFile(files: Files, runtime: RuntimeFiles, build: string, code: string): void;
-/** S2 7.8: removes terms/<id>.sock and .pid of keepers dead by their line or whose socket refuses. */
+/** S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
+ *  whose socket refuses connections; a line that is 'unknown' never removes anything by itself. */
 export function removeDeadKeeperFiles(platform: Platform, runtime: RuntimeFiles): Promise<string[]>;
 export interface ServerJson { pid: number; procStart: number; bootId: string; port: number; serverId: string; build: string; checkout: string; startedAt: NsText; envOrigin: { dir: string; atNs: NsText } }
 export function readServerJson(files: Files, path: string): ServerJson | null;
@@ -804,8 +805,11 @@ export function writeServerJson(files: Files, path: string, value: ServerJson): 
  *  5.5's rule. */
 export function takeServerLock(deck: Deck, value: { pid: number; procStart: number; bootId: string; checkout: string }): { taken: true } | { taken: false; holder: { pid: number; checkout: string } };
 export function releaseServerLock(deck: Deck): void;
-/** Keepers by their .pid lines (S2 4.2), alive or not, for doctor, uninstall and the server's rediscovery. */
-export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; alive: boolean }[];
+/** Keepers by their .pid lines (S2 4.2), whatever their state (pidLineState, 2.8), for doctor,
+ *  uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
+ *  server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
+ *  is 'alive' or 'unknown'). */
+export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; state: PidLineState }[];
 
 // src/window/log.ts (task 15)
 /** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1. */
@@ -837,7 +841,7 @@ export function parsePidLine(text: string): PidLine | null; // null for pid 0, t
  *    taking the server lock from the server it names (takeServerLock); `uninstall --purge`
  *    (refuses unless every keeper is 'dead'); the keep-alive (task 7, sh) ends only when the
  *    server's and every keeper's line is dead, never when it cannot read the boot id.
- *  - isPidLineAlive ("known alive"): showing and counting (doctor, listKeeperLines' `alive`), and
+ *  - isPidLineAlive ("known alive"): showing and counting (doctor counts state 'alive'), and
  *    before signalling a process (stopServer, the tests' killKeepersIn): only a process known alive
  *    is signalled. */
 export type PidLineState = 'alive' | 'dead' | 'unknown';
@@ -1349,8 +1353,8 @@ export function edgeArgs(port: number, token: string, profileDir: string): strin
  *  URL must also be at most 2,048 characters and hold no '"' and no backslash. */
 export function linkToOpen(url: string): string | null;
 // src/window/flags.ts
-/** S2 12.6: words separated by whitespace, '…' and "…" group words, no escapes; an unclosed quote
- *  or a NUL is an error. */
+/** S2 12.6: words separated by any whitespace (JavaScript's \s: a no-break space too), '…' and
+ *  "…" group words, no escapes; an unclosed quote or a NUL is an error. */
 export function splitFlags(text: string): { ok: true; flags: string[] } | { ok: false; error: string };
 // src/claude/procstat.ts
 export function parentPidFromStat(line: string): number | null; // field 4, after the last ')'

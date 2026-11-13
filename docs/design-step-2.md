@@ -620,9 +620,9 @@ The server's environment (5.2), with:
   (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `WT_SESSION`, `WT_PROFILE_ID`, every `WEZTERM_*`,
   `TMUX`, `TMUX_PANE`, `STY`, `VTE_VERSION`, `KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, `KONSOLE_*`,
   every `VSCODE_*`), and those that describe the terminal the server was started from rather than
-  the new one: `GPG_TTY` and `SSH_TTY` (a pinentry would draw on that tty) and
-  `CLAUDE_CODE_SSE_PORT` (an editor's Claude Code extension; every session would reach that
-  editor). `WEZTERM_`, `KONSOLE_` and `VSCODE_` are the only prefix rules: those programs set a
+  the new one: `GPG_TTY` and `SSH_TTY` (a pinentry would draw on that tty), and
+  `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION` (an editor's Claude Code extension; every
+  session would reach that editor). `WEZTERM_`, `KONSOLE_` and `VSCODE_` are the only prefix rules: those programs set a
   family of variables whose names change between versions (an editor's integrated terminal sets
   many `VSCODE_*`, pointing at that editor's sockets); every other name is exact.
   Also removed:
@@ -1453,7 +1453,8 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
   the label, the group and extra flags. A label that starts with a ticket key gives the group
   through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by
-  whitespace (spaces, tabs, line breaks: a pasted text, and nothing can hide inside one word);
+  any whitespace (spaces, tabs, line breaks, the no-break space of a pasted text: nothing can hide
+  inside one word);
   `'…'` and `"…"` group words (no escapes, no variables); a NUL is refused (no program can be given
   it); design 7.7's refusals apply. It starts in
   the window (11.3).
@@ -1769,7 +1770,8 @@ Before what it does in step 1:
   profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
 `--purge` refuses (exit 1) while any keeper is alive — by its `.pid` line and design 5.5's rule,
-never by connecting to it (7.1) — naming the open terminals. It looks for `.pid` lines in every
+never by connecting to it (7.1); a line that cannot be told dead counts as alive (4.2) — naming the
+open terminals. It looks for `.pid` lines in every
 directory that can be the runtime directory: the one the store records and each one the rule of
 4.2 can give (`$SKYDECK_HOME/run`, `$XDG_RUNTIME_DIR/skydeck-<store id>`, `<stateDir>/run-<store
 id>`), because the command may run with another environment than the server did. Purging
