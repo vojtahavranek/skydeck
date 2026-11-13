@@ -130,6 +130,7 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
       linkKind !== undefined && event.pid !== 0
         ? store.latestEventOfProcess(event.bootId, event.pid, event.procStart, event.timeNs)
         : null;
+    const argv = (event.kind === 'start' ? storedLaunch(deck, event) : null) ?? event.argv;
     const id = store.insertEvent({
       spoolName: event.spoolName,
       timeNs: event.timeNs,
@@ -141,7 +142,7 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
       pid: event.pid,
       procStart: event.procStart,
       cwd: event.cwd,
-      argv: event.argv,
+      argv,
       name: event.name,
       payload: event.payload,
     });
@@ -161,6 +162,37 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
     }
     return id;
   });
+}
+
+/**
+ * The launch command an earlier `start` of the same process stored, null when none did. A process's
+ * command line never changes, but a later start (after `/clear`, an in-session `/resume`, or once
+ * the session changed directory) resolves its relative path flags against the hook input's cwd of
+ * that moment, which need not be where the process was launched. A process is known only with a pid
+ * and a process start time: without them two processes could not be told apart.
+ */
+function storedLaunch(deck: Deck, event: SpoolEvent): string[] | null {
+  if (event.pid === 0 || event.procStart === null) {
+    return null;
+  }
+  let beforeNs = event.timeNs;
+  for (;;) {
+    const earlier = deck.store.latestEventOfProcess(
+      event.bootId,
+      event.pid,
+      event.procStart,
+      beforeNs,
+    );
+    if (earlier === null) {
+      return null;
+    }
+    if (earlier.kind === 'start' && earlier.argv !== null) {
+      return earlier.argv;
+    }
+    // Two events of one process in the same nanosecond are not told apart here: at worst no stored
+    // command is found, and the start keeps the one it resolved itself.
+    beforeNs = earlier.timeNs - 1n;
+  }
 }
 
 /** Moves <spoolDir>/<name> to <badDir>/<name> (creating badDir), noting what happened. */

@@ -424,6 +424,73 @@ test('a relative path-flag value is stored absolute against the input cwd', (t) 
   ]);
 });
 
+/** Directories `first` and `second`, each holding an `s.json`. */
+function twoProjects(d: TestDeck): { first: string; second: string } {
+  const first = join(d.sandbox.root, 'first');
+  const second = join(d.sandbox.root, 'second');
+  for (const dir of [first, second]) {
+    mkdirSync(dir);
+    writeFileSync(join(dir, 's.json'), '{}');
+  }
+  return { first, second };
+}
+
+/** A start of process `over.pid ?? 4242` whose launch command has `--settings s.json`, in `cwd`. */
+function startIn(
+  cwd: string,
+  sessionId: string,
+  source: string,
+  timeNs: Ns,
+  over: Partial<SpoolFields> = {},
+): SpoolFields {
+  return {
+    ...start(sessionId, source, timeNs, { argv: ['claude', '--settings', 's.json'], ...over }),
+    input: hookInput('SessionStart', sessionId, { source, cwd }),
+  };
+}
+
+test('a later start of the same process keeps the launch command its first start stored', (t) => {
+  // After /clear (or an in-session /resume) the hook input's cwd need not be where the process
+  // was launched; its command line never changes, so its relative path flags are not resolved again.
+  const d = testDeck(t);
+  const { first, second } = twoProjects(d);
+  ingestRuns(d, [
+    startIn(first, S1, 'startup', T0),
+    end(S1, 'clear', T60),
+    startIn(second, S2, 'clear', T60_2),
+    // a start whose hook could not read the command line gets it too
+    startIn(second, S3, 'clear', T60_2 + SEC, { argv: null }),
+  ]);
+  const settings = join(first, 's.json');
+  assert.deepEqual(
+    d.deck.store.events().map((e) => e.argv),
+    [
+      ['claude', '--settings', settings],
+      null,
+      ['claude', '--settings', settings],
+      ['claude', '--settings', settings],
+    ],
+  );
+});
+
+test('another process (another process start) resolves its own launch command', (t) => {
+  const d = testDeck(t);
+  const { first, second } = twoProjects(d);
+  ingestRuns(d, [
+    startIn(first, S1, 'startup', T0),
+    startIn(second, S2, 'startup', T60, { procStart: 999 }), // the pid, reused
+    startIn(second, S3, 'startup', T60_2, { pid: null }), // no process at all
+  ]);
+  assert.deepEqual(
+    d.deck.store.events().map((e) => e.argv),
+    [
+      ['claude', '--settings', join(first, 's.json')],
+      ['claude', '--settings', join(second, 's.json')],
+      ['claude', '--settings', join(second, 's.json')],
+    ],
+  );
+});
+
 test('no positional argument and no removed flag is ever stored', (t) => {
   const d = testDeck(t);
   put(d, start(S1, 'startup', T0, { argv: ['claude', '--model', 'opus', 'fix the bug'] }), 1);

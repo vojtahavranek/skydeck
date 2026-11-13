@@ -172,6 +172,10 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
   The original string is stored as well.
 - Relative values of the path flags `--mcp-config`, `--settings`, `--add-dir`, `--plugin-dir`
   in the launch command are made absolute against the event's `cwd` when that path exists.
+  A later `start` of a process (same boot, pid and process start) that already has a `start` with a
+  stored launch command is stored with that command instead: the command line of a process never
+  changes, but after `/clear`, an in-session `/resume` or a change of directory the hook input's
+  `cwd` need not be the directory the process was launched in.
 
 **Scripted runs are dropped at ingest.** An event is discarded (and counted in `kv`) when its
 launch command, as recorded, has the print flag — `-p` or `--print`, alone or inside a cluster of
