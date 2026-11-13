@@ -1214,9 +1214,10 @@ versions (A5); `npm ci` fetches them from the registry and checks each tarball a
 files of A3 from `node_modules/@xterm/*` into `vendor/xterm/`, writes the `.d.mts` shims and
 `vendor/MANIFEST.json` (`{ files: [{ path, package, version, sha256, licenseFrom?, licenseReason?, upstreamSha256?, patch? }] }`, sorted by
 path). One file is patched (ruled on #48, built by task 12): `@xterm/addon-serialize` 0.14.0's
-bundle, whose `_diffStyle` loses bold or dim when either goes off (SGR 22 turns off both). The
-script checks the installed bundle's version and sha256, replaces the two clauses (each exactly
-once), records `upstreamSha256` and `patch` beside the patched file's `sha256`, and the notices
+bundle, whose `_diffStyle` loses bold or dim when either goes off (SGR 22 turns off both), whose
+wrap trick moves by 0 columns above a blank row, and which serialises the alternate screen as if
+the pen were the default. The script checks the installed bundle's version and sha256, replaces
+four texts (each exactly once), records `upstreamSha256` and `patch` beside the patched file's `sha256`, and the notices
 file says the bundle is modified and how (S2 16.6). The committed `vendor/` is what users run; **nothing is fetched at install time**: users do
 not run `npm ci` (docs/install.md), and `install` runs no package manager. `doctor` (task 24) and
 the server (task 14) check the files against the manifest.
@@ -3440,4 +3441,6 @@ Rulings on task 12's findings (2026-11-13):
     task 12's pull request (task 2's script and manifest gain the patch, S2 16.6). The snapshot
     ends with the pen read from the headless terminal's own state (the internal the serialise
     addon reads; a test pins it), so S2 7.2 has no pen limit. Modes 2026 and 20 are restored; tab
-    stops join the known limits.
+    stops join the known limits. Review 2's re-check found two more defects of the same addon
+    (the alternate screen took the pen; a stray `-` above a wrapped row after a blank one); the
+    same patch covers them.

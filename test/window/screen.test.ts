@@ -230,7 +230,9 @@ function recordedStream(endInAlternate: boolean, lines = 300): Step[] {
   steps.push({
     out: '\x1b[?1049h\x1b[H\x1b[44;97m full screen \x1b[0m\r\n\x1b[1;35m漢字🙂\x1b[0m',
   });
-  steps.push({ out: '\x1b[5;10H\x1b[38;2;200;100;50mboxed\x1b[0m' });
+  // A record that ends with a pen set while the alternate screen shows (review 2, N1).
+  steps.push({ out: '\x1b[5;10H\x1b[38;2;200;100;50mboxed\x1b[1;3m' });
+  steps.push({ out: ' more\x1b[0m' });
   if (!endInAlternate) {
     steps.push({ out: '\x1b[?1049l' });
   }
@@ -627,6 +629,44 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
 
   // @xterm/addon-serialize 0.14.0 turns bold off and dim off both with SGR 22, which turns off
   // both; scripts/vendor.ts patches the vendored bundle. Each case also leaves a pen behind.
+  // More of @xterm/addon-serialize 0.14.0 that the vendored bundle's patch fixes (review 2 of #48).
+  const ADDON_CASES: { name: string; cols: number; rows: number; bytes: string }[] = [
+    {
+      name: 'the alternate screen with a pen set: its cells do not take the pen',
+      cols: 10,
+      rows: 3,
+      bytes: '\x1b[?1049h\x1b[Hplain\x1b[1;31m',
+    },
+    {
+      name: 'the alternate screen, a background and then italic set',
+      cols: 10,
+      rows: 3,
+      bytes: '\x1b[?1049h\x1b[H\x1b[44m bg \x1b[49m\x1b[3m',
+    },
+    {
+      name: 'a blank row before a wrapped row keeps no stray character',
+      cols: 6,
+      rows: 4,
+      bytes: 'abcdefgh\x1b[1;1H\x1b[2K\x1b[3;1H',
+    },
+  ];
+
+  for (const c of ADDON_CASES) {
+    test(`the serialise addon: ${c.name}`, async () => {
+      const a = open({ cols: c.cols, rows: c.rows, snapshot: null });
+      await a.screen.output(utf8(c.bytes));
+
+      const b = await rebuilt(a.screen);
+
+      assertSameScreen(a.term, b.term);
+      await a.screen.output(utf8('Z'));
+      await b.screen.output(utf8('Z'));
+      assertSameScreen(a.term, b.term);
+      a.screen.dispose();
+      b.screen.dispose();
+    });
+  }
+
   const BOLD_DIM_CASES: { name: string; bytes: string }[] = [
     { name: 'dim, then bold', bytes: '\x1b[2mab\x1b[22m\x1b[1mcd' },
     { name: 'bold, then dim', bytes: '\x1b[1mab\x1b[22m\x1b[2mcd' },

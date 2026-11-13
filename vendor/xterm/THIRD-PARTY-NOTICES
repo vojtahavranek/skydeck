@@ -1,9 +1,11 @@
 Third-party code in the vendored xterm.js files
 
 vendor/xterm/addon-serialize/lib/addon-serialize.mjs, the bundle of @xterm/addon-serialize
-0.14.0, is modified by skydeck (scripts/vendor.ts): its _diffStyle turned bold off and dim off
-both with SGR 22, which turns off both; it now writes SGR 22 first when either goes off, then
-SGR 1 and 2 for what the cell keeps. Everything else in the file is as the package ships it.
+0.14.0, is modified by skydeck (scripts/vendor.ts) in three places: its _diffStyle turned bold
+off and dim off both with SGR 22, which turns off both; it now writes SGR 22 first when either
+goes off, then SGR 1 and 2 for what the cell keeps. The wrap trick above a blank row no longer
+moves by 0 columns (CUF 0 and CUB 0 move one). The alternate screen is preceded by SGR 0, as it
+is serialised from the default attributes. Everything else is as the package ships it.
 
 vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs, the bundle of
 @xterm/addon-unicode-graphemes 0.4.0, contains adapted copies of two packages by Devon Govett:

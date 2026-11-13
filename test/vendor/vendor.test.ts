@@ -391,10 +391,24 @@ describe('the licence check', () => {
 
 const SERIALIZE = 'vendor/xterm/addon-serialize/lib/addon-serialize.mjs';
 
-/** The two clauses of addon-serialize 0.14.0's `_diffStyle` that turn bold and dim off with 22. */
-const BUGGY_CLAUSES = [
-  'e.isBold()!==r.isBold()&&t.push(e.isBold()?1:22)',
-  'e.isDim()!==r.isDim()&&t.push(e.isDim()?2:22)',
+/**
+ * The patch of addon-serialize 0.14.0, restated as the specification: the vendored bundle must be
+ * the installed one with exactly these replacements. The screen side's tests show what they fix.
+ */
+const REPLACEMENTS: Array<[string, string]> = [
+  // _diffStyle: SGR 22 turns off both bold and dim (#48, review 2, finding 1).
+  [
+    'e.isBold()!==r.isBold()&&t.push(e.isBold()?1:22),',
+    '(e.isBold()!==r.isBold()||e.isDim()!==r.isDim())&&(!e.isBold()&&r.isBold()||!e.isDim()&&r.isDim()?(t.push(22),e.isBold()&&t.push(1),e.isDim()&&t.push(2)):(e.isBold()!==r.isBold()&&t.push(1),e.isDim()!==r.isDim()&&t.push(2))),',
+  ],
+  [',e.isDim()!==r.isDim()&&t.push(e.isDim()?2:22)', ''],
+  // The wrap trick above a blank row: CUF 0 and CUB 0 move one column (re-check, N2).
+  [
+    't+=`\\x1B[${a.length-this._nullCellCount}C`,t+=`\\x1B[${this._nullCellCount}X`,t+=`\\x1B[${a.length-this._nullCellCount}D`',
+    'a.length>this._nullCellCount&&(t+=`\\x1B[${a.length-this._nullCellCount}C`),t+=`\\x1B[${this._nullCellCount}X`,a.length>this._nullCellCount&&(t+=`\\x1B[${a.length-this._nullCellCount}D`)',
+  ],
+  // The alternate screen was serialised as if the pen were the default (re-check, N1).
+  ['e+=`\\x1B[?1049h\\x1B[H${r}`', 'e+=`\\x1B[0m\\x1B[?1049h\\x1B[H${r}`'],
 ];
 
 const sha256Of = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
@@ -412,22 +426,17 @@ describe("the patch of addon-serialize's bundle (ruled on #48)", () => {
     assert.match(entry?.patch ?? '', /22/);
   });
 
-  test('the bundle differs from the installed one only inside _diffStyle, without the two clauses', () => {
+  test('the bundle is the installed one with exactly the replacements of the patch', () => {
     const before = installed.toString('utf8');
     const after = vendored.toString('utf8');
-    let start = 0;
-    while (start < before.length && before[start] === after[start]) start++;
-    let end = 0;
-    while (end < before.length && before.at(-1 - end) === after.at(-1 - end)) end++;
-    const fn = before.indexOf('_diffStyle(e,r){');
-    const fnEnd = before.indexOf('_nextCell(', fn);
 
-    assert.ok(fn >= 0 && fnEnd > fn, 'no _diffStyle in the installed bundle');
-    assert.ok(start >= fn && before.length - end <= fnEnd, 'the patch reaches outside _diffStyle');
-    for (const clause of BUGGY_CLAUSES) {
-      assert.equal(before.split(clause).length, 2, `${clause} is not in the installed bundle once`);
-      assert.equal(after.includes(clause), false, `${clause} is still in the vendored bundle`);
+    for (const [old, replacement] of REPLACEMENTS) {
+      assert.equal(before.split(old).length, 2, `not once in the installed bundle: ${old}`);
+      if (!replacement.includes(old)) {
+        assert.equal(after.includes(old), false, `still in the vendored bundle: ${old}`);
+      }
     }
+    assert.equal(after, applyPatch(before, REPLACEMENTS));
   });
 
   test('no other entry carries upstreamSha256 or patch', () => {
