@@ -5,7 +5,15 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -32,7 +40,8 @@ type AnswerRecord = Extract<StandinRecord, { ev: 'answer' }>;
  * Runs argv[3:] in a new pty of argv[1] columns and argv[2] rows (set before the program starts).
  * stdin goes to the pty, the pty to stdout; it prints "pid <n>" on stderr; fd 3 carries control
  * lines: "resize <cols> <rows>", "signal <n>" (to its child), "killgroup" (SIGKILL to the child's
- * process group). It exits with the child's status (128 + n for a signal).
+ * process group). When fd 3 or stdout closes (the test process is gone) it kills the child's
+ * process group too. It exits with the child's status (128 + n for a signal).
  */
 const PTY_HELPER = `
 import fcntl, os, pty, select, signal, struct, sys, termios
@@ -49,6 +58,11 @@ fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)
 pending = b''
 inputs = [0, 3]
 ctl = b''
+def killgroup():
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 while True:
     readable = [fd] + [i for i in inputs if i != 0 or len(pending) < 1 << 20]
     r, w, _ = select.select(readable, [fd] if pending else [], [])
@@ -67,7 +81,10 @@ while True:
         if data == b'':
             break
         if data:
-            os.write(1, data)
+            try:
+                os.write(1, data)
+            except BrokenPipeError:
+                killgroup()
     if 0 in r:
         data = os.read(0, 65536)
         if not data:
@@ -77,6 +94,7 @@ while True:
         data = os.read(3, 4096)
         if not data:
             inputs.remove(3)
+            killgroup()
         ctl += data
         while b'\\n' in ctl:
             line, ctl = ctl.split(b'\\n', 1)
@@ -85,9 +103,12 @@ while True:
                 size = struct.pack('HHHH', int(words[2]), int(words[1]), 0, 0)
                 fcntl.ioctl(fd, termios.TIOCSWINSZ, size)
             elif words[0] == b'signal':
-                os.kill(pid, int(words[1]))
+                try:
+                    os.kill(pid, int(words[1]))
+                except ProcessLookupError:
+                    pass
             elif words[0] == b'killgroup':
-                os.killpg(pid, signal.SIGKILL)
+                killgroup()
 _, status = os.waitpid(pid, 0)
 code = os.waitstatus_to_exitcode(status)
 sys.exit(code if code >= 0 else 128 - code)
@@ -106,7 +127,10 @@ interface Pty {
   waitFor(needle: string, timeoutMs?: number, from?: number): Promise<number>;
   /** How many prompts were drawn so far. */
   prompts(): number;
-  exit: Promise<number | null>;
+  /** The helper's exit code (the program's status); rejects when it takes over `timeoutMs`. */
+  exited(timeoutMs?: number): Promise<number | null>;
+  /** Closes fd 3, as the death of the test process would. */
+  closeControl(): void;
 }
 
 function count(haystack: Buffer, needle: string): number {
@@ -141,6 +165,7 @@ function inPty(
   let output = Buffer.alloc(0);
   let stderr = '';
   let exited = false;
+  let controlOpen = true;
   child.stdout?.on('data', (chunk: Buffer) => {
     output = Buffer.concat([output, chunk]);
   });
@@ -156,7 +181,9 @@ function inPty(
   });
   t.after(async () => {
     if (!exited) {
-      control.write('killgroup\n');
+      if (controlOpen) {
+        control.write('killgroup\n');
+      }
       const timer = setTimeout(() => child.kill('SIGKILL'), 3000);
       await exit;
       clearTimeout(timer);
@@ -197,7 +224,24 @@ function inPty(
       }
     },
     prompts: () => count(output, PROMPT),
-    exit,
+    exited: async (timeoutMs = 5000) => {
+      let timer: NodeJS.Timeout | undefined;
+      const late = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`the program did not end within ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      });
+      try {
+        return await Promise.race([exit, late]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    closeControl: () => {
+      controlOpen = false;
+      control.end();
+    },
   };
 }
 
@@ -368,6 +412,9 @@ describe('stand-in: start', () => {
     );
     // The answers are the terminal's, not input: no input record holds them.
     assert.deepEqual(inputs(record), []);
+    // Bracketed paste is turned on with the first prompt, as Claude Code does.
+    const paste = pty.output().indexOf('\x1b[?2004h');
+    assert.ok(paste !== -1 && paste < pty.output().indexOf(PROMPT), 'mode 2004 before the prompt');
   });
 
   test('without an answer to DA1 it says so on the screen after 2 s and goes on', async (t) => {
@@ -377,9 +424,12 @@ describe('stand-in: start', () => {
 
     await pty.waitFor('no answer to DA1', 5000);
     const waited = performance.now() - asked;
+    const said = performance.now();
     await pty.waitFor(PROMPT);
+    const then = performance.now() - said;
 
     assert.ok(waited >= 1800, `said it after ${waited} ms`);
+    assert.ok(then < 1000, `the prompt came ${then} ms after; CPR was waited for`);
     const da1 = readRecords(record).find((r) => r.ev === 'da1');
     assert.deepEqual(da1 && { ev: da1.ev, answer: da1.ev === 'da1' ? da1.answer : '' }, {
       ev: 'da1',
@@ -416,6 +466,24 @@ describe('stand-in: start', () => {
     assert.equal(live['procStart'], procStat(start.pid)[19]);
     assert.equal(typeof live['startedAt'], 'number');
     assert.equal(typeof live['updatedAt'], 'number');
+  });
+
+  test('$STANDIN_HOOK is run instead of bin/skydeck-hook', async (t) => {
+    const s = sandbox(t);
+    const calls = join(s.root, 'hook-calls');
+    const hook = join(s.root, 'hook-recorder');
+    writeFileSync(
+      hook,
+      `#!/bin/sh\nprintf '%s %s\\n' "$1" "$CLAUDE_PID" >> '${calls}'\ncat >> '${calls}'\n`,
+    );
+    chmodSync(hook, 0o755);
+
+    const { start } = await startStandin(t, { s, env: { STANDIN_HOOK: hook } });
+
+    const lines = readFileSync(calls, 'utf8').split('\n');
+    assert.equal(lines[0], `SessionStart ${start.pid}`);
+    assert.equal((JSON.parse(lines[1] ?? '') as Record<string, unknown>)['session_id'], S1);
+    assert.equal(existsSync(join(s.skydeckHome, 'state')), false);
   });
 
   test('--resume and -r resume the session they name; -n names it', async (t) => {
@@ -473,7 +541,9 @@ describe('stand-in: session commands', () => {
   });
 
   test('/clear ends the session, starts a new one and the live file names it', async (t) => {
-    const { s, pty, start } = await startStandin(t);
+    const { s, pty, start } = await startStandin(t, {
+      args: ['--session-id', S1, '-n', 'my label'],
+    });
 
     await typeLine(pty, '/clear');
 
@@ -494,14 +564,19 @@ describe('stand-in: session commands', () => {
     assert.ok(events.every((e) => e.claudePid === String(start.pid)));
     assert.equal(liveFile(s, start.pid)?.['sessionId'], fresh);
     assert.ok(pty.output().includes(`${PROMPT}${String(fresh).slice(0, 8)}> `));
+    // The -n name was the first session's; the new one has none.
+    assert.equal(events[0]?.input['session_title'], 'my label');
+    assert.equal(events[2]?.input['session_title'], undefined);
+    assert.equal(liveFile(s, start.pid)?.['name'], undefined);
   });
 
   test('/exit: SessionEnd prompt_input_exit, the live file removed, exit 0 recorded last', async (t) => {
     const { s, pty, start, record } = await startStandin(t);
 
+    const from = pty.output().length;
     pty.write('/exit\r');
 
-    assert.equal(await pty.exit, 0);
+    assert.equal(await pty.exited(), 0);
     assert.deepEqual(
       spoolEvents(s).map((e) => [e.event, e.input['reason'] ?? null]),
       [
@@ -512,6 +587,21 @@ describe('stand-in: session commands', () => {
     assert.equal(liveFile(s, start.pid), null);
     const last = readRecords(record).at(-1);
     assert.deepEqual(last?.ev === 'exit' && last.code, 0);
+    const end = pty.output().subarray(from).toString('utf8');
+    assert.ok(end.includes('\x1b[?2004l'), JSON.stringify(end));
+    assert.equal(end.includes('\x1b[?1049l'), false, JSON.stringify(end));
+  });
+
+  test('/exit on the alternate screen leaves it, then turns bracketed paste off', async (t) => {
+    const { pty } = await startStandin(t);
+    await typeLine(pty, '/alt');
+
+    const from = pty.output().length;
+    pty.write('/exit\r');
+
+    assert.equal(await pty.exited(), 0);
+    const end = pty.output().subarray(from).toString('utf8');
+    assert.ok(end.includes('\x1b[?1049l\x1b[?2004l'), JSON.stringify(end));
   });
 
   test('/fail 3 exits 3 with no end event and leaves the live file', async (t) => {
@@ -519,7 +609,7 @@ describe('stand-in: session commands', () => {
 
     pty.write('/fail 3\r');
 
-    assert.equal(await pty.exit, 3);
+    assert.equal(await pty.exited(), 3);
     assert.deepEqual(
       spoolEvents(s).map((e) => e.event),
       ['SessionStart'],
@@ -527,6 +617,16 @@ describe('stand-in: session commands', () => {
     assert.notEqual(liveFile(s, start.pid), null);
     const last = readRecords(record).at(-1);
     assert.deepEqual(last?.ev === 'exit' && last.code, 3);
+  });
+
+  test('/fail 300 records the status the process really has (300 mod 256)', async (t) => {
+    const { pty, record } = await startStandin(t);
+
+    pty.write('/fail 300\r');
+
+    assert.equal(await pty.exited(), 44);
+    const last = readRecords(record).at(-1);
+    assert.deepEqual(last?.ev === 'exit' && last.code, 44);
   });
 });
 
@@ -588,12 +688,15 @@ describe('stand-in: input', () => {
 describe('stand-in: signals', () => {
   test('SIGWINCH after a size change: a resize record with the new size, and a redraw', async (t) => {
     const { pty, record } = await startStandin(t, { cols: 80, rows: 24 });
+    pty.write('half');
+    await pty.waitFor('> half');
 
     pty.control('resize 100 30');
 
     const resize = await waitForRecord(record, (r) => r.ev === 'resize', 5000);
     assert.deepEqual(resize.ev === 'resize' && [resize.cols, resize.rows], [100, 30]);
-    await pty.waitFor('size 100x30');
+    // The size, then the prompt with the line typed so far.
+    await pty.waitFor(`size 100x30\r\n${PROMPT}${S1.slice(0, 8)}> half`);
   });
 
   test('a SIGWINCH that leaves the size as it was records nothing and draws nothing', async (t) => {
@@ -616,7 +719,7 @@ describe('stand-in: signals', () => {
 
     pty.control('signal 1');
 
-    assert.equal(await pty.exit, 129);
+    assert.equal(await pty.exited(), 129);
     const evs = readRecords(record).map((r) => r.ev);
     assert.deepEqual(evs.slice(-2), ['hup', 'exit']);
     const last = readRecords(record).at(-1);
@@ -668,6 +771,10 @@ describe('stand-in: drawing commands', () => {
     assert.ok(alt.includes('\x1b[?1049h'), JSON.stringify(alt));
     assert.ok(alt.includes(`┌${'─'.repeat(38)}┐`), JSON.stringify(alt));
     assert.ok(alt.includes(`└${'─'.repeat(38)}┘`), JSON.stringify(alt));
+
+    // A resize on the alternate screen draws the box again at the new size.
+    pty.control('resize 50 12');
+    await pty.waitFor(`┌${'─'.repeat(48)}┐`);
 
     const back = pty.output().length;
     await typeLine(pty, '/main');
@@ -805,6 +912,28 @@ describe('stand-in: refusing to run outside a sandbox (A33)', () => {
 });
 
 describe('stand-in: ending itself (A33)', () => {
+  for (const [what, act] of [
+    ['a hangup', (pty: Pty) => pty.control('signal 1')],
+    ['/clear', (pty: Pty) => pty.write('/clear\r')],
+    ['/busy', (pty: Pty) => pty.write('/busy\r')],
+    ['/exit', (pty: Pty) => pty.write('/exit\r')],
+  ] as const) {
+    test(`its record directory gone, then ${what} at once → exit 0, nothing written`, async (t) => {
+      const { s, pty, start } = await startStandin(t);
+      const live = liveFile(s, start.pid);
+
+      rmSync(join(s.root, 'records'), { recursive: true, force: true });
+      rmSync(s.skydeckHome, { recursive: true, force: true });
+      act(pty);
+
+      assert.equal(await pty.exited(), 0);
+      assert.equal(existsSync(s.skydeckHome), false);
+      assert.equal(existsSync(join(s.root, 'records')), false);
+      // Not even the live file is touched.
+      assert.deepEqual(liveFile(s, start.pid), live);
+    });
+  }
+
   test('its record directory gone → exit 0 within 2 s, no hook, nothing written', async (t) => {
     const { s, pty, record } = await startStandin(t);
     const records = readRecords(record).length;
@@ -813,7 +942,7 @@ describe('stand-in: ending itself (A33)', () => {
     rmSync(join(s.root, 'records'), { recursive: true, force: true });
     rmSync(s.skydeckHome, { recursive: true, force: true });
     const removed = performance.now();
-    const code = await pty.exit;
+    const code = await pty.exited();
     const took = performance.now() - removed;
 
     assert.equal(code, 0);
@@ -828,7 +957,7 @@ describe('stand-in: ending itself (A33)', () => {
       env: { STANDIN_MAX_SECONDS: '2' },
     });
 
-    const code = await pty.exit;
+    const code = await pty.exited();
     const took = performance.now() - began;
 
     assert.equal(code, 0);
@@ -843,6 +972,29 @@ describe('stand-in: ending itself (A33)', () => {
     assert.equal(liveFile(s, start.pid), null);
     const last = readRecords(record).at(-1);
     assert.deepEqual(last?.ev === 'exit' && last.code, 0);
+  });
+});
+
+describe('stand-in: limits on its life', () => {
+  test('STANDIN_MAX_SECONDS only shortens: a huge value is still the 10 minutes', async (t) => {
+    const { pty, record } = await startStandin(t, { env: { STANDIN_MAX_SECONDS: '3000000' } });
+
+    await sleep(1000);
+
+    assert.deepEqual(
+      readRecords(record).filter((r) => r.ev === 'exit'),
+      [],
+    );
+    assert.equal(pty.output().includes('TimeoutOverflowWarning'), false);
+  });
+
+  test('the pty helper takes the program with it when the test process is gone', async (t) => {
+    const { pty, start } = await startStandin(t);
+
+    pty.closeControl();
+
+    assert.equal(await pty.exited(3000), 128 + 9);
+    assert.equal(existsSync(`/proc/${start.pid}`), false);
   });
 });
 

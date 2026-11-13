@@ -6,7 +6,7 @@
  * It refuses to run outside a sandbox: STANDIN_RECORD, SKYDECK_HOME and CLAUDE_CONFIG_DIR must be
  * absolute paths (A33). It writes nothing but its record file, `<CLAUDE_CONFIG_DIR>/sessions/` and
  * what the hook writes under SKYDECK_HOME, and it ends itself when its record file's directory is
- * gone (a crashed test) or after STANDIN_MAX_SECONDS (default 600).
+ * gone (a crashed test) or after 10 minutes (STANDIN_MAX_SECONDS can only shorten that).
  *
  * The test helper `test/helpers/standin.ts` starts it and reads its records.
  */
@@ -45,7 +45,9 @@ const CONFIG_DIR = process.env['CLAUDE_CONFIG_DIR'] as string;
 const HOOK =
   process.env['STANDIN_HOOK'] ||
   fileURLToPath(new URL('../../../bin/skydeck-hook', import.meta.url));
-const MAX_SECONDS = positive(process.env['STANDIN_MAX_SECONDS']) ?? 600;
+// 10 minutes at most (A33): a larger value could keep a stand-in alive for days, and one above
+// 2^31 ms would overflow Node's timer and end it at once.
+const MAX_SECONDS = Math.min(positive(process.env['STANDIN_MAX_SECONDS']) ?? 600, 600);
 const ANSWER_WAIT_MS = 2000;
 
 const ESC = '\x1b';
@@ -411,7 +413,8 @@ function command(text: string): void {
       draw(`${onAlt ? `${ESC}[?1049l` : ''}${ESC}[?2004l`);
       finish(0, 'prompt_input_exit', true);
     case '/fail':
-      finish(/^[0-9]+$/.test(rest) ? Number(rest) : 1, null, false);
+      // An exit status is one byte: record the one the process really ends with.
+      finish(/^[0-9]+$/.test(rest) ? Number(rest) % 256 : 1, null, false);
     case '/clear':
       runHook('SessionEnd', { reason: 'clear' });
       sessionId = randomUUID();

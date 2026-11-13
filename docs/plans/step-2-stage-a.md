@@ -455,8 +455,9 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
   ESC as `^[`, so a bracketed paste shows `^[[200~…^[[201~`). Lines end in `\n`: Node's raw mode
   keeps the terminal's ONLCR, as it does for Claude Code, so the terminal receives `\r\n`.
 - **Commands.** `/exit` — the alternate screen left when it is on, bracketed paste off,
-  `SessionEnd` reason `prompt_input_exit`, live file removed, exit 0. `/fail <n>` — exit `n` without an end event; the live file stays, as after a
-  crash. `/clear` — `SessionEnd` `clear`, a new session id, `SessionStart` `clear`, the live file
+  `SessionEnd` reason `prompt_input_exit`, live file removed, exit 0. `/fail <n>` — exit `n` mod
+  256 (the status the process really has, recorded as such) without an end event; the live file
+  stays, as after a crash. `/clear` — `SessionEnd` `clear`, a new session id, `SessionStart` `clear`, the live file
   names the new id (and no `-n` name any more). `/busy`, `/idle`, `/waiting <what>` — the live
   file's status (and `waitingFor`, removed by `/busy` and `/idle`). `/alt`, `/main` — enter and
   leave the alternate screen, drawing a box around the whole screen on it. `/mouse` — modes 1000
@@ -480,8 +481,11 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
 - **It ends itself** (A33), exit 0: when the directory of `STANDIN_RECORD` is gone (checked every
   second, and before every hook run, record and live-file write) at once, running no hook and
   writing nothing (no record, no live file, no spool directory created again); 10 minutes after
-  it started (`STANDIN_MAX_SECONDS` shortens it, for its own test) with `SessionEnd` reason
-  `other` and its live file removed.
+  it started (`STANDIN_MAX_SECONDS` shortens it, for its own test; a larger value counts as 600)
+  with `SessionEnd` reason `other` and its live file removed. Both are timers: while a write to
+  its terminal blocks (`/flood` into a pty that nobody reads, e.g. a keeper under SIGSTOP), they
+  wait, and it ends once the terminal is read again or its holder is gone (then the write fails
+  or it gets SIGHUP).
 - **Reading the records.** `readRecords` leaves out a last line that is not complete yet; record
   times (`ms`) are wall-clock milliseconds, which can step back on WSL — measure durations in the
   test with `performance.now()`.
