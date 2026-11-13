@@ -5,6 +5,9 @@ export const NS_PER_SECOND = 1_000_000_000n;
 export const NS_PER_MINUTE = 60n * NS_PER_SECOND;
 export const NS_PER_DAY = 86_400n * NS_PER_SECOND;
 
+/** The longest wait a Node.js timer keeps: 2^31 − 1 ms (a longer one fires at once). */
+export const MAX_TIMER_MS = 2_147_483_647;
+
 /**
  * "2026-11-12T14:03:05.123Z" (UTC, milliseconds, truncated). Throws RangeError for a time outside
  * what `Date` can show (about ±275,760 years): whoever turns foreign numbers into `Ns` bounds them.

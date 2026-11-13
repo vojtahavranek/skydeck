@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
+  closeSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { on } from 'node:events';
-import { homedir, tmpdir } from 'node:os';
+import { on, once } from 'node:events';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -19,7 +25,7 @@ import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
 import { realPlatform } from '../../src/platform/real.ts';
-import type { RunResult } from '../../src/platform/types.ts';
+import type { Detached, Platform, RunResult } from '../../src/platform/types.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
 
@@ -874,5 +880,770 @@ describe('real platform', () => {
     } finally {
       delete process.env['SKYDECK_REAL_TEST'];
     }
+  });
+});
+
+/** Field `n` (1-based, as in proc(5)) of a /proc/<pid>/stat line. */
+function statField(line: string, n: number): string | undefined {
+  return line
+    .slice(line.lastIndexOf(')') + 1)
+    .trim()
+    .split(/\s+/)[n - 3];
+}
+
+/** Waits until `check()` is true, at most `ms`. */
+async function until(check: () => boolean, ms = 10_000): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return true;
+}
+
+/** Ends a detached child the test started itself, unless it already ended. */
+function endAfter(t: TestContext, platform: Platform, child: Detached): void {
+  let ended = false;
+  void child.exited.then(() => {
+    ended = true;
+  });
+  t.after(async () => {
+    if (!ended) {
+      platform.processes.signal(child.pid, 'SIGKILL');
+      await child.exited;
+    }
+  });
+}
+
+describe('real clock: after', () => {
+  test('calls back once after that many milliseconds', async () => {
+    const { clock } = realPlatform();
+    let calls = 0;
+    const started = Date.now();
+
+    clock.after(20, () => {
+      calls++;
+    });
+    assert.ok(await until(() => calls === 1));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    assert.equal(calls, 1);
+    assert.ok(Date.now() - started >= 15, `after ${Date.now() - started} ms`);
+  });
+
+  test('the returned function cancels it, and calling it again does nothing', async () => {
+    const { clock } = realPlatform();
+    let calls = 0;
+
+    const cancel = clock.after(10, () => {
+      calls++;
+    });
+    cancel();
+    cancel();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    assert.equal(calls, 0);
+  });
+
+  test('refuses a time that is not a whole number of milliseconds a timer can wait', () => {
+    const { clock } = realPlatform();
+
+    for (const ms of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31]) {
+      assert.throws(() => clock.after(ms, () => {}), RangeError, String(ms));
+    }
+  });
+
+  test('a timer of after does not keep the process alive', async (t) => {
+    const s = sandbox(t);
+    const script = [
+      `const { realPlatform } = await import(${JSON.stringify(REAL_MODULE)});`,
+      'realPlatform().clock.after(60_000, () => {});',
+    ].join('\n');
+
+    const result = await realPlatform().runner.run(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { cwd: s.root, env: s.env(), timeoutMs: 20_000 },
+    );
+
+    assert.equal(result.timedOut, false);
+    assert.equal(result.code, 0, result.stderr);
+  });
+});
+
+describe('real files: mode and owner', () => {
+  test('stat and lstat report the permission bits and the owner', (t) => {
+    const dir = tmp(t);
+    const file = join(dir, 'f');
+    writeFileSync(file, 'x');
+    chmodSync(file, 0o640);
+    mkdirSync(join(dir, 'd'), { mode: 0o700 });
+    chmodSync(join(dir, 'd'), 0o2750);
+    const { files } = realPlatform();
+
+    const info = files.stat(file);
+
+    assert.equal(info?.mode, 0o640);
+    assert.equal(info.uid, process.getuid?.());
+    assert.equal(files.lstat(file)?.mode, 0o640);
+    assert.equal(files.stat(join(dir, 'd'))?.mode, 0o2750, 'the set-group-id bit is kept');
+  });
+});
+
+describe('real proc: fdTarget and tcpListening', () => {
+  test('fdTarget reads the link of an open descriptor; null when there is none', () => {
+    const { proc } = realPlatform();
+
+    assert.equal(typeof proc.fdTarget(process.pid, 0), 'string');
+    assert.equal(proc.fdTarget(process.pid, 999_999), null);
+    assert.equal(proc.fdTarget(999_999_999, 0), null);
+    assert.equal(proc.fdTarget(-1, 0), null);
+    assert.equal(proc.fdTarget(process.pid, -1), null);
+    assert.equal(proc.fdTarget(process.pid, 1.5), null);
+  });
+
+  test('fdTarget names the file a descriptor holds open', (t) => {
+    const file = join(tmp(t), 'held');
+    writeFileSync(file, '');
+    const fd = openSync(file, 'r');
+    t.after(() => {
+      closeSync(fd);
+    });
+
+    assert.equal(realPlatform().proc.fdTarget(process.pid, fd), realpathSync(file));
+  });
+
+  test('tcpListening is true for a port this process listens on and false once it closed', async () => {
+    const { proc, net } = realPlatform();
+    const listener = await net.listenHttp(
+      { host: '127.0.0.1', port: 0 },
+      { request: (_req, res) => res.end() },
+    );
+
+    assert.equal(proc.tcpListening(listener.port), true);
+    await listener.close();
+    assert.equal(proc.tcpListening(listener.port), false);
+  });
+
+  test('tcpListening is false for a port nothing can listen on', () => {
+    const { proc } = realPlatform();
+
+    for (const port of [0, -1, 65_536, 1.5]) {
+      assert.equal(proc.tcpListening(port), false, String(port));
+    }
+  });
+});
+
+describe('real platform: randomness and identity', () => {
+  test('randomBytes gives that many bytes, different each time', () => {
+    const { randomBytes } = realPlatform();
+
+    const [a, b] = [randomBytes(4), randomBytes(4)];
+
+    assert.ok(a instanceof Uint8Array);
+    assert.equal(a.length, 4);
+    assert.equal(b.length, 4);
+    assert.notDeepEqual([...a], [...b]);
+    assert.equal(randomBytes(0).length, 0);
+  });
+
+  test('pid, uid and userName are those of this process', () => {
+    const platform = realPlatform();
+
+    assert.equal(platform.pid, process.pid);
+    assert.equal(platform.uid, process.getuid?.());
+    assert.equal(platform.userName, userInfo().username);
+  });
+});
+
+describe('real processes: startDetached', () => {
+  test('the child gets the input, and exited resolves with its exit code', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const { processes } = realPlatform();
+
+    const child = await processes.startDetached(
+      'sh',
+      ['-c', 'echo $$ > f; read x; echo "$x" >> f; exit 3'],
+      { cwd: s.root, env: s.env(), input: 'spec' },
+    );
+
+    assert.deepEqual(await child.exited, { code: 3, signal: null });
+    assert.equal(readFileSync(join(s.root, 'f'), 'utf8'), `${child.pid}\nspec\n`);
+  });
+
+  test('the child runs in a session of its own, and signal ends it', async (t) => {
+    const s = sandbox(t);
+    s.link('sleep');
+    const platform = realPlatform();
+    const child = await platform.processes.startDetached('sleep', ['30'], {
+      cwd: s.root,
+      env: s.env(),
+    });
+    endAfter(t, platform, child);
+
+    const stat = platform.proc.stat(child.pid);
+
+    assert.ok(stat !== null, 'the child is running');
+    assert.equal(statField(stat, 6), String(child.pid), 'session id = its own pid (setsid)');
+    assert.notEqual(statField(stat, 6), statField(platform.proc.stat(process.pid) ?? '', 6));
+    assert.equal(platform.processes.signal(child.pid, 'SIGTERM'), true);
+    assert.deepEqual(await child.exited, { code: null, signal: 'SIGTERM' });
+    assert.ok(await until(() => platform.proc.stat(child.pid) === null), 'reaped');
+    assert.equal(platform.processes.signal(child.pid, 'SIGTERM'), false, 'a dead pid');
+  });
+
+  test('stdout and stderr are appended to their files, created with mode 0o600', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const { processes } = realPlatform();
+    const out = join(s.root, 'out.log');
+    const err = join(s.root, 'err.log');
+    const options = { cwd: s.root, env: s.env(), stdoutTo: out, stderrTo: err };
+
+    for (let i = 0; i < 2; i++) {
+      const child = await processes.startDetached(
+        'sh',
+        ['-c', 'printf out; printf err >&2'],
+        options,
+      );
+      await child.exited;
+    }
+
+    assert.equal(readFileSync(out, 'utf8'), 'outout');
+    assert.equal(readFileSync(err, 'utf8'), 'errerr');
+    assert.equal(mode(out), 0o600);
+    assert.equal(mode(err), 0o600);
+  });
+
+  test('without files the output goes nowhere and without input stdin is empty', async (t) => {
+    const s = sandbox(t);
+    s.link('sh', 'cat');
+    const { processes } = realPlatform();
+
+    const child = await processes.startDetached('sh', ['-c', 'cat > got; printf ignored'], {
+      cwd: s.root,
+      env: s.env(),
+    });
+
+    assert.deepEqual(await child.exited, { code: 0, signal: null });
+    assert.equal(readFileSync(join(s.root, 'got'), 'utf8'), '');
+  });
+
+  test('the child sees only the environment it was given, in its working directory', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const { processes } = realPlatform();
+    const dir = join(s.root, 'work');
+    mkdirSync(dir);
+
+    const child = await processes.startDetached('sh', ['-c', 'echo "$X|$HOME|$(pwd)" > seen'], {
+      cwd: dir,
+      env: { PATH: s.bin, X: 'x' },
+    });
+    await child.exited;
+
+    assert.equal(readFileSync(join(dir, 'seen'), 'utf8'), `x||${dir}\n`);
+  });
+
+  test('a program or a working directory that does not exist rejects with ENOENT', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const { processes } = realPlatform();
+
+    await assert.rejects(
+      processes.startDetached('no-such-program', [], { cwd: s.root, env: s.env() }),
+      { code: 'ENOENT' },
+    );
+    await assert.rejects(
+      processes.startDetached('sh', ['-c', 'exit 0'], {
+        cwd: join(s.root, 'missing'),
+        env: s.env(),
+      }),
+      { code: 'ENOENT' },
+    );
+  });
+
+  test('the child does not keep this process alive', async (t) => {
+    const s = sandbox(t);
+    s.link('sleep');
+    const script = [
+      `const { realPlatform } = await import(${JSON.stringify(REAL_MODULE)});`,
+      `const child = await realPlatform().processes.startDetached('sleep', ['30'], { cwd: ${JSON.stringify(s.root)}, env: { PATH: ${JSON.stringify(s.bin)} }, input: 'x' });`,
+      'process.stdout.write(String(child.pid));',
+    ].join('\n');
+    const platform = realPlatform();
+    const started = Date.now();
+
+    const result = await platform.runner.run(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { cwd: s.root, env: s.env(), timeoutMs: 20_000 },
+    );
+    const pid = Number(result.stdout);
+    const cmdline = text(platform.proc.cmdline(pid) ?? new Uint8Array());
+    if (cmdline.startsWith(`${s.bin}/sleep\0`) || cmdline.startsWith('sleep\0')) {
+      platform.processes.signal(pid, 'SIGKILL'); // the sleep our own child started
+    }
+
+    assert.equal(result.timedOut, false);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(Date.now() - started < 15_000, `took ${Date.now() - started} ms`);
+    assert.match(cmdline, /sleep\x0030\x00$/, 'the sleep was still running after its parent ended');
+  });
+});
+
+describe('real processes: signal', () => {
+  test('refuses a pid that would signal a group or every process', () => {
+    const { processes } = realPlatform();
+
+    for (const pid of [0, -1, -4242, 1.5, Number.NaN]) {
+      assert.throws(() => processes.signal(pid, 'SIGTERM'), RangeError, String(pid));
+    }
+  });
+
+  test('a pid that does not exist is false', () => {
+    assert.equal(realPlatform().processes.signal(999_999_999, 'SIGKILL'), false);
+  });
+});
+
+describe('real net', () => {
+  test('listenHttp on 127.0.0.1 port 0 answers a request on the port the system picked', async (t) => {
+    const { net } = realPlatform();
+    const listener = await net.listenHttp(
+      { host: '127.0.0.1', port: 0 },
+      { request: (req, res) => res.end(`hello ${req.url}`) },
+    );
+    t.after(() => listener.close());
+
+    const answer = await fetch(`http://127.0.0.1:${listener.port}/x`);
+
+    assert.ok(listener.port > 0);
+    assert.equal(await answer.text(), 'hello /x');
+  });
+
+  test('a second listen on a port that is taken rejects with EADDRINUSE', async (t) => {
+    const { net } = realPlatform();
+    const handlers = { request: (_req: IncomingMessage, res: ServerResponse) => res.end() };
+    const first = await net.listenHttp({ host: '127.0.0.1', port: 0 }, handlers);
+    t.after(() => first.close());
+
+    await assert.rejects(net.listenHttp({ host: '127.0.0.1', port: first.port }, handlers), {
+      code: 'EADDRINUSE',
+    });
+  });
+
+  test('a unix socket has mode 0o600, port 0, and requestUnix reaches it with a JSON body', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp(
+      { path },
+      {
+        request(req, res) {
+          let body = '';
+          req.setEncoding('utf8');
+          req.on('data', (chunk: string) => {
+            body += chunk;
+          });
+          req.on('end', () => {
+            res.writeHead(201, { 'content-type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                method: req.method,
+                url: req.url,
+                type: req.headers['content-type'] ?? null,
+                body: body === '' ? null : JSON.parse(body),
+              }),
+            );
+          });
+        },
+      },
+    );
+    t.after(() => listener.close());
+
+    const posted = await net.requestUnix(path, {
+      method: 'POST',
+      path: '/new',
+      body: { dir: '/x', flags: ['-a'] },
+      timeoutMs: 5000,
+    });
+    const got = await net.requestUnix(path, { method: 'GET', path: '/ping', timeoutMs: 5000 });
+
+    assert.equal(lstatSync(path).isSocket(), true);
+    assert.equal(mode(path), 0o600);
+    assert.equal(listener.port, 0);
+    assert.deepEqual(posted, {
+      status: 201,
+      body: {
+        method: 'POST',
+        url: '/new',
+        type: 'application/json',
+        body: { dir: '/x', flags: ['-a'] },
+      },
+    });
+    assert.deepEqual(got.body, { method: 'GET', url: '/ping', type: null, body: null });
+  });
+
+  test('requestUnix gives a body that is not JSON as text, and an empty one as null', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp(
+      { path },
+      { request: (req, res) => res.end(req.url === '/text' ? 'not json' : '') },
+    );
+    t.after(() => listener.close());
+
+    const textAnswer = await net.requestUnix(path, {
+      method: 'GET',
+      path: '/text',
+      timeoutMs: 5000,
+    });
+    const empty = await net.requestUnix(path, { method: 'GET', path: '/empty', timeoutMs: 5000 });
+
+    assert.deepEqual(textAnswer, { status: 200, body: 'not json' });
+    assert.deepEqual(empty, { status: 200, body: null });
+  });
+
+  test('requestUnix rejects with ENOENT for a missing socket and ECONNREFUSED for a stale one', async (t) => {
+    const s = sandbox(t);
+    const { net } = realPlatform();
+    const live = join(s.root, 'live.sock');
+    const stale = join(s.root, 'stale.sock');
+    const listener = await net.listenHttp({ path: live }, { request: (_req, res) => res.end() });
+    linkSync(live, stale); // a second name for the socket, left behind when the server goes
+    await listener.close();
+    const request = { method: 'GET', path: '/ping', timeoutMs: 5000 } as const;
+
+    await assert.rejects(net.requestUnix(join(s.root, 'missing.sock'), request), {
+      code: 'ENOENT',
+    });
+    await assert.rejects(net.requestUnix(stale, request), { code: 'ECONNREFUSED' });
+    await assert.rejects(net.connectUnix(join(s.root, 'missing.sock')), { code: 'ENOENT' });
+    await assert.rejects(net.connectUnix(stale), { code: 'ECONNREFUSED' });
+  });
+
+  test('requestUnix to a server that never answers rejects with ETIMEDOUT after the timeout', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp({ path }, { request: () => {} });
+    t.after(() => listener.close());
+    const started = Date.now();
+
+    await assert.rejects(net.requestUnix(path, { method: 'GET', path: '/', timeoutMs: 200 }), {
+      code: 'ETIMEDOUT',
+    });
+    assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+  });
+
+  test('onLine gets each line of a streamed body as it comes, and the body is then null', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    let more: (() => void) | undefined;
+    const listener = await net.listenHttp(
+      { path },
+      {
+        request(_req, res) {
+          res.write('{"a":1}\n');
+          more = () => {
+            res.end('{"b":2}\n\n{"c":3}');
+          };
+        },
+      },
+    );
+    t.after(() => listener.close());
+    const lines: string[] = [];
+
+    const answer = net.requestUnix(path, {
+      method: 'POST',
+      path: '/restore',
+      body: { all: true },
+      timeoutMs: 5000,
+      onLine: (line) => {
+        lines.push(line);
+        if (lines.length === 1) {
+          more?.();
+        }
+      },
+    });
+
+    assert.deepEqual(await answer, { status: 200, body: null });
+    assert.deepEqual(lines, ['{"a":1}', '{"b":2}', '', '{"c":3}']);
+  });
+
+  test('a streamed answer that keeps coming is not cut off by the timeout', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp(
+      { path },
+      {
+        request(_req, res) {
+          let n = 0;
+          const timer = setInterval(() => {
+            n++;
+            if (n === 6) {
+              clearInterval(timer);
+              res.end('end\n');
+            } else {
+              res.write(`${n}\n`);
+            }
+          }, 50);
+        },
+      },
+    );
+    t.after(() => listener.close());
+    const lines: string[] = [];
+
+    await net.requestUnix(path, {
+      method: 'GET',
+      path: '/',
+      timeoutMs: 150,
+      onLine: (line) => lines.push(line),
+    });
+
+    assert.deepEqual(lines, ['1', '2', '3', '4', '5', 'end']);
+  });
+
+  test('connectUnix gives a connected socket', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp({ path }, { request: (_req, res) => res.end('ok') });
+    t.after(() => listener.close());
+
+    const socket = await net.connectUnix(path);
+    socket.write('GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+    let answer = '';
+    socket.setEncoding('utf8');
+    for await (const chunk of socket) {
+      answer += String(chunk);
+    }
+
+    assert.match(answer, /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\nok$/);
+  });
+
+  test('an upgrade request reaches the upgrade handler with its socket', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp(
+      { path },
+      {
+        request: (_req, res) => res.end('no upgrade'),
+        upgrade(req, socket) {
+          socket.end(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: test\r\nConnection: Upgrade\r\nX-Url: ${req.url}\r\n\r\n`,
+          );
+        },
+      },
+    );
+    t.after(() => listener.close());
+
+    const socket = await net.connectUnix(path);
+    socket.write('GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: test\r\nConnection: Upgrade\r\n\r\n');
+    let answer = '';
+    socket.setEncoding('utf8');
+    for await (const chunk of socket) {
+      answer += String(chunk);
+    }
+
+    assert.match(answer, /^HTTP\/1\.1 101 Switching Protocols\r\n/);
+    assert.match(answer, /X-Url: \/ws\r\n/);
+  });
+
+  test('close ends open connections instead of waiting for them, and removes the socket file', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp(
+      { path },
+      {
+        request: () => {},
+        upgrade: () => {},
+      },
+    );
+    const idle = await net.connectUnix(path);
+    const upgraded = await net.connectUnix(path);
+    upgraded.write('GET / HTTP/1.1\r\nHost: x\r\nUpgrade: test\r\nConnection: Upgrade\r\n\r\n');
+    const pending = net.requestUnix(path, { method: 'GET', path: '/', timeoutMs: 10_000 });
+    pending.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const closed = [idle, upgraded].map((socket) => once(socket, 'close'));
+
+    await listener.close();
+    await Promise.all(closed);
+
+    await assert.rejects(pending);
+    assert.equal(existsSync(path), false);
+    t.after(() => {
+      idle.destroy();
+      upgraded.destroy();
+    });
+  });
+});
+
+describe('the Windows guard (A32)', () => {
+  /** Programs that write `ran:<name>` into `marker` if they are ever started. */
+  function stubs(s: Sandbox): { marker: string; write: (path: string) => void } {
+    const marker = join(s.root, 'marker');
+    const write = (path: string): void => {
+      writeFileSync(path, `#!/bin/sh\necho "ran:$0" >> ${JSON.stringify(marker)}\n`, {
+        mode: 0o755,
+      });
+    };
+    for (const name of ['cmd.exe', 'X.EXE', 'stub.exe']) {
+      write(join(s.bin, name));
+    }
+    return { marker, write };
+  }
+
+  /** realPlatform() built while this process's environment has SKYDECK_TEST_NO_WINDOWS = `value`. */
+  function realPlatformWith(value: string | undefined): Platform {
+    const saved = process.env['SKYDECK_TEST_NO_WINDOWS'];
+    if (value === undefined) {
+      delete process.env['SKYDECK_TEST_NO_WINDOWS'];
+    } else {
+      process.env['SKYDECK_TEST_NO_WINDOWS'] = value;
+    }
+    try {
+      return realPlatform();
+    } finally {
+      if (saved === undefined) {
+        delete process.env['SKYDECK_TEST_NO_WINDOWS'];
+      } else {
+        process.env['SKYDECK_TEST_NO_WINDOWS'] = saved;
+      }
+    }
+  }
+
+  /** Every way the platform starts a program, each expected to refuse `command`. */
+  async function assertRefused(
+    platform: Platform,
+    s: Sandbox,
+    command: string,
+    env: Record<string, string>,
+  ): Promise<void> {
+    const options = { cwd: s.root, env };
+    await assert.rejects(
+      platform.processes.startDetached(command, ['--version'], options),
+      {
+        code: 'EWINDOWS',
+      },
+      `startDetached ${command}`,
+    );
+    await assert.rejects(
+      platform.runner.run(command, ['--version'], options),
+      {
+        code: 'EWINDOWS',
+      },
+      `run ${command}`,
+    );
+    await assert.rejects(
+      platform.runner.runInteractive(command, ['--version'], options),
+      {
+        code: 'EWINDOWS',
+      },
+      `runInteractive ${command}`,
+    );
+  }
+
+  // A sandbox stub first: if the guard were broken, the real wsl.exe that comes after would run.
+  const WINDOWS = [
+    'cmd.exe',
+    'X.EXE',
+    '/mnt/skydeck-test-none/program',
+    '/mnt/c/x/msedge.exe',
+    '/mnt/c/Windows/System32/wsl.exe',
+  ];
+
+  test('with SKYDECK_TEST_NO_WINDOWS=1 nothing under /mnt/ or ending in .exe is started', async (t) => {
+    const s = sandbox(t);
+    const { marker } = stubs(s);
+    const platform = realPlatformWith('1');
+
+    for (const command of WINDOWS) {
+      await assertRefused(platform, s, command, { PATH: s.bin });
+    }
+
+    assert.equal(existsSync(marker), false, 'no stub ran');
+  });
+
+  test('the variable in the environment given to the child is enough', async (t) => {
+    const s = sandbox(t);
+    const { marker } = stubs(s);
+    const platform = realPlatformWith(undefined);
+
+    for (const command of ['cmd.exe', 'X.EXE', '/mnt/skydeck-test-none/program']) {
+      await assertRefused(platform, s, command, s.env());
+    }
+
+    assert.equal(existsSync(marker), false, 'no stub ran');
+  });
+
+  test('a name that leads to a program ending in .exe through a link is refused too', async (t) => {
+    const s = sandbox(t);
+    const { marker, write } = stubs(s);
+    mkdirSync(join(s.root, 'win'));
+    write(join(s.root, 'win', 'edge.exe'));
+    symlinkSync(join(s.root, 'win', 'edge.exe'), join(s.bin, 'edge'));
+    symlinkSync(join(s.root, 'win', 'edge.exe'), join(s.root, 'edge-link'));
+    const platform = realPlatformWith('1');
+
+    await assertRefused(platform, s, 'edge', { PATH: s.bin });
+    await assertRefused(platform, s, join(s.root, 'edge-link'), { PATH: s.bin });
+    await assertRefused(platform, s, './edge-link', { PATH: s.bin });
+
+    assert.equal(existsSync(marker), false, 'no stub ran');
+  });
+
+  test('refuseWindows refuses always, whatever the environment says', async (t) => {
+    const s = sandbox(t);
+    const { marker } = stubs(s);
+    const saved = process.env['SKYDECK_TEST_NO_WINDOWS'];
+    delete process.env['SKYDECK_TEST_NO_WINDOWS'];
+    let platform: Platform;
+    try {
+      platform = realPlatform({ refuseWindows: true });
+    } finally {
+      if (saved !== undefined) {
+        process.env['SKYDECK_TEST_NO_WINDOWS'] = saved;
+      }
+    }
+
+    for (const command of ['cmd.exe', 'X.EXE', '/mnt/skydeck-test-none/program']) {
+      await assertRefused(platform, s, command, s.env({ SKYDECK_TEST_NO_WINDOWS: undefined }));
+    }
+
+    assert.equal(existsSync(marker), false, 'no stub ran');
+  });
+
+  test('without the variable a sandbox script named stub.exe runs: the rule is the variable, not a ban', async (t) => {
+    const s = sandbox(t);
+    const { marker } = stubs(s);
+    const platform = realPlatformWith(undefined);
+    const env = s.env({ SKYDECK_TEST_NO_WINDOWS: undefined });
+
+    const child = await platform.processes.startDetached('stub.exe', [], { cwd: s.root, env });
+    await child.exited;
+    const result = await platform.runner.run('stub.exe', [], { cwd: s.root, env });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(readFileSync(marker, 'utf8'), `ran:${s.bin}/stub.exe\n`.repeat(2));
+  });
+
+  test('a program that is not a Windows one still runs with the variable set', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const platform = realPlatformWith('1');
+
+    const result = await platform.runner.run('sh', ['-c', 'printf ok'], { env: s.env() });
+
+    assert.equal(result.stdout, 'ok');
   });
 });

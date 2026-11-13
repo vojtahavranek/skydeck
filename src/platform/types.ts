@@ -13,12 +13,22 @@ export interface Clock {
    * to report to (the real one would end the process).
    */
   every(ms: number, callback: () => void): () => void;
+  /**
+   * Calls `callback` once after `ms` milliseconds (a whole number from 0 to 2^31 − 1; RangeError
+   * otherwise) unless the returned function was called first (calling it again does nothing).
+   * The real one does not keep the process alive by itself; the fake one fires from advanceMs, in
+   * time order with `every`. `callback` must not throw, as for `every`.
+   */
+  after(ms: number, callback: () => void): () => void;
 }
 
 export interface FileInfo {
   size: number;
   mtimeNs: Ns;
   kind: 'file' | 'dir' | 'symlink' | 'other';
+  /** Permission bits: stat.mode & 0o7777. */
+  mode: number;
+  uid: number;
 }
 
 /** The file system. Every path is absolute. Errors other than "does not exist" are thrown. */
@@ -73,6 +83,13 @@ export interface Proc {
   cmdline(pid: number): Uint8Array | null;
   /** MemAvailable from /proc/meminfo in MiB (kB / 1024, rounded down). */
   memAvailableMb(): number | null;
+  /** The target of the symbolic link /proc/<pid>/fd/<fd>; null when it cannot be read. */
+  fdTarget(pid: number, fd: number): string | null;
+  /**
+   * Whether /proc/net/tcp or /proc/net/tcp6 lists a socket in state LISTEN (0A) on `port`; null
+   * when neither can be read (A30). False for a number that is not a port (1–65535).
+   */
+  tcpListening(port: number): boolean | null;
 }
 
 export interface RunOptions {
@@ -115,6 +132,98 @@ export interface Runner {
   ): Promise<number | null>;
 }
 
+export interface DetachedOptions {
+  cwd: string;
+  env: Readonly<Record<string, string>>;
+  /** Written to the child's stdin, which is then closed; without it stdin is /dev/null. */
+  input?: string;
+  /** Files stdout and stderr are appended to (created with mode 0o600); without, /dev/null. */
+  stdoutTo?: string;
+  stderrTo?: string;
+}
+
+export interface Detached {
+  pid: number;
+  /**
+   * Settles when the child exits while this process lives. The child never keeps this process
+   * alive and gets no SIGHUP from this process's terminal (setsid, a session of its own).
+   */
+  exited: Promise<{ code: number | null; signal: string | null }>;
+}
+
+/**
+ * Starting programs that outlive the call, and signalling processes. With SKYDECK_TEST_NO_WINDOWS=1
+ * (the test sandbox, A32), and always in the test platforms, a command under /mnt/ or ending in
+ * .exe (any case) is refused with an Error whose `code` is 'EWINDOWS', and nothing is started.
+ */
+export interface Processes {
+  /**
+   * Starts a program detached in a new session. Rejects with an Error whose `code` is 'ENOENT'
+   * when the program (or `cwd`) does not exist.
+   */
+  startDetached(
+    command: string,
+    args: readonly string[],
+    options: DetachedOptions,
+  ): Promise<Detached>;
+  /**
+   * process.kill; false when no such process exists (ESRCH). Callers check the identity first.
+   * A pid that is not a positive whole number (0 and -1 would signal a group or every process) is
+   * a RangeError.
+   */
+  signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean;
+}
+
+export interface HttpHandlers {
+  request(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): void;
+  upgrade?(
+    req: import('node:http').IncomingMessage,
+    socket: import('node:stream').Duplex,
+    head: Buffer,
+  ): void;
+}
+
+export interface HttpListener {
+  /** The bound TCP port; 0 for a unix socket. */
+  port: number;
+  /**
+   * Stops listening and ends every open connection, upgraded ones included, instead of waiting
+   * for them; a unix socket's file is removed. Resolves when the server has closed.
+   */
+  close(): Promise<void>;
+}
+
+/** Sockets: the HTTP server of the window and the unix sockets of the server and the keepers. */
+export interface Net {
+  /**
+   * An HTTP server on 127.0.0.1:<port> (0: the system picks) or on a unix socket path (created
+   * with mode 0o600). Rejects with an Error whose `code` is 'EADDRINUSE' when it is taken.
+   */
+  listenHttp(
+    where: { host: '127.0.0.1'; port: number } | { path: string },
+    handlers: HttpHandlers,
+  ): Promise<HttpListener>;
+  /** Connects to a unix socket; rejects with `code` 'ECONNREFUSED' or 'ENOENT'. */
+  connectUnix(path: string): Promise<import('node:net').Socket>;
+  /**
+   * One HTTP/1.1 request over a unix socket with a JSON body; rejects on timeout (`code`
+   * 'ETIMEDOUT'), refusal or a missing socket. `onLine` receives a streamed body line by line
+   * when given (each line without its '\n', a last line without one too); `body` is then null.
+   * Otherwise `body` is the answer parsed as JSON, its text when it is not JSON, null when empty.
+   * The timeout counts from the request; with `onLine` it starts again with every chunk received.
+   */
+  requestUnix(
+    path: string,
+    request: {
+      method: 'GET' | 'POST';
+      path: string;
+      body?: unknown;
+      timeoutMs: number;
+      onLine?: (line: string) => void;
+    },
+  ): Promise<{ status: number; body: unknown }>;
+}
+
 export type Env = Readonly<Record<string, string | undefined>>;
 
 /** Everything the outside world provides. Tests build one with test/helpers/platform.ts. */
@@ -135,4 +244,15 @@ export interface Platform {
   nodeVersion: string;
   /** Absolute path of the skydeck checkout (the directory holding bin/ and src/). */
   appRoot: string;
+  processes: Processes;
+  net: Net;
+  /**
+   * `count` random bytes (crypto.randomBytes); the fake one returns 0, 1, 2, … in order. A property,
+   * not a method, so that the import check of plan 2.1 does not read the declaration as a call.
+   */
+  randomBytes: (count: number) => Uint8Array;
+  pid: number;
+  uid: number;
+  /** os.userInfo().username, for /var/lib/systemd/linger/<user>. */
+  userName: string;
 }
