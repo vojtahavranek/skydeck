@@ -1728,7 +1728,10 @@ export interface WebSocketConnection {
   sendBinary(bytes: Uint8Array): void;
   /** Bytes written to the socket and not yet flushed (for S2 8.2.8). */
   readonly buffered: number;
+  /** RangeError for a code a server may not send (outside 1000–1014 and 3000–4999, or 1004,
+   *  1005, 1006) or a reason above 123 UTF-8 bytes; nothing is sent then (ruled, #44). */
   close(code: number, reason?: string): void;
+  // Each onX adds a listener; earlier ones stay (ruled, #44).
   onText(listener: (text: string) => void): void;
   onBinary(listener: (bytes: Uint8Array) => void): void;
   onDrain(listener: () => void): void;
@@ -1739,6 +1742,13 @@ export interface WebSocketConnection {
 export function acceptWebSocket(req: IncomingMessage, socket: Duplex, head: Buffer): WebSocketConnection | null;
 export const MAX_MESSAGE = 1024 * 1024;
 ```
+
+A ping is answered with a pong carrying the same payload; while the socket is backed up (a write
+was refused by its queue), only the latest ping's pong is kept and sent at the drain, as RFC 6455
+5.5.3 allows, so that a peer that pings and never reads cannot grow the queue (ruled, #44). The
+101 and the 400 are answers of the WebSocket endpoint, not pages: they carry
+`Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none';
+frame-ancestors 'none'` (no port is needed) with the other headers of S2 8.2.1 (ruled, #44).
 
 **Files**
 - Create: `src/window/websocket.ts`
@@ -1751,6 +1761,8 @@ export const MAX_MESSAGE = 1024 * 1024;
   with a code → the same code echoed; invalid UTF-8 in a text message → close 1007; an unmasked
   client frame (written with a raw socket) → close 1002; a message over 1 MiB (also as fragments
   that add up to more) → close 1009; a missing `Sec-WebSocket-Key` → 400.
+- The 101 and the 400 carry the headers above and no CORS header; `close()`'s RangeErrors; many
+  pings while the socket is backed up → one pong, for the latest (ruled, #44).
 - `buffered` grows while the client does not read (a paused socket) and `onDrain` fires once it
   reads again.
 

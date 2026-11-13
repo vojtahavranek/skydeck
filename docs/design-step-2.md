@@ -818,7 +818,12 @@ The WebSocket is the server's own RFC 6455 code on `node:http` (the prototype is
 and passed every frame test, section 21): text and binary frames, fragmentation, ping and pong,
 close codes; invalid UTF-8 closes with 1007, an unmasked client frame with 1002; a message over
 1 MiB from a page closes with 1009. The page never sends one: it splits input (a large paste) into
-`input` messages of at most 64 KiB, in order.
+`input` messages of at most 64 KiB, in order. While the socket to a page is backed up, only the
+latest ping's pong is kept and sent when it drains (RFC 6455 5.5.3), so that a peer that pings
+and never reads cannot grow the queue. The answers of the WebSocket endpoint itself (its 101 and
+its 400 for a request that is not a valid upgrade) are not pages: they carry
+`Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none';
+frame-ancestors 'none'` with the same other headers as every answer, and no CORS header.
 
 #### 8.2.2 Handshake, proof and versions
 
