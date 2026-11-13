@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
@@ -147,7 +148,16 @@ describe('openStore', () => {
   });
 
   test('the write-ahead log files are as private as the database', (t) => {
-    const { store, path } = fresh(t);
+    // SQLite gives -wal and -shm the mode the database file has when it creates them. Starting
+    // from a file of mode 644 makes the test independent of the umask: were the file made 600
+    // only after SQLite opened the log, the log would stay 644 even under umask 077.
+    const path = join(sandbox(t).root, 'skydeck.db');
+    writeFileSync(path, '');
+    chmodSync(path, 0o644);
+    const store = openStore(path);
+    t.after(() => {
+      store.close();
+    });
 
     store.insertEvent(ev());
 
@@ -211,10 +221,82 @@ describe('openStore', () => {
     });
   });
 
-  test('a database in a directory that does not exist cannot be opened', (t) => {
+  const refusals: [what: string, version: string | null][] = [
+    ['an empty text', ''],
+    ['text that is not a whole number', 'abc'],
+    ['a decimal with a fraction', '1.0'],
+    ['a number with spaces', ' 1 '],
+    ['a hexadecimal number', '0x1'],
+    ['a negative number', '-1'],
+    ['a number too large for a safe integer', '99999999999999999999'],
+    ['no value at all', null],
+  ];
+  for (const [what, version] of refusals) {
+    test(`a schema_version of ${what} is refused with exit code 1, and nothing is migrated`, (t) => {
+      const { store, path, reopen } = fresh(t);
+      store.insertEvent(ev());
+      if (version === null) {
+        store.deleteKv('schema_version');
+      } else {
+        store.setKv('schema_version', version);
+      }
+      store.close();
+
+      assert.throws(reopen, (error) => {
+        assert.ok(error instanceof SkydeckError);
+        assert.equal(error.exitCode, 1);
+        assert.match(error.message, /schema version/);
+        return true;
+      });
+      assert.equal(rawRows(path, 'SELECT count(*) AS n FROM events')[0]?.n, 1);
+    });
+  }
+
+  test('a migration that fails part-way leaves nothing behind', (t) => {
+    // Migration 1 creates `prs` after `events`, `session_meta`, `links` and `transcripts`; a
+    // table of that name makes it fail there. All of its tables must go, as one transaction.
+    const path = join(sandbox(t).root, 'skydeck.db');
+    const other = new DatabaseSync(path);
+    other.exec('CREATE TABLE prs (x)');
+    other.close();
+
+    assert.throws(() => openStore(path), /already exists/);
+
+    const tables = rawRows(path, "SELECT name FROM sqlite_master WHERE type = 'table'");
+    assert.deepEqual(
+      tables.map((row) => row.name),
+      ['prs'],
+    );
+  });
+
+  test('a file that is not a database is refused with exit code 1, naming the path', (t) => {
+    const path = join(sandbox(t).root, 'skydeck.db');
+    writeFileSync(path, 'this is plain text, not a SQLite database\n'.repeat(20));
+
+    assert.throws(
+      () => openStore(path),
+      (error) => {
+        assert.ok(error instanceof SkydeckError);
+        assert.equal(error.exitCode, 1);
+        assert.ok(error.message.includes(path), error.message);
+        assert.match(error.message, /not a database/);
+        return true;
+      },
+    );
+  });
+
+  test('a database in a directory that does not exist is refused with exit code 1', (t) => {
     const path = join(sandbox(t).root, 'missing', 'skydeck.db');
 
-    assert.throws(() => openStore(path));
+    assert.throws(
+      () => openStore(path),
+      (error) => {
+        assert.ok(error instanceof SkydeckError);
+        assert.equal(error.exitCode, 1);
+        assert.ok(error.message.includes(path), error.message);
+        return true;
+      },
+    );
   });
 });
 
@@ -262,6 +344,52 @@ describe('events', () => {
     store.insertEvent(ev({ timeNs: 1_762_988_000_123_456_789n }));
 
     assert.equal(store.events()[0]?.timeNs, 1_762_988_000_123_456_789n);
+  });
+
+  test('insertEvent throws when the commit fails, instead of returning an id for a lost row', (t) => {
+    // Outside transaction() the INSERT commits by itself, and a failed commit (here: the file
+    // size limit is hit) must surface; it was once swallowed when the row was read with get().
+    const sb = sandbox(t);
+    const path = join(sb.root, 'skydeck.db');
+    const child = `
+      const [storeUrl, path, payload] = process.argv.slice(1);
+      const { openStore } = await import(storeUrl);
+      const store = openStore(path);
+      const event = { spoolName: 'a.ev', timeNs: 1n, kind: 'start', detail: 'startup',
+        rawDetail: 'startup', sessionId: 's', bootId: 'b', pid: 1, procStart: 1, cwd: null,
+        argv: null, name: null, payload: 'x'.repeat(Number(payload)) };
+      try {
+        console.log('returned ' + store.insertEvent(event));
+      } catch {
+        console.log('threw');
+      }
+    `;
+    // `ulimit -f 150` is 75 to 150 KB; the payload is 400 KB. A child that ignores SIGXFSZ gets
+    // EFBIG from the write instead of being killed.
+    const result = spawnSync(
+      '/bin/sh',
+      [
+        '-c',
+        'trap "" XFSZ; ulimit -f 150; exec "$@"',
+        'sh',
+        process.execPath,
+        '--input-type=module',
+        '-e',
+        child,
+        new URL('../../src/store/store.ts', import.meta.url).href,
+        path,
+        '400000',
+      ],
+      { env: sb.env(), encoding: 'utf8' },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'threw');
+    const store = openStore(path);
+    t.after(() => {
+      store.close();
+    });
+    assert.deepEqual(store.events(), []);
   });
 
   test('observed events (no spool name) can be inserted twice', (t) => {

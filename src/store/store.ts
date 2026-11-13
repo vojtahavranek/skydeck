@@ -277,8 +277,11 @@ function inTransaction<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
-/** The schema version in kv; 0 for a database that has no kv table yet. */
-function schemaVersion(db: DatabaseSync): number {
+/**
+ * The schema version in kv; 0 only for a database that has no kv table yet (a new one). A kv table
+ * without a usable version is not new, and running migration 1 on it would fail half way in.
+ */
+function schemaVersion(db: DatabaseSync, path: string): number {
   const table = db
     .prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'kv'")
     .get();
@@ -286,12 +289,13 @@ function schemaVersion(db: DatabaseSync): number {
     return 0;
   }
   const row = db.prepare("SELECT value FROM kv WHERE key = 'schema_version'").get();
-  if (row === undefined) {
-    return 0;
-  }
-  const version = Number(reqStr(row, 'value'));
-  if (!Number.isSafeInteger(version) || version < 0) {
-    throw new SkydeckError(`the database has no usable schema version (${String(row.value)})`, 1);
+  const text = row === undefined ? null : reqStr(row, 'value');
+  const version = text !== null && /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
+  if (!Number.isSafeInteger(version)) {
+    throw new SkydeckError(
+      `the database ${path} has no usable schema version (${text === null ? 'none' : JSON.stringify(text)})`,
+      1,
+    );
   }
   return version;
 }
@@ -303,13 +307,14 @@ function migrate(db: DatabaseSync, path: string): void {
       `the database ${path} was written by a newer skydeck (schema version ${version}, this one knows ${SCHEMA_VERSION}); update skydeck`,
       1,
     );
-  if (schemaVersion(db) > SCHEMA_VERSION) {
-    throw tooNew(schemaVersion(db));
+  const found = schemaVersion(db, path);
+  if (found > SCHEMA_VERSION) {
+    throw tooNew(found);
   }
   // The version is read again inside the write lock: a second process may have migrated meanwhile.
-  while (schemaVersion(db) < SCHEMA_VERSION) {
+  while (schemaVersion(db, path) < SCHEMA_VERSION) {
     inTransaction(db, () => {
-      const version = schemaVersion(db);
+      const version = schemaVersion(db, path);
       if (version > SCHEMA_VERSION) {
         throw tooNew(version);
       }
@@ -329,11 +334,15 @@ function migrate(db: DatabaseSync, path: string): void {
  * Opens (creating when absent) the database at `path`; the directory must exist. Sets
  * journal_mode=WAL, synchronous=FULL, busy_timeout=5000, foreign_keys=ON, chmods the file 0600,
  * runs the missing migrations. Throws SkydeckError (exit 1) when kv schema_version is newer than
- * SCHEMA_VERSION ("the database was written by a newer skydeck").
+ * SCHEMA_VERSION ("the database was written by a newer skydeck"). Any other failure to open it (a
+ * file that is not a database, a lock held for more than the busy timeout, a missing directory,
+ * a failed migration) is a SkydeckError (exit 1) naming the path: it is a fact of the machine,
+ * not a bug in skydeck.
  */
 export function openStore(path: string): Store {
-  const db = new DatabaseSync(path, { readBigInts: true });
+  let db: DatabaseSync | undefined;
   try {
+    db = new DatabaseSync(path, { readBigInts: true });
     // First, so the -wal and -shm files that SQLite creates later take the mode of this file.
     chmodSync(path, 0o600);
     db.exec('PRAGMA busy_timeout = 5000');
@@ -342,8 +351,12 @@ export function openStore(path: string): Store {
     db.exec('PRAGMA foreign_keys = ON');
     migrate(db, path);
   } catch (error) {
-    db.close();
-    throw error;
+    db?.close();
+    if (error instanceof SkydeckError) {
+      throw error;
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new SkydeckError(`cannot open the database ${path}: ${reason}`, 1);
   }
   return new SqliteStore(db, path);
 }
@@ -404,7 +417,10 @@ class SqliteStore implements Store {
   }
 
   insertEvent(event: NewEvent): number | null {
-    const row = this.#get(
+    // Not #get: outside transaction() this INSERT commits when its statement is finished, and
+    // .get() stops after the first row and ignores a failure of that commit (a full disk), so an
+    // id would be returned for a row that was rolled back. .all() runs the statement to the end.
+    const [row] = this.#all(
       `INSERT INTO events (spool_name, time_ns, kind, detail, raw_detail, session_id, boot_id,
                            pid, proc_start, cwd, argv, name, payload)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
