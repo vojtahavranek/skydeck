@@ -140,7 +140,10 @@ function keepOrder(old: TuiModel['order'], fresh: TuiModel['order']): TuiModel['
 /**
  * New rows for the model. `reorder` true: `order` is computed again with `buildList`. False: the
  * order is kept (it does not change under the cursor) and only adjusted for rows that appeared,
- * went away or changed group. The selection, the filter, `showAll` and the message stay.
+ * went away, are no longer listed at all, or changed group. The filter, `showAll` and the message
+ * stay, and so does the selection, unless its row is not visible any more: then the cursor goes
+ * to the first visible row and a detail or an input that was open on the old row is closed
+ * (`mode` is 'list' afterwards), so that the caller must not assume the mode survives.
  */
 export function withRows(
   model: TuiModel,
@@ -278,7 +281,11 @@ function reduceFilter(model: TuiModel, key: string): Step {
   }
 }
 
-/** What `enter` in the input does: the text goes out as the effect of its purpose. */
+/**
+ * What `enter` in the input does: the text goes out as the effect of its purpose. Pull-request
+ * text is trimmed; one that is empty, or only a dash, is not an effect (there is nothing to add
+ * or remove).
+ */
 function finishInput(model: TuiModel, input: TuiInput): Step {
   const closed: TuiModel = { ...model, mode: 'list', input: null };
   const row = selectedRow(model);
