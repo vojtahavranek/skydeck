@@ -1820,9 +1820,12 @@ that the package's `package.json` declares `MIT` and the repository of `@xterm/x
 otherwise. Beside each bundle it writes a declaration file `<name>.d.mts` that re-exports the
 package's typings by the package's name, so that `tsc` for `web/` never reads a bundle; the
 typings themselves are vendored beside the bundles, within a type checker's reach.
+`@xterm/addon-unicode-graphemes` bundles adapted copies of tiny-inflate and unicode-trie (both
+MIT) without their notices, so the script also writes `vendor/xterm/THIRD-PARTY-NOTICES`, which
+names that bundle and holds both licences as their packages publish them on npm.
 `vendor/MANIFEST.json` lists every file with its
-package, version and sha256 — paths relative to the checkout, the shims under the package
-`skydeck` with version `-`, a borrowed licence with `licenseFrom` (`@xterm/xterm`) and
+package, version and sha256 — paths relative to the checkout, the shims and the notices under
+the package `skydeck` with version `-`, a borrowed licence with `licenseFrom` (`@xterm/xterm`) and
 `licenseReason`. The same packages at the same versions are development dependencies;
 `npm run vendor` copies them into `vendor/` and writes the manifest, and a test fails when
 `vendor/` and the installed packages differ, so they are updated only together. `addon-webgl` is

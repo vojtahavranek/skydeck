@@ -30,6 +30,70 @@ const PACKAGES: VendoredPackage[] = [
 const LICENSE_SOURCE = '@xterm/xterm';
 const LICENSE_REASON = `no LICENSE in the package; its package.json declares MIT and the repository of ${LICENSE_SOURCE}`;
 
+/**
+ * Code that @xterm/addon-unicode-graphemes bundles without a notice of its own (ruling on #38):
+ * the licence of each package exactly as its LICENSE file is published on npm. Checked for the
+ * bundle of `UNICODE_GRAPHEMES_CHECKED`; another version must be checked again (the script
+ * refuses it until then).
+ */
+const UNICODE_GRAPHEMES_CHECKED = '0.4.0';
+const NOTICES_PATH = 'vendor/xterm/THIRD-PARTY-NOTICES';
+const THIRD_PARTY: Array<{ header: string; license: string }> = [
+  {
+    header: '======== tiny-inflate 1.0.3 (npm), its LICENSE file ========',
+    license: `MIT License
+
+Copyright (c) 2015-present Devon Govett
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`,
+  },
+  {
+    header: '======== unicode-trie 2.0.0 (npm), its LICENSE file ========',
+    license: `Copyright 2018
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+`,
+  },
+];
+const NOTICES = [
+  'Third-party code in the vendored xterm.js files',
+  '',
+  'vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs, the bundle of',
+  `@xterm/addon-unicode-graphemes ${UNICODE_GRAPHEMES_CHECKED}, contains adapted copies of two packages by Devon Govett:`,
+  'tiny-inflate and unicode-trie (in xterm.js: addons/addon-unicode-graphemes/src/third-party/).',
+  'The package ships no notice for them; its LICENSE names only the xterm.js authors. Their',
+  'licences follow, each exactly as the package publishes its LICENSE file on npm. unicode-trie',
+  'is cited at 2.0.0, the line that decompresses with tiny-inflate as the copy does; every',
+  'published version of unicode-trie has the same LICENSE. tiny-inflate says in its readme that',
+  "it is a port of Joergen Ibsen's tinf.",
+  '',
+  'Written by scripts/vendor.ts.',
+  '',
+  ...THIRD_PARTY.flatMap(({ header, license }) => [header, license]),
+].join('\n');
+
 export interface VendorOptions {
   /** The directory whose `node_modules/@xterm/*` is copied. */
   from: string;
@@ -157,6 +221,13 @@ function collect(from: string): Array<{ entry: ManifestEntry; bytes: Uint8Array 
     entry.licenseFrom = LICENSE_SOURCE;
     entry.licenseReason = LICENSE_REASON;
   }
+  const graphemes = packageJson('@xterm/addon-unicode-graphemes').version;
+  if (graphemes !== UNICODE_GRAPHEMES_CHECKED) {
+    throw new Error(
+      `@xterm/addon-unicode-graphemes ${graphemes} is not the version whose bundle ${NOTICES_PATH} was written for (${UNICODE_GRAPHEMES_CHECKED}): check the third-party code it bundles and update the notices in scripts/vendor.ts`,
+    );
+  }
+  add(NOTICES_PATH, Buffer.from(NOTICES, 'utf8'), 'skydeck', '-');
   return out.sort((a, b) =>
     a.entry.path < b.entry.path ? -1 : a.entry.path > b.entry.path ? 1 : 0,
   );

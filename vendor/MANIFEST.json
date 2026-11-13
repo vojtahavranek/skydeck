@@ -1,6 +1,12 @@
 {
   "files": [
     {
+      "path": "vendor/xterm/THIRD-PARTY-NOTICES",
+      "package": "skydeck",
+      "version": "-",
+      "sha256": "cfe9abdd2be0358e6739511562a2f98c9ec30a8e50f9aff06bb24575c5971d1b"
+    },
+    {
       "path": "vendor/xterm/addon-fit/LICENSE",
       "package": "@xterm/addon-fit",
       "version": "0.11.0",
