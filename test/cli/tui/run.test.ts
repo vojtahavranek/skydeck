@@ -702,7 +702,109 @@ test(
   },
 );
 
-for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+test('r after the fetch of an earlier r has finished fetches again, and the message goes away', async (t) => {
+  const runner = gh(() => runResult({ stdout: OPEN_GREEN }));
+  const d = listDeck(t, ['r', 'r', 'q']);
+  attachManualPr(d.deck, S1, PR1);
+  d.deck.store.savePrResult(PR1, {
+    ok: true,
+    atNs: T0 - MINUTE,
+    title: 'Fix the retry',
+    state: 'open',
+    review: null,
+    checks: 'passing',
+  });
+
+  assert.equal(await main([], patient(withRunner(d, runner))), 0);
+
+  assert.equal(ghCalls(runner).length, 2);
+  assert.notEqual(lastLines(d).at(-1), 'refreshing pull requests…', lastLines(d).join('\n'));
+});
+
+test(
+  'r while the fetch of an earlier r runs still reads what is new and computes the order again',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const runner = hangingGh();
+    let d: TestDeck | undefined;
+    d = listDeck(t, [
+      'r',
+      () => {
+        if (d !== undefined) startRunning(d, S2, 4343);
+        return 'r';
+      },
+      'q',
+    ]);
+    attachManualPr(d.deck, S1, PR1);
+    d.deck.store.savePrResult(PR1, {
+      ok: true,
+      atNs: T0 - MINUTE,
+      title: 'Fix the retry',
+      state: 'open',
+      review: null,
+      checks: 'passing',
+    });
+
+    assert.equal(await main([], withRunner(d, runner)), 0);
+
+    assert.equal(ghCalls(runner).length, 1);
+    assert.deepEqual(rowOrder(frames(d).at(-1) ?? []), [short(S2), short(S1)]);
+  },
+);
+
+test(
+  'q while the fetch that p started waits for gh returns at once, and nothing is saved',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const runner = hangingGh();
+    const d = listDeck(t, ['p', PR1, '\r', 'q']);
+
+    assert.equal(await main([], withRunner(d, runner)), 0);
+    await settle();
+
+    assert.equal(ghCalls(runner).length, 1);
+    assert.equal(d.deck.store.prs().find((row) => row.url === PR1)?.triedAtNs, null);
+  },
+);
+
+test('a background fetch that fails says so in the message line', async (t) => {
+  // The clock fails once, right after gh answered: saving the answer throws.
+  let breakClock = false;
+  const runner = gh(() => {
+    breakClock = true;
+    return runResult({ stdout: OPEN_GREEN });
+  });
+  const d = listDeck(t, ['q']);
+  attachManualPr(d.deck, S1, PR1);
+  const ctx = withRunner(d, runner);
+  const clock = ctx.platform.clock;
+  ctx.platform = {
+    ...ctx.platform,
+    clock: {
+      ...clock,
+      nowNs: () => {
+        if (breakClock) {
+          breakClock = false;
+          throw new Error('clock broke');
+        }
+        return clock.nowNs();
+      },
+    },
+  };
+
+  assert.equal(await main([], patient(ctx)), 0);
+
+  assert.ok(
+    lastLines(d).includes('the pull requests could not be refreshed: Error: clock broke'),
+    lastLines(d).join('\n'),
+  );
+});
+
+for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) {
   test(
     `${signal} gives the terminal back before the process ends`,
     { timeout: 5000 },

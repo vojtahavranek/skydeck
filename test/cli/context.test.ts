@@ -113,7 +113,7 @@ describe('processContext', () => {
     assert.equal(process.stdout.listenerCount('resize'), before);
   });
 
-  for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+  for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) {
     test(`onTerminate runs its callback on ${signal}, then the process ends by that signal`, async (t) => {
       const s = sandbox(t);
       const script = `

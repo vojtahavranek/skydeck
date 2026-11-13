@@ -22,15 +22,15 @@ export type Io = {
    */
   onResize(callback: () => void): () => void;
   /**
-   * Calls `callback` when the process is asked to end (SIGTERM) or its terminal went away (SIGHUP),
-   * so that it can give the terminal back; the process then ends as the signal would have ended it.
-   * Returns the function that unsubscribes it.
+   * Calls `callback` when the process is asked to end (SIGTERM, or SIGINT sent from outside: in raw
+   * mode ctrl-c is a key) or its terminal went away (SIGHUP), so that it can give the terminal back;
+   * the process then ends as the signal would have ended it. Returns the function that unsubscribes it.
    */
   onTerminate(callback: (signal: TerminateSignal) => void): () => void;
 };
 
 /** The signals `Io.onTerminate` reports. */
-export type TerminateSignal = 'SIGTERM' | 'SIGHUP';
+export type TerminateSignal = 'SIGTERM' | 'SIGHUP' | 'SIGINT';
 
 /** Everything a command may reach for, passed in so tests can substitute fakes. */
 export type Context = { io: Io; platform: Platform };
@@ -101,7 +101,7 @@ function processIo(): Io {
       };
     },
     onTerminate(callback) {
-      const signals: TerminateSignal[] = ['SIGTERM', 'SIGHUP'];
+      const signals: TerminateSignal[] = ['SIGTERM', 'SIGHUP', 'SIGINT'];
       const listeners = signals.map((signal) => {
         const listener = (): void => {
           try {

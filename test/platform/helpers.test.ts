@@ -340,8 +340,9 @@ describe('capture', () => {
     c.terminate('SIGTERM');
     first();
     c.terminate('SIGHUP');
+    c.terminate('SIGINT');
 
-    assert.deepEqual(seen, ['a SIGTERM', 'b SIGTERM', 'b SIGHUP']);
+    assert.deepEqual(seen, ['a SIGTERM', 'b SIGTERM', 'b SIGHUP', 'b SIGINT']);
   });
 
   test('resize changes the size and calls every onResize callback until it unsubscribes', () => {

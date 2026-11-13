@@ -105,7 +105,7 @@ class TerminalList {
     const stopResizing = this.#ctx.io.onResize(() => {
       this.#repaintIfResized();
     });
-    // SIGTERM or SIGHUP end the process: the terminal is given back first.
+    // SIGTERM, SIGHUP or an outside SIGINT end the process: the terminal is given back first.
     const stopTerminating = this.#ctx.io.onTerminate(() => {
       void this.#giveBack();
     });

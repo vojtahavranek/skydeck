@@ -1837,11 +1837,12 @@ export type Io = {
    */
   onResize(callback: () => void): () => void;
   /**
-   * (Added by task 19, ruled by the plan owner.) Calls `callback` on SIGTERM or SIGHUP so that the terminal can be given
-   * back; once no subscriber is left the process ends by that signal (the real context re-raises it; the fake one:
-   * `terminate(signal)` of `capture()` / `testContext()`). Returns the function that unsubscribes it.
+   * (Added by task 19, ruled by the plan owner.) Calls `callback` on SIGTERM, SIGHUP or SIGINT (sent from outside: in
+   * raw mode ctrl-c is a key) so that the terminal can be given back; once no subscriber is left the process ends by
+   * that signal (the real context re-raises it; the fake one: `terminate(signal)` of `capture()` / `testContext()`).
+   * Returns the function that unsubscribes it.
    */
-  onTerminate(callback: (signal: 'SIGTERM' | 'SIGHUP') => void): () => void;
+  onTerminate(callback: (signal: 'SIGTERM' | 'SIGHUP' | 'SIGINT') => void): () => void;
 };
 
 /** Everything a command may reach for. */
@@ -4646,7 +4647,8 @@ the pull request); keys are read meanwhile, and a further `r` while it runs refr
 starts no second fetch (the message says one is running); when it settles, `loadRows` + `withRows(reorder false)`
 when it saved something, the message taken away, repaint.
 
-Giving the terminal back — on `quit`, the end of `io.keys()`, a `--here` resume, an error, SIGTERM or SIGHUP: abort
+Giving the terminal back — on `quit`, the end of `io.keys()`, a `--here` resume, an error, SIGTERM, SIGHUP or an
+outside SIGINT: abort
 the fetches (one `AbortController` for all: an aborted fetch ends at once and saves nothing), write
 `\x1b[?7h\x1b[?25h\x1b[?1049l` (autowrap, cursor, normal screen), call `return()` on the key iterator, print the
 lines kept for the end on stderr; then (except for a signal, after which the process ends) unsubscribe and return —
@@ -4695,7 +4697,10 @@ parts beyond the first version of this paragraph were ruled by the plan owner af
     when the handoff is written; a fetch that ends while the editor runs paints nothing over it; `r` computes the order
     again; `r` while its fetch runs starts no second one; `p` fetches what it attached; a failed tab launch shows the outcome
     first at 80 columns and prints its lines on stderr when the list ends; after a failed note edit the message starts with
-    the outcome; SIGTERM and SIGHUP give the terminal back (screen, autowrap, cursor, keys) and abort the fetches.
+    the outcome; SIGTERM, SIGHUP and SIGINT give the terminal back (screen, autowrap, cursor, keys) and abort the fetches.
+    (After the re-check of review 2.) A second `r` after the first fetch finished fetches again and the message goes away;
+    `r` while a fetch runs still re-reads and reorders; `q` while the fetch of `p` hangs returns at once; a failed
+    background fetch is shown in the message line.
 
 **Steps**
 - [ ] Write both test files; replace the bare-`skydeck` test in `test/cli/main.test.ts`. `npm test` → fails.
