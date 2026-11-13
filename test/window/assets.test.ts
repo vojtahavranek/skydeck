@@ -197,6 +197,7 @@ describe('loadAssets', () => {
 
     for (const path of [
       `/assets/${b}/web/tsconfig.json`,
+      `/assets/${b}/web/index.html`,
       `/assets/${b}/web/.hidden.js`,
       `/assets/${b}/bin/skydeck-keeper`,
       `/assets/${b}/src/window/server.ts`,
@@ -502,6 +503,7 @@ describe('httpHandler', () => {
       `/assets/${build}/vendor/xterm/THIRD-PARTY-NOTICES`,
       `/assets/${build}/vendor/MANIFEST.json`,
       `/assets/${build}/web/tsconfig.json`,
+      `/assets/${build}/web/index.html`,
       `/assets/${build}/bin/skydeck-keeper`,
       `/assets/${build}/src/window/server.ts`,
       '/manifest.webmanifest',
@@ -580,6 +582,22 @@ describe('httpHandler', () => {
     for (const answer of answers) {
       assertSecurityHeaders(answer, port);
     }
+  });
+
+  test('immutable only under /assets/: a file at an address that never changes is no-store', async (t) => {
+    const { platform } = testPlatform(t);
+    const icon = { body: Uint8Array.from([1, 2, 3]), type: 'image/x-icon' };
+    const assets: Assets = {
+      build: '0123456789abcdef',
+      keeperCode: '',
+      get: (path) => (path === '/favicon.ico' ? icon : null), // as stage E's list will have it
+    };
+    const port = await serve(t, platform, assets);
+
+    const answer = await send(port, '/favicon.ico');
+
+    assert.equal(answer.status, 200);
+    assert.equal(answer.headers['cache-control'], 'no-store');
   });
 
   test('a request without a Host header (HTTP/1.0) → 421', async (t) => {

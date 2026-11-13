@@ -25,8 +25,9 @@ const KEEPER = 'bin/skydeck-keeper';
 const INDEX = 'web/index.html';
 /** The contract with web/index.html (task 26): every occurrence becomes `/assets/<build>/`. */
 const PLACEHOLDER = '/assets/__VERSION__/';
-/** Files of web/ the page never loads. */
-const NOT_SERVED = new Set(['web/tsconfig.json']);
+/** Files of web/ not on the versioned list: the type checker's, and index.html, which is served as
+ *  '/' with the build put in (as it is on disk it would be a second, broken page). */
+const NOT_SERVED = new Set(['web/tsconfig.json', INDEX]);
 /** Vendored files the page loads: the bundles and the stylesheet (S2 16.6). */
 const LOADED_FROM_VENDOR = /\.(mjs|css)$/;
 
@@ -54,8 +55,9 @@ function withBuild(index: Uint8Array, build: string): Uint8Array {
 }
 
 /**
- * Reads web/** (but web/tsconfig.json), the vendored files of the manifest that the page loads
- * (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper. Refuses (Error) when verifyVendored
+ * Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only), the vendored files of
+ * the manifest that the page loads (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper.
+ * Refuses (Error) when verifyVendored
  * reports a problem. A missing or empty web/ is no error (task 23's tests run before task 26
  * creates it): then `GET /` is 404.
  *
@@ -131,9 +133,9 @@ export function hostOk(host: string | undefined, port: number): boolean {
  *
  * In this order: a wrong Host → 421; OPTIONS → 403; any other method but GET → 405 with
  * `Allow: GET` (HEAD included: the one listener other pages can reach answers as few requests as
- * it can; ruled); GET of a path on the list → the file, the query ignored and never used ('/' is
- * `no-store`, a versioned path `max-age=31536000, immutable`); any other GET → 404. Refusals are
- * `no-store`. No answer carries a CORS header.
+ * it can; ruled); GET of a path on the list → the file, the query ignored and never used (a path
+ * under `/assets/` is `max-age=31536000, immutable`, any other, '/' included, `no-store`); any other
+ * GET → 404. Refusals are `no-store`. No answer carries a CORS header.
  */
 export function httpHandler(
   assets: Assets,
@@ -181,6 +183,8 @@ export function httpHandler(
       refusal(404, 'not found');
       return;
     }
-    answer(200, asset.type, asset.body, path === '/' ? 'no-store' : 'max-age=31536000, immutable');
+    // Immutable only under the versioned path: '/' (and the icon of stage E) keep their address.
+    const cache = path.startsWith('/assets/') ? 'max-age=31536000, immutable' : 'no-store';
+    answer(200, asset.type, asset.body, cache);
   };
 }

@@ -1944,8 +1944,9 @@ export interface Assets {
    *  '/assets/<build>/<path in the checkout>'. null when the path is not on the list. */
   get(path: string): { body: Uint8Array; type: string } | null;
 }
-/** Reads web/** (but web/tsconfig.json), the vendored files of the manifest that the page loads
- *  (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper, each once through readBuild (2.8),
+/** Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only), the vendored files
+ *  of the manifest that the page loads (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper,
+ *  each once through readBuild (2.8),
  *  so that the build is the hash of exactly the bytes served. Refuses (Error) when verifyVendored
  *  reports a problem, when a served vendored file's bytes as read do not have the manifest's hash
  *  (it changed between the two reads), when bin/skydeck-keeper is missing, and when it is not
@@ -1955,8 +1956,8 @@ export function loadAssets(files: Files, appRoot: string): Assets;
 /** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. In
  *  this order: a wrong Host → 421; OPTIONS → 403; any other method but GET → 405 with
  *  `Allow: GET`; GET of a path on the list → the file, a query ignored and never used; any other
- *  GET → 404. `Cache-Control`: `max-age=31536000, immutable` under `/assets/<build>/`, `no-store`
- *  for `/` and every refusal (ruled by the plan owner, task 14). */
+ *  GET → 404. `Cache-Control`: `max-age=31536000, immutable` under `/assets/`, `no-store` for
+ *  every other path (`/` included) and every refusal (ruled by the plan owner, task 14). */
 /** `port()` is the bound port, read at each request: with port 0 it is known only after
  *  listenHttp has resolved (tasks 20, 23 pass a function that returns it then). */
 export function httpHandler(assets: Assets, port: () => number): (req: IncomingMessage, res: ServerResponse) => void;
@@ -1977,18 +1978,21 @@ export function securityHeaders(port: number): Record<string, string>;
 - `GET /` → `index.html` with every `/assets/__VERSION__/` replaced by `/assets/<build>/`
   (the placeholder `__VERSION__` is the contract with task 26); `GET /assets/<build>/web/app.js`
   and `/assets/<build>/vendor/xterm/xterm/lib/xterm.mjs` → the bytes read at start with the right
-  `Content-Type` and `Cache-Control: max-age=31536000, immutable`; `/` and every refusal
-  `no-store`; a query string ignored; another version in the path, `../`, an encoded
-  `%2e%2e`, a file added to `web/` after start → 404; the file changed on disk after start → the
-  old bytes (S2 17.3 "updating").
+  `Content-Type` and `Cache-Control: max-age=31536000, immutable`; every path outside `/assets/`
+  (`/` included) and every refusal `no-store`; a query string ignored, also by the cache rule;
+  another version in the path, `../`, an encoded `%2e%2e`, `/assets/<build>/web/index.html`, a
+  file added to `web/` after start → 404; the file changed on disk after start → the old bytes
+  (S2 17.3 "updating").
 - Every answer (also 404, 421, 403, 405) carries the CSP of S2 8.2.1 with the port,
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and no `Access-Control-*` header.
-- `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port → 421; `OPTIONS` → 403;
+- `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port, no `Host` (HTTP/1.0) →
+  421; `OPTIONS` → 403;
   `HEAD`, `POST` and any other method → 405 with `Allow: GET` (a wrong Host is 421 first);
   `GET /manifest.webmanifest` and `/favicon.ico` → 404 in stage A (the icon is stage E).
-- `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes, is
-  added or removed; does not change for `docs/`, `test/`, `__pycache__/` or a dot-file; the same
-  tree gives the same build.
+- `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes (one
+  byte, its length kept), is added or removed; does not change for `docs/`, `test/`,
+  `__pycache__/` or a dot-file; the same tree gives the same build; a file removed between its
+  `stat` and its read, a dangling link and a link to itself are no files of the build.
 - `loadAssets` refuses a checkout whose vendored file was altered, one whose served vendored file
   changed between the build's read and the manifest check, and one whose `bin/skydeck-keeper` is
   missing or not UTF-8.

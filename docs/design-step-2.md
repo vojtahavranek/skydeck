@@ -792,16 +792,17 @@ The server listens on `127.0.0.1:<port>` only. Every request must have the `Host
 | Request | Answer |
 |---|---|
 | `GET /` | `web/index.html`, with the asset version put into its asset URLs by the server when it reads the file at start (there is no build step). No secret needed: the page holds no secret of its own. |
-| `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list): every file of `web/` but `web/tsconfig.json`, and the vendored `.mjs` and `.css` files of `vendor/MANIFEST.json`. `Cache-Control: max-age=31536000, immutable` under the versioned path. |
+| `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list): every file of `web/` but `web/tsconfig.json` and `web/index.html` (served as `/` only), and the vendored `.mjs` and `.css` files of `vendor/MANIFEST.json`. `Cache-Control: max-age=31536000, immutable` under the versioned path. |
 | `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
 | `OPTIONS` | 403. |
 | any other method but `GET` (`HEAD` included) | 405 with `Allow: GET`. |
 | any other `GET` | 404. |
 
-A query string is ignored and never used: `/?x` is `/`. `/` and every refusal (404, 405, 421,
-403) carry `Cache-Control: no-store`, so that a page reloading after a server restart always gets
-the new asset version.
+A query string is ignored and never used: `/?x` is `/`. Every path outside `/assets/` (`/`, and
+later the icon and the manifest) and every refusal (404, 405, 421, 403) carry
+`Cache-Control: no-store`, so that a page reloading after a server restart always gets the new
+asset version.
 
 The server reads every file it serves into memory when it starts, and its build (16.5) is the hash
 of exactly those bytes: it serves what it hashed, never a file a `git pull` changed under it. It
