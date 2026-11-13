@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -141,6 +141,7 @@ test('q: the alternate screen is entered and left, and a frame shows both sessio
   assert.equal(frames(d)[0]?.length, 24, 'a frame fills the terminal');
   assert.equal(d.stderr(), '');
   assert.equal(d.openKeys(), 0, 'the terminal was given back');
+  assert.equal(d.clock.timers(), 0, 'the background refresh was stopped');
 });
 
 test('the keys are taken before anything is painted, so that nothing typed early is echoed', async (t) => {
@@ -167,11 +168,13 @@ test('the end of the keys quits like q, and ctrl-c quits too', async (t) => {
   assert.equal(await main([], ended.ctx), 0);
   assert.ok(ended.stdout().endsWith(LEAVE));
   assert.equal(ended.openKeys(), 0);
+  assert.equal(ended.clock.timers(), 0);
 
   const interrupted = listDeck(t, ['\x03', 'd']);
   assert.equal(await main([], interrupted.ctx), 0);
   assert.ok(interrupted.stdout().endsWith(LEAVE));
   assert.equal(interrupted.openKeys(), 0);
+  assert.equal(interrupted.clock.timers(), 0);
   assert.equal(interrupted.deck.store.meta(S1)?.doneAtNs ?? null, null, 'nothing after ctrl-c');
 });
 
@@ -296,7 +299,7 @@ test('R on a session that is not running, terminal here: the handoff holds the r
   const dir = resumable(d);
   const handoff = join(d.sandbox.root, 'handoff');
   // What the terminal looked like when the handoff was written: claude takes it over from there.
-  let atHandoff: { openKeys: number; left: boolean } | undefined;
+  let atHandoff: { openKeys: number; left: boolean; timers: number } | undefined;
   const files = d.platform.files;
   const ctx: Context = {
     ...d.ctx,
@@ -306,7 +309,11 @@ test('R on a session that is not running, terminal here: the handoff holds the r
         ...files,
         writeText: (path: string, text: string, mode?: number) => {
           if (path === handoff) {
-            atHandoff = { openKeys: d.openKeys(), left: d.stdout().endsWith(LEAVE) };
+            atHandoff = {
+              openKeys: d.openKeys(),
+              left: d.stdout().endsWith(LEAVE),
+              timers: d.clock.timers(),
+            };
           }
           files.writeText(path, text, mode);
         },
@@ -320,7 +327,7 @@ test('R on a session that is not running, terminal here: the handoff holds the r
     readFileSync(handoff, 'utf8'),
     handoffScript({ cwd: dir, argv: ['claude', '--resume', S1] }),
   );
-  assert.deepEqual(atHandoff, { openKeys: 0, left: true });
+  assert.deepEqual(atHandoff, { openKeys: 0, left: true, timers: 0 });
   assert.ok(d.stdout().endsWith(LEAVE), 'the screen was restored');
   assert.equal(
     d.stdout().indexOf(LEAVE),
@@ -811,17 +818,21 @@ for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) {
     `${signal} gives the terminal back before the process ends`,
     { timeout: 5000 },
     async (t) => {
-      let atSignal: { leftLast: boolean; openKeys: number; aborted: boolean } | undefined;
+      let atSignal:
+        { leftLast: boolean; openKeys: number; aborted: boolean; timers: number } | undefined;
+      let timersBefore = -1;
       const runner = hangingGh();
       let d: TestDeck | undefined;
       d = listDeck(t, [
         () => {
           const deck = d as TestDeck;
+          timersBefore = deck.clock.timers();
           deck.terminate(signal);
           atSignal = {
             leftLast: deck.stdout().endsWith(LEAVE),
             openKeys: deck.openKeys(),
             aborted: ghCalls(runner)[0]?.options?.signal?.aborted === true,
+            timers: deck.clock.timers(),
           };
           return 'j';
         },
@@ -832,7 +843,8 @@ for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) {
       const written = d.stdout();
       d.terminate(signal);
 
-      assert.deepEqual(atSignal, { leftLast: true, openKeys: 0, aborted: true });
+      assert.equal(timersBefore, 1, 'the background refresh ran until then');
+      assert.deepEqual(atSignal, { leftLast: true, openKeys: 0, aborted: true, timers: 0 });
       assert.equal(written.split(LEAVE).length, 2, 'left once');
       assert.equal(d.stdout(), written, 'the list no longer listens');
     },
@@ -904,5 +916,377 @@ test('an error inside the list restores the terminal and is reported by the erro
   assert.ok(d.stdout().startsWith(ENTER));
   assert.ok(d.stdout().endsWith(LEAVE));
   assert.equal(d.openKeys(), 0);
+  assert.equal(d.clock.timers(), 0);
   assert.equal(d.stderr(), 'skydeck: internal error: boom\n');
+});
+
+// --- the background refresh (design 7.3, 7.4) ------------------------------------------------------
+
+/** The list's refresh period: every 5 s while it is on screen. */
+const PERIOD_MS = 5000;
+
+/** The line of a frame that shows `id`. */
+const lineOf = (frame: readonly string[], id: string): string =>
+  frame.find((line) => line.includes(short(id))) ?? '';
+
+/** Frames whose message line (the last one) is `message`. */
+const framesSaying = (d: TestDeck, message: string): number =>
+  lastLines(d).filter((line) => line === message).length;
+
+/** The spool files still waiting to be ingested. */
+const spooled = (d: TestDeck): string[] =>
+  readdirSync(d.deck.places.spoolDir).filter((name) => name.endsWith('.ev'));
+
+test('every 5 s the list refreshes by itself: new states and sessions show, the order and the selected session stay', async (t) => {
+  let d: TestDeck | undefined;
+  let framesBefore = -1;
+  let framesAt4999 = -1;
+  d = listDeck(t, [
+    'j',
+    () => {
+      const deck = d as TestDeck;
+      startRunning(deck, S2, 4343); // S2 starts working: a reorder would put it first
+      writeTranscript(deck, S3, [userRecord(S3, T0 - 5n * SEC)]); // new, and the most recent
+      framesBefore = frames(deck).length;
+      deck.clock.advanceMs(PERIOD_MS - 1);
+      framesAt4999 = frames(deck).length;
+      deck.clock.advanceMs(1);
+      return '';
+    },
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.equal(framesAt4999, framesBefore, 'nothing before 5 s');
+  assert.equal(frames(d).length, framesBefore + 1, 'one frame, painted by the refresh');
+  const refreshed = frames(d).at(-1) ?? [];
+  assert.deepEqual(rowOrder(refreshed), [short(S1), short(S2), short(S3)]);
+  assert.equal(selectedIn(refreshed), short(S2), 'the cursor stays on its session');
+  assert.ok(lineOf(refreshed, S2).includes('working'), refreshed.join('\n'));
+  assert.deepEqual(spooled(d), []);
+  assert.equal(d.stderr(), '');
+});
+
+test('a background refresh that changes nothing that is shown paints nothing', async (t) => {
+  let d: TestDeck | undefined;
+  const counts: number[] = [];
+  const count = (): void => {
+    counts.push(frames(d as TestDeck).length);
+  };
+  d = listDeck(t, [
+    () => {
+      count();
+      // A spool file that cannot be parsed: the refresh moves it to spool/bad, the list shows nothing of it.
+      writeFileSync(join((d as TestDeck).deck.places.spoolDir, '1-0-1.ev'), 'garbage\n');
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      count();
+      return '';
+    },
+    () => {
+      startRunning(d as TestDeck, S2, 4343);
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      count();
+      return '';
+    },
+    'q',
+  ]);
+  // Ages in hours, which 5 s do not change.
+  writeTranscript(d, S1, [userRecord(S1, T0 - 120n * MINUTE)]);
+  writeTranscript(d, S2, [userRecord(S2, T0 - 180n * MINUTE)]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const [first = -1, second = -1, third = -1] = counts;
+  assert.equal(second, first, 'the first refresh changed nothing that is shown');
+  assert.equal(third, first + 1, 'the second one did');
+  assert.deepEqual(readdirSync(join(d.deck.places.spoolDir, 'bad')), ['1-0-1.ev']);
+});
+
+test('no background refresh while an input is open: what is typed stays, the refresh comes after', async (t) => {
+  let d: TestDeck | undefined;
+  let framesBefore = -1;
+  let framesAfter = -1;
+  let spoolWhileTyping: string[] = [];
+  d = listDeck(t, [
+    'l',
+    'a',
+    () => {
+      const deck = d as TestDeck;
+      startRunning(deck, S2, 4343);
+      framesBefore = frames(deck).length;
+      deck.clock.advanceMs(PERIOD_MS);
+      framesAfter = frames(deck).length;
+      spoolWhileTyping = spooled(deck);
+      return 'b';
+    },
+    '\r',
+    () => {
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      return '';
+    },
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.equal(framesAfter, framesBefore, 'nothing painted while the input is open');
+  assert.equal(spoolWhileTyping.length, 1, 'nothing read in while the input is open');
+  assert.equal(d.deck.store.meta(S1)?.label, 'ab');
+  assert.ok(lineOf(frames(d).at(-1) ?? [], S2).includes('working'));
+});
+
+test('no background refresh while the editor runs; the list refreshes after it', async (t) => {
+  let d: TestDeck | undefined;
+  let spoolWhileEditing: string[] = [];
+  const runner = fakeRunner(undefined, (call) => {
+    const deck = d as TestDeck;
+    startRunning(deck, S2, 4343);
+    deck.clock.advanceMs(PERIOD_MS);
+    spoolWhileEditing = spooled(deck);
+    writeFileSync(call.args.at(-1) ?? '', 'x');
+    return 0;
+  });
+  d = listDeck(t, [
+    'n',
+    () => {
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      return '';
+    },
+    'q',
+  ]);
+
+  assert.equal(await main([], withRunner(d, runner)), 0);
+
+  const out = d.stdout();
+  const left = out.indexOf(LEAVE);
+  const back = out.indexOf(ENTER, left);
+  assert.equal(out.slice(left, back).includes(CLEAR), false, 'nothing painted over the editor');
+  assert.equal(spoolWhileEditing.length, 1, 'nothing read in while the editor runs');
+  assert.ok(lineOf(frames(d).at(-1) ?? [], S2).includes('working'));
+});
+
+test('no background refresh while a tab is being opened', async (t) => {
+  let d: TestDeck | undefined;
+  let framesBefore = -1;
+  let framesAfter = -1;
+  const runner = fakeRunner((call) => {
+    if (call.command === 'wezterm') {
+      const deck = d as TestDeck;
+      writeTranscript(deck, S3, [userRecord(S3, T0 - 5n * SEC)]);
+      framesBefore = frames(deck).length;
+      deck.clock.advanceMs(PERIOD_MS);
+      framesAfter = frames(deck).length;
+    }
+    return runResult({});
+  });
+  d = listDeck(t, ['R', 'q'], { config: { terminal: 'wezterm' } });
+  resumable(d);
+
+  assert.equal(await main([], withRunner(d, runner)), 0);
+
+  assert.ok(framesBefore > 0);
+  assert.equal(framesAfter, framesBefore, 'nothing painted while the tab opens');
+  assert.ok(!(frames(d).at(-1) ?? []).join('\n').includes(short(S3)), 'and nothing read in');
+});
+
+test('a background refresh fetches the pull requests that are due, and starts no fetch while one runs', async (t) => {
+  let answer: (result: RunResult) => void = () => {};
+  const runner = gh(
+    () =>
+      new Promise<RunResult>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  let d: TestDeck | undefined;
+  const calls: number[] = [];
+  const tick = (before?: () => void) => (): string => {
+    before?.();
+    (d as TestDeck).clock.advanceMs(PERIOD_MS);
+    calls.push(ghCalls(runner).length);
+    return '';
+  };
+  d = listDeck(t, [
+    '',
+    tick(), // read a minute ago: not due
+    tick(() => {
+      (d as TestDeck).clock.setNs(T0 + 5n * MINUTE); // its last attempt is more than 5 minutes old
+    }),
+    tick(), // the fetch still runs: no second one
+    () => {
+      answer(runResult({ stdout: OPEN_GREEN }));
+      return '';
+    },
+    'q',
+  ]);
+  attachManualPr(d.deck, S1, PR1);
+  d.deck.store.savePrResult(PR1, {
+    ok: true,
+    atNs: T0 - MINUTE,
+    title: 'Fix the retry',
+    state: 'draft',
+    review: null,
+    checks: 'passing',
+  });
+
+  assert.equal(await main([], patient(withRunner(d, runner))), 0);
+
+  assert.deepEqual(calls, [0, 1, 1]);
+  assert.equal(d.deck.store.prs().find((row) => row.url === PR1)?.state, 'open');
+  const chip = formatChip({ level: 'approved-green', count: 1 });
+  assert.ok((frames(d).at(-1) ?? []).join('\n').includes(chip));
+});
+
+test(
+  'a background refresh starts no fetch while the fetch of r runs',
+  { timeout: 5000 },
+  async (t) => {
+    const runner = hangingGh();
+    let d: TestDeck | undefined;
+    d = listDeck(t, [
+      'r',
+      () => {
+        const deck = d as TestDeck;
+        deck.clock.setNs(T0 + 10n * MINUTE); // due for an automatic refresh too
+        deck.clock.advanceMs(PERIOD_MS);
+        return '';
+      },
+      'q',
+    ]);
+    attachManualPr(d.deck, S1, PR1);
+    d.deck.store.savePrResult(PR1, {
+      ok: true,
+      atNs: T0 - MINUTE,
+      title: 'Fix the retry',
+      state: 'open',
+      review: null,
+      checks: 'passing',
+    });
+
+    assert.equal(await main([], patient(withRunner(d, runner))), 0);
+
+    assert.equal(ghCalls(runner).length, 1, 'only the fetch of r');
+  },
+);
+
+test(
+  'q while the fetch of a background refresh waits for gh returns at once, and nothing is saved',
+  { timeout: 5000 },
+  async (t) => {
+    const runner = hangingGh();
+    let d: TestDeck | undefined;
+    d = listDeck(t, [
+      '',
+      () => {
+        const deck = d as TestDeck;
+        deck.clock.setNs(T0 + 10n * MINUTE);
+        deck.clock.advanceMs(PERIOD_MS);
+        return '';
+      },
+      'q',
+    ]);
+    attachManualPr(d.deck, S1, PR1);
+    d.deck.store.savePrResult(PR1, {
+      ok: true,
+      atNs: T0 - MINUTE,
+      title: 'Fix the retry',
+      state: 'open',
+      review: null,
+      checks: 'passing',
+    });
+
+    assert.equal(await main([], patient(withRunner(d, runner))), 0);
+    const written = d.stdout();
+    await settle();
+    d.clock.advanceMs(10 * PERIOD_MS);
+
+    assert.equal(ghCalls(runner).length, 1);
+    assert.ok(ghCalls(runner)[0]?.options?.signal?.aborted);
+    assert.equal(d.deck.store.prs().find((row) => row.url === PR1)?.triedAtNs, T0 - MINUTE);
+    assert.equal(d.stdout(), written, 'nothing painted after the list ended');
+    assert.equal(d.clock.timers(), 0);
+  },
+);
+
+test('a background refresh that fails says so once, and the list goes on', async (t) => {
+  const BUSY = 'the list could not be refreshed: Error: database is locked';
+  let broken = false;
+  let d: TestDeck | undefined;
+  const tick = (before: () => void) => (): string => {
+    before();
+    (d as TestDeck).clock.advanceMs(PERIOD_MS);
+    return '';
+  };
+  d = listDeck(t, [
+    tick(() => {
+      broken = true; // fails: the message
+    }),
+    'j', // a key takes the message away
+    tick(() => {}), // the same failure: not said again
+    tick(() => {
+      broken = false; // works again, and shows what changed meanwhile
+      startRunning(d as TestDeck, S2, 4343);
+    }),
+    tick(() => {
+      broken = true; // a failure after one that worked is said again
+    }),
+    'q',
+  ]);
+  const bootId = d.proc.bootId;
+  d.proc.bootId = () => {
+    if (broken) {
+      throw new Error('database is locked');
+    }
+    return bootId();
+  };
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.equal(framesSaying(d, BUSY), 2, lastLines(d).join('\n'));
+  const shown = lastLines(d);
+  assert.equal(shown.indexOf(BUSY), 1, 'said by the first refresh');
+  assert.equal(shown.at(-1), BUSY, 'and by the last');
+  assert.ok(frames(d).some((frame) => lineOf(frame, S2).includes('working')));
+  assert.equal(d.stderr(), '');
+});
+
+test('an automatic fetch that fails again and again says so once', async (t) => {
+  const FAILED = 'the pull requests could not be refreshed: Error: clock broke';
+  // The clock fails right after every gh answer: saving it throws, and the pull request stays due.
+  let breakClock = false;
+  const runner = gh(() => {
+    breakClock = true;
+    return runResult({ stdout: OPEN_GREEN });
+  });
+  let d: TestDeck | undefined;
+  d = listDeck(t, [
+    '', // the fetch of the opening fails: the message
+    'j', // a key takes it away
+    () => {
+      (d as TestDeck).clock.advanceMs(PERIOD_MS); // the same failure: not said again
+      return '';
+    },
+    'q',
+  ]);
+  attachManualPr(d.deck, S1, PR1);
+  const ctx = withRunner(d, runner);
+  const clock = ctx.platform.clock;
+  ctx.platform = {
+    ...ctx.platform,
+    clock: {
+      ...clock,
+      nowNs: () => {
+        if (breakClock) {
+          breakClock = false;
+          throw new Error('clock broke');
+        }
+        return clock.nowNs();
+      },
+    },
+  };
+
+  assert.equal(await main([], patient(ctx)), 0);
+
+  assert.equal(ghCalls(runner).length, 2, 'asked when the list opened and again 5 s later');
+  assert.equal(framesSaying(d, FAILED), 1, lastLines(d).join('\n'));
 });

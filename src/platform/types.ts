@@ -5,6 +5,14 @@ export type Ns = bigint;
 export interface Clock {
   nowNs(): Ns;
   sleep(ms: number): Promise<void>;
+  /**
+   * Calls `callback` every `ms` milliseconds (a positive whole number; RangeError otherwise) until
+   * the returned function is called (calling it again does nothing). The real clock's timer does
+   * not keep the process alive by itself; the fake one calls `callback` from `advanceMs` (and so
+   * from `sleep`) once for every period that passed. `callback` must not throw: a timer has nobody
+   * to report to (the real one would end the process).
+   */
+  every(ms: number, callback: () => void): () => void;
 }
 
 export interface FileInfo {

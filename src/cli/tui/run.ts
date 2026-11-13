@@ -1,7 +1,7 @@
 // The interactive list on a terminal (design 7.4): the pure model and renderer (model.ts,
 // render.ts) fed with the keys the user types, and the effects `reduce` asks for carried out on the
-// deck. It paints from the cache, fetches the pull requests in the background and repaints (design
-// 7.3); leaving the list never waits for `gh`.
+// deck. It paints from the cache, refreshes itself and the pull requests in the background and
+// repaints (design 7.3, 7.4); leaving the list never waits for `gh`.
 import { fetchPrs, refreshPrs } from '../../github.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import type { Ns } from '../../platform/types.ts';
@@ -18,6 +18,7 @@ import {
   setLabel,
 } from '../../sessions/meta.ts';
 import { describeError } from '../../sessions/problems.ts';
+import { refresh } from '../../sessions/refresh.ts';
 import { prepareResumeById } from '../../sessions/resume-by-id.ts';
 import type { PreparedLaunch } from '../../sessions/resume.ts';
 import { terminalFor } from '../../terminals/index.ts';
@@ -43,9 +44,18 @@ const CLEAR = '\x1b[H\x1b[2J';
 const SAVED = 'saved';
 const REFRESHING = 'refreshing pull requests…';
 const OWN_PREFIX = 'skydeck: ';
+/** How often the list refreshes by itself while it is on screen (design 7.4). */
+const BACKGROUND_REFRESH_MS = 5000;
 
 type Size = { columns: number; rows: number };
 type Fetched = { fetched: number; failed: number };
+/**
+ * Why pull requests are fetched: `automatic` when the list opens and in the background (the due
+ * ones, design 7.3), `explicit` for `r`, `attached` for the one `p` attached.
+ */
+type FetchKind = 'automatic' | 'explicit' | 'attached';
+/** The work in the background whose failures are said once (see #failedInBackground). */
+type BackgroundWork = 'refresh' | 'automatic fetch';
 type Change = Extract<TuiEffect, { kind: 'label' | 'group' | 'done' | 'pr-add' | 'pr-rm' }>;
 
 /** Opens the deck (withDeck, refresh: true) and runs the list until quit or a --here resume; returns the exit code. */
@@ -84,7 +94,15 @@ class TerminalList {
   #model: TuiModel;
   #size: Size;
   #onScreen = false;
+  /** The frame last painted on the screen now; null when the screen holds none of ours. */
+  #painted: string | null = null;
+  /** A key's effect is being carried out: the background refresh waits for the next key. */
+  #busy = false;
   #keys: AsyncIterableIterator<string> | null = null;
+  /** Stops the timer of the background refresh. */
+  #stopRefreshing: () => void = () => {};
+  /** The failure of each kind of background work last said in the message line (said once). */
+  readonly #failures = new Map<BackgroundWork, string>();
   /** The pull-request fetches running in the background. */
   readonly #fetches = new Set<Promise<void>>();
   /** Whether the fetch of the refresh key is one of them: `r` starts no second one meanwhile. */
@@ -115,13 +133,10 @@ class TerminalList {
       this.#keys = this.#ctx.io.keys();
       this.#enterScreen();
       this.#paint();
-      this.#fetchInBackground((signal) =>
-        refreshPrs(this.#ghDeps(), {
-          force: false,
-          refreshMinutes: this.#deck.config.prRefreshMinutes,
-          signal,
-        }),
-      );
+      this.#fetchDue();
+      this.#stopRefreshing = this.#deck.platform.clock.every(BACKGROUND_REFRESH_MS, () => {
+        this.#refreshInBackground();
+      });
       for (;;) {
         const chunk: IteratorResult<string> = await (this.#keys?.next() ?? { done: true });
         if (chunk.done === true) {
@@ -147,13 +162,18 @@ class TerminalList {
 
   /** One key: the next model, its effect, a new frame. A number ends the list with that exit code. */
   async #press(key: string): Promise<number | null> {
-    const { model, effect } = reduce(this.#model, key);
-    this.#setModel(model);
-    const exit = await this.#perform(effect);
-    if (exit === null) {
-      this.#paint();
+    this.#busy = true;
+    try {
+      const { model, effect } = reduce(this.#model, key);
+      this.#setModel(model);
+      const exit = await this.#perform(effect);
+      if (exit === null) {
+        this.#paint();
+      }
+      return exit;
+    } finally {
+      this.#busy = false;
     }
-    return exit;
   }
 
   async #perform(effect: TuiEffect): Promise<number | null> {
@@ -207,7 +227,10 @@ class TerminalList {
       case 'pr-add': {
         // As `pr add` does: a fresh attachment shows its status, not "not fetched".
         const { url } = attachManualPr(deck, effect.id, effect.url);
-        this.#fetchInBackground((signal) => fetchPrs(this.#ghDeps(), [url], { signal }));
+        this.#fetchInBackground(
+          (signal) => fetchPrs(this.#ghDeps(), [url], { signal }),
+          'attached',
+        );
         return SAVED;
       }
       case 'pr-rm':
@@ -310,28 +333,89 @@ class TerminalList {
           sessionIds,
           signal,
         }),
-      true,
+      'explicit',
     );
   }
 
+  /**
+   * The background refresh (design 7.3, 7.4), every BACKGROUND_REFRESH_MS: what changed on disk is
+   * read in (the refresh every command starts with, design 5.3), the rows are loaded again in the
+   * order shown (the cursor stays on its session, a new one goes to the end of its group) and the
+   * frame is painted when it changed; then, unless a fetch runs, the pull requests that are due are
+   * fetched (automatic, design 7.3). That part is the one that takes time: a fetch still running at
+   * the next tick is not joined by another one, while reading the disk again (synchronous, so it
+   * can never overlap itself) goes on at every tick.
+   *
+   * It runs only between keys and while the list is on screen: not while a key's effect is carried
+   * out (a tab being opened), not while the editor has the terminal, never after the list has
+   * given it back, and not while an input is open (a reload could close it under the user's
+   * fingers; the next tick after it does the refresh). A failure is the message line, once.
+   */
+  #refreshInBackground(): void {
+    if (!this.#onScreen || this.#busy || this.#model.mode === 'input') {
+      return;
+    }
+    let failure: string | null = null;
+    try {
+      refresh(this.#deck); // not refreshWithProgress: nothing may be written under the list
+      this.#reload(false);
+    } catch (error) {
+      failure = `the list could not be refreshed: ${describeError(error)}`;
+    }
+    this.#failedInBackground('refresh', failure);
+    try {
+      this.#paint(true);
+    } catch {
+      // A timer has nobody to report to; the next key paints and meets the same failure.
+    }
+    if (failure === null && this.#fetches.size === 0) {
+      this.#fetchDue();
+    }
+  }
+
+  /** The automatic fetch (design 7.3): the pull requests never tried or last tried more than prRefreshMinutes ago. */
+  #fetchDue(): void {
+    this.#fetchInBackground(
+      (signal) =>
+        refreshPrs(this.#ghDeps(), {
+          force: false,
+          refreshMinutes: this.#deck.config.prRefreshMinutes,
+          signal,
+        }),
+      'automatic',
+    );
+  }
+
+  /**
+   * Says a failure of the work the list does by itself in the message line — once: the same
+   * failure of the same work again says nothing more (the user has seen it, and a key took it
+   * away), until that work has succeeded (`failure` null), after which a failure is new again.
+   */
+  #failedInBackground(work: BackgroundWork, failure: string | null): void {
+    if (failure === null) {
+      this.#failures.delete(work);
+    } else if (this.#failures.get(work) !== failure) {
+      this.#failures.set(work, failure);
+      this.#setModel(withMessage(this.#model, failure));
+    }
+  }
+
   /** Starts a fetch of pull requests that runs while the list goes on; the list stops it when it ends. */
-  #fetchInBackground(work: (signal: AbortSignal) => Promise<Fetched>, explicit = false): void {
-    const fetch = this.#fetchPrs(work, explicit);
+  #fetchInBackground(work: (signal: AbortSignal) => Promise<Fetched>, kind: FetchKind): void {
+    const fetch = this.#fetchPrs(work, kind);
     this.#fetches.add(fetch);
     void fetch.then(() => this.#fetches.delete(fetch));
   }
 
   /**
-   * One fetch (design 7.3): automatic when the list opens (the pull requests that are due), the
-   * one pull request `p` attached, or explicit for `r`. When it saved something, the rows are
-   * loaded again, in the order shown, and painted; an explicit one also takes its "refreshing"
-   * message away. It never rejects: a failure is the message. Once the list has ended or handed
-   * the terminal over (the signal fired), nothing is done with its result.
+   * One fetch (design 7.3): automatic (the pull requests that are due: when the list opens and in
+   * the background), the one pull request `p` attached, or explicit for `r`. When it saved
+   * something, the rows are loaded again, in the order shown, and painted if that changed the
+   * frame; an explicit one also takes its "refreshing" message away. It never rejects: a failure
+   * is the message (an automatic one's once, as for the background refresh). Once the list has
+   * ended or handed the terminal over (the signal fired), nothing is done with its result.
    */
-  async #fetchPrs(
-    work: (signal: AbortSignal) => Promise<Fetched>,
-    explicit: boolean,
-  ): Promise<void> {
+  async #fetchPrs(work: (signal: AbortSignal) => Promise<Fetched>, kind: FetchKind): Promise<void> {
     let saved = 0;
     let failure: string | null = null;
     try {
@@ -340,7 +424,7 @@ class TerminalList {
     } catch (error) {
       failure = `the pull requests could not be refreshed: ${describeError(error)}`;
     } finally {
-      if (explicit) {
+      if (kind === 'explicit') {
         this.#explicitFetchRunning = false;
       }
     }
@@ -348,20 +432,17 @@ class TerminalList {
       return; // the list has ended, or handed the terminal over
     }
     try {
-      let repaint = false;
       if (saved > 0 || failure !== null) {
         this.#reload(false);
-        repaint = true;
       }
-      if (failure !== null) {
+      if (kind === 'automatic') {
+        this.#failedInBackground('automatic fetch', failure);
+      } else if (failure !== null) {
         this.#setModel(withMessage(this.#model, failure));
-      } else if (explicit && this.#model.message === REFRESHING) {
+      } else if (kind === 'explicit' && this.#model.message === REFRESHING) {
         this.#setModel(withMessage(this.#model, null));
-        repaint = true;
       }
-      if (repaint) {
-        this.#paint();
-      }
+      this.#paint(true);
     } catch {
       // The next key loads and paints again, and meets the same failure where it can end the list.
     }
@@ -411,21 +492,29 @@ class TerminalList {
     }
   }
 
-  #paint(): void {
+  /** A frame, unless the list is off screen; with `onlyIfChanged`, only when it differs from the one shown. */
+  #paint(onlyIfChanged = false): void {
     if (!this.#onScreen) {
       return;
     }
     this.#takeSize();
-    this.#ctx.io.stdout(CLEAR + render(this.#model, this.#size).join('\r\n'));
+    const frame = render(this.#model, this.#size).join('\r\n');
+    if (onlyIfChanged && frame === this.#painted) {
+      return;
+    }
+    this.#painted = frame;
+    this.#ctx.io.stdout(CLEAR + frame);
   }
 
   /**
-   * Gives the terminal back for good: the fetches stop, the normal screen, cursor and autowrap come
-   * back, the keys are no longer read, and what was kept for the end is printed. Everything that
+   * Gives the terminal back for good: the background refresh and the fetches stop, the normal
+   * screen, cursor and autowrap come back, the keys are no longer read, and what was kept for the
+   * end is printed. Everything that
    * matters happens before the first await (the keys' return() turns raw mode off at once), so
    * that it also works on a signal, after which the process ends.
    */
   #giveBack(): Promise<void> {
+    this.#stopRefreshing();
     this.#stop.abort();
     this.#leaveScreen();
     const released = this.#releaseKeys();
@@ -439,11 +528,13 @@ class TerminalList {
   #enterScreen(): void {
     this.#ctx.io.stdout(ENTER_SCREEN);
     this.#onScreen = true;
+    this.#painted = null; // a fresh alternate screen is blank
   }
 
   #leaveScreen(): void {
     if (this.#onScreen) {
       this.#onScreen = false;
+      this.#painted = null;
       this.#ctx.io.stdout(LEAVE_SCREEN);
     }
   }
