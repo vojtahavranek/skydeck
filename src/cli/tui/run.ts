@@ -28,7 +28,7 @@ import { terminalFor } from '../../terminals/index.ts';
 import type { Context } from '../context.ts';
 import { refreshWithProgress, withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
-import { launchPrepared } from '../launching.ts';
+import { launchWhere } from '../launching.ts';
 import { editNote } from '../notes.ts';
 import { decodeKeys } from './keys.ts';
 import { initModel, reduce, visibleRows, withMessage, withRows } from './model.ts';
@@ -336,7 +336,7 @@ class TerminalList {
     }
     if (this.#opensTabs()) {
       const short = id.slice(0, SHORT_ID_LENGTH);
-      const { code, lines } = await launchPrepared(this.#deck, prepared, 'tab');
+      const { code, lines } = await launchWhere(this.#deck, prepared, 'tab');
       let outcome = `opened ${short} in a new tab`;
       if (code !== EXIT.ok) {
         // What to do instead (the command to run) does not fit one line: it goes to the scrollback.
@@ -348,7 +348,7 @@ class TerminalList {
       return null;
     }
     await this.#giveBack(); // the terminal goes to `claude`: nothing may hold the launcher's exec back
-    const { code, lines } = await launchPrepared(this.#deck, prepared, 'here');
+    const { code, lines } = await launchWhere(this.#deck, prepared, 'here');
     for (const line of lines) {
       this.#ctx.io.stderr(`${line}\n`);
     }

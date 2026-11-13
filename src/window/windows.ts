@@ -1,0 +1,131 @@
+/**
+ * The Windows side of the window, as pure rules: Windows paths, the Edge profile folder (S2 5.4),
+ * Edge's arguments (S2 5.3) and the links it may open (S2 9.6). Nothing here starts a program;
+ * task 19 does, with what these return.
+ */
+
+import { join } from 'node:path';
+
+import type { Files } from '../platform/types.ts';
+
+/** `/mnt/<letter>` and what follows it; WSL mounts drives under lowercase letters. */
+const DRIVE_PATH = /^\/mnt\/([a-z])(?:\/(.*))?$/;
+/** Characters no Windows file name holds: the control characters and " * : < > ? | \\. */
+const NOT_IN_A_WINDOWS_NAME = /[\x00-\x1f"*:<>?|\\]/;
+
+/**
+ * A name Windows cannot have, or one that names something else there: '.' and '..' (they would
+ * leave the drive), a forbidden character (a backslash would split the name, ':' names a stream,
+ * '"' would end a quoted argument), a trailing space or dot (Windows drops it).
+ */
+function notAWindowsName(name: string): boolean {
+  return NOT_IN_A_WINDOWS_NAME.test(name) || name.endsWith(' ') || name.endsWith('.');
+}
+
+/**
+ * '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/, and for one
+ * with a segment Windows cannot have (see notAWindowsName).
+ */
+export function windowsPath(linuxPath: string): string | null {
+  const match = DRIVE_PATH.exec(linuxPath);
+  if (match === null) return null;
+  const [, letter = '', rest = ''] = match;
+  const parts = rest.split('/').filter((part) => part !== '');
+  if (parts.some(notAWindowsName)) return null;
+  return `${letter.toUpperCase()}:\\${parts.join('\\')}`;
+}
+
+/** Where Windows keeps its users' folders, as WSL sees it. */
+const USERS = '/mnt/c/Users';
+/** A user's Edge folder, below their user folder. */
+const EDGE_FOLDER = ['AppData', 'Local', 'Microsoft', 'Edge'];
+/** The window's profile folder, below the user folder (S2 5.4). */
+const PROFILE_FOLDER = 'AppData/Local/skydeck/edge-profile';
+const SET_PROFILE_DIR =
+  "set window.profileDir to the folder for the window's Edge profile (an absolute Windows path)";
+
+/** A folder that exists (links followed) and whose entries can be listed. */
+function isReadableFolder(files: Files, path: string): boolean {
+  try {
+    if (files.stat(path)?.kind !== 'dir') return false;
+    files.list(path);
+    return true;
+  } catch {
+    return false; // permission denied on it or on a folder above it, a loop, …
+  }
+}
+
+/** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
+export function deriveProfileDir(
+  files: Files,
+): { ok: true; dir: string } | { ok: false; error: string } {
+  return deriveProfileDirUnder(files, USERS);
+}
+
+/**
+ * deriveProfileDir with `usersRoot` standing for /mnt/c/Users, so that tests can point it into a
+ * sandbox. The profile folder it gives is always under `C:\Users\<name>`.
+ */
+export function deriveProfileDirUnder(
+  files: Files,
+  usersRoot: string,
+): { ok: true; dir: string } | { ok: false; error: string } {
+  const where = `${usersRoot}/<user>/${EDGE_FOLDER.join('/')}`;
+  let names: string[];
+  try {
+    names = files.list(usersRoot);
+  } catch {
+    return { ok: false, error: `cannot read ${usersRoot} to find ${where}; ${SET_PROFILE_DIR}` };
+  }
+  const found: { name: string; dir: string }[] = [];
+  for (const name of names) {
+    const dir = windowsPath(`${USERS}/${name}/${PROFILE_FOLDER}`);
+    if (dir !== null && isReadableFolder(files, join(usersRoot, name, ...EDGE_FOLDER))) {
+      found.push({ name, dir });
+    }
+  }
+  const [only] = found;
+  if (only !== undefined && found.length === 1) {
+    return { ok: true, dir: only.dir };
+  }
+  if (found.length === 0) {
+    return { ok: false, error: `no readable Edge folder found at ${where}; ${SET_PROFILE_DIR}` };
+  }
+  const users = found.map((f) => f.name).join(', ');
+  return {
+    ok: false,
+    error: `Edge folders of several Windows users found at ${where} (${users}); ${SET_PROFILE_DIR}`,
+  };
+}
+
+/** S2 5.3: the arguments for msedge.exe. */
+export function edgeArgs(port: number, token: string, profileDir: string): string[] {
+  return [
+    `--app=http://127.0.0.1:${port}/#t=${token}`,
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+  ];
+}
+
+/** S2 9.6: the longest URL the server opens. */
+const MAX_LINK_LENGTH = 2048;
+
+/**
+ * S2 9.6: the URL to open (re-serialised), or null when it must not be opened: longer than 2,048
+ * characters, not a URL, or not http/https. The re-serialised URL — the one passed to Edge — must
+ * fit the same limit (percent-encoding can make it longer than what the page sent), and must hold
+ * no '"' and no backslash: it becomes one argument of a Windows program, and either can change how
+ * that program splits its command line. (The parser encodes a '"' everywhere but in the host, and
+ * a backslash keeps only in the query and the fragment.)
+ */
+export function linkToOpen(url: string): string | null {
+  if (url.length > MAX_LINK_LENGTH) return null;
+  const parsed = URL.parse(url);
+  if (parsed === null || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+    return null;
+  }
+  const href = parsed.href;
+  if (href.length > MAX_LINK_LENGTH || href.includes('"') || href.includes('\\')) return null;
+  return href;
+}

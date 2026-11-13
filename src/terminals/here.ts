@@ -7,9 +7,10 @@ export const HANDOFF_ENV = 'SKYDECK_HANDOFF';
 
 /**
  * The handoff file content (plan 2.10.3): "cd -- <q cwd> || exit 1\nexec <q argv…>\n". It is the one
- * place where skydeck gives a shell a string to run, so every word goes through `shellQuote`.
+ * place where skydeck gives a shell a string to run, so every word goes through `shellQuote`. The
+ * other fields of a LaunchSpec do not concern a terminal that replaces skydeck.
  */
-export function handoffScript(spec: LaunchSpec): string {
+export function handoffScript(spec: Pick<LaunchSpec, 'cwd' | 'argv'>): string {
   return `cd -- ${shellQuote(spec.cwd)} || exit 1\nexec ${shellJoin(spec.argv)}\n`;
 }
 
