@@ -1,0 +1,119 @@
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+
+import { main } from '../../../src/cli/main.ts';
+import { shellQuote } from '../../../src/text/shell.ts';
+import { testDeck } from '../../helpers/deck.ts';
+import type { TestDeck } from '../../helpers/deck.ts';
+
+const USAGE_FIRST_LINE =
+  'skydeck new [--label <text>] [--group <text>] [--here | --tab] [-- <claude flags>]\n';
+const UUID1 = '00000000-0000-4000-8000-000000000001';
+
+type Options = Parameters<typeof testDeck>[1];
+
+function deck(t: Parameters<typeof testDeck>[0], options: Options = {}): TestDeck {
+  return testDeck(t, {
+    env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'handoff') }),
+    ...options,
+  });
+}
+
+const handoffPath = (d: TestDeck): string => join(d.sandbox.root, 'handoff');
+const handoff = (d: TestDeck): string => readFileSync(handoffPath(d), 'utf8');
+
+test('new --help prints the usage and exits 0', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--help'], d.ctx), 0);
+  assert.ok(d.stdout().startsWith(USAGE_FIRST_LINE), d.stdout());
+});
+
+test('new with a label, a group and claude flags hands the command to the launcher', async (t) => {
+  const d = deck(t);
+  assert.equal(
+    await main(['new', '--label', 'fix it', '--group', 'ABC-1', '--', '--model', 'opus'], d.ctx),
+    0,
+  );
+  assert.equal(
+    handoff(d),
+    `cd -- ${shellQuote(d.platform.cwd)} || exit 1\nexec claude --session-id ${UUID1} -n 'fix it' --model opus\n`,
+  );
+  const stored = d.deck.store.meta(UUID1);
+  assert.equal(stored?.label, 'fix it');
+  assert.equal(stored?.group, 'ABC-1');
+  assert.equal(d.stderr(), '');
+});
+
+test('new without options starts claude with only the new session id', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new'], d.ctx), 0);
+  assert.equal(
+    handoff(d),
+    `cd -- ${shellQuote(d.platform.cwd)} || exit 1\nexec claude --session-id ${UUID1}\n`,
+  );
+  assert.deepEqual(d.deck.store.allMeta(), []);
+});
+
+test('new --label -x is a usage error', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--label', '-x'], d.ctx), 2);
+  assert.ok(d.stderr().includes(USAGE_FIRST_LINE), d.stderr());
+  assert.equal(existsSync(handoffPath(d)), false);
+});
+
+test('new --label=-x is refused and stores nothing', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--label=-x'], d.ctx), 2);
+  assert.deepEqual(d.deck.store.allMeta(), []);
+  assert.equal(existsSync(handoffPath(d)), false);
+});
+
+test('new --here --tab is a usage error', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--here', '--tab'], d.ctx), 2);
+});
+
+test('new with a positional argument is a usage error', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', 'prompt'], d.ctx), 2);
+});
+
+test('new --tab opens a WezTerm tab in the current directory', async (t) => {
+  const d = deck(t, { config: { terminal: 'wezterm' } });
+  assert.equal(await main(['new', '--tab', '--', '--model', 'opus'], d.ctx), 0);
+  assert.deepEqual(
+    d.runner.calls.map((call) => [call.command, ...call.args]),
+    [
+      [
+        'wezterm',
+        'cli',
+        '--no-auto-start',
+        'spawn',
+        '--cwd',
+        d.platform.cwd,
+        '--',
+        'claude',
+        '--session-id',
+        UUID1,
+        '--model',
+        'opus',
+      ],
+    ],
+  );
+});
+
+test('new --tab without a tab adapter prints the command and exits 1', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--tab', '--label', 'fix it'], d.ctx), 1);
+  assert.ok(d.stderr().includes('no terminal adapter that opens tabs'), d.stderr());
+  assert.ok(
+    d
+      .stderr()
+      .includes(
+        `cd -- ${shellQuote(d.platform.cwd)} && claude --session-id ${UUID1} -n 'fix it'\n`,
+      ),
+    d.stderr(),
+  );
+});

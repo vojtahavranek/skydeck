@@ -472,7 +472,12 @@ A session without a transcript cannot be resumed.
 **The guard (principle 7).** Resume runs ingest and reconcile and refuses (exit 4) when the
 session is running, naming the holder. It then creates a lock file for the session exclusively;
 if the lock exists and is younger than 60 seconds, resume is refused and says how long to wait.
-The lock is removed when a `start` event for the session appears or after 60 seconds.
+The lock is removed when a `start` event for the session appears or after 60 seconds. The lock
+file, `<stateDir>/locks/<session id>.lock`, holds the time it was created in nanoseconds; its
+age is computed from that, not from the file's modification time. Locks that are stale by these
+two rules are swept at the end of every refresh. A stale lock is replaced (or swept) by moving
+it aside and checking that it is still the one that was found, so that a fresh lock another
+resume put there in the meantime is never removed.
 
 **Where.** `--here` replaces skydeck with `claude` in the current terminal: the command line tool
 hands the directory and the argument list back to the `bin/skydeck` launcher through a handoff
@@ -481,10 +486,15 @@ through the terminal adapter named in the configuration (first adapter: WezTerm,
 `wezterm cli --no-auto-start spawn`: with no WezTerm window open it fails instead of starting a
 hidden server that would hold the session where nobody can see it; when `wezterm` is not found
 and `$WSL_DISTRO_NAME` is set it retries with `wezterm.exe`, so tabs can be opened from WSL). The
-default is the configured `terminal`. If opening a tab fails, skydeck prints the command instead,
-quoted for a POSIX shell. Commands are run as argument lists; the one exception is the `--here`
-handoff, a generated `sh` fragment in which every word is quoted by the same function as the
-printed fallback.
+default is the configured `terminal`. `--tab` when the configured `terminal` opens no tabs
+(`here`) prints the command and exits 1. If opening a tab fails, skydeck prints the command
+instead, quoted for a POSIX shell, and exits 1 — with two exceptions, in which it prints no
+command: when the WezTerm call timed out (the tab may have opened, and pasting the command could
+resume the session a second time; skydeck says so and that running `skydeck` again shows whether
+the session is running), and when the directory or a word of the command holds a control
+character (the printed line could act on the terminal or break when pasted). Commands are run as
+argument lists; the one exception is the `--here` handoff, a generated `sh` fragment in which
+every word is quoted by the same function as the printed fallback.
 
 ### 7.7 New
 
