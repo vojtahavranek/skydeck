@@ -1243,7 +1243,9 @@ export interface ManifestEntry { path: string; package: string; version: string;
 /** null when the manifest is missing, unreadable or not a manifest — also when any entry's path
  *  lies outside `vendor/xterm/`, has a segment that is empty, `.` or `..` or holds anything but
  *  ASCII letters, digits, `.`, `_` and `-` (no backslash, space or control character), or is
- *  listed twice (task 14 serves the listed paths). Never throws. */
+ *  listed twice (task 14 serves the listed paths), or when an entry has `upstreamSha256` without
+ *  `patch` or `patch` without `upstreamSha256`, an `upstreamSha256` that is not 64 lowercase hex,
+ *  or a `patch` that is not a string. Never throws. */
 export function readManifest(files: Files, appRoot: string): ManifestEntry[] | null;
 /** One line per problem: a listed file missing, or its sha256 different; [] when all match.
  *  Also one line for a listed path that is not a file or cannot be read, and one line for a
@@ -3425,7 +3427,8 @@ Rulings on task 12's findings (2026-11-13):
    sequence and appends it to every snapshot; task 12 leaves the seam.
 10. **What the serialise addon does not restore beyond S2 7.2's first list.** Ruled: task 12 also
     restores mode 1016 beside 1006 and mode 12, re-prints the last cell when the cursor stands
-    past the last column (the pen can then differ in one case, named in S2 7.2), and answers OSC
+    past the last column (the pen can then differ in one case, named in S2 7.2 — superseded by
+    item 11: the pen is restored), and answers OSC
     10 and 11 with xterm.js's default colours until a page has sent its theme. The scroll region,
     the saved cursor and the character sets stay known limits (S2 7.2, check W26).
 11. **From task 12's review 2.** Ruled: `@xterm/addon-serialize` 0.14.0 loses bold or dim when
