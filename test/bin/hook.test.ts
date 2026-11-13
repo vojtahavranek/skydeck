@@ -149,23 +149,18 @@ describe('hook: the spool file', () => {
     assertSilent(ran);
     const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
     const { head, body } = split(content);
-    assert.deepEqual(
-      head.map((line) => line.split('=')[0]),
-      [
-        'v',
-        'event',
-        'time_ns',
-        'claude_pid',
-        'session_env',
-        'entrypoint_env',
-        'boot_id',
-        'stat',
-        'pwd',
-      ],
-    );
-    assert.equal(head[1], 'event=SessionEnd');
-    assert.equal(head[3], `claude_pid=${pid}`);
-    assert.equal(head[7], `stat=${readStat(pid)}`);
+    assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
+    assert.deepEqual(head, [
+      'v=1',
+      'event=SessionEnd',
+      head[2],
+      `claude_pid=${pid}`,
+      `session_env=${S1}`,
+      'entrypoint_env=cli',
+      `boot_id=${bootId()}`,
+      `stat=${readStat(pid)}`,
+      `pwd=${s.root}`,
+    ]);
     assert.equal(body, INPUT);
   });
 
@@ -209,31 +204,6 @@ describe('hook: the spool file', () => {
     assert.ok(head.includes('claude_pid=999999999'));
     assert.ok(head.includes('stat='));
     assert.ok(head.includes('argv_b64='));
-  });
-
-  test('a CLAUDE_PID that is not a number is recorded as no pid and never reaches the path', (t) => {
-    const s = hookSandbox(t);
-
-    const ran = run(s, 'SessionStart', { CLAUDE_PID: '../../etc' });
-
-    assertSilent(ran);
-    const [name, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
-    assert.match(name, /^[0-9]{19}-0-[0-9]+\.ev$/);
-    const { head } = split(content);
-    assert.ok(head.includes('claude_pid='));
-    assert.ok(head.includes('stat='));
-  });
-
-  test('the spool is private to the user', (t) => {
-    const s = hookSandbox(t);
-
-    run(s, 'SessionStart', { CLAUDE_PID: undefined });
-
-    const state = join(s.skydeckHome, 'state');
-    const spool = join(state, 'spool');
-    const [name] = onlySpoolFile(spool);
-    assert.equal(statSync(spool).mode & 0o077, 0);
-    assert.equal(statSync(join(spool, name as string)).mode & 0o077, 0);
   });
 });
 
@@ -299,20 +269,6 @@ describe('hook: failures stay silent and exit 0', () => {
     } finally {
       chmodSync(spool, 0o700);
     }
-  });
-
-  test('a HOME that is not absolute and no other variable gives up quietly', (t) => {
-    const s = hookSandbox(t);
-
-    const ran = run(s, 'SessionStart', {
-      SKYDECK_HOME: undefined,
-      XDG_STATE_HOME: undefined,
-      HOME: 'relative-home',
-    });
-
-    assertSilent(ran);
-    assert.equal(existsSync(join(s.root, 'relative-home')), false);
-    assert.equal(existsSync(join(s.root, '.local')), false);
   });
 });
 

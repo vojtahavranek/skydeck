@@ -102,11 +102,8 @@ same directory and then renamed. Content: `key=value` lines, a line containing o
 the hook input from stdin unchanged.
 
 `<random>` is the hook shell's own process id (`$$`): the programs 5.1 allows include no source of
-randomness, and two hooks alive at the same time never share a process id. The temporary name is
-`.<final name>.tmp`, and ingest reads only names ending in `.ev`, so a half-written file is never
-read. A missing `CLAUDE_PID` gives an empty `claude_pid` value and `0` in the name; so does one
-that is not a number (it is never put into a path). The files are created readable by the user only,
-because `pwd` and the launch command are private.
+randomness. The temporary name is `.<final name>.tmp`, and ingest reads only names ending in `.ev`.
+A missing `CLAUDE_PID` gives an empty `claude_pid` value and `0` in the name.
 
 | Key | Value |
 |---|---|

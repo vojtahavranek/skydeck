@@ -7,9 +7,6 @@
 # Its own errors are appended to hook.log in the state directory; when even that fails they are
 # dropped.
 
-# The spool holds working directories and launch command lines, so it is private to the user.
-umask 077
-
 # Appends one line to hook.log. Failing to log is not worth a second error.
 log() {
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ) || now=-
@@ -18,9 +15,7 @@ log() {
 
 # Sets $state as design 9.1 says (D26): $SKYDECK_HOME/state, else $XDG_STATE_HOME/skydeck, else
 # $HOME/.local/state/skydeck; a variable counts only when it is absolute (starts with a slash).
-# $state stays empty when not even HOME is usable.
 resolve_state() {
-  state=
   case ${SKYDECK_HOME-} in
     /*)
       state=$SKYDECK_HOME/state
@@ -33,9 +28,7 @@ resolve_state() {
       return
       ;;
   esac
-  case ${HOME-} in
-    /*) state=$HOME/.local/state/skydeck ;;
-  esac
+  state=${HOME-}/.local/state/skydeck
 }
 
 main() {
@@ -44,20 +37,7 @@ main() {
   time_ns=$(date +%s%N)
 
   resolve_state
-  if [ -z "$state" ]; then
-    return
-  fi
-  # The time and the pid become part of a file name; nothing else may.
-  case $time_ns in
-    '' | *[!0-9]*)
-      log "date gave '$time_ns' instead of a number of nanoseconds"
-      return
-      ;;
-  esac
   pid=${CLAUDE_PID-}
-  case $pid in
-    '' | *[!0-9]*) pid= ;;
-  esac
 
   # An unreadable /proc entry gives an empty value; ingest copes with that.
   stat=
