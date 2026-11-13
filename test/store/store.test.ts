@@ -148,6 +148,21 @@ describe('openStore', () => {
     ]);
   });
 
+  test('dataVersion changes when another connection committed, not when this one did', (t) => {
+    const { store, reopen } = fresh(t);
+    const other = reopen();
+
+    const first = store.dataVersion();
+    store.setKv('first_scan_done', '1');
+    const afterOwn = store.dataVersion();
+    other.setKv('first_scan_done', '0');
+    const afterOther = store.dataVersion();
+
+    assert.equal(afterOwn, first, 'its own commit');
+    assert.notEqual(afterOther, afterOwn, "another connection's commit");
+    assert.equal(store.dataVersion(), afterOther, 'nothing since');
+  });
+
   test('the write-ahead log files are as private as the database', (t) => {
     // SQLite gives -wal and -shm the mode the database file has when it creates them. Starting
     // from a file of mode 644 makes the test independent of the umask: were the file made 600

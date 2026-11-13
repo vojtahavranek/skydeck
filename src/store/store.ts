@@ -28,6 +28,13 @@ export interface Store {
   readonly path: string;
   /** Closes the connection; a second call does nothing. */
   close(): void;
+  /**
+   * PRAGMA data_version (added by fix 4): a number that differs from the one the previous call
+   * returned when another connection — another skydeck — committed to the database in between;
+   * this connection's own commits do not change it. The interactive list reads it to tell whether
+   * the rows can have changed.
+   */
+  dataVersion(): number;
   /** The connection's PRAGMA values (they are per connection, so tests read them here). */
   connectionSettings(): {
     journalMode: string;
@@ -445,6 +452,10 @@ class SqliteStore implements Store {
     if (this.#db.isOpen) {
       this.#db.close();
     }
+  }
+
+  dataVersion(): number {
+    return Number(pragma(this.#db, 'data_version'));
   }
 
   connectionSettings(): {
