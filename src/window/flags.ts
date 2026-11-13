@@ -8,7 +8,7 @@ const SEPARATORS = new Set([' ', '\t', '\n', '\r']);
 
 /**
  * S2 12.6: words separated by whitespace, '…' and "…" group words, no escapes; an unclosed quote is
- * an error. Quoted and unquoted parts next to each other form one word, and a quoted empty text is an
+ * an error, and so is a NUL anywhere (no program can be given it). Quoted and unquoted parts next to each other form one word, and a quoted empty text is an
  * empty word, as in a shell.
  */
 export function splitFlags(
@@ -41,6 +41,10 @@ export function splitFlags(
   }
   if (quote !== null) {
     return { ok: false, error: `the flags have an unclosed ${quote}` };
+  }
+  if (text.includes('\0')) {
+    // No program can be given an argument holding a NUL: exec refuses it.
+    return { ok: false, error: 'the flags contain a NUL character' };
   }
   if (inWord) flags.push(word);
   return { ok: true, flags };

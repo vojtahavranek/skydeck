@@ -76,3 +76,9 @@ test('splitFlags: no escapes — a backslash is an ordinary character', () => {
 test('splitFlags: no variables — a dollar sign is an ordinary character', () => {
   assert.deepEqual(words('--x $HOME "$PATH"'), ['--x', '$HOME', '$PATH']);
 });
+
+test('splitFlags: a NUL is refused, quoted or not (no program can be given it)', () => {
+  assert.match(error('a\u0000b'), /NUL/);
+  assert.match(error("--append-system-prompt 'a\u0000b'"), /NUL/);
+  assert.match(error('"\u0000"'), /NUL/);
+});
