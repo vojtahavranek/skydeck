@@ -544,7 +544,10 @@ and the rows carry it, so a failed read and a later successful one are never mix
 nothing and does not need it. It refuses when the session is running, naming the holder. It then takes a lock for the session; if the lock exists and is younger than 60 seconds,
 resume is refused and says how long to wait.
 The lock is removed when a `start` event of a real process for the session appears that was
-recorded after the lock was taken and is dated at or after it (a start without a pid or a process
+recorded after the lock was taken and is dated at or after it — or up to 5 seconds before it when
+the lock holds an event id, because the wall clock can step back between the lock and the start
+(under WSL it does, by about 1.7 seconds every half minute) and the later id already shows that
+the start came after the lock; a lock without an id keeps the exact time (a start without a pid or a process
 start time names no `claude` and releases nobody; nor does a `scripted` or `scripted-end` event
 (5.3), which is no `start` but counts as the session's latest event for the lock's own check; a
 start recorded before the lock but dated after
@@ -639,7 +642,8 @@ nothing, so it needs neither `--yes` nor a terminal.
 through the guard of 7.6 and takes its lock, on state refreshed just before it: opening a tab
 takes time, and another skydeck may have resumed the session meanwhile. After starting a batch,
 restore waits until each of its sessions has a `start` event of a real process that counts by the
-lock's rule (7.6: recorded after restore took the lock, and dated at or after the batch started),
+lock's rule (7.6: recorded after restore took the lock, and dated at or after the batch started,
+or up to 5 seconds before it),
 checking once a second, for at most
 `restoreStartTimeoutSeconds` (default 120) counted from the start of the batch. Before each batch
 it reads `MemAvailable` from `/proc/meminfo` and stops (exit 5) when it is below
