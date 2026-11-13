@@ -4378,20 +4378,26 @@ export const command: Command;   // in each of the three files
   `~/.local/bin`), `nodeLink` → `platform.nodePath`. (3) `addHookEntries(<settings text or null>, hookPath)`;
   when `changed`: print to stderr `skydeck will add these hook entries to <settingsPath>:` and the
   added groups as JSON, ask `readLine('Add them? [y/N] ')`; anything but `y`/`yes` (or null) →
-  print `settings not changed` and return 1. On yes: write the backup
-  `<settingsPath>.skydeck-backup` with the old content (kv `settings_backup` = its path, or `none`
-  when there was no file; an existing backup is never overwritten), write the new text, set kv
+  print `settings not changed` and return 1. On yes (ruled by the plan owner in pull request #20):
+  write a NEW backup of the old content, `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC,
+  from `platform.clock`; when that exact name exists, `-2`, `-3`, …), mode 600, created with
+  `files.createExclusive` so that an older backup is never touched or reused (kv `settings_backup`
+  = its path, or `none` when there was no file and so no backup), write the new text, set kv
   `settings_hash` = sha256 hex of the written text. When not changed: print
-  `hook entries already present`. (4) `refreshWithProgress(ctx, deck)`. (5) Unless kv `first_run_offered`:
+  `hook entries already present`; no backup is written and kv is left as it is. (4) `refreshWithProgress(ctx, deck)`. (5) Unless kv `first_run_offered`:
   count rows that are listed, not done, not running, with `lastActivityNs` older than
   `firstRunDoneAfterDays`; when > 0 ask `Mark <n> sessions older than <d> days as done? [y/N] `
   and on yes set their `doneAtNs` with `store.updateMeta(id, { doneAtNs: now }, now)`; set `first_run_offered`. Return `EXIT.ok`.
 - **uninstall** never creates anything: `resolveDeckPlaces`; when `dbPath` exists, it reads and
   deletes the kv keys through `withDeck(ctx, { refresh: false }, …)`, otherwise kv counts as empty.
   When kv `settings_hash` equals the sha256 of the current settings text → restore:
-  backup path → copy it over `settings.json` and remove the backup; `none` → remove `settings.json`.
-  Otherwise, when the file exists → `removeHookEntries` and write if changed. Remove the three
-  links, each only when it is a symlink pointing where install pointed it. Delete kv
+  backup path, when that file still exists → copy it over `settings.json` (the backup stays);
+  `none` → remove `settings.json`.
+  Otherwise (hash mismatch, or the recorded backup is gone), when the file exists →
+  `removeHookEntries` and write if changed. Remove the three
+  links, each only when it is a symlink pointing where install pointed it. Never remove a backup
+  file, with or without `--purge`; print one line per `<settingsPath>.skydeck-backup-*` file
+  (ruled by the plan owner in pull request #20). Delete kv
   `settings_hash`, `settings_backup`. `--purge` → after `withDeck` has returned (the store is
   closed), `removeTree` dataDir, stateDir, configDir. Return `EXIT.ok`.
 - **doctor** uses `withDeck(ctx, { refresh: false }, …)` and counts the spool as it is (nothing is
@@ -4412,20 +4418,22 @@ export const command: Command;   // in each of the three files
 1. No settings file, answer `y` → 0; `readlink(H)` = `<appRoot>/bin/skydeck-hook`; `readlink(binLink)` = `<appRoot>/bin/skydeck`;
    `readlink(nodeLink)` = `process.execPath`; `SP` parses to the two entries; kv `settings_backup 'none'`;
    kv `settings_hash` = sha256 of `SP`'s content; stderr shows the entries before the prompt; `prompts` contains `'Add them? [y/N] '`.
-2. Existing `SP` `{"model":"opus"}`, answer `y` → backup file content `{"model":"opus"}`, `SP` has `model` and both entries.
+2. Existing `SP` `{"model":"opus"}`, answer `y` → backup file `<SP>.skydeck-backup-20261112T090000Z` (T0) with content `{"model":"opus"}`, `SP` has `model` and both entries.
 3. Answer `n` → 1, `SP` unchanged, no backup; `readLine` returning null (no terminal) → the same.
-4. Install twice → second run asks nothing about hooks (`prompts` has no `'Add them?'`), `SP`, backup and hash unchanged, stdout/stderr say `hook entries already present`, exit 0.
+4. Install twice → second run asks nothing about hooks (`prompts` has no `'Add them?'`), `SP`, backup and hash unchanged, no second backup, stdout/stderr say `hook entries already present`, exit 0.
+4a. An older backup beside `SP` is left byte-identical and a new one is written; a taken name gets `-2`, then `-3`; an install that changes the file again (the user removed the entries by hand) writes and records another backup.
 5. Foreign hook entries in `SP` survive install.
 6. A spool file present before install → ingested (one event) after install.
 7. First-run offer: two transcripts with `lastActivity` 10 days old, one 2 days old, answer `y` → the two are done; `first_run_offered '1'`; a later install asks nothing.
    No old sessions → no question, flag still set.
 
 `uninstall.test.ts`
-1. After install from no file, `uninstall` → `SP` removed, backup gone, links removed, kv hash/backup deleted, database still present.
-2. After install over `{"model":"opus"}` → `SP` content equals `{"model":"opus"}` again.
-3. After install, the user edits `SP` (adds `"theme":"dark"`) → `uninstall` keeps `theme` and `model`, removes only the entries naming `H`.
+1. After install from no file, `uninstall` → `SP` removed, no backup, links removed, kv hash/backup deleted, database still present.
+2. After install over `{"model":"opus"}` → `SP` content equals `{"model":"opus"}` again; the backup is kept and named on stdout.
+2a. Two installs that changed the file (the user removed the entries by hand in between) → `uninstall` restores the second backup, not the first; the first stays byte-identical.
+3. After install, the user edits `SP` (adds `"theme":"dark"`) → `uninstall` keeps `theme` and `model`, removes only the entries naming `H` (hash mismatch); the same when the recorded backup file was deleted (missing backup).
 4. `binLink` replaced by a symlink to `/elsewhere` → left alone.
-5. `uninstall --purge` → dataDir, stateDir, configDir gone.
+5. `uninstall --purge` → dataDir, stateDir, configDir gone; the backups stay.
 6. `uninstall` with nothing installed → 0; no directory, database or file is created (`sandbox.skydeckHome` stays empty).
 
 `doctor.test.ts` (fake runner answers `gh --version` 0, `gh auth status` 0, `wezterm cli list` 0 unless stated)

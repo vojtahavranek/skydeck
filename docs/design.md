@@ -572,17 +572,20 @@ commands for the others.
   database; (2) creates the links `<dataDir>/skydeck-hook` and `~/.local/bin/skydeck`, and
   `<dataDir>/node` pointing at the Node.js binary it runs under; (3) shows the exact change to
   `<claudeHome>/settings.json`, asks, writes a backup beside it, adds the two hook entries and
-  records a hash of the resulting file; (4) runs ingest, reconcile and the first transcript scan;
-  (5) makes the first-run offer (7.1), once: a later install does not offer it again, whatever
-  the answer was. Running it again changes nothing. Hook entries that belong to something else
-  are never touched. A backup left by an earlier install is never overwritten; when it differs
-  from the current file, restoring it would undo what the user changed since, so install then
-  records no hash and uninstall removes the entries instead. A link is created or re-pointed only
-  where there is nothing or a symbolic link; anything else stops install before it changes
-  anything.
-- **`skydeck uninstall`**: restores the backup when the settings file still has the recorded
-  hash; otherwise removes exactly the entries whose command names `<hookPath>`. Removes the
-  links that still point where install pointed them. The database stays unless `--purge` is
+  records the backup's path and a hash of the resulting file; (4) runs ingest, reconcile and the
+  first transcript scan; (5) makes the first-run offer (7.1), once: a later install does not offer
+  it again, whatever the answer was. Running it again changes nothing. Hook entries that belong to
+  something else are never touched. Every install that changes the settings file writes a new
+  backup of it, `<settings file>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC; `-2`, `-3`, … when that
+  name is taken), readable by the user only; an older backup is never touched or reused, because
+  restoring it could undo what the user changed since. An install that changes nothing writes no
+  backup. A link is created or re-pointed only where there is nothing or a symbolic link; anything
+  else stops install before it changes anything.
+- **`skydeck uninstall`**: restores the recorded backup only when the settings file still has the
+  recorded hash and that backup still exists (when there was no file before install, it removes
+  the file); in every other case it removes exactly the entries whose command names
+  `<hookPath>`. Removes the links that still point where install pointed them. It never removes a
+  backup, not even with `--purge`, and names each one. The database stays unless `--purge` is
   given.
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
   resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with

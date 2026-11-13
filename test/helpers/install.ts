@@ -3,8 +3,8 @@
  * another on one sandboxed platform, each run with its own captured output and answers, and look
  * at the database and Claude Code's folders between runs.
  */
-import { mkdirSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 import { main } from '../../src/cli/main.ts';
 import { settingsPath } from '../../src/claude/settings.ts';
@@ -48,6 +48,20 @@ export function withStore<T>(places: Places, fn: (store: Store) => T): T {
 /** <claudeHome>/settings.json of `places`. */
 export function settingsFile(places: Places): string {
   return settingsPath(places.claudeHome);
+}
+
+/** The settings backup install writes at T0 (the test clock's start), `<settings>.skydeck-backup-<UTC>`. */
+export function backupAtT0(places: Places): string {
+  return `${settingsFile(places)}.skydeck-backup-20261112T090000Z`;
+}
+
+/** Every file beside the settings file whose name starts like a backup's, as paths, sorted. */
+export function backups(places: Places): string[] {
+  const prefix = `${basename(settingsFile(places))}.skydeck-backup`;
+  return readdirSync(places.claudeHome)
+    .filter((name) => name.startsWith(prefix))
+    .sort()
+    .map((name) => join(places.claudeHome, name));
 }
 
 /** <claudeHome>/projects and <claudeHome>/sessions, as a machine that runs Claude Code has them. */

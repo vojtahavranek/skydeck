@@ -2,7 +2,7 @@
 // removes install's links, and with --purge skydeck's own directories. It never creates anything:
 // with no database there is nothing recorded, and only the entries naming the hook are removed.
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { removeHookEntries, settingsPath } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
@@ -24,7 +24,8 @@ const SPEC: ArgSpec = {
     '\n' +
     "Puts Claude Code's settings file back as it was before install when nobody changed it\n" +
     'since, otherwise removes only the hook entries that name skydeck-hook, and removes the\n' +
-    'links install made. The database stays.\n' +
+    'links install made. The database stays. The backups install made of the settings file\n' +
+    'are kept (it names them).\n' +
     '\n' +
     '  --purge  also remove the data, state and configuration directories\n',
   flags: { purge: { type: 'boolean' } },
@@ -77,16 +78,40 @@ export const command: Command = {
   },
 };
 
-/** The settings first (they name the hook link), then the links. */
+/** The settings first (they name the hook link), then the links; last, where the backups are. */
 function undo(ctx: Context, places: Places, recorded: Recorded): void {
   restoreSettings(ctx, ctx.platform.files, places, recorded);
   removeLinks(ctx, ctx.platform, places);
+  showBackups(ctx, ctx.platform.files, places);
 }
 
 /**
- * Design 8: when the file is still exactly what install wrote (its hash), the state before install
- * comes back: the backup, or no file at all. Otherwise, or when the backup is gone, exactly the hook
- * objects whose command names hookPath are removed, and everything else stays.
+ * Ruled by the plan owner: the backups install made are the user's safety net and are never
+ * removed, not even by --purge; uninstall names each one so the user can find them.
+ */
+function showBackups(ctx: Context, files: Files, places: Places): void {
+  const prefix = `${basename(settingsPath(places.claudeHome))}.skydeck-backup-`;
+  let names: string[];
+  try {
+    names = files.list(places.claudeHome);
+  } catch (error) {
+    ctx.io.stdout(
+      `cannot list ${sanitize(places.claudeHome)} to show the backups (${describeError(error)})\n`,
+    );
+    return;
+  }
+  for (const name of names) {
+    if (name.startsWith(prefix)) {
+      ctx.io.stdout(`kept the backup ${sanitize(join(places.claudeHome, name))}\n`);
+    }
+  }
+}
+
+/**
+ * Design 8: when the file is still exactly what install wrote (its hash) and the recorded backup
+ * still exists, the state before install comes back: the backup, or no file at all for `none`. In
+ * every other case exactly the hook objects whose command names hookPath are removed, and
+ * everything else stays. The backup itself is never removed (ruled by the plan owner).
  */
 function restoreSettings(ctx: Context, files: Files, places: Places, recorded: Recorded): void {
   const path = settingsPath(places.claudeHome);
@@ -103,7 +128,6 @@ function restoreSettings(ctx: Context, files: Files, places: Places, recorded: R
     const before = recorded.backup === null ? null : readOrFail(files, recorded.backup);
     if (recorded.backup !== null && before !== null) {
       files.writeText(path, before);
-      files.remove(recorded.backup);
       ctx.io.stdout(`restored ${sanitize(path)} from ${sanitize(recorded.backup)}\n`);
       return;
     }

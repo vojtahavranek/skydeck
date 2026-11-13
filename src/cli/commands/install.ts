@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 import { addHookEntries, hookEntry, settingsPath } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
-import { NS_PER_DAY } from '../../platform/time.ts';
+import { NS_PER_DAY, isoFromNs } from '../../platform/time.ts';
 import type { Files } from '../../platform/types.ts';
 import type { Deck } from '../../sessions/deck.ts';
 import { isListed } from '../../sessions/list.ts';
@@ -39,6 +39,8 @@ const SPEC: ArgSpec = {
 
 /** kv settings_backup when there was no settings file: uninstall then removes the file. */
 const NO_FILE = 'none';
+/** Backups made in one second take `-2`, `-3`, …; this many is more than any real use makes. */
+const MAX_BACKUPS_PER_SECOND = 1000;
 
 export const command: Command = {
   name: 'install',
@@ -125,19 +127,18 @@ async function addHooks(ctx: Context, deck: Deck): Promise<boolean> {
   if (!isYes(await ctx.io.readLine('Add them? [y/N] '))) {
     return false;
   }
-  const backup = backUp(ctx, files, path, text);
+  const backup = backUp(deck, path, text);
   files.writeText(path, edit.text);
   const { store } = deck;
   store.transaction(() => {
-    if (backup === null) {
-      store.deleteKv('settings_hash');
-      store.deleteKv('settings_backup');
-    } else {
-      store.setKv('settings_backup', backup);
-      store.setKv('settings_hash', sha256(edit.text));
-    }
+    store.setKv('settings_backup', backup);
+    store.setKv('settings_hash', sha256(edit.text));
   });
-  ctx.io.stdout(`added the hook entries to ${sanitize(path)}\n`);
+  ctx.io.stdout(
+    backup === NO_FILE
+      ? `added the hook entries to ${sanitize(path)} (a new file)\n`
+      : `added the hook entries to ${sanitize(path)}; the file as it was is kept in ${sanitize(backup)}\n`,
+  );
   return true;
 }
 
@@ -150,28 +151,29 @@ function readSettings(files: Files, path: string): string | null {
 }
 
 /**
- * Keeps the current settings beside them as `<settingsPath>.skydeck-backup` (readable by the user
- * only: the file can hold secrets). Returns what uninstall may restore: NO_FILE when there was no
- * file, the backup's path, or null when a backup from an earlier install is in the way. That one is
- * never overwritten, and restoring it would undo what the user changed since, so then nothing is
- * recorded and uninstall removes the entries instead.
+ * Ruled by the plan owner: every install that changes the file first keeps what is there in a new
+ * file `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC, the platform clock; `-2`, `-3`, …
+ * when that name is taken), readable by the user only, as the file can hold secrets. An older
+ * backup is never touched or reused: restoring it could undo what the user changed since. Returns
+ * what uninstall may restore: the new backup's path, or NO_FILE when there was no file.
  */
-function backUp(ctx: Context, files: Files, path: string, text: string | null): string | null {
+function backUp(deck: Deck, path: string, text: string | null): string {
   if (text === null) {
     return NO_FILE;
   }
-  const backup = `${path}.skydeck-backup`;
-  if (files.createExclusive(backup, text)) {
-    files.chmod(backup, 0o600);
-    return backup;
+  const { files, clock } = deck.platform;
+  const stamp = isoFromNs(clock.nowNs())
+    .replace(/\.\d+Z$/, 'Z')
+    .replace(/[-:]/g, '');
+  const base = `${path}.skydeck-backup-${stamp}`;
+  for (let n = 1; n <= MAX_BACKUPS_PER_SECOND; n++) {
+    const backup = n === 1 ? base : `${base}-${n}`;
+    if (files.createExclusive(backup, text)) {
+      files.chmod(backup, 0o600);
+      return backup;
+    }
   }
-  if (files.readText(backup) === text) {
-    return backup;
-  }
-  ctx.io.stdout(
-    `kept the older backup ${sanitize(backup)}; uninstall will remove the hook entries instead of restoring it\n`,
-  );
-  return null;
+  throw new SkydeckError(`cannot find a free name for a backup beside ${path}`);
 }
 
 /**

@@ -16,7 +16,14 @@ import { describe, test } from 'node:test';
 import { command } from '../../../src/cli/commands/install.ts';
 import { hookEntry } from '../../../src/claude/settings.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
-import { run, settingsFile, transcript, withStore } from '../../helpers/install.ts';
+import {
+  backupAtT0,
+  backups,
+  run,
+  settingsFile,
+  transcript,
+  withStore,
+} from '../../helpers/install.ts';
 import { S1, S2, S3, SEC, T0, statLine, testPlatform } from '../../helpers/platform.ts';
 import type { TestPlatform } from '../../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../../helpers/spool.ts';
@@ -34,7 +41,7 @@ function ourHooks(d: TestPlatform): Record<string, unknown> {
 const kv = (d: TestPlatform, key: 'settings_hash' | 'settings_backup' | 'first_run_offered') =>
   withStore(d.places, (store) => store.getKv(key));
 
-const backupOf = (d: TestPlatform): string => `${settingsFile(d.places)}.skydeck-backup`;
+const backupOf = (d: TestPlatform): string => backupAtT0(d.places);
 
 describe('install: links and hook entries', () => {
   test('with no settings file and the answer y: the three links, the two entries, backup "none" and the hash', async (t) => {
@@ -50,7 +57,7 @@ describe('install: links and hook entries', () => {
     assert.deepEqual(JSON.parse(text), { hooks: ourHooks(d) });
     assert.equal(kv(d, 'settings_backup'), 'none');
     assert.equal(kv(d, 'settings_hash'), sha256(text));
-    assert.equal(existsSync(backupOf(d)), false);
+    assert.deepEqual(backups(d.places), []);
     assert.ok(r.prompts.includes('Add them? [y/N] '));
     const prompt = r.stderr.indexOf('Add them? [y/N] ');
     const announced = r.stderr.indexOf(
@@ -99,7 +106,7 @@ describe('install: links and hook entries', () => {
       assert.equal(r.code, 1);
       assert.match(r.stderr, /settings not changed/);
       assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"opus"}');
-      assert.equal(existsSync(backupOf(d)), false);
+      assert.deepEqual(backups(d.places), []);
       assert.equal(kv(d, 'settings_hash'), null);
       assert.equal(kv(d, 'settings_backup'), null);
     });
@@ -133,7 +140,9 @@ describe('install: links and hook entries', () => {
     assert.equal(statSync(settingsFile(d.places)).ino, settingsBefore.ino);
     assert.equal(statSync(settingsFile(d.places)).mtimeMs, settingsBefore.mtimeMs);
     assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"opus"}');
+    assert.deepEqual(backups(d.places), [backupOf(d)], 'no second backup');
     assert.equal(kv(d, 'settings_hash'), hashBefore);
+    assert.equal(kv(d, 'settings_backup'), backupOf(d));
     assert.deepEqual(
       links.map((link) => lstatSync(link).ino),
       linksBefore,
@@ -192,7 +201,7 @@ describe('install: links and hook entries', () => {
     assert.equal(r.code, 1);
     assert.match(r.stderr, /settings\.json is not valid JSON/);
     assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":');
-    assert.equal(existsSync(backupOf(d)), false);
+    assert.deepEqual(backups(d.places), []);
   });
 
   test('a Claude Code directory that does not exist is not created: exit 1 naming it', async (t) => {
@@ -230,31 +239,53 @@ describe('install: links and hook entries', () => {
     assert.equal(readlinkSync(d.places.binLink), join(d.platform.appRoot, 'bin', 'skydeck'));
   });
 
-  test('a backup left by an earlier install is never overwritten', async (t) => {
+  test('older backups are left byte-identical; a new one, named for now, holds the current file', async (t) => {
     const d = testPlatform(t);
-    writeFileSync(backupOf(d), '{"model":"haiku"}');
+    const older = `${settingsFile(d.places)}.skydeck-backup-20250101T000000Z`;
+    writeFileSync(older, '{"model":"haiku"}');
     writeFileSync(settingsFile(d.places), '{"model":"opus","theme":"dark"}');
 
     const r = await run(d.platform, ['install'], { lines: ['y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"haiku"}');
-    // Restoring that older backup would undo what the user changed since; uninstall must remove
-    // the entries instead, so nothing that leads to the restore is recorded.
-    assert.equal(kv(d, 'settings_hash'), null);
-    assert.equal(kv(d, 'settings_backup'), null);
-    assert.match(r.stdout + r.stderr, /skydeck-backup/);
+    assert.equal(readFileSync(older, 'utf8'), '{"model":"haiku"}');
+    assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"opus","theme":"dark"}');
+    assert.deepEqual(backups(d.places), [older, backupOf(d)]);
+    assert.equal(kv(d, 'settings_backup'), backupOf(d));
+    assert.equal(kv(d, 'settings_hash'), sha256(readFileSync(settingsFile(d.places), 'utf8')));
   });
 
-  test('a backup left by an earlier install that equals the current file is recorded as the backup', async (t) => {
+  test('a backup name that is taken gets -2, then -3; the files there are not touched', async (t) => {
     const d = testPlatform(t);
-    writeFileSync(backupOf(d), '{"model":"opus"}');
+    writeFileSync(backupOf(d), 'first');
+    writeFileSync(`${backupOf(d)}-2`, 'second');
     writeFileSync(settingsFile(d.places), '{"model":"opus"}');
 
     const r = await run(d.platform, ['install'], { lines: ['y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(kv(d, 'settings_backup'), backupOf(d));
+    assert.equal(readFileSync(backupOf(d), 'utf8'), 'first');
+    assert.equal(readFileSync(`${backupOf(d)}-2`, 'utf8'), 'second');
+    assert.equal(readFileSync(`${backupOf(d)}-3`, 'utf8'), '{"model":"opus"}');
+    assert.equal(kv(d, 'settings_backup'), `${backupOf(d)}-3`);
+  });
+
+  test('an install that changes the file again writes another backup and records it', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+    await run(d.platform, ['install'], { lines: ['y'] });
+    // The user takes skydeck's entries out by hand and changes a setting; an hour later, install.
+    writeFileSync(settingsFile(d.places), '{"model":"sonnet"}');
+    d.clock.setNs(T0 + 3600n * SEC);
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    const later = `${settingsFile(d.places)}.skydeck-backup-20261112T100000Z`;
+    assert.deepEqual(backups(d.places), [backupOf(d), later]);
+    assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"opus"}');
+    assert.equal(readFileSync(later, 'utf8'), '{"model":"sonnet"}');
+    assert.equal(kv(d, 'settings_backup'), later);
     assert.equal(kv(d, 'settings_hash'), sha256(readFileSync(settingsFile(d.places), 'utf8')));
   });
 
