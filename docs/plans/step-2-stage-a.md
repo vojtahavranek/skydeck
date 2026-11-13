@@ -1009,6 +1009,10 @@ export function stopServer(deck: Deck, times?: LifecycleTimes): Promise<{ stoppe
 // src/window/build.ts (task 14)
 /** sha256 over the sorted paths and contents of every file under bin/, src/, web/, vendor/ (A12), first 16 hex. */
 export function computeBuild(files: Files, appRoot: string): string;
+/** Every file of the build read once (path relative to the app root → bytes, in sorted order) and
+ *  the build over exactly those bytes; computeBuild is its `build`. loadAssets serves these bytes,
+ *  and a command that compares builds can use it too (ruled by the plan owner, task 14). */
+export function readBuild(files: Files, appRoot: string): { build: string; files: Map<string, Uint8Array> };
 ```
 
 ### 2.9 The page's modules (tasks 26 and 31)
@@ -1932,11 +1936,39 @@ export interface ViewInput {
   selected: SelectedPayload | null;
   nowNs: Ns;
 }
+/** Ruled by the plan owner (task 13, #45): listed are design 7.2's rows (`isListed` with
+ *  `showDone`), every open row (running, or starting in the window) whatever its done mark
+ *  (S2 12.10), and a `new` terminal's own session's row while the terminal is there — also one
+ *  step 1 does not list (ended before its first prompt), unless it is done and stopped. The
+ *  filter picks the sections' rows and the done rows `doneHidden` counts (only those that match
+ *  it); `counts` ignore it. While a filter is set every section is unfolded (S2 12.8); otherwise
+ *  Earlier is folded unless `view.unfolded` names it, and a folded section carries `count`,
+ *  `firstNs` and `lastNs` with `rows: []`. `elsewhere` is taken only for a row that is running; a
+ *  row held both in the window and elsewhere (a duplicate) counts as `elsewhere`. `selected` is
+ *  passed on only when its `sessionId` equals `view.selected`, else null.
+ *  Terminals on rows: a terminal that may still run (not `ended`, `lost`, `not-started`) claims a
+ *  session's row before one that may not, one showing the session before one waiting for it, then
+ *  by slot and opening time; a terminal that may not run is put only on a row that is not running.
+ *  The view model may assume that an ended terminal never belongs to a running session for longer
+ *  than one tick: it is dropped, its slot freed, when its session runs again (by the resume action
+ *  in the window, task 32; by the server's tick when the session runs anywhere else, task 23). */
 export function buildListMessage(input: ViewInput): Omit<ListMessage, 'terminals'> & { terminals: Omit<TerminalPayload, 'ownsSize'>[] };
 // src/window/view/sections.ts — the parts, exported for tests
+/** Shared inside the view model (ruled, #45): the terminal states whose program may still come to
+ *  hold a session (S2 7.5) — `starting`, `running`, `reconnecting`, `newer-keeper`. `rowPayload`'s
+ *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. */
+export const MAY_START: ReadonlySet<TerminalState>;
 export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'week' | 'earlier';
+/** Ruled (#45): `starting` when the terminal's program holds no session (`sessionId` null), the
+ *  terminal may still start one (not `ended`, `lost` or `not-started`) and the row is not
+ *  running. `noteHead`: the note's first three lines as step 1 shows a note (`formatNoteLines`'s
+ *  rule: split at every line break, each line sanitised, empty lines at the start and end
+ *  dropped), each cut to 1,024 UTF-16 units with the cut marked by `…` (never inside a surrogate
+ *  pair). `elsewhere.tty` is sanitised like every other foreign text. */
 export function rowPayload(row: ListRow, extra: { terminal: TerminalInfo | null; elsewhere: { pid: number; tty: string | null } | null }): RowPayload;
-export function projectDirs(rows: readonly ListRow[]): string[]; // most recent first, unique
+/** Most recent first, unique, of the rows step 1 lists (`isListed(row, true)`); left out: a
+ *  directory the sanitiser changes, and one that is not absolute (ruled, #45). */
+export function projectDirs(rows: readonly ListRow[]): string[];
 ```
 
 **Files**
@@ -1955,12 +1987,16 @@ export function projectDirs(rows: readonly ListRow[]): string[]; // most recent 
 - Done: hidden with `doneHidden` counted; `showDone` lists them; a running done session stays
   under open with its `done` mark (S2 12.10).
 - Filter (design 7.4): matches title, group, note, directory, pull requests; a filter does not
-  show done sessions in stage A (that is stage E).
-- Rows: `noteHead` is at most the note's first three lines; `chip` is design 7.3's; `slot` and
-  `terminal` from the terminal; `elsewhere` with pid and tty; `attention` and `stack` null.
+  show done sessions in stage A (that is stage E); while a filter is set every section is
+  unfolded (S2 12.8, ruled in #45).
+- Rows: `noteHead` is at most the note's first three lines as step 1 shows a note; `chip` is
+  design 7.3's; `slot` and `terminal` from the terminal; `elsewhere` with pid and tty;
+  `attention` and `stack` null.
 - Starting: a resume terminal whose program holds no session yet marks the expected session's
   row `starting`; a `new` terminal without a session row gives a row with the new id, `starting`,
-  titled with the label or `new session in <dir>` (A28); once the session has a row, that row.
+  titled with the label or `new session in <dir>` (A28); once the session has a row, that row; a
+  `new` program that ends before its session started leaves its row, no longer starting, until
+  the terminal is closed (ruled in #45).
 - Counts: per state of the listed rows, `starting` and `elsewhere` separately.
 - Terminals carry `state` and `notReported` from `TerminalInfo` (`reconnecting` included).
 - `projectDirs`: unique, most recent activity first, sanitised paths excluded when they differ
@@ -1988,23 +2024,35 @@ export interface Assets {
   build: string;
   /** The keeper's code as read at start (S2 16.5). */
   keeperCode: string;
-  /** null when the path is not on the list. */
+  /** By the path of a request without its query: '/' (index.html with the build put in) or
+   *  '/assets/<build>/<path in the checkout>'. null when the path is not on the list. */
   get(path: string): { body: Uint8Array; type: string } | null;
 }
-/** Reads web/** (but web/tsconfig.json), the vendored files of the manifest that the page loads
- *  (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper. Refuses (Error) when verifyVendored
- *  reports a problem. A missing or empty web/ is no error (task 23's tests run before task 26
- *  creates it): then `GET /` is 404. */
+/** Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only), the vendored files
+ *  of the manifest that the page loads (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper,
+ *  each once through readBuild (2.8),
+ *  so that the build is the hash of exactly the bytes served. Refuses (Error) when verifyVendored
+ *  reports a problem, when a served vendored file's bytes as read do not have the manifest's hash
+ *  (it changed between the two reads), when bin/skydeck-keeper is missing, and when it is not
+ *  UTF-8 (ruled by the plan owner, task 14). A missing or empty web/ is no error (task 23's tests
+ *  run before task 26 creates it): then `GET /` is 404. */
 export function loadAssets(files: Files, appRoot: string): Assets;
-/** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. */
+/** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. In
+ *  this order: a wrong Host → 421; OPTIONS → 403; any other method but GET → 405 with
+ *  `Allow: GET`; GET of a path on the list → the file, a query ignored and never used; any other
+ *  GET → 404. `Cache-Control`: `max-age=31536000, immutable` under `/assets/`, `no-store` for
+ *  every other path (`/` included) and every refusal (ruled by the plan owner, task 14). */
 /** `port()` is the bound port, read at each request: with port 0 it is known only after
  *  listenHttp has resolved (tasks 20, 23 pass a function that returns it then). */
 export function httpHandler(assets: Assets, port: () => number): (req: IncomingMessage, res: ServerResponse) => void;
-/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17). */
+/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17).
+ *  For port 80 also `127.0.0.1` (a browser leaves out its default port), never `localhost`; task
+ *  17's Origin check needs the same rule for 80 (`http://127.0.0.1`) (ruled by the plan owner,
+ *  task 14). */
 export function hostOk(host: string | undefined, port: number): boolean;
 /** The headers every answer carries (the policy with the port, nosniff, DENY, no-referrer). */
 export function securityHeaders(port: number): Record<string, string>;
-// src/window/build.ts — computeBuild of 2.8
+// src/window/build.ts — computeBuild and readBuild of 2.8
 ```
 
 **Files**
@@ -2017,17 +2065,25 @@ export function securityHeaders(port: number): Record<string, string>;
 - `GET /` → `index.html` with every `/assets/__VERSION__/` replaced by `/assets/<build>/`
   (the placeholder `__VERSION__` is the contract with task 26); `GET /assets/<build>/web/app.js`
   and `/assets/<build>/vendor/xterm/xterm/lib/xterm.mjs` → the bytes read at start with the right
-  `Content-Type` and `Cache-Control: immutable`; another version in the path, `../`, an encoded
-  `%2e%2e`, a file added to `web/` after start → 404; the file changed on disk after start → the
-  old bytes (S2 17.3 "updating").
-- Every answer (also 404, 421, 403) carries the CSP of S2 8.2.1 with the port,
+  `Content-Type` and `Cache-Control: max-age=31536000, immutable`; every path outside `/assets/`
+  (`/` included) and every refusal `no-store`; a query string ignored, also by the cache rule;
+  another version in the path, `../`, an encoded `%2e%2e`, `/assets/<build>/web/index.html`, a
+  file added to `web/` after start → 404; the file changed on disk after start → the old bytes
+  (S2 17.3 "updating").
+- Every answer (also 404, 421, 403, 405) carries the CSP of S2 8.2.1 with the port,
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and no `Access-Control-*` header.
-- `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port → 421; `OPTIONS` → 403;
+- `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port, no `Host` (HTTP/1.0) →
+  421; at port 80 `127.0.0.1` and `127.0.0.1:80` are accepted, `localhost` and `localhost:80`
+  not; `OPTIONS` → 403;
+  `HEAD`, `POST` and any other method → 405 with `Allow: GET` (a wrong Host is 421 first);
   `GET /manifest.webmanifest` and `/favicon.ico` → 404 in stage A (the icon is stage E).
-- `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes, is
-  added or removed; does not change for `docs/`, `test/`, `__pycache__/` or a dot-file; the same
-  tree gives the same build.
-- `loadAssets` refuses a checkout whose vendored file was altered.
+- `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes (one
+  byte, its length kept), is added or removed; does not change for `docs/`, `test/`,
+  `__pycache__/` or a dot-file; the same tree gives the same build; a file removed between its
+  `stat` and its read, a dangling link and a link to itself are no files of the build.
+- `loadAssets` refuses a checkout whose vendored file was altered, one whose served vendored file
+  changed between the build's read and the manifest check, and one whose `bin/skydeck-keeper` is
+  missing or not UTF-8.
 
 **Done when:** the server's static side is complete and the build is the one `skydeck window`
 will compute for the checkout.

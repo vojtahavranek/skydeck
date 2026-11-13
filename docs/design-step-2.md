@@ -187,7 +187,7 @@ Added to design 11:
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses. | platform, text, store, claude, sessions, terminals, github |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
-| `src/window/view/` | The page's view model as pure functions: sections, rows, stacks, attention, the switcher's ranking, the filter (12). | sessions (types), text |
+| `src/window/view/` | The page's view model as pure functions: sections, rows, stacks, attention, the switcher's ranking, the filter (12). | sessions (types, and the pure `isListed` and `matchesFilter` of `src/sessions/list.ts`: stage A's filter is design 7.4's, with one implementation), text |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS. No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
@@ -695,6 +695,12 @@ both in memory: the **expected session**. Which session it shows is decided agai
   session's row; a new session has no row yet, so the server shows the terminal as a row of its
   own, titled with the label or "new session in <directory>"). After `restoreStartTimeoutSeconds`
   without a holder it is shown as "started, not reported" and stays where it is.
+  The row of a terminal opened for `new` has the new session's id (known from `prepareNew`), so
+  that the page can select it, and is marked starting; the keeper's `meta` carries the label and
+  the directory, so the row survives a server restart. When the session reports a start, the
+  terminal moves to that session's ordinary row. A program that ends before its session reported a
+  start leaves the row in place, no longer starting, with the ended terminal (7.8) until the
+  terminal is closed.
 
 ### 7.6 Slots
 
@@ -787,26 +793,37 @@ attach is `seq`: the snapshot covers records up to `snapSeq` and the tail brings
 #### 8.2.1 HTTP
 
 The server listens on `127.0.0.1:<port>` only. Every request must have the `Host` header exactly
-`127.0.0.1:<port>` (15.1), else 421.
+`127.0.0.1:<port>` (15.1), else 421; for port 80 also `127.0.0.1`, which is what a browser sends
+for its default port (and the upgrade's `Origin` is then `http://127.0.0.1`).
 
 | Request | Answer |
 |---|---|
 | `GET /` | `web/index.html`, with the asset version put into its asset URLs by the server when it reads the file at start (there is no build step). No secret needed: the page holds no secret of its own. |
-| `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list). `Cache-Control: immutable` under the versioned path. |
+| `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list): every file of `web/` but `web/tsconfig.json` and `web/index.html` (served as `/` only), and the vendored `.mjs` and `.css` files of `vendor/MANIFEST.json`. `Cache-Control: max-age=31536000, immutable` under the versioned path. |
 | `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
-| anything else | 404. |
+| `OPTIONS` | 403. |
+| any other method but `GET` (`HEAD` included) | 405 with `Allow: GET`. |
+| any other `GET` | 404. |
+
+A query string is ignored and never used: `/?x` is `/`. Every path outside `/assets/` (`/`, and
+later the icon and the manifest) and every refusal (404, 405, 421, 403) carry
+`Cache-Control: no-store`, so that a page reloading after a server restart always gets the new
+asset version.
 
 The server reads every file it serves into memory when it starts, and its build (16.5) is the hash
-of exactly those bytes: it serves what it hashed, never a file a `git pull` changed under it.
+of exactly those bytes: it serves what it hashed, never a file a `git pull` changed under it. It
+does not start when a vendored file differs from the manifest (also one that changed between its
+reads), or when `bin/skydeck-keeper` is missing or not UTF-8.
 
 Every answer carries `Content-Security-Policy: default-src 'none'; script-src 'self';
 style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; manifest-src 'self';
 connect-src 'self' ws://127.0.0.1:<port>; base-uri 'none'; form-action 'none'; frame-ancestors
 'none'`,
 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and
-no CORS header ever. `OPTIONS` is answered 403. Nothing on the TCP port acts on anything: the static
-files are not secret, and every action goes through the WebSocket after the proof (8.2.2).
+no CORS header ever. `OPTIONS` is answered 403, any other method but `GET` 405. Nothing on the
+TCP port acts on anything: the static files are not secret, and every action goes through the
+WebSocket after the proof (8.2.2).
 
 **Why `'unsafe-inline'` for styles, and only for styles.** xterm.js 6.0.0's DOM renderer creates
 `<style>` elements at run time and writes the colour palette, cursor and selection rules into them
@@ -1675,7 +1692,8 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
     so no other page can read one. A cross-site WebSocket is refused by the exact `Origin` check
     at the upgrade, and could not give the proof anyway.
   - DNS rebinding (a page whose own host name is made to point at `127.0.0.1`): its requests carry
-    its own host name in `Host`, which is refused (421); only `Host: 127.0.0.1:<port>` is served.
+    its own host name in `Host`, which is refused (421); only `Host: 127.0.0.1:<port>` is served
+    (for port 80 also `127.0.0.1`, 8.2.1).
   - Framing (clickjacking): `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 - **Other local processes.** The WebSocket needs the proof, checked in constant time, and the proof
   shows nothing of the secret, so watching loopback traffic does not reveal it. `server.sock` and
@@ -1862,7 +1880,10 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
   `bin/skydeck-keeper` from the checkout again. So an old server never serves new files under its
   old, immutable asset path, and never starts a new keeper it does not speak. Its **build** is a
   hash (sha256, first 16 hex characters) over the paths and contents of every file under `bin/`,
-  `src/`, `web/` and `vendor/`, computed from what it read; `skydeck window` computes the same for
+  `src/`, `web/` and `vendor/`, computed from what it read; names that start with `.` and
+  `__pycache__` directories are left out at any depth, so that `python3 -m py_compile` writing
+  `bin/__pycache__/` (or an editor's swap file) neither changes the build nor restarts the server
+  for nothing, and they are not served either. `skydeck window` computes the same for
   the checkout and restarts a server of the same checkout whose build differs (5.1). A server whose
   store is migrated under it makes no further write and stops (10.1). Sessions keep running across
   the restart, every screen is rebuilt (7.3), and pages reload themselves for the new assets
