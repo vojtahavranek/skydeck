@@ -81,3 +81,49 @@ test('a group with a line break inside, or an empty one, is refused', () => {
   assert.throws(() => cleanGroup(''), usageError);
   assert.throws(() => cleanGroup('  \t '), usageError);
 });
+
+// What the sanitiser (design 7.4) would change is not part of a label or a group: ESC and the
+// other controls, a tab, the bidirectional controls, NUL.
+const NOT_CLEAN = [
+  ['an escape sequence', 'x\x1b]0;pwn\x07y'],
+  ['a CSI sequence', 'a\x1b[2Jb'],
+  ['a tab inside', 'a\tb'],
+  ['a right-to-left override', 'a‮b'],
+  ['a NUL', 'a\x00b'],
+  ['a DEL', 'a\x7fb'],
+  ['a C1 control', 'a\u009bb'],
+] as const;
+
+test('a label with control characters is refused, and the message does not repeat it', () => {
+  for (const [what, text] of NOT_CLEAN) {
+    assert.throws(
+      () => cleanLabel(text),
+      (error: unknown) =>
+        usageError(error) &&
+        /control characters/.test((error as Error).message) &&
+        !/[\x00-\x1f]/.test((error as Error).message),
+      what,
+    );
+  }
+});
+
+test('a group with control characters is refused', () => {
+  for (const [what, text] of NOT_CLEAN) {
+    assert.throws(
+      () => cleanGroup(text),
+      (error: unknown) => usageError(error) && /control characters/.test((error as Error).message),
+      what,
+    );
+  }
+});
+
+test('a tab or an escape at the edge is whitespace or a control: trimmed, or refused', () => {
+  assert.equal(cleanLabel('\tfix retry\t'), 'fix retry'); // a tab at the edge is trimmed
+  assert.throws(() => cleanLabel('\x1b[2Jfix'), usageError);
+  assert.equal(cleanGroup('\tABC-1 '), 'ABC-1');
+});
+
+test('ordinary text of any script is clean: spaces, accents, emoji, a joiner', () => {
+  assert.equal(cleanLabel('fix  retry (Čeština) 🚀 👩‍💻'), 'fix  retry (Čeština) 🚀 👩‍💻');
+  assert.equal(cleanGroup('[ops] ABC-1'), '[ops] ABC-1');
+});
