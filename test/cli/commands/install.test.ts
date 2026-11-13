@@ -472,6 +472,117 @@ describe('install: links and hook entries', () => {
   });
 });
 
+describe('install: the rewrite of the whole file is announced', () => {
+  const inSkydeckFormat = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+  const announced = (backup: string, lost = ''): string =>
+    `the rest of the file will be rewritten in skydeck's formatting${lost}; ` +
+    `the file as it is now is kept in ${backup}`;
+
+  test('a file in other formatting: one extra line, between the entries and the question, names the backup', async (t) => {
+    const d = testPlatform(t);
+    const text = `${JSON.stringify({ model: 'opus' }, null, 4)}\n`;
+    writeFileSync(settingsFile(d.places), text);
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    const header = `skydeck will add these hook entries to ${settingsFile(d.places)}:\n`;
+    const shown = r.stderr.slice(r.stderr.indexOf(header) + header.length);
+    const [entries, note, prompt] = [
+      shown.slice(0, shown.indexOf('\n}\n') + 3),
+      shown.slice(shown.indexOf('\n}\n') + 3, shown.indexOf('Add them?')),
+      shown.slice(shown.indexOf('Add them?')),
+    ];
+    assert.deepEqual(JSON.parse(entries), ourHooks(d));
+    assert.equal(note, `${announced(backupOf(d))}\n`);
+    assert.ok(prompt.startsWith('Add them? [y/N] '));
+    // What the line promised is what happened.
+    assert.equal(readFileSync(backupOf(d), 'utf8'), text);
+    assert.deepEqual(JSON.parse(readFileSync(settingsFile(d.places), 'utf8')), {
+      model: 'opus',
+      hooks: ourHooks(d),
+    });
+  });
+
+  test("a file already in skydeck's formatting: no extra line", async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), inSkydeckFormat({ model: 'opus' }));
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /rewritten/);
+  });
+
+  test('no settings file: no extra line and no backup to name', async (t) => {
+    const d = testPlatform(t);
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /rewritten/);
+  });
+
+  test('an integer a double cannot hold is named; install still goes ahead and the answer decides', async (t) => {
+    const d = testPlatform(t);
+    const text = '{\n  "env": { "BIG_ID": 12345678901234567890 }\n}\n';
+    writeFileSync(settingsFile(d.places), text);
+
+    const no = await run(d.platform, ['install'], { lines: ['n'] });
+
+    assert.equal(no.code, 1);
+    assert.ok(
+      no.stderr.includes(`${announced(backupOf(d), ' and env.BIG_ID would lose digits')}\n`),
+      no.stderr,
+    );
+    assert.equal(readFileSync(settingsFile(d.places), 'utf8'), text);
+    nothingCreated(d);
+
+    const yes = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(yes.code, 0, yes.stderr);
+    assert.equal(readFileSync(backupOf(d), 'utf8'), text, 'the digits are in the backup');
+    assert.match(readFileSync(settingsFile(d.places), 'utf8'), /"BIG_ID": 12345678901234567000/);
+  });
+
+  test('a key with a character a terminal acts on is shown escaped', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"a\\u001b[2Jb": 12345678901234567890}');
+
+    const r = await run(d.platform, ['install'], { lines: ['n'] });
+
+    assert.ok(r.stderr.includes('would lose digits'), r.stderr);
+    assert.ok(!r.stderr.includes('\u001b'), 'no raw escape character reaches the terminal');
+  });
+
+  test('a backup name that is taken: the line names the one that will be used', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(backupOf(d), 'first');
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.stderr.includes(announced(`${backupOf(d)}-2`)), r.stderr);
+    assert.equal(readFileSync(`${backupOf(d)}-2`, 'utf8'), '{"model":"opus"}');
+  });
+
+  test('the backup is named for the moment of the question, even when the answer takes a minute', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+    // Every look at the clock is a minute later than the one before.
+    let now = T0;
+    const clock = { ...d.clock, nowNs: () => (now += 60n * SEC) };
+
+    const r = await run({ ...d.platform, clock }, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    const [made] = backups(d.places);
+    assert.ok(made !== undefined && backups(d.places).length === 1, String(backups(d.places)));
+    assert.ok(r.stderr.includes(announced(made)), r.stderr);
+  });
+});
+
 describe('install: the first-run offer', () => {
   const OLD = T0 - 10n * NS_PER_DAY;
   const RECENT = T0 - 2n * NS_PER_DAY;

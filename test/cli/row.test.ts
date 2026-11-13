@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { formatChip, formatPrLine, formatPrStatus, formatRow } from '../../src/cli/row.ts';
+import {
+  formatChip,
+  formatNoteLines,
+  formatPrLine,
+  formatPrStatus,
+  formatRow,
+  stateDetailSuffix,
+} from '../../src/cli/row.ts';
 import { NS_PER_DAY, NS_PER_MINUTE } from '../../src/platform/time.ts';
 import type { PrView } from '../../src/sessions/list.ts';
 import { S1, T0 } from '../helpers/platform.ts';
@@ -245,4 +252,39 @@ test('formatPrLine is the url, two spaces and formatPrStatus', () => {
     const view = pr({ level, okAtNs: T0, error: level === 'cant-read' ? 'x' : null });
     assert.equal(formatPrLine(view), `${view.url}  ${formatPrStatus(view)}`, level);
   }
+});
+
+// --- formatNoteLines -------------------------------------------------------------------------------
+
+test('formatNoteLines: every line break is one, a lone carriage return too; lines are indented by two spaces', () => {
+  assert.deepEqual(formatNoteLines('a\nb'), ['  a', '  b']);
+  assert.deepEqual(formatNoteLines('a\r\nb'), ['  a', '  b']);
+  assert.deepEqual(formatNoteLines('a\rb'), ['  a', '  b']);
+  assert.deepEqual(formatNoteLines('a\r\rb'), ['  a', '', '  b']);
+});
+
+test('formatNoteLines: each line is sanitised on its own', () => {
+  const note =
+    'one \x1b[31mred\x1b[0m\ntwo\twith tab\x07\r\nthree \x1b]8;;http://x\x07link\x1b]8;;\x07';
+  assert.deepEqual(formatNoteLines(note), ['  one red', '  two with tab', '  three link']);
+});
+
+test('formatNoteLines: an empty line inside stays empty, without trailing spaces; those at the edges go', () => {
+  assert.deepEqual(formatNoteLines('a\n\nb'), ['  a', '', '  b']);
+  assert.deepEqual(formatNoteLines('a\n  \nb'), ['  a', '', '  b']);
+  assert.deepEqual(formatNoteLines('\n\x1b[0m\n\na\nb\n\n'), ['  a', '  b']);
+});
+
+test('formatNoteLines: a note that is nothing once sanitised has no lines', () => {
+  assert.deepEqual(formatNoteLines(''), []);
+  assert.deepEqual(formatNoteLines('\x1b[2J\n\x07'), []);
+});
+
+// --- stateDetailSuffix -----------------------------------------------------------------------------
+
+test('stateDetailSuffix: the detail in brackets after a space; nothing for none or for nothing', () => {
+  assert.equal(stateDetailSuffix('tool: Bash'), ' (tool: Bash)');
+  assert.equal(stateDetailSuffix(null), '');
+  assert.equal(stateDetailSuffix(''), '');
+  assert.equal(stateDetailSuffix('  '), '');
 });

@@ -10,16 +10,17 @@
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 
-import { addHookEntries, hookEntry, settingsPath } from '../../claude/settings.ts';
-import type { SettingsEdit } from '../../claude/settings.ts';
+import { addHookEntries, hookEntry, rewriteReport, settingsPath } from '../../claude/settings.ts';
+import type { RewriteReport, SettingsEdit } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import type { Places } from '../../platform/paths.ts';
-import { NS_PER_DAY, isoFromNs } from '../../platform/time.ts';
+import { NS_PER_DAY } from '../../platform/time.ts';
 import type { Files, Platform } from '../../platform/types.ts';
 import type { Deck } from '../../sessions/deck.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import { isListed } from '../../sessions/list.ts';
 import { loadRows } from '../../sessions/load.ts';
+import { markDone } from '../../sessions/meta.ts';
 import { describeError } from '../../sessions/problems.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { parseCommandArgs } from '../args.ts';
@@ -29,6 +30,7 @@ import type { Context } from '../context.ts';
 import { refreshWithProgress, withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 import { jsonText } from '../json.ts';
+import { backupBase, createBackup, nextBackupName } from '../settings-backup.ts';
 
 const SPEC: ArgSpec = {
   usage:
@@ -45,10 +47,6 @@ const SPEC: ArgSpec = {
 
 /** kv settings_backup when there was no settings file: uninstall then removes the file. */
 const NO_FILE = 'none';
-/** Backups made in one second take `-2`, `-3`, …; this many is more than any real use makes. */
-const MAX_BACKUPS_PER_SECOND = 1000;
-/** The settings file can hold tokens: its backup is the user's alone, from the start. */
-const BACKUP_MODE = 0o600;
 
 interface Link {
   path: string;
@@ -61,6 +59,14 @@ interface Prepared {
   /** The settings file's text when it was read (and shown), null when there was none. */
   text: string | null;
   edit: SettingsEdit;
+  /** What writing the file back would change besides the entries; null when there is no file. */
+  rewrite: RewriteReport | null;
+  /**
+   * The name of the backup, without `-2`, `-3`, …: made when the question is asked, so that the
+   * path the question names is the one the backup gets however long the answer takes. null when
+   * there is no file to keep.
+   */
+  backupBase: string | null;
   links: Link[];
 }
 
@@ -133,7 +139,14 @@ function prepare(platform: Platform, places: Places): Prepared {
       `Claude Code's directory ${places.claudeHome} does not exist; run claude once, or set claudeHome`,
     );
   }
-  return { settingsPath: path, text, edit: addHookEntries(text, places.hookPath), links };
+  return {
+    settingsPath: path,
+    text,
+    edit: addHookEntries(text, places.hookPath),
+    rewrite: text === null ? null : rewriteReport(text),
+    backupBase: text === null ? null : backupBase(path, platform.clock),
+    links,
+  };
 }
 
 /** Something at a link path that is not a symbolic link is not skydeck's: it is never replaced. */
@@ -157,13 +170,34 @@ function readSettings(files: Files, path: string): string | null {
 /**
  * The exact groups that will be appended, by event. jsonText escapes, rather than drops, any
  * character of the path a terminal would act on, so what is shown is what is written.
+ *
+ * The file does not go back as it was, only with the entries added: it is parsed and written in
+ * skydeck's formatting. When that would change more than the entries, one more line says so and
+ * names the backup (ruled by the plan owner; no refusal: Claude Code rewrites the file in the same
+ * formatting whenever it saves a setting). A number that would lose digits is the one case where
+ * content, not formatting, changes: its key is named.
  */
 function showChange(ctx: Context, hookPath: string, prepared: Prepared): void {
+  const { files } = ctx.platform;
   const added = Object.fromEntries(
     prepared.edit.events.map((event) => [event, [hookEntry(hookPath, event)]]),
   );
   ctx.io.stderr(`skydeck will add these hook entries to ${sanitize(prepared.settingsPath)}:\n`);
   ctx.io.stderr(jsonText(added));
+  const { rewrite, backupBase: base } = prepared;
+  if (rewrite?.reformatted === true && base !== null) {
+    const lost =
+      rewrite.lossyPaths.length === 0
+        ? ''
+        : ` and ${rewrite.lossyPaths.join(', ')} would lose digits`;
+    const backup = nextBackupName(files, prepared.settingsPath, base);
+    ctx.io.stderr(
+      sanitize(
+        `the rest of the file will be rewritten in skydeck's formatting${lost}; ` +
+          `the file as it is now is kept in ${backup}`,
+      ) + '\n',
+    );
+  }
 }
 
 /**
@@ -211,7 +245,10 @@ function writeSettings(ctx: Context, deck: Deck, prepared: Prepared): void {
   const { files } = deck.platform;
   const { settingsPath: path, text, edit } = prepared;
   requireUnchanged(files, prepared);
-  const backup = backUp(deck, path, text);
+  const backup =
+    text === null || prepared.backupBase === null
+      ? NO_FILE
+      : createBackup(files, path, prepared.backupBase, text);
   try {
     files.writeText(path, edit.text);
   } catch (error) {
@@ -240,39 +277,6 @@ function writeSettings(ctx: Context, deck: Deck, prepared: Prepared): void {
 }
 
 /**
- * Ruled by the plan owner: every install that changes the file first keeps what is there in a new
- * file `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC, the platform clock; `-2`, `-3`, …
- * when that name is taken), created with mode 600 from the start. An older backup is never touched
- * or reused: restoring it could undo what the user changed since. Returns what uninstall may
- * restore: the new backup's path, or NO_FILE when there was no file.
- */
-function backUp(deck: Deck, path: string, text: string | null): string {
-  if (text === null) {
-    return NO_FILE;
-  }
-  const { files, clock } = deck.platform;
-  const stamp = isoFromNs(clock.nowNs())
-    .replace(/\.\d+Z$/, 'Z')
-    .replace(/[-:]/g, '');
-  const base = `${path}.skydeck-backup-${stamp}`;
-  for (let n = 1; n <= MAX_BACKUPS_PER_SECOND; n++) {
-    const backup = n === 1 ? base : `${base}-${n}`;
-    let created: boolean;
-    try {
-      created = files.createExclusive(backup, text, BACKUP_MODE);
-    } catch (error) {
-      throw new SkydeckError(
-        `cannot write a backup of ${path} (${describeError(error)}); it was not changed`,
-      );
-    }
-    if (created) {
-      return backup;
-    }
-  }
-  throw new SkydeckError(`cannot find a free name for a backup of ${path}; it was not changed`);
-}
-
-/**
  * Design 7.1 "First run", once (D20): the listed sessions that are not running and whose last
  * activity is older than firstRunDoneAfterDays may be marked as done. Nothing changes without a yes.
  */
@@ -297,7 +301,7 @@ async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
   store.transaction(() => {
     if (mark) {
       for (const row of old) {
-        store.updateMeta(row.id, { doneAtNs: now }, now);
+        markDone(deck, row.id);
       }
     }
     store.setKv('first_run_offered', '1');

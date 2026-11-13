@@ -166,6 +166,14 @@ test('sessionJson: dir is the empty string when the directory is not known; labe
   assert.deepEqual(json.prs, []);
 });
 
+test('sessionJson: dir is the directory as stored, not the sanitised text the row shows', () => {
+  const raw = '/home/dev/pro\u0007jects/a\u009bb';
+  const row = listRow({ id: S1, dir: '/home/dev/projects/ab', session: ds({ id: S1, dir: raw }) });
+
+  assert.equal(sessionJson(row).dir, raw);
+  assert.equal(showJson(row, []).dir, raw);
+});
+
 test('sessionJson does not hand out the row own marks array', () => {
   const row = listRow({ id: S1, marks: ['was-working'] });
   const json = sessionJson(row);
@@ -607,6 +615,17 @@ test('formatShow: lines that are nothing once sanitised leave no empty line befo
   assert.ok(before.endsWith('\nnote:\n  a\n'), JSON.stringify(before));
 });
 
+test('formatShow: a lone carriage return is a line break', () => {
+  const text = showText(listRow({ id: S1, hasNote: true, note: 'a\rb' }));
+  assert.ok(text.endsWith('\nnote:\n  a\n  b\n'), JSON.stringify(text));
+});
+
+test('formatShow: a state detail that is nothing once sanitised has no brackets', () => {
+  const text = showText(listRow({ id: S1, state: 'waiting', stateDetail: '' }));
+  assert.match(text, /^state: {5}waiting since /m);
+  assert.doesNotMatch(text, /\(\)/);
+});
+
 test('formatShow: an empty line inside a note stays empty, without trailing spaces', () => {
   const text = showText(listRow({ id: S1, hasNote: true, note: 'a\n\nb' }));
   assert.ok(text.endsWith('\nnote:\n  a\n\n  b\n'), JSON.stringify(text));
@@ -618,7 +637,7 @@ test('formatShow: a note is sanitised line by line, and its line breaks are kept
   const text = showText(listRow({ id: S1, hasNote: true, note }));
   assert.ok(!/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(text), JSON.stringify(text));
   assert.ok(
-    text.endsWith('\nnote:\n  one red\n  two with tab \n  three link\n'),
+    text.endsWith('\nnote:\n  one red\n  two with tab\n  three link\n'),
     JSON.stringify(text),
   );
 });

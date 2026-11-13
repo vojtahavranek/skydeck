@@ -8,7 +8,12 @@ import { testContext } from '../../helpers/context.ts';
 import { testDeck } from '../../helpers/deck.ts';
 import { S1, S2, SEC, T0, fakeRunner, runResult } from '../../helpers/platform.ts';
 import type { RunCall } from '../../helpers/platform.ts';
-import { twoSessions, withRunner } from '../../helpers/session-files.ts';
+import {
+  twoSessions,
+  userRecord,
+  withRunner,
+  writeTranscript,
+} from '../../helpers/session-files.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
 
 const USAGE = 'skydeck ls [--all] [--json] [--refresh]\n';
@@ -143,6 +148,17 @@ test('ls cuts a row to the width of the terminal, less the indent', async (t) =>
   assert.ok(row.startsWith('  not-running a label'), row);
   assert.ok(row.includes('…'), row);
   assert.ok(row.endsWith('  0b5f3c1e'), row);
+});
+
+test('ls --json carries the directory as it is, and still prints nothing a terminal acts on', async (t) => {
+  const d = testDeck(t);
+  const dir = '/home/dev/pro\u0007jects/a\u009bb';
+  writeTranscript(d, S1, [{ ...userRecord(S1, T0 - 30n * SEC), cwd: dir }]);
+
+  assert.equal(await main(['ls', '--json'], d.ctx), 0);
+
+  assert.equal((JSON.parse(d.stdout()) as { sessions: { dir: string }[] }).sessions[0]?.dir, dir);
+  assert.doesNotMatch(d.stdout(), /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
 });
 
 test('ls --json lists the sessions in list order with the stable keys', async (t) => {

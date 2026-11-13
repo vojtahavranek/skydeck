@@ -117,12 +117,8 @@ describe('editNote', () => {
     assert.equal(noteOf(d), null);
   });
 
-  test('a non-zero exit is "editor exited <code>": the note is unchanged and the file is gone', async (t) => {
-    const { d, ctx, deck } = withEditor(t, {
-      env: { EDITOR: 'ed' },
-      code: 3,
-      edit: (path) => writeFileSync(path, 'half done'),
-    });
+  test('a non-zero exit is "editor exited <code>": the note is unchanged and the file this edit made is gone', async (t) => {
+    const { d, ctx, deck } = withEditor(t, { env: { EDITOR: 'ed' }, code: 3 });
     setNote(d.deck, S1, 'old');
 
     await assert.rejects(
@@ -136,6 +132,72 @@ describe('editNote', () => {
 
     assert.equal(noteOf(d), 'old');
     assert.equal(existsSync(join(d.places.stateDir, `note-${S1}.md`)), false);
+  });
+
+  test('an editor that changed the file and then failed leaves the text in it: it was never stored', async (t) => {
+    const { d, ctx, deck } = withEditor(t, {
+      env: { EDITOR: 'ed' },
+      code: 3,
+      edit: (path) => writeFileSync(path, 'ten minutes of careful typing'),
+    });
+    setNote(d.deck, S1, 'old');
+    const file = join(d.places.stateDir, `note-${S1}.md`);
+
+    await assert.rejects(
+      editNote(ctx, deck, S1),
+      (error: unknown) =>
+        error instanceof SkydeckError &&
+        error.exitCode === 1 &&
+        error.message === `editor exited 3; your text is in ${file}`,
+    );
+
+    assert.equal(readFileSync(file, 'utf8'), 'ten minutes of careful typing');
+    assert.equal(noteOf(d), 'old');
+  });
+
+  test('a file left by an earlier edit that the editor then changed and failed on is named too', async (t) => {
+    const { d, ctx, deck } = withEditor(t, {
+      env: { EDITOR: 'ed' },
+      code: 1,
+      edit: (path) => writeFileSync(path, 'left behind, and more'),
+    });
+    const file = join(d.places.stateDir, `note-${S1}.md`);
+    writeFileSync(file, 'left behind');
+
+    await assert.rejects(
+      editNote(ctx, deck, S1),
+      (error: unknown) =>
+        error instanceof SkydeckError &&
+        error.message === `editor exited 1; your text is in ${file}`,
+    );
+
+    assert.equal(readFileSync(file, 'utf8'), 'left behind, and more');
+  });
+
+  test('an editor that could not be run names the file only when it holds text from before', async (t) => {
+    const { d, ctx, deck } = withEditor(t, { env: { EDITOR: 'ed' }, code: null });
+    const file = join(d.places.stateDir, `note-${S1}.md`);
+    writeFileSync(file, 'left behind');
+
+    await assert.rejects(
+      editNote(ctx, deck, S1),
+      (error: unknown) => error instanceof SkydeckError && !error.message.includes(file),
+    );
+    assert.equal(readFileSync(file, 'utf8'), 'left behind');
+  });
+
+  test('a note that was set elsewhere while the editor ran does not make an untouched file worth keeping', async (t) => {
+    const { d, ctx, deck } = withEditor(t, {
+      env: { EDITOR: 'ed' },
+      code: 1,
+      edit: () => setNote(d.deck, S1, 'set meanwhile'),
+    });
+    setNote(d.deck, S1, 'old');
+
+    await assert.rejects(editNote(ctx, deck, S1), /^SkydeckError: editor exited 1$/);
+
+    assert.equal(existsSync(join(d.places.stateDir, `note-${S1}.md`)), false);
+    assert.equal(noteOf(d), 'set meanwhile');
   });
 
   test('an editor that could not be started, or was killed, is a failure too, and the note is unchanged', async (t) => {
@@ -219,7 +281,7 @@ describe('editNote', () => {
     );
   });
 
-  test('a file left by an earlier edit is continued; quitting the editor with a failure discards it', async (t) => {
+  test('a file left by an earlier edit is continued; an editor that fails does not delete it', async (t) => {
     const { d, ctx, deck, startedWith } = withEditor(t, { env: { EDITOR: 'ed' }, code: 1 });
     const file = join(d.places.stateDir, `note-${S1}.md`);
     writeFileSync(file, 'left behind');
@@ -227,8 +289,38 @@ describe('editNote', () => {
     await assert.rejects(editNote(ctx, deck, S1), /^SkydeckError: editor exited 1$/);
 
     assert.deepEqual(startedWith, ['left behind']);
-    assert.equal(existsSync(file), false);
+    assert.equal(readFileSync(file, 'utf8'), 'left behind');
+    assert.equal(noteOf(d), undefined, 'the text was never stored');
     assert.match(d.stderr(), /^skydeck: an earlier edit of this note was not saved; continuing/);
+  });
+
+  for (const [why, options] of [
+    ['could not be run or was killed', { code: null }],
+    [
+      'cannot be run at all',
+      { spawnError: Object.assign(new Error('spawn ed EACCES'), { code: 'EACCES' }) },
+    ],
+  ] as const) {
+    test(`a file left by an earlier edit stays when the editor ${why}`, async (t) => {
+      const { d, ctx, deck } = withEditor(t, { env: { EDITOR: 'ed' }, ...options });
+      const file = join(d.places.stateDir, `note-${S1}.md`);
+      writeFileSync(file, 'left behind');
+
+      await assert.rejects(editNote(ctx, deck, S1), SkydeckError);
+
+      assert.equal(readFileSync(file, 'utf8'), 'left behind');
+    });
+  }
+
+  test("a file left by an earlier edit that holds the stored text is not the edit's own: it stays", async (t) => {
+    const { d, ctx, deck } = withEditor(t, { env: { EDITOR: 'ed' }, code: 1 });
+    setNote(d.deck, S1, 'stored');
+    const file = join(d.places.stateDir, `note-${S1}.md`);
+    writeFileSync(file, 'stored');
+
+    await assert.rejects(editNote(ctx, deck, S1), SkydeckError);
+
+    assert.equal(readFileSync(file, 'utf8'), 'stored');
   });
 
   test('with no file left, nothing is said and the editor sees the stored note', async (t) => {
