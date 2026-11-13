@@ -178,6 +178,10 @@ export function listKey(e) {
  *   outside the table (Enter in the find bar). While a text field of the page has the keyboard
  *   (the filter, the new form) the caller passes false for the keys it leaves to the field, so
  *   that `j` or `/` type there. A key xterm.js sends is cancelled by xterm.js, not by the page.
+ * - In the terminal zone F5, Shift+F5, Ctrl+F5 and Ctrl+R go to the program only while xterm.js
+ *   has the keyboard; while something of the page has it (the find bar, the New form, a card, the
+ *   ended bar) the caller takes them as the page's reload (`listKey` gives `reload` in any zone)
+ *   and passes `handled = true`.
  * @param {KeyLike} e
  * @param {Zone} zone
  * @param {boolean} handled whether the page acted on the key

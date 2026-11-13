@@ -403,6 +403,23 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
     assert.equal(cancels(ev('F5', 'F5', 'shift'), 'terminal', false), false);
   });
 
+  // Ruled 2026-11-13: in the terminal zone the reload keys go to the program only while xterm.js
+  // has the keyboard; while something of the page has it (the find bar, the New form, a card, the
+  // ended bar) app.js takes them as the page's reload — listKey classifies them in any zone — and
+  // passes handled = true.
+  test('terminal zone, the keyboard not with xterm.js: the reload keys are the page’s', () => {
+    for (const e of [
+      ev('F5', 'F5'),
+      ev('F5', 'F5', 'shift'),
+      ev('F5', 'F5', 'ctrl'),
+      ev('r', 'KeyR', 'ctrl'),
+    ]) {
+      const name = `${e.ctrlKey ? 'Ctrl+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.key}`;
+      assert.deepEqual(listKey(e), { kind: 'reload' }, name);
+      assert.equal(cancels(e, 'terminal', true), true, name);
+    }
+  });
+
   test('BrowserRefresh, alone, with Shift or with Ctrl, in both zones', () => {
     for (const zone of ZONES) {
       for (const mods of [[], ['shift'], ['ctrl']] as Mod[][]) {
