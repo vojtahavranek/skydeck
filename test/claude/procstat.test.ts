@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { argvFromCmdline, parentPidFromStat, procStartFromStat } from '../../src/claude/procstat.ts';
+import {
+  argvFromCmdline,
+  parentPidFromStat,
+  procStartFromStat,
+} from '../../src/claude/procstat.ts';
 import { statLine } from '../helpers/platform.ts';
 
 const TAIL = '4194304 1 0 0 0 1 0 0 0 20 0 11 0';

@@ -22,7 +22,10 @@ test('serverEnvironment drops entries whose value is undefined', () => {
 });
 
 test('serverEnvironment keeps a variable whatever its name, __proto__ included', () => {
-  const input: Record<string, string> = Object.fromEntries([['__proto__', 'x'], ['A', 'b']]);
+  const input: Record<string, string> = Object.fromEntries([
+    ['__proto__', 'x'],
+    ['A', 'b'],
+  ]);
   const { env } = serverEnvironment(input);
   assert.deepEqual(Object.entries(env), [
     ['__proto__', 'x'],
@@ -84,7 +87,10 @@ test('serverEnvironment takes SKYDECK_CORE_SOFT out and returns it: 0', () => {
 });
 
 test('serverEnvironment takes SKYDECK_CORE_SOFT out and returns it: a number of bytes', () => {
-  assert.equal(serverEnvironment({ SKYDECK_CORE_SOFT: '18446744073709551614' }).coreSoft, '18446744073709551614');
+  assert.equal(
+    serverEnvironment({ SKYDECK_CORE_SOFT: '18446744073709551614' }).coreSoft,
+    '18446744073709551614',
+  );
 });
 
 test('serverEnvironment gives coreSoft null when SKYDECK_CORE_SOFT is absent', () => {

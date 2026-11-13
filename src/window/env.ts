@@ -83,8 +83,7 @@ export function serverEnvironment(env: Env): {
 
 function isTerminalVariable(name: string): boolean {
   return (
-    TERMINAL_VARIABLES.includes(name) ||
-    TERMINAL_PREFIXES.some((prefix) => name.startsWith(prefix))
+    TERMINAL_VARIABLES.includes(name) || TERMINAL_PREFIXES.some((prefix) => name.startsWith(prefix))
   );
 }
 

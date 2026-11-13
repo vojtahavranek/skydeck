@@ -44,7 +44,9 @@ function isReadableFolder(files: Files, path: string): boolean {
 }
 
 /** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
-export function deriveProfileDir(files: Files): { ok: true; dir: string } | { ok: false; error: string } {
+export function deriveProfileDir(
+  files: Files,
+): { ok: true; dir: string } | { ok: false; error: string } {
   return deriveProfileDirUnder(files, USERS);
 }
 

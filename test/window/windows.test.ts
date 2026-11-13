@@ -166,24 +166,20 @@ test('deriveProfileDir: a link to nothing does not count', (t) => {
   });
 });
 
-test(
-  'deriveProfileDir: an unreadable Edge folder does not count',
-  { skip: isRoot },
-  (t) => {
-    const { files, root } = usersRoot(t);
-    withEdge(root, 'me');
-    const closed = withEdge(root, 'other');
-    chmodSync(closed, 0o000);
-    try {
-      assert.deepEqual(deriveProfileDirUnder(files, root), {
-        ok: true,
-        dir: 'C:\\Users\\me\\AppData\\Local\\skydeck\\edge-profile',
-      });
-    } finally {
-      chmodSync(closed, 0o700); // the sandbox cannot remove it otherwise
-    }
-  },
-);
+test('deriveProfileDir: an unreadable Edge folder does not count', { skip: isRoot }, (t) => {
+  const { files, root } = usersRoot(t);
+  withEdge(root, 'me');
+  const closed = withEdge(root, 'other');
+  chmodSync(closed, 0o000);
+  try {
+    assert.deepEqual(deriveProfileDirUnder(files, root), {
+      ok: true,
+      dir: 'C:\\Users\\me\\AppData\\Local\\skydeck\\edge-profile',
+    });
+  } finally {
+    chmodSync(closed, 0o700); // the sandbox cannot remove it otherwise
+  }
+});
 
 test(
   "deriveProfileDir: another user's folder that cannot be entered does not count",
