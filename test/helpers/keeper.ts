@@ -5,7 +5,7 @@
  * through `killKeepersIn` (A34), before the sandbox is removed.
  */
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -278,6 +278,11 @@ export interface StartOptions {
   rawSpec?: string;
   /** Wait for the socket and the pid line (default true). */
   waitReady?: boolean;
+  /**
+   * Modules (name → python source) put before the standard library's, to make the keeper fail
+   * where no input can: the keeper then runs without -I, with PYTHONPATH naming them.
+   */
+  faults?: Record<string, string>;
 }
 
 export interface KeeperBox {
@@ -381,9 +386,21 @@ export function keeperSandbox(t: TestContext): KeeperBox {
 
   const start = async (options: StartOptions = {}): Promise<Keeper> => {
     const keeperSpec = spec(options.spec);
-    const child = await tp.platform.processes.startDetached('python3', ['-I', KEEPER], {
+    let args = ['-I', KEEPER];
+    let env = s.env(options.env);
+    if (options.faults !== undefined) {
+      // Without -I, so that PYTHONPATH puts these modules before the standard library's.
+      const faults = join(s.root, `faults-${keeperSpec.id}`);
+      mkdirSync(faults);
+      for (const [name, source] of Object.entries(options.faults)) {
+        writeFileSync(join(faults, `${name}.py`), source);
+      }
+      args = ['-s', KEEPER];
+      env = { ...env, PYTHONPATH: faults };
+    }
+    const child = await tp.platform.processes.startDetached('python3', args, {
       cwd: '/',
-      env: s.env(options.env),
+      env,
       input: options.rawSpec ?? JSON.stringify(keeperSpec),
       stderrTo: keepersLog,
     });

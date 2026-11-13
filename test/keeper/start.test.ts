@@ -170,13 +170,8 @@ describe('keeper: what starts the program', { concurrency: true }, () => {
 });
 
 describe('keeper: the process', { concurrency: true }, () => {
-  test('the keeper is not dumpable; its program is, with the spec core limit', async (t) => {
+  test('the keeper is not dumpable; its program is', async (t) => {
     const box = keeperSandbox(t);
-    const { hard } = coreLimits('self');
-    if (hard === '0') {
-      t.skip('the hard core limit is 0 here: no soft limit can be given to the program');
-      return;
-    }
     const k = await box.start();
     // Non-dumpable: the kernel gives its /proc files to root (there is no Dumpable line in
     // status on this kernel), so this process, the same user, cannot open its environ.
@@ -191,7 +186,19 @@ describe('keeper: the process', { concurrency: true }, () => {
     const uid = process.getuid?.();
     assert.equal(statSync(`/proc/${t1.pid}/status`).uid, uid);
     assert.ok(readFileSync(`/proc/${t1.pid}/environ`).length > 0);
-    // The program's soft core limit is the spec's, not the keeper's own.
+  });
+
+  test('the program gets the spec soft core limit, not the keeper’s', async (t) => {
+    const box = keeperSandbox(t);
+    if (coreLimits('self').hard === '0') {
+      t.skip('the hard core limit is 0 here: no soft limit can be given to the program');
+      return;
+    }
+    const k = await box.start();
+    const { client } = await k.claim();
+    client.send('G');
+    await client.next('T');
+    const start = await waitForRecord(k.record, (r): r is StartRecord => r.ev === 'start', 5000);
     assert.equal(start.coreSoft, k.spec.coreSoft);
     assert.notEqual(coreLimits(k.pid).soft, k.spec.coreSoft, 'the keeper has another limit');
   });

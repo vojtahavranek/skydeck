@@ -2,7 +2,8 @@
 // linger, a killed keeper ending its program, and errors logged by kind only. Real python3, the
 // stand-in as the program, in a sandbox (realTestPlatform).
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 import { encodeFrame, encodeSnapshot } from '../../src/window/frames.ts';
@@ -135,6 +136,31 @@ describe('keeper: ending', { concurrency: true }, () => {
     await gone(k);
   });
 
+  test('never started and never connected to: it ends after the linger from the deadline', async (t) => {
+    const box = keeperSandbox(t);
+    const now = box.tp.platform.clock.nowNs();
+    const k = await box.start({
+      spec: { startBy: String(now + 1_000_000_000n) },
+      env: { SKYDECK_TEST_KEEPER_LINGER_SECONDS: '1' },
+    });
+    await sleep(1500);
+    assert.equal(k.hasExited(), false, 'the linger starts at the deadline');
+    await gone(k);
+  });
+
+  test('a program that ends while no server is connected: it ends after the linger', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start({
+      spec: { argv: ['sh', '-c', 'sleep 0.5'] },
+      env: { SKYDECK_TEST_KEEPER_LINGER_SECONDS: '1' },
+    });
+    const { client } = await k.claim();
+    client.send('G');
+    await client.next('T');
+    client.socket.end();
+    await gone(k);
+  });
+
   test('a claim during the linger holds it; it ends after the linger once that one is gone', async (t) => {
     const box = keeperSandbox(t);
     const k = await box.start({ env: { SKYDECK_TEST_KEEPER_LINGER_SECONDS: '2' } });
@@ -167,7 +193,7 @@ describe('keeper: ending', { concurrency: true }, () => {
 
 describe('keeper: what reaches its log', { concurrency: true }, () => {
   const MARKER = 'MARKER-6d1f2a90';
-  const LINE = /^keeper (?:[0-9a-f]{12}|-): [a-z][a-z-]*$/;
+  const LINE = /^keeper (?:[0-9a-f]{12}|-): [A-Za-z][A-Za-z-]*$/;
 
   function checkLog(path: string): string[] {
     const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
@@ -213,11 +239,88 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
     bad.set(park);
     bad[park.length] = 0xff; // not UTF-8
     client.sendRaw(encodeFrame('P', bad));
-    await client.closed;
+    await within(client.closed, 'the connection closed');
     assert.deepEqual(checkLog(box.keepersLog), [`keeper ${k.spec.id}: bad-park`]);
     const { client: again } = await k.claim();
     again.send('I', `${MARKER}\r`);
     await again.waitForOutput(MARKER);
     assert.equal(checkLog(box.keepersLog).length, 1, 'input is never logged');
+  });
+
+  const badMeta: [string, Record<string, unknown>][] = [
+    ['a session id that is not one', { sessionId: MARKER }],
+    ['a kind that is neither resume nor new', { kind: MARKER }],
+    ['a slot above 9', { slot: 10 }],
+    ['a slot that is not a whole number', { slot: '3' }],
+    ['no slot', { slot: undefined }],
+    ['no label', { label: undefined }],
+    ['a label that is not text', { label: 7 }],
+    ['an openedNs with a leading zero', { openedNs: '01' }],
+    ['a build that is not text', { build: null }],
+    ['no dir', { dir: undefined }],
+  ];
+  for (const [what, change] of badMeta) {
+    test(`meta with ${what}: refused as a bad spec, so no hello the codec refuses`, async (t) => {
+      const box = keeperSandbox(t);
+      const spec = box.spec();
+      const meta = { ...spec.meta, ...change };
+      const k = await box.start({ rawSpec: JSON.stringify({ ...spec, meta }), waitReady: false });
+      const end = await within(k.exited, 'the keeper ended');
+      assert.notEqual(end.code, 0);
+      assert.deepEqual(checkLog(box.keepersLog), [`keeper ${spec.id}: bad-spec`]);
+      assert.equal(existsSync(spec.socket), false);
+    });
+  }
+
+  for (const [what, name] of [
+    ['a NUL', `x\u0000${MARKER}`],
+    ['a lone surrogate', `x\ud800${MARKER}`],
+  ] as const) {
+    test(`a socket path with ${what}: refused as a bad spec`, async (t) => {
+      const box = keeperSandbox(t);
+      const spec = box.spec();
+      const socket = join(box.termsDir, name);
+      const k = await box.start({ rawSpec: JSON.stringify({ ...spec, socket }), waitReady: false });
+      await within(k.exited, 'the keeper ended');
+      assert.deepEqual(checkLog(box.keepersLog), [`keeper ${spec.id}: bad-spec`]);
+      assert.deepEqual(readdirSync(box.termsDir), [], 'no socket under a shortened name');
+    });
+  }
+
+  test('an error no check foresaw, quoting the spec: only its class name', async (t) => {
+    const box = keeperSandbox(t);
+    // A json module that fails with the spec in its message, as a parser's error can.
+    const json = [
+      'def loads(data):',
+      '    raise TypeError("cannot read %r" % (data,))',
+      'def dumps(value, **options):',
+      '    raise TypeError("cannot write %r" % (value,))',
+      '',
+    ].join('\n');
+    const spec = box.spec({ argv: [MARKER] });
+    const k = await box.start({ spec, faults: { json }, waitReady: false });
+    const end = await within(k.exited, 'the keeper ended');
+    assert.notEqual(end.code, 0);
+    assert.deepEqual(checkLog(box.keepersLog), ['keeper -: TypeError']);
+  });
+
+  test('an error no check foresaw, quoting a frame: only its class name', async (t) => {
+    const box = keeperSandbox(t);
+    // The real struct module, but unpacking bytes that hold the marker fails with them in the message.
+    const struct = [
+      'from _struct import *',
+      'from _struct import unpack as _unpack',
+      'def unpack(fmt, data):',
+      `    if b"${MARKER}"[:6] in bytes(data):`,
+      '        raise TypeError("cannot unpack %r" % (bytes(data),))',
+      '    return _unpack(fmt, data)',
+      '',
+    ].join('\n');
+    const k = await box.start({ faults: { struct } });
+    const { client } = await k.claim();
+    client.send('P', new TextEncoder().encode(`${MARKER}${MARKER}`));
+    const end = await within(k.exited, 'the keeper ended');
+    assert.notEqual(end.code, 0);
+    assert.deepEqual(checkLog(box.keepersLog), [`keeper ${k.spec.id}: TypeError`]);
   });
 });

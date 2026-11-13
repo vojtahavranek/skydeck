@@ -16,6 +16,7 @@ import {
   startProgram,
   typeLine,
   until,
+  within,
 } from '../helpers/keeper.ts';
 import type { KeeperClient } from '../helpers/keeper.ts';
 import { readRecords } from '../helpers/standin.ts';
@@ -174,7 +175,7 @@ describe('keeper: caps', { concurrency: true }, () => {
 
     // What the first connection got stops short of that.
     client.socket.resume();
-    await client.closed;
+    await within(client.closed, 'the connection closed');
     assert.equal(client.output().includes('flood 00050000'), false);
   });
 });

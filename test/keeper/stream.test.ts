@@ -16,8 +16,10 @@ import {
   startProgram,
   typeLine,
   until,
+  within,
 } from '../helpers/keeper.ts';
 import type { KeeperClient } from '../helpers/keeper.ts';
+import type { Frame } from '../../src/window/frames.ts';
 import { readRecords, waitForRecord } from '../helpers/standin.ts';
 
 /** The records a client received, in order. */
@@ -152,7 +154,7 @@ describe('keeper: claims and connections', { concurrency: true }, () => {
     const k = await box.start();
     const { client: first } = await k.claim();
     const { client: second } = await k.claim();
-    await first.closed;
+    await within(first.closed, 'the connection closed');
     second.send('G');
     await second.next('T');
     assert.equal(first.frames.filter((f) => f.type === 'T').length, 0);
@@ -163,7 +165,7 @@ describe('keeper: claims and connections', { concurrency: true }, () => {
     const k = await box.start();
     const rude = await k.connect();
     rude.send('G');
-    await rude.closed;
+    await within(rude.closed, 'the connection closed');
     assert.equal(rude.frames.length, 0);
     const { client, hello } = await k.claim();
     assert.equal(hello.started, false, 'the G of an unclaimed connection did nothing');
@@ -191,7 +193,7 @@ describe('keeper: claims and connections', { concurrency: true }, () => {
       const k = await box.start();
       const { client } = await k.claim();
       client.sendRaw(bytes);
-      await client.closed;
+      await within(client.closed, 'the connection closed');
       const { client: next, hello } = await k.claim();
       assert.equal(hello.started, false);
       assert.equal(hello.exited, null, 'nothing was applied');
@@ -275,3 +277,191 @@ function parkBytes(seq: number, cols: number, rows: number, data: Uint8Array): U
   payload.set(data, 12);
   return payload;
 }
+
+/** The bytes of every D record so far, concatenated. */
+function raw(client: KeeperClient): Buffer {
+  return Buffer.concat(client.frames.filter((f) => f.type === 'D').map((f) => f.payload));
+}
+
+/** The bytes as printf's octal escapes, for a sh program. */
+function octal(bytes: Buffer): string {
+  return [...bytes].map((b) => `\\${b.toString(8).padStart(3, '0')}`).join('');
+}
+
+/** Every D record decodes as UTF-8 on its own: none ends inside a character. */
+function assertWholeCharacters(client: KeeperClient): void {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  for (const frame of client.frames.filter((f) => f.type === 'D')) {
+    assert.doesNotThrow(
+      () => decoder.decode(frame.payload),
+      `record ${Buffer.from(frame.payload).toString('hex')} ends inside a character`,
+    );
+  }
+}
+
+describe('keeper: records end at character boundaries (ruled)', { concurrency: true }, () => {
+  test('a character split across two reads at each of its bytes is one record', async (t) => {
+    const box = keeperSandbox(t);
+    // The program writes the first bytes, waits so that the keeper reads them, then the rest.
+    const steps: string[] = [];
+    let expected = Buffer.alloc(0);
+    for (const char of ['é', '€', '😀']) {
+      const bytes = Buffer.from(char, 'utf8');
+      for (let at = 1; at < bytes.length; at++) {
+        steps.push(`printf 'a${octal(bytes.subarray(0, at))}'`, 'sleep 0.3');
+        steps.push(`printf '${octal(bytes.subarray(at))}b'`);
+        expected = Buffer.concat([expected, Buffer.from(`a${char}b`, 'utf8')]);
+      }
+    }
+    steps.push(`printf '\\n'`);
+    expected = Buffer.concat([expected, Buffer.from('\r\n')]);
+    const k = await box.start({ spec: { argv: ['sh', '-c', steps.join('; ')] } });
+    const { client } = await k.claim();
+    client.send('G');
+    await client.next('X', 10_000);
+    assert.deepEqual(raw(client), expected, 'nothing dropped or reordered');
+    assertWholeCharacters(client);
+  });
+
+  test('bytes that cannot start a character are not held back', async (t) => {
+    const box = keeperSandbox(t);
+    // 0xc0 is never a lead byte; 0xed 0xa0 would be a surrogate.
+    const k = await box.start({
+      spec: {
+        argv: ['sh', '-c', `printf 'x\\300'; sleep 2; printf 'y\\355\\240'; sleep 2; printf 'z'`],
+      },
+    });
+    const { client } = await k.claim();
+    client.send('G');
+    await until(
+      () => raw(client).includes(Buffer.from([0x78, 0xc0])),
+      'x 0xc0 while it sleeps',
+      1500,
+    );
+    assert.equal(raw(client).includes('y'), false);
+    await until(
+      () => raw(client).includes(Buffer.from([0x79, 0xed, 0xa0])),
+      'y 0xed 0xa0 while it sleeps',
+      2500,
+    );
+    assert.equal(raw(client).includes('z'), false);
+    await client.next('X', 10_000);
+    assert.deepEqual(raw(client), Buffer.from([0x78, 0xc0, 0x79, 0xed, 0xa0, 0x7a]));
+  });
+
+  test('held bytes that do not go on as a character are sent as they are, in order', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start({
+      spec: {
+        argv: [
+          'sh',
+          '-c',
+          `printf 'a\\342'; sleep 0.3; printf '(b'; sleep 0.3; printf '\\360\\237'`,
+        ],
+      },
+    });
+    const { client } = await k.claim();
+    client.send('G');
+    await client.next('X', 10_000);
+    // The last two bytes, held when the program ended, come before X.
+    assert.deepEqual(raw(client), Buffer.from([0x61, 0xe2, 0x28, 0x62, 0xf0, 0x9f]));
+    const lastRecord = client.frames.filter((f) => f.type === 'D').at(-1);
+    assert.deepEqual(
+      Buffer.from(lastRecord?.payload ?? []).subarray(-2),
+      Buffer.from([0xf0, 0x9f]),
+    );
+    assert.equal(client.frames.at(-1)?.type, 'X');
+  });
+
+  test('a resize while a character is half read comes after the whole character', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start({
+      spec: { argv: ['sh', '-c', `printf 'a\\342'; sleep 1; printf '\\202\\254b'`] },
+    });
+    const { client } = await k.claim();
+    client.send('G');
+    await until(() => raw(client).includes('a'), 'the first record');
+    await sleep(200);
+    client.send('Z', encodeResize(100, 30));
+    await client.next('X', 10_000);
+    const completes = client.frames.findIndex(
+      (f) => f.type === 'D' && Buffer.from(f.payload).includes(Buffer.from('€', 'utf8')),
+    );
+    const resized = client.frames.findIndex((f) => f.type === 'R');
+    assert.ok(completes !== -1 && resized > completes, 'R after the record that completes €');
+    assert.deepEqual(resize(client.frames[resized] as Frame), { cols: 100, rows: 30 });
+    assert.deepEqual(raw(client), Buffer.from('a€b', 'utf8'));
+    assertWholeCharacters(client);
+  });
+});
+
+describe('keeper: limits on connections and frames (ruled)', { concurrency: true }, () => {
+  test('at most 8 unclaimed connections: a ninth closes the oldest', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const idle: KeeperClient[] = [];
+    for (let i = 0; i < 9; i++) {
+      idle.push(await k.connect());
+      await sleep(50);
+    }
+    await within(idle[0]?.closed ?? Promise.resolve(), 'the oldest unclaimed connection closed');
+    await sleep(300);
+    assert.deepEqual(
+      idle.slice(1).map((c) => c.isClosed()),
+      new Array(8).fill(false),
+    );
+    // One of them can still claim.
+    idle[8]?.send('C');
+    await idle[8]?.next('H');
+  });
+
+  test('a park numbered below the current snapshot closes the connection', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const { client } = await k.claim();
+    client.send('Z', encodeResize(90, 25));
+    client.send('Z', encodeResize(91, 25));
+    await client.next('R');
+    await client.next('R');
+    client.send('P', encodeSnapshot(2, 91, 25, 'two'));
+    client.send('P', encodeSnapshot(1, 90, 25, 'one'));
+    await within(client.closed, 'the connection closed');
+    assert.deepEqual(box.logLines(), [`keeper ${k.spec.id}: bad-park`]);
+    const { client: next, hello } = await k.claim();
+    assert.equal(hello.snapSeq, 2);
+    assert.equal(snapshot(await next.next('S')).data, 'two');
+  });
+
+  test('an input frame larger than the 4 MiB queue closes the connection', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const { client } = await startProgram(k);
+    client.send('I', new Uint8Array(4 * 1024 * 1024 + 1).fill(0x61));
+    await within(client.closed, 'the connection closed');
+    assert.deepEqual(box.logLines(), [`keeper ${k.spec.id}: input-too-long`]);
+    const { client: next } = await k.claim();
+    await typeLine(next, 'still here');
+    assert.equal(
+      readRecords(k.record).some((r) => r.ev === 'input' && r.hex.startsWith('6161616161')),
+      false,
+      'nothing of it reached the program',
+    );
+  });
+
+  test('an input frame of exactly 4 MiB is taken whole', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const { client } = await startProgram(k);
+    client.send('I', '/stall 2\r');
+    await client.waitForOutput('stalling 2 s');
+    client.send('I', new Uint8Array(4 * 1024 * 1024).fill(0x61));
+    client.send('I', 'z');
+    await until(() => raw(client).includes('z'), 'the echo of the last byte', 30_000);
+    const total = readRecords(k.record).reduce(
+      (sum, r) => sum + (r.ev === 'input' ? r.hex.length / 2 : 0),
+      0,
+    );
+    assert.equal(total, '/stall 2\r'.length + 4 * 1024 * 1024 + 1);
+    assert.equal(client.isClosed(), false);
+  });
+});
