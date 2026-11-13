@@ -122,6 +122,36 @@ describe('uninstall', () => {
     );
   });
 
+  test("a user's own hooks that only name the hook path survive; skydeck's two entries go", async (t) => {
+    const d = testPlatform(t);
+    await installed(d, '{"model":"opus"}');
+    // What the user adds to the file afterwards (so that uninstall cannot restore the backup).
+    const notify = { type: 'command', command: `${d.places.hookPath}-notify.sh` };
+    const mention = { type: 'command', command: `echo see '${d.places.hookPath}' >>/tmp/log` };
+    const older = hookEntry(join(d.sandbox.root, 'old-checkout', 'skydeck-hook'), 'SessionEnd');
+    const settings = JSON.parse(readFileSync(settingsFile(d.places), 'utf8')) as {
+      hooks: Record<string, unknown[]>;
+    };
+    settings.hooks['Stop'] = [{ hooks: [notify] }];
+    settings.hooks['PreToolUse'] = [{ matcher: 'Bash', hooks: [mention] }];
+    settings.hooks['SessionStart']?.push({ hooks: [notify] });
+    settings.hooks['SessionEnd']?.push(older);
+    writeFileSync(settingsFile(d.places), JSON.stringify(settings));
+
+    const r = await run(d.platform, ['uninstall']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(settingsFile(d.places), 'utf8')), {
+      model: 'opus',
+      hooks: {
+        SessionStart: [{ hooks: [notify] }],
+        SessionEnd: [older],
+        Stop: [{ hooks: [notify] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [mention] }],
+      },
+    });
+  });
+
   test('a link that now points elsewhere is left alone; the others are removed', async (t) => {
     const d = testPlatform(t);
     await installed(d, null);

@@ -95,22 +95,25 @@ function serialize(settings: Json): string {
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
-/** Every hook object of the matcher groups in `groups` that has a string `command`. Odd shapes are skipped. */
-function commandsOf(groups: unknown): string[] {
-  const commands: string[] = [];
+/** The hook objects of the matcher groups in `groups`. Odd shapes are skipped. */
+function hooksIn(groups: unknown): unknown[] {
   if (!Array.isArray(groups)) {
-    return commands;
+    return [];
   }
-  for (const group of groups as unknown[]) {
-    if (isObject(group) && Array.isArray(group['hooks'])) {
-      for (const hook of group['hooks'] as unknown[]) {
-        if (isObject(hook) && typeof hook['command'] === 'string') {
-          commands.push(hook['command']);
-        }
-      }
-    }
-  }
-  return commands;
+  return (groups as unknown[]).flatMap((group) =>
+    isObject(group) && Array.isArray(group['hooks']) ? (group['hooks'] as unknown[]) : [],
+  );
+}
+
+/**
+ * Is `hook`, found under `event`, one that install wrote: its command is exactly
+ * hookCommand(hookPath, event), the whole command and not a part of it? The one test behind
+ * install's "already installed", doctor's "present" and uninstall's removal, so that the three can
+ * never disagree about what is skydeck's (principle 2: nothing else is ever touched). Throws
+ * SkydeckError like hookCommand when hookPath contains a quote.
+ */
+function isOwnHook(hook: unknown, event: string, hookPath: string): boolean {
+  return isHookEvent(event) && isObject(hook) && hook['command'] === hookCommand(hookPath, event);
 }
 
 /**
@@ -125,7 +128,7 @@ export function addHookEntries(settingsText: string | null, hookPath: string): S
   const target: Json = hooks ?? {};
   for (const event of HOOK_EVENTS) {
     const groups = target[event] as unknown[] | undefined;
-    if (!commandsOf(groups).includes(hookCommand(hookPath, event))) {
+    if (!hooksIn(groups).some((hook) => isOwnHook(hook, event, hookPath))) {
       target[event] = [...(groups ?? []), hookEntry(hookPath, event)];
       added.push(event);
     }
@@ -138,79 +141,70 @@ export function addHookEntries(settingsText: string | null, hookPath: string): S
 }
 
 /**
- * Removes every hook object whose `command` contains hookPath, under any event; then drops matcher
- * groups left with no hooks, event arrays left empty, and `hooks` when left empty. Nothing else
- * changes: a group or array that was empty before stays. `events` names the hooked events that
- * lost an entry (HookEvent cannot name another event); `changed` is true when anything went.
- * Throws SkydeckError when hookPath is empty or blank, which would match every hook.
+ * Removes, from each hooked event, the hook objects that install wrote (isOwnHook: the command is
+ * exactly hookCommand(hookPath, event)); then drops matcher groups left with no hooks, event arrays
+ * left empty, and `hooks` when left empty. Nothing else changes: another hook that merely names
+ * the path, a hook under another event, a group or array that was empty before, all stay. `events`
+ * names the events that lost an entry; `changed` is true when anything went. Throws SkydeckError
+ * when hookPath is empty or blank. A hookPath with a quote cannot be in any command install wrote,
+ * so nothing is removed.
  */
 export function removeHookEntries(settingsText: string, hookPath: string): SettingsEdit {
   if (hookPath.trim() === '') {
     throw new SkydeckError('the hook path is empty, so no hook entry can be told apart');
   }
   const { settings, hooks } = parseForEdit(settingsText);
+  const unchanged: SettingsEdit = { text: settingsText, changed: false, events: [] };
+  if (hooks === null || hookPath.includes("'")) {
+    return unchanged;
+  }
   const removed: HookEvent[] = [];
-  let changed = false;
-  if (hooks !== null) {
-    for (const event of Object.keys(hooks)) {
-      const groups = hooks[event];
-      if (!Array.isArray(groups)) {
+  for (const event of HOOK_EVENTS) {
+    const groups = hooks[event] as unknown[] | undefined;
+    if (groups === undefined) {
+      continue;
+    }
+    const kept: unknown[] = [];
+    let touched = false;
+    for (const group of groups) {
+      if (!isObject(group) || !Array.isArray(group['hooks'])) {
+        kept.push(group);
         continue;
       }
-      const kept: unknown[] = [];
-      let touched = false;
-      for (const group of groups as unknown[]) {
-        if (!isObject(group) || !Array.isArray(group['hooks'])) {
-          kept.push(group);
-          continue;
-        }
-        const own = (group['hooks'] as unknown[]).filter(
-          (hook) =>
-            isObject(hook) &&
-            typeof hook['command'] === 'string' &&
-            hook['command'].includes(hookPath),
-        );
-        if (own.length === 0) {
-          kept.push(group);
-          continue;
-        }
-        touched = true;
-        const left = (group['hooks'] as unknown[]).filter((hook) => !own.includes(hook));
-        if (left.length > 0) {
-          kept.push({ ...group, hooks: left });
-        }
-      }
-      if (!touched) {
+      const all = group['hooks'] as unknown[];
+      const left = all.filter((hook) => !isOwnHook(hook, event, hookPath));
+      if (left.length === all.length) {
+        kept.push(group);
         continue;
       }
-      changed = true;
-      if (isHookEvent(event)) {
-        removed.push(event);
-      }
-      if (kept.length > 0) {
-        hooks[event] = kept;
-      } else {
-        delete hooks[event];
+      touched = true;
+      if (left.length > 0) {
+        kept.push({ ...group, hooks: left });
       }
     }
+    if (!touched) {
+      continue;
+    }
+    removed.push(event);
+    if (kept.length > 0) {
+      hooks[event] = kept;
+    } else {
+      delete hooks[event];
+    }
   }
-  if (!changed) {
-    return { text: settingsText, changed: false, events: [] };
+  if (removed.length === 0) {
+    return unchanged;
   }
-  if (hooks !== null && Object.keys(hooks).length === 0) {
+  if (Object.keys(hooks).length === 0) {
     delete settings['hooks'];
   }
-  return {
-    text: serialize(settings),
-    changed: true,
-    events: HOOK_EVENTS.filter((event) => removed.includes(event)),
-  };
+  return { text: serialize(settings), changed: true, events: removed };
 }
 
 /**
- * For each event: does an entry whose command equals hookCommand(hookPath, event) exist? Settings
- * that cannot be read, or whose hooks have the wrong shape, have no entries. Throws SkydeckError
- * like hookCommand when hookPath contains a quote.
+ * For each event: does an entry that install wrote (isOwnHook) exist? Settings that cannot be
+ * read, or whose hooks have the wrong shape, have no entries. Throws SkydeckError like hookCommand
+ * when hookPath contains a quote.
  */
 export function hookStatus(
   settingsText: string | null,
@@ -219,8 +213,8 @@ export function hookStatus(
   const status: Record<HookEvent, boolean> = { SessionStart: false, SessionEnd: false };
   const hooks = parseLoosely(settingsText)?.['hooks'];
   for (const event of HOOK_EVENTS) {
-    const command = hookCommand(hookPath, event);
-    status[event] = isObject(hooks) && commandsOf(hooks[event]).includes(command);
+    status[event] =
+      isObject(hooks) && hooksIn(hooks[event]).some((hook) => isOwnHook(hook, event, hookPath));
   }
   return status;
 }

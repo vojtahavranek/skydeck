@@ -188,26 +188,96 @@ describe('settings: removeHookEntries', () => {
     assert.deepEqual(edit.events, []);
   });
 
-  test('an entry whose command merely contains the path is removed too', () => {
+  test('an entry whose command merely contains the path is not ours and stays', () => {
+    // Not what hookCommand writes: a different quote, no silencing, a longer file name.
     const text = JSON.stringify({
       hooks: {
         SessionStart: [
-          {
-            hooks: [
-              {
-                type: 'command',
-                command: '"/home/dev/.local/share/skydeck/skydeck-hook" SessionStart',
-              },
-            ],
-          },
+          { hooks: [{ type: 'command', command: `"${H}" SessionStart` }] },
+          { hooks: [{ type: 'command', command: `${hookCommand(H, 'SessionStart')} # mine` }] },
+          { hooks: [{ type: 'command', command: `'${H}-notify.sh' SessionStart` }] },
         ],
       },
     });
 
     const edit = removeHookEntries(text, H);
 
+    assert.equal(edit.changed, false);
+    assert.equal(edit.text, text);
+    assert.deepEqual(edit.events, []);
+  });
+
+  test("a user's own hooks that name the hook path survive, in any event, next to ours", () => {
+    const notify = { type: 'command', command: `${H}-notify.sh` };
+    const mention = { type: 'command', command: `echo see '${H}' >>/tmp/log` };
+    const text = JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [notify] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [mention] }],
+        SessionStart: [{ hooks: [notify, E('SessionStart').hooks[0], mention] }],
+        SessionEnd: [{ hooks: [mention] }, E('SessionEnd')],
+      },
+    });
+
+    const edit = removeHookEntries(text, H);
+
     assert.equal(edit.changed, true);
-    assert.equal(edit.text, '{}\n');
+    assert.deepEqual(edit.events, ['SessionStart', 'SessionEnd']);
+    assert.deepEqual(parse(edit.text), {
+      hooks: {
+        Stop: [{ hooks: [notify] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [mention] }],
+        SessionStart: [{ hooks: [notify, mention] }],
+        SessionEnd: [{ hooks: [mention] }],
+      },
+    });
+  });
+
+  test('an entry written by an install with another hook path is left alone', () => {
+    const older = hookEntry('/home/dev/old-checkout/skydeck-hook', 'SessionStart');
+    const text = JSON.stringify({ hooks: { SessionStart: [older, E('SessionStart')] } });
+
+    const edit = removeHookEntries(text, H);
+
+    assert.deepEqual(parse(edit.text), { hooks: { SessionStart: [older] } });
+  });
+
+  test('a hook path with a quote in it cannot be ours: nothing is removed, nothing throws', () => {
+    const text = JSON.stringify({ hooks: { Stop: [FOREIGN_GROUP] } });
+
+    const edit = removeHookEntries(text, "/a'b/skydeck-hook");
+
+    assert.equal(edit.changed, false);
+    assert.equal(edit.text, text);
+  });
+
+  test('install, doctor and uninstall agree on what is ours', () => {
+    // The same command, in the event it names and in the other one, in the shapes people write.
+    const commands = [
+      hookCommand(H, 'SessionStart'),
+      hookCommand(H, 'SessionEnd'),
+      `'${H}' SessionStart`,
+      `"${H}" SessionStart >/dev/null 2>&1 || true`,
+      `${hookCommand(H, 'SessionStart')} extra`,
+      `${H}-notify.sh`,
+      `echo '${H}' SessionStart`,
+      ` ${hookCommand(H, 'SessionStart')}`,
+    ];
+    for (const event of HOOK_EVENTS) {
+      for (const command of commands) {
+        const text = JSON.stringify({
+          hooks: { [event]: [{ hooks: [{ type: 'command', command }] }] },
+        });
+
+        const installed = !addHookEntries(text, H).events.includes(event);
+        const reported = hookStatus(text, H)[event];
+        const removed = removeHookEntries(text, H).changed;
+
+        assert.equal(reported, installed, `${event}: ${command}`);
+        assert.equal(removed, installed, `${event}: ${command}`);
+        assert.equal(installed, command === hookCommand(H, event), `${event}: ${command}`);
+      }
+    }
   });
 
   test('other events that already were empty are not touched', () => {
@@ -228,7 +298,7 @@ describe('settings: removeHookEntries', () => {
     assert.deepEqual(removeHookEntries(reversed, H).events, ['SessionStart', 'SessionEnd']);
   });
 
-  test('an entry under any other event that names the hook path is removed too', () => {
+  test('our command under an event it does not name is not ours either', () => {
     const text = JSON.stringify({
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: hookCommand(H, 'SessionEnd') }] }],
@@ -238,9 +308,8 @@ describe('settings: removeHookEntries', () => {
 
     const edit = removeHookEntries(text, H);
 
-    assert.equal(edit.changed, true);
-    assert.deepEqual(edit.events, []);
-    assert.deepEqual(parse(edit.text), { hooks: { PreToolUse: [FOREIGN_GROUP] } });
+    assert.equal(edit.changed, false);
+    assert.equal(edit.text, text);
   });
 
   test('a foreign group that was empty already is left alone', () => {

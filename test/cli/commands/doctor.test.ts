@@ -14,6 +14,7 @@ import { describe, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
 
 import { command } from '../../../src/cli/commands/doctor.ts';
+import { hookEntry } from '../../../src/claude/settings.ts';
 import { NS_PER_DAY, NS_PER_SECOND } from '../../../src/platform/time.ts';
 import type { Files, Ns, Platform, RunResult } from '../../../src/platform/types.ts';
 import { claudeFolders, run, settingsFile, withStore } from '../../helpers/install.ts';
@@ -150,6 +151,23 @@ describe('doctor: each problem alone', () => {
     writeFileSync(settingsFile(d.places), '{"model":"opus"}');
     const r = await doctor(d);
     onlyProblem(r, /no (SessionStart|SessionEnd) hook entry/);
+    assert.equal(r.problems.length, 2);
+  });
+
+  test('entries of an install with another hook path are not ours: both are reported missing', async (t) => {
+    const d = await installedMachine(t);
+    const other = join(d.sandbox.root, 'old-checkout', 'skydeck-hook');
+    writeFileSync(
+      settingsFile(d.places),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [hookEntry(other, 'SessionStart')],
+          SessionEnd: [hookEntry(other, 'SessionEnd')],
+        },
+      }),
+    );
+    const r = await doctor(d);
+    onlyProblem(r, /no (SessionStart|SessionEnd) hook entry for .*\/skydeck-hook in /);
     assert.equal(r.problems.length, 2);
   });
 
