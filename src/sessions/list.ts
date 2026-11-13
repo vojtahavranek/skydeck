@@ -18,6 +18,8 @@ import { sanitize } from '../text/sanitize.ts';
 import type { DerivedSession, Mark, State } from './types.ts';
 
 export type TitleSource = 'label' | 'name' | 'generated' | 'fallback';
+/** Where a row's group comes from: the user set it, or `groupPattern` took it from the title. */
+export type GroupSource = 'meta' | 'title';
 
 export interface PrView {
   url: string;
@@ -37,13 +39,14 @@ export interface ListRow {
   shortId: string;
   title: string; // sanitised
   titleSource: TitleSource;
-  label: string | null;
-  group: string | null; // meta group, else groupPattern match on the title
+  label: string | null; // sanitised
+  group: string | null; // sanitised; meta group, else groupPattern match on the title
+  groupSource: GroupSource | null; // null exactly when `group` is
   state: State;
   stateDetail: string | null; // sanitised
   sinceNs: Ns;
   lastActivityNs: Ns;
-  dir: string | null; // sanitised
+  dir: string | null; // sanitised, so for display only: the path to use is `session.dir`
   marks: Mark[];
   hasNote: boolean;
   note: string | null;
@@ -74,13 +77,17 @@ function compareNs(a: Ns, b: Ns): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** The sanitised text, or null when there is none left to show (a cleared name is an empty string). */
+/**
+ * The sanitised and trimmed text, or null when there is none left to show (a cleared name is an
+ * empty string). Trimmed, so that a title the sanitiser leaves a leading space on still starts
+ * with its ticket key.
+ */
 function shown(text: string | null): string | null {
   if (text === null) {
     return null;
   }
-  const clean = sanitize(text);
-  return clean.trim() === '' ? null : clean;
+  const clean = sanitize(text).trim();
+  return clean === '' ? null : clean;
 }
 
 /** D12: `YYYY-MM-DD HH:MM <directory name>`, UTC, from the time the session was first seen. */
@@ -168,12 +175,18 @@ export function buildRows(input: {
   const groupPattern = new RegExp(input.groupPattern);
   return input.sessions.map((session): ListRow => {
     const meta = metaOf.get(session.id);
-    const label = meta?.label ?? null;
+    // A label and a group are clean when they are set (cleanLabel, cleanGroup); the database can be
+    // changed by other means, so they are sanitised here like every other string.
+    const label = shown(meta?.label ?? null);
     const note = meta?.note ?? null;
     const dir = session.dir === null ? null : sanitize(session.dir);
     const { title, titleSource } = titleOf(session, label, dir);
     // A pattern that matches nothing (or the empty string) names no group.
-    const group = meta?.group ?? (groupPattern.exec(title)?.[0] || null);
+    const setGroup = shown(meta?.group ?? null);
+    const titleGroup = groupPattern.exec(title)?.[0] || null;
+    const group = setGroup ?? titleGroup;
+    const groupSource: GroupSource | null =
+      setGroup !== null ? 'meta' : titleGroup !== null ? 'title' : null;
     const attached = prsOf.get(session.id) ?? [];
     return {
       id: session.id,
@@ -182,6 +195,7 @@ export function buildRows(input: {
       titleSource,
       label,
       group,
+      groupSource,
       state: session.state,
       stateDetail: session.stateDetail === null ? null : sanitize(session.stateDetail),
       sinceNs: session.sinceNs,
@@ -201,7 +215,9 @@ export function buildRows(input: {
 
 /**
  * 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with
- * showAll); done (unless showAll) → false; expired with no label, group, note or PR → false.
+ * showAll); done (unless showAll) → false; expired with nothing the user attached (no label, no
+ * group set by the user, no note, no pull request) → false. A group that only `groupPattern`
+ * took from the title is not something the user attached.
  */
 export function isListed(row: ListRow, showAll: boolean): boolean {
   const transcript = row.session.transcript;
@@ -216,7 +232,7 @@ export function isListed(row: ListRow, showAll: boolean): boolean {
     return false;
   }
   const nothingAttached =
-    row.label === null && row.group === null && !row.hasNote && row.prs.length === 0;
+    row.label === null && row.groupSource !== 'meta' && !row.hasNote && row.prs.length === 0;
   return !(row.marks.includes('expired') && nothingAttached);
 }
 

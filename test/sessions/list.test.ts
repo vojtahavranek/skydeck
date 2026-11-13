@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 
 import { chipFor, prLevel } from '../../src/github.ts';
@@ -15,6 +16,7 @@ import type { DerivedSession } from '../../src/sessions/types.ts';
 import type { SessionMeta, TranscriptRow } from '../../src/store/types.ts';
 import { attached, ds, meta, prRow, rowOf, rows } from '../helpers/derived.ts';
 import { S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
+import { sandbox } from '../helpers/sandbox.ts';
 
 const MIN = NS_PER_MINUTE;
 
@@ -86,6 +88,22 @@ test('title: the fallback is sanitised too (the directory name is foreign text)'
   assert.equal(row.dir, '/home/dev/demo');
 });
 
+test('title: the fallback is in UTC whatever the time zone of the machine', (t) => {
+  // In a child process, because the zone is read once at start; an hour and a minute that differ
+  // from UTC in both (Kolkata is +05:30) make local time show.
+  const helpers = new URL('../helpers/derived.ts', import.meta.url).href;
+  const script = `
+    import { ds, rowOf } from ${JSON.stringify(helpers)};
+    process.stdout.write(rowOf(ds({ id: 'x', firstSeenNs: ${T0}n })).title);
+  `;
+  const env = sandbox(t).env({ TZ: 'Asia/Kolkata' });
+  const title = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    env,
+    encoding: 'utf8',
+  });
+  assert.equal(title, '2026-11-12 09:00 demo');
+});
+
 // --- sanitising -------------------------------------------------------------------------------------
 
 test('sanitised: a generated title', () => {
@@ -102,9 +120,12 @@ test('sanitised: the detail of the state', () => {
   assert.equal(rowOf(ds({ id: S1, stateDetail: null })).stateDetail, null);
 });
 
-test('sanitised: the project directory', () => {
+test('sanitised: the project directory, for display; the path itself stays in the session', () => {
   assert.equal(rowOf(ds({ id: S1, dir: '/w/\x1b[31mred' })).dir, '/w/red');
   assert.equal(rowOf(ds({ id: S1, dir: null })).dir, null);
+  const row = rowOf(ds({ id: S1, dir: '/home/dev/a\tb' }));
+  assert.equal(row.dir, '/home/dev/a b');
+  assert.equal(row.session.dir, '/home/dev/a\tb');
 });
 
 test('sanitised: the title and the error of a pull request', () => {
@@ -121,8 +142,36 @@ test('sanitised: the title and the error of a pull request', () => {
   assert.equal(row.prs[0]?.level, 'cant-read');
 });
 
-test('sanitised: the label is the user’s own text and stays as typed', () => {
+test('sanitised: a label and a group (the database can be changed by other means)', () => {
+  const row = rowOf(ds({ id: S1 }), {
+    metas: [meta(S1, { label: 'x\x1b]0;pwn\x07y', group: 'g\x1b[2Jr' })],
+  });
+  assert.equal(row.title, 'xy');
+  assert.equal(row.titleSource, 'label');
+  assert.equal(row.label, 'xy');
+  assert.equal(row.group, 'gr');
   assert.equal(rowOf(ds({ id: S1 }), { metas: [meta(S1, { label: 'L' })] }).title, 'L');
+});
+
+test('sanitised: a label or a group that is nothing once sanitised is not set', () => {
+  const session = ds({ id: S1, transcript: { aiTitle: 'ABC-1 fix' } });
+  const row = rowOf(session, { metas: [meta(S1, { label: '\x1b[2J ', group: '\x07' })] });
+  assert.equal(row.label, null);
+  assert.equal(row.title, 'ABC-1 fix');
+  assert.equal(row.titleSource, 'generated');
+  assert.equal(row.group, 'ABC-1'); // the pattern, since no group is set
+  assert.equal(row.groupSource, 'title');
+});
+
+test('sanitised: a name or title is shown trimmed', () => {
+  assert.equal(rowOf(ds({ id: S1, transcript: { aiTitle: '  A  ' } })).title, 'A');
+  assert.equal(rowOf(ds({ id: S1, transcript: { customTitle: '\x1b[2J B\n' } })).title, 'B');
+});
+
+test('sanitised: a title that starts with a line break still gives its ticket group', () => {
+  const row = rowOf(ds({ id: S1, transcript: { aiTitle: '\nDE-1 fix' } }));
+  assert.equal(row.title, 'DE-1 fix');
+  assert.equal(row.group, 'DE-1');
 });
 
 // --- groups -----------------------------------------------------------------------------------------
@@ -157,6 +206,15 @@ test('group: the title can be the label', () => {
 test('group: a pattern from the configuration', () => {
   const session = ds({ id: S1, transcript: { aiTitle: '[ops] rotate' } });
   assert.equal(groupOf(session, undefined, '^\\[\\w+\\]'), '[ops]');
+});
+
+test('group: where it came from is recorded', () => {
+  const titled = ds({ id: S1, transcript: { aiTitle: 'ABC-123 fix' } });
+  assert.equal(rowOf(titled, { metas: [meta(S1, { group: 'G' })] }).groupSource, 'meta');
+  assert.equal(rowOf(titled).groupSource, 'title');
+  const plain = rowOf(ds({ id: S1, transcript: { aiTitle: 'fix' } }));
+  assert.equal(plain.group, null);
+  assert.equal(plain.groupSource, null);
 });
 
 test('group: a match of nothing is no group', () => {
@@ -357,6 +415,20 @@ test('isListed: an expired session with a note, a label, a group or an attached 
     assert.equal(isListed(row, false), true, what);
     assert.equal(isListed(row, true), true, what);
   }
+});
+
+test('isListed: a group taken from the title is not something the user attached', () => {
+  const expired = ds({
+    id: S1,
+    marks: ['expired'],
+    transcript: { missingSinceNs: T0, aiTitle: 'ABC-123 fix retry' },
+  });
+  const row = rowOf(expired);
+  assert.equal(row.group, 'ABC-123');
+  assert.equal(isListed(row, false), false);
+  assert.equal(isListed(row, true), false);
+  // the same session with a group the user set is listed
+  assert.equal(isListed(rowOf(expired, { metas: [meta(S1, { group: 'ABC-123' })] }), false), true);
 });
 
 test('isListed: an expired session with only a detached pull request is not listed', () => {
