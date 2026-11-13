@@ -1475,11 +1475,14 @@ window stayed open). So the page cancels exactly the keys it handles itself (thi
 keys below) and the keys it passes to the terminal (xterm.js cancels those it sends), and no
 other. Alt+F4 is never passed to the terminal and never cancelled, in either focus zone, so the
 window closes with it as any window does. Alt+Space never reaches the page (Windows keeps it for
-the window menu). The reload keys are the page's own in the list zone: F5, Ctrl+R, Ctrl+Shift+R and
-Ctrl+F5 make the page open a new connection, wait for the server's proof, and only then reload
-(15.3); in the terminal zone F5, Ctrl+R and Ctrl+F5 go to the program like any key, while
-Ctrl+Shift+R — for which xterm.js sends nothing and cancels nothing (9.1) — is the page's there
-too, so that Edge never reloads the page by itself. A key that neither zone uses
+the window menu). The reload keys are the page's own in the list zone: F5, Shift+F5, Ctrl+F5,
+Ctrl+R, Ctrl+Shift+R and the keyboard's BrowserRefresh key (alone, with Shift, with Ctrl) make the
+page open a new connection, wait for the server's proof, and only then reload (15.3); in the
+terminal zone F5, Shift+F5, Ctrl+F5 and Ctrl+R go to the program like any key, while Ctrl+Shift+R
+and BrowserRefresh — for which xterm.js sends nothing and cancels nothing (9.1) — are the page's
+there too, so that Edge never reloads the page by itself. That Chromium also reloads on Shift+F5
+and BrowserRefresh is from memory of its accelerator table, not verified; the page handling them
+is harmless if Edge does not. A key that neither zone uses
 keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no session.
 
 | Key | Action |
@@ -1694,8 +1697,10 @@ Edge reaches that program instead.
   can pass both proofs along and then read and type everything, without ever learning the secret
   (15.1).
 - **A reload** fetches the page from whoever holds the port at that moment. The page therefore
-  handles F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 itself in the list zone (12.9): it first opens a new
-  connection, waits for the server's proof, and only then reloads.
+  handles F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and the BrowserRefresh key (alone, with
+  Shift, with Ctrl) itself in the list zone, and Ctrl+Shift+R and BrowserRefresh in the terminal
+  zone too (12.9): it first opens a new connection, waits for the server's proof, and only then
+  reloads. (Shift+F5 and BrowserRefresh as Chromium reload keys are from memory, not verified.)
 
 Accepted: it takes a program that binds this one port at the moment a window is opened or
 reloaded, the window then shows that program's page rather than skydeck's, and the worst case —

@@ -825,10 +825,22 @@ export function terminalKey(e) {}
 /** List-zone keys (S2 12.9): { kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' } |
  *  { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' } |
  *  { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' } |
- *  { kind: 'later', stage: 'D' } (A11: `l`, `g`, `n`, `p`, `d`, F2) | null */
+ *  { kind: 'later', stage: 'D' } (A11: `l`, `g`, `n`, `p`, `d`, F2) | null
+ *  `reload`: F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R, BrowserRefresh alone / with Shift / with
+ *  Ctrl (ruled for task 31); windowChord gives `reload` for Ctrl+Shift+R and BrowserRefresh. */
 export function listKey(e) {}
-/** Whether the page cancels the key (preventDefault): exactly the keys it handles (Alt+F4 never). */
+/** Whether the page cancels the key (preventDefault): exactly the keys it handles (Alt+F4 never).
+ *  `handled` (boolean) means "the page acted on this key" (ruled for task 31). False for Alt+F4,
+ *  and for Ctrl+V in the terminal zone, whatever `handled` says; true, whatever `handled` says,
+ *  for every windowChord (`later` ones included), the list zone's reload keys, and the terminal
+ *  keys the page sends itself (terminalKey `{ send }`: Shift+Enter, Ctrl+Shift+V); for every
+ *  other key it returns `handled`. While a text field of the page has the keyboard (the filter,
+ *  the new form), app.js passes `handled = false` for the keys it leaves to the field, so that
+ *  `j` or `/` type there. */
 export function cancels(e, zone, handled) {}
+// Tasks 26 and 28: a key that two functions classify (Ctrl+Shift+V: windowChord `paste-raw` and
+// terminalKey `{ send: '\x16' }`; Ctrl+Shift+R and BrowserRefresh: windowChord and listKey
+// `reload`) is acted on once.
 
 // web/list.js — replaced by task 27
 /** @param {HTMLElement} root
@@ -1305,7 +1317,8 @@ cancels) and `web/format.js` (the age format of design 7.4). No DOM, no state: f
 // web/format.js
 /** design 7.4's compact age: < 60 s "<n>s", < 60 min "<n>m", < 48 h "<n>h", else "<n>d"; negative counts as 0. */
 export function formatAge(durationNs) {} // bigint → string
-/** The age between two decimal-string nanosecond times of the protocol. */
+/** The age between two decimal-string nanosecond times of the protocol; a TypeError for a string
+ *  that is not all digits (never pass an empty or null time). */
 export function ageBetween(nowNs, thenNs) {} // (string, string) → string
 ```
 
@@ -1315,7 +1328,8 @@ export function ageBetween(nowNs, thenNs) {} // (string, string) → string
   character is not a digit; letters, Ctrl+Shift+H included, by the character typed), in both zones;
   Ctrl+Shift+- is not the window's; `terminalKey`: Shift+Enter → `\n`, Ctrl+V → `'browser'`,
   Ctrl+Shift+V → `\x16`, Alt+F4 → `'browser'`, a plain letter → null; `listKey`: ↑ ↓ `j` `k` Home
-  End PgUp PgDn ← → Enter `/` `a` Esc, F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5; A11: Ctrl+Shift+P and
+  End PgUp PgDn ← → Enter `/` `a` Esc, F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5, Shift+F5 and BrowserRefresh
+  (alone, with Shift, with Ctrl; ruled for task 31); A11: Ctrl+Shift+P and
   Ctrl+Shift+J → `later` (E, B) in both zones, `l` `g` `n` `p` `d` F2 → `later` (D) in the list zone
   and null in the terminal zone; `cancels`: Alt+F4 never, a key neither zone uses never, F5 and
   Ctrl+R in the list zone yes and in the terminal zone no, Ctrl+Shift+R in both, every `later` key
