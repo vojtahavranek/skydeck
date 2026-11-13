@@ -65,12 +65,15 @@ text. More than one match is an error that lists the candidates; no match is an 
 exit 3).
 
 Exit codes: 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not found
-or ambiguous; 4 resume refused; 5 restore stopped before finishing.
+or ambiguous; 4 resume refused; 5 restore stopped before finishing. Also: 141 when the reader of
+standard output closed it (`skydeck ls | head`) and the command had succeeded; 127 when the launcher
+finds no `node`; and once `resume`, `new` or `restore` has handed the terminal to `claude`, the status
+is `claude`'s own.
 
 In the interactive list: `j`/`k` or the arrows move, `Enter` shows the detail, `l` label, `g` group,
 `n` note, `d` done or undo, `p` pull requests, `R` resume, `/` filter, `a` show all, `r` refresh,
-`q` quit. The list refreshes itself every 5 seconds without reordering the rows or moving the
-cursor; the title line counts the sessions per state; `r` refreshes at once, reorders, and reads the
+`q` quit. The list refreshes itself every 5 seconds without reordering the rows (the cursor
+moves only when its own session leaves the list, and the last line says so); the title line counts the sessions per state; `r` refreshes at once, reorders, and reads the
 pull requests again.
 
 ## Documents

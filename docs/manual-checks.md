@@ -28,7 +28,7 @@ install again).
 ## 1. Install
 
 On a machine with an existing `~/.claude/settings.json`, where skydeck is not installed yet (or
-after item 8):
+after item 8). (With no settings file yet, see the end of this item.)
 
 ```sh
 cp ~/.claude/settings.json /tmp/settings.before.json
@@ -36,7 +36,10 @@ cd ~/skydeck
 bin/skydeck install
 ```
 
-Answer `y`.
+Answer `y`. If install then asks `Mark <n> sessions older than 7 days as done? [y/N]` (it asks once,
+and only when sessions that old exist), answer `n` for this checklist: `y` hides those sessions
+from `skydeck ls` (`skydeck ls --all` shows them), `n` changes nothing, and either answer ends the
+question for good.
 
 Expected:
 
@@ -46,7 +49,7 @@ Expected:
   formatting; the file as it is now is kept in <backup path>`.
 - Three `linked ...` lines (fewer when links already exist), then
   `added the hook entries to ...; the file as it was is kept in ...settings.json.skydeck-backup-<UTC time>`,
-  then `skydeck is installed`.
+  then the question about old sessions if it is asked, then `skydeck is installed`.
 - The backup exists, is readable by you only (`ls -l` shows `-rw-------`) and is the file you copied:
   `cmp /tmp/settings.before.json ~/.claude/settings.json.skydeck-backup-*` prints nothing (with
   more than one backup, name the one that was printed).
@@ -55,6 +58,10 @@ Expected:
 - `skydeck doctor` prints no line that starts with `problem`, and `echo $?` right after it prints
   `0`. (It needs `gh` logged in.)
 - `bin/skydeck install` a second time prints `hook entries already present` and makes no new backup.
+
+With no settings file (only the folder `~/.claude`): skip the `cp` and every `cmp` and `ls -l` of the
+backup. The entries are shown and the question asked as above, and the line is
+`added the hook entries to <settings file> (a new file)`. No backup is made.
 
 ## 2. Session start
 
@@ -168,9 +175,12 @@ skydeck restore --dry-run
 echo $?
 ```
 
-Expected: exit code 0, and nothing is started. A numbered list of three entries, each preselected
-(`[x]`), each ending with `no exit recorded`; the busy one ends with `no exit recorded  was working`.
-Under each entry is its command: `cd -- <folder> && claude --resume <session id> ...`.
+Expected: exit code 0, and nothing is started. A numbered list with the three sessions, each
+preselected (`[x]`) and ending with `no exit recorded`; the busy one ends with
+`no exit recorded  was working`. A session that ended unexpectedly earlier in the same WSL run (the
+one of item 6, say) is listed too, ending with `ended <time>`; it is preselected only when it ended
+within two minutes of the last event recorded before the shutdown. Under each entry is its command:
+`cd -- <folder> && claude --resume <session id> ...`.
 
 ```sh
 skydeck restore
@@ -205,6 +215,9 @@ Expected: `restored <settings file> from <backup>`, three lines `removed ...` (t
 `cmp ~/.claude/settings.json <that backup>` prints nothing: the settings file equals the backup again.
 Sessions that are running are not touched.
 
+If there was no settings file before the install, and nobody changed it since, the line is
+`removed <settings file>: there was none before skydeck install`, and no backup is named.
+
 If you or Claude Code changed the settings file after the install, the line is
 `removed the hook entries from <settings file>` instead, and your later changes stay. That is the
 right result too. A hook of yours that only mentions the skydeck hook's path stays as well: only the
@@ -224,8 +237,11 @@ skydeck is installed. In terminal S, open the interactive list (a terminal, not 
 skydeck
 ```
 
-Expected: the title line reads `skydeck  <n> sessions  <a> waiting · <b> working · <c> not-running`
-(a state with no session is left out), and the cursor is on a row. Leave the list open.
+Expected: the title line reads
+`skydeck  <n> sessions  <a> waiting · <b> working · <c> running · <d> not-running`
+(a state with no session is left out; `running` is a session that a process holds but whose
+live-session file cannot be read, for example the file of a scripted run, which leaves none), and
+the cursor is on a row. Leave the list open.
 
 In A, start `claude` in `~/skydeck-try`. Expected, within about 5 seconds and without a key press:
 the new session appears in the list, the counts in the title line change, and the cursor stays on

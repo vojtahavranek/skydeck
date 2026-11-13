@@ -182,7 +182,8 @@ Add them? [y/N]
 
 Answer `y` (or `yes`). Anything else, or the end of input, is a no: install prints
 `settings not changed`, exits 1 and leaves no skydeck folder, database or link behind (the launcher's
-compile cache, `~/.cache/skydeck`, is made by every run). After a yes:
+compile cache, `~/.cache/skydeck`, is made by every run). After a yes, with an existing settings
+file:
 
 ```
 linked /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
@@ -191,6 +192,12 @@ linked /home/you/.local/share/skydeck/node -> /home/you/.nvm/versions/node/v24.1
 added the hook entries to /home/you/.claude/settings.json; the file as it was is kept in /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 skydeck is installed
 ```
+
+When there is no settings file yet (only Claude Code's folder, as on a fresh machine), the question
+is the same, no backup is made, and the line reads
+`added the hook entries to /home/you/.claude/settings.json (a new file)`. Uninstall later removes
+that file again, as long as nobody changed it since: `removed /home/you/.claude/settings.json: there
+was none before skydeck install`.
 
 When Claude Code already has sessions with old transcripts, install asks one more question,
 **once** (a later install never asks again, whatever you answered):
@@ -274,7 +281,7 @@ npm run check
 
 | Where | What |
 |---|---|
-| `<claudeHome>/settings.json` (default `~/.claude/settings.json`) | Two hook entries are added: `SessionStart` and `SessionEnd`, each running `'<dataDir>/skydeck-hook' <event> >/dev/null 2>&1 \|\| true` with a timeout of 5 seconds. Everything else in the file keeps its content and key order. The file is parsed and written back in skydeck's formatting (two-space indentation, a newline at the end); when that changes more than the entries, the question has one more line (below). If the file does not exist but the folder does, install creates it. Hook entries that belong to something else are never touched. |
+| `<claudeHome>/settings.json` (default `~/.claude/settings.json`) | Two hook entries are added: `SessionStart` and `SessionEnd`, each running `'<dataDir>/skydeck-hook' <event> >/dev/null 2>&1 \|\| true` with a timeout of 5 seconds. Everything else in the file keeps its key order, and its content except a number that cannot be written back exactly (the question names it; the backup has it). The file is parsed and written back in skydeck's formatting (two-space indentation, a newline at the end); when that changes more than the entries, the question has one more line (below). If the file does not exist but the folder does, install creates it. Hook entries that belong to something else are never touched. |
 | `<claudeHome>/settings.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>` | The file as it was before, readable by you only. The time is UTC; a second backup in the same second gets `-2`, and so on. Every install that changes the settings makes a new one. skydeck never removes one, not even with `uninstall --purge`. |
 | `<dataDir>/skydeck-hook` | Symbolic link to `<checkout>/bin/skydeck-hook`. |
 | `~/.local/bin/skydeck` | Symbolic link to `<checkout>/bin/skydeck`. The folder is created when missing. |
@@ -320,7 +327,7 @@ dotfiles folder, say) stays a link; the file it points to is changed.
 | Name | Default | Holds |
 |---|---|---|
 | `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db`, the links `node` and `skydeck-hook`. |
-| `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`, `locks/` (unused), a note while it is being edited. |
+| `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`, `locks/` (unused), a note while it is being edited, and `note-<session id>.md` after an editor that failed having changed it (`editor exited <n>; your text is in <path>`). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the key `claudeHome` of `config.json`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files, including the settings file and the backups. |
 
