@@ -393,7 +393,9 @@ const SERIALIZE = 'vendor/xterm/addon-serialize/lib/addon-serialize.mjs';
 
 /**
  * The patch of addon-serialize 0.14.0, restated as the specification: the vendored bundle must be
- * the installed one with exactly these replacements. The screen side's tests show what they fix.
+ * the installed one with exactly these replacements. The screen side's tests show what they fix;
+ * its other two defects (review 2's re-check, N1 and N2) are corrected by the screen side on the
+ * serialised text, not here.
  */
 const REPLACEMENTS: Array<[string, string]> = [
   // _diffStyle: SGR 22 turns off both bold and dim (#48, review 2, finding 1).
@@ -402,13 +404,6 @@ const REPLACEMENTS: Array<[string, string]> = [
     '(e.isBold()!==r.isBold()||e.isDim()!==r.isDim())&&(!e.isBold()&&r.isBold()||!e.isDim()&&r.isDim()?(t.push(22),e.isBold()&&t.push(1),e.isDim()&&t.push(2)):(e.isBold()!==r.isBold()&&t.push(1),e.isDim()!==r.isDim()&&t.push(2))),',
   ],
   [',e.isDim()!==r.isDim()&&t.push(e.isDim()?2:22)', ''],
-  // The wrap trick above a blank row: CUF 0 and CUB 0 move one column (re-check, N2).
-  [
-    't+=`\\x1B[${a.length-this._nullCellCount}C`,t+=`\\x1B[${this._nullCellCount}X`,t+=`\\x1B[${a.length-this._nullCellCount}D`',
-    'a.length>this._nullCellCount&&(t+=`\\x1B[${a.length-this._nullCellCount}C`),t+=`\\x1B[${this._nullCellCount}X`,a.length>this._nullCellCount&&(t+=`\\x1B[${a.length-this._nullCellCount}D`)',
-  ],
-  // The alternate screen was serialised as if the pen were the default (re-check, N1).
-  ['e+=`\\x1B[?1049h\\x1B[H${r}`', 'e+=`\\x1B[0m\\x1B[?1049h\\x1B[H${r}`'],
 ];
 
 const sha256Of = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');

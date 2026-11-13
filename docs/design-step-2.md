@@ -619,17 +619,25 @@ just printed there and the next one wraps), which CUP cannot reach: then the las
 that row is printed again with its own attributes, which leaves the cursor past it. Last comes the
 pen (the attributes the next character gets), read from the headless terminal's own state — the
 same internal the serialise addon reads for its pen, so a test pins it to the vendored version.
-The addon turned bold off and dim off both with SGR 22, which turns off both (a rebuilt cell lost
-its bold after a dim one), serialised the alternate screen as if the pen were the default (its
-cells took the program's pen) and left a stray character above a wrapped row after a blank one;
-its vendored bundle is patched (16.6).
+The addon turned bold off and dim off both with SGR 22, which turns off both, so a rebuilt cell
+lost its bold after a dim one; its vendored bundle is patched (16.6). Two more of its defects are
+corrected on its output, exactly, since no cell holds ESC: it serialises the alternate screen as
+if the pen were the default, so SGR 0 goes before the alternate screen; and above a blank row
+followed by a wrapped one it writes cursor moves of 0 columns, which move one and left a stray
+`-`, so those moves are dropped.
 Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain URLs still are
 (9.6).
 
 Known limits: a snapshot does not restore the scroll region (DECSTBM), the saved cursor (DECSC,
 and so where leaving the alternate screen puts the cursor), the character sets (`ESC ( 0`) or tab
 stops set by the program (HTS, TBC); xterm.js's API does not show them, and Claude Code's normal screen is not known to use them
-(check W26).
+(check W26). Nor are these rebuilt exactly, by the serialise addon:
+
+- an alternate-screen line marked wrapped comes back unwrapped (its cells are equal, and the
+  alternate screen never reflows);
+- with autowrap off (DECAWM), a wide character overwritten at the right margin leaves a cell pair
+  that is serialised one column too wide (Claude Code keeps autowrap on);
+- a colour set as `38;5;n` with n below 16 comes back in its 16-colour form (it renders the same).
 
 A record can end inside an escape sequence or inside a UTF-8 character, and a snapshot taken
 there would cut it: the next record's continuation would reach a screen rebuilt from the snapshot
@@ -1942,17 +1950,13 @@ typings themselves are vendored beside the bundles, within a type checker's reac
 `@xterm/addon-unicode-graphemes` bundles adapted copies of tiny-inflate and unicode-trie (both
 MIT) without their notices, so the script also writes `vendor/xterm/THIRD-PARTY-NOTICES`, which
 names that bundle and holds both licences as their packages publish them on npm. One vendored
-file is changed, `@xterm/addon-serialize` 0.14.0's bundle, in three places where a snapshot was
-not exact (section 21; unfixed on xterm.js's master on 2026-11-13): its `_diffStyle` turns bold
-off and dim off both with SGR 22, which turns off both, so a bold cell after a dim one lost its
-bold; above a blank row followed by a wrapped one, its wrap trick moves by CUF 0 and CUB 0, which
-move one column, and leaves a stray `-`; and it serialises the alternate screen as if the pen
-were the default, so the alternate screen's cells took the program's pen. `npm run vendor`
-checks that the installed bundle is the one the patch was written for (its version and sha256),
-replaces the texts — each must occur exactly once — so that SGR 22 comes first whenever bold or
-dim goes off, followed by SGR 1 and 2 for what the cell keeps, no move of 0 is written, and SGR 0
-precedes the alternate screen, and refuses otherwise; the notices file says the bundle is
-modified and how. Each part is dropped when a release fixes it.
+file is changed: `@xterm/addon-serialize` 0.14.0's `_diffStyle` turns bold off and dim off both
+with SGR 22, which turns off both, so a snapshot rebuilt a bold cell after a dim one without its
+bold (section 21; unfixed on xterm.js's master on 2026-11-13). `npm run vendor` checks that the
+installed bundle is the one the patch was written for (its version and sha256), replaces the two
+clauses — each text must occur exactly once — so that SGR 22 comes first whenever bold or dim
+goes off, followed by SGR 1 and 2 for what the cell keeps, and refuses otherwise; the notices
+file says the bundle is modified and how. The patch is dropped when a release fixes it.
 `vendor/MANIFEST.json` lists every file with its
 package, version and sha256 — paths relative to the checkout, the shims and the notices under
 the package `skydeck` with version `-`, a borrowed licence with `licenseFrom` (`@xterm/xterm`) and
@@ -2320,7 +2324,7 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | When the owner of a pty's master ends, the program gets SIGHUP and exits; for Claude Code that fires `SessionEnd` with reason `other`. | verified with a stand-in (terminal research T6); Claude Code's side observed in step 1 (design 14) |
 | A python3 keeper's output equals node-pty's cell for cell; snapshot plus tail rebuilds the screen exactly (every viewport cell, colour, attribute, 119 scrollback lines, wrap flags, modes, after two resizes; after SIGKILL of the screen side with 9 unparked records including a resize, no query answered twice, exit status delivered). Keeper about 12 MB. | verified (T1, T4, T10) |
 | `@xterm/addon-serialize` 0.14.0 restores modes 1, 66, 2004, 4, 6, 45, 1004, 7 and mouse modes 9/1000/1002/1003, but not cursor visibility (25), SGR mouse encoding (1006), the cursor style or OSC 8 link ids; the cursor lands one column left when the last row is full width. | verified |
-| `@xterm/addon-serialize` 0.14.0's `_diffStyle` writes SGR 22 both for "bold off" and for "dim off", and 22 turns off both: a dim cell followed by a bold one serialises as `1;22` and the bold is lost; bold and dim followed by only one of them loses that one too. Its wrap trick above a blank row before a wrapped one writes CUF 0 and CUB 0, which move one column, and leaves a stray `-`; it serialises the alternate screen as if the pen were the default. All three unfixed on xterm.js's master on 2026-11-13. With autowrap off (DECAWM), a wide character overwritten at the right margin leaves a cell pair xterm.js serialises one column too wide (Claude Code keeps autowrap on). Nor does it restore modes 2026, 20 and 1016, mode 12, the scroll region, the saved cursor, the character sets or tab stops. | verified (task 12) |
+| `@xterm/addon-serialize` 0.14.0's `_diffStyle` writes SGR 22 both for "bold off" and for "dim off", and 22 turns off both: a dim cell followed by a bold one serialises as `1;22` and the bold is lost; bold and dim followed by only one of them loses that one too. It serialises the alternate screen as if the pen were the default, so after a pen is set the alternate screen's cells take it; above a blank row before a wrapped one its wrap trick writes CUF 0 and CUB 0, which move one column, and leaves a stray `-`. All three unfixed on xterm.js's master on 2026-11-13 (the first patched in the vendored bundle, the other two corrected on the addon's output, 7.2). An alternate-screen line marked wrapped comes back unwrapped; with DECAWM off a wide character overwritten at the right margin is serialised one column too wide; `38;5;n` with n below 16 comes back as the 16-colour form. Nor does it restore modes 2026, 20 and 1016, mode 12, the scroll region, the saved cursor, the character sets or tab stops. | verified (task 12) |
 | xterm.js 6.0.0 in the browser leaves synchronized output (mode 2026) by itself: a held-back refresh starts a 1-second timer that turns the mode off and renders. The headless terminal has no renderer and keeps the mode until `?2026l`, RIS or DECSTR. | read in the vendored bundles (task 12) |
 | A headless terminal with 10,000 lines of 120 columns is about 25 MB; serialising it 145–166 ms (1.24 MB); the last 1,000 lines 18–41 ms; parsing about 10 MB/s. | verified |
 | The headless terminal answers DA1, DA2, DECRQM 2026, CPR, DSR and DECRQSS; it cannot answer OSC 10/11; xterm.js 6.0.0 has no XTVERSION answer. Starting the program before a screen side is connected makes its first probe time out and swallow the first keys. | verified (T9) |

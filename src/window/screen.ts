@@ -195,6 +195,24 @@ function cursorPosition(term: Terminal): string {
 }
 
 /**
+ * Corrects two defects of @xterm/addon-serialize 0.14.0 in its output (ruled on #48; the bold and
+ * dim one cannot be corrected from outside and is patched in the vendored bundle instead):
+ * - it serialises the alternate screen as if the pen were the default, after restoring the
+ *   program's pen at the end of the normal screen, so the alternate screen's cells took that pen:
+ *   SGR 0 goes before its `CSI ? 1049 h CSI H`;
+ * - above a blank row followed by a wrapped one, its wrap trick moves by `CSI 0 C` and `CSI 0 D`,
+ *   which move one column, and leaves a stray `-`: those moves are dropped.
+ * Exact on the text: no cell holds ESC, the addon writes 1049 only there (its modes never do),
+ * and its own cursor moves are never of 0.
+ */
+function correctSerialized(text: string): string {
+  return text
+    .replace('\x1b[?1049h\x1b[H', '\x1b[0m\x1b[?1049h\x1b[H')
+    .replaceAll('\x1b[0C', '')
+    .replaceAll('\x1b[0D', '');
+}
+
+/**
  * The pen (the attributes the next character gets), read from the xterm.js internal the vendored
  * serialise addon itself reads for its pen; null if this xterm.js has none (a test pins it).
  */
@@ -353,7 +371,8 @@ export function createScreen(
         if (disposed) {
           throw new Error('the screen is disposed');
         }
-        const data = serializer.serialize() + additions(term, state.tracked) + unfinished();
+        const serialized = correctSerialized(serializer.serialize());
+        const data = serialized + additions(term, state.tracked) + unfinished();
         return { cols: size.cols, rows: size.rows, data };
       });
     },
