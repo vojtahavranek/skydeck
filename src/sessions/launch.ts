@@ -35,8 +35,10 @@ export interface LaunchOutcome {
 
 /**
  * A20: lock time + LOCK_TTL_NS − LOCK_START_TOLERANCE_NS for a resume (the time read from `lock`);
- * preparedAtNs + the same for `new` or when `lock` is null. A value that is not a lock skydeck
- * writes counts as no lock.
+ * preparedAtNs + the same for `new`, and for a resume whose `lock` is null or not a lock skydeck
+ * writes (it has no time to read). Such a resume is protected by no lock of its own: a terminal
+ * that starts the program itself against the deadline (the window's) must not start it; `here` and
+ * `wezterm` ignore the deadline and the lock, as in step 1.
  */
 export function startDeadline(prepared: PreparedLaunch, lock: string | null): Ns {
   const takenNs = prepared.kind === 'resume' && lock !== null ? lockTakenNs(lock) : null;

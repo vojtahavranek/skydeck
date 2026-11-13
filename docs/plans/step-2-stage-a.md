@@ -570,18 +570,29 @@ export interface LaunchSpec {
 }
 export interface Terminal { readonly name: 'here' | 'wezterm' | 'window'; readonly opensTabs: boolean; open(spec: LaunchSpec): Promise<OpenResult> }
 // `terminalFor` keeps taking 'here' | 'wezterm' (the window terminal exists only inside the server).
+// src/terminals/here.ts (ruled in #39): handoffScript(spec: Pick<LaunchSpec, 'cwd' | 'argv'>) — the
+// handoff uses only those two, so callers and tests need not invent the other fields.
 
 // src/sessions/resume.ts — PreparedLaunch gains:
 //   preparedAtNs: Ns   (the clock when prepareResume / prepareNew ran)
 //   label: string | null
 // prepareNew's options gain `dir: string` (absolute, an existing directory: UsageError
-// "the directory <dir> does not exist" / "… is not absolute" otherwise, nothing stored);
-// the command passes platform.cwd.
+// "the directory <dir> does not exist" (nothing there, or not a directory) / "… is not absolute" /
+// "… cannot be checked (<reason>)" when looking at it fails (ruled in #39), <dir> sanitised;
+// nothing stored); the command passes platform.cwd.
+/** The time a lock value records (when it was taken or last renewed); null for a value that is not
+ *  a lock skydeck writes. Beside lockEventId; startDeadline and task 21 read a lock's time with it
+ *  (ruled in #39). */
+export function lockTakenNs(value: string): Ns | null;
 
 // src/sessions/launch.ts (new; launchPrepared moves here from src/cli/launching.ts)
 export interface LaunchOutcome { code: number; lines: string[] }
-/** A20: lock time + LOCK_TTL_NS − LOCK_START_TOLERANCE_NS for a resume (the time read from `lock`);
- *  preparedAtNs + the same for `new` or when `lock` is null. */
+/** A20: lock time + LOCK_TTL_NS − LOCK_START_TOLERANCE_NS for a resume (the time read from `lock`
+ *  with lockTakenNs); preparedAtNs + the same for `new`, and for a resume whose `lock` is null or
+ *  not a lock skydeck writes (ruled in #39: it has no time to read). Such a resume is protected by
+ *  no lock of its own: a terminal that starts the program itself against the deadline — the window
+ *  terminal (task 21) — must not start it (no keeper, `{ ok: false, timedOut: false }` with the
+ *  reason). `here` and `wezterm` ignore the deadline and the lock, as in step 1. */
 export function startDeadline(prepared: PreparedLaunch, lock: string | null): Ns;
 export function launchSpec(prepared: PreparedLaunch, lock: string | null): LaunchSpec;
 /** launchPrepared of step 1 with the terminal as a parameter; `terminal` null means "no terminal
@@ -592,7 +603,10 @@ export function launchPrepared(deck: Deck, prepared: PreparedLaunch, terminal: T
 export function launchWhere(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
 
 // src/store/store.ts
-export class StoreNewerError extends SkydeckError {} // "skydeck was updated; run skydeck window"
+/** (ruled in #39) `new StoreNewerError()` says "skydeck was updated; run skydeck window"; the
+ *  (message, exitCode?) form of SkydeckError works too. isDatabaseFailure counts it: a refresh's
+ *  per-item catches rethrow it instead of recording it against one spool file, process or transcript. */
+export class StoreNewerError extends SkydeckError { constructor(message?: string, exitCode?: ExitCode) }
 /** guardSchema (the server's connection only, S2 10.1): before every write transaction and every
  *  single-statement write outside a transaction it reads kv schema_version and throws
  *  StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION. */
@@ -1037,14 +1051,19 @@ write guard; `kv` gets the window's keys.
 **Files**
 - Create: `src/sessions/launch.ts`
 - Modify: `src/terminals/types.ts`, `src/terminals/here.ts`, `src/terminals/wezterm.ts` (names
-  only; they ignore the new fields), `src/sessions/resume.ts` (`PreparedLaunch` fields,
+  only; they ignore the new fields; `handoffScript` takes `Pick<LaunchSpec, 'cwd' | 'argv'>`,
+  ruled in #39), `src/sessions/resume.ts` (`PreparedLaunch` fields,
   `prepareNew` with `dir`), `src/sessions/restore.ts` (fills the new `LaunchSpec` fields through
   `launchSpec`), `src/cli/launching.ts` (only `launchWhere`), `src/cli/commands/resume.ts`,
   `src/cli/commands/new.ts`, `src/cli/tui/run.ts` (call `launchWhere`; `new` passes
   `platform.cwd`), `src/store/store.ts`, `src/store/types.ts`, `src/sessions/deck.ts`
-- Modify: `docs/design-step-2.md` 11.1 (A20)
+- Modify: `docs/design-step-2.md` 11.1 (A20), and the 4.4 row of `src/terminals/types.ts` (the
+  label; ruled in #39)
 - Test: `test/sessions/launch.test.ts` (moved from `test/cli/launching.test.ts` and extended),
-  `test/store/store.test.ts`, `test/sessions/resume.test.ts`, `test/sessions/restore.test.ts`
+  `test/store/store.test.ts`, `test/sessions/resume.test.ts`, `test/sessions/restore.test.ts`,
+  `test/sessions/deck.test.ts` (`openDeck`'s option), `test/fixtures/migrate-while-locked.ts` (a
+  worker thread that commits a migration while a guarded write waits for the lock); call sites
+  only in `test/terminals/terminals.test.ts` and `test/bin/launcher-handoff.test.ts` (ruled in #39)
 
 **Tests** (platform: `testPlatform` (through `testDeck`))
 - Every existing test of `resume`, `new`, `restore`, the interactive list and `launching` passes
@@ -1062,6 +1081,11 @@ write guard; `kv` gets the window's keys.
   `SCHEMA_VERSION + 1`; then `setKv`, `updateMeta`, `insertEvent` and `transaction(fn)` each throw
   `StoreNewerError` and write nothing (`fn` is not called); reads still work. Without the option
   the same writes succeed (a command migrates, it does not refuse). The `kv` keys of 2.6 type-check.
+- Store guard under the lock: a migration that commits while a guarded write waits for the write
+  lock is seen, and the write is refused (the version is read after BEGIN IMMEDIATE).
+- `isDatabaseFailure(new StoreNewerError())` is true (ruled in #39): otherwise ingest, reconcile and
+  scan, which rethrow only failures of the database as a whole, would record the refusal item by
+  item and go on, and the server's tick would not stop at the first refused write.
 
 **Done when:** all step 1 tests pass; no command's output changes; the server can call
 `launchPrepared` with its own terminal and get the spec it needs.
