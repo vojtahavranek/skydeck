@@ -573,15 +573,25 @@ commands for the others.
   `<dataDir>/node` pointing at the Node.js binary it runs under; (3) shows the exact change to
   `<claudeHome>/settings.json`, asks, writes a backup beside it, adds the two hook entries and
   records a hash of the resulting file; (4) runs ingest, reconcile and the first transcript scan;
-  (5) makes the first-run offer (7.1). Running it again changes nothing. Hook entries that belong
-  to something else are never touched.
+  (5) makes the first-run offer (7.1), once: a later install does not offer it again, whatever
+  the answer was. Running it again changes nothing. Hook entries that belong to something else
+  are never touched. A backup left by an earlier install is never overwritten; when it differs
+  from the current file, restoring it would undo what the user changed since, so install then
+  records no hash and uninstall removes the entries instead. A link is created or re-pointed only
+  where there is nothing or a symbolic link; anything else stops install before it changes
+  anything.
 - **`skydeck uninstall`**: restores the backup when the settings file still has the recorded
   hash; otherwise removes exactly the entries whose command names `<hookPath>`. Removes the
-  links. The database stays unless `--purge` is given.
+  links that still point where install pointed them. The database stays unless `--purge` is
+  given.
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
-  resolvable; Node.js version; database writable; spool size and files in `spool/bad/`; age of
-  the last event; the last lines of `hook.log`; scripted runs dropped; `gh` present and logged
-  in; the terminal adapter.
+  resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with
+  their ages (they are removed after seven days); age of the last event; the last lines of
+  `hook.log`; scripted runs dropped; what the last refresh skipped (a spool file, a process, a
+  transcript folder or file that could not be read); whether `<claudeHome>/sessions` and every
+  folder and file under `<claudeHome>/projects` can be read (5.6); `gh` present and logged in; the
+  terminal adapter. It does not refresh, and a check that fails unexpectedly is one problem line,
+  not the end of the report.
 
 `docs/install.md` is the guide for setting skydeck up on another machine.
 
