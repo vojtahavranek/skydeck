@@ -3,6 +3,14 @@ import { isAbsolute } from 'node:path';
 import { ConfigError } from './errors.ts';
 import type { Files } from './types.ts';
 
+/** The keys of `window` (S2 16.4). */
+export interface WindowConfig {
+  port: number; // 1..65535 (A6)
+  edge: string; // absolute path
+  profileDir: string | null; // an absolute Windows path, `<letter>:\…`
+  keepAlive: 'wsl' | 'off';
+}
+
 export interface Config {
   terminal: 'here' | 'wezterm';
   wezterm: { domain: string | null };
@@ -14,6 +22,7 @@ export interface Config {
   restoreStartTimeoutSeconds: number;
   claudeHome: string | null;
   claudeCommand: string;
+  window: WindowConfig;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -27,12 +36,25 @@ export const DEFAULT_CONFIG: Config = {
   restoreStartTimeoutSeconds: 120,
   claudeHome: null,
   claudeCommand: 'claude',
+  window: {
+    port: 47613,
+    edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    profileDir: null,
+    keepAlive: 'wsl',
+  },
 };
 
 /** A copy of the defaults that the caller may change. */
 function defaults(): Config {
-  return { ...DEFAULT_CONFIG, wezterm: { ...DEFAULT_CONFIG.wezterm } };
+  return {
+    ...DEFAULT_CONFIG,
+    wezterm: { ...DEFAULT_CONFIG.wezterm },
+    window: { ...DEFAULT_CONFIG.window },
+  };
 }
+
+/** An absolute Windows path: a drive letter, a colon and a backslash (`C:\…`). */
+const WINDOWS_ABSOLUTE = /^[A-Za-z]:\\/;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -42,7 +64,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * Parses config.json text and merges it over DEFAULT_CONFIG. Throws ConfigError naming `source`
  * and the key on: invalid JSON; a top level that is not an object; an unknown key (also inside
  * `wezterm`); a wrong type; `terminal` not here|wezterm; a number that is not a positive integer;
- * `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute; `claudeCommand` empty.
+ * `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute; `claudeCommand` empty; in
+ * `window` (S2 16.4): an unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir`
+ * neither null nor an absolute Windows path, `keepAlive` neither "wsl" nor "off".
  *
  * `claudeHome` and `wezterm.domain` may also be `null`, which is their default; an empty
  * `wezterm.domain` is an error like an empty `claudeCommand`.
@@ -119,6 +143,47 @@ export function parseConfig(text: string, source: string): Config {
           fail('"claudeCommand" must be a non-empty string');
         }
         config.claudeCommand = value;
+        break;
+      case 'window':
+        if (!isObject(value)) {
+          fail('"window" must be an object');
+        }
+        for (const [name, item] of Object.entries(value)) {
+          switch (name) {
+            case 'port':
+              // 0 is not a setting: tests pass port 0 to the server directly (A6).
+              if (
+                typeof item !== 'number' ||
+                !Number.isSafeInteger(item) ||
+                item < 1 ||
+                item > 65535
+              ) {
+                fail('"window.port" must be a whole number from 1 to 65535');
+              }
+              config.window.port = item;
+              break;
+            case 'edge':
+              if (typeof item !== 'string' || !isAbsolute(item)) {
+                fail('"window.edge" must be an absolute path');
+              }
+              config.window.edge = item;
+              break;
+            case 'profileDir':
+              if (item !== null && (typeof item !== 'string' || !WINDOWS_ABSOLUTE.test(item))) {
+                fail('"window.profileDir" must be an absolute Windows path (C:\\…) or null');
+              }
+              config.window.profileDir = item;
+              break;
+            case 'keepAlive':
+              if (item !== 'wsl' && item !== 'off') {
+                fail('"window.keepAlive" must be "wsl" or "off"');
+              }
+              config.window.keepAlive = item;
+              break;
+            default:
+              fail(`unknown key "window.${name}"`);
+          }
+        }
         break;
       default:
         fail(`unknown key "${key}"`);

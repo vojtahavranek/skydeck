@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 
 import type { Env } from './types.ts';
@@ -73,4 +74,45 @@ export function resolvePlaces(
     configPath: join(configDir, 'config.json'),
     binLink: join(homeDir, '.local', 'bin', 'skydeck'),
   };
+}
+
+/** The first 8 hex digits of the sha256 of the store's path (S2 4.2). */
+export function storeId(dbPath: string): string {
+  return createHash('sha256').update(dbPath).digest('hex').slice(0, 8);
+}
+
+export type RuntimeRule = 'skydeck-home' | 'xdg-runtime' | 'state-dir';
+
+/**
+ * S2 4.2's rule, without the store's record: $SKYDECK_HOME/run when SKYDECK_HOME counts (D26);
+ * else $XDG_RUNTIME_DIR/skydeck-<id> when XDG_RUNTIME_DIR counts and `xdgUsable(dir)` says it is
+ * a directory of the user's, not readable by others, and the user lingers; else <stateDir>/run-<id>.
+ * `xdgUsable` is asked only when XDG_RUNTIME_DIR decides.
+ */
+export function runtimeDirByRule(input: {
+  env: Env;
+  stateDir: string;
+  storeId: string;
+  xdgUsable: (xdgDir: string) => boolean;
+}): { dir: string; rule: RuntimeRule } {
+  const skydeckHome = absoluteEnv(input.env, 'SKYDECK_HOME');
+  if (skydeckHome !== null) {
+    return { dir: join(skydeckHome, 'run'), rule: 'skydeck-home' };
+  }
+  const xdg = absoluteEnv(input.env, 'XDG_RUNTIME_DIR');
+  if (xdg !== null && input.xdgUsable(xdg)) {
+    return { dir: join(xdg, `skydeck-${input.storeId}`), rule: 'xdg-runtime' };
+  }
+  return { dir: join(input.stateDir, `run-${input.storeId}`), rule: 'state-dir' };
+}
+
+/** Every directory the rule can give, for `uninstall --purge` (S2 16.2), in the rule's order. */
+export function runtimeDirCandidates(env: Env, stateDir: string, storeId: string): string[] {
+  const skydeckHome = absoluteEnv(env, 'SKYDECK_HOME');
+  const xdg = absoluteEnv(env, 'XDG_RUNTIME_DIR');
+  return [
+    ...(skydeckHome === null ? [] : [join(skydeckHome, 'run')]),
+    ...(xdg === null ? [] : [join(xdg, `skydeck-${storeId}`)]),
+    join(stateDir, `run-${storeId}`),
+  ];
 }

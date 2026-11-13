@@ -37,6 +37,38 @@ describe('loadConfig', () => {
     });
   });
 
+  test('an empty object gives the window defaults of plan 2.2', (t) => {
+    assert.deepEqual((load(t, '{}').run() as { window: unknown }).window, {
+      port: 47613,
+      edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+      profileDir: null,
+      keepAlive: 'wsl',
+    });
+  });
+
+  test('a window key replaces its default, the other window keys stay', (t) => {
+    assert.deepEqual(load(t, '{"window":{"port":47000}}').run(), {
+      ...DEFAULT_CONFIG,
+      window: { ...DEFAULT_CONFIG.window, port: 47000 },
+    });
+  });
+
+  test('every window key can be set (S2 16.4)', (t) => {
+    const text = JSON.stringify({
+      window: { port: 1, edge: '/opt/edge', profileDir: 'D:\\skydeck\\edge', keepAlive: 'off' },
+    });
+
+    assert.deepEqual((load(t, text).run() as { window: unknown }).window, {
+      port: 1,
+      edge: '/opt/edge',
+      profileDir: 'D:\\skydeck\\edge',
+      keepAlive: 'off',
+    });
+    assert.equal(parseConfig('{"window":{"port":65535}}', 'x').window.port, 65535);
+    assert.equal(parseConfig('{"window":{"profileDir":"c:\\\\"}}', 'x').window.profileDir, 'c:\\');
+    assert.equal(parseConfig('{"window":{"profileDir":null}}', 'x').window.profileDir, null);
+  });
+
   test('an empty wezterm object leaves the domain null', (t) => {
     assert.equal(
       (load(t, '{"wezterm":{}}').run() as { wezterm: { domain: unknown } }).wezterm.domain,
@@ -71,6 +103,24 @@ describe('loadConfig', () => {
     ['{"wezterm":{"domain":""}}', 'domain'],
     ['{"wezterm":[]}', 'wezterm'],
     ['{"wezterm":"x"}', 'wezterm'],
+    ['{"window":[]}', 'window'],
+    ['{"window":null}', 'window'],
+    ['{"window":{"colour":1}}', 'window.colour'],
+    ['{"window":{"port":0}}', 'window.port'],
+    ['{"window":{"port":65536}}', 'window.port'],
+    ['{"window":{"port":1.5}}', 'window.port'],
+    ['{"window":{"port":"1"}}', 'window.port'],
+    ['{"window":{"port":-1}}', 'window.port'],
+    ['{"window":{"edge":"msedge.exe"}}', 'window.edge'],
+    ['{"window":{"edge":""}}', 'window.edge'],
+    ['{"window":{"edge":null}}', 'window.edge'],
+    ['{"window":{"profileDir":"relative\\\\x"}}', 'window.profileDir'],
+    ['{"window":{"profileDir":"/mnt/c/x"}}', 'window.profileDir'],
+    ['{"window":{"profileDir":"C:"}}', 'window.profileDir'],
+    ['{"window":{"profileDir":"C:/x"}}', 'window.profileDir'],
+    ['{"window":{"profileDir":3}}', 'window.profileDir'],
+    ['{"window":{"keepAlive":"on"}}', 'window.keepAlive'],
+    ['{"window":{"keepAlive":false}}', 'window.keepAlive'],
   ];
   for (const [text, key] of invalid) {
     test(`${text} is a ConfigError naming the file${key === null ? '' : ` and ${key}`}`, (t) => {
@@ -94,9 +144,11 @@ describe('parseConfig', () => {
 
     config.wezterm.domain = 'changed';
     config.restoreBatch = 99;
+    config.window.port = 1;
 
     assert.equal(DEFAULT_CONFIG.wezterm.domain, null);
     assert.equal(DEFAULT_CONFIG.restoreBatch, 3);
+    assert.equal(DEFAULT_CONFIG.window.port, 47613);
   });
 
   test('an absolute claudeHome and a valid groupPattern are accepted', () => {
@@ -125,6 +177,12 @@ describe('parseConfig', () => {
       restoreStartTimeoutSeconds: 120,
       claudeHome: null,
       claudeCommand: 'claude',
+      window: {
+        port: 47613,
+        edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+        profileDir: null,
+        keepAlive: 'wsl',
+      },
     });
   });
 

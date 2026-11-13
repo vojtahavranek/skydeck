@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { describe, test } from 'node:test';
 
-import { resolveConfigDir, resolvePlaces } from '../../src/platform/paths.ts';
+import {
+  resolveConfigDir,
+  resolvePlaces,
+  runtimeDirByRule,
+  runtimeDirCandidates,
+  storeId,
+} from '../../src/platform/paths.ts';
 
 describe('resolvePlaces (home /h)', () => {
   test('with an empty environment everything is under the home directory', () => {
@@ -116,5 +123,134 @@ describe('resolveConfigDir', () => {
     ]) {
       assert.equal(resolveConfigDir(env, '/h'), resolvePlaces(env, '/h', null).configDir);
     }
+  });
+});
+
+describe('storeId (S2 4.2)', () => {
+  test('is the first 8 hex digits of the sha256 of the path', () => {
+    const path = '/h/.local/share/skydeck/skydeck.db';
+    const expected = createHash('sha256').update(path).digest('hex').slice(0, 8);
+
+    assert.equal(storeId(path), expected);
+    assert.match(storeId(path), /^[0-9a-f]{8}$/);
+  });
+
+  test('two stores have two ids', () => {
+    assert.notEqual(storeId('/a/skydeck.db'), storeId('/b/skydeck.db'));
+  });
+});
+
+describe('runtimeDirByRule (S2 4.2)', () => {
+  const ID = 'ab12cd34';
+  const usable = (): boolean => true;
+
+  test('SKYDECK_HOME wins whatever XDG_RUNTIME_DIR says', () => {
+    const asked: string[] = [];
+
+    const result = runtimeDirByRule({
+      env: { SKYDECK_HOME: '/s', XDG_RUNTIME_DIR: '/run/user/1' },
+      stateDir: '/s/state',
+      storeId: ID,
+      xdgUsable: (dir) => {
+        asked.push(dir);
+        return true;
+      },
+    });
+
+    assert.deepEqual(result, { dir: '/s/run', rule: 'skydeck-home' });
+    assert.deepEqual(asked, [], 'XDG_RUNTIME_DIR is not even looked at');
+  });
+
+  test('without SKYDECK_HOME a usable XDG_RUNTIME_DIR gives skydeck-<id> in it', () => {
+    const asked: string[] = [];
+
+    const result = runtimeDirByRule({
+      env: { XDG_RUNTIME_DIR: '/run/user/1' },
+      stateDir: '/h/.local/state/skydeck',
+      storeId: ID,
+      xdgUsable: (dir) => {
+        asked.push(dir);
+        return true;
+      },
+    });
+
+    assert.deepEqual(result, { dir: `/run/user/1/skydeck-${ID}`, rule: 'xdg-runtime' });
+    assert.deepEqual(asked, ['/run/user/1']);
+  });
+
+  test('an XDG_RUNTIME_DIR that is relative, empty, unset or not usable gives run-<id> in the state directory', () => {
+    const stateDir = '/h/.local/state/skydeck';
+    const cases: [env: Record<string, string>, xdgUsable: () => boolean][] = [
+      [{ XDG_RUNTIME_DIR: 'run/user/1' }, usable],
+      [{ XDG_RUNTIME_DIR: '' }, usable],
+      [{}, usable],
+      [{ XDG_RUNTIME_DIR: '/run/user/1' }, () => false],
+    ];
+    for (const [env, xdgUsable] of cases) {
+      assert.deepEqual(
+        runtimeDirByRule({ env, stateDir, storeId: ID, xdgUsable }),
+        { dir: `${stateDir}/run-${ID}`, rule: 'state-dir' },
+        JSON.stringify(env),
+      );
+    }
+  });
+
+  test('a relative or empty SKYDECK_HOME does not count (D26)', () => {
+    for (const value of ['rel', '']) {
+      assert.equal(
+        runtimeDirByRule({
+          env: { SKYDECK_HOME: value, XDG_RUNTIME_DIR: '/run/user/1' },
+          stateDir: '/st',
+          storeId: ID,
+          xdgUsable: usable,
+        }).rule,
+        'xdg-runtime',
+        JSON.stringify(value),
+      );
+    }
+  });
+
+  test('a trailing slash in a variable does not leak into the path', () => {
+    assert.equal(
+      runtimeDirByRule({
+        env: { SKYDECK_HOME: '/s/' },
+        stateDir: '/st',
+        storeId: ID,
+        xdgUsable: usable,
+      }).dir,
+      '/s/run',
+    );
+    assert.equal(
+      runtimeDirByRule({
+        env: { XDG_RUNTIME_DIR: '/run/user/1/' },
+        stateDir: '/st',
+        storeId: ID,
+        xdgUsable: usable,
+      }).dir,
+      `/run/user/1/skydeck-${ID}`,
+    );
+  });
+});
+
+describe('runtimeDirCandidates (S2 16.2)', () => {
+  const ID = 'ab12cd34';
+
+  test('lists the three directories of the rule in its order', () => {
+    assert.deepEqual(
+      runtimeDirCandidates({ SKYDECK_HOME: '/s', XDG_RUNTIME_DIR: '/run/user/1' }, '/s/state', ID),
+      ['/s/run', `/run/user/1/skydeck-${ID}`, `/s/state/run-${ID}`],
+    );
+  });
+
+  test('leaves out the ones whose variable does not count', () => {
+    assert.deepEqual(runtimeDirCandidates({}, '/st', ID), [`/st/run-${ID}`]);
+    assert.deepEqual(
+      runtimeDirCandidates({ SKYDECK_HOME: 'rel', XDG_RUNTIME_DIR: '/run/user/1' }, '/st', ID),
+      [`/run/user/1/skydeck-${ID}`, `/st/run-${ID}`],
+    );
+    assert.deepEqual(runtimeDirCandidates({ SKYDECK_HOME: '/s', XDG_RUNTIME_DIR: '' }, '/st', ID), [
+      '/s/run',
+      `/st/run-${ID}`,
+    ]);
   });
 });
