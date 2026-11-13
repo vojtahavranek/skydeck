@@ -1,0 +1,398 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { describe, test } from 'node:test';
+
+import { command } from '../../../src/cli/commands/install.ts';
+import { hookEntry } from '../../../src/claude/settings.ts';
+import { NS_PER_DAY } from '../../../src/platform/time.ts';
+import { run, settingsFile, transcript, withStore } from '../../helpers/install.ts';
+import { S1, S2, S3, SEC, T0, statLine, testPlatform } from '../../helpers/platform.ts';
+import type { TestPlatform } from '../../helpers/platform.ts';
+import { hookInput, spoolName, spoolText } from '../../helpers/spool.ts';
+
+const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/** The two entries install adds, as `hooks` holds them in a file that had none. */
+function ourHooks(d: TestPlatform): Record<string, unknown> {
+  return {
+    SessionStart: [hookEntry(d.places.hookPath, 'SessionStart')],
+    SessionEnd: [hookEntry(d.places.hookPath, 'SessionEnd')],
+  };
+}
+
+const kv = (d: TestPlatform, key: 'settings_hash' | 'settings_backup' | 'first_run_offered') =>
+  withStore(d.places, (store) => store.getKv(key));
+
+const backupOf = (d: TestPlatform): string => `${settingsFile(d.places)}.skydeck-backup`;
+
+describe('install: links and hook entries', () => {
+  test('with no settings file and the answer y: the three links, the two entries, backup "none" and the hash', async (t) => {
+    const d = testPlatform(t);
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(readlinkSync(d.places.hookPath), join(d.platform.appRoot, 'bin', 'skydeck-hook'));
+    assert.equal(readlinkSync(d.places.binLink), join(d.platform.appRoot, 'bin', 'skydeck'));
+    assert.equal(readlinkSync(d.places.nodeLink), process.execPath);
+    const text = readFileSync(settingsFile(d.places), 'utf8');
+    assert.deepEqual(JSON.parse(text), { hooks: ourHooks(d) });
+    assert.equal(kv(d, 'settings_backup'), 'none');
+    assert.equal(kv(d, 'settings_hash'), sha256(text));
+    assert.equal(existsSync(backupOf(d)), false);
+    assert.ok(r.prompts.includes('Add them? [y/N] '));
+    const prompt = r.stderr.indexOf('Add them? [y/N] ');
+    const announced = r.stderr.indexOf(
+      `skydeck will add these hook entries to ${settingsFile(d.places)}:`,
+    );
+    assert.ok(announced >= 0 && announced < prompt, r.stderr);
+    for (const event of ['SessionStart', 'SessionEnd'] as const) {
+      const shown = r.stderr.indexOf(JSON.stringify(hookEntry(d.places.hookPath, event)));
+      assert.ok(shown > announced && shown < prompt, `${event} entry shown before the prompt`);
+    }
+  });
+
+  test('over an existing file: a backup of it, the old keys kept and both entries added', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"opus"}');
+    const text = readFileSync(settingsFile(d.places), 'utf8');
+    assert.deepEqual(JSON.parse(text), { model: 'opus', hooks: ourHooks(d) });
+    assert.equal(kv(d, 'settings_backup'), backupOf(d));
+    assert.equal(kv(d, 'settings_hash'), sha256(text));
+  });
+
+  test('the backup is readable by the user only: settings can hold secrets', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"env":{"TOKEN":"x"}}', { mode: 0o600 });
+
+    await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(statSync(backupOf(d)).mode & 0o777, 0o600);
+  });
+
+  for (const [why, lines] of [
+    ['the answer n', ['n']],
+    ['no answer (no terminal)', []],
+  ] as const) {
+    test(`${why}: exit 1, settings not changed, no backup and no hash`, async (t) => {
+      const d = testPlatform(t);
+      writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+
+      const r = await run(d.platform, ['install'], { lines });
+
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /settings not changed/);
+      assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"opus"}');
+      assert.equal(existsSync(backupOf(d)), false);
+      assert.equal(kv(d, 'settings_hash'), null);
+      assert.equal(kv(d, 'settings_backup'), null);
+    });
+  }
+
+  test('"yes" and " Y " count as yes', async (t) => {
+    for (const answer of ['yes', ' Y ']) {
+      const d = testPlatform(t);
+      const r = await run(d.platform, ['install'], { lines: [answer] });
+      assert.equal(r.code, 0, `${answer}: ${r.stderr}`);
+      assert.ok(existsSync(settingsFile(d.places)));
+    }
+  });
+
+  test('installing twice changes nothing the second time and asks nothing about hooks', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+    await run(d.platform, ['install'], { lines: ['y'] });
+    const settingsBefore = statSync(settingsFile(d.places));
+    const textBefore = readFileSync(settingsFile(d.places), 'utf8');
+    const hashBefore = kv(d, 'settings_hash');
+    const links = [d.places.hookPath, d.places.binLink, d.places.nodeLink];
+    const linksBefore = links.map((link) => lstatSync(link).ino);
+
+    const r = await run(d.platform, ['install']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(!r.prompts.some((prompt) => prompt.startsWith('Add them?')));
+    assert.match(r.stdout + r.stderr, /hook entries already present/);
+    assert.equal(readFileSync(settingsFile(d.places), 'utf8'), textBefore);
+    assert.equal(statSync(settingsFile(d.places)).ino, settingsBefore.ino);
+    assert.equal(statSync(settingsFile(d.places)).mtimeMs, settingsBefore.mtimeMs);
+    assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"opus"}');
+    assert.equal(kv(d, 'settings_hash'), hashBefore);
+    assert.deepEqual(
+      links.map((link) => lstatSync(link).ino),
+      linksBefore,
+    );
+  });
+
+  test('hook entries that belong to something else survive install', async (t) => {
+    const d = testPlatform(t);
+    const foreignStart = { hooks: [{ type: 'command', command: '/opt/other/hook start' }] };
+    const foreignTool = {
+      matcher: 'Bash',
+      hooks: [{ type: 'command', command: 'echo checked', timeout: 3 }],
+    };
+    writeFileSync(
+      settingsFile(d.places),
+      JSON.stringify({ hooks: { SessionStart: [foreignStart], PreToolUse: [foreignTool] } }),
+    );
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    const settings = JSON.parse(readFileSync(settingsFile(d.places), 'utf8')) as {
+      hooks: Record<string, unknown>;
+    };
+    assert.deepEqual(settings.hooks, {
+      SessionStart: [foreignStart, hookEntry(d.places.hookPath, 'SessionStart')],
+      PreToolUse: [foreignTool],
+      SessionEnd: [hookEntry(d.places.hookPath, 'SessionEnd')],
+    });
+  });
+
+  test('a settings file that is a symbolic link stays one; the file it points to gets the entries', async (t) => {
+    const d = testPlatform(t);
+    const dotfiles = join(d.sandbox.root, 'dotfiles');
+    mkdirSync(dotfiles);
+    const real = join(dotfiles, 'claude-settings.json');
+    writeFileSync(real, '{"model":"opus"}');
+    symlinkSync(real, settingsFile(d.places));
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(readlinkSync(settingsFile(d.places)), real);
+    assert.deepEqual(JSON.parse(readFileSync(real, 'utf8')), {
+      model: 'opus',
+      hooks: ourHooks(d),
+    });
+  });
+
+  test('a settings file that is not JSON: exit 1, nothing written to it', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), '{"model":');
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /settings\.json is not valid JSON/);
+    assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":');
+    assert.equal(existsSync(backupOf(d)), false);
+  });
+
+  test('a Claude Code directory that does not exist is not created: exit 1 naming it', async (t) => {
+    const d = testPlatform(t, { env: (s) => ({ CLAUDE_CONFIG_DIR: join(s.root, 'no-claude') }) });
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /no-claude/);
+    assert.equal(existsSync(join(d.sandbox.root, 'no-claude')), false);
+  });
+
+  test('a file that is not a symbolic link where a link goes is left alone: exit 1, settings untouched', async (t) => {
+    const d = testPlatform(t);
+    mkdirSync(join(d.sandbox.home, '.local', 'bin'), { recursive: true });
+    writeFileSync(d.places.binLink, '#!/bin/sh\necho mine\n');
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /not a symbolic link/);
+    assert.equal(readFileSync(d.places.binLink, 'utf8'), '#!/bin/sh\necho mine\n');
+    assert.equal(existsSync(settingsFile(d.places)), false);
+    assert.equal(existsSync(d.places.hookPath), false);
+  });
+
+  test('a symbolic link from an earlier checkout is pointed at this one', async (t) => {
+    const d = testPlatform(t);
+    mkdirSync(join(d.sandbox.home, '.local', 'bin'), { recursive: true });
+    symlinkSync('/old/checkout/bin/skydeck', d.places.binLink);
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(readlinkSync(d.places.binLink), join(d.platform.appRoot, 'bin', 'skydeck'));
+  });
+
+  test('a backup left by an earlier install is never overwritten', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(backupOf(d), '{"model":"haiku"}');
+    writeFileSync(settingsFile(d.places), '{"model":"opus","theme":"dark"}');
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"haiku"}');
+    // Restoring that older backup would undo what the user changed since; uninstall must remove
+    // the entries instead, so nothing that leads to the restore is recorded.
+    assert.equal(kv(d, 'settings_hash'), null);
+    assert.equal(kv(d, 'settings_backup'), null);
+    assert.match(r.stdout + r.stderr, /skydeck-backup/);
+  });
+
+  test('a backup left by an earlier install that equals the current file is recorded as the backup', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(backupOf(d), '{"model":"opus"}');
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(kv(d, 'settings_backup'), backupOf(d));
+    assert.equal(kv(d, 'settings_hash'), sha256(readFileSync(settingsFile(d.places), 'utf8')));
+  });
+
+  test('a spool file written before install is ingested by it', async (t) => {
+    const d = testPlatform(t);
+    mkdirSync(d.places.spoolDir, { recursive: true });
+    const fields = {
+      event: 'SessionStart' as const,
+      timeNs: T0 - 20n * SEC,
+      pid: 4242,
+      input: hookInput('SessionStart', S1, { source: 'startup' }),
+    };
+    writeFileSync(join(d.places.spoolDir, spoolName(fields, 1)), spoolText(fields));
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(
+      withStore(d.places, (store) => store.events().map((event) => event.sessionId)),
+      [S1],
+    );
+  });
+});
+
+describe('install: the first-run offer', () => {
+  const OLD = T0 - 10n * NS_PER_DAY;
+  const RECENT = T0 - 2n * NS_PER_DAY;
+
+  const doneOf = (d: TestPlatform): Record<string, bigint | null> =>
+    withStore(d.places, (store) =>
+      Object.fromEntries(store.allMeta().map((meta) => [meta.sessionId, meta.doneAtNs])),
+    );
+
+  test('two sessions older than seven days, one younger, answer y: the two are done', async (t) => {
+    const d = testPlatform(t);
+    transcript(d.places, S1, OLD);
+    transcript(d.places, S2, OLD);
+    transcript(d.places, S3, RECENT);
+
+    const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.prompts, [
+      'Add them? [y/N] ',
+      'Mark 2 sessions older than 7 days as done? [y/N] ',
+    ]);
+    assert.deepEqual(doneOf(d), { [S1]: T0, [S2]: T0 });
+    assert.equal(kv(d, 'first_run_offered'), '1');
+
+    const again = await run(d.platform, ['install']);
+    assert.equal(again.code, 0, again.stderr);
+    assert.deepEqual(again.prompts, []);
+  });
+
+  test('answer n: nothing is done, and the offer is not made again', async (t) => {
+    const d = testPlatform(t);
+    transcript(d.places, S1, OLD);
+
+    const r = await run(d.platform, ['install'], { lines: ['y', 'n'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.prompts, [
+      'Add them? [y/N] ',
+      'Mark 1 session older than 7 days as done? [y/N] ',
+    ]);
+    assert.deepEqual(doneOf(d), {});
+    assert.equal(kv(d, 'first_run_offered'), '1');
+    assert.deepEqual((await run(d.platform, ['install'])).prompts, []);
+  });
+
+  test('no old sessions: no question, and the flag is still set', async (t) => {
+    const d = testPlatform(t);
+    transcript(d.places, S1, RECENT);
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
+    assert.equal(kv(d, 'first_run_offered'), '1');
+  });
+
+  test('a running session and one that is not listed are not offered', async (t) => {
+    const d = testPlatform(t);
+    // S1: an old start by a process that is still alive (running), its transcript old too.
+    mkdirSync(d.places.spoolDir, { recursive: true });
+    const fields = {
+      event: 'SessionStart' as const,
+      timeNs: OLD,
+      pid: 4242,
+      input: hookInput('SessionStart', S1, { source: 'startup' }),
+    };
+    writeFileSync(join(d.places.spoolDir, spoolName(fields, 1)), spoolText(fields));
+    d.proc.setProcess(4242, { stat: statLine(4242, 51234567), cmdline: ['claude'] });
+    transcript(d.places, S1, OLD);
+    // S2: an old transcript of another entry point (never listed).
+    transcript(d.places, S2, OLD, 'sdk-cli');
+    // S3: the one that counts.
+    transcript(d.places, S3, OLD);
+
+    const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.prompts.includes('Mark 1 session older than 7 days as done? [y/N] '));
+    assert.deepEqual(doneOf(d), { [S3]: T0 });
+  });
+
+  test('the age comes from firstRunDoneAfterDays', async (t) => {
+    const d = testPlatform(t);
+    mkdirSync(d.places.configDir, { recursive: true });
+    writeFileSync(d.places.configPath, '{"firstRunDoneAfterDays":1}');
+    transcript(d.places, S1, RECENT);
+
+    const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.prompts.includes('Mark 1 session older than 1 day as done? [y/N] '));
+  });
+});
+
+describe('install: arguments', () => {
+  test('--help prints the usage and exits 0', async (t) => {
+    const d = testPlatform(t);
+    const r = await run(d.platform, ['install', '--help']);
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /^skydeck install\n/);
+    assert.equal(existsSync(d.places.dbPath), false);
+  });
+
+  test('an argument is a usage error: exit 2, nothing created', async (t) => {
+    const d = testPlatform(t);
+    const r = await run(d.platform, ['install', 'now']);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /skydeck install/);
+    assert.equal(existsSync(d.places.dbPath), false);
+  });
+
+  test('name and summary are those of the plan', () => {
+    assert.equal(command.name, 'install');
+    assert.equal(command.summary, 'Install the hooks and links');
+  });
+});
