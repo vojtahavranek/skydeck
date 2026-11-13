@@ -23,8 +23,9 @@ const NOTE_HEAD_LINES = 3;
 const NOTE_LINE_MAX = 1024;
 
 /** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was lost or
- *  never started has no program that could. */
-const MAY_START: ReadonlySet<TerminalState> = new Set([
+ *  never started has no program that could. Shared inside the view model (ruled, #45): `rowPayload`'s
+ *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. */
+export const MAY_START: ReadonlySet<TerminalState> = new Set([
   'starting',
   'running',
   'reconnecting',

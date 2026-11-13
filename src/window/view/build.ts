@@ -10,7 +10,7 @@ import { isListed, matchesFilter } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import type { DerivedSession } from '../../sessions/types.ts';
 import { sanitize } from '../../text/sanitize.ts';
-import type { TerminalInfo, TerminalState } from '../hub.ts';
+import type { TerminalInfo } from '../hub.ts';
 import type {
   ListMessage,
   RowPayload,
@@ -18,7 +18,7 @@ import type {
   SelectedPayload,
   TerminalPayload,
 } from '../protocol.ts';
-import { projectDirs, rowPayload, sectionOf } from './sections.ts';
+import { MAY_START, projectDirs, rowPayload, sectionOf } from './sections.ts';
 
 export interface ViewInput {
   rows: readonly ListRow[];
@@ -36,16 +36,6 @@ const SHORT_ID_LENGTH = 8;
 
 type SectionName = SectionPayload['name'];
 const SECTIONS: readonly SectionName[] = ['open', 'week', 'earlier'];
-
-/** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was lost or
- *  never started has no program that could. The same set as `rowPayload`'s `starting` (sections.ts),
- *  kept private to each file so that each exports exactly its contract. */
-const MAY_START: ReadonlySet<TerminalState> = new Set([
-  'starting',
-  'running',
-  'reconnecting',
-  'newer-keeper',
-]);
 
 /** One row of the message and what places it. */
 interface Entry {

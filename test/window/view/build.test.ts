@@ -751,6 +751,19 @@ test('starting: a new terminal keeps its row when the session has a row step 1 d
     done.sections.flatMap((s) => s.rows),
     [],
   );
+  assert.equal(done.doneHidden, 1);
+  // With done sessions shown, it is listed with its terminal.
+  const shownDone = buildListMessage(
+    input({
+      rows: rows([ds({ id: NEW, transcript: null, hidden: true, doneAtNs: T0 })]),
+      terminals: [ended],
+      view: { showDone: true },
+    }),
+  );
+  assert.deepEqual(ids(shownDone, 'week'), [NEW]);
+  assert.equal(rowIn(shownDone, NEW).terminal, termId(1));
+  assert.equal(rowIn(shownDone, NEW).done, true);
+  assert.equal(shownDone.doneHidden, 0);
 });
 
 // --- done --------------------------------------------------------------------------------------

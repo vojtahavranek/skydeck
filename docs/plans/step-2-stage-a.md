@@ -1898,6 +1898,10 @@ export interface ViewInput {
  *  in the window, task 32; by the server's tick when the session runs anywhere else, task 23). */
 export function buildListMessage(input: ViewInput): Omit<ListMessage, 'terminals'> & { terminals: Omit<TerminalPayload, 'ownsSize'>[] };
 // src/window/view/sections.ts — the parts, exported for tests
+/** Shared inside the view model (ruled, #45): the terminal states whose program may still come to
+ *  hold a session (S2 7.5) — `starting`, `running`, `reconnecting`, `newer-keeper`. `rowPayload`'s
+ *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. */
+export const MAY_START: ReadonlySet<TerminalState>;
 export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'week' | 'earlier';
 /** Ruled (#45): `starting` when the terminal's program holds no session (`sessionId` null), the
  *  terminal may still start one (not `ended`, `lost` or `not-started`) and the row is not
