@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import { isSessionId } from '../../src/claude/launch.ts';
 import {
   KEEPER_PROTOCOL,
   MAX_PAYLOAD,
@@ -346,6 +347,13 @@ describe('parseHello', () => {
       refused(parseHello(json(value)));
     });
   }
+
+  test('meta.sessionId follows isSessionId exactly', () => {
+    for (const sessionId of [S1, S1.toUpperCase(), S1.replaceAll('-', ''), `${S1}\n`, '']) {
+      const result = parseHello(json({ ...HELLO, meta: { ...META, sessionId } }));
+      assert.equal(result.ok, isSessionId(sessionId), JSON.stringify(sessionId));
+    }
+  });
 
   test('invalid UTF-8, invalid JSON, a JSON array, null → refused, quoting nothing', () => {
     refused(parseHello(concat(utf8(`{"id":"${MARKER}`), new Uint8Array([0xff]), utf8('"}'))));
