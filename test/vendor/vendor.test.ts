@@ -2,6 +2,7 @@
 // `npm run vendor` makes from the installed development dependencies.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -24,11 +25,30 @@ import { sandbox } from '../helpers/sandbox.ts';
 const checkout = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, '');
 const script = join(checkout, 'scripts/vendor.ts');
 
+const NOTICES = 'vendor/xterm/THIRD-PARTY-NOTICES';
+
+/**
+ * The code @xterm/addon-unicode-graphemes 0.4.0 bundles without a notice (ruling on #38), and the
+ * sha256 of the LICENSE file each package publishes on npm: from `npm pack tiny-inflate@1.0.3`
+ * and `npm pack unicode-trie@2.0.0` (unicode-trie 1.0.0 and 3.0.0 publish the same bytes).
+ */
+const THIRD_PARTY = [
+  {
+    header: '======== tiny-inflate 1.0.3 (npm), its LICENSE file ========',
+    sha256: 'c0df7f551401f8f80197ff31bf69b8cd23727d127423403282514d242a3ab132',
+  },
+  {
+    header: '======== unicode-trie 2.0.0 (npm), its LICENSE file ========',
+    sha256: '43439dbd4f43837aadab215cdbe5a422cc6323a50c4ea84d8d6bbc3671666a1d',
+  },
+];
+
 const LICENSE_REASON =
   'no LICENSE in the package; its package.json declares MIT and the repository of @xterm/xterm';
 
-/** A3: the vendored files, by package directory. */
+/** A3: the vendored files, by package directory, and the third-party notices. */
 const EXPECTED_FILES = [
+  'vendor/xterm/THIRD-PARTY-NOTICES',
   'vendor/xterm/addon-fit/LICENSE',
   'vendor/xterm/addon-fit/lib/addon-fit.d.mts',
   'vendor/xterm/addon-fit/lib/addon-fit.mjs',
@@ -206,7 +226,7 @@ describe('the manifest', () => {
     }
   });
 
-  test('the shims: one .d.mts beside each .mjs, package skydeck, version -', () => {
+  test('the shims and the notices: package skydeck, version -; one .d.mts beside each .mjs', () => {
     const shims = committed.filter((e) => e.path.endsWith('.d.mts'));
     const bundles = committed.filter((e) => e.path.endsWith('.mjs'));
     assert.deepEqual(
@@ -217,11 +237,19 @@ describe('the manifest', () => {
       assert.equal(shim.package, 'skydeck', shim.path);
       assert.equal(shim.version, '-', shim.path);
     }
-    assert.ok(committed.filter((e) => e.package === 'skydeck').every((e) => shims.includes(e)));
+    assert.deepEqual(
+      committed.filter((e) => e.package === 'skydeck').map((e) => e.path),
+      [NOTICES, ...shims.map((e) => e.path)].sort(),
+    );
+    const notices = committed.find((e) => e.path === NOTICES);
+    assert.equal(notices?.package, 'skydeck');
+    assert.equal(notices?.version, '-');
   });
 
   test('every package directory has a LICENSE', () => {
-    const dirs = readdirSync(join(checkout, 'vendor/xterm'));
+    const dirs = readdirSync(join(checkout, 'vendor/xterm'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
     assert.equal(dirs.length, 6);
     for (const dir of dirs) {
       const path = `vendor/xterm/${dir}/LICENSE`;
@@ -355,6 +383,42 @@ describe('the licence check', () => {
     assert.throws(
       () => vendor({ from: join(root, 'from'), to: root }),
       /@xterm\/addon-fit.*lib\/addon-fit\.mjs/,
+    );
+    assert.equal(existsSync(join(root, 'vendor')), false);
+  });
+});
+
+describe('the third-party notices', () => {
+  const text = readFileSync(join(checkout, NOTICES), 'utf8');
+
+  test('name the bundle that contains the code, and its package and version', () => {
+    assert.ok(
+      text.includes('vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs'),
+      text,
+    );
+    assert.ok(text.includes('@xterm/addon-unicode-graphemes 0.4.0'), text);
+    assert.ok(text.includes('tiny-inflate') && text.includes('unicode-trie'), text);
+  });
+
+  for (const { header, sha256 } of THIRD_PARTY) {
+    test(`hold the published licence verbatim: ${header}`, () => {
+      const start = text.indexOf(`\n${header}\n`);
+      assert.ok(start >= 0, `no line ${header}`);
+      const body = text.slice(start + header.length + 2);
+      const next = body.indexOf('\n======== ');
+      const license = next < 0 ? body : body.slice(0, next); // a blank line separates the sections
+      assert.equal(createHash('sha256').update(license).digest('hex'), sha256, license);
+      assert.match(license, /Copyright/);
+    });
+  }
+
+  test('the script refuses another version of addon-unicode-graphemes: its bundle must be checked again', (t) => {
+    const root = fixtureModules(t);
+    alterPackage(root, 'addon-unicode-graphemes', { version: '0.5.0' });
+
+    assert.throws(
+      () => vendor({ from: join(root, 'from'), to: root }),
+      /@xterm\/addon-unicode-graphemes 0\.5\.0.*THIRD-PARTY-NOTICES/,
     );
     assert.equal(existsSync(join(root, 'vendor')), false);
   });
