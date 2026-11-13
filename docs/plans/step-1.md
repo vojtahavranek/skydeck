@@ -2096,7 +2096,9 @@ export interface ShowJson extends SessionJson {
 ```
 
 Times are `isoFromNs`. `dir` is `""` when unknown. `sessions` is in list order (groups in order,
-rows in order). Output is `JSON.stringify(value, null, 2) + "\n"`. `show --json` adds, after
+rows in order). Output is `JSON.stringify(value, null, 2) + "\n"`, written by `jsonText`
+(`src/cli/json.ts`), which also writes DEL, the C1 controls and the bidirectional controls as
+`\uXXXX` escapes (the same value for `JSON.parse`, safe on a terminal). `show --json` adds, after
 `prs`: `note`, `launch` (`session.launch`), `unknownFlags` (`unknownFlags(session.launch)`, `[]` when
 there is no launch command), `links` (every link from or to the session, by
 time), `holders` (live holders). Version 1 is stable: later changes only add keys.
@@ -3913,7 +3915,9 @@ drops groups left empty. Groups are ranked by the members listed under the curre
 
 **Files**
 - Create: `src/cli/output.ts`
+- Create: `src/cli/json.ts` (`jsonText(value): string`: `JSON.stringify(value, null, 2)` and a newline, with DEL, the C1 controls and the bidirectional controls written as `\uXXXX` escapes — the one place JSON is turned into text for the terminal; `JSON.parse` of its result is the exact value). Test: `test/cli/json.test.ts`
 - Create: `src/cli/commands/ls.ts`, `src/cli/commands/show.ts` (each `export const command: Command`)
+- Modify: `src/cli/commands/pr.ts` (its private `statusOf` is `formatPrLine` minus the url: the duplicate logic is gone; its tests are unchanged)
 - Create fixtures: `test/fixtures/day/` — `spool/*.ev`, `claude/projects/<folder>/<uuid>.jsonl`,
   `claude/sessions/*.json`, `proc.json` (the fake `/proc`: boot id, processes), `expected-ls.json`
 - Modify: `docs/design.md` 7.3 (`ls`/`show` print the cached status unless `--refresh`) and the `ls`/`show` rows of 7.5 (D11)
@@ -3957,10 +3961,15 @@ when there are none; ends with `\n`. `ls` uses `io.size().columns`. `formatShow`
 one line per field with the label padded to 11 characters: `id:`, `state:` (`<state>[ (<stateDetail>)] since <iso>`),
 `marks:`, `label:`, `group:`, `dir:` (`-` for null/empty), `launch:` (`shellJoin(launch)` or `unknown`),
 `unknown:` (only when `unknownFlags(launch)` is not empty: the names, sanitised, joined by one space — the flags
-skydeck does not know, which a resume does not pass on), `continues:` (only when `continuedFrom`), `link:` per link (`<kind> <fromShort> -> <toShort> at <iso>`),
+skydeck does not know, which a resume does not pass on), `continues:` (only when `continuedFrom`: the full id), `link:` per link (`<kind> <fromShort> -> <toShort> at <iso>`),
 `holder:` per holder (`pid <pid> since <iso>`), `pr:` per PR (`formatPrLine(pr)`, then
 ` review <r>` and ` checks <c>` when set and the level is not `cant-read`), then `note:` and the note
-lines indented by two spaces when there is a note.
+lines indented by two spaces when there is a note. Details the lines above leave open: `marks:` joins
+the marks with a comma, and `marks:`, `label:` and `group:` show `-` when there is nothing; the words
+of `launch:` are sanitised before they are quoted; the note loses its trailing line breaks, each of its
+lines is sanitised (line breaks kept) and an empty line stays empty; the text always ends with `\n`.
+`nowNs` is part of the signature and is not used (`since` is an ISO time, not an age). `show --json`
+and `ls --json` are written by `jsonText`; the JSON holds the note and the launch command as stored.
 
 **Test cases**
 

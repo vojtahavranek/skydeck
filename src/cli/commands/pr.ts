@@ -2,7 +2,6 @@
 // request to a session by hand, detach one, or fetch the status of the pull requests now.
 import { fetchPrs, refreshPrs } from '../../github.ts';
 import { UsageError } from '../../platform/errors.ts';
-import { isoFromNs } from '../../platform/time.ts';
 import { loadRows } from '../../sessions/load.ts';
 import type { PrView } from '../../sessions/list.ts';
 import { attachManualPr, detachSessionPr, requirePrKey } from '../../sessions/meta.ts';
@@ -13,6 +12,7 @@ import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
 import { withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
+import { formatPrLine } from '../row.ts';
 import type { Deck } from '../../sessions/deck.ts';
 
 const SPEC: ArgSpec = {
@@ -34,16 +34,12 @@ function ghDeps(ctx: Context, deck: Deck) {
 }
 
 /**
- * The status of one pull request as a row prints it after its url (design 7.3): "can't read, last
- * read <time or never>" and the error for a pull request that could not be read, "not fetched" for
- * one never fetched, otherwise the level. `title` and `error` are already sanitised in a `PrView`.
+ * The status of one pull request as a row prints it after its url (design 7.3): what `formatPrLine`
+ * puts behind the url and its two spaces — "can't read, last read <time or never>" and the error,
+ * "not fetched", or the level.
  */
 function statusOf(pr: PrView): string {
-  if (pr.level === 'cant-read') {
-    const last = pr.okAtNs === null ? 'never' : isoFromNs(pr.okAtNs);
-    return `can't read, last read ${last}${pr.error === null ? '' : ` (${pr.error})`}`;
-  }
-  return pr.level === 'unfetched' ? 'not fetched' : pr.level;
+  return formatPrLine(pr).slice(pr.url.length).trimStart();
 }
 
 /** UsageError "missing argument" / "too many arguments" unless `rest` has exactly `count` words. */
