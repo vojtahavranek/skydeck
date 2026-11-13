@@ -123,8 +123,9 @@ The places of design 9.1 stay. Step 2 adds:
 
 | Place | Holds |
 |---|---|
-| `<runtimeDir>` | `$XDG_RUNTIME_DIR/skydeck` when `XDG_RUNTIME_DIR` is set, an absolute path, a directory owned by the user and not readable by others; else `<stateDir>/run`. Created with mode 700. Holds `server.json`, `server.pid`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; `<stateDir>/run` is not, so the server treats anything there from another boot as stale (6.3, 7.8). |
+| `<runtimeDir>` | The first that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck` when `XDG_RUNTIME_DIR` counts by the same rule and is a directory owned by the user and not readable by others; else `<stateDir>/run`. Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the other two are not, so the server treats anything there from another boot as stale (6.3, 7.8). The bootstrap, the server and the keep-alive script all resolve it by this rule, and a test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
 | `<runtimeDir>/server.json` | The running server: `pid`, `procStart`, `bootId`, `port`, `serverId` (random per start), `build` (16.5), `startedAt`. Mode 600. Written after the server listens, removed when it stops. |
+| `<runtimeDir>/server.sock` | The server's unix socket for the command line (8.3), mode 600. |
 | `<runtimeDir>/server.pid`, `keepalive.pid` | One pid each: the server's for the keep-alive script (6.1), which cannot read JSON; the script's own for the server. |
 | `<runtimeDir>/keepalive.interop` | The keep-alive's `$WSL_INTEROP` (6.4). |
 | `<runtimeDir>/terms/<terminal id>.sock` | A keeper's unix socket, mode 600, in a directory of mode 700. |
@@ -134,9 +135,9 @@ The places of design 9.1 stay. Step 2 adds:
 | the store | Migration 2 (10.2) and the `kv` entries of 10.2. |
 | the Edge profile folder | A Windows folder (5.4). Edge creates and writes it; skydeck never writes or removes it. |
 
-A unix socket path must be shorter than 108 bytes. With the `<stateDir>/run` fallback and a long
-home directory it can be longer; then the server refuses to open terminals and says why, and
-`doctor` reports it.
+A unix socket path must be shorter than 108 bytes. With a fallback under `<stateDir>` or
+`$SKYDECK_HOME` and a long home directory it can be longer; then the server refuses to start (for
+`server.sock`) or to open terminals, says why, and `doctor` reports it.
 
 ### 4.3 Code layout
 
@@ -173,8 +174,8 @@ skydeck window [--print-url] [--new-window] [--restart] [--stop] [--new-secret]
 
 Run inside WSL. Without options it:
 
-1. makes sure the server runs (5.2): when `server.json` names a server that answers `/api/ping`
-   (8.3) with the current boot id and the current build (16.5), that one is used; when it answers
+1. makes sure the server runs (5.2): when `server.sock` answers `GET /ping` (8.3) with the current
+   boot id and the current build (16.5), that one is used; when it answers
    with another build, it is asked to stop and a new one is started (sessions keep running,
    16.5); otherwise a new one is started;
 2. when no page is connected to the server, starts Edge (5.3) and waits up to 10 seconds for a page
@@ -214,9 +215,11 @@ so a change to the user's shell profile reaches new terminals only after `skydec
 --restart`.
 
 The fixed port (configuration `window.port`, default 47613) is the lock that keeps one server per
-machine. A server that cannot bind the port asks whoever holds it for `/api/ping` with the secret:
-a skydeck server that answers makes it exit 0 quietly (two `skydeck window` at once start one
-server); anything else makes it exit 1 with `port <n> on 127.0.0.1 is used by another program; set
+machine. A server binds the port first, then removes a `server.sock` that refuses connections (left
+by a dead server) and listens there, then writes `server.json`. One that cannot bind the port asks
+`server.sock` for `GET /ping`: a server of this installation that answers, naming this port, makes
+it exit 0 quietly (two `skydeck window` at once start one server); anything else makes it exit 1
+with `port <n> on 127.0.0.1 is used by another program; set
 window.port in <config path>`, which `skydeck window` prints. The port is fixed because Edge's
 taskbar identity of an app window includes the host and port (section 21): a changing port would
 be a new app each time.
@@ -265,10 +268,10 @@ under `/mnt/<letter>/` maps to `<LETTER>:\`). None or several is an error that n
 
 ### 5.5 Stopping the server
 
-On `/api/shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connections; parks a
+On `POST /shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connections; parks a
 snapshot in every keeper (7.3); closes its keeper connections (the keepers and their programs keep
 running); sends every page `bye` with the reason; removes `server.json` and `server.pid`; and
-exits 0. It does not stop the keep-alive, which ends by itself (6.1). A server that crashes leaves
+exits 0, having removed `server.sock` too. It does not stop the keep-alive, which ends by itself (6.1). A server that crashes leaves
 `server.json` behind: anything that reads it checks that its pid and process start are alive on
 the current boot (design 5.5) before believing it.
 
@@ -309,9 +312,9 @@ check W14). The design does not depend on it:
 
 ### 6.2 What the server watches
 
-The server checks the keep-alive's pid every tick (10.1). `/api/status` (8.3) carries
+The server checks the keep-alive's pid every tick (10.1). `GET /status` (8.3) carries
 `keepAlive: { mode, state: running|starting|failed|off, since, error }`, and so does the page's
-`hello` answer, so a window can show "WSL is not kept running" in its title bar.
+`welcome` (8.2.2), so a window can show "WSL is not kept running" in its title bar.
 
 ### 6.3 The page notices that the server is gone
 
@@ -321,9 +324,9 @@ closed WebSocket, it shows a bar across the window:
 > skydeck's server is not answering (since 14:02:11). Sessions in the window keep running unless
 > WSL has stopped. To get back, open a WSL terminal and run: `skydeck window`
 
-and tries `GET /api/ping` (8.3) every second for 10 seconds, then every 5 seconds. A page cannot
-tell a dead server from a stopped WSL while neither answers (both refuse the connection). When an
-answer comes, it compares:
+and tries to open the WebSocket again every second for 10 seconds, then every 5 seconds. A page
+cannot tell a dead server from a stopped WSL while neither answers (both refuse the connection). An
+answer counts only once the server has proven itself (8.2.2); then the page compares:
 
 - **same boot id, same server id**: the connection had dropped (sleep, 6.5); it reconnects and
   re-attaches.
@@ -377,29 +380,46 @@ stdin:
 { "protocol": 1, "id": "<terminal id>", "socket": "<runtimeDir>/terms/<id>.sock",
   "cols": 120, "rows": 40, "cwd": "<directory>", "argv": ["claude", "--resume", "<id>"],
   "env": { "...": "the complete environment of the program (7.4)" },
+  "startBy": "<ns>", "lock": "<the resume lock's value, or null for new>",
   "meta": { "sessionId": "<uuid>", "kind": "resume|new", "slot": 3, "openedNs": "<ns>",
             "build": "<server build>" } }
 ```
 
+`startBy` is the **start deadline**, no later than the resume lock holds: for a resume, the time
+the lock was taken plus `LOCK_TTL_NS` minus `LOCK_START_TOLERANCE_NS` (55 s, design 7.6); for a
+new session, the time `prepareNew` stored its label and group plus the same 55 s. Past it, the
+guard's decision that allowed this launch is no longer protected by the lock: another skydeck may
+have resumed the session since, and starting it then could run one session twice (principle 7).
+
 The keeper:
 
-1. creates its socket (mode 600; the directory is 700), writes `<id>.pid`, and forks the program
-   with `pty.fork()` at the spec's size. The child changes to `cwd`, replaces its environment with
-   `env` and `exec`s `argv` — not before a first screen side has connected (7.3), because a TUI's
-   first output is terminal queries that only a connected screen side can answer. When `chdir` or
-   `exec` fails, the child writes one line naming the reason to the pty and exits 127.
-2. accepts one connection at a time; a new one replaces the old (a restarted server must not wait
-   for a half-dead connection to time out). It accepts only a peer with its own user id
-   (`SO_PEERCRED`).
-3. reads the pty and keeps every chunk as a record in the tail; never interprets it.
-4. applies input and resizes from the connected server (8.1).
-5. keeps at most 8 MiB of tail. When the tail would grow beyond that (no server parked for a long
+1. creates its socket (mode 600; the directory is 700) and writes `<id>.pid`. It does **not**
+   start the program. A connection alone never starts it either: only the start message `G` of a
+   screen side does (8.1), and only while the clock (`time.time_ns()`) is before `startBy`. Then it
+   forks the program with `pty.fork()` at the current size; the child changes to `cwd`, replaces
+   its environment with `env` and `exec`s `argv`. The server sends `G` right after its first
+   `hello`, because a TUI's first output is terminal queries that only a connected screen side can
+   answer. When `chdir` or `exec` fails, the child writes one line naming the reason to the pty and
+   exits 127.
+2. never starts after `startBy`: a `G` that comes later, or a deadline that passes with no `G`,
+   ends the terminal as **not started**: the keeper sends (now, or to the next screen side that
+   claims it) `X` with `notStarted` and the reason, starts nothing, and ends as 7.8 says. A `N` from
+   the server (it refused the start, 7.3) does the same. `hello` always says whether the program
+   was started.
+3. accepts several connections, each passive until it says what it is (8.1): `C` (**claim**) makes
+   it the screen side, replacing an earlier screen side (a restarted server must not wait for a
+   half-dead connection to time out); `W` (**who**) gets one `hello` and is closed, read-only — it
+   replaces nothing, starts nothing and receives no output (for `doctor` and `uninstall --purge`,
+   16.2, 16.3). It accepts only a peer with its own user id (`SO_PEERCRED`).
+4. reads the pty and keeps every chunk as a record in the tail; never interprets it.
+5. applies input and resizes from the screen side (8.1).
+6. keeps at most 8 MiB of tail. When the tail would grow beyond that (no server parked for a long
    time while the program wrote a lot), it drops the oldest records and sets **gap**: the snapshot
    it holds no longer leads to the current screen (7.3).
-6. sends to the server without blocking: when more than 8 MiB is queued for a connection, it closes
+7. sends to the server without blocking: when more than 8 MiB is queued for a connection, it closes
    that connection (the server reconnects and gets snapshot and tail) and keeps reading the pty.
    The program is never paused because a reader is slow.
-7. ends as 7.8 says.
+8. ends as 7.8 says.
 
 Memory: about 12 MB plus the snapshot and the tail (verified with the prototype, section 21).
 
@@ -427,16 +447,24 @@ Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain U
 
 ### 7.3 Attaching, parking, rebuilding
 
-- **Attach.** On connecting to a keeper the server receives `hello`, the parked snapshot if there
-  is one, the tail, and the exit if the program has ended (8.1). It builds the screen side from the
+- **Attach.** On connecting to a keeper the server claims it (`C`) and receives `hello`, the
+  parked snapshot if there is one, the tail, and the exit if the program has ended (8.1). It builds the screen side from the
   snapshot and applies the tail, answering no query while doing so (those were answered when they
   were new), and is then live. Measured with the prototype: about 40 ms for a parked screen and a
   short tail; parsing runs at about 10 MB/s.
+- **A keeper that has not started its program.** The server that spawned it sends `G` at once:
+  it has just run the guard and taken the lock (11.2). A server that **finds** such a keeper —
+  after a restart, in `<runtimeDir>/terms/` — has not: before `G` it runs the guard again on
+  freshly refreshed rows (`prepareResumeById`'s refresh and `checkResumable`, design 7.6) and
+  checks that the session's resume lock in the store is still exactly the spec's `lock` (no other
+  skydeck has taken it over); for a new session, that no live process holds the session id. When
+  all holds and the deadline has not passed, it sends `G`; otherwise `N` with the reason, which the
+  window shows on the terminal ("not started: <reason>").
 - **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
   passed with output since the last park, and for every terminal when it stops (5.5). A park names
   the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
   about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by design.
-- **Gap.** A keeper that reports gap (7.1, step 5) has lost records. The server rebuilds from what
+- **Gap.** A keeper that reports gap (7.1, step 6) has lost records. The server rebuilds from what
   is left, shows "part of this terminal's output was lost while skydeck's server was not running"
   on the terminal, and makes the program redraw by changing the pty's width by one column and back.
   The scrollback above the redraw may be wrong.
@@ -497,9 +525,9 @@ running.
 
 The keeper reads the pty until it closes, reaps the program, and sends `exit` with the exit code or
 signal. It then ends when the server has acknowledged the exit (8.1), or when no server has been
-connected for 10 minutes since the program ended; it removes its socket and pid file. A keeper
-whose spec never got a screen side connected within 10 minutes ends too, without starting the
-program (nothing started; the resume's lock expires by design 7.6).
+connected for 10 minutes since the program ended; it removes its socket and pid file. A terminal
+that was not started (7.1, step 2) ends the same way, after its `X` with `notStarted`: nothing was
+started, and the resume's lock expires by design 7.6.
 
 The server, on `exit`: keeps the terminal's last screen in memory and shows it in the terminal pane
 dimmed, under a bar `claude exited (status <n>) at <time> · Resume · Close` (12.6), until the user
@@ -531,17 +559,23 @@ keeper). Protocol version 1:
 
 | Type | Direction | Payload |
 |---|---|---|
-| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `pid` (the program's), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers, 0 for none), `gap`, `meta` (the spec's), `exited` (null or as `X`). First frame of every connection. |
+| `C` claim | server → keeper | Empty. The connection becomes the screen side (7.1, step 3). First frame of a server's connection. |
+| `W` who | anyone → keeper | Empty. The keeper answers `H` and closes the connection; nothing else changes. |
+| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` (the program's; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers, 0 for none), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C` and to `W`. |
+| `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
+| `N` do not start | server → keeper | UTF-8 reason. The program is never started (7.1, step 2). |
 | `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. |
 | `D` output | keeper → server | One record: bytes as read from the pty. After `H` (and `S`) come the tail's records, then live ones. |
 | `R` resize | keeper → server | One record: JSON `{cols, rows}`, the size the pty was set to. |
-| `X` exit | keeper → server | JSON `{code, signal, atNs}`: after the last `D`. |
+| `X` exit | keeper → server | JSON `{code, signal, atNs, notStarted}`: after the last `D`. `notStarted` is null, or the reason the program was never started (the deadline passed, or `N`). |
 | `I` input | server → keeper | Bytes written to the pty. Dropped after the program has ended. |
 | `Z` resize | server → keeper | `"<cols> <rows>"`: sets the pty size, appends an `R` record and sends it back, so the resize takes its place in the stream. |
 | `P` park | server → keeper | 8-byte record number, 2-byte cols, 2-byte rows, snapshot. The keeper keeps it and drops the tail's records up to that number. |
 | `A` acknowledge | server → keeper | The server has the exit; the keeper may end (7.8). |
 
-Records are numbered from 1 in the order the keeper produced them. The server's position after an
+A frame other than `C` or `W` on a connection that has not said what it is, and any frame but
+`W` from a peer that is not the screen side, closes that connection. Records are numbered from 1
+in the order the keeper produced them. The server's position after an
 attach is `seq`: the snapshot covers records up to `snapSeq` and the tail brings it to `seq`.
 
 ### 8.2 Page and server
@@ -556,7 +590,6 @@ The server listens on `127.0.0.1:<port>` only. Every request must have the `Host
 | `GET /` | `web/index.html`. No secret needed: the page holds no secret of its own. |
 | `GET /assets/<asset version>/<path>` | A file of `web/` or `vendor/xterm/`, from a fixed list (no path is taken from the request beyond that list). `Cache-Control: immutable` under the versioned path. |
 | `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
-| `GET /api/ping`, `GET /api/status`, `POST /api/open`, `POST /api/shutdown` | 8.3; they need the secret. |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
 | anything else | 404. |
 
@@ -564,34 +597,56 @@ Every answer carries `Content-Security-Policy: default-src 'none'; script-src 's
 style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; connect-src 'self'
 ws://127.0.0.1:<port>; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and
-no CORS header ever. `OPTIONS` is answered 403, so a cross-origin request with a custom header
-(15.1) fails its preflight.
+no CORS header ever. `OPTIONS` is answered 403. Nothing on the TCP port acts on anything: the static
+files are not secret, and every action goes through the WebSocket after the proof (8.2.2).
 
 The WebSocket is the server's own RFC 6455 code on `node:http` (the prototype is about 100 lines
 and passed every frame test, section 21): text and binary frames, fragmentation, ping and pong,
 close codes; invalid UTF-8 closes with 1007, an unmasked client frame with 1002; a message over
 1 MiB from a page closes with 1009.
 
-#### 8.2.2 Handshake and versions
+#### 8.2.2 Handshake, proof and versions
 
-- The upgrade request must carry `Origin` exactly `http://127.0.0.1:<port>`, else 403.
-- The page's first message is `hello` within 5 seconds, else the server closes with 4001:
+The secret (15.2) never crosses a connection, in either direction: each side proves that it knows
+it, and the page trusts a server only after the server's proof.
 
-  ```json
-  { "t": "hello", "protocol": 1, "secret": "<from the URL fragment>",
-    "assetVersion": "<the version the page was loaded with>", "windowId": "<random per page>",
-    "focused": true, "theme": { "fg": "#cccccc", "bg": "#1e1e1e" } }
-  ```
+1. The upgrade request must carry `Origin` exactly `http://127.0.0.1:<port>` (and the `Host` of
+   8.2.1), else 403.
+2. The server's first message, at once: `{ "t": "challenge", "protocol": 1, "nonce": "<sN>" }`,
+   `sN` 32 random bytes in base64url, new for every connection.
+3. The page's first message, within 5 seconds (else the server closes with 4001):
+   `{ "t": "hello", "protocol": 1, "nonce": "<cN>", "proof": "<pP>" }`, where `cN` is 32 random
+   bytes of the page's and `pP = HMAC-SHA256(secret, "skydeck page 1\n" + sN + "\n" + cN + "\n" +
+   origin)` (Web Crypto, available in a secure context). A `protocol` the server does not speak
+   closes with 4426.
+4. The server checks `pP` in constant time. A wrong one closes with 4003 and nothing else.
+   Otherwise it answers:
 
-- A wrong secret closes with 4003 ("this window's key is not valid any more; run skydeck window").
-  Compared in constant time.
-- A `protocol` the server does not speak closes with 4426. A page whose `assetVersion` is not the
-  server's reloads itself (it was loaded from an older server); the server's answer says which:
+   ```json
+   { "t": "welcome", "proof": "<pS>", "protocol": 1, "assetVersion": "<build>",
+     "serverId": "<random>", "bootId": "<id>", "version": "<package version>",
+     "keepAlive": { ... }, "nowNs": "<ns>" }
+   ```
 
-  ```json
-  { "t": "welcome", "protocol": 1, "assetVersion": "<build>", "serverId": "<random>",
-    "bootId": "<id>", "version": "<package version>", "keepAlive": { ... }, "nowNs": "<ns>" }
-  ```
+   with `pS = HMAC-SHA256(secret, "skydeck server 1\n" + sN + "\n" + cN + "\n" + origin)`. The
+   labels differ, so neither proof can be replayed as the other, and fresh nonces on both sides
+   make an old proof worthless.
+5. The page checks `pS`. Until it has, it sends nothing else, shows nothing the server sent, and
+   does not reload itself on the server's word. A wrong `pS` makes it close the connection and say
+   `something answers on port <n> that is not skydeck's server; nothing was sent to it`.
+6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
+   "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
+   connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
+   reloads itself (it was loaded from an older server).
+
+A closed connection with 4003 means the page's key is not valid any more (after `--new-secret`):
+it says `this window's key is not valid any more; run skydeck window`.
+
+**Where the page keeps the secret.** At load, before it opens any connection, the page reads the
+address's fragment (`#k=<secret>`), keeps the secret in the tab's `sessionStorage`, and removes it
+from the address with `history.replaceState` (the address becomes `/`). A reload finds it in
+`sessionStorage`. A page that finds neither says `this window has no key; run skydeck window (or
+skydeck window --print-url for a browser tab)`.
 
 Page and server come from one checkout, so "same asset version" means "same protocol"; the
 protocol number exists for the reload decision and for tests.
@@ -603,7 +658,7 @@ server sends that comes from a transcript, a live-session file, GitHub, the user
 passed the sanitiser (design 7.4), except a note's text (multi-line, sanitised line by line by the
 page's renderer, which writes it as text, never as markup).
 
-Page → server:
+Page → server (after `hello` and `start`, 8.2.2):
 
 | `t` | Fields | Effect |
 |---|---|---|
@@ -614,13 +669,13 @@ Page → server:
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
 | `resize` | `term`, `cols`, `rows` | The page's fitted size (8.2.6). |
-| `act` | `id`, `kind`, … | An action (11, 12): `resume`, `new`, `restore`, `label`, `group`, `note`, `done`, `undone`, `pr-add`, `pr-rm`, `pr-refresh`, `close-terminal`, `open-link`, `dismiss-restore`. |
+| `act` | `id`, `kind`, … | An action (11, 12): `resume`, `new`, `restore`, `label`, `group`, `note`, `done`, `undone`, `pr-add`, `pr-rm`, `pr-refresh`, `close-terminal`, `open-link`, `dismiss-restore`. Its fields are fixed per kind; an unknown field is refused. No action carries a program, a directory to run in or an argument list, except `new`: a directory, a label, a group and `claude` flags, checked as `skydeck new` checks them (11.3). |
 
 Server → page:
 
 | `t` | Fields |
 |---|---|
-| `welcome` | 8.2.2. |
+| `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
 | `list` | The view model (12): sections, rows, counts, the restore banner, terminals with slot and state. Sent whole (about 50 KB for 100 sessions) when it changed, at most once a second. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
@@ -676,18 +731,23 @@ hidden terminal costs nothing.
 
 ### 8.3 Command line and server
 
-The command line uses the same HTTP server with the secret in the header `X-Skydeck-Key` (it
-reads it from the store, 10.2). A request that carries an `Origin` header must carry the exact
-one; requests with a body must be `Content-Type: application/json`.
+The command line talks to the server over `<runtimeDir>/server.sock`, a unix socket of mode 600 in
+a directory of mode 700: only the user's own processes can connect, and no secret is needed or
+sent. HTTP/1.1 over that socket, JSON bodies with fixed fields (an unknown field is 400).
+
+**No request carries a program, a working directory to run in or an argument list.** The server
+prepares every launch itself, through the guard and the lock (11.1): from a session id, or, for a
+new session, from a directory, a label, a group and `claude` flags that it checks as `skydeck new`
+checks them (design 7.7).
 
 | Request | Answer |
 |---|---|
-| `GET /api/ping` | `{ serverId, bootId, build, protocol, pid }`. |
-| `GET /api/status` | `{ pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python }`, for `skydeck window` and `doctor`. |
-| `POST /api/open` | `{ sessionId, kind, cwd, argv }`: opens a terminal for a launch the command line has already prepared (and locked, design 7.6). `{ ok: true, terminal }` once the keeper has said `hello`; `{ ok: false, error, timedOut }` otherwise (11.3). |
-| `POST /api/shutdown` | `{ ok: true }`, then 5.5. |
-
-A request without the right key gets 401.
+| `GET /ping` | `{ serverId, bootId, build, protocol, pid, port }`. |
+| `GET /status` | `{ pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python }`, for `skydeck window` and `doctor`. |
+| `POST /resume` | `{ sessionId }` → `prepareResumeById` and the window terminal (11.2) → `{ code, lines }`: the exit code and the lines `skydeck resume` prints (design 7.6), refusals included. |
+| `POST /new` | `{ dir, label, group, flags }` (`flags` an array of strings) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
+| `POST /restore` | `{ sessionIds, all }` → 11.4. The answer is a stream of JSON lines: one per report line of the run, the last one the outcome. |
+| `POST /shutdown` | `{ ok: true }`, then 5.5. |
 
 ## 9. Typing into and reading from a terminal
 
@@ -869,20 +929,17 @@ Two changes to step 1's code make that possible, with no change of behaviour for
 ### 11.2 The window terminal
 
 `Terminal` (design 7.6 "Where", `src/terminals/`) gets a third adapter, `window`, with
-`opensTabs: true`. Its `open({ cwd, argv })`:
+`opensTabs: true`. It exists **only inside the server**: no other process opens a terminal of the
+window, and nothing hands the server a launch to run (8.3). Its `open({ cwd, argv })` spawns a
+keeper (7.1) with the launch, the session id and kind, the start deadline and the lock value, and
+the next free slot; claims it, sends `G` on its `hello`, and resolves `{ ok: true }` once the keeper
+says it started. A keeper that cannot be started (python3 missing, a socket path too long, a spawn
+error) is `{ ok: false, timedOut: false }` with the reason; no `hello` within 5 seconds is
+`{ ok: false, timedOut: true }` (the keeper may yet be found by a later server, which then runs the
+guard before it starts anything, 7.3).
 
-- inside the server: spawns a keeper (7.1) with the launch, the session id and kind, and the next
-  free slot, connects, and resolves `{ ok: true }` on `hello`. A keeper that cannot be started
-  (python3 missing, a socket path too long, a spawn error) is `{ ok: false, timedOut: false }`
-  with the reason; no `hello` within 5 seconds is `{ ok: false, timedOut: true }` (the program may
-  start yet, design 7.6);
-- in a command: makes sure the server runs (5.2), sends `POST /api/open` (10-second timeout:
-  `timedOut: true`), and when no page is connected starts Edge as `skydeck window` does (5.3). A
-  server that cannot be started is a definite failure.
-
-So a failure behaves as a failed tab does in step 1: the command prints the command line to run
-by hand and exits 1, the window shows the same lines on the resume card (12.6); after a timeout no
-command is offered.
+So a failure behaves as a failed tab does in step 1 (`settleFailedLaunch`): the lines end with the
+command line to run by hand when that is safe, and none after a timeout.
 
 ### 11.3 In the window
 
@@ -905,13 +962,22 @@ command is offered.
   "running in another terminal" (7.9). The guard sees every holder wherever it runs, so a session
   open in the window is refused as `running (pid <n>)` like any other running session; `show` adds
   `(in the skydeck window)` to a holder whose parent is a keeper.
-- `--window` (new for `resume` and `new`; `restore` follows the configuration) opens it in the
-  window through 11.2, starting the server and a window when needed. `--here`, `--tab` and
-  `--window` exclude each other.
-- Configuration `"terminal": "window"` makes the window the default for `resume`, `new`, `restore`
-  and `R` in the interactive list; `--tab` then also means the window, the adapter that opens tabs.
-  `restore` from the command line then opens its sessions in the window, waiting for their start
-  events itself as in design 7.8.
+- `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other), or
+  configuration `"terminal": "window"`, sends the request to the server (8.3) instead of starting
+  anything itself: `resume` sends the session id its `<ref>` resolved to, `new` sends its current
+  directory, `--label`, `--group` and the flags after `--`. The command starts the server first
+  when none runs (5.2). It prints the answer's lines on stderr and exits with the answer's code;
+  then, when no page is connected, it starts a window as `skydeck window` does (5.3). When the
+  server cannot be started or does not answer within 30 seconds it says so and exits 1, printing no
+  command (it prepared nothing; after a timeout the server may have started the session: `skydeck`
+  shows whether it runs). With `"terminal": "window"`, `--tab` means the window too, and so does
+  `R` in the interactive list.
+- `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
+  sends the selected session ids (and `--all`) to `POST /restore`. The server takes design 7.8's
+  set from freshly refreshed rows, keeps the entries the user selected (an id no longer in the set
+  is reported `failed <short>: no longer offered for restore`), and runs `runRestore` with the
+  window terminal (11.3). The command prints each report line as it arrives and exits with design
+  7.8's code for the outcome. `--dry-run` asks the server nothing.
 
 ## 12. What the window shows
 
@@ -1178,6 +1244,7 @@ taskbar button show it is check W3. Low priority: stage E (19).
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. |
 | **skydeck is updated** | 16.5. |
 | **The secret is wrong** (after `--new-secret`, or a stale bookmark) | The page says that its key is not valid any more and to run `skydeck window` (8.2.2). |
+| **Something else answers on the port** (a program on the Windows side, 15.3) | An open window gets no server proof, sends nothing, and says `something answers on port <n> that is not skydeck's server`. |
 
 ## 15. Security
 
@@ -1185,24 +1252,33 @@ taskbar button show it is check W3. Low priority: stage E (19).
 
 The server listens on `127.0.0.1` only, but loopback is reachable by every process on the PC, in
 Windows and in WSL, of every user, and by every web page in every browser on the PC (a page can
-make requests to `127.0.0.1`). The terminals it serves can run any command as the user. So:
+make requests to `127.0.0.1`). The terminals it serves can run any command as the user. What the
+TCP port offers is therefore small: the page's static files, which are not secret, and one
+WebSocket, which does nothing until the other side has proven that it knows the secret (8.2.2).
+Every request the command line makes goes over a unix socket instead (8.3). So:
 
 - **Other pages in the user's browsers.**
-  - Cross-site requests: every API request needs the secret in the header `X-Skydeck-Key`. A
-    cross-origin request with a custom header needs a preflight, which the server refuses (8.2.1),
-    and no answer carries a CORS header, so no other page can read one. A cross-site WebSocket is
-    refused by the exact `Origin` check at the upgrade, and the secret is required as the first
-    message anyway.
+  - Cross-site requests: there is no HTTP request that acts, and no answer carries a CORS header,
+    so no other page can read one. A cross-site WebSocket is refused by the exact `Origin` check
+    at the upgrade, and could not give the proof anyway.
   - DNS rebinding (a page whose own host name is made to point at `127.0.0.1`): its requests carry
     its own host name in `Host`, which is refused (421); only `Host: 127.0.0.1:<port>` is served.
   - Framing (clickjacking): `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
-- **Other local processes.** Everything but the static files needs the secret, compared in
-  constant time. Processes of other users cannot read it: it is in the store (mode 600) and in the
-  Edge profile folder (the user's own Windows profile). Keeper sockets are in a directory of mode
-  700, are mode 600, and keepers accept only a peer with their own user id (7.1). A process that
-  runs as the user can read the secret — and can equally run `claude` itself, read the transcripts
-  or reach the WSL files from Windows (`\\wsl.localhost\…`); defending against the user's own
-  processes is not a goal.
+- **Other local processes.** The WebSocket needs the proof, checked in constant time, and the proof
+  shows nothing of the secret, so watching loopback traffic does not reveal it. `server.sock` and
+  the keeper sockets are in directories of mode 700 and are mode 600, and keepers also accept only a
+  peer with their own user id (7.1). Processes of other users cannot read the secret: it is in the
+  store (mode 600) and in the Edge profile folder (the user's own Windows profile). A process that
+  runs as the user can read it — and can equally run `claude` itself, read the transcripts or reach
+  the WSL files from Windows (`\\wsl.localhost\…`); defending against the user's own processes is
+  not a goal.
+- **Programs pretending to be the server.** A page trusts a server only after the server's proof
+  (8.2.2): an open window sends nothing — no proof it could reuse, no keys, no view state — to a
+  program that answers on the port and cannot prove itself, and says so (15.3).
+- **Requests that start programs.** No request carries a program, a directory to run in or an
+  argument list (8.2.3, 8.3): the server builds every launch itself, through the guard and the lock,
+  from a session id or from `new`'s checked fields. The only argument skydeck passes to a program
+  from a page is a link, and only as 9.6 allows.
 - **Browser extensions.** An extension that may read `127.0.0.1` pages could read the terminals and
   the secret. The window runs in its own profile folder, so the user's extensions are not there.
   Extensions that company policy forces into every profile still are: check W13 lists them
@@ -1212,19 +1288,25 @@ make requests to `127.0.0.1`). The terminals it serves can run any command as th
 
 32 random bytes, base64url, kept in `kv` (10.2); created on first need and kept across server
 restarts, so a window can reconnect to a restarted server and to the server of a new boot without
-being reopened. It reaches the page only in the URL fragment (`#k=…`), which browsers never send
-to a server; the page keeps the fragment in its URL, so a reload still has it. It is therefore in
-the window's history in the Edge profile folder, and in Edge's command line while `msedge.exe`
-starts (readable by the user's own processes only). `skydeck window --new-secret` replaces it
-(5.1). The server never logs it; `skydeck window` prints it only with `--print-url`.
+being reopened. It never crosses a connection: page and server prove that they know it (8.2.2). It
+reaches the page once, in the address Edge is started with (`#k=…`, a fragment, which browsers
+never send to a server), and the page takes it out of the address at once and keeps it in the
+tab's `sessionStorage` (8.2.2). It is therefore in Edge's command line while `msedge.exe` starts,
+possibly in the history Edge recorded for that first address, and in the session storage Edge keeps
+in the profile folder — all readable by the user's own processes only. `skydeck window
+--new-secret` replaces it (5.1). The server never logs it; `skydeck window` prints it only with
+`--print-url`.
 
 ### 15.3 Accepted risk: the port on the Windows side
 
 Edge reaches the server through WSL's localhost forwarding. If another Windows program listens on
-`127.0.0.1:<port>` first, Edge reaches that program instead, and a page it serves reads the secret
-from the fragment. With the secret alone it cannot reach the real server: the forwarding to WSL is
-what it took away. The user sees a broken window. Accepted: any Windows program that can do this
-runs on the user's PC and, as the user, could read the secret directly (15.1).
+`127.0.0.1:<port>` first, Edge reaches that program instead. A window that is already open learns
+nothing from it: it waits for the server's proof and sends nothing (8.2.2). But a window **loaded**
+from that program — opened by `skydeck window` or reloaded while the program holds the port — runs
+that program's page, which can read the secret from the address or from the tab's session storage.
+With the secret alone it cannot reach the real server: the forwarding to WSL is what it took away.
+The user sees a broken window. Accepted: any Windows program that can do this runs on the user's
+PC and, as the user, could read the secret directly (15.1).
 
 ### 15.4 What a program in a terminal can do to the page
 
@@ -1262,8 +1344,8 @@ Before what it does in step 1:
 - it names the Edge profile folder when one is configured or can be derived: `the window's Edge
   profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
-`--purge` refuses (exit 1) while any keeper answers, naming the open terminals: purging
-`<stateDir>` can remove the keeper sockets of the `<stateDir>/run` fallback, and the screens of
+`--purge` refuses (exit 1) while any keeper answers the read-only `W` (8.1), naming the open
+terminals: purging `<stateDir>` can remove the keeper sockets of the `<stateDir>/run` fallback, and the screens of
 those sessions could not be shown again. The user ends those sessions first. Otherwise it also
 removes `<runtimeDir>`.
 
@@ -1275,7 +1357,7 @@ already runs (`gh`, `wezterm`) and `python3 --version`; it starts nothing on Win
 | Check | `problem` when |
 |---|---|
 | python3 | `python3` is not found or is older than 3.9 (`info` instead when the window has never been used: no `window_secret`). |
-| server | never: `info` says whether a server runs, its pid, build, uptime, pages and terminals; `problem` only when it runs with another build than the checkout (`run skydeck window --restart`). |
+| server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, build, uptime, pages and terminals; `problem` only when it runs with another build than the checkout (`run skydeck window --restart`). |
 | port | something that is not this installation's server answers on `127.0.0.1:<window.port>`. |
 | keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. |
 | interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. |
@@ -1283,7 +1365,7 @@ already runs (`gh`, `wezterm`) and `python3 --version`; it starts nothing on Win
 | profile folder | it cannot be derived (5.4) and `window.profileDir` is not set. |
 | runtime directory | it is not mode 700 or not the user's, or a socket path would be 108 bytes or longer. |
 | vendored files | a file of `vendor/MANIFEST.json` is missing or its hash differs (a broken checkout). |
-| keepers | never: `info` counts them, with their keeper versions; a socket that refuses connections is `info` (removed at the next server start). |
+| keepers | never: `info` counts them, asking each with the read-only `W` (8.1) — which never claims a keeper, starts a program or takes output — and names their keeper versions and whether each program was started; a socket that refuses connections is `info` (removed at the next server start). |
 
 ### 16.4 Configuration
 
@@ -1319,7 +1401,8 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
 `vendor/xterm/` holds, at exact versions, each with its `LICENSE`: `@xterm/xterm` 6.0.0 (with its
 CSS), `@xterm/headless` 6.0.0, `@xterm/addon-serialize` 0.14.0, `@xterm/addon-fit` 0.11.0,
-`@xterm/addon-search` (the release made for xterm.js 6.0.0), `@xterm/addon-unicode-graphemes`
+`@xterm/addon-search` (the release made for xterm.js 6.0.0; the research named no version, so it
+is pinned exactly when the files are vendored, like the others), `@xterm/addon-unicode-graphemes`
 0.4.0, and their type declarations for `tsc`. `vendor/MANIFEST.json` lists every file with its
 package, version and sha256. The same packages at the same versions are development dependencies;
 `npm run vendor` copies them into `vendor/` and writes the manifest, and a test fails when
@@ -1353,11 +1436,15 @@ behaves like the parts of Claude Code that skydeck depends on, and nothing else:
 
 Driven over its socket by `node:test` with real python3 (CI has it):
 
-- the program starts only after the first connection;
+- the program never starts on a connection alone, nor on `W`; it starts on `G` before `startBy`,
+  once; a `G` after `startBy`, a deadline that passes with no `G`, and `N` each end the terminal
+  not started, with `X` `notStarted`, and the program is never run (the stand-in records every
+  start in a file the test reads); `hello` says `started` truly before and after;
+- `W` gets one `hello` and is closed, takes no output and does not replace the screen side;
 - output, input, resize as records in order; `R` echoed;
 - park, the tail trimmed to the snapshot, reconnect giving snapshot plus exactly the tail;
-- a new connection replacing the old one; a peer with another user id refused (where the test can
-  arrange it);
+- a new claim replacing the old screen side; a frame other than `C` or `W` first closes the
+  connection; a peer with another user id refused (where the test can arrange it);
 - a frame it cannot parse closes the connection and the keeper lives on;
 - the tail cap and `gap`; the send queue cap;
 - exit status after a normal exit, a signal, and `exec` failing (127); `A` ending the keeper; the
@@ -1370,9 +1457,19 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
 
 - the WebSocket: the frame tests of the prototype (0 bytes to 1 MiB, fragments, ping and pong,
   close codes, invalid UTF-8, unmasked frames), with `ws` as a development dependency for the client;
-- authentication: wrong or missing secret, wrong `Origin`, wrong `Host`, `OPTIONS`, an API request
-  without the header, CORS headers never present;
-- protocol: `hello` and `welcome`, the 5-second limit, the protocol and asset version decisions;
+- authentication: a wrong page proof, a proof replayed on a new connection (fresh nonce), a proof
+  made with the server's label, a missing `hello`; wrong `Origin`, wrong `Host`, `OPTIONS`; CORS
+  headers never present; the secret's bytes appear in no frame and no log line the tests capture;
+- the unix socket: mode 600 in a directory of mode 700; a body with an unknown field, or with a
+  program, directory or argument list in any form, is refused and starts nothing;
+- places: with `SKYDECK_HOME` set, the runtime directory is `$SKYDECK_HOME/run` whatever
+  `XDG_RUNTIME_DIR` says, and the server, the keepers and the keep-alive script create and open
+  nothing outside `SKYDECK_HOME` and the test's temporary directories;
+- protocol: `challenge`, `hello`, `welcome`, `start`, the 5-second limit, the protocol and asset
+  version decisions;
+- rediscovery: a server restarted between spawning a keeper and `G` runs the guard and the lock
+  check before `G`, and sends `N` when the session runs elsewhere, the lock is someone else's, or
+  the deadline passed;
 - screen side: exact rebuild cell by cell after a restart of the server with unparked records and
   resizes; the modes the serialise addon misses (25, 1006, cursor style) and the cursor fix; each
   query answered exactly once and none while replaying; OSC 10 and 11 from the page's theme;
@@ -1394,7 +1491,7 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
 The view model (`src/window/view/`) and the key table (`web/keys.js`) are pure and tested with
 `node:test`, like the interactive list's `reduce` and `render`: sections, order, stacks, the chip,
 attention and its order, the switcher's ranking, the filter, every key of 12.9 on a US and a Czech
-layout (as `KeyboardEvent`-like objects).
+layout (as `KeyboardEvent`-like objects), and which keys are cancelled (Alt+F4 never).
 
 **A headless browser as a development dependency: for.** What breaks in a page — xterm.js
 integration, that the page's terminal answers no query, the Shift+Enter and Ctrl+Shift+V mapping
@@ -1405,6 +1502,10 @@ a browser download in CI, never at install time. So `playwright` (pinned exactly
 headless against a real server and keepers running the stand-in, in a small suite
 (`npm run test:page`). Chromium is not Edge: what only Edge decides (keys an app window keeps, its
 policy, notifications on the PC) stays a manual check.
+
+In the browser suite: the secret leaves the address before any connection opens and is found
+again after a reload; the page sends nothing after `hello` until the server's proof checks out, and
+against a stand-in server with a wrong proof it sends nothing at all and shows the warning.
 
 ### 17.5 What CI runs
 
@@ -1481,7 +1582,7 @@ reasons and their marks (12.4), Ctrl+Shift+J, the title bar counts and `(n) skyd
 notifications (13). Checks W11, W19, W21.
 
 **Stage C — restore in the window.** The restore banner (12.7); the `window` terminal for commands
-(`--window`, `"terminal": "window"`, `POST /api/open`, 11.2, 11.4); `show`'s `(in the skydeck
+(`--window`, `"terminal": "window"`, `POST /resume`, `/new` and `/restore`, 11.4); `show`'s `(in the skydeck
 window)`. Check W16.
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
