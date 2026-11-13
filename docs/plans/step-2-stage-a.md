@@ -646,11 +646,13 @@ export class StoreNewerError extends SkydeckError {}
 /** guardSchema (the server's connection only, S2 10.1): before every write transaction and every
  *  single-statement write outside a transaction it reads kv schema_version and throws
  *  StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION.
- *  Every write goes through the guarded path by construction (ruled in #39): inside the store only
- *  the write helpers prepare SQL themselves, and the read helpers prepare through prepareRead,
- *  which refuses any statement that does not start with SELECT, WITH or PRAGMA; a test holds both. */
+ *  (ruled in #39) The store's read helpers prepare through prepareRead, which refuses anything but
+ *  a SELECT (not WITH, which can stand before a write, nor PRAGMA, which can assign); a test over
+ *  store.ts checks that only the write helpers prepare SQL themselves. That guards against the
+ *  usual mistake, a write sent through a read helper; a function handed the database object
+ *  directly is not covered. */
 export function openStore(path: string, options?: { guardSchema?: boolean }): Store;
-/** Prepares a read statement; throws Error "not a read statement: …" for anything else. Exported for its test. */
+/** Prepares a SELECT; throws Error "not a read statement: …" for anything else. Exported for its test. */
 export function prepareRead(db: DatabaseSync, sql: string): StatementSync;
 // src/sessions/deck.ts
 export function openDeck(platform: Platform, options?: { guardSchema?: boolean }): Deck;
@@ -1174,10 +1176,12 @@ write guard; `kv` gets the window's keys.
   the same writes succeed (a command migrates, it does not refuse). The `kv` keys of 2.6 type-check.
 - Store guard under the lock: a migration that commits while a guarded write waits for the write
   lock is seen, and the write is refused (the version is read after BEGIN IMMEDIATE).
-- Every write is guarded by construction (ruled in #39): `prepareRead` accepts SELECT, WITH and
-  PRAGMA (any case, after whitespace) and refuses INSERT, UPDATE, DELETE, REPLACE, CREATE, a word
-  that only begins like a read, and empty text, running nothing; a test over the store's source
-  finds `this.#db.prepare(` only in the two write helpers, inside `#write`, and no `this.#db.exec(`.
+- The read helpers take only a SELECT (ruled in #39): `prepareRead` accepts SELECT (any case,
+  after whitespace) and refuses WITH (also before a SELECT), PRAGMA (also a read), INSERT, UPDATE,
+  DELETE, REPLACE, CREATE, a word that only begins like SELECT, and empty text, running nothing
+  (a WITH…INSERT, a WITH…DELETE, `PRAGMA user_version = 7` and `PRAGMA journal_mode = DELETE`
+  change nothing); a test over the store's source finds `this.#db.prepare(` only in the two write
+  helpers, inside `#write`, and no `this.#db.exec(`.
 - `isDatabaseFailure(new StoreNewerError('<message>'))` is true (ruled in #39): otherwise ingest, reconcile and
   scan, which rethrow only failures of the database as a whole, would record the refusal item by
   item and go on, and the server's tick would not stop at the first refused write.

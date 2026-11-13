@@ -1389,21 +1389,23 @@ describe('the schema guard of the server (S2 10.1)', () => {
     assert.equal(new StoreNewerError('m', 5).exitCode, 5);
   });
 
-  test('the read helpers prepare only reads: a write cannot go round the guard through them', (t) => {
+  test('the read helpers prepare only a SELECT: a write cannot go round the guard through them', (t) => {
     const { path } = fresh(t);
     const db = new DatabaseSync(path);
     t.after(() => {
       db.close();
     });
-    for (const sql of [
-      'SELECT value FROM kv',
-      '  select 1',
-      '\n\tWITH x AS (SELECT 1) SELECT * FROM x',
-      'PRAGMA data_version',
-    ]) {
+    for (const sql of ['SELECT value FROM kv', '  select 1', '\n\tSelect 2']) {
       assert.doesNotThrow(() => prepareRead(db, sql).all(), sql);
     }
+    // WITH and PRAGMA are refused too: a WITH clause can stand before a write, a PRAGMA can assign.
     for (const sql of [
+      '\n\tWITH x AS (SELECT 1) SELECT * FROM x',
+      "WITH x AS (SELECT 1) INSERT INTO kv (key, value) VALUES ('doctor_probe', '1')",
+      "WITH x AS (SELECT 1) DELETE FROM kv WHERE key = 'schema_version' RETURNING key",
+      'PRAGMA data_version',
+      'PRAGMA user_version = 7',
+      'PRAGMA journal_mode = DELETE',
       "INSERT INTO kv (key, value) VALUES ('doctor_probe', '1')",
       "  insert or replace into kv (key, value) VALUES ('doctor_probe', '1')",
       "UPDATE kv SET value = '9' WHERE key = 'schema_version'",
@@ -1415,7 +1417,12 @@ describe('the schema guard of the server (S2 10.1)', () => {
     ]) {
       assert.throws(() => prepareRead(db, sql), /^Error: not a read statement/, sql);
     }
-    assert.deepEqual(rawRows(path, "SELECT key FROM kv WHERE key <> 'schema_version'"), []);
+    assert.deepEqual(
+      rawRows(path, 'SELECT key FROM kv').map((row) => row['key']),
+      ['schema_version'],
+    );
+    assert.equal(rawRows(path, 'PRAGMA user_version')[0]?.['user_version'], 0);
+    assert.equal(rawRows(path, 'PRAGMA journal_mode')[0]?.['journal_mode'], 'wal');
   });
 
   test('inside the store only the two write helpers prepare a statement themselves (S2 10.1)', () => {
