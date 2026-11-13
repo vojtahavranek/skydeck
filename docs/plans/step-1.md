@@ -3315,9 +3315,12 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
   `working`; `idle` or `waiting` → `waiting` (`stateDetail` = `waitingFor`); no live file or any
   other status → `running`.
 - **sinceNs**: `working`/`waiting` → the later of `statusUpdatedAtNs ?? updatedAtNs ??
-  holders[0].sinceNs` and `holders[0].sinceNs` (the live file keeps its status time when the process
-  changes session with `/clear`, so a session the holder began to hold later is not in its state
-  since before it existed); `running` → `holders[0].sinceNs`; `not-running` → `lastActivityNs`.
+  holders[0].sinceNs` and the time of the holder's latest `start` event that names the session and
+  is not a compaction (`observed` events never count; with no such event, the file's status time
+  stands alone). The live file keeps its status time when the process changes session with
+  `/clear`, so a session the holder began to hold later is not in its state since before it
+  existed; a compaction keeps the session, and an `observed` event is only skydeck noticing the
+  process. `running` → `holders[0].sinceNs`; `not-running` → `lastActivityNs`.
 - **lastActivityNs** = the larger of transcript `lastRecordNs` and the latest event time naming the
   session; falls back to transcript `mtimeNs`. **firstSeenNs** = the smaller of transcript
   `firstRecordNs` and the earliest event time; falls back to `mtimeNs`.
@@ -3378,9 +3381,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 | 27 | sessions from events S2 and transcript S1 | output ids `[S1, S2]` (sorted) |
 | 28 | 12 plus a clear link targeting S1 and transcript mtime `now − 26 days` | marks `['ended-unexpectedly','was-working','continued','expiring']` |
 | 29 | P1: `start S1 T0`, `end S1 T0+10min−0.2s 'clear'`, `start S2 T0+10min 'clear'`; alive P1; `live(P1,S2,'idle',{statusUpdatedAtNs: T0, updatedAtNs: T0+5s})` | S2 `waiting`, since `T0+10min` (not `T0`) |
+| 30 | `start S1 T0`, `start S1 T0+60s 'compact'`; alive P1; `live(P1,S1,'busy',{statusUpdatedAtNs: T0+20s, updatedAtNs: T0+61s})` | `working`, since `T0+20s` (a compaction does not restart it) |
+| 31 | `observed(P1,S1,T0+300s)` only; alive P1; `live(P1,S1,'idle',{statusUpdatedAtNs: T0+20s})` | `waiting`, since `T0+20s` (reconcile does not restart it) |
 
 **Steps**
-- [ ] Write `test/sessions/derive.test.ts` with the 33 cases. `npm test` → fails.
+- [ ] Write `test/sessions/derive.test.ts` with the 35 cases. `npm test` → fails.
 - [ ] Implement `types.ts` and `derive.ts` (pure: no I/O, no clock; everything comes in `DeriveInput`).
 - [ ] `npm run check` → pass. Commit `Derive state, holders and marks from events, live files and transcripts`; open the PR.
 

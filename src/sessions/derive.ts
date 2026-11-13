@@ -115,7 +115,12 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       earliest(transcript?.firstRecordNs ?? null, sessionEvents[0]?.timeNs ?? null) ??
       transcript?.mtimeNs ??
       0n; // unreachable, as above
-    const { state, stateDetail, sinceNs } = stateOf(holders, lastActivityNs);
+    const holder = holders[0];
+    const { state, stateDetail, sinceNs } = stateOf(
+      holders,
+      lastActivityNs,
+      holder === undefined ? null : holdingBeganNs(sessionEvents, holder.process),
+    );
 
     const endedUnexpectedly =
       state === 'not-running' &&
@@ -169,6 +174,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
 function stateOf(
   holders: readonly Holder[],
   lastActivityNs: Ns,
+  beganNs: Ns | null,
 ): { state: State; stateDetail: string | null; sinceNs: Ns } {
   const holder = holders[0];
   if (holder === undefined) {
@@ -178,7 +184,7 @@ function stateOf(
   // The file keeps its status time when the process changes session (`/clear`): a session the
   // holder began to hold later than that is not in the state since before it existed.
   const statusNs = live?.statusUpdatedAtNs ?? live?.updatedAtNs ?? holder.sinceNs;
-  const statusSinceNs = statusNs > holder.sinceNs ? statusNs : holder.sinceNs;
+  const statusSinceNs = beganNs !== null && beganNs > statusNs ? beganNs : statusNs;
   switch (live?.status) {
     case 'busy':
       return { state: 'working', stateDetail: null, sinceNs: statusSinceNs };
@@ -188,6 +194,23 @@ function stateOf(
     default:
       return { state: 'running', stateDetail: null, sinceNs: holder.sinceNs };
   }
+}
+
+/**
+ * When `process` began to hold the session: its latest `start` event naming it, a compaction aside
+ * (the session id stays). null when it has none: a session found by reconcile (`observed`) is
+ * not known to have begun anywhere.
+ */
+function holdingBeganNs(sessionEvents: readonly EventRow[], process: ProcessKey): Ns | null {
+  const began = sessionEvents.findLast(
+    (event) =>
+      event.kind === 'start' &&
+      event.detail !== 'compact' &&
+      event.bootId === process.bootId &&
+      event.pid === process.pid &&
+      event.procStart === process.procStart,
+  );
+  return began?.timeNs ?? null;
 }
 
 /**

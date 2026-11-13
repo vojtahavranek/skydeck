@@ -350,6 +350,76 @@ test('a session created by /clear is not since the idle time of the session befo
   assert.equal(s.sinceNs, T0 + 600n * SEC);
 });
 
+test('an auto-compaction in the middle of a turn does not restart working-since', () => {
+  // Busy since T0+20s; Claude Code compacts at T0+60s and fires SessionStart(compact).
+  const s = session(
+    {
+      events: [start(P1, S1, T0, 'startup'), start(P1, S1, T0 + 60n * SEC, 'compact')],
+      isAlive: alive(P1),
+      liveFiles: [
+        live(P1, S1, 'busy', { statusUpdatedAtNs: T0 + 20n * SEC, updatedAtNs: T0 + 61n * SEC }),
+      ],
+    },
+    S1,
+  );
+  assert.equal(s.state, 'working');
+  assert.equal(s.sinceNs, T0 + 20n * SEC);
+});
+
+test('a session found by reconcile keeps its file status time', () => {
+  // Idle since T0+20s; skydeck's first run at T0+300s inserts the observed event (design 5.4).
+  const s = session(
+    {
+      events: [observed(P1, S1, T0 + 300n * SEC, ['claude'])],
+      isAlive: alive(P1),
+      liveFiles: [live(P1, S1, 'idle', { statusUpdatedAtNs: T0 + 20n * SEC })],
+    },
+    S1,
+  );
+  assert.equal(s.state, 'waiting');
+  assert.equal(s.sinceNs, T0 + 20n * SEC);
+});
+
+test('a /resume of the session in the same process is a new holding', () => {
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        end(P1, S1, T0 + 100n * SEC, 'switch'),
+        start(P1, S1, T0 + 100n * SEC + 200n * NS_PER_MS, 'resume'),
+      ],
+      isAlive: alive(P1),
+      liveFiles: [live(P1, S1, 'idle', { statusUpdatedAtNs: T0 + 20n * SEC })],
+    },
+    S1,
+  );
+  assert.equal(s.sinceNs, T0 + 100n * SEC + 200n * NS_PER_MS);
+});
+
+test('only the holder’s own starts say when it began: another process’s do not', () => {
+  const otherBoot: ProcessKey = { bootId: BOOT_B, pid: P1.pid, procStart: P1.procStart };
+  const otherPid: ProcessKey = { bootId: BOOT_A, pid: 4999, procStart: P1.procStart };
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        start(P2, S1, T0 + 40n * SEC, 'resume'), // another pid and start
+        start(otherPid, S1, T0 + 45n * SEC, 'resume'), // another pid, the same start
+        start(P4, S1, T0 + 50n * SEC, 'resume'), // the same pid, another process start
+        start(otherBoot, S1, T0 + 60n * SEC, 'resume'), // the same pid and start, another boot
+      ],
+      isAlive: alive(P1),
+      liveFiles: [live(P1, S1, 'idle', { statusUpdatedAtNs: T0 + 20n * SEC })],
+    },
+    S1,
+  );
+  assert.deepEqual(
+    s.holders.map((h) => h.process),
+    [P1],
+  );
+  assert.equal(s.sinceNs, T0 + 20n * SEC);
+});
+
 test('a status time after the holder’s latest event is kept', () => {
   const s = session(
     {
