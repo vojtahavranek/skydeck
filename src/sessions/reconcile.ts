@@ -1,7 +1,8 @@
 // 5.4: sessions that no hook reported — started before `skydeck install`, or whose spool file was
 // lost — are recorded from Claude Code's live-session files as `observed` events. Nothing that
-// comes from one live process stops the reconcile: an error with one is recorded for doctor
-// (problems.ts) and that process is skipped. An error of the database itself ends the command.
+// comes from one live process stops the reconcile: the whole handling of one (looking at it and
+// saving its event) is guarded, and an error is recorded for doctor (problems.ts) and that process
+// skipped.
 import { absolutizePathFlags, storableArgv } from '../claude/launch.ts';
 import { isLiveFileTrusted, readLiveFiles } from '../claude/live.ts';
 import type { LiveFile } from '../claude/live.ts';
@@ -23,13 +24,15 @@ const SETTLE_NS = 2n * NS_PER_SECOND;
  * command is storableArgv(absolutizePathFlags(cmdline, file.cwd)), as for a spooled one, so no
  * prompt, removed flag or unknown flag's value is stored (principle 4).
  *
- * Never throws for one process: an error while looking at one is recorded in kv
- * `reconcile_problems` (replaced on every run) and the next one is looked at.
+ * Never throws for one process: an error while looking at one or saving its event (the store's
+ * included) is recorded in kv `reconcile_problems` (replaced on every run) and the next one is
+ * looked at. Without a boot id nothing is reconciled, and that is recorded too.
  */
 export function reconcile(deck: Deck): { observed: number } {
   const { platform, store } = deck;
   const bootId = platform.proc.bootId();
   if (bootId === null) {
+    recordProblems(store, 'reconcile_problems', ['cannot read the boot id: reconcile skipped']);
     return { observed: 0 };
   }
   const now = platform.clock.nowNs();
@@ -38,56 +41,59 @@ export function reconcile(deck: Deck): { observed: number } {
 
   // readLiveFiles keeps only files whose session id passes isSessionId.
   for (const file of readLiveFiles(platform.files, deck.places.claudeHome)) {
-    let argv: string[] | null;
     try {
-      if (!isCandidate(platform, file, now)) {
-        continue;
+      if (isCandidate(platform, file, now) && recordObserved(deck, bootId, file, now)) {
+        observed++;
       }
-      argv = launchCommand(platform, file);
     } catch (error) {
       problems.push(`process ${file.pid}: ${describeError(error)}`);
-      continue;
-    }
-    const { pid, procStart } = file;
-    const needed = (): boolean => {
-      const latest = store.latestEventOfProcess(bootId, pid, procStart, now);
-      return (
-        latest === null ||
-        latest.sessionId !== file.sessionId ||
-        (argv !== null && !store.processHasLaunch(bootId, pid, procStart))
-      );
-    };
-    // Checked again inside the transaction: another skydeck may have recorded it in between.
-    if (
-      needed() &&
-      store.transaction(() => {
-        if (!needed()) {
-          return false;
-        }
-        store.insertEvent({
-          spoolName: null,
-          timeNs: now,
-          kind: 'observed',
-          detail: '',
-          rawDetail: null,
-          sessionId: file.sessionId,
-          bootId,
-          pid,
-          procStart,
-          cwd: file.cwd,
-          argv,
-          name: file.name,
-          payload: null,
-        });
-        return true;
-      })
-    ) {
-      observed++;
     }
   }
 
   recordProblems(store, 'reconcile_problems', problems);
   return { observed };
+}
+
+/** Inserts the observed event of `file`'s process when 5.4 asks for one; whether it did. */
+function recordObserved(deck: Deck, bootId: string, file: LiveFile, now: Ns): boolean {
+  const { platform, store } = deck;
+  const { pid, procStart } = file;
+  const argv = launchCommand(platform, file);
+  const needed = (atNs: Ns): boolean => {
+    const latest = store.latestEventOfProcess(bootId, pid, procStart, atNs);
+    return (
+      latest === null ||
+      latest.sessionId !== file.sessionId ||
+      (argv !== null && !store.processHasLaunch(bootId, pid, procStart))
+    );
+  };
+  if (!needed(now)) {
+    return false;
+  }
+  return store.transaction(() => {
+    // Asked again with the write lock held, and with the clock read now: another skydeck may have
+    // recorded this process since, with a time after the `now` of this run.
+    const atNs = platform.clock.nowNs();
+    if (!needed(atNs)) {
+      return false;
+    }
+    store.insertEvent({
+      spoolName: null,
+      timeNs: atNs,
+      kind: 'observed',
+      detail: '',
+      rawDetail: null,
+      sessionId: file.sessionId,
+      bootId,
+      pid,
+      procStart,
+      cwd: file.cwd,
+      argv,
+      name: file.name,
+      payload: null,
+    });
+    return true;
+  });
 }
 
 /** 5.4: trusted (5.5), entrypoint cli or absent, last modified more than 2 s ago. */

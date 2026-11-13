@@ -4,11 +4,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { isoFromNs } from '../../src/platform/time.ts';
-import type { Files, Ns } from '../../src/platform/types.ts';
-import type { Deck } from '../../src/sessions/deck.ts';
+import type { Ns } from '../../src/platform/types.ts';
 import { scanTranscripts } from '../../src/sessions/scan.ts';
 import type { TranscriptRow } from '../../src/store/types.ts';
-import { testDeck } from '../helpers/deck.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 
@@ -52,14 +51,6 @@ const problems = (d: TestDeck): string[] | null => {
   const value = d.deck.store.getKv('scan_problems');
   return value === null ? null : (JSON.parse(value) as string[]);
 };
-
-/** The deck with some `Files` methods replaced. */
-function withFiles(deck: Deck, override: Partial<Files>): Deck {
-  return {
-    ...deck,
-    platform: { ...deck.platform, files: { ...deck.platform.files, ...override } },
-  };
-}
 
 /** Throws an error with `code` when called for `failingPath`, else calls `real`. */
 function failing<A extends unknown[], R>(
@@ -120,9 +111,11 @@ test('an unchanged transcript is skipped and not opened', (t) => {
   two(d);
   scanTranscripts(d.deck);
   const calls: [number, number][] = [];
-  const deck = withFiles(d.deck, {
-    readBytes: () => {
-      throw new Error('opened');
+  const deck = deckWith(d.deck, {
+    files: {
+      readBytes: () => {
+        throw new Error('opened');
+      },
     },
   });
   assert.deepEqual(
@@ -206,7 +199,9 @@ test('nothing at or under a folder that cannot be read is marked missing', async
     unlinkSync(gone);
     appendFileSync(p3, assistant(S3, T0 + SEC));
     const demo = join(d.deck.places.claudeHome, 'projects', 'demo');
-    const deck = withFiles(d.deck, { list: failing(demo, 'EACCES', d.deck.platform.files.list) });
+    const deck = deckWith(d.deck, {
+      files: { list: failing(demo, 'EACCES', d.deck.platform.files.list) },
+    });
 
     // demo-b starts with the name of demo but is not under it: its deleted transcript IS missing
     assert.deepEqual(scanTranscripts(deck), { read: 1, skipped: 0, missing: 1, prsAttached: 0 });
@@ -221,8 +216,10 @@ test('nothing at or under a folder that cannot be read is marked missing', async
     const { p1, p2 } = two(d);
     scanTranscripts(d.deck);
     const projects = join(d.deck.places.claudeHome, 'projects');
-    const deck = withFiles(d.deck, {
-      list: failing(projects, 'EACCES', d.deck.platform.files.list),
+    const deck = deckWith(d.deck, {
+      files: {
+        list: failing(projects, 'EACCES', d.deck.platform.files.list),
+      },
     });
     assert.deepEqual(scanTranscripts(deck), { read: 0, skipped: 0, missing: 0, prsAttached: 0 });
     assert.equal(rowOf(d, p1)?.missingSinceNs, null);
@@ -237,10 +234,12 @@ test('a transcript that disappears between listing and reading is marked missing
   appendFileSync(p1, user(S1, T0 + 30n * SEC));
   appendFileSync(p2, user(S2, T0 + 30n * SEC));
   const files = d.deck.platform.files;
-  const deck = withFiles(d.deck, {
-    readBytes: (path, from, to) => {
-      if (path === p2) unlinkSync(path);
-      return files.readBytes(path, from, to);
+  const deck = deckWith(d.deck, {
+    files: {
+      readBytes: (path, from, to) => {
+        if (path === p2) unlinkSync(path);
+        return files.readBytes(path, from, to);
+      },
     },
   });
   const calls: [number, number][] = [];
@@ -264,8 +263,10 @@ test('a transcript that cannot be read is recorded, kept as it was and not marke
   const saved = rowOf(d, p2);
   appendFileSync(p1, user(S1, T0 + 30n * SEC));
   appendFileSync(p2, user(S2, T0 + 30n * SEC));
-  const deck = withFiles(d.deck, {
-    readBytes: failing(p2, 'EACCES', d.deck.platform.files.readBytes),
+  const deck = deckWith(d.deck, {
+    files: {
+      readBytes: failing(p2, 'EACCES', d.deck.platform.files.readBytes),
+    },
   });
   assert.deepEqual(scanTranscripts(deck), { read: 1, skipped: 0, missing: 0, prsAttached: 0 });
   assert.deepEqual(rowOf(d, p2), saved);
@@ -333,7 +334,7 @@ test('a transcript of another entry point is recorded with it', (t) => {
   assert.equal(rowOf(d, path)?.entrypoint, 'sdk-ts');
 });
 
-test('a scan with no projects directory reads nothing and marks nothing', (t) => {
+test('a projects directory that is gone (not unreadable) marks its transcripts missing', (t) => {
   const d = testDeck(t);
   const { p1 } = two(d);
   scanTranscripts(d.deck);
@@ -341,4 +342,119 @@ test('a scan with no projects directory reads nothing and marks nothing', (t) =>
   // projects is gone (not unreadable): its transcripts are gone too
   assert.equal(scanTranscripts(d.deck).missing, 2);
   assert.equal(rowOf(d, p1)?.missingSinceNs, T0);
+});
+
+test('a transcript whose modification time the database cannot hold is recorded and skipped', (t) => {
+  const d = testDeck(t);
+  const { p1, p2 } = two(d);
+  const files = d.deck.platform.files;
+  const deck = deckWith(d.deck, {
+    files: {
+      lstat: (path) => {
+        const info = files.lstat(path);
+        return path === p1 && info !== null ? { ...info, mtimeNs: 2n ** 64n } : info;
+      },
+    },
+  });
+  assert.deepEqual(scanTranscripts(deck), { read: 1, skipped: 0, missing: 0, prsAttached: 0 });
+  assert.equal(rowOf(d, p1), undefined);
+  assert.equal(rowOf(d, p2)?.lastRecordNs, T0 + 10n * SEC);
+  assert.deepEqual(problems(d), [`cannot record ${p1}: a time is out of range`]);
+});
+
+test('a transcript whose row cannot be saved is recorded and skipped; the others are read', (t) => {
+  const d = testDeck(t);
+  const { p1, p2 } = two(d);
+  const calls: [number, number][] = [];
+  const deck = deckWith(d.deck, {
+    store: {
+      saveTranscript: (row) => {
+        if (row.path === p1) throw new RangeError('cannot bind');
+        d.deck.store.saveTranscript(row);
+      },
+    },
+  });
+  assert.deepEqual(
+    scanTranscripts(deck, (done, total) => calls.push([done, total])),
+    { read: 1, skipped: 0, missing: 0, prsAttached: 0 },
+  );
+  assert.equal(rowOf(d, p1), undefined);
+  assert.equal(rowOf(d, p2)?.lastRecordNs, T0 + 10n * SEC);
+  assert.deepEqual(problems(d), [`cannot record ${p1} (RangeError: cannot bind)`]);
+  assert.deepEqual(calls, [
+    [1, 2],
+    [2, 2],
+  ]);
+});
+
+test('a transcript row and its pull requests are saved together or not at all', (t) => {
+  const d = testDeck(t);
+  const url = 'https://github.com/o/r/pull/7';
+  const p1 = transcript(d, S1, user(S1, T0) + prLink(S1, url));
+  const p2 = transcript(d, S2, user(S2, T0) + prLink(S2, url));
+  const deck = deckWith(d.deck, {
+    store: {
+      attachPr: (sessionId, prUrl, origin, nowNs) => {
+        if (sessionId === S1) throw new Error('cannot attach');
+        d.deck.store.attachPr(sessionId, prUrl, origin, nowNs);
+      },
+    },
+  });
+  assert.deepEqual(scanTranscripts(deck), { read: 1, skipped: 0, missing: 0, prsAttached: 1 });
+  assert.equal(rowOf(d, p1), undefined, 'the row of S1 was rolled back with its attachment');
+  assert.notEqual(rowOf(d, p2), undefined);
+  assert.deepEqual(
+    d.deck.store.sessionPrs().map((r) => r.sessionId),
+    [S2],
+  );
+  assert.deepEqual(problems(d), [`cannot record ${p1} (Error: cannot attach)`]);
+
+  // the next scan reads S1 again and attaches its pull request
+  assert.deepEqual(scanTranscripts(d.deck), { read: 1, skipped: 1, missing: 0, prsAttached: 1 });
+});
+
+test('a transcript another refresh saved while this one was listing is not taken for deleted', (t) => {
+  const d = testDeck(t);
+  two(d);
+  scanTranscripts(d.deck);
+  const demo = join(d.deck.places.claudeHome, 'projects', 'demo');
+  const p3 = join(demo, `${S3}.jsonl`);
+  const files = d.deck.platform.files;
+  let raced = false;
+  const deck = deckWith(d.deck, {
+    files: {
+      list: (dir) => {
+        const names = files.list(dir);
+        if (dir === demo && !raced) {
+          // After this folder was listed, a new transcript appears and another skydeck saves it.
+          raced = true;
+          writeFileSync(p3, user(S3, T0));
+          scanTranscripts(d.deck);
+        }
+        return names;
+      },
+    },
+  });
+  assert.equal(scanTranscripts(deck).missing, 0);
+  assert.equal(rowOf(d, p3)?.missingSinceNs, null);
+});
+
+test('a deleted transcript that cannot be marked missing is recorded; the others are marked', (t) => {
+  const d = testDeck(t);
+  const { p1, p2 } = two(d);
+  scanTranscripts(d.deck);
+  unlinkSync(p1);
+  unlinkSync(p2);
+  const deck = deckWith(d.deck, {
+    store: {
+      saveTranscript: (row) => {
+        if (row.path === p1) throw new RangeError('cannot bind');
+        d.deck.store.saveTranscript(row);
+      },
+    },
+  });
+  assert.deepEqual(scanTranscripts(deck), { read: 0, skipped: 0, missing: 1, prsAttached: 0 });
+  assert.equal(rowOf(d, p1)?.missingSinceNs, null);
+  assert.equal(rowOf(d, p2)?.missingSinceNs, T0);
+  assert.deepEqual(problems(d), [`cannot mark ${p1} missing (RangeError: cannot bind)`]);
 });

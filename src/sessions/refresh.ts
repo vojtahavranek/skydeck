@@ -14,8 +14,9 @@ export interface RefreshResult {
 
 /**
  * ingestSpool, reconcile, scanTranscripts — in this order (5.3). Task 16 adds sweepLocks at the end.
- * Throws only for an error of the database itself: what one spool file, live process or transcript
- * does wrong is skipped and recorded in kv (`ingest_problems`, `reconcile_problems`, `scan_problems`).
+ * Never throws for one spool file, live process or transcript, whatever fails while it is read or
+ * saved: that one is skipped and recorded in kv (`ingest_problems`, `reconcile_problems`,
+ * `scan_problems`). Only the steps' own reads and kv writes around the items can still throw.
  */
 export function refresh(
   deck: Deck,

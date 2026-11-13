@@ -5,10 +5,9 @@ import { test } from 'node:test';
 
 import { parseSpoolFile } from '../../src/claude/hookinput.ts';
 import { NS_PER_DAY, NS_PER_MINUTE, NS_PER_SECOND } from '../../src/platform/time.ts';
-import type { Files, Ns } from '../../src/platform/types.ts';
-import type { Deck } from '../../src/sessions/deck.ts';
+import type { Ns } from '../../src/platform/types.ts';
 import { ingestSpool } from '../../src/sessions/ingest.ts';
-import { testDeck } from '../helpers/deck.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { BOOT_B, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
@@ -30,14 +29,6 @@ const problems = (d: TestDeck): string[] | null => {
   const value = d.deck.store.getKv('ingest_problems');
   return value === null ? null : (JSON.parse(value) as string[]);
 };
-
-/** The deck with some `Files` methods replaced. */
-function withFiles(deck: Deck, override: Partial<Files>): Deck {
-  return {
-    ...deck,
-    platform: { ...deck.platform, files: { ...deck.platform.files, ...override } },
-  };
-}
 
 function start(
   sessionId: string,
@@ -153,10 +144,12 @@ test('a file whose reading throws an unexpected error is moved to spool/bad; the
   const broken = put(d, start(S1, 'startup', T0), 1);
   put(d, start(S2, 'startup', T0 + SEC), 2);
   const files = d.deck.platform.files;
-  const deck = withFiles(d.deck, {
-    readText: (path) => {
-      if (path.endsWith(broken)) throw new TypeError('something unexpected');
-      return files.readText(path);
+  const deck = deckWith(d.deck, {
+    files: {
+      readText: (path) => {
+        if (path.endsWith(broken)) throw new TypeError('something unexpected');
+        return files.readText(path);
+      },
     },
   });
 
@@ -182,7 +175,7 @@ test('an entry that is not a regular file is moved to spool/bad', (t) => {
 test('a file that is gone by the time it is read is skipped without a problem', (t) => {
   const d = testDeck(t);
   const name = put(d, start(S1, 'startup', T0), 1);
-  const deck = withFiles(d.deck, { readText: () => null });
+  const deck = deckWith(d.deck, { files: { readText: () => null } });
   assert.deepEqual(ingestSpool(deck), NONE);
   assert.deepEqual(spool(d), [name]);
   assert.equal(problems(d), null);
@@ -192,12 +185,14 @@ test('a spool that cannot be listed ingests nothing and records why, without thr
   const d = testDeck(t);
   put(d, start(S1, 'startup', T0), 1);
   const files = d.deck.platform.files;
-  const deck = withFiles(d.deck, {
-    list: (dir) => {
-      if (dir === d.deck.places.spoolDir) {
-        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
-      }
-      return files.list(dir);
+  const deck = deckWith(d.deck, {
+    files: {
+      list: (dir) => {
+        if (dir === d.deck.places.spoolDir) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        return files.list(dir);
+      },
     },
   });
   assert.deepEqual(ingestSpool(deck), NONE);
@@ -209,9 +204,11 @@ test('a file that cannot be moved to spool/bad stays where it is, and that is re
   const name = spoolName(start(S1, 'startup', T0), 1);
   writeFileSync(join(d.deck.places.spoolDir, name), 'garbage');
   put(d, start(S2, 'startup', T0 + SEC), 2);
-  const deck = withFiles(d.deck, {
-    rename: () => {
-      throw Object.assign(new Error('EXDEV'), { code: 'EXDEV' });
+  const deck = deckWith(d.deck, {
+    files: {
+      rename: () => {
+        throw Object.assign(new Error('EXDEV'), { code: 'EXDEV' });
+      },
     },
   });
   assert.deepEqual(ingestSpool(deck), { ...NONE, ingested: 1, bad: 1 });
@@ -222,9 +219,11 @@ test('a file that cannot be moved to spool/bad stays where it is, and that is re
 test('a file that cannot be deleted after its row is committed is recorded, and is a duplicate next time', (t) => {
   const d = testDeck(t);
   const name = put(d, start(S1, 'startup', T0), 1);
-  const deck = withFiles(d.deck, {
-    remove: () => {
-      throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+  const deck = deckWith(d.deck, {
+    files: {
+      remove: () => {
+        throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      },
     },
   });
   assert.deepEqual(ingestSpool(deck), { ...NONE, ingested: 1 });
@@ -276,10 +275,12 @@ test('retention that cannot remove a file records it and goes on', (t) => {
   touch(join(badDir, 'old.ev'), T0 - 8n * NS_PER_DAY);
   put(d, start(S1, 'startup', T0), 1);
   const files = d.deck.platform.files;
-  const deck = withFiles(d.deck, {
-    remove: (path) => {
-      if (path.startsWith(badDir)) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
-      files.remove(path);
+  const deck = deckWith(d.deck, {
+    files: {
+      remove: (path) => {
+        if (path.startsWith(badDir)) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+        files.remove(path);
+      },
     },
   });
   assert.deepEqual(ingestSpool(deck), { ...NONE, ingested: 1 });
@@ -439,4 +440,79 @@ test('no positional argument and no removed flag is ever stored', (t) => {
       ['claude', '--model', 'opus'],
     ],
   );
+});
+
+test('a spool file whose row cannot be saved stays in the spool, and the others are ingested', (t) => {
+  const d = testDeck(t);
+  const failing = put(d, start(S1, 'startup', T0), 1);
+  put(d, start(S2, 'startup', T0 + SEC), 2);
+  const deck = deckWith(d.deck, {
+    store: {
+      insertEvent: (event) => {
+        if (event.spoolName === failing) throw new RangeError('cannot bind');
+        return d.deck.store.insertEvent(event);
+      },
+    },
+  });
+  assert.deepEqual(ingestSpool(deck), { ...NONE, ingested: 1 });
+  // The file is deleted only after its row is committed: this one stays for the next refresh.
+  assert.deepEqual(spool(d), [failing]);
+  assert.deepEqual(bad(d), []);
+  assert.deepEqual(
+    d.deck.store.events().map((e) => e.sessionId),
+    [S2],
+  );
+  assert.deepEqual(problems(d), [
+    `spool file ${failing} could not be recorded (RangeError: cannot bind)`,
+  ]);
+  assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1 });
+  assert.deepEqual(spool(d), []);
+});
+
+test('a link that cannot be saved leaves no event row behind', (t) => {
+  const d = testDeck(t);
+  put(d, start(S1, 'startup', T0), 1);
+  const clear = put(d, start(S2, 'clear', T60), 2);
+  const deck = deckWith(d.deck, {
+    store: {
+      insertLink: () => {
+        throw new Error('no link');
+      },
+    },
+  });
+  assert.deepEqual(ingestSpool(deck), { ...NONE, ingested: 1 });
+  assert.deepEqual(spool(d), [clear]);
+  assert.equal(d.deck.store.events().length, 1);
+  assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1 });
+  assert.equal(d.deck.store.links().length, 1);
+});
+
+test('a scripted run whose file cannot be removed is counted once, when it is removed', (t) => {
+  const d = testDeck(t);
+  put(d, start(S1, 'startup', T0, { argv: ['claude', '-p', 'hi'] }), 1);
+  const deck = deckWith(d.deck, {
+    files: {
+      remove: () => {
+        throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      },
+    },
+  });
+  assert.deepEqual(ingestSpool(deck), NONE);
+  assert.deepEqual(ingestSpool(deck), NONE);
+  assert.equal(d.deck.store.getKv('dropped_scripted'), null);
+  assert.deepEqual(ingestSpool(d.deck), { ...NONE, scripted: 1 });
+  assert.equal(d.deck.store.getKv('dropped_scripted'), '1');
+});
+
+test('a bad file moved in this run stays in spool/bad until the next run, however old it is', (t) => {
+  const d = testDeck(t);
+  const name = spoolName(start(S1, 'startup', T0), 1);
+  const path = join(d.deck.places.spoolDir, name);
+  writeFileSync(path, 'garbage');
+  touch(path, T0 - 8n * NS_PER_DAY);
+  assert.deepEqual(ingestSpool(d.deck), { ...NONE, bad: 1 });
+  assert.deepEqual(bad(d), [name]);
+  assert.equal(problems(d)?.length, 1);
+  ingestSpool(d.deck);
+  assert.deepEqual(bad(d), []);
 });

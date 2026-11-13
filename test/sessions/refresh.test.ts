@@ -5,9 +5,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { NS_PER_SECOND, isoFromNs } from '../../src/platform/time.ts';
-import type { Proc } from '../../src/platform/types.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
-import { testDeck } from '../helpers/deck.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
@@ -78,26 +77,18 @@ test('a refresh whose spool file, live process and transcript all fail does not 
   writeFileSync(join(d.deck.places.spoolDir, '1-2-3.ev'), 'garbage');
   liveFile(d, S2, 4343);
   transcript(d, S3);
-  const proc: Proc = {
-    ...d.proc,
-    cmdline: () => {
-      throw new Error('cmdline');
-    },
-  };
-  const files = d.deck.platform.files;
-  const deck = {
-    ...d.deck,
-    platform: {
-      ...d.deck.platform,
-      proc,
-      files: {
-        ...files,
-        readBytes: () => {
-          throw Object.assign(new Error('EIO'), { code: 'EIO' });
-        },
+  const deck = deckWith(d.deck, {
+    proc: {
+      cmdline: () => {
+        throw new Error('cmdline');
       },
     },
-  };
+    files: {
+      readBytes: () => {
+        throw Object.assign(new Error('EIO'), { code: 'EIO' });
+      },
+    },
+  });
   assert.deepEqual(refresh(deck), {
     ingest: { ingested: 0, duplicates: 0, bad: 1, scripted: 0 },
     observed: 0,
@@ -106,4 +97,52 @@ test('a refresh whose spool file, live process and transcript all fail does not 
   assert.notEqual(d.deck.store.getKv('ingest_problems'), null);
   assert.notEqual(d.deck.store.getKv('reconcile_problems'), null);
   assert.notEqual(d.deck.store.getKv('scan_problems'), null);
+});
+
+test('a refresh in which saving one spool event, one observed event and one transcript fails handles the others', (t) => {
+  const d = testDeck(t);
+  spoolStart(d, S1, 4242); // its save fails
+  const other = {
+    event: 'SessionStart' as const,
+    timeNs: T0 - 15n * SEC,
+    pid: 4444,
+    input: hookInput('SessionStart', S3, { source: 'startup' }),
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(other, 2)), spoolText(other));
+  liveFile(d, S2, 4343); // its save fails
+  liveFile(d, S3, 4545);
+  transcript(d, S1); // its save fails
+  transcript(d, S2);
+  const store = d.deck.store;
+  const deck = deckWith(d.deck, {
+    store: {
+      insertEvent: (event) => {
+        if (event.pid === 4242 || event.pid === 4343) throw new RangeError('cannot bind');
+        return store.insertEvent(event);
+      },
+      saveTranscript: (row) => {
+        if (row.sessionId === S1) throw new RangeError('cannot bind');
+        store.saveTranscript(row);
+      },
+    },
+  });
+  assert.deepEqual(refresh(deck), {
+    ingest: { ingested: 1, duplicates: 0, bad: 0, scripted: 0 },
+    observed: 1,
+    scan: { read: 1, skipped: 0, missing: 0, prsAttached: 0 },
+  });
+  assert.deepEqual(
+    store.events().map((e) => [e.kind, e.pid]),
+    [
+      ['start', 4444],
+      ['observed', 4545],
+    ],
+  );
+  assert.deepEqual(
+    store.transcripts().map((r) => r.sessionId),
+    [S2],
+  );
+  for (const key of ['ingest_problems', 'reconcile_problems', 'scan_problems'] as const) {
+    assert.equal((JSON.parse(store.getKv(key) ?? '[]') as string[]).length, 1, key);
+  }
 });

@@ -1,7 +1,8 @@
 // 5.3 step 1: the spool files the hook wrote become event rows (and links), then the spool is
-// cleaned up. Nothing that comes from one spool file stops the ingest: a file that cannot be read
-// or parsed is moved to spool/bad/ and the reason recorded for doctor (problems.ts). An error of
-// the database itself is not about one file and ends the command.
+// cleaned up. Nothing that comes from one spool file stops the ingest — reading, parsing and
+// saving it are all guarded: a file that cannot be read or parsed is moved to spool/bad/, one
+// whose row cannot be saved stays in the spool for the next refresh, and the reason is recorded
+// for doctor (problems.ts).
 import { join } from 'node:path';
 
 import { SpoolParseError, parseSpoolFile } from '../claude/hookinput.ts';
@@ -38,8 +39,10 @@ const LINK_KINDS: Readonly<Partial<Record<SpoolEvent['detail'], LinkKind>>> = {
  * file may belong to a running hook). The removals are not counted in the result.
  *
  * Never throws for one file: a spool file that is not a regular file, cannot be read, or does not
- * parse (for any reason) is moved to spool/bad/; a file that cannot be moved or removed stays where
- * it is. Each such problem is recorded in kv `ingest_problems` (replaced on every run).
+ * parse (for any reason) is moved to spool/bad/; one whose row cannot be saved (any error, the
+ * store's included), or that cannot be moved or removed, stays where it is. A scripted run is
+ * counted once its file is removed. Each such problem is recorded in kv `ingest_problems` (replaced
+ * on every run).
  */
 export function ingestSpool(deck: Deck): IngestResult {
   const { files } = deck.platform;
@@ -47,6 +50,7 @@ export function ingestSpool(deck: Deck): IngestResult {
   const result: IngestResult = { ingested: 0, duplicates: 0, bad: 0, scripted: 0 };
   const problems: string[] = [];
   const names = listOrNote(files, spoolDir, problems);
+  const movedToBad = new Set<string>();
 
   for (const name of names) {
     if (name.startsWith('.') || !name.endsWith('.ev')) {
@@ -62,22 +66,34 @@ export function ingestSpool(deck: Deck): IngestResult {
       event = parseSpoolFile(name, read, (p) => files.stat(p) !== null);
     } catch (error) {
       result.bad++;
-      moveToBad(deck, name, describeError(error), problems);
+      if (moveToBad(deck, name, describeError(error), problems)) {
+        movedToBad.add(name);
+      }
       continue;
     }
-    if (event.scripted) {
-      deck.store.addToKv('dropped_scripted', 1);
-      result.scripted++;
-    } else if (insert(deck, event) === null) {
-      result.duplicates++;
-    } else {
-      result.ingested++;
+    try {
+      if (event.scripted) {
+        // Counted once the file is gone, so that a file that cannot be removed is not counted again.
+        if (removeOrNote(files, path, `spool file ${name}`, problems)) {
+          deck.store.addToKv('dropped_scripted', 1);
+          result.scripted++;
+        }
+        continue;
+      }
+      if (insert(deck, event) === null) {
+        result.duplicates++;
+      } else {
+        result.ingested++;
+      }
+    } catch (error) {
+      problems.push(`spool file ${name} could not be recorded (${describeError(error)})`);
+      continue;
     }
     // Only now, with the row committed: a file is never lost before its event is stored.
     removeOrNote(files, path, `spool file ${name}`, problems);
   }
 
-  removeExpired(deck, names, problems);
+  removeExpired(deck, names, movedToBad, problems);
   recordProblems(deck.store, 'ingest_problems', problems);
   return result;
 }
@@ -142,7 +158,7 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
 }
 
 /** Moves <spoolDir>/<name> to <badDir>/<name> (creating badDir), noting what happened. */
-function moveToBad(deck: Deck, name: string, reason: string, problems: string[]): void {
+function moveToBad(deck: Deck, name: string, reason: string, problems: string[]): boolean {
   const { files } = deck.platform;
   const { spoolDir, badDir } = deck.places;
   const path = join(spoolDir, name);
@@ -150,18 +166,26 @@ function moveToBad(deck: Deck, name: string, reason: string, problems: string[])
     files.mkdirp(badDir, 0o700);
     files.rename(path, join(badDir, name));
     problems.push(`spool file ${name} moved to spool/bad/: ${reason}`);
+    return true;
   } catch (error) {
     problems.push(
       `cannot move spool file ${name} to spool/bad/ (${describeError(error)}): ${reason}`,
     );
+    return false;
   }
 }
 
 /**
- * Design 5.3 retention. A bad file's age is the time since the hook wrote it: a move keeps the
- * modification time. Directories are never removed.
+ * Design 5.3 retention. A bad file's age is the time since the hook wrote it (a move keeps the
+ * modification time), but one moved in this run stays until the next, so that what the problem
+ * line says is there is there. Directories are never removed.
  */
-function removeExpired(deck: Deck, spoolNames: readonly string[], problems: string[]): void {
+function removeExpired(
+  deck: Deck,
+  spoolNames: readonly string[],
+  movedToBad: ReadonlySet<string>,
+  problems: string[],
+): void {
   const { files } = deck.platform;
   const { spoolDir, badDir } = deck.places;
   const now = deck.platform.clock.nowNs();
@@ -171,7 +195,9 @@ function removeExpired(deck: Deck, spoolNames: readonly string[], problems: stri
     }
   }
   for (const name of listOrNote(files, badDir, problems)) {
-    removeIfOlder(files, join(badDir, name), now - BAD_FILE_AGE_NS, problems);
+    if (!movedToBad.has(name)) {
+      removeIfOlder(files, join(badDir, name), now - BAD_FILE_AGE_NS, problems);
+    }
   }
 }
 
@@ -187,11 +213,14 @@ function removeIfOlder(files: Files, path: string, beforeNs: Ns, problems: strin
   }
 }
 
-function removeOrNote(files: Files, path: string, what: string, problems: string[]): void {
+/** Removes the file; false (and noted) when that fails. */
+function removeOrNote(files: Files, path: string, what: string, problems: string[]): boolean {
   try {
     files.remove(path);
+    return true;
   } catch (error) {
     problems.push(`cannot remove ${what} (${describeError(error)})`);
+    return false;
   }
 }
 

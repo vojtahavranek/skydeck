@@ -5,11 +5,10 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { NS_PER_SECOND } from '../../src/platform/time.ts';
-import type { Ns, Proc } from '../../src/platform/types.ts';
-import type { Deck } from '../../src/sessions/deck.ts';
+import type { Ns } from '../../src/platform/types.ts';
 import { ingestSpool } from '../../src/sessions/ingest.ts';
 import { reconcile } from '../../src/sessions/reconcile.ts';
-import { testDeck } from '../helpers/deck.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { BOOT_A, S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
@@ -161,8 +160,7 @@ test('an unreadable or empty cmdline gives argv null, and a readable one later a
 
   // /proc/<pid>/cmdline that cannot be read at all (null) is the same as an empty one
   const e = setup(t);
-  const proc: Proc = { ...e.proc, cmdline: () => null };
-  assert.deepEqual(reconcile({ ...e.deck, platform: { ...e.deck.platform, proc } }), {
+  assert.deepEqual(reconcile(deckWith(e.deck, { proc: { cmdline: () => null } })), {
     observed: 1,
   });
   assert.equal(observed(e)[0]?.argv, null);
@@ -182,10 +180,22 @@ test('a relative path-flag value is stored absolute against the live file cwd', 
   assert.deepEqual(observed(d)[0]?.argv, ['claude', '--settings', join(project, 's.json')]);
 });
 
-test('no boot id: nothing is reconciled', (t) => {
+test('no boot id: nothing is reconciled, and that is recorded', (t) => {
   const d = setup(t);
   d.proc.setBootId(null);
   assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  assert.deepEqual(problems(d), ['cannot read the boot id: reconcile skipped']);
+  d.proc.setBootId(BOOT_A);
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.equal(problems(d), null);
+});
+
+test('a live file modified exactly 2 seconds ago is still left for later', (t) => {
+  const d = setup(t);
+  live(d, {}, T0 - 2n * SEC);
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  live(d, {}, T0 - 3n * SEC);
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
 });
 
 test('no positional argument and no removed flag is ever stored', (t) => {
@@ -210,14 +220,14 @@ test('a process whose handling throws an unexpected error is recorded and skippe
   const d = setup(t);
   d.proc.setProcess(4343, { stat: statLine(4343, START), cmdline: ['claude'] });
   live(d, { pid: 4343, sessionId: S2 });
-  const proc: Proc = {
-    ...d.proc,
-    cmdline: (pid) => {
-      if (pid === 4242) throw new TypeError('something unexpected');
-      return d.proc.cmdline(pid);
+  const deck = deckWith(d.deck, {
+    proc: {
+      cmdline: (pid) => {
+        if (pid === 4242) throw new TypeError('something unexpected');
+        return d.proc.cmdline(pid);
+      },
     },
-  };
-  const deck: Deck = { ...d.deck, platform: { ...d.deck.platform, proc } };
+  });
   assert.deepEqual(reconcile(deck), { observed: 1 });
   assert.deepEqual(
     observed(d).map((e) => [e.pid, e.sessionId]),
@@ -228,4 +238,60 @@ test('a process whose handling throws an unexpected error is recorded and skippe
   // the next clean run clears the record
   assert.deepEqual(reconcile(d.deck), { observed: 1 });
   assert.equal(problems(d), null);
+});
+
+test('a process whose observed event cannot be saved is recorded and skipped; the others are reconciled', (t) => {
+  const d = setup(t);
+  d.proc.setProcess(4343, { stat: statLine(4343, START), cmdline: ['claude'] });
+  live(d, { pid: 4343, sessionId: S2 });
+  const deck = deckWith(d.deck, {
+    store: {
+      insertEvent: (event) => {
+        if (event.pid === 4242) throw new RangeError('cannot bind');
+        return d.deck.store.insertEvent(event);
+      },
+    },
+  });
+  assert.deepEqual(reconcile(deck), { observed: 1 });
+  assert.deepEqual(
+    observed(d).map((e) => [e.pid, e.sessionId]),
+    [[4343, S2]],
+  );
+  assert.deepEqual(problems(d), ['process 4242: RangeError: cannot bind']);
+});
+
+test('a process another refresh recorded in the meantime is not recorded twice', (t) => {
+  const d = setup(t);
+  const concurrent = {
+    spoolName: null,
+    timeNs: T0 + 1_000_000n,
+    kind: 'observed' as const,
+    detail: '' as const,
+    rawDetail: null,
+    sessionId: S1,
+    bootId: BOOT_A,
+    pid: 4242,
+    procStart: START,
+    cwd: '/home/dev/projects/demo',
+    argv: ['claude', '--model', 'opus'],
+    name: 'demo name',
+    payload: null,
+  };
+  let raced = false;
+  const deck = deckWith(d.deck, {
+    store: {
+      // Another skydeck commits the same observed event (1 ms later by the clock) just before
+      // this one takes the write lock.
+      transaction: <T>(fn: () => T): T => {
+        if (!raced) {
+          raced = true;
+          d.clock.setNs(T0 + 1_000_000n);
+          d.deck.store.insertEvent(concurrent);
+        }
+        return d.deck.store.transaction(fn);
+      },
+    },
+  });
+  assert.deepEqual(reconcile(deck), { observed: 0 });
+  assert.equal(observed(d).length, 1);
 });

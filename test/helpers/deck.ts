@@ -2,8 +2,10 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 
+import type { Files, Proc } from '../../src/platform/types.ts';
 import { openDeck, resolveDeckPlaces } from '../../src/sessions/deck.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
+import type { Store } from '../../src/store/store.ts';
 import type { CaptureOptions } from './capture.ts';
 import { testContext } from './context.ts';
 import type { TestCtx } from './context.ts';
@@ -34,4 +36,34 @@ export function testDeck(
     deck.store.close();
   });
   return { ...context, deck };
+}
+
+/**
+ * The deck with some methods of its `Files`, `Proc` or `Store` replaced, for tests that make one
+ * file, process or save fail. The replacements may call the real ones through `deck`. The store's
+ * own methods stay bound to it, so `transaction(fn)` still works, and `fn` sees the replacements.
+ */
+export function deckWith(
+  deck: Deck,
+  override: { files?: Partial<Files>; proc?: Partial<Proc>; store?: Partial<Store> },
+): Deck {
+  const storeOverride = override.store ?? {};
+  const store = new Proxy(deck.store, {
+    get(target, key) {
+      if (Object.hasOwn(storeOverride, key)) {
+        return storeOverride[key as keyof Store];
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function' ? (value as () => unknown).bind(target) : value;
+    },
+  });
+  return {
+    ...deck,
+    platform: {
+      ...deck.platform,
+      files: { ...deck.platform.files, ...override.files },
+      proc: { ...deck.platform.proc, ...override.proc },
+    },
+    store,
+  };
 }
