@@ -116,11 +116,41 @@ export interface RewriteReport {
   /** Writing the file back unchanged would not give the same bytes: the rest of it is reformatted. */
   reformatted: boolean;
   /**
-   * The keys of numbers that would not come back with their digits (content, not formatting):
+   * Where the numbers are that would not come back with their digits (content, not formatting):
    * integers a double cannot hold, decimals with more digits than it keeps, numbers too large for
-   * it. Each key once, in file order; an array element is named by its index, `[1]`.
+   * it. Each place once, in file order, as a path: `env.TOKEN_ID`, `a.b[1]`; a key that is empty or
+   * holds a dot, a bracket, a quote or white space is written as a JSON string (`""`, `x."a.b"`).
    */
-  lossyKeys: string[];
+  lossyPaths: string[];
+}
+
+/** A key as a segment of a path: as it is when it is plain, else as a JSON string. */
+function segment(key: string): string {
+  return /^[^\s.[\]"]+$/.test(key) ? key : JSON.stringify(key);
+}
+
+/** The path of `key` in `holder`, which is at `holderPath` (the root is at ''). */
+function childPath(holder: unknown, holderPath: string, key: string): string {
+  if (Array.isArray(holder)) {
+    return `${holderPath}[${key}]`;
+  }
+  return holderPath === '' ? segment(key) : `${holderPath}.${segment(key)}`;
+}
+
+/** The path of every object and array in `root`. */
+function pathsOf(root: unknown): Map<object, string> {
+  const paths = new Map<object, string>();
+  const visit = (node: unknown, path: string): void => {
+    if (typeof node !== 'object' || node === null) {
+      return;
+    }
+    paths.set(node, path);
+    for (const [key, child] of Object.entries(node)) {
+      visit(child, childPath(node, path, key));
+    }
+  };
+  visit(root, '');
+  return paths;
 }
 
 /** A number literal as sign, digits without zeros at either end, and exponent: equal literals are equal numbers. */
@@ -145,7 +175,7 @@ function canonicalNumber(literal: string): string | null {
  * survive. Throws SkydeckError like the editing functions when the text is not a JSON object.
  */
 export function rewriteReport(text: string): RewriteReport {
-  const lossy = new Set<string>();
+  const lossy: { holder: unknown; key: string }[] = [];
   const settings = parseObject(text, function (key, value, context) {
     const source = context?.source;
     if (
@@ -153,11 +183,20 @@ export function rewriteReport(text: string): RewriteReport {
       source !== undefined &&
       canonicalNumber(JSON.stringify(value)) !== canonicalNumber(source)
     ) {
-      lossy.add(Array.isArray(this) ? `[${key}]` : key);
+      lossy.push({ holder: this, key }); // `this` is the object or array that holds the number
     }
     return value;
   });
-  return { reformatted: serialize(settings) !== text, lossyKeys: [...lossy] };
+  const paths = pathsOf(settings);
+  const lossyPaths = new Set<string>();
+  for (const { holder, key } of lossy) {
+    const holderPath =
+      typeof holder === 'object' && holder !== null ? paths.get(holder) : undefined;
+    if (holderPath !== undefined) {
+      lossyPaths.add(childPath(holder, holderPath, key));
+    }
+  }
+  return { reformatted: serialize(settings) !== text, lossyPaths: [...lossyPaths] };
 }
 
 /** The hook objects of the matcher groups in `groups`. Odd shapes are skipped. */

@@ -161,7 +161,7 @@ function restoreSettings(ctx: Context, files: Files, places: Places, recorded: R
   ctx.io.stdout(`removed the hook entries from ${sanitize(path)}\n`);
   if (backup !== null) {
     const lost =
-      rewrite.lossyKeys.length === 0 ? '' : ` and ${rewrite.lossyKeys.join(', ')} lost digits`;
+      rewrite.lossyPaths.length === 0 ? '' : ` and ${rewrite.lossyPaths.join(', ')} lost digits`;
     ctx.io.stdout(
       sanitize(
         `the rest of the file was rewritten in skydeck's formatting${lost}; ` +

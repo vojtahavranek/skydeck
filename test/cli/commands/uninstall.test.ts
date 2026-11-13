@@ -451,6 +451,23 @@ describe('uninstall: removing the entries rewrites the file, and says so', () =>
     );
   });
 
+  test('a key with a character a terminal acts on is not printed raw', async (t) => {
+    const d = testPlatform(t);
+    await installed(d, '{"model":"opus"}');
+    const added = readFileSync(settingsFile(d.places), 'utf8').replace(
+      '"model": "opus"',
+      '"model": "opus", "a\\u001b[2Jb\\u009bc": 12345678901234567890',
+    );
+    writeFileSync(settingsFile(d.places), added);
+    d.clock.setNs(T0 + 3600n * SEC);
+
+    const r = await run(d.platform, ['uninstall']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.stdout.includes('lost digits'), r.stdout);
+    assert.doesNotMatch(r.stdout, /[\u001b\u009b]/);
+  });
+
   test('the restore path is untouched: the backup comes back and nothing new is written', async (t) => {
     const d = testPlatform(t);
     await installed(d, '{"model":"opus"}');

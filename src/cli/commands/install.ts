@@ -187,9 +187,9 @@ function showChange(ctx: Context, hookPath: string, prepared: Prepared): void {
   const { rewrite, backupBase: base } = prepared;
   if (rewrite?.reformatted === true && base !== null) {
     const lost =
-      rewrite.lossyKeys.length === 0
+      rewrite.lossyPaths.length === 0
         ? ''
-        : ` and ${rewrite.lossyKeys.join(', ')} would lose digits`;
+        : ` and ${rewrite.lossyPaths.join(', ')} would lose digits`;
     const backup = nextBackupName(files, prepared.settingsPath, base);
     ctx.io.stderr(
       sanitize(

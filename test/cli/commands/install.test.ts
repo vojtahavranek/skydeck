@@ -532,7 +532,7 @@ describe('install: the rewrite of the whole file is announced', () => {
 
     assert.equal(no.code, 1);
     assert.ok(
-      no.stderr.includes(`${announced(backupOf(d), ' and BIG_ID would lose digits')}\n`),
+      no.stderr.includes(`${announced(backupOf(d), ' and env.BIG_ID would lose digits')}\n`),
       no.stderr,
     );
     assert.equal(readFileSync(settingsFile(d.places), 'utf8'), text);

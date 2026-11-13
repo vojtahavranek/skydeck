@@ -355,7 +355,7 @@ describe('settings: rewriteReport', () => {
   test("a file in skydeck's own formatting would come back as it is", () => {
     const text = in2({ model: 'opus', hooks: { Stop: [FOREIGN_GROUP] }, n: 1.5, big: 1e21 });
 
-    assert.deepEqual(rewriteReport(text), { reformatted: false, lossyKeys: [] });
+    assert.deepEqual(rewriteReport(text), { reformatted: false, lossyPaths: [] });
   });
 
   for (const [why, text] of [
@@ -367,7 +367,7 @@ describe('settings: rewriteReport', () => {
     ['1E+5, which comes back as 100000', '{\n  "n": 1E+5\n}\n'],
   ] as const) {
     test(`${why}: the bytes would change, no number loses a digit`, () => {
-      assert.deepEqual(rewriteReport(text), { reformatted: true, lossyKeys: [] });
+      assert.deepEqual(rewriteReport(text), { reformatted: true, lossyPaths: [] });
     });
   }
 
@@ -381,7 +381,7 @@ describe('settings: rewriteReport', () => {
     test(`${why}: the key is named`, () => {
       const report = rewriteReport(`{\n  "env": {\n    "id": ${literal}\n  }\n}\n`);
 
-      assert.deepEqual(report, { reformatted: true, lossyKeys: ['id'] });
+      assert.deepEqual(report, { reformatted: true, lossyPaths: ['env.id'] });
     });
   }
 
@@ -389,15 +389,29 @@ describe('settings: rewriteReport', () => {
     for (const literal of ['9007199254740992', '1000000000000000000000', '-0', '0.5e1']) {
       const report = rewriteReport(`{\n  "n": ${literal}\n}\n`);
 
-      assert.deepEqual(report.lossyKeys, [], literal);
+      assert.deepEqual(report.lossyPaths, [], literal);
     }
   });
 
-  test('each key once, in file order; an array element is named by its index', () => {
-    const text =
-      '{"a":12345678901234567890,"b":{"a":12345678901234567891},"c":[1,12345678901234567892]}';
+  test('a number is named by its path, each once, in file order', () => {
+    const big = (n: number): string => `1234567890123456789${n}`;
+    const text = `{"a":${big(0)},"b":{"a":${big(1)},"c":[1,{"d":${big(2)}},${big(3)}]},"e":[${big(4)}]}`;
 
-    assert.deepEqual(rewriteReport(text).lossyKeys, ['a', '[1]']);
+    assert.deepEqual(rewriteReport(text).lossyPaths, ['a', 'b.a', 'b.c[1].d', 'b.c[2]', 'e[0]']);
+  });
+
+  test('an empty key is named "" and a key with a dot, a bracket or a quote is quoted', () => {
+    const big = '12345678901234567890';
+    const text = `{"":${big},"x":{"":${big},"a.b":${big},"c[0]":${big},"q\\"r":${big},"ok-1_$":${big}}}`;
+
+    assert.deepEqual(rewriteReport(text).lossyPaths, [
+      '""',
+      'x.""',
+      'x."a.b"',
+      'x."c[0]"',
+      'x."q\\"r"',
+      'x.ok-1_$',
+    ]);
   });
 
   test('text that is not a JSON object throws like the editing functions do', () => {
