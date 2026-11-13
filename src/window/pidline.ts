@@ -71,6 +71,11 @@ export function parsePidLine(text: string): PidLine | null {
  * Design 5.5: alive when the line's boot id is `bootId` (the current one, read once by the
  * caller), /proc/<pid>/stat exists, and its field 22 equals the line's process start. Without a
  * current boot id nothing is alive.
+ *
+ * false means "not proven alive", which is also the answer when the boot id or the stat line could
+ * not be read (the platform turns every read error into null). A caller that REMOVES something of
+ * the line's owner (its socket, its pid file) or signals it must therefore first have a non-null
+ * boot id, and should treat a failed read as "cannot tell", not as "dead".
  */
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean {
   if (bootId === null || line.bootId !== bootId) return false;
