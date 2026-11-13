@@ -862,7 +862,8 @@ Two additions to S2 8.2.3 and 8.3 that task 1 records in the design: `result` ca
 // sent before they call pageProof, serverProof or wrapSecret, so a page's bad nonce closes the
 // connection (4001) and never reaches a throw.
 /** One transaction. A stored value that is not 32 bytes in isNonce's form is replaced as if absent
- *  (ruled): it could prove nothing, and a page holding a key from it gets 4003 and asks for a new launch. */
+ *  (ruled): it could prove nothing, and a page holding a key from it gets 4003 and asks for a new launch.
+ *  Both: RangeError, and nothing stored, when the random source gives another number of bytes. */
 export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array;
 export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm; one transaction
 /** RangeError for a key that is not 32 bytes, a mode other than 'key' | 'launch', or an sN or cN that is not isNonce. */

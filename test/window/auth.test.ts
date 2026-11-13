@@ -296,6 +296,18 @@ test('replaceSecret changes the secret and clears window_alarm, in one transacti
   assert.equal(deck.store.getKv('window_alarm'), null);
 });
 
+test('replaceSecret with a short random source throws and changes nothing', (t) => {
+  const { deck } = testDeck(t);
+  const { random } = countingRandom(t);
+  const before = ensureSecret(deck.store, random);
+  raiseAlarm(deck.store, T0);
+  assert.throws(() => replaceSecret(deck.store, () => new Uint8Array(31)), {
+    name: 'RangeError',
+  });
+  assert.equal(deck.store.getKv('window_secret'), b64(before));
+  assert.equal(deck.store.getKv('window_alarm'), String(T0));
+});
+
 test('replaceSecret creates a secret where there was none', (t) => {
   const { deck } = testDeck(t);
   const { random } = countingRandom(t);
