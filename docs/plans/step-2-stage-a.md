@@ -836,7 +836,10 @@ export function listKey(e) {}
  *  keys the page sends itself (terminalKey `{ send }`: Shift+Enter, Ctrl+Shift+V); for every
  *  other key it returns `handled`. While a text field of the page has the keyboard (the filter,
  *  the new form), app.js passes `handled = false` for the keys it leaves to the field, so that
- *  `j` or `/` type there. */
+ *  `j` or `/` type there. In the terminal zone F5, Shift+F5, Ctrl+F5 and Ctrl+R go to the program
+ *  only while xterm.js has the keyboard; while something of the page has it (the find bar, the
+ *  New form, a card, the ended bar) app.js treats them as the page's reload (`listKey` gives
+ *  `reload` in any zone) and passes `handled = true` (ruled for task 31). */
 export function cancels(e, zone, handled) {}
 // Tasks 26 and 28: a key that two functions classify (Ctrl+Shift+V: windowChord `paste-raw` and
 // terminalKey `{ send: '\x16' }`; Ctrl+Shift+R and BrowserRefresh: windowChord and listKey
@@ -2504,8 +2507,9 @@ with `@import` and `@typedef`, ruling 5).
   server whose proof is wrong the page sends nothing
   after `hello` and shows the warning with the port.
 - `shell.test.ts`: the CSP lets the page's files load and an inline script injected into the
-  served HTML by a stand-in server does not run; F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 in the list
-  zone, and Ctrl+Shift+R in the terminal zone, reload only after a server's proof, and not at
+  served HTML by a stand-in server does not run; F5, Shift+F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5
+  in the list zone, Ctrl+Shift+R in the terminal zone, and BrowserRefresh in both if Playwright
+  can send it, reload only after a server's proof, and not at
   all against a stand-in server without one; a dropped file does not navigate the window; the
   server stopped → the bar of S2 6.3 within 4 s; started again (same boot) → "skydeck's server
   restarted; your sessions kept running" and the list back; a server started with another boot
