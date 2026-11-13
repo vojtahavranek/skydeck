@@ -493,12 +493,25 @@ test('the detail: a note is printed line by line, each sanitised, with the break
     'note:',
     '  first red',
     '  second with tab',
-    '  ',
+    '',
     '  last',
   ]);
   for (const line of lines) {
     assert.ok(!/[\x00-\x1f\x7f-\x9f]/.test(line), JSON.stringify(line));
   }
+});
+
+test('the detail: a lone carriage return is a line break, and empty lines at the edges are not shown', () => {
+  const row = listRow({ id: S1, hasNote: true, note: '\n\na\rb\n\n' });
+  const lines = render(press(initModel([row], T0), 'enter'), { columns: 80, rows: 20 });
+  const at = lines.indexOf('note:');
+  assert.deepEqual(lines.slice(at, at + 3), ['note:', '  a', '  b']);
+});
+
+test('the detail: a state detail that is nothing once sanitised has no brackets', () => {
+  const row = listRow({ id: S1, state: 'waiting', stateDetail: '' });
+  const lines = render(press(initModel([row], T0), 'enter'), { columns: 80, rows: 20 });
+  assert.ok(lines.includes('state: waiting'), lines.join('\n'));
 });
 
 test('the detail: a note that is empty has the heading and no lines', () => {

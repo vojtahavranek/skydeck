@@ -20,6 +20,7 @@ import type { Deck } from '../../sessions/deck.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import { isListed } from '../../sessions/list.ts';
 import { loadRows } from '../../sessions/load.ts';
+import { markDone } from '../../sessions/meta.ts';
 import { describeError } from '../../sessions/problems.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { parseCommandArgs } from '../args.ts';
@@ -300,7 +301,7 @@ async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
   store.transaction(() => {
     if (mark) {
       for (const row of old) {
-        store.updateMeta(row.id, { doneAtNs: now }, now);
+        markDone(deck, row.id);
       }
     }
     store.setKv('first_run_offered', '1');

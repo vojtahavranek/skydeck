@@ -11,7 +11,7 @@ import type { Holder, Mark, State } from '../sessions/types.ts';
 import type { LinkKind, LinkRow, PrChecks, PrReview, PrState } from '../store/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { shellJoin } from '../text/shell.ts';
-import { formatPrLine, formatRow } from './row.ts';
+import { formatNoteLines, formatPrLine, formatRow, stateDetailSuffix } from './row.ts';
 
 // --- JSON (key order is the order written here) -----------------------------------------------------
 
@@ -225,7 +225,7 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
     field('id:', row.id),
     field(
       'state:',
-      `${row.state}${row.stateDetail === null ? '' : ` (${row.stateDetail})`} since ${isoFromNs(row.sinceNs)}`,
+      `${row.state}${stateDetailSuffix(row.stateDetail)} since ${isoFromNs(row.sinceNs)}`,
     ),
     ...doneField(row),
     field('marks:', row.marks.length === 0 ? '-' : row.marks.join(',')),
@@ -251,19 +251,8 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
     lines.push(field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}`));
   }
   lines.push(...row.prs.map(prField));
-  // A note is free multi-line text: sanitised line by line, so that its line breaks stay. Lines
-  // that are nothing once sanitised (only escape sequences) are not shown at its start and end,
-  // and a note of nothing else has nothing to show under a heading.
-  const noteLines = (row.note?.trimEnd() ?? '').split('\n').map((line) => {
-    const clean = sanitize(line);
-    return clean.trim() === '' ? '' : INDENT + clean;
-  });
-  while (noteLines[0] === '') {
-    noteLines.shift();
-  }
-  while (noteLines.at(-1) === '') {
-    noteLines.pop();
-  }
+  // A note is free multi-line text; a note that has nothing to show gets no heading.
+  const noteLines = row.note === null ? [] : formatNoteLines(row.note);
   if (noteLines.length > 0) {
     lines.push('note:', ...noteLines);
   }
