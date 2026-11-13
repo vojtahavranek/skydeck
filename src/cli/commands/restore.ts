@@ -88,7 +88,15 @@ export const command: Command = {
           `restore stopped: not enough memory to start ${outcome.notStarted.length} more (listed above)`,
         );
       }
-      return outcome.failed.length > 0 || outcome.timedOut.length > 0 ? EXIT.failure : EXIT.ok;
+      const notResumed = outcome.failed.length + outcome.timedOut.length;
+      if (outcome.handedOff !== null && notResumed > 0) {
+        // The launcher execs claude once this returns, so the caller sees claude's exit status,
+        // never this one: the failure is said here instead.
+        ctx.io.stderr(
+          `skydeck: ${notResumed} of ${chosen.length} selected sessions could not be resumed; see above\n`,
+        );
+      }
+      return notResumed > 0 ? EXIT.failure : EXIT.ok;
     });
   },
 };

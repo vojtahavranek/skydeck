@@ -7,6 +7,7 @@ import type { Context } from '../../../src/cli/context.ts';
 import { main } from '../../../src/cli/main.ts';
 import { isoFromNs } from '../../../src/platform/time.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
+import { acquireLock } from '../../../src/sessions/resume.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
 import { testContext } from '../../helpers/context.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
@@ -172,6 +173,22 @@ test('restore --yes hands off the first preselected session and prints a skydeck
     d.deck.store.kvEntries('resume_lock:').map((entry) => entry.key),
     [`resume_lock:${sid(1)}`],
   );
+  assert.equal(d.stderr(), ''); // nothing failed: no summary before the hand-off
+});
+
+test('before a hand-off restore says on stderr how many sessions failed: the exit status will be claude’s', async (t) => {
+  const d = machine(t, { stdinTTY: true, lines: ['3', ''] });
+  // Another skydeck is resuming sid(2): it fails; sid(1) is handed off, sid(3) printed.
+  acquireLock(d.deck, sid(2), { latestEventId: d.deck.store.latestEventIdOfSession(sid(2)) });
+  assert.equal(await main(['restore'], d.ctx), 1);
+  assert.ok(existsSync(handoffPath(d)));
+  assert.ok(d.stdout().includes('failed 00000002: 00000002 is being resumed by another skydeck\n'));
+  assert.ok(d.stdout().includes(`${resumeLine(sid(3))}\n`), d.stdout());
+  // After the prompts (stderr too); the printed sid(3) is not counted: its line is the user's to run.
+  assert.equal(
+    d.stderr(),
+    `${PROMPT}${PROMPT}skydeck: 1 of 3 selected sessions could not be resumed; see above\n`,
+  );
 });
 
 test('the line restore prints runs the guard when the user runs it: a session resumed meanwhile is refused', async (t) => {
@@ -269,6 +286,7 @@ test('restore exits 1 when a selected session was refused', async (t) => {
     1,
   );
   assert.ok(d.stdout().includes('failed 00000002: 00000002 is running (pid 4242)\n'), d.stdout());
+  assert.equal(d.stderr(), ''); // no hand-off: the exit status says it
 });
 
 test('restore exits 5 when memory is short, listing what was not started', async (t) => {
