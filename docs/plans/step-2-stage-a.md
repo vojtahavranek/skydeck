@@ -195,7 +195,7 @@ Each is binding for the implementer. The last column names the task that records
 | A29 | `skydeck window` passes its working directory to `serve` in `SKYDECK_ENV_ORIGIN`; `serve` takes it out of its environment (task 8's `serverEnvironment`) and records it with its start time as "where the environment came from" (S2 5.2); a `serve` started by hand records its own working directory. | `serve` runs in `/` (S2 5.2), so it cannot see where its environment came from. | 23 (5.2) |
 | A30 | `doctor`'s port check reads `/proc/net/tcp` and `/proc/net/tcp6` (`Proc.tcpListening`, task 5) for a listener on `<window.port>`; when one exists and no server of this installation answers, something else holds the port. | No side effect: binding the port, even for an instant, could make a server that starts at that moment exit 10; no request is sent to a foreign program. | 24 (16.3) |
 | A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
-| A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); a platform that can start a real process — `realTestPlatform`, and `testPlatform` given real processes (`realProcesses: true`) — refuses them always, whatever any environment says (the guard is part of the processes object they build, `realPlatform({ refuseWindows: true })`, never read from `process.env`: in the test process the variable is in the platform's environment, not in the runner's own; `refuseWindows` can only turn the refusal on); the pure fake starts nothing: it records the call and returns what its handler scripts, also for a Windows command, so that a test can assert the command line (ruling of 2026-11-13, task 5). The guard also covers `runner.runInteractive`, follows `PATH` and symbolic links, and is also active when the variable is in the environment given to the child. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
+| A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); a platform that can start a real process — `realTestPlatform`, and `testPlatform` given real processes (`realProcesses: true`) — refuses them always, whatever any environment says (the guard is part of the processes object they build, `realPlatform({ refuseWindows: true })`, never read from `process.env`: in the test process the variable is in the platform's environment, not in the runner's own; `refuseWindows` can only turn the refusal on); the pure fake starts nothing: it records the call and returns what its handler scripts, also for a Windows command, so that a test can assert the command line (ruling of 2026-11-13, task 5). The guard also covers `runner.runInteractive`; it judges every file the command can lead execvp to (every directory of `PATH`, or execvp's default without one; a path as the kernel follows it, symbolic links before `..`) by name and by content (a file that starts with `MZ`, what WSL interop runs), and is also active when the variable is in the environment given to the child. Only the program itself is judged: `sh -c '/mnt/…'` runs. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
 | A33 | The stand-in refuses to run outside a sandbox (review A, must-fix): it exits 2 before doing anything — no hook, no live file, no record — unless `STANDIN_RECORD`, `SKYDECK_HOME` and `CLAUDE_CONFIG_DIR` are all set to absolute paths; there are no defaults. It ends itself, exit 0, when the directory of its record file is gone (checked every second) — then without running the hook or writing anything, since the hook would create `$SKYDECK_HOME/state/spool` again and leave a directory behind after every crashed test — or 10 minutes after it started, with `SessionEnd` reason `other` as on `/exit`. | Implementers run tests inside Claude Code sessions on a machine with the hook installed: a stand-in with an inherited environment would write into the user's real spool and `~/.claude/sessions`, and a crashed test would leave keepers and stand-ins running. | — |
 | A34 | Test helpers signal only through `killKeepersIn(s, runtimeDir)` (task 5, `test/helpers/kill.ts`), which asserts that the real path of `runtimeDir` lies under `s.root` before it reads a single `.pid` line, and signals only pids whose lines are alive by design 5.5's rule; a test signals other processes only through the child handles it started itself. | If a runtime directory were ever resolved wrongly, a cleanup would kill the user's real keepers and their sessions. | — |
 | A35 | Every module the server uses is loaded before it listens, the vendored xterm modules (`loadXterm`) included; no `import()` runs after start. | S2 16.5: the server must never read new code from a checkout that `git pull` changed under it. | — |
@@ -290,14 +290,15 @@ export interface Detached {
 }
 /** With SKYDECK_TEST_NO_WINDOWS=1 in skydeck's environment or the child's, and always for
  *  realPlatform({ refuseWindows: true }), startDetached, Runner.run and Runner.runInteractive refuse
- *  a command under /mnt/ or ending in .exe (any case; also reached through PATH or a symbolic link)
- *  with an Error whose `code` is 'EWINDOWS', and start nothing (A32). */
+ *  a command under /mnt/, ending in .exe (any case) or a file starting with "MZ" (also reached
+ *  through PATH or a symbolic link) with an Error whose `code` is 'EWINDOWS', and start nothing (A32). */
 export interface Processes {
   /** Starts a program detached in a new session. Rejects with an Error whose `code` is 'ENOENT'
-   *  when the program (or `cwd`) does not exist. */
+   *  when the program, `cwd`, or the directory of `stdoutTo` / `stderrTo` does not exist. */
   startDetached(command: string, args: readonly string[], options: DetachedOptions): Promise<Detached>;
-  /** process.kill; false when no such process exists (ESRCH). Callers check the identity first.
-   *  RangeError for a pid that is not a positive whole number (0 and -1 signal groups). */
+  /** process.kill; false when no such process exists (ESRCH, or a pid above 2^31 − 1). Callers check
+   *  the identity first. RangeError for a pid that is not a positive whole number (0 and -1 signal
+   *  groups), and nothing is sent; `assertProcessId` (real.ts) is that check, shared with the fake. */
   signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean;
 }
 export interface HttpHandlers {
@@ -312,14 +313,16 @@ export interface HttpListener {
 }
 export interface Net {
   /** An HTTP server on 127.0.0.1:<port> (0: the system picks) or on a unix socket path (created
-   *  with mode 0o600). Rejects with an Error whose `code` is 'EADDRINUSE' when it is taken. */
+   *  with mode 0o600). Rejects with an Error whose `code` is 'EADDRINUSE' when it is taken. The real
+   *  one listens on 127.0.0.1 whatever `host` says at run time. */
   listenHttp(where: { host: '127.0.0.1'; port: number } | { path: string }, handlers: HttpHandlers): Promise<HttpListener>;
   /** Connects to a unix socket; rejects with `code` 'ECONNREFUSED' or 'ENOENT'. */
   connectUnix(path: string): Promise<import('node:net').Socket>;
   /** One HTTP/1.1 request over a unix socket with a JSON body; rejects on timeout (`code` 'ETIMEDOUT'),
    *  refusal or a missing socket. `onLine` receives a streamed body line by line when given; `body`
    *  is then null, and the timeout starts again with every chunk. Without `onLine`, `body` is the
-   *  answer parsed as JSON, its text when it is not JSON, null when empty. */
+   *  answer parsed as JSON, its text when it is not JSON, null when empty. A `timeoutMs` that is not
+   *  a whole number from 0 to MAX_TIMER_MS rejects with a RangeError. */
   requestUnix(path: string, request: { method: 'GET' | 'POST'; path: string; body?: unknown; timeoutMs: number; onLine?: (line: string) => void }): Promise<{ status: number; body: unknown }>;
 }
 export interface Platform {
@@ -375,12 +378,15 @@ a deterministic `randomBytes`, `pid` 4000, `uid` the real uid, `userName` `'test
 `net` (tests use real loopback and unix sockets) and the fake processes (`processes` beside
 `clock`, `proc` and `runner`), unless options ask for real ones
 (`TestPlatformOptions.realProcesses: true`), which refuse a command under `/mnt/` or ending in
-`.exe` always (A32). `fakeProc` also has `setTcpListening(ports | null)`.
+`.exe` always (A32) and whose `signal` reaches only a process they started that still runs (beside
+the fake `/proc`, a fixture's pid may be a real process of the developer's; any other pid throws).
+The fake `signal` throws the real one's RangeError. `fakeProc` also has `setTcpListening(ports | null)`.
 
 `realTestPlatform(t, options?: { bootId?: string; env?: TestPlatformOptions['env'] })` (same file,
 A36) returns a `RealTestPlatform` (`TestPlatform<Clock, Proc, Runner, Processes>`: `TestPlatform`
 is generic, its defaults the fakes) whose `platform` has the real
-clock, the real `/proc` (so the real boot id), `pid` = `process.pid`, the real `uid` and
+clock, the real `/proc` (so the real boot id), the real runner (a run without `env` or `cwd` gets the
+sandbox's environment and home, never the developer's), `pid` = `process.pid`, the real `uid` and
 `userName`, real processes that refuse a command under `/mnt/` or ending in `.exe` always (A32: the
 guard is built into the processes object, not read from an environment), the real `net`, real `randomBytes`,
 `homeDir` and `cwd` = the sandbox's home, `appRoot` = the repository, and the sandbox's

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { isAlive } from '../../src/claude/live.ts';
@@ -12,6 +12,12 @@ function assertInside(s: Sandbox, path: string, what: string): void {
     path.startsWith(`${s.root}/`),
     `killKeepersIn: ${what} ${path} is not inside the sandbox ${s.root}; nothing was signalled`,
   );
+}
+
+/** The entry vanished meanwhile: a keeper removes its own `.pid` file when it ends (S2 4.2). */
+function isGone(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 /** `<pid> <process start> <boot id>`, and for a keeper `<version> <started>` (S2 4.2); null if not that. */
@@ -32,8 +38,9 @@ function parseLine(text: string): { pid: number; procStart: number; bootId: stri
  * rule (A34): the boot id, the pid and its process start all match. Before it reads a single line
  * it asserts that `runtimeDir`, its real path, the real path of `terms/` and of every `.pid` file
  * lie inside the sandbox's root, so that a wrongly resolved directory can never reach the user's
- * real keepers. A dead line, a garbled one, a temporary file and this process (or its parent) are
- * skipped. A directory that does not exist is nothing to do. Killing a keeper ends its program
+ * real keepers; every assertion is made before the first signal. A dead line, a garbled one, a
+ * temporary file, an entry that vanished meanwhile or is not a file, and this process (or its
+ * parent) are skipped. A directory that does not exist is nothing to do. Killing a keeper ends its program
  * (SIGHUP from its pty).
  */
 export function killKeepersIn(s: Sandbox, runtimeDir: string): void {
@@ -54,9 +61,21 @@ export function killKeepersIn(s: Sandbox, runtimeDir: string): void {
     if (name.startsWith('.') || !name.endsWith('.pid')) {
       continue; // `.<name>.tmp` while a keeper rewrites its line, sockets, anything else
     }
-    const file = realpathSync(join(realTerms, name));
-    assertInside(s, file, 'the real path of');
-    lines.push(readFileSync(file, 'utf8'));
+    let text: string;
+    try {
+      const file = realpathSync(join(realTerms, name));
+      assertInside(s, file, 'the real path of');
+      if (!statSync(file).isFile()) {
+        continue; // a directory or a socket named *.pid: no line to read
+      }
+      text = readFileSync(file, 'utf8');
+    } catch (error) {
+      if (isGone(error)) {
+        continue; // removed (or a link left dangling) since the listing: no keeper to signal here
+      }
+      throw error;
+    }
+    lines.push(text);
   }
 
   const { proc, processes } = realPlatform({ refuseWindows: true });

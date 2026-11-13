@@ -145,13 +145,19 @@ export function readLiveFiles(files: Files, claudeHome: string): LiveFile[] {
   return result.sort((a, b) => a.pid - b.pid);
 }
 
-/** Field 22 of /proc/<pid>/stat, null when the process does not exist or the line is unreadable. */
+/**
+ * Field 22 of /proc/<pid>/stat, null when the process does not exist or the line cannot be parsed.
+ * Throws when /proc/<pid>/stat cannot be read for another reason (Proc.stat): unknown is not dead.
+ */
 function startOf(pid: number, proc: Proc): number | null {
   const line = proc.stat(pid);
   return line === null ? null : procStartFromStat(line);
 }
 
-/** 5.5: bootId equals currentBootId, /proc/<pid>/stat exists, and its field 22 equals procStart (non-null). */
+/**
+ * 5.5: bootId equals currentBootId, /proc/<pid>/stat exists, and its field 22 equals procStart
+ * (non-null). Throws, never answers false, when /proc/<pid>/stat cannot be read (Proc.stat).
+ */
 export function isAlive(p: ProcessKey, proc: Proc, currentBootId: string | null): boolean {
   if (currentBootId === null || p.bootId !== currentBootId || p.procStart === null) {
     return false;
@@ -159,7 +165,10 @@ export function isAlive(p: ProcessKey, proc: Proc, currentBootId: string | null)
   return startOf(p.pid, proc) === p.procStart;
 }
 
-/** 5.5: a live file is trusted when /proc/<pid>/stat exists and its field 22 equals the file's procStart. */
+/**
+ * 5.5: a live file is trusted when /proc/<pid>/stat exists and its field 22 equals the file's
+ * procStart. Throws when /proc/<pid>/stat cannot be read (Proc.stat).
+ */
 export function isLiveFileTrusted(f: LiveFile, proc: Proc): boolean {
   return f.procStart !== null && startOf(f.pid, proc) === f.procStart;
 }

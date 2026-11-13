@@ -2,10 +2,8 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess, StdioOptions } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
-  accessSync,
   chmodSync,
   closeSync,
-  constants as fsConstants,
   fstatSync,
   linkSync,
   mkdirSync,
@@ -27,7 +25,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import { createConnection } from 'node:net';
 import type { Socket } from 'node:net';
 import { homedir, userInfo } from 'node:os';
-import { basename, dirname, join, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
@@ -398,37 +396,67 @@ function isWindowsCommand(command: string): boolean {
   return command.startsWith('/mnt/') || /\.exe$/i.test(command);
 }
 
+/** Where execvp looks when the child's environment has no PATH (glibc's default, and more). */
+const DEFAULT_PATH = '/usr/local/bin:/usr/bin:/bin';
+
 /**
- * The file execvp would run for `command`: relative to `cwd` when it holds a '/', else the first
- * executable file of that name in `path`. null when there is none (the start fails as ENOENT).
+ * Every file `command` can lead execvp to, as text the kernel resolves: the path itself when it
+ * holds a '/' (joined to the working directory, not normalised: `a/link/../x` follows `link`
+ * first), else `<dir>/<command>` for every directory of `path` (execvp goes on past one it cannot
+ * run, so every one counts, not only the first). [] when the working directory is gone.
  */
-function locateProgram(command: string, cwd: string | undefined, path: string): string | null {
+function candidatesOf(command: string, cwd: string | undefined, path: string): string[] {
+  let base: string;
   try {
-    if (command.includes('/')) {
-      return resolvePath(cwd ?? '.', command);
-    }
-    for (const dir of path.split(':')) {
-      const candidate = resolvePath(cwd ?? '.', dir, command); // an empty entry is the working directory
-      try {
-        accessSync(candidate, fsConstants.X_OK);
-        if (statSync(candidate).isFile()) {
-          return candidate;
-        }
-      } catch {
-        // not here: the next directory
-      }
-    }
+    base = cwd ?? process.cwd();
   } catch {
-    // the working directory is gone: only the name itself can be judged
+    return [];
   }
-  return null;
+  const under = (dir: string): string => (dir.startsWith('/') ? dir : `${base}/${dir}`);
+  if (command.includes('/')) {
+    return [under(command)];
+  }
+  // An empty entry of PATH is the working directory.
+  return path.split(':').map((dir) => `${dir === '' ? base : under(dir)}/${command}`);
+}
+
+/** Whether the file starts with "MZ": a Windows program, which WSL interop would run. */
+function startsWithMz(path: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    const head = new Uint8Array(2);
+    return readSync(fd, head, 0, 2, 0) === 2 && head[0] === 0x4d && head[1] === 0x5a;
+  } catch {
+    return false; // not a readable file: nothing interop could run from here
+  } finally {
+    if (fd !== undefined) {
+      closeSync(fd);
+    }
+  }
+}
+
+/** Whether `candidate`, followed as the kernel follows it, is a Windows program. */
+function leadsToWindows(candidate: string): boolean {
+  if (isWindowsCommand(candidate)) {
+    return true;
+  }
+  let real: string;
+  try {
+    real = realpathSync.native(candidate); // the kernel's resolution, `..` after the link
+  } catch {
+    return false; // not there: starting it fails as ENOENT
+  }
+  return isWindowsCommand(real) || startsWithMz(real);
 }
 
 /**
- * Refuses a Windows program (A32): `command` itself, the file it names on `PATH`, and that file's
- * real path (a link named `edge` to `msedge.exe` is refused too). Active when `always`, or when the
- * environment given to the child carries SKYDECK_TEST_NO_WINDOWS=1. An Error with `code`
- * 'EWINDOWS' for a refusal, null otherwise.
+ * Refuses a Windows program (A32): `command` itself, and every file it can lead to through `PATH`
+ * (the child's, or execvp's default when it has none) and symbolic links, judged by name (under
+ * /mnt/, *.exe) and by content (a file that starts with "MZ", which is what WSL interop runs).
+ * Only the program itself is judged: `sh -c '/mnt/c/…'` is a shell, and runs. Active when
+ * `always`, or when the environment given to the child carries SKYDECK_TEST_NO_WINDOWS=1. An Error
+ * with `code` 'EWINDOWS' for a refusal, null otherwise.
  */
 type WindowsGuard = (
   command: string,
@@ -440,14 +468,11 @@ function windowsGuard(always: boolean, ownEnv: Env): WindowsGuard {
     if (!always && options.env?.['SKYDECK_TEST_NO_WINDOWS'] !== '1') {
       return null;
     }
-    const located = locateProgram(command, options.cwd, (options.env ?? ownEnv)['PATH'] ?? '');
-    let real: string | null = null;
-    try {
-      real = located === null ? null : realpathSync(located);
-    } catch {
-      // it does not exist: starting it fails as ENOENT
-    }
-    if (![command, located, real].some((path) => path !== null && isWindowsCommand(path))) {
+    const path = (options.env ?? ownEnv)['PATH'] ?? DEFAULT_PATH;
+    if (
+      !isWindowsCommand(command) &&
+      !candidatesOf(command, options.cwd, path).some(leadsToWindows)
+    ) {
       return null;
     }
     return Object.assign(new Error(`refused to start a Windows program under test: ${command}`), {
@@ -604,6 +629,19 @@ function appendTo(path: string | undefined, opened: number[]): number | 'ignore'
   return fd;
 }
 
+/** Above the largest pid Linux can give (pid_max is at most 2^22): no such process. */
+const MAX_PID = 2_147_483_647;
+
+/**
+ * Throws a RangeError for a pid that is not a positive whole number: process.kill(0) signals this
+ * process's group, -1 every process the user owns, -n the group n. Shared with the test fakes.
+ */
+export function assertProcessId(pid: number): void {
+  if (!Number.isSafeInteger(pid) || pid < 1) {
+    throw new RangeError(`not a process id: ${pid}`);
+  }
+}
+
 function realProcesses(guard: WindowsGuard): Processes {
   return {
     startDetached(command, args, options) {
@@ -662,9 +700,9 @@ function realProcesses(guard: WindowsGuard): Processes {
       });
     },
     signal(pid, signal) {
-      // process.kill(0) signals this process's group and -1 every process the user owns.
-      if (!Number.isSafeInteger(pid) || pid < 1) {
-        throw new RangeError(`not a process id: ${pid}`);
+      assertProcessId(pid);
+      if (pid > MAX_PID) {
+        return false; // no process has it, and process.kill would throw a TypeError
       }
       try {
         process.kill(pid, signal);
@@ -716,9 +754,6 @@ function realNet(): Net {
           server.off('error', reject);
           server.on('error', () => {}); // a failed accept must not end the process
           const address = server.address();
-          if ('path' in where) {
-            chmodSync(where.path, 0o600);
-          }
           resolve({
             port: typeof address === 'object' && address !== null ? address.port : 0,
             close: () =>
@@ -733,7 +768,8 @@ function realNet(): Net {
           });
         });
         if ('path' in where) {
-          // The socket is created by bind() inside listen(): with this umask it is never wider than 0o600.
+          // The socket is created by bind() inside listen(): with this umask it has mode 0o600 from
+          // its first moment.
           const umask = process.umask(0o177);
           try {
             server.listen(where.path);
@@ -741,7 +777,7 @@ function realNet(): Net {
             process.umask(umask);
           }
         } else {
-          server.listen(where.port, where.host);
+          server.listen(where.port, '127.0.0.1'); // loopback only (principle 8), whatever was passed
         }
       });
     },
@@ -760,6 +796,13 @@ function realNet(): Net {
       });
     },
     requestUnix(path, request) {
+      const { timeoutMs } = request;
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMER_MS) {
+        // Node would wait 1 ms for such a timer: refused as Clock.after refuses it.
+        return Promise.reject(
+          new RangeError(`not a whole number of milliseconds a timer can wait: ${timeoutMs}`),
+        );
+      }
       return new Promise((resolve, reject) => {
         const payload = request.body === undefined ? undefined : JSON.stringify(request.body);
         const headers: Record<string, string> =

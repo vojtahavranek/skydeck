@@ -2,7 +2,7 @@ import type { TestContext } from 'node:test';
 
 import { resolvePlaces } from '../../src/platform/paths.ts';
 import type { Places } from '../../src/platform/paths.ts';
-import { realPlatform } from '../../src/platform/real.ts';
+import { assertProcessId, realPlatform } from '../../src/platform/real.ts';
 import { MAX_TIMER_MS, NS_PER_SECOND, nsFromMs } from '../../src/platform/time.ts';
 import type {
   Clock,
@@ -328,8 +328,9 @@ export interface FakeProcesses extends Processes {
  * rejection is the rejection); without one each call gets the next pid from 5001 and an `exited`
  * that never settles. A Windows command is recorded and answered like any other, so that a test
  * can assert the command line Edge or the keep-alive would get: only what can start a real
- * process refuses one (ruling on A32). signal() records the call and answers whether `live` holds
- * the pid.
+ * process refuses one (ruling on A32). signal() refuses what the real one refuses (a RangeError
+ * for a pid that is not a positive whole number), records the call and answers whether `live`
+ * holds the pid.
  */
 export function fakeProcesses(
   handler?: (call: DetachedCall) => Detached | Promise<Detached>,
@@ -356,6 +357,7 @@ export function fakeProcesses(
       }
     },
     signal(pid, signal) {
+      assertProcessId(pid); // as the real one: a RangeError for 0, -1, NaN, 1.5
       signals.push({ pid, signal });
       return alive.has(pid);
     },
@@ -371,7 +373,11 @@ export interface TestPlatformOptions {
   bootId?: string;
   /** Default 8000. */
   memAvailableMb?: number;
-  /** Real processes, which refuse Windows programs always (A32), instead of fakeProcesses(). */
+  /**
+   * Real processes, which refuse Windows programs always (A32), instead of fakeProcesses(). Their
+   * signal() reaches only a process they started that still runs: beside the fake /proc it throws
+   * for any other pid.
+   */
   realProcesses?: boolean;
 }
 
@@ -427,7 +433,8 @@ export function testPlatform(
   });
   const runner = fakeRunner();
   const real = realPlatform({ refuseWindows: true });
-  const processes = options.realProcesses === true ? real.processes : fakeProcesses();
+  const processes =
+    options.realProcesses === true ? ownProcessesOnly(real.processes) : fakeProcesses();
   let uuids = 0;
   let randoms = 0;
   const platform: Platform = {
@@ -460,6 +467,33 @@ export function testPlatform(
   };
 }
 
+/**
+ * Real processes that signal only what they started and what still runs. Beside a fake /proc,
+ * design 5.5's identity check answers from fixtures, and a fixture's pid may be a real process of
+ * the developer's: so signal() throws for any other pid, and sends nothing.
+ */
+function ownProcessesOnly(real: Processes): Processes {
+  const running = new Set<number>();
+  return {
+    async startDetached(command, args, options) {
+      const child = await real.startDetached(command, args, options);
+      running.add(child.pid);
+      void child.exited.then(() => {
+        running.delete(child.pid);
+      });
+      return child;
+    },
+    signal(pid, signal) {
+      if (!running.has(pid)) {
+        throw new Error(
+          `testPlatform signals only the processes it started and that still run, not ${pid}`,
+        );
+      }
+      return real.signal(pid, signal);
+    },
+  };
+}
+
 /** What a keeper, the stand-in, the hook and the launcher run, linked into the sandbox's bin. */
 const REAL_PROGRAMS = [
   'python3',
@@ -478,7 +512,8 @@ const REAL_PROGRAMS = [
 /**
  * A platform for tests that start a keeper, the stand-in or a server, or judge a real process
  * alive (A36): the real clock, /proc (and so the boot id, unless `options.bootId` overrides what
- * bootId() reports), runner, processes, net and randomBytes; pid = process.pid, the real uid and
+ * bootId() reports), runner (a run without env or cwd gets the sandbox's environment and home),
+ * processes, net and randomBytes; pid = process.pid, the real uid and
  * userName; homeDir and cwd = the sandbox's home, appRoot = the repository, env =
  * sandbox.env(options.env). Its runner and processes refuse Windows programs always (A32), whatever
  * any environment says. python3, sh and the other programs of REAL_PROGRAMS are linked into the
@@ -494,11 +529,27 @@ export function realTestPlatform(
   const real = realPlatform({ refuseWindows: true });
   const { bootId } = options;
   const proc: Proc = bootId === undefined ? real.proc : { ...real.proc, bootId: () => bootId };
+  // A run without env or cwd would get the developer's (Node's spawn falls back to process.env):
+  // here it gets the sandbox's environment and home, as platform.env says.
+  const runner: Runner = {
+    run: (command, args, runOptions = {}) =>
+      real.runner.run(command, args, {
+        ...runOptions,
+        env: runOptions.env ?? env,
+        cwd: runOptions.cwd ?? s.home,
+      }),
+    runInteractive: (command, args, runOptions = {}) =>
+      real.runner.runInteractive(command, args, {
+        ...runOptions,
+        env: runOptions.env ?? env,
+        cwd: runOptions.cwd ?? s.home,
+      }),
+  };
   const platform: Platform = {
     clock: real.clock,
     files: real.files,
     proc,
-    runner: real.runner,
+    runner,
     processes: real.processes,
     net: real.net,
     env,
@@ -518,7 +569,7 @@ export function realTestPlatform(
     sandbox: s,
     clock: real.clock,
     proc,
-    runner: real.runner,
+    runner,
     processes: real.processes,
     places: resolvePlaces(env, s.home, null),
   };

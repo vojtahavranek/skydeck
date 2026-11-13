@@ -786,6 +786,15 @@ describe('fakeProcesses', () => {
     assert.equal(existsSync(marker), false, 'neither stub ran');
   });
 
+  test('signal refuses what the real one refuses: a pid that is not a positive whole number', () => {
+    const processes = fakeProcesses(undefined, [0]);
+
+    for (const pid of [0, -1, Number.NaN, 1.5]) {
+      assert.throws(() => processes.signal(pid, 'SIGTERM'), RangeError, String(pid));
+    }
+    assert.deepEqual(processes.signals, []);
+  });
+
   test('signal answers from the set of live pids and records every call', () => {
     const processes = fakeProcesses(undefined, [10]);
 
@@ -833,6 +842,46 @@ describe('testPlatform: step 2 members', () => {
       tp.processes.calls.map((call) => call.command),
       ['sh', '/mnt/c/Windows/System32/wsl.exe'],
     );
+  });
+
+  test('realProcesses: true signals only the processes it started and that still run, never a pid of the fake /proc', async (t) => {
+    const kill = t.mock.method(process, 'kill', () => true);
+    const tp = testPlatform(t, { realProcesses: true });
+    tp.sandbox.link('sh');
+    const env = tp.platform.env as Record<string, string>;
+    const child = await tp.platform.processes.startDetached('sh', ['-c', 'exit 0'], {
+      cwd: tp.sandbox.root,
+      env,
+    });
+    // A fixture that names a pid of the developer's: the fake /proc says it is alive.
+    tp.proc.setProcess(4242, { stat: statLine(4242, 100), cmdline: ['claude'] });
+
+    assert.throws(
+      () => tp.platform.processes.signal(4242, 'SIGTERM'),
+      /only the processes it started/,
+    );
+    assert.throws(
+      () => tp.platform.processes.signal(tp.platform.pid, 'SIGKILL'),
+      /only the processes it started/,
+    );
+    await child.exited;
+    assert.throws(
+      () => tp.platform.processes.signal(child.pid, 'SIGTERM'),
+      /only the processes it started/,
+    );
+    assert.equal(kill.mock.callCount(), 0);
+  });
+
+  test('realProcesses: true signals a process it started while it runs', async (t) => {
+    const tp = testPlatform(t, { realProcesses: true });
+    tp.sandbox.link('sleep');
+    const child = await tp.platform.processes.startDetached('sleep', ['30'], {
+      cwd: tp.sandbox.root,
+      env: tp.platform.env as Record<string, string>,
+    });
+
+    assert.equal(tp.platform.processes.signal(child.pid, 'SIGKILL'), true);
+    assert.deepEqual(await child.exited, { code: null, signal: 'SIGKILL' });
   });
 
   test('realProcesses: true gives real processes that still refuse Windows programs, whatever the environment', async (t) => {
@@ -976,6 +1025,21 @@ describe('realTestPlatform (A36)', () => {
     assert.equal(found.stdout, `${s.bin}/python3\n${s.bin}/sh\n`);
   });
 
+  test("a run without env or cwd gets the sandbox environment and home, never the developer's", async (t) => {
+    const { platform, sandbox: s } = realTestPlatform(t);
+    const script =
+      'printf "%s|%s|%s|%s|%s" "$HOME" "$SKYDECK_HOME" "$SKYDECK_TEST_NO_WINDOWS" "$PATH" "$(pwd)"';
+
+    const plain = await platform.runner.run('sh', ['-c', script]);
+    const interactive = await platform.runner.runInteractive('sh', [
+      '-c',
+      `[ "$HOME|$PATH|$(pwd)" = "${s.home}|${s.bin}|${s.home}" ]`,
+    ]);
+
+    assert.equal(plain.stdout, `${s.home}|${s.skydeckHome}|1|${s.bin}|${s.home}`);
+    assert.equal(interactive, 0);
+  });
+
   test('a keeper-like python3 -c started detached with the sandbox environment runs', async (t) => {
     const { platform, sandbox: s } = realTestPlatform(t);
 
@@ -1020,6 +1084,24 @@ describe('realTestPlatform (A36)', () => {
 });
 
 describe('writeWindowConfig (A32)', () => {
+  test('a key given as undefined is left out: the stub and keepAlive off stay', (t) => {
+    const s = sandbox(t);
+
+    const { edgeStub } = writeWindowConfig(s, {
+      edge: undefined,
+      keepAlive: undefined,
+      port: 47001,
+    });
+    const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
+
+    assert.deepEqual(config.window, {
+      port: 47001,
+      edge: edgeStub,
+      profileDir: null,
+      keepAlive: 'off',
+    });
+  });
+
   test('writes a config.json that parses, with the Edge stub and the keep-alive off', (t) => {
     const s = sandbox(t);
 
@@ -1214,6 +1296,48 @@ describe('killKeepersIn (A34)', () => {
       assert.equal(await exitWithin(other, 100), 'running', why);
       assert.equal(alive(other.pid), true, why);
     }
+  });
+
+  test('an entry that vanished or is not a file is skipped: the keepers after it are still killed', async (t) => {
+    const s = sandbox(t);
+    const keeper = await sleeper(t, s);
+    const dir = `${s.skydeckHome}/run`;
+    writeLine(dir, 'bbbbbbbbbbbb', `${keeper.pid} ${keeper.procStart} ${BOOT()} 1 1`);
+    // Sorted before the live line: a keeper that ended removed its file, a link left dangling.
+    symlinkSync(`${dir}/terms/gone.pid`, `${dir}/terms/aaaaaaaaaaaa.pid`);
+    mkdirSync(`${dir}/terms/aaaaaaaaaaab.pid`);
+
+    killKeepersIn(s, dir);
+
+    assert.deepEqual(await exitWithin(keeper, 5000), { code: null, signal: 'SIGKILL' });
+  });
+
+  test('a .pid file that leads out of the sandbox fails the assertion before any keeper is signalled', async (t) => {
+    const s = sandbox(t);
+    const keeper = await sleeper(t, s);
+    const elsewhere = await sleeper(t, s);
+    const out = outside(t);
+    writeLine(out, 'cccccccccccc', `${elsewhere.pid} ${elsewhere.procStart} ${BOOT()} 1 1`);
+    const dir = `${s.skydeckHome}/run`;
+    writeLine(dir, 'aaaaaaaaaaaa', `${keeper.pid} ${keeper.procStart} ${BOOT()} 1 1`);
+    // Sorted after the live line, so a helper that signalled as it read would have signalled already.
+    symlinkSync(`${out}/terms/cccccccccccc.pid`, `${dir}/terms/zzzzzzzzzzzz.pid`);
+
+    assert.throws(() => killKeepersIn(s, dir), assert.AssertionError);
+
+    assert.equal(await exitWithin(keeper, 300), 'running');
+    assert.equal(await exitWithin(elsewhere, 0), 'running');
+  });
+
+  test('a line that names this process is skipped: the test lives on', (t) => {
+    const s = sandbox(t);
+    const self = procStartFromStat(realPlatform().proc.stat(process.pid) ?? '');
+    writeLine(`${s.skydeckHome}/run`, 'aaaaaaaaaaaa', `${process.pid} ${self} ${BOOT()} 1 1`);
+    const kill = t.mock.method(process, 'kill', () => true);
+
+    killKeepersIn(s, `${s.skydeckHome}/run`);
+
+    assert.equal(kill.mock.callCount(), 0);
   });
 
   test('a runtime directory that does not exist (yet) is nothing to do', (t) => {

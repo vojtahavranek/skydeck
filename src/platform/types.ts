@@ -160,13 +160,14 @@ export interface Detached {
 /**
  * Starting programs that outlive the call, and signalling processes. With SKYDECK_TEST_NO_WINDOWS=1
  * (the test sandbox, A32), and always for realPlatform({ refuseWindows: true }) (the real processes
- * of the test platforms), a command under /mnt/ or ending in .exe (any case) is refused with an
- * Error whose `code` is 'EWINDOWS', and nothing is started.
+ * of the test platforms), a Windows program — under /mnt/, ending in .exe (any case), or a file
+ * that starts with "MZ", also when reached through PATH or a symbolic link — is refused with an
+ * Error whose `code` is 'EWINDOWS', and nothing is started. Runner.run and runInteractive too.
  */
 export interface Processes {
   /**
    * Starts a program detached in a new session. Rejects with an Error whose `code` is 'ENOENT'
-   * when the program (or `cwd`) does not exist.
+   * when the program, `cwd`, or the directory of `stdoutTo` or `stderrTo` does not exist.
    */
   startDetached(
     command: string,
@@ -174,9 +175,9 @@ export interface Processes {
     options: DetachedOptions,
   ): Promise<Detached>;
   /**
-   * process.kill; false when no such process exists (ESRCH). Callers check the identity first.
-   * A pid that is not a positive whole number (0 and -1 would signal a group or every process) is
-   * a RangeError.
+   * process.kill; false when no such process exists (ESRCH, or a pid above 2^31 − 1). Callers
+   * check the identity first. A pid that is not a positive whole number (0 and -1 would signal a
+   * group or every process) is a RangeError, and nothing is sent.
    */
   signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean;
 }
@@ -204,7 +205,8 @@ export interface HttpListener {
 export interface Net {
   /**
    * An HTTP server on 127.0.0.1:<port> (0: the system picks) or on a unix socket path (created
-   * with mode 0o600). Rejects with an Error whose `code` is 'EADDRINUSE' when it is taken.
+   * with mode 0o600). Rejects with an Error whose `code` is 'EADDRINUSE' when it is taken. The
+   * real one listens on 127.0.0.1 whatever `host` says: never on another interface.
    */
   listenHttp(
     where: { host: '127.0.0.1'; port: number } | { path: string },
@@ -218,6 +220,7 @@ export interface Net {
    * when given (each line without its '\n', a last line without one too); `body` is then null.
    * Otherwise `body` is the answer parsed as JSON, its text when it is not JSON, null when empty.
    * The timeout counts from the request; with `onLine` it starts again with every chunk received.
+   * A `timeoutMs` that is not a whole number from 0 to 2^31 − 1 rejects with a RangeError.
    */
   requestUnix(
     path: string,

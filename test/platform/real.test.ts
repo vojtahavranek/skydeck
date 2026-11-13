@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -1184,8 +1185,15 @@ describe('real processes: startDetached', () => {
     );
     const pid = Number(result.stdout);
     const cmdline = text(platform.proc.cmdline(pid) ?? new Uint8Array());
-    if (cmdline.startsWith(`${s.bin}/sleep\0`) || cmdline.startsWith('sleep\0')) {
-      platform.processes.signal(pid, 'SIGKILL'); // the sleep our own child started
+    let cwd: string | null = null;
+    try {
+      cwd = readlinkSync(`/proc/${pid}/cwd`);
+    } catch {
+      // gone already
+    }
+    // Only the sleep our own child started: its command line, and its working directory in the sandbox.
+    if (cmdline === 'sleep\x0030\x00' && cwd === s.root) {
+      platform.processes.signal(pid, 'SIGKILL');
     }
 
     assert.equal(result.timedOut, false);
@@ -1196,12 +1204,25 @@ describe('real processes: startDetached', () => {
 });
 
 describe('real processes: signal', () => {
-  test('refuses a pid that would signal a group or every process', () => {
+  test('refuses a pid that would signal a group or every process, without sending anything', (t) => {
+    // If the refusal ever regressed, this test must not end every process of the user: kill is a stub.
+    const kill = t.mock.method(process, 'kill', () => true);
     const { processes } = realPlatform();
 
-    for (const pid of [0, -1, -4242, 1.5, Number.NaN]) {
+    for (const pid of [0, -1, -4242, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       assert.throws(() => processes.signal(pid, 'SIGTERM'), RangeError, String(pid));
     }
+
+    assert.equal(kill.mock.callCount(), 0);
+  });
+
+  test('a pid above any the kernel gives is false, and nothing is sent', (t) => {
+    const kill = t.mock.method(process, 'kill', () => true);
+    const { processes } = realPlatform();
+
+    assert.equal(processes.signal(2 ** 31, 'SIGKILL'), false);
+    assert.equal(processes.signal(Number.MAX_SAFE_INTEGER, 'SIGKILL'), false);
+    assert.equal(kill.mock.callCount(), 0);
   });
 
   test('a pid that does not exist is false', () => {
@@ -1387,27 +1408,30 @@ describe('real net', () => {
           let n = 0;
           const timer = setInterval(() => {
             n++;
-            if (n === 6) {
+            if (n === 40) {
               clearInterval(timer);
               res.end('end\n');
             } else {
               res.write(`${n}\n`);
             }
-          }, 50);
+          }, 20);
         },
       },
     );
     t.after(() => listener.close());
     const lines: string[] = [];
 
+    const started = Date.now();
+
     await net.requestUnix(path, {
       method: 'GET',
       path: '/',
-      timeoutMs: 150,
+      timeoutMs: 500,
       onLine: (line) => lines.push(line),
     });
 
-    assert.deepEqual(lines, ['1', '2', '3', '4', '5', 'end']);
+    assert.ok(Date.now() - started > 500, 'the stream outlasted the timeout');
+    assert.deepEqual(lines, [...Array.from({ length: 39 }, (_, i) => String(i + 1)), 'end']);
   });
 
   test('connectUnix gives a connected socket', async (t) => {
@@ -1650,6 +1674,56 @@ describe('the Windows guard (A32)', () => {
     assert.equal(existsSync(marker), false, 'no stub ran');
   });
 
+  test('a path is judged as the kernel follows it: a link to a directory, then ..', async (t) => {
+    const s = sandbox(t);
+    const { marker, write } = stubs(s);
+    mkdirSync(join(s.root, 'win'));
+    write(join(s.root, 'win', 'tool.exe'));
+    mkdirSync(join(s.root, 'x', 'y'), { recursive: true });
+    symlinkSync(join(s.root, 'win', 'tool.exe'), join(s.root, 'x', 'alias'));
+    mkdirSync(join(s.root, 'a'));
+    symlinkSync(join(s.root, 'x', 'y'), join(s.root, 'a', 'link'));
+    const platform = realPlatformWith('1');
+
+    // The text a/link/../alias normalises to a/alias, which does not exist; the kernel reaches tool.exe.
+    await assertRefused(platform, s, join(s.root, 'a', 'link') + '/../alias', { PATH: s.bin });
+    await assertRefused(platform, s, 'a/link/../alias', { PATH: s.bin });
+
+    assert.equal(existsSync(marker), false, 'no stub ran');
+  });
+
+  test('every directory of PATH is judged, not only the first that has the name', async (t) => {
+    const s = sandbox(t);
+    const { marker, write } = stubs(s);
+    for (const dir of ['p1', 'p2', 'win']) {
+      mkdirSync(join(s.root, dir));
+    }
+    // p1/prog cannot be run (its interpreter does not exist), so execvp goes on to p2/prog.
+    writeFileSync(join(s.root, 'p1', 'prog'), '#!/skydeck-test-none/interpreter\n', {
+      mode: 0o755,
+    });
+    write(join(s.root, 'win', 'prog.exe'));
+    symlinkSync(join(s.root, 'win', 'prog.exe'), join(s.root, 'p2', 'prog'));
+    const platform = realPlatformWith('1');
+
+    await assertRefused(platform, s, 'prog', {
+      PATH: `${join(s.root, 'p1')}:${join(s.root, 'p2')}`,
+    });
+
+    assert.equal(existsSync(marker), false, 'no stub ran');
+  });
+
+  test('a file that starts with MZ (what WSL interop runs) is refused whatever its name', async (t) => {
+    const s = sandbox(t);
+    stubs(s);
+    // Not executable: should the guard ever fail, the start fails with EACCES and nothing runs.
+    writeFileSync(join(s.root, 'tool'), 'MZ\x90\x00not a real program', { mode: 0o644 });
+    const platform = realPlatformWith('1');
+
+    await assertRefused(platform, s, join(s.root, 'tool'), { PATH: s.bin });
+    await assertRefused(platform, s, './tool', { PATH: s.bin });
+  });
+
   test('without the variable a sandbox script named stub.exe runs: the rule is the variable, not a ban', async (t) => {
     const s = sandbox(t);
     const { marker } = stubs(s);
@@ -1716,5 +1790,75 @@ describe('real proc: a read that fails is not a process that is gone (ruling)', 
 
     assert.equal(proc.stat(999_999_999), null);
     assert.notEqual(proc.bootId(), null);
+  });
+});
+
+/** The local address (hex, as /proc/net/tcp writes it) of the socket listening on `port`. */
+function listeningAddress(port: number): string | null {
+  for (const path of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    for (const line of readFileSync(path, 'utf8').split('\n').slice(1)) {
+      const [, local, , state] = line.trim().split(/\s+/);
+      if (
+        state === '0A' &&
+        local !== undefined &&
+        Number.parseInt(local.split(':')[1] ?? '', 16) === port
+      ) {
+        return local.split(':')[0] ?? null;
+      }
+    }
+  }
+  return null;
+}
+
+describe('real net and processes: what the review asked to pin', () => {
+  test('listenHttp listens on the loopback address whatever host it is handed', async (t) => {
+    const { net } = realPlatform();
+    const listener = await net.listenHttp(
+      { host: '0.0.0.0' as '127.0.0.1', port: 0 },
+      { request: (_req, res) => res.end() },
+    );
+    t.after(() => listener.close());
+
+    assert.equal(listeningAddress(listener.port), '0100007F');
+  });
+
+  test('requestUnix refuses a timeout no timer can wait, with a RangeError', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    const listener = await net.listenHttp({ path }, { request: (_req, res) => res.end('{}') });
+    t.after(() => listener.close());
+
+    for (const timeoutMs of [-5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31]) {
+      await assert.rejects(
+        net.requestUnix(path, { method: 'GET', path: '/', timeoutMs }),
+        RangeError,
+        String(timeoutMs),
+      );
+    }
+  });
+
+  test('a missing directory for stdoutTo or stderrTo rejects with ENOENT and starts nothing', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const { processes } = realPlatform();
+    const ran = join(s.root, 'ran');
+
+    for (const where of [
+      { stdoutTo: join(s.root, 'missing', 'out') },
+      { stderrTo: join(s.root, 'missing', 'err') },
+    ]) {
+      await assert.rejects(
+        processes.startDetached('sh', ['-c', `echo x > ${ran}`], {
+          cwd: s.root,
+          env: s.env(),
+          ...where,
+        }),
+        { code: 'ENOENT' },
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assert.equal(existsSync(ran), false);
   });
 });
