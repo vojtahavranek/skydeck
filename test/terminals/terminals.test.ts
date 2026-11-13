@@ -96,6 +96,16 @@ describe('hereTerminal', () => {
     await assert.rejects(promise as Promise<unknown>, { code: 'ENOENT' });
   });
 
+  test('an empty argument list is rejected and nothing is written', async (t) => {
+    const { platform, sandbox } = testPlatform(t);
+    const file = join(sandbox.root, 'h');
+    const terminal = hereTerminal({ files: platform.files, env: { SKYDECK_HANDOFF: file } });
+
+    await assert.rejects(terminal.open({ cwd: '/w', argv: [] }), /empty argument list/);
+
+    assert.equal(platform.files.readText(file), null);
+  });
+
   test('the variable is named SKYDECK_HANDOFF', () => {
     assert.equal(HANDOFF_ENV, 'SKYDECK_HANDOFF');
   });
@@ -212,7 +222,7 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'wezterm timed out' });
+    assert.deepEqual(result, { ok: false, error: 'wezterm timed out; a tab may have opened' });
   });
 
   test('a program that is not found is not retried outside WSL', async () => {

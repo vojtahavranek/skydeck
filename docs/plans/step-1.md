@@ -1133,6 +1133,8 @@ export function handoffScript(spec: LaunchSpec): string;
 /**
  * open() writes handoffScript to the file named by env SKYDECK_HANDOFF (Files.writeText).
  * Without that variable: { ok: false, error: 'not started through bin/skydeck' }.
+ * open() is async: a file that cannot be written, or an empty argv (a caller bug: `exec` with
+ * nothing after it does nothing), is a rejected promise, not a returned error.
  * The caller must exit right after a successful open(); the launcher then execs the command.
  */
 export function hereTerminal(deps: { files: Files; env: Env }): Terminal;
@@ -1147,7 +1149,8 @@ export function hereTerminal(deps: { files: Files; env: Env }): Terminal;
  * starting a hidden mux server that would hold the session where nobody can see it); on notFound
  * with env WSL_DISTRO_NAME set it retries once with `wezterm.exe` (D15).
  * ok when the exit code is 0; otherwise error = first line of stderr, or "wezterm exited <code>",
- * "wezterm timed out", "wezterm is not installed".
+ * "wezterm timed out; a tab may have opened" (the request can reach WezTerm before the call is
+ * killed, so a caller must not print a paste-able fallback after it), "wezterm is not installed".
  */
 export function weztermTerminal(deps: { runner: Runner; env: Env }, domain: string | null): Terminal;
 ```
@@ -2610,12 +2613,13 @@ Round trip (spawns `/bin/sh` with `env: sandbox(t).env()`, so nothing of the dev
   `"cd -- /home/dev/projects/demo || exit 1\nexec claude --resume " + S1 + " -n 'my label' --model opus\n"`.
 - `handoffScript({ cwd: "/tmp/it's", argv: ['claude'] })` → `"cd -- '/tmp/it'\\''s' || exit 1\nexec claude\n"`.
 - `hereTerminal` with env `{}` → `open` → `{ ok: false, error: 'not started through bin/skydeck' }`; with
-  `{ SKYDECK_HANDOFF: <dir>/h }` → `{ ok: true }` and the file holds `handoffScript(spec)`; `name 'here'`, `opensTabs false`.
+  `{ SKYDECK_HANDOFF: <dir>/h }` → `{ ok: true }` and the file holds `handoffScript(spec)`; `name 'here'`, `opensTabs false`;
+  a handoff file in a missing directory, or `argv: []`, makes `open` reject (nothing written for `[]`).
 - `weztermTerminal` with `fakeRunner` returning code 0, domain `null` → one call
   `('wezterm', ['cli','--no-auto-start','spawn','--cwd','/w','--','claude','--resume',S1], { timeoutMs: 10000 })`, result `{ ok: true }`.
 - domain `'WSL:Ubuntu'` → args `['cli','--no-auto-start','spawn','--domain-name','WSL:Ubuntu','--cwd','/w','--',…]`.
 - code 1, stderr `'no running wezterm\nmore'` → `{ ok: false, error: 'no running wezterm' }`; code 1, stderr `''` → `'wezterm exited 1'`;
-  `timedOut` → `'wezterm timed out'`; `notFound` without `WSL_DISTRO_NAME` → `'wezterm is not installed'`, one call;
+  `timedOut` → `'wezterm timed out; a tab may have opened'`; `notFound` without `WSL_DISTRO_NAME` → `'wezterm is not installed'`, one call;
   `notFound` with `WSL_DISTRO_NAME 'Ubuntu'` → a second call to `'wezterm.exe'` with the same args, whose result counts.
 - `name 'wezterm'`, `opensTabs true`; `terminalFor('here', …).name` → `'here'`; `terminalFor('wezterm', …).name` → `'wezterm'`.
 

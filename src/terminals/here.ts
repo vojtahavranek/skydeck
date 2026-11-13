@@ -29,6 +29,10 @@ export function hereTerminal(deps: { files: Files; env: Env }): Terminal {
       if (path === undefined || path === '') {
         return { ok: false, error: 'not started through bin/skydeck' };
       }
+      if (spec.argv.length === 0) {
+        // `exec` with nothing after it does nothing: the launcher would exit 0 as if all went well.
+        throw new Error('hereTerminal.open: empty argument list');
+      }
       deps.files.writeText(path, handoffScript(spec));
       return { ok: true };
     },
