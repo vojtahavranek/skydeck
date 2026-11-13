@@ -90,6 +90,7 @@ describe('readManifest', () => {
     ['an absolute path', JSON.stringify({ files: [entry('/etc/passwd')] })],
     ['a path with an empty segment', JSON.stringify({ files: [entry('vendor/xterm//a.mjs')] })],
     ['a path with a backslash', JSON.stringify({ files: [entry('vendor/xterm/a\\..\\b')] })],
+    ['a path with a newline', JSON.stringify({ files: [entry('vendor/xterm/a\nb.mjs')] })],
   ];
   for (const [name, text] of invalid) {
     test(`${name} → null`, (t) => {

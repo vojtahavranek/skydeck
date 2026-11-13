@@ -31,12 +31,15 @@ function errorCode(error: unknown): string {
   return error instanceof Error && 'code' in error ? String(error.code) : 'error';
 }
 
-/** A path relative to the checkout, under `vendor/xterm/`, with no `.`, `..` or empty segment. */
+/**
+ * A path relative to the checkout, under `vendor/xterm/`, with no `.`, `..` or empty segment and
+ * no backslash or control character (a problem line names the path on one line).
+ */
 function isVendoredPath(path: string): boolean {
   const segments = path.split('/');
   return (
     path.startsWith('vendor/xterm/') &&
-    segments.every((s) => s !== '' && s !== '.' && s !== '..' && !/[\\\0]/.test(s))
+    segments.every((s) => s !== '' && s !== '.' && s !== '..' && !/[\\\x00-\x1f\x7f]/.test(s))
   );
 }
 
