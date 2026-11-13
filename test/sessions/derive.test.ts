@@ -317,6 +317,21 @@ test('stateDetail is the waitingFor of an idle file too, and null for a busy one
   assert.equal(session(given('busy'), S1).stateDetail, null);
 });
 
+test('the status time wins over the update time when a file has both', () => {
+  const s = session(
+    {
+      events: [start(P1, S1, T0, 'startup')],
+      isAlive: alive(P1),
+      liveFiles: [
+        live(P1, S1, 'idle', { statusUpdatedAtNs: T0 + 5n * SEC, updatedAtNs: T0 + 9n * SEC }),
+      ],
+    },
+    S1,
+  );
+  assert.equal(s.state, 'waiting');
+  assert.equal(s.sinceNs, T0 + 5n * SEC);
+});
+
 test('a working file without any time falls back to the holder’s latest event', () => {
   const s = session(
     {
@@ -458,6 +473,13 @@ test('an end by /clear or a switch of a dead process is not unexpected either', 
   }
 });
 
+test('an end row whose detail is none of the four reads as other', () => {
+  const odd = event(P1, S1, T0 + 10n * SEC, 'end', 'startup');
+  const s = session({ events: [start(P1, S1, T0, 'startup'), odd] }, S1);
+  assert.equal(s.lastHolding?.endDetail, 'other');
+  assert.deepEqual(s.marks, ['ended-unexpectedly']);
+});
+
 test('an end by other whose process is alive is not marked', () => {
   const s = session(
     {
@@ -492,6 +514,27 @@ test('11: a process of another boot is dead however its pid looks now', () => {
 test('12: a leftover busy live file of the dead process says a turn was in progress', () => {
   const s = session(
     { events: [start(P1, S1, T0, 'startup')], liveFiles: [live(P1, S1, 'busy')] },
+    S1,
+  );
+  assert.deepEqual(s.marks, ['ended-unexpectedly', 'was-working']);
+});
+
+test('12: the leftover file of a dead process counts although it cannot be trusted', () => {
+  // In use `isTrusted` is false for every file of a dead process: its /proc entry is gone.
+  const s = session(
+    {
+      events: [start(P1, S1, T0, 'startup')],
+      liveFiles: [live(P1, S1, 'busy')],
+      isTrusted: () => false,
+    },
+    S1,
+  );
+  assert.deepEqual(s.marks, ['ended-unexpectedly', 'was-working']);
+});
+
+test('12: the leftover busy file is the dead process’s, whichever session it names (plan 2.8.3)', () => {
+  const s = session(
+    { events: [start(P1, S1, T0, 'startup')], liveFiles: [live(P1, S2, 'busy')] },
     S1,
   );
   assert.deepEqual(s.marks, ['ended-unexpectedly', 'was-working']);
@@ -888,6 +931,14 @@ test('25: events without a pid belong to no process', () => {
   assert.equal(s.lastHolding, null);
   assert.deepEqual(s.marks, []);
   assert.deepEqual(s.holders, []);
+});
+
+test('25: an event without a pid still counts as activity of its session', () => {
+  const s = session(
+    { events: [start(P1, S1, T0, 'startup'), end(null, S1, T0 + 10n * SEC, 'exit')] },
+    S1,
+  );
+  assert.equal(s.lastActivityNs, T0 + 10n * SEC);
 });
 
 test('25: an event without a pid does not become the latest of a process, nor its E', () => {
