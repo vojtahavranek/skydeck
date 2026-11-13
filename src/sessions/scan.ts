@@ -22,8 +22,9 @@ const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
 
 /**
- * 5.6. progress(done, total) is called after each file that is read (total: the files that
- * changed). Sets kv first_scan_done.
+ * 5.6. progress(done, total) is called after each file that is processed (total: the files that
+ * changed), also one that could not be read, was gone or could not be recorded. Sets kv
+ * first_scan_done.
  *
  * A listed file whose size or modification time differs from its row (or that has no row, or a
  * row marked missing) is read from the row's offset; its facts are saved and the pull requests its

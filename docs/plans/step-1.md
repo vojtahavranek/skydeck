@@ -1424,7 +1424,9 @@ export function terminalFor(name: 'here' | 'wezterm', platform: Platform, config
 export interface Deck { platform: Platform; places: Places; config: Config; store: Store }
 /**
  * resolveConfigDir → loadConfig → resolvePlaces(env, homeDir, config.claudeHome) → mkdirp (0o700)
- * dataDir, stateDir, configDir, spoolDir, locksDir → openStore(dbPath). Throws ConfigError.
+ * dataDir, stateDir, configDir, spoolDir, locksDir → openStore(dbPath). Throws ConfigError (also
+ * for a config.json that exists but cannot be read); a directory that cannot be created is a
+ * SkydeckError (exit 1) naming it.
  */
 export function openDeck(platform: Platform): Deck;
 /** The first two steps of openDeck only (no directory, no database): for commands that must not create anything. */
@@ -1495,7 +1497,9 @@ export function reconcile(deck: Deck): { observed: number };
 // src/sessions/scan.ts
 export interface ScanResult { read: number; skipped: number; missing: number; prsAttached: number }
 /**
- * 5.6. progress(done, total) is called after each file that is read. Sets kv first_scan_done.
+ * 5.6. progress(done, total) is called after each file that is processed (total: the changed
+ * files; one that could not be read, was gone or could not be recorded counts too). Sets kv
+ * first_scan_done.
  * What cannot be read (listing or file) is recorded in kv `scan_problems` and is not marked missing.
  */
 export function scanTranscripts(deck: Deck, progress?: (done: number, total: number) => void): ScanResult;
@@ -3088,6 +3092,8 @@ export function testDeck(t: TestContext, options?: TestPlatformOptions & Capture
 Rules that are part of this task (design 5.3–5.6, 9.1):
 - **openDeck.** `resolveConfigDir` → `loadConfig` → `resolvePlaces(env, homeDir, config.claudeHome)`
   → mkdirp (mode `0o700`) dataDir, stateDir, configDir, spoolDir, locksDir → `openStore(dbPath)`.
+  A `config.json` that exists but cannot be read is a `ConfigError` naming it; a directory that
+  cannot be created is a `SkydeckError` (exit 1) naming it.
 - **Ingest.** Names ending in `.ev` and not starting with `.`, in name order. Not a regular file,
   unreadable, `SpoolParseError` or any other error while reading or parsing → moved to `badDir`
   (created when needed); a file that is gone when it is read is skipped. `event.scripted` → file deleted,
@@ -3108,8 +3114,9 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   exception: the item is skipped (a spool file moved to `badDir`; a spool file that cannot be moved
   or removed stays) and one line naming it and the reason (an error code, or the error's name and
   message; never content) is recorded. Each step replaces its own kv key at its end:
-  `ingest_problems`, `reconcile_problems`, `scan_problems` (a JSON array of at most 20 strings;
-  deleted when there is none; written only when it changes). `doctor` (task 17) shows them. An error
+  `ingest_problems`, `reconcile_problems`, `scan_problems` (a JSON array of at most 20 strings —
+  past 20, the first 19 and `… and <n> more`; a reason is cut at 200 characters; deleted when there
+  is none; written only when it changes). `doctor` (task 17) shows them. An error
   of the database itself is not about one item and is thrown.
 - **Reconcile.** `bootId = proc.bootId()`; when it is null, do nothing. For each `readLiveFiles`
   file that `isLiveFileTrusted`, whose `entrypoint` is `'cli'` or null, and whose
