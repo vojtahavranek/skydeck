@@ -138,7 +138,7 @@ Each is binding for the implementer. The last column names the task that records
 | D13 | `Context` gains `platform`; `Io` gains `isTTY`, `size`, `readLine`, `keys` (task 1, once). Commands open the database through `withDeck` (task 12). | Brief 18: the platform task extends `Context` once. | — |
 | D14 | `$VISUAL`, else `$EDITOR`, else `vi`; the value is split on spaces; the note file path is appended. | 7.1 only says `$EDITOR`. | 15 (7.1) |
 | D15 | The WezTerm adapter runs `wezterm cli --no-auto-start spawn`; when `wezterm` is not found and `$WSL_DISTRO_NAME` is set, it retries with `wezterm.exe`. | 13 "Open": tabs from WSL. | 7 (7.6) |
-| D16 | The resume lock stores its creation time (ns, decimal) as content; age is computed from that, not from mtime. Locks are swept at the end of every refresh. | Fake clock in tests. | 16 (7.6) |
+| D16 | The resume lock stores its creation time (ns, decimal) as content; age is computed from that, not from mtime (only content that is not a time is dated by the file's mtime, as a fallback). A lock dated 60 s or more in the future is stale too. Locks are swept at the end of every refresh. A stale lock is replaced or swept only after it is moved aside atomically and found unchanged; someone else's fresh lock is put back. | Fake clock in tests; a stale lock taken over without an atomic step would let two resumes both succeed (principle 7). | 16 (7.6) |
 | D17 | `--all` restore entries are preselected relative to the last event of *their own* boot. | 7.8 defines it for the default set only. | 18 (7.8) |
 | D18 | Arguments are read as Claude Code's own parser reads them: a several-value flag takes the next argument whatever it is and then the following ones up to the next flag-like one (starts with `-`, more than one character, so a lone `-` is a value); `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value (`-rabc`), and a token of no-value short flags (`-cp`) is one flag; `--` ends the flags and everything after it is positional. A flag that is in no table is stored as its bare name and not passed on at resume: what follows it cannot be classified. | 7.6 "several values"; principle 4. | 2 (7.6, 5.3, principle 4) |
 | D19 | Restore's selection prompt: a numbered list, the user types numbers to toggle, an empty line confirms, `q` cancels (exit 5). | 7.8 says only "confirms or changes". | 18 (7.8) |
@@ -1523,7 +1523,7 @@ export function scanTranscripts(deck: Deck, progress?: (done: number, total: num
 // src/sessions/refresh.ts
 export interface RefreshResult { ingest: IngestResult; observed: number; scan: ScanResult }
 /**
- * ingestSpool, reconcile, scanTranscripts — in this order (5.3). Task 16 adds sweepLocks at the end.
+ * ingestSpool, reconcile, scanTranscripts — in this order (5.3) — and then sweepLocks (task 16, D16).
  * Never throws for one spool file, process or transcript, whatever fails (reading, deriving or
  * saving it); a failure of the database itself (`isDatabaseFailure`) ends the command.
  */
@@ -1666,27 +1666,40 @@ export function detachSessionPr(deck: Deck, sessionId: string, url: string): PrK
 
 ```ts
 export const LOCK_TTL_NS: Ns;   // 60 s
-/** <locksDir>/<sessionId>.lock */
+/** <locksDir>/<sessionId>.lock. RangeError when sessionId is not a lowercase UUID (it becomes a file name). */
 export function lockPath(places: Places, sessionId: string): string;
 /**
- * 7.6 refusals (ResumeRefusedError): running → "<short> is running (pid <p>[, pid <p>…])";
- * no transcript → "<short> has no transcript"; expired → "<short> has expired: its transcript is gone";
- * project directory null or missing → "<short>: directory <dir> no longer exists".
+ * 7.6 refusals (ResumeRefusedError), in this order: running → "<short> is running (pid <p>[, pid <p>…])"
+ * (holders latest first); no transcript → "<short> has no transcript"; expired → "<short> has expired:
+ * its transcript is gone"; project directory null → "<short>: its project directory is not known";
+ * not absolute → "<short>: directory <dir> is not an absolute path"; the existence check throws →
+ * "<short>: directory <dir> cannot be checked (<reason>)"; missing or not a directory →
+ * "<short>: directory <dir> no longer exists". The directory checked is row.session.dir; <dir> in
+ * messages is the display text row.dir.
  */
 export function checkResumable(row: ListRow, files: Files): void;
 /**
- * Creates the lock exclusively (content: now ns + "\n"). If it exists: when it is older than
- * LOCK_TTL_NS or the session has a start event at or after its time (hasStartSince), it is replaced; otherwise
- * ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s".
+ * Creates the lock exclusively (content: now ns + "\n"). If it exists and is stale — older than
+ * LOCK_TTL_NS, dated LOCK_TTL_NS or more in the future, or the session has a start event at or after
+ * its time (hasStartSince) — it is replaced: moved aside to a hidden `.<uuid>.lock.stale` (atomic),
+ * compared with what was read, someone else's fresh lock put back with createExclusive, then the new
+ * lock created; at most 5 rounds, then ResumeRefusedError "<short>: its resume lock keeps changing;
+ * try again". A fresh lock: ResumeRefusedError "<short> is being resumed (<n> s ago); try again in
+ * <m> s" (n rounded down, m rounded up). Content that is not a time is dated by the file's mtime.
  */
 export function acquireLock(deck: Deck, sessionId: string): void;
-/** Removes locks that are stale by the same two rules. Returns how many. */
+/**
+ * Removes locks that are stale by the same rules, the same atomic way. Returns how many. Only names
+ * `<lowercase uuid>.lock` are locks (the directory also holds hidden temporary files). A directory
+ * that cannot be listed gives 0; a lock that cannot be read or removed is skipped; a failure of the
+ * database as a whole (isDatabaseFailure) is thrown.
+ */
 export function sweepLocks(deck: Deck): number;
 
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[] }
 /** checkResumable, acquireLock, buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command). */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;
-/** 7.7: platform.uuid(), stores label/group (cleaned) as meta, buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` []. */
+/** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` []. UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse. */
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;
 ```
 
@@ -1892,7 +1905,11 @@ export function editNote(ctx: Context, deck: Deck, sessionId: string): Promise<v
  * EXIT.failure. Prints "skydeck: original flags unknown; resuming with defaults" first when
  * !prepared.flagsKnown, and, when prepared.unknownFlags is not empty, "skydeck: started with flags
  * skydeck does not know, not passed on resume: <names>" (names sanitised, joined by one space), both
- * on stderr and before it starts anything.
+ * on stderr and before it starts anything. An open() that rejects is a failed open. Two failures
+ * print no command: after "wezterm timed out; a tab may have opened" it adds "skydeck: run skydeck
+ * again to see whether the session is running" (pasting the command could resume the session a
+ * second time); when the directory or a word of argv holds anything sanitize() would change, it adds
+ * "skydeck: the command contains control characters and cannot be printed safely".
  */
 export function launchPrepared(ctx: Context, deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<number>;
 ```
@@ -4116,7 +4133,7 @@ results are checked in the store (`d.deck.store.meta`, `sessionPrs`, `prs`) or w
 - Create: `src/sessions/resume.ts`, `src/cli/launching.ts`
 - Modify: `src/sessions/refresh.ts` — call `sweepLocks(deck)` at the end of `refresh` (one line)
 - Create: `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` (each `export const command: Command`)
-- Modify: `docs/design.md` 7.6 (D16; D24: `--tab` without an adapter)
+- Modify: `docs/design.md` 7.6 (D16; D24: `--tab` without an adapter; the two failures that print no command)
 - Test: `test/sessions/resume.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`
 
 **Exported API**
