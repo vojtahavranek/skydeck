@@ -165,9 +165,10 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
   in the launch command are made absolute against the event's `cwd` when that path exists.
 
 **Scripted runs are dropped at ingest.** An event is discarded (and counted in `kv`) when its
-launch command contains the argument `-p` or `--print`, or when `entrypoint_env` is set and is
-not `cli`. User-level hooks also fire for `claude -p` and SDK runs; those are not sessions a
-person works in.
+launch command, as recorded, has the print flag — `-p` or `--print`, alone or inside a cluster of
+short flags such as `-cp` — or when `entrypoint_env` is set and is not `cli`. An end event has
+no launch command, so there only the entry point decides. User-level hooks also fire for
+`claude -p` and SDK runs; those are not sessions a person works in.
 
 **Links.** When a `start` event with detail `clear`, `resume` or `fork` is ingested for a process
 whose previously held session (6.1) is a different session, a row old → new is written to
@@ -386,9 +387,9 @@ recorded command keeps the flag's name, and `resume` and `show` say that the ses
 with flags skydeck does not know, naming them.
 
 Arguments are read as Claude Code's own parser reads them: a flag that takes several values
-consumes the arguments after it up to the next flag (a token that starts with `-` and has more
-than one character), so a prompt written directly after such a flag is taken as one of its values
-and stays with the stored launch command (principle 4);
+takes the next argument whatever it is, and then the arguments after it up to the next flag (a
+token that starts with `-` and has more than one character), so a prompt written directly after
+such a flag is taken as one of its values and stays with the stored launch command (principle 4);
 `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value
 (`-rabc` is `--resume abc`), and a token of several short flags (`-cp`) is one flag, removed as a
 whole when any flag in it is removed; a lone `-` is a value; `--` ends the flags, and it and
@@ -401,7 +402,9 @@ everything after it are positional arguments.
   and `--environment` (`--pool`) with their values, `--desktop`, and `--tmux`, which needs
   `--worktree`. The flags that choose a session or act once are removed too:
   `--rewind-files`, `--resume-session-at`, `--resume-drops-turn`, `--reply-on-resume`,
-  `--attach-serve`, `--session-began-as-copy`, `--init-only` and `--handle-uri`. Flags that carry
+  `--attach-serve`, `--session-began-as-copy`, `--init-only` and `--handle-uri`; so are the
+  one-time actions `--init` and `--maintenance`, and `--ref`, `--on-branch`, `--correlation-id` and
+  `--forward-home-settings`, which only work together with the cloud flags above. Flags that carry
   prompt text are removed as well: `--prefill`, `--prefill-b64` and the deep-link flags
   (`--deep-link-origin`, `--deep-link-repo`, `--deep-link-last-fetch`, `--deep-link-cwd-b64`).
   Flags that only configure how the session runs, including `--remote-control`, are kept.

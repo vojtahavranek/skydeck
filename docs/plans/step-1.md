@@ -140,7 +140,7 @@ Each is binding for the implementer. The last column names the task that records
 | D15 | The WezTerm adapter runs `wezterm cli --no-auto-start spawn`; when `wezterm` is not found and `$WSL_DISTRO_NAME` is set, it retries with `wezterm.exe`. | 13 "Open": tabs from WSL. | 7 (7.6) |
 | D16 | The resume lock stores its creation time (ns, decimal) as content; age is computed from that, not from mtime. Locks are swept at the end of every refresh. | Fake clock in tests. | 16 (7.6) |
 | D17 | `--all` restore entries are preselected relative to the last event of *their own* boot. | 7.8 defines it for the default set only. | 18 (7.8) |
-| D18 | Arguments are read as Claude Code's own parser reads them: several-value flags consume following arguments up to the next flag-like one (starts with `-`, more than one character, so a lone `-` is a value); `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value (`-rabc`), and a token of no-value short flags (`-cp`) is one flag; `--` ends the flags and everything after it is positional. A flag that is in no table is stored as its bare name and not passed on at resume: what follows it cannot be classified. | 7.6 "several values"; principle 4. | 2 (7.6, 5.3, principle 4) |
+| D18 | Arguments are read as Claude Code's own parser reads them: a several-value flag takes the next argument whatever it is and then the following ones up to the next flag-like one (starts with `-`, more than one character, so a lone `-` is a value); `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value (`-rabc`), and a token of no-value short flags (`-cp`) is one flag; `--` ends the flags and everything after it is positional. A flag that is in no table is stored as its bare name and not passed on at resume: what follows it cannot be classified. | 7.6 "several values"; principle 4. | 2 (7.6, 5.3, principle 4) |
 | D19 | Restore's selection prompt: a numbered list, the user types numbers to toggle, an empty line confirms, `q` cancels (exit 5). | 7.8 says only "confirms or changes". | 18 (7.8) |
 | D20 | Install offers the first-run "mark as done" only once (kv `first_run_offered`). | 8 "Running it again changes nothing". | 17 (8) |
 | D21 | An `observed` event's time is the clock at reconcile; its launch command gets the same path-flag rewrite as a spooled one. | 5.4 is silent. | 8 (5.4) |
@@ -150,7 +150,7 @@ Each is binding for the implementer. The last column names the task that records
 | D25 | `src/sessions/` may import `src/github.ts` (`prKey`, `prLevel`, `chipFor` — pure functions): the scan attaches pull requests by key, the list model computes the chip. | Design 11 leaves `github` out of the sessions row. | 8 (11) |
 | D26 | `SKYDECK_HOME`, `XDG_*_HOME` and `CLAUDE_CONFIG_DIR` count only when non-empty and absolute — in `resolvePlaces`, in the hook and in the launcher alike. | 9.1 "the hook resolves stateDir by the same rule". | 1 (9.1) |
 | D27 | A session that is not running and has no transcript is not listed (nothing to resume; a session that never received a prompt has no transcript, design 14). | 7.2 would list it forever. | 11 (7.2) |
-| D28 | Resume removes the flags that choose which session is opened or where it runs — besides 7.6's list, `--tmux` (it needs `-w`), `--teleport`, `--cloud`/`--remote`, `--desktop`, `--environment`/`--pool` with their values; flags that configure how it runs (including `--remote-control`) are kept. The deep-link flags (`--deep-link-origin`, `--deep-link-repo`, `--deep-link-last-fetch`, `--deep-link-cwd-b64`) and `--prefill`/`--prefill-b64` are removed too: they carry prompt text. `--rewind-files`, `--resume-session-at`, `--resume-drops-turn`, `--reply-on-resume`, `--attach-serve`, `--session-began-as-copy`, `--init-only` and `--handle-uri` are removed too (they choose a session or act once). `storableArgv` stores a launch command without the removed flags and positional arguments. | 7.6 predates these flags; principle 4. | 2 (7.6, and 5.3: what is stored) |
+| D28 | Resume removes the flags that choose which session is opened or where it runs — besides 7.6's list, `--tmux` (it needs `-w`), `--teleport`, `--cloud`/`--remote`, `--desktop`, `--environment`/`--pool` with their values; flags that configure how it runs (including `--remote-control`) are kept. The deep-link flags (`--deep-link-origin`, `--deep-link-repo`, `--deep-link-last-fetch`, `--deep-link-cwd-b64`) and `--prefill`/`--prefill-b64` are removed too: they carry prompt text. `--rewind-files`, `--resume-session-at`, `--resume-drops-turn`, `--reply-on-resume`, `--attach-serve`, `--session-began-as-copy`, `--init-only` and `--handle-uri` are removed too (they choose a session or act once), and so are `--init` and `--maintenance` (one-time actions) and `--ref`, `--on-branch`, `--correlation-id` and `--forward-home-settings` (they only work with the cloud flags that are removed). `storableArgv` stores a launch command without the removed flags and positional arguments. | 7.6 predates these flags; principle 4. | 2 (7.6, and 5.3: what is stored) |
 
 ## 2. Contracts
 
@@ -801,6 +801,14 @@ export const FLAGS: readonly FlagSpec[] = [
   { names: ['--session-began-as-copy'], shape: 'one', remove: true, path: false },
   { names: ['--init-only'], shape: 'none', remove: true, path: false },
   { names: ['--handle-uri'], shape: 'one', remove: true, path: false },
+  // they only work with the cloud flags above, which are removed
+  { names: ['--ref'], shape: 'one', remove: true, path: false },
+  { names: ['--on-branch'], shape: 'one', remove: true, path: false },
+  { names: ['--correlation-id'], shape: 'one', remove: true, path: false },
+  { names: ['--forward-home-settings'], shape: 'one', remove: true, path: false },
+  // one-time actions
+  { names: ['--init'], shape: 'none', remove: true, path: false },
+  { names: ['--maintenance'], shape: 'none', remove: true, path: false },
   // deep-link launches carry prompt text, which skydeck never stores (principle 4)
   { names: ['--deep-link-origin'], shape: 'none', remove: true, path: false },
   { names: ['--deep-link-repo'], shape: 'one', remove: true, path: false },
@@ -874,10 +882,6 @@ export const FLAGS: readonly FlagSpec[] = [
     '--input-format',
     '--teammate-mode',
     '--messaging-socket-path',
-    '--ref',
-    '--on-branch',
-    '--correlation-id',
-    '--forward-home-settings',
     '--project-config-root',
     '--runner-declares',
   ].map((name) => ({ names: [name], shape: 'one' as const, remove: false, path: false })),
@@ -899,8 +903,6 @@ export const FLAGS: readonly FlagSpec[] = [
     '--verbose',
     '--bare',
     '--safe-mode',
-    '--init',
-    '--maintenance',
     '--include-hook-events',
     '--include-partial-messages',
     '--forward-subagent-text',
@@ -945,12 +947,13 @@ export type ParsedArg =
  *   a value-taking flag ends it and takes the rest of the token, `=` included, as its value when
  *   there is a rest (`-rabc` is `--resume abc`, one token, nothing more consumed), otherwise its
  *   value follows by its shape; a letter that is not in the table makes the whole token an unknown
- *   flag, whose `name` is the token up to that letter (`-Zabc` is `-Z`, `-cZfix` is `-cZ`). `name` of
- *   a known flag is the token without the glued value; `spec` is that of the first letter with
+ *   flag, whose `name` is that letter alone (`-Zabc` is `-Z`, `-cZfix` is `-Z`). `name` of a known
+ *   flag is the token without the glued value; `spec` is that of the first letter with
  *   `remove: true`, else of the last letter;
  * - shape none: no value; one: the next token whatever it is; optional: the next token if it
- *   exists and is not flag-like; many: every following token up to the next flag-like one. A token
- *   is flag-like when it starts with '-' and has more than one character: a lone '-' is a value;
+ *   exists and is not flag-like; many: the next token whatever it is, then every following token up
+ *   to the next flag-like one (as Claude Code's parser does). A token is flag-like when it starts
+ *   with '-' and has more than one character: a lone '-' is a value;
  * - an unknown flag-like token is a flag with spec null; it takes the next token as its value when
  *   that exists and is not flag-like;
  * - '--' and every token after it are positionals;
@@ -974,7 +977,7 @@ export function absolutizePathFlags(argv: readonly string[], cwd: string | null,
  * prompt), '--' and everything after it, and every flag with `remove: true` (with its values) are
  * dropped, so a prompt reaches the database neither as a positional argument nor inside a removed
  * flag such as `--prefill-b64`. A flag that is in no table is stored as its bare name (`--flag=value`
- * as `--flag`; a short token cut after its first unknown letter, `-cZfix` as `-cZ`): what follows it cannot be classified, and
+ * as `--flag`; a short token with an unknown letter as that letter alone, `-cZfix` as `-Z`): what follows it cannot be classified, and
  * skydeck never stores text it cannot classify; the name lets a resume say it was not passed on.
  * [] for an empty command. buildResumeCommand gives the same result for a command and for
  * storableArgv of it, and storableArgv(storableArgv(x)) equals storableArgv(x).
@@ -983,7 +986,7 @@ export function storableArgv(argv: readonly string[]): string[];
 
 /**
  * The names of the flags in a recorded or stored command (program first) that are in no table, in
- * order, each once (`--flag=value` is `--flag`, `-cZfix` is `-cZ`). A resume does not pass them on; `resume` and `show`
+ * order, each once (`--flag=value` is `--flag`, `-cZfix` is `-Z`). A resume does not pass them on; `resume` and `show`
  * say so. unknownFlags(storableArgv(x)) equals unknownFlags(x).
  */
 export function unknownFlags(argv: readonly string[]): string[];
@@ -1038,6 +1041,10 @@ export interface SpoolEvent {
   name: string | null;            // SessionStart session_title
   payload: string;                // the hook input exactly as received
   entrypointEnv: string | null;   // empty → null
+  scripted: boolean;              // 5.3 "scripted runs": isPrintRun(recorded argv) — the command as
+                                  // recorded, before storableArgv drops `-cp` whole — or entrypointEnv
+                                  // non-null and not 'cli' (design 14: `claude -p` hooks see 'sdk-cli').
+                                  // An end event has no command: only entrypointEnv decides.
 }
 
 /** SessionStart.source → detail. Anything else → 'unknown'. */
@@ -1065,20 +1072,10 @@ export class SpoolParseError extends Error {}
  * launch command is normalised: `argv` is storableArgv(absolutizePathFlags(recorded, cwd, exists)),
  * so no positional argument, no removed flag (with its values) and no value of an unknown flag is
  * stored (design principle 4).
- * Lines are split on '\n' only; a '\r' belongs to the value.
- * `exists` is used only by absolutizePathFlags.
+ * Lines are split on '\n' only; a '\r' belongs to the value. `scripted` is set as SpoolEvent says,
+ * from the command as recorded. `exists` is used only by absolutizePathFlags.
  */
 export function parseSpoolFile(name: string, content: string, exists: (path: string) => boolean): SpoolEvent;
-
-/**
- * 5.3 "scripted runs": true when isPrintRun(argv) (the print flag, alone or in a cluster such as
- * `-cp`), or when entrypointEnv is non-null and not 'cli' (design 14: `claude -p` hooks see 'sdk-cli').
- * NOTE: `-cp` is dropped whole by storableArgv, so the answer for the stored `SpoolEvent.argv` can
- * differ from the answer for the recorded command; parseSpoolFile must evaluate isPrintRun on the
- * recorded command, and ingest must not ask isScriptedRun of a stored argv alone (task 5 decides
- * how the answer travels in the event).
- */
-export function isScriptedRun(argv: readonly string[] | null, entrypointEnv: string | null): boolean;
 ```
 
 #### 2.5.4 `src/claude/live.ts`
@@ -1545,10 +1542,10 @@ export function acquireLock(deck: Deck, sessionId: string): void;
 /** Removes locks that are stale by the same two rules. Returns how many. */
 export function sweepLocks(deck: Deck): number;
 
-export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean }
-/** checkResumable, acquireLock, buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label). */
+export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[] }
+/** checkResumable, acquireLock, buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command). */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;
-/** 7.7: platform.uuid(), stores label/group (cleaned) as meta, buildNewCommand, cwd = platform.cwd. */
+/** 7.7: platform.uuid(), stores label/group (cleaned) as meta, buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` []. */
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;
 ```
 
@@ -1728,7 +1725,9 @@ export function editNote(ctx: Context, deck: Deck, sessionId: string): Promise<v
  * return at once so the launcher can exec). On failure, or 'tab' without a tab adapter (D24),
  * prints the reason and the command ("cd -- <q dir> && <shellJoin argv>") on stderr and returns
  * EXIT.failure. Prints "skydeck: original flags unknown; resuming with defaults" first when
- * !prepared.flagsKnown.
+ * !prepared.flagsKnown, and, when prepared.unknownFlags is not empty, "skydeck: started with flags
+ * skydeck does not know, not passed on resume: <names>" (names sanitised, joined by one space), both
+ * on stderr and before it starts anything.
  */
 export function launchPrepared(ctx: Context, deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<number>;
 ```
@@ -1892,13 +1891,14 @@ export interface ListJson { version: 1; generatedAt: string; sessions: SessionJs
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
 export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
 export interface ShowJson extends SessionJson {
-  note: string | null; launch: string[] | null; links: LinkJson[]; holders: HolderJson[];
+  note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[];
 }
 ```
 
 Times are `isoFromNs`. `dir` is `""` when unknown. `sessions` is in list order (groups in order,
 rows in order). Output is `JSON.stringify(value, null, 2) + "\n"`. `show --json` adds, after
-`prs`: `note`, `launch` (`session.launch`), `links` (every link from or to the session, by
+`prs`: `note`, `launch` (`session.launch`), `unknownFlags` (`unknownFlags(session.launch)`, `[]` when
+there is no launch command), `links` (every link from or to the session, by
 time), `holders` (live holders). Version 1 is stable: later changes only add keys.
 
 ## 3. Tasks
@@ -2198,7 +2198,7 @@ null for: 'https://gitlab.com/o/r/pull/1', 'https://github.com/o/r/issues/1', 'h
 `FLAGS`: every name starts with `-` and appears once; the names with `path: true` are exactly
 `--mcp-config --add-dir --settings --plugin-dir --plugin-dir-no-mcp --system-prompt-file --append-system-prompt-file --append-subagent-system-prompt-file`;
 the names with `remove: true` are exactly
-`-r --resume -c --continue --session-id --fork-session -n --name -w --worktree --tmux --bg --background --from-pr --teleport --cloud --remote --desktop --environment --pool --rewind-files --resume-session-at --resume-drops-turn --reply-on-resume --attach-serve --session-began-as-copy --init-only --handle-uri --deep-link-origin --deep-link-repo --deep-link-last-fetch --deep-link-cwd-b64 --prefill --prefill-b64`;
+`-r --resume -c --continue --session-id --fork-session -n --name -w --worktree --tmux --bg --background --from-pr --teleport --cloud --remote --desktop --environment --pool --rewind-files --resume-session-at --resume-drops-turn --reply-on-resume --attach-serve --session-began-as-copy --init-only --handle-uri --ref --on-branch --correlation-id --forward-home-settings --init --maintenance --deep-link-origin --deep-link-repo --deep-link-last-fetch --deep-link-cwd-b64 --prefill --prefill-b64`;
 `--remote` shares its spec with `--cloud`, and `--pool` with `--environment`. The fixture
 `test/fixtures/claude/flags-2.1.323.json` is Claude Code 2.1.323's own table (every spelling of
 every root flag, hidden ones included, with its shape): FLAGS has every name of it with the same
@@ -2214,6 +2214,10 @@ flag of its own and not `-d` with a value, `--max-turns` takes one.
 ['-c']                             → F['-c']             values []
 ['--add-dir','a','b','--verbose']  → F['--add-dir','a','b'], F['--verbose']
 ['--add-dir','a','hello']          → F['--add-dir','a','hello']                       (D18)
+['--add-dir','-x','b','--verbose'] → F['--add-dir','-x','b'], F['--verbose']          (the first value is taken whatever it is)
+['--add-dir','--model','opus']     → F['--add-dir','--model','opus']                  (values ['--model','opus'])
+['--add-dir','a','-x','b']         → F['--add-dir','a'], U['-x','b']                  (from the second value on, a flag stops it)
+['--add-dir']                      → F['--add-dir']      values []
 ['-r']                             → F['-r']             values []
 ['-r','abc']                       → F['-r','abc']       values ['abc']
 ['-r','--model','x']               → F['-r'], F['--model','x']
@@ -2228,7 +2232,7 @@ flag of its own and not `-d` with a value, `--max-turns` takes one.
 ['-cp','x']                        → F['-cp'], P['x']                       (cluster of no-value flags)
 ['-cn','foo']                      → F['-cn','foo']      values ['foo']     (cluster ending in a value flag)
 ['-cnfoo','x']                     → F['-cnfoo'], P['x']                    (values ['foo'])
-['-cZ','x']                        → U['-cZ','x']                           (an unknown letter: unknown as a whole; named '-cZ', and '-Zabc' is named '-Z')
+['-cZ','x']                        → U['-cZ','x']                           (an unknown letter: unknown as a whole; its `name` is '-Z', and '-Zabc' is '-Z' too)
 ['-d2e']                           → F['-d2e']           values []          (a flag's own name wins over the letters)
 ['-']                              → P['-']
 ['--add-dir','a','-','--verbose']  → F['--add-dir','a','-'], F['--verbose'] (a lone '-' is a value)
@@ -2284,7 +2288,9 @@ same, label 'fix retry'                                            → [...R,'-n
 ['claude','-pv']                                                   → [...R,'-pv']
 ['claude','-cZ','x']                                               → R   (unknown as a whole: not passed on)
 ['claude','--rewind-files','m','--resume-session-at','m','--resume-drops-turn','x','--reply-on-resume','--attach-serve','a','--session-began-as-copy','b','--init-only','--handle-uri','u','--model','opus'] → [...R,'--model','opus']
-['claude','--enable-auto-mode','--channels','plugin:a@x','plugin:b@y','--max-turns','5','--init','-d2e','fix it'] → [...R, …the same flags and values]
+['claude','--enable-auto-mode','--channels','plugin:a@x','plugin:b@y','--max-turns','5','--thinking','enabled','-d2e','fix it'] → [...R, …the same flags and values]
+['claude','--cloud','--ref','main','--on-branch','b','--correlation-id','c','--forward-home-settings','h','--init','--maintenance','--model','opus'] → [...R,'--model','opus']
+['claude','--add-dir','-scratch','b','--model','opus']             → [...R,'--add-dir','-scratch','b','--model','opus']   (the first value is taken whatever it is)
 ['claude','-']                                                     → R   (a lone '-' is a positional)
 ['claude','--prefill-b64=Zml4','--deep-link-origin','--deep-link-repo=o/r','--deep-link-last-fetch','1','--deep-link-cwd-b64','L3A','--prefill','fix','--model','opus'] → [...R,'--model','opus']
 ['claude','--remote','d','--environment','e','--pool','p','--tmux','-w','--model','opus'] → [...R,'--model','opus']
@@ -2308,8 +2314,8 @@ launch `['claude', name, ...V]` gives `R`; with `remove: false` it gives `[...R,
 ['claude','--add-dir','/x','fix it']                               → unchanged   (D18: the prompt is the flag's value)
 ['claude','--frobnicate','v','prompt']                             → ['claude','--frobnicate']   (an unknown flag: its bare name only)
 ['claude','--frobnicate=fix it','--model=opus']                    → ['claude','--frobnicate','--model=opus']
-['claude','-cZ','x','-Zabc','y']                                   → ['claude','-cZ','-Z']   (cut after the first unknown letter)
-['claude','-cZfix the login bug','--model','opus','-Zsecret']      → ['claude','-cZ','--model','opus','-Z']
+['claude','-cZ','x','-Zabc','y']                                   → ['claude','-Z','-Z']   (an unknown letter: that letter alone)
+['claude','-cZfix the login bug','--model','opus','-Zsecret']      → ['claude','-Z','--model','opus','-Z']
 ['claude','--model','opus','--','-p','text']                       → ['claude','--model','opus']
 ['claude','--resume','abc','-n','my name','--prefill-b64=Zml4','--prefill','fix','--deep-link-repo','o/r','-wfeat','--model','opus','--cloud'] → ['claude','--model','opus']
 ```
@@ -2323,7 +2329,7 @@ without a label; `storableArgv(storableArgv(x))` equals `storableArgv(x)`; the f
 (no label); and `unknownFlags(storableArgv(x))` equals `unknownFlags(x)`.
 
 `unknownFlags` (program first): `['claude','--frob','x','--model','opus','--other=1','--frob','-Z','y']` →
-`['--frob','--other','-Z']`; `['claude','-cZ','x']` → `['-cZ']`; only known flags, `['claude']` and `[]` → `[]`;
+`['--frob','--other','-Z']`; `['claude','-cZ','x']` → `['-Z']`; only known flags, `['claude']` and `[]` → `[]`;
 the program and what follows `--` are never named.
 
 `isPrintRun` (program first): `['claude','-p','hi']`, `['claude','--print']`, `['claude','-cp','hi']`,
@@ -2616,12 +2622,12 @@ export interface SpoolEvent {
   detail: 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown' | 'switch' | 'exit' | 'other';
   rawDetail: string | null; sessionId: string; bootId: string; pid: number; procStart: number | null;
   cwd: string | null; argv: string[] | null; name: string | null; payload: string; entrypointEnv: string | null;
+  scripted: boolean;
 }
 export const START_DETAILS: Readonly<Record<string, SpoolEvent['detail']>>;
 export const END_DETAILS: Readonly<Record<string, SpoolEvent['detail']>>;
 export class SpoolParseError extends Error {}
 export function parseSpoolFile(name: string, content: string, exists: (path: string) => boolean): SpoolEvent;  // throws SpoolParseError
-export function isScriptedRun(argv: readonly string[] | null, entrypointEnv: string | null): boolean;
 
 // test/helpers/spool.ts — used by tasks 8, 14, 18
 export interface SpoolFields {
@@ -2645,7 +2651,7 @@ export function hookInput(event: 'SessionStart' | 'SessionEnd', sessionId: strin
 **Test cases** (`parse(fields)` = `parseSpoolFile(spoolName(fields, 1), spoolText(fields), () => false)`)
 
 - The fixture `1794474000000000000-4242-1.ev` → deep-equals
-  `{ spoolName: '1794474000000000000-4242-1.ev', timeNs: T0, kind: 'start', detail: 'startup', rawDetail: 'startup', sessionId: S1, bootId: BOOT_A, pid: 4242, procStart: 51234567, cwd: '/home/dev/projects/demo', argv: ['claude','--model','opus'], name: null, payload: <the text after the '--' line, exactly>, entrypointEnv: 'cli' }`.
+  `{ spoolName: '1794474000000000000-4242-1.ev', timeNs: T0, kind: 'start', detail: 'startup', rawDetail: 'startup', sessionId: S1, bootId: BOOT_A, pid: 4242, procStart: 51234567, cwd: '/home/dev/projects/demo', argv: ['claude','--model','opus'], name: null, payload: <the text after the '--' line, exactly>, entrypointEnv: 'cli', scripted: false }`.
 - `source` `resume` / `clear` / `compact` / `fork` → that detail; `'weird'` → `'unknown'` with `rawDetail 'weird'`; no `source` → `'unknown'`, `rawDetail null`.
 - `reason` `clear` → `'clear'`; `resume` → `'switch'`; `prompt_input_exit` → `'exit'`; `logout` → `'exit'`; `other` → `'other'`; `'terminal_closed'` → `'other'` with `rawDetail 'terminal_closed'`.
 - `SessionEnd` with an `argv_b64` line present anyway → `argv null`.
@@ -2668,10 +2674,13 @@ export function hookInput(event: 'SessionStart' | 'SessionEnd', sessionId: strin
   a key twice before `--` (`pwd=/a` and `pwd=/b`, and likewise `future_key=1` twice).
 - Every hook-input fixture file parses inside a spool built with `spoolText({ …, input: <fixture text> })`
   and gives the detail its file name says.
-- `isScriptedRun(['claude','-p','hi'], null)` → true; `(['claude','--print'], 'cli')` → true; `(['claude','-cp'], 'cli')` → true;
-  `(['claude','--','-p'], 'cli')` → false; `(['claude'], 'sdk-cli')` → true;
-  `(['claude'], 'sdk-ts')` → true; `(null, 'sdk-py')` → true; `(['claude'], 'cli')` → false;
-  `(['claude'], null)` → false; `(null, null)` → false.
+- `scripted` (the `SessionStart` is built with `argv` and `entrypointEnv`; `parse(fields).scripted`):
+  `['claude','-p','hi']` with no entry point set (`entrypointEnv ''`) → true; `['claude','--print']` and `'cli'` → true;
+  `['claude','-c','-p']` and `['claude','-cp','hi']` with `'cli'` → true, while the stored `argv` is `['claude']`
+  (the answer comes from the command as recorded); `['claude','--','-p']` and `'cli'` → false;
+  `['claude']` with `'sdk-cli'` → true; with `'sdk-ts'` → true; `argv null` with `'sdk-py'` → true; `['claude']` with `'cli'` → false;
+  `['claude']` with `''` → false; `argv null` with `''` → false. A `SessionEnd` has no command: with `'sdk-cli'` → true, with `'cli'` → false,
+  and an `argv_b64` line carrying `-p` on a `SessionEnd` with `'cli'` → false.
 
 **Steps**
 - [ ] Write fixtures, `test/helpers/spool.ts`, and the test file. `npm test` → fails.
@@ -2680,7 +2689,7 @@ export function hookInput(event: 'SessionStart' | 'SessionEnd', sessionId: strin
 - [ ] Commit `Parse spool files into normalised events`; open the PR.
 
 **Done when:** all cases pass; a `claude -p` run (argv with `-p`, entry point `sdk-cli`) is
-recognised as scripted by either rule alone.
+recognised as scripted by either rule alone, `claude -c -p` included.
 
 ---
 
@@ -2950,7 +2959,7 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 - **openDeck.** `resolveConfigDir` → `loadConfig` → `resolvePlaces(env, homeDir, config.claudeHome)`
   → mkdirp (mode `0o700`) dataDir, stateDir, configDir, spoolDir, locksDir → `openStore(dbPath)`.
 - **Ingest.** Names ending in `.ev` and not starting with `.`, in name order. Unreadable or
-  `SpoolParseError` → moved to `badDir` (created when needed). `isScriptedRun` → file deleted,
+  `SpoolParseError` → moved to `badDir` (created when needed). `event.scripted` → file deleted,
   `addToKv('dropped_scripted', 1)`. Otherwise, inside one `store.transaction`: compute the link,
   `insertEvent`, `insertLink`; after the commit, delete the file. A `null` from `insertEvent`
   counts as a duplicate (the file is deleted too). **Link:** for a `start` with detail `clear`,
@@ -2999,7 +3008,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
    at `T0 − 2 h` → removed; `.1794474000000000000-4242-2.ev.tmp` at `T0 − 10 min` → kept (it may
    belong to a running hook); `README` at `T0 − 30 days` → untouched. None of them is counted in
    the result.
-7. argv `['claude','-p','hi']` → no row, file deleted, `getKv('dropped_scripted')` `'1'`; `entrypointEnv 'sdk-ts'` → dropped, `'2'`.
+7. argv `['claude','-p','hi']` → no row, file deleted, `getKv('dropped_scripted')` `'1'`; `entrypointEnv 'sdk-ts'` → dropped, `'2'`;
+   argv `['claude','-c','-p','hi']` and `['claude','-cp']` with `'cli'` → dropped, `'4'`.
 8. Links (all for process `P`):
    - start startup S1 `T0`; end clear S1 `T0+60s`; start clear S2 `T0+60.2s` → `links()` = `[{ eventId: 3, fromSession: S1, toSession: S2, kind: 'clear', timeNs: T0+60.2s }]`.
    - start startup S1; end resume S1; start resume S2 → one link, kind `'switch'`.
@@ -3573,7 +3583,7 @@ export interface SessionJson {
 export interface ListJson { version: 1; generatedAt: string; sessions: SessionJson[] }
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
 export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
-export interface ShowJson extends SessionJson { note: string | null; launch: string[] | null; links: LinkJson[]; holders: HolderJson[] }
+export interface ShowJson extends SessionJson { note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[] }
 export function sessionJson(row: ListRow): SessionJson;
 export function listJson(model: ListModel): ListJson;
 export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson;
@@ -3594,7 +3604,8 @@ each row as `'  ' + formatRow(row, nowNs, width − 2)`; one empty line between 
 when there are none; ends with `\n`. `ls` uses `io.size().columns`. `formatShow`: the title, then
 one line per field with the label padded to 11 characters: `id:`, `state:` (`<state>[ (<stateDetail>)] since <iso>`),
 `marks:`, `label:`, `group:`, `dir:` (`-` for null/empty), `launch:` (`shellJoin(launch)` or `unknown`),
-`continues:` (only when `continuedFrom`), `link:` per link (`<kind> <fromShort> -> <toShort> at <iso>`),
+`unknown:` (only when `unknownFlags(launch)` is not empty: the names, sanitised, joined by one space — the flags
+skydeck does not know, which a resume does not pass on), `continues:` (only when `continuedFrom`), `link:` per link (`<kind> <fromShort> -> <toShort> at <iso>`),
 `holder:` per holder (`pid <pid> since <iso>`), `pr:` per PR (`formatPrLine(pr)`, then
 ` review <r>` and ` checks <c>` when set and the level is not `cant-read`), then `note:` and the note
 lines indented by two spaces when there is a note.
@@ -3605,11 +3616,12 @@ lines indented by two spaces when there is a note.
 - `sessionJson` of a row with every field set → the exact object of 2.10.5 with keys in that order
   (`Object.keys` compared), times as `isoFromNs`, `dir ''` when null, PR `repo 'o/r'`, `okAt` ISO or null.
 - `listJson` → `{ version: 1, generatedAt: isoFromNs(model.generatedAtNs), sessions: <flatRows order> }`.
-- `showJson` → the session object followed by `note`, `launch`, `links` (only links from/to the row, by time,
+- `showJson` → the session object followed by `note`, `launch`, `unknownFlags`, `links` (only links from/to the row, by time,
   `at` ISO), `holders` (`pid`, `bootId`, `procStart`, `since`).
 - `formatList` of two groups → `'ABC-123\n  <row>\n\nno group\n  <row>\n'`; empty → `'no sessions\n'`.
 - `formatShow` of a row whose `session.launch` is `['claude','--model','opus']` contains `'id:        ' + S1`,
   `'launch:    claude --model opus'` (the recorded command, `shellJoin`), and `'launch:    unknown'` when `launch` is null;
+  no `unknown:` line for it; for `['claude','--frob','x','--other=1']` a line `'unknown:   --frob --other'`, and `showJson` has `unknownFlags ['--frob','--other']` (`[]` when `launch` is null);
   a never-fetched PR → `'pr:        https://github.com/o/r/pull/1  not fetched'`; an open PR with review
   `approved` and checks `passing` → `'pr:        https://github.com/o/r/pull/1  approved-green review approved checks passing'`;
   note `'a\nb'` → `'note:\n  a\n  b'`.
@@ -3784,7 +3796,7 @@ export function lockPath(places: Places, sessionId: string): string;
 export function checkResumable(row: ListRow, files: Files): void;               // throws ResumeRefusedError
 export function acquireLock(deck: Deck, sessionId: string): void;                 // throws ResumeRefusedError
 export function sweepLocks(deck: Deck): number;
-export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean }
+export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[] }
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;          // throws ResumeRefusedError
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;  // throws UsageError
 // src/cli/launching.ts
@@ -3809,10 +3821,11 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `sweepLocks` removes a lock older than 60 s and a lock followed by a start event; keeps a fresh one; returns the count.
   `refresh(deck)` sweeps too.
 - `prepareResume` on a dead S1 with launch `['claude','--model','opus']` and label `'fix'` →
-  `{ sessionId: S1, cwd: <dir>, argv: buildResumeCommand(...).argv, flagsKnown: true }`, lock created; on a running row → refused, no lock.
+  `{ sessionId: S1, cwd: <dir>, argv: buildResumeCommand(...).argv, flagsKnown: true, unknownFlags: [] }`, lock created; on a running row → refused, no lock.
+- `prepareResume` on a dead S1 with launch `['claude','--frob','x','--model','opus']` → `argv [...R,'--model','opus']`, `unknownFlags ['--frob']`.
 - Guard before lock: a running row with a stale lock → refused for running; the lock file is unchanged.
 - `prepareNew({ label: ' x ', group: 'G', extra: ['--model','opus'] })` → `sessionId '00000000-0000-4000-8000-000000000001'`,
-  `cwd` = `platform.cwd`, `argv ['claude','--session-id',<id>,'-n','x','--model','opus']`, meta label `'x'` and group `'G'` stored;
+  `cwd` = `platform.cwd`, `argv ['claude','--session-id',<id>,'-n','x','--model','opus']`, `flagsKnown true`, `unknownFlags []`, meta label `'x'` and group `'G'` stored;
   label `'-x'` → `UsageError` and no meta stored.
 
 `commands/resume.test.ts`, `commands/new.test.ts` (`d = testDeck(t, { env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'handoff') }) })`; `await main([...], d.ctx)`)
@@ -3824,6 +3837,9 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `resume 0b5f --tab` with terminal `here` → 1, stderr names the missing tab adapter and prints the command.
 - `resume 0b5f --here --tab` → 2. `resume nope1234` → 3. A running S1 → 4 naming the pid. Twice within 60 s → second 4.
 - A session without a recorded launch command → 0 and stderr `'skydeck: original flags unknown; resuming with defaults\n'`.
+- A session whose recorded launch command has `--frob x` → 0, stderr `'skydeck: started with flags skydeck does not know, not passed on resume: --frob\n'`
+  (printed before the handoff is written), and the handoff argv has neither `--frob` nor `x`; two unknown flags are named in order,
+  separated by a space; a name with a control character is printed sanitised; a session whose flags are all known prints no such line.
 - Never a permission flag: the handoff of a session launched without one contains no `--dangerously-skip-permissions` and no `--permission-mode`.
 - `new --label 'fix it' --group ABC-1 -- --model opus` → 0; handoff
   `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> -n 'fix it' --model opus\n`; `meta(<uuid1>)` label `'fix it'`, group `'ABC-1'`.
