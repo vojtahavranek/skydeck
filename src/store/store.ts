@@ -126,13 +126,13 @@ export interface Store {
 
 /**
  * A guarded connection (openStore's `guardSchema`) refused a write: the store's schema is newer than
- * this skydeck knows — a command of an updated checkout migrated it (S2 10.1, 16.5).
+ * this skydeck knows — a command of an updated checkout migrated it (S2 10.1, 16.5). The store
+ * throws it with STORE_NEWER.
  */
-export class StoreNewerError extends SkydeckError {
-  constructor() {
-    super('skydeck was updated; run skydeck window', 1);
-  }
-}
+export class StoreNewerError extends SkydeckError {}
+
+/** The message of the StoreNewerError the store throws, and the server's `bye` (S2 10.1). */
+const STORE_NEWER = 'skydeck was updated; run skydeck window';
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -522,7 +522,7 @@ class SqliteStore implements Store {
     return inTransaction(this.#db, () => {
       // Inside BEGIN IMMEDIATE: a migration either committed before this or waits until it ends.
       if (this.#guardSchema && schemaVersion(this.#db, this.path) > SCHEMA_VERSION) {
-        throw new StoreNewerError();
+        throw new StoreNewerError(STORE_NEWER);
       }
       return fn();
     });

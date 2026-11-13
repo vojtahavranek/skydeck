@@ -1372,11 +1372,16 @@ describe('the schema guard of the server (S2 10.1)', () => {
   }
 
   test('StoreNewerError is a failure of the database as a whole: a refresh must not skip it per item', () => {
-    const error = new StoreNewerError();
+    assert.equal(isDatabaseFailure(new StoreNewerError(REFUSAL)), true);
+  });
+
+  test('StoreNewerError is a SkydeckError constructed as one (contract 2.6): message, exit code', () => {
+    const error = new StoreNewerError('m');
     assert.ok(error instanceof SkydeckError);
-    assert.equal(error.message, REFUSAL);
+    assert.equal(error.name, 'StoreNewerError');
+    assert.equal(error.message, 'm');
     assert.equal(error.exitCode, 1);
-    assert.equal(isDatabaseFailure(error), true);
+    assert.equal(new StoreNewerError('m', 5).exitCode, 5);
   });
 
   test("the window's keys are kv keys (S2 10.2)", (t) => {
