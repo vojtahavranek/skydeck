@@ -68,9 +68,11 @@ test('an ambiguous prefix lists its candidates in the order of the rows given', 
   );
 });
 
-test('an exact id wins over a longer prefix match of other ids (a full id is also a prefix)', () => {
-  const rowList = rows([ds({ id: A1 }), ds({ id: A2 })]);
-  assert.equal(resolveRef(A1, rowList).id, A1);
+test('an exact id wins over the prefix match it is also part of', () => {
+  // Real ids all have the same length, so only ids of another shape can tell the two steps apart.
+  const rowList = rows([ds({ id: 'aaaa1111' }), ds({ id: 'aaaa11112222' })]);
+  assert.equal(resolveRef('aaaa1111', rowList).id, 'aaaa1111');
+  assert.equal(refError('aaaa111', rowList).message, "'aaaa111' matches 2 sessions");
 });
 
 test('a prefix is found among all sessions, an expired unlabelled one (not listed) included', () => {

@@ -11,7 +11,7 @@ import { loadRows, loadSessions } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { BOOT_B, S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
+import { BOOT_B, S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 
 const START = 51234567;
@@ -118,19 +118,30 @@ test('a transcript last modified long ago is expiring, by cleanupPeriodDays of t
   assert.deepEqual(loadRows(d.deck)[0]?.marks, ['expiring']);
 });
 
-test('without a settings file the retention is 30 days', (t) => {
-  const d = testDeck(t);
+/**
+ * Three transcripts 6, 24 and 26 days old. `expiring` starts at (retention − 5) days, so of these
+ * only 6 and 24 together with 26 pin a retention of 29 or 30 days: 6 days old rules out anything
+ * shorter than 11, 26 days old anything of 31 or more.
+ */
+function ageProbe(d: TestDeck): void {
   transcript(d, S1, { mtimeNs: T0 - 6n * NS_PER_DAY });
+  transcript(d, S3, { mtimeNs: T0 - 24n * NS_PER_DAY });
   transcript(d, S2, { mtimeNs: T0 - 26n * NS_PER_DAY });
   refresh(d.deck);
-  const marks = Object.fromEntries(loadRows(d.deck).map((row) => [row.id, row.marks]));
-  assert.deepEqual(marks, { [S1]: [], [S2]: ['expiring'] });
+}
+const EXPIRING_UNDER_DEFAULT = { [S1]: [], [S2]: ['expiring'], [S3]: [] };
+const marksOf = (rows: readonly { id: string; marks: string[] }[]): Record<string, string[]> =>
+  Object.fromEntries(rows.map((row) => [row.id, row.marks]));
+
+test('without a settings file the retention is 30 days', (t) => {
+  const d = testDeck(t);
+  ageProbe(d);
+  assert.deepEqual(marksOf(loadRows(d.deck)), EXPIRING_UNDER_DEFAULT);
 });
 
 test('a settings file that cannot be read leaves the retention at its default and the list intact', (t) => {
   const d = testDeck(t);
-  transcript(d, S2, { mtimeNs: T0 - 26n * NS_PER_DAY });
-  refresh(d.deck);
+  ageProbe(d);
   const settings = settingsPath(d.deck.places.claudeHome);
   const deck = deckWith(d.deck, {
     files: {
@@ -142,7 +153,7 @@ test('a settings file that cannot be read leaves the retention at its default an
       },
     },
   });
-  assert.deepEqual(loadRows(deck)[0]?.marks, ['expiring']);
+  assert.deepEqual(marksOf(loadRows(deck)), EXPIRING_UNDER_DEFAULT);
 });
 
 test('a changed boot leaves a session that was running as not-running, ended unexpectedly', (t) => {
