@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { nsFromMs } from '../platform/time.ts';
 import type { Files, Ns, Proc } from '../platform/types.ts';
+import { isSessionId } from './launch.ts';
 import { procStartFromStat } from './procstat.ts';
 
 /** A process as recorded: the boot it ran in, its pid, and field 22 of its stat line. */
@@ -32,17 +33,8 @@ export interface LiveFile {
 /** The names that are live-session files; the directory also holds credential files. */
 const LIVE_FILE_NAME = /^[0-9]+\.json$/;
 
-const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
- * Whether `text` is a session id: a lowercase UUID (8-4-4-4-12 hex digits) and nothing more. Every
- * session id skydeck takes from a Claude Code file passes through this check, because the id ends
- * up on a command line after `--resume`, where a value such as `--dangerously-skip-permissions`
- * would be read as a flag (principle 5).
- */
-export function isSessionId(text: string): boolean {
-  return SESSION_ID.test(text);
-}
+/** Whether `text` is a session id (a lowercase UUID); the rule lives in `launch.ts`. */
+export { isSessionId };
 
 /** The largest epoch-millisecond value `Date` can show, and so the largest time skydeck converts. */
 const MAX_EPOCH_MS = 8.64e15;

@@ -38,8 +38,8 @@ No. Recording sessions, the list, labels, groups, notes, done and pull requests 
 terminal, and so do `resume`, `new` and `restore`: by default they start `claude` in the terminal
 you are in. WezTerm adds one thing, new tabs (`--tab`, or `"terminal": "wezterm"` in `config.json`),
 and `restore` uses them to bring several sessions back at once. Without WezTerm, `--tab` prints the
-command to run by hand, and `restore` resumes the first session in this terminal and prints the
-commands for the others. Details are at the top of [docs/install.md](docs/install.md).
+command to run by hand, and `restore` resumes the first session in this terminal and prints a
+`skydeck resume <id> --here` line for each of the others. Details are at the top of [docs/install.md](docs/install.md).
 
 ## Commands
 
@@ -69,7 +69,9 @@ or ambiguous; 4 resume refused; 5 restore stopped before finishing.
 
 In the interactive list: `j`/`k` or the arrows move, `Enter` shows the detail, `l` label, `g` group,
 `n` note, `d` done or undo, `p` pull requests, `R` resume, `/` filter, `a` show all, `r` refresh,
-`q` quit.
+`q` quit. The list refreshes itself every 5 seconds without reordering the rows or moving the
+cursor; the title line counts the sessions per state; `r` refreshes at once, reorders, and reads the
+pull requests again.
 
 ## Documents
 

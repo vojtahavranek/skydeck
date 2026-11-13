@@ -6,11 +6,45 @@ import { isoFromNs } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
 import type { ListRow, PrView } from '../sessions/list.ts';
 import { formatAge } from '../text/age.ts';
+import { sanitize } from '../text/sanitize.ts';
 import { clip } from './clip.ts';
 
 const STATE_WIDTH = 11; // 'not-running', the longest state
 const AGE_WIDTH = 4;
 const ELLIPSIS = '…';
+
+/**
+ * The state detail as the state line prints it after the state: " (<detail>)". Nothing when there
+ * is none, or when it is nothing once sanitised (Claude Code can write a `waitingFor` that is only
+ * control characters). `show` and the detail view of the list both print it.
+ */
+export function stateDetailSuffix(detail: string | null): string {
+  return detail === null || detail.trim() === '' ? '' : ` (${detail})`;
+}
+
+const NOTE_INDENT = '  ';
+
+/**
+ * The lines under a `note:` heading, for `show` and for the detail view of the list alike (design
+ * 7.4: a note is free multi-line text, sanitised line by line). Split at every line break, a lone
+ * `\r` too (printed raw it would move the cursor, and the sanitiser would turn it into a space in
+ * the middle of a line); each line sanitised on its own and indented by two spaces; a line that is
+ * nothing once sanitised is empty, without trailing spaces. Empty lines at the start and the end
+ * are dropped, so a note of nothing has no lines.
+ */
+export function formatNoteLines(note: string): string[] {
+  const lines = note.split(/\r\n|\r|\n/).map((line) => {
+    const clean = sanitize(line);
+    return clean.trim() === '' ? '' : NOTE_INDENT + clean;
+  });
+  while (lines[0] === '') {
+    lines.shift();
+  }
+  while (lines.at(-1) === '') {
+    lines.pop();
+  }
+  return lines;
+}
 
 /** "<count>pr:<level>", e.g. "2pr:checks-failing". */
 export function formatChip(chip: { level: ChipLevel; count: number }): string {

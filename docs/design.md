@@ -44,7 +44,8 @@ section first.
    skydeck never adds a permission flag that the session was not started with.
 6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one
    session to another. skydeck never stops a process. This is about the user's data (sessions,
-   labels, groups, notes), not skydeck's own transient files (5.3).
+   labels, groups, notes), not skydeck's own transient files (5.3). The one exception is the label
+   and group skydeck itself has just stored for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.
 8. **Local only.** No network service, no account, no telemetry. The only network use is the
    `gh` command line for pull-request status.
@@ -85,7 +86,9 @@ The hook is `bin/skydeck-hook`, a POSIX `sh` script. It writes one small file pe
 spool directory and exits. Rules (principle 3):
 
 - It prints nothing to stdout or stderr. (Claude Code adds the stdout of some hooks to the
-  conversation, and exit code 2 blocks.) Its own errors go to `hook.log` in the state directory.
+  conversation, and exit code 2 blocks.) Its own errors go to `hook.log` in the state directory,
+  one line each: a newline inside an error message becomes a space, so every line starts with its
+  time.
 - It always exits 0.
 - It uses only `sh`, `date`, `cat`, `base64`, `mkdir` and `mv`.
 - It does no interpretation. Everything else happens at ingest (5.3).
@@ -135,8 +138,9 @@ The inputs of these two events contain no conversation content.
 
 Every skydeck command that works on sessions (`ls`, `show`, `label`, `group`, `note`, `done`,
 `undone`, `pr`, `new`, `resume`, `restore` and the interactive list) starts with the same three
-steps, in this order. `install` runs them after it has made its links and changed the settings (8); `doctor` and
-`uninstall` do not run them (8); the hook is a script, not a command, and does none of this:
+steps, in this order. `install` runs them after it has made its links and changed the settings
+(8); `doctor` and `uninstall` do not run them (8); the hook is a script, not a command, and
+does none of this:
 
 1. **Ingest the spool.** Files are read in name order. Each becomes at most one row in `events`,
    keyed by the spool file name so that reading a file twice changes nothing; the file is deleted
@@ -175,12 +179,31 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
   The original string is stored as well.
 - Relative values of the path flags `--mcp-config`, `--settings`, `--add-dir`, `--plugin-dir`
   in the launch command are made absolute against the event's `cwd` when that path exists.
+  A later `start` of a process (same boot, pid and process start) that already has a `start` with a
+  stored launch command is stored with the command of the first such start instead: the command line of a process never
+  changes, but after `/clear`, an in-session `/resume` or a change of directory the hook input's
+  `cwd` need not be the directory the process was launched in.
 
-**Scripted runs are dropped at ingest.** An event is discarded (and counted in `kv`) when its
-launch command, as recorded, has the print flag — `-p` or `--print`, alone or inside a cluster of
-short flags such as `-cp` — or when `entrypoint_env` is set and is not `cli`. An end event has
-no launch command, so there only the entry point decides. User-level hooks also fire for
-`claude -p` and SDK runs; those are not sessions a person works in.
+**Scripted runs.** An event is **scripted** when its launch command, as recorded, has the print
+flag — `-p` or `--print`, alone or inside a cluster of short flags such as `-cp` — or when
+`entrypoint_env` is set and is not `cli`. An end event has no launch command, so there only the
+entry point decides. User-level hooks also fire for `claude -p` and SDK runs; those are not
+sessions a person works in, and nearly all of them start a session of their own, so scripted
+events are **dropped** at ingest (and counted in `kv`) — with the two exceptions below. A scripted `start` of
+a process (it has a pid and a process start time) on a session skydeck already knows — an event names it, or it has a
+transcript that would be listed (entry point `cli`, or none; 7.2) — is kept as an event of kind
+`scripted`: `claude -p --resume <id>` or `claude -p -c` appends to that session's transcript, and
+must count as holding it, or a resume would start it a second time (principle 7). Such an event
+says only that its process holds the session while the process is alive (6.1); it has no detail,
+launch command or name, makes no link, and is never the session's launch command, directory,
+activity after done, last holding (6.3), or the start that releases a resume lock or that restore
+waits for (7.6, 7.8). The liveness rule (5.5) ends the holding when the process exits; a
+`claude -p` run holds one session for its whole life. An SDK host or an editor extension can clear
+or switch inside one process, so the scripted `end` of the session that a kept scripted start
+holds is kept too, as an event of kind `scripted-end`: the process no longer holds that session.
+It is never a session's last holding and never gives a mark. Every other scripted end is dropped.
+A scripted start that is ingested before the session was ever recorded or scanned (the
+first refresh after `skydeck install`) is dropped too: skydeck does not know the session yet.
 
 **Links.** When a `start` event with detail `clear`, `resume` or `fork` is ingested for a process
 whose previously held session (6.1) is a different session, a row old → new is written to
@@ -202,6 +225,13 @@ hook file was lost.
   (launch command from `/proc/<pid>/cmdline`, `cwd` from the file). The event's time is the clock
   at reconcile, and its launch command is reduced and its path flags made absolute exactly as for a
   spooled one (5.3).
+- A file that names another session than the process's latest event wins only when it was
+  modified after that event (the hook of the change was lost). When the event is newer, the hook
+  spoke after the file was last written — an in-session `/resume` or `/clear` records the new
+  session while the file can still name the old one — so the file is stale and nothing is
+  inserted; a missing launch command is added once the file names that session too. An `observed`
+  event is not the hook speaking: it is stamped with the clock at reconcile, after the file it was
+  read from, so a file that names another session than it always wins (the file changed since).
 
 An `observed` event never creates a link.
 
@@ -257,7 +287,16 @@ a command runs. None of it is stored.
 
 For a process, the **held session** is the session id of its latest event that is not an `end`.
 A process **stopped holding** a session when an `end` event for it arrives. An `end` with detail
-`exit` is a **deliberate exit**; every other `end` detail, and no `end` at all, is not.
+`exit` is a **deliberate exit**; every other `end` detail, and no `end` at all, is not. A
+`scripted` event (5.3) makes its process hold the session like any other: the guard refuses to
+resume a session that a live scripted run holds, and `show` names such a holder as a scripted
+run. While it runs, the session is `running` (a scripted run has no live-session file, 6.2). A
+`scripted-end` stops the holding like an `end`, but is never a deliberate exit or any other end of
+a holding: 6.3 looks only at holdings of processes that are not scripted runs. One case escapes
+this, and is left as it is: a kept `claude -cp` start whose `entrypoint_env` is empty is scripted
+by its launch command, but its end has no launch command and so is not scripted (5.3); it is
+stored as a plain `end`, and that process's holding can then be a session's last holding. Claude
+Code always sets the entry point today, so this does not happen.
 
 A session is **running** when a live process holds it. If two live processes hold the same
 session (which principle 7 exists to prevent), the session is running, `show` lists both, and the
@@ -285,7 +324,7 @@ Marks are shown next to the state.
 
 | Mark | Rule |
 |---|---|
-| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. |
+| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. The latest holding is decided per process, not by the latest event: of the holdings of the processes that held the session, the one that ended last. A holding ends at the process's `end` for the session, or at the process's first event naming another session (it moved on; when that event is an `observed` one, reconcile noticed the move only then, so the holding counts as ended at the process's last event for the session); a process that is gone without either ended when it was last seen — its last event, or the last write of the live-session file it left naming the session, whichever is later. So after two holders, one that exited deliberately does not hide one killed after it — when anything shows the killed one alive after that exit. A live-session file is not rewritten while its session is idle, so a holder killed while idle since before the other holder's exit cannot be told from one that died first: its holding counts as ended when it was last seen, before the exit, and the session gets no mark (a known limit). A scripted run's holding (5.3) is never the latest holding: when it ends or is killed it leaves no mark, and the session keeps what its last interactive holding says, so restore never offers a session because of a scripted run. |
 | `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `assistant` record or `user` turn (5.6) of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
 | `continued` | The session is the target of a `clear` or `fork` link. `show` names the session it continues. |
 | `expired` | Its transcript is missing. It cannot be resumed. |
@@ -312,6 +351,10 @@ Marks are shown next to the state.
   else `vi`: the value is split on spaces and the path of a temporary file holding the note
   (`<stateDir>/note-<session id>.md`, removed afterwards) is appended; stdin must be a terminal.
   When the text cannot be stored the file is kept, and the next edit of that note continues with it.
+  A file kept like that is never removed by an editor that fails. When the editor fails on a file
+  that this edit made, the file is removed only while it still holds what the edit put there: text
+  the editor changed but never stored stays, and the error that says the editor failed names the
+  file (`editor exited 1; your text is in <path>`).
   `skydeck note <ref> --set <text>` sets it without an editor (and removes such a kept file), and an
   empty note is no note.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
@@ -361,7 +404,8 @@ never received a prompt has no transcript (14).
   given `--refresh`: then they first make an explicit refresh (`ls`: of the sessions it prints,
   `show`: of that session), with the timeout above, and a fetch that fails leaves the pull
   request "can't read" and the command still succeeds. The interactive list paints from the
-  cache, refreshes in the background and repaints. `skydeck pr refresh` fetches now.
+  cache, refreshes in the background (every 5 seconds, 7.4) and repaints. `skydeck pr refresh`
+  fetches now.
 - A pull request that cannot be read is shown as "can't read" with the time of its last
   successful fetch — never as closed.
 - A pull request that has never been fetched and has no failed attempt is shown as "not
@@ -378,13 +422,20 @@ otherwise it behaves like `skydeck ls`.
 - Groups are ordered by the most recent activity of a listed member; "no group" is last; ties by
   name. Inside a group: `waiting`, `working`, `running`, then `not-running` with
   `ended-unexpectedly` first; inside each of those by most recent activity.
-- The order is computed when the list opens or is refreshed, and does not change under the cursor.
+- The order is computed when the list opens or is refreshed with `r`, and does not change under
+  the cursor. While the list is on screen it also refreshes by itself every 5 seconds (5.3, then
+  the automatic pull-request refresh of 7.3) and repaints when what it shows changed; that refresh
+  keeps the order and the selected session (a new session goes to the end of its group) and waits
+  while an input is being typed. When the selected session leaves the list, the cursor goes to the
+  row that takes its place, not to the top, and the message line says which session left.
+- The title line counts the sessions shown and how many of them are in each state, so that a
+  session that starts waiting out of view is still seen.
 - A row shows: state, title, time in state, marks, the pull-request chip, a note mark, and the
   short id (first 8 characters of the session id).
 - Every string that comes from a transcript, a live-session file or GitHub passes through the
   sanitiser, which removes control characters and escape sequences, when the list model is built.
   So do the label and the group, although setting them refuses such characters (7.1): the
-  database can be changed by other means. A note is free multi-line text: a row only shows that there is one, and whoever prints a note sanitises it.
+  database can be changed by other means. A note is free multi-line text: a row only shows that there is one, and whoever prints a note sanitises it. `show` and the detail view of the list print it the same way, by one function: split at every line break (a lone carriage return too), each line sanitised on its own and indented by two spaces, empty lines at the start and end dropped. They also print a state detail the same way: in brackets after the state, and no brackets when it is empty once sanitised.
 
 Keys: arrows or `j`/`k` move; `Enter` detail; `l` label; `g` group; `n` note; `d` done or undo;
 `p` pull requests; `R` resume; `/` filter; `a` show all; `r` refresh; `q` quit. The filter
@@ -416,7 +467,11 @@ compared in lower case, labels exactly as typed. The first step that finds anyth
 match or more than one match is an error that lists the candidates.
 
 **Exit codes:** 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not
-found or ambiguous; 4 resume refused; 5 restore stopped before finishing.
+found or ambiguous; 4 resume refused; 5 restore stopped before finishing. After a hand-off (`resume
+--here`, `new --here`, `R` in the interactive list when it resumes here, or `restore` without a tab
+adapter) the exit status is `claude`'s own: the launcher has become `claude` (7.6 "Where"), so
+skydeck's status never reaches the caller.
+A reader that closes standard output early (`skydeck ls | head -1`) is not an error: nothing more is written and nothing is said on stderr, the command runs to its end (a state change finishes, the database is closed), and the process exits 141, the status a shell shows for a program killed by SIGPIPE, when the command itself returned 0; a command that failed keeps its own code. A closed standard error is as quiet and changes no exit code.
 
 **`--json`** output of `ls` is stable and versioned:
 
@@ -430,11 +485,15 @@ found or ambiguous; 4 resume refused; 5 restore stopped before finishing.
                              "review": null, "checks": null, "okAt": null, "error": null } ] } ] }
 ```
 
-Times are UTC ISO 8601 with milliseconds. Sessions are in list order. A pull request's `state`,
+Times are UTC ISO 8601 with milliseconds. `dir` is the project directory as stored (the text views
+show it sanitised, 7.4), so that it can be used as a path; the characters a terminal would act on
+are written as `\uXXXX` escapes like in any other string of the JSON. Sessions are in list order. A pull request's `state`,
 `review`, `checks` and `okAt` are null until it has been fetched. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
 `launch` (argument list or null), `unknownFlags` (the names of the flags in `launch` that skydeck
-does not know; `[]` without a launch command), `links` and `holders` added. The text of `show` prints a note sanitised line by line (7.4); the
+does not know; `[]` without a launch command), `links` and `holders` added; each holder is
+`{ "pid", "bootId", "procStart", "since", "scripted" }`, where `scripted` (`true` or `false`) says
+whether the holder is a scripted run (5.3). The text of `show` prints a note sanitised line by line (7.4); the
 JSON of `show` holds the note as stored, with the characters a terminal would act on written as `\uXXXX`
 escapes, so that it is safe to print and still parses back to the exact text.
 
@@ -496,24 +555,40 @@ which sessions are running: the boot id could not be read"). The boot id is read
 and the rows carry it, so a failed read and a later successful one are never mixed; `new` resumes
 nothing and does not need it. It refuses when the session is running, naming the holder. It then takes a lock for the session; if the lock exists and is younger than 60 seconds,
 resume is refused and says how long to wait.
-The lock is removed when a `start` event of a real process for the session appears (a start
-without a pid or a process start time names no `claude` and releases nobody) or after 60 seconds — or at once when starting the session definitely failed and skydeck
+The lock is removed when a `start` event of a real process for the session appears that was
+recorded after the lock was taken and is dated at or after it (a start without a pid or a process
+start time names no `claude` and releases nobody; nor does a `scripted` or `scripted-end` event
+(5.3), which is no `start` but counts as the session's latest event for the lock's own check; a
+start recorded before the lock but dated after
+it — the clock was ahead when it was written, then stepped back — is not the resume's own, and
+would otherwise make every lock of the session stale at once) or after 60 seconds — or at once when starting the session definitely failed and skydeck
 printed no command for it (the command holds a control character, or restore only reports the
 failure): nothing was started and nothing is left to run by hand, so the lock would only make the
-user wait. Where skydeck prints the command for the user to run, and after a timeout (the program
+user wait. When the lock holds an event id, a start dated up to 5 seconds before the lock counts too:
+the wall clock can step back between the lock and the start (measured on one WSL machine: about
+1.7 to 1.9 seconds every 32 seconds), and the resume's own start would then be stamped before the
+lock; a lock an earlier version wrote (the time alone) keeps the exact time. The id shows when a
+start was recorded, not when its process began, so a start stamped up to 5 seconds before the lock
+and recorded only after it releases the lock even when it is not the resume's own — another
+process on the session that began within those 5 seconds, is recorded late and is already gone,
+followed by a second resume before the first one's `claude` reports. That is accepted: the guard
+still refuses while any holder lives. Where skydeck prints the command for the user to run, and after a timeout (the program
 may have started), the lock stays for its 60 seconds. Whoever took a lock may renew it while it
 waits longer than that for the session to start (restore, 7.8), and renews or releases only the
 lock it wrote: one another skydeck took over is left alone. The lock
 is an entry `resume_lock:<session id>` in the database's `kv` table, holding the time it was
-taken in nanoseconds (so its age does not depend on any file's modification time). Reading the
+taken in nanoseconds (so its age does not depend on any file's modification time) and the id of
+the session's latest event at that moment (0 when it has none), which tells a start recorded after
+the lock from one recorded before it (event ids grow in the order events are recorded, whatever
+their times). Reading the
 lock and writing it happen in one database transaction, which no two skydecks hold at once, so
 of several resumes started together exactly one gets the lock. Inside that transaction the
 session's latest event is read again, and resume is refused ("the session's state changed while
 preparing; run the command again") when it is not the one its decision was made on: in between,
 another skydeck may have resumed the session, and a sweep may have removed its lock because its
-start event had been ingested. A lock dated 60 seconds or more in the future, or holding
-something other than a time, counts as stale too; stale locks are deleted, again in one
-transaction, at the end of every refresh.
+start event had been ingested. A lock dated 60 seconds or more in the future, or holding a
+value that is not a lock skydeck writes, counts as stale too; stale locks are deleted, again in
+one transaction, at the end of every refresh.
 
 **Where.** `--here` replaces skydeck with `claude` in the current terminal: the command line tool
 hands the directory and the argument list back to the `bin/skydeck` launcher through a handoff
@@ -552,16 +627,23 @@ session that already exists must not start in a new worktree or in the cloud a s
 prompt after `--` is passed on; it is the user's own and is never stored.
 When opening its tab times out, `new` prints no command but the new session's id, and says that
 running `skydeck` shows whether it started: a session that never started has nothing to resume.
+When starting it definitely failed and no command was printed (the case in which a resume releases
+its lock, 7.6), `new` removes the label and group it stored for the id: that session will never
+exist, and the row is skydeck's own, just written. After a timeout, or where a command is printed,
+they stay.
 
 ### 7.8 Restore
 
 **The set.** By default: the sessions marked `ended-unexpectedly`, not done and not expired,
 whose last holder belongs to the **latest earlier boot** in which any session was held: of the
 boots other than the current one that have a `start` or `observed` event, the one whose last
-event is the latest. `--all` adds every other session marked `ended-unexpectedly`, from any boot
+event is the latest. A `scripted` event (5.3) counts for neither: a scripted run is not what the
+user had open, so it does not make a boot the latest earlier one or move the last event of its
+boot (which the preselection below measures against). `--all` adds every other session marked `ended-unexpectedly`, from any boot
 including the current one. The set is in list order (as `ls --all` shows it). When the current
 boot id cannot be read, restore refuses (exit 1): every process would look dead, so the sessions
-running now would be offered, and the guard could not see that they run (principle 7).
+running now would be offered, and the guard could not see that they run (principle 7). As for the
+guard, the boot id is the one read when the sessions were loaded, never a second read.
 
 **The selection.** Each entry shows how it ended (no exit recorded, or ended at a time) and
 `was-working`. Preselected are the entries with no exit recorded and those that ended within two
@@ -577,7 +659,10 @@ nothing, so it needs neither `--yes` nor a terminal.
 **Running it.** Sessions are resumed in tabs, `restoreBatch` at a time (default 3). Each one goes
 through the guard of 7.6 and takes its lock, on state refreshed just before it: opening a tab
 takes time, and another skydeck may have resumed the session meanwhile. After starting a batch,
-restore waits until each of its sessions has a `start` event, checking once a second, for at most
+restore waits until each of its sessions has a `start` event of a real process that counts by the
+lock's rule (7.6: recorded after restore took the lock, and dated at or after the batch started,
+or up to 5 seconds before it),
+checking once a second, for at most
 `restoreStartTimeoutSeconds` (default 120) counted from the start of the batch. Before each batch
 it reads `MemAvailable` from `/proc/meminfo` and stops (exit 5) when it is below
 `restoreMinFreeMb` (default 4096; a value that cannot be read counts as enough), listing what was
@@ -594,16 +679,30 @@ guard refuses, or whose tab cannot be opened, is reported and skipped; restore p
 for it. When the tab definitely did not open (the terminal refused, or is not installed), nothing was
 started and restore prints no command for it, so its lock is released at once.
 
-Without a tab adapter, restore resumes the first selected session the guard accepts `--here` and
-prints the commands for the others, each only after the guard let it through — restore takes no
-lock for them, but one another skydeck holds refuses the command — and only when it holds no
-control character. If the handoff itself fails, that session's command is printed too and, as with `resume`, its
+Without a tab adapter, restore resumes the first selected session the guard accepts `--here` and,
+for each of the others the guard lets through now (restore takes no lock for them, but one another
+skydeck holds refuses the session), prints `skydeck resume <session id> --here` for the user to run
+in other terminals — not the session's own `claude` command. The user may paste the line minutes
+later, and the session may have been resumed elsewhere meanwhile: `skydeck resume` runs the guard
+and takes the lock at the moment it is run, where a raw command would start a second process on one
+transcript (principle 7). The line is always printable: a session id holds no control character.
+Before each printed command restore prints one line that names its session — short id, title and
+directory, sanitised as in the list and quoted for a shell — because with `--yes` no list was
+shown. The line sits right under the command it names, so a user may paste the two together:
+quoted, it is a command that does not exist and does nothing else, where a title such as
+`notes -> README.md` would empty a file. The command keeps a line of its own so that it can be
+pasted alone (not a trailing `#` comment: zsh takes none in an interactive shell).
+If the handoff itself fails, that session's own command is printed too and, as with `resume`, its
 lock stays for its 60 seconds, so that no other skydeck starts the session while the user runs the
-command; when that command cannot be printed, the lock is released.
+command; when that command cannot be printed, the lock is released. `--dry-run` shows each
+session's own command line: it is information, not something to paste.
 
-**Exit codes.** 0 when every selected session started, was handed off or had its command
-printed; 1 when any was refused, failed to open or did not start in time; 5 when restore was
-stopped by the memory check or cancelled at the prompt.
+**Exit codes.** 0 when every selected session started, was handed off or had its `skydeck
+resume` line printed; 1 when any was refused, failed to open or did not start in time; 5 when
+restore was stopped by the memory check or cancelled at the prompt. After a hand-off the exit status is
+`claude`'s own (7.5): when any selected session was refused, failed or did not start in time,
+restore says so in one line on stderr just before the hand-off (`skydeck: 1 of 3 selected sessions
+could not be resumed; see above`).
 
 ## 8. Install, uninstall, doctor
 
@@ -611,7 +710,15 @@ stopped by the memory check or cancelled at the prompt.
   database; (2) creates the links `<dataDir>/skydeck-hook` and `~/.local/bin/skydeck`, and
   `<dataDir>/node` pointing at the Node.js binary it runs under; (3) shows the exact change to
   `<claudeHome>/settings.json`, asks, writes a backup beside it, adds the two hook entries and
-  records the backup's path and a hash of the resulting file; (4) runs ingest, reconcile and the
+  records the backup's path and a hash of the resulting file. The file is parsed and written back
+  in skydeck's formatting (JSON, 2-space indentation, a newline at the end), as Claude Code itself
+  writes it; when writing it back unchanged would not give the same bytes, the question has one
+  more line that says the rest of the file will be rewritten in skydeck's formatting and names the
+  backup (its name is fixed when the question is asked), and when a number would lose digits (any
+  number that does not come back as written once it is a double, such as `12345678901234567890`,
+  `0.1000000000000000055511151231257827` or `1e999`; `1.50` becoming `1.5` is formatting, not loss;
+  the one case where content and not formatting changes) it names the place, as a path such as
+  `env.TOKEN_ID` or `a.b[1]`. Neither refuses; (4) runs ingest, reconcile and the
   first transcript scan; (5) makes the first-run offer (7.1), once: a later install does not offer
   it again, whatever the answer was. Running it again changes nothing. Hook entries that belong to
   something else are never touched. Every install that changes the settings file writes a new
@@ -621,8 +728,8 @@ stopped by the memory check or cancelled at the prompt.
   backup. Every check that can stop install runs before it creates anything, and the question is
   asked before anything is created too, so a refusal or a no leaves no directory, database or link
   behind (apart from the compile cache under `~/.cache/skydeck` that every run of the launcher
-  creates, 10): a link is created or re-pointed only where there is nothing or a symbolic link; a settings
-  file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
+  creates, 10): a link is created or re-pointed only where there is nothing or a symbolic link;
+  a settings file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
   to nothing (install names the link and its target and never replaces it with a file), and a
   missing Claude Code directory (never created for it). After the yes, install reads the settings
   file again, also right before writing it: if it is no longer what was shown (the user or another
@@ -630,12 +737,18 @@ stopped by the memory check or cancelled at the prompt.
   fails is an error naming the file, and leaves no backup of its own behind.
 - **`skydeck uninstall`**: restores the recorded backup only when the settings file still has the
   recorded hash and that backup still exists (when there was no file before install, it removes
-  the file); in every other case it removes exactly the entries whose command names
-  `<hookPath>`. Removes the links that still point where install pointed them. It never removes a
-  backup, not even with `--purge`, and names each one. It creates nothing: no directory, database
-  or file, also none the user removed after install. The database stays unless `--purge` is
-  given, which removes the data, state and configuration folders (the database, the spool,
-  `hook.log` and `config.json`).
+  the file); in every other case it removes exactly the entries install wrote, that is the hook
+  objects whose whole command is what install writes for the event they sit under (a hook that
+  merely names `<hookPath>`, or an entry of an install with another hook path, is not skydeck's and
+  stays; install, doctor and uninstall use this one test). That path rewrites the file in
+  skydeck's formatting too: when this changes more than the removed entries, it first keeps the
+  file as it is in a new backup (named and protected like install's), says where, and names the
+  numbers that lost digits as install's question does. Removes the
+  links that still point where install pointed them. It never removes a backup, not even with
+  `--purge`, and names each one. It creates nothing but that backup: no directory, database or
+  file, also none the user removed after install. The database stays unless `--purge` is given,
+  which removes the data, state and configuration folders (the database, the spool, `hook.log` and
+  `config.json`).
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
   resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with
   their ages (they are removed after seven days); age of the last event; the last lines of
@@ -772,6 +885,9 @@ CREATE TABLE session_prs (
 CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
+`kind` in `events` can also be `scripted` or `scripted-end` (5.3); such a row has `detail` `''`
+and no `argv` or `name`. The column is free text, so this needs no migration.
+
 ## 10. Technology
 
 - **TypeScript on Node.js 24.12 or later**, run directly through Node's type stripping, with the
@@ -891,6 +1007,7 @@ inspecting local files, unless marked otherwise.
 | `--session-id <uuid>` starts a session with a chosen id. | documentation |
 | `-n <name>` together with `--resume <id>` keeps the session id and gives the session that name; a later `-n` wins over a stored name, and a resume without `-n` keeps the stored name. | observed |
 | Closing the terminal (SIGHUP, or the terminal side of the pty closing) fires `SessionEnd` with reason `other` and removes the live-session file, also in the middle of a turn. SIGKILL fires nothing and leaves the file with its last `status`. | observed |
+| `claude -p` and SDK runs write no live-session file that is left behind: on 2026-11-13 all 178 files in `<claudeHome>/sessions/` on the development machine (left-over ones of killed processes included) had `entrypoint` `cli` and `kind` `interactive`, although `claude -p` runs on that machine every day. So the hook, not a live-session file, is what shows that a scripted run holds a session (5.3). A `claude -p` prompt is written to the transcript with `turnOrigin` `sdk`, so it is not user input (5.6). | observed (local files) |
 | In a hook's environment `$CLAUDE_CODE_ENTRYPOINT` is `cli` for an interactive session and `sdk-cli` for `claude -p`. Hooks fire for `-p` runs, and their command line contains `-p`. After `/clear`, the environment and the hook input both carry the new session id. | observed |
 | A session that never received a prompt has no transcript. | observed |
 

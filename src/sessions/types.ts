@@ -22,6 +22,8 @@ export interface Holder {
   process: ProcessKey;
   sinceNs: Ns; // time of the process's latest event
   live: LiveFile | null; // its trusted live file naming this session, if any
+  /** The process is a scripted run (`claude -p`, an SDK run) holding a session skydeck knew (5.3). */
+  scripted: boolean;
 }
 
 export interface LastHolding {

@@ -68,6 +68,89 @@ describe('fakeClock', () => {
 
     assert.equal(clock.nowNs(), T0 + 5n);
   });
+
+  test('every is called from advanceMs once per period that passed, at its time, until stopped', () => {
+    const clock = fakeClock(T0);
+    const seen: bigint[] = [];
+
+    const stop = clock.every(5000, () => {
+      seen.push(clock.nowNs() - T0);
+    });
+    const running = clock.timers();
+    clock.advanceMs(4999);
+    const before = [...seen];
+    clock.advanceMs(1);
+    clock.advanceMs(12_000);
+    const after = [...seen];
+    stop();
+    stop();
+    clock.advanceMs(60_000);
+
+    assert.equal(running, 1);
+    assert.deepEqual(before, []);
+    assert.deepEqual(after, [5n * SEC, 10n * SEC, 15n * SEC]);
+    assert.deepEqual(seen, after, 'nothing after it was stopped');
+    assert.equal(clock.timers(), 0);
+    assert.equal(clock.nowNs(), T0 + 77n * SEC);
+  });
+
+  test('timers fire in time order, sleep fires them too, and setNs does not', async () => {
+    const clock = fakeClock(T0);
+    const seen: string[] = [];
+    clock.every(3000, () => {
+      seen.push(`a${(clock.nowNs() - T0) / SEC}`);
+    });
+    clock.every(2000, () => {
+      seen.push(`b${(clock.nowNs() - T0) / SEC}`);
+    });
+
+    await clock.sleep(6000);
+    clock.setNs(T0 + 60n * SEC);
+
+    assert.deepEqual(seen, ['b2', 'a3', 'b4', 'a6', 'b6']);
+    assert.equal(clock.timers(), 2);
+  });
+
+  test('setNs moves every running timer to one period after the new time, as a real interval after a jump', () => {
+    const clock = fakeClock(T0);
+    let calls = 0;
+    clock.every(5000, () => {
+      calls++;
+    });
+
+    clock.setNs(T0 + 300n * SEC);
+    clock.advanceMs(4999);
+    const before = calls;
+    clock.advanceMs(1);
+
+    assert.equal(before, 0, 'not 60 calls for the periods jumped over');
+    assert.equal(calls, 1);
+  });
+
+  test('a timer stopped by another one in the same advance is not called again', () => {
+    const clock = fakeClock(T0);
+    let calls = 0;
+    const stopCounted = clock.every(2000, () => {
+      calls++;
+    });
+    clock.every(3000, () => {
+      stopCounted();
+    });
+
+    clock.advanceMs(10_000);
+
+    assert.equal(calls, 1, 'at 2 s only; stopped at 3 s');
+    assert.equal(clock.timers(), 1);
+  });
+
+  test('every refuses a period that is not a positive whole number of milliseconds', () => {
+    const clock = fakeClock(T0);
+
+    for (const ms of [0, -5, 1.5, Number.NaN]) {
+      assert.throws(() => clock.every(ms, () => {}), RangeError, String(ms));
+    }
+    assert.equal(clock.timers(), 0);
+  });
 });
 
 describe('statLine', () => {

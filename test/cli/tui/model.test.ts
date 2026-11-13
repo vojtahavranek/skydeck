@@ -486,7 +486,7 @@ test('withRows without reorder keeps the order and puts a new row at the end of 
   assert.equal(next.selected, S1);
 });
 
-test('withRows without reorder drops a vanished row and moves the selection to the first visible row', () => {
+test('withRows without reorder drops a vanished row; the last one gone, the cursor goes to the one before it', () => {
   const m = press(open(), 'j').model;
   assert.equal(m.selected, S2);
   const next = withRows(m, [R1, R3], T0, false);
@@ -495,6 +495,38 @@ test('withRows without reorder drops a vanished row and moves the selection to t
     { name: null, ids: [S3] },
   ]);
   assert.equal(next.selected, S1);
+});
+
+// Three listed rows in group A, in this order: R1 (waiting), R2, R4.
+const R4 = listRow({ id: S4, group: 'A', title: 'delta', lastActivityNs: T0 - 2n * MIN });
+const three = (): TuiModel => initModel([R1, R2, R3, R4], T0);
+
+test('when the selected row goes, the cursor goes to the row that takes its place, not to the first', () => {
+  const onR2 = press(three(), 'j').model;
+  assert.deepEqual(ids(visibleRows(onR2)), [S1, S2, S4]);
+
+  assert.equal(withRows(onR2, [R1, R3, R4], T0, false).selected, S4, 'the next one');
+  const hidden = { ...R2, done: true };
+  assert.equal(withRows(onR2, [R1, hidden, R3, R4], T0, false).selected, S4, 'hidden as done');
+  assert.equal(withRows(onR2, [R1, R3], T0, false).selected, S1, 'no next one: the one before');
+  const onR4 = press(three(), 'j', 'j').model;
+  assert.equal(withRows(onR4, [R1, R2, R3], T0, false).selected, S2, 'the last: the one before');
+});
+
+test('with reorder too, the cursor goes to the row after the old one in the order that was shown', () => {
+  const onR2 = press(three(), 'j').model;
+  // A new row S5 is ranked first by the new order; R4 is still the row that came after R2.
+  const S5 = '4f9d7a5c-2b6e-4daf-9071-6c5d4e3f2a1b';
+  const R5 = listRow({ id: S5, group: 'A', state: 'waiting', lastActivityNs: T0 + MIN });
+  const next = withRows(onR2, [R1, R3, R4, R5], T0, true);
+  assert.deepEqual(ids(visibleRows(next)), [S5, S1, S4]);
+  assert.equal(next.selected, S4);
+});
+
+test('when nothing that was shown is left, the cursor goes to the first visible row', () => {
+  const onR2 = press(three(), 'j').model;
+  const R5 = listRow({ id: '4f9d7a5c-2b6e-4daf-9071-6c5d4e3f2a1b', group: 'B' });
+  assert.equal(withRows(onR2, [R3, R5], T0, false).selected, R5.id);
 });
 
 test('withRows without reorder puts a group that did not exist after the named ones and before "no group"', () => {

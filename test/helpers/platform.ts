@@ -26,15 +26,52 @@ export const BOOT_A = '6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f';
 export const BOOT_B = '7d2e3f4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a';
 
 export interface FakeClock extends Clock {
+  /**
+   * Jumps to `ns`. No timer of `every` is called; each running one is next due one period after
+   * `ns`, as a real interval is after the wall clock jumped.
+   */
   setNs(ns: Ns): void;
-  /** `sleep(ms)` calls this and resolves on the next microtask. */
+  /**
+   * Moves the time on by `ms`. Every timer of `every` that falls due on the way is called at its
+   * time (nowNs() answers that time meanwhile), once per period, in time order. `sleep(ms)` calls
+   * this and resolves on the next microtask.
+   */
   advanceMs(ms: number): void;
+  /** How many timers of `every` run: started and not stopped. */
+  timers(): number;
+}
+
+interface FakeTimer {
+  periodNs: Ns;
+  dueNs: Ns;
+  callback: () => void;
 }
 
 export function fakeClock(startNs: Ns): FakeClock {
   let now = startNs;
+  const running = new Set<FakeTimer>();
+  /** The timer due first at or before `endNs`; of two due at once, the one started first. */
+  const nextDue = (endNs: Ns): FakeTimer | undefined => {
+    let next: FakeTimer | undefined;
+    for (const timer of running) {
+      if (timer.dueNs <= endNs && (next === undefined || timer.dueNs < next.dueNs)) {
+        next = timer;
+      }
+    }
+    return next;
+  };
   const advanceMs = (ms: number): void => {
-    now += nsFromMs(ms);
+    const endNs = now + nsFromMs(ms);
+    for (let timer = nextDue(endNs); timer !== undefined; timer = nextDue(endNs)) {
+      if (timer.dueNs > now) {
+        now = timer.dueNs;
+      }
+      timer.dueNs += timer.periodNs;
+      timer.callback();
+    }
+    if (endNs > now) {
+      now = endNs;
+    }
   };
   return {
     nowNs: () => now,
@@ -42,10 +79,24 @@ export function fakeClock(startNs: Ns): FakeClock {
       advanceMs(ms);
       return Promise.resolve();
     },
+    every: (ms, callback) => {
+      if (!Number.isSafeInteger(ms) || ms < 1) {
+        throw new RangeError(`not a positive whole number of milliseconds: ${ms}`);
+      }
+      const timer = { periodNs: nsFromMs(ms), dueNs: now + nsFromMs(ms), callback };
+      running.add(timer);
+      return () => {
+        running.delete(timer);
+      };
+    },
     setNs: (ns) => {
       now = ns;
+      for (const timer of running) {
+        timer.dueNs = ns + timer.periodNs;
+      }
     },
     advanceMs,
+    timers: () => running.size,
   };
 }
 

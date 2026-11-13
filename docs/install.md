@@ -26,8 +26,12 @@ What happens without WezTerm, with the default `"terminal": "here"`:
 
 - `skydeck resume <ref>` and `skydeck new` run `claude` in this terminal. `--here` does the same
   whatever the configuration says.
-- `skydeck restore` resumes the first selected session in this terminal and prints a
-  `cd ... && claude --resume ...` line for each of the others, to paste into other terminals.
+- `skydeck restore` resumes the first selected session in this terminal. For each of the others
+  it prints a line that names the session and, under it, `skydeck resume <full session id> --here`,
+  to run in another terminal (`--dry-run` shows the real `cd ... && claude --resume ...` lines
+  instead). After the hand-off the exit status is `claude`'s own; when some session could not be
+  resumed, one line `skydeck: <n> of <m> selected sessions could not be resumed; see above` says
+  so before `claude` takes over.
 - `--tab` opens nothing. It prints the command to run by hand, and exits 1.
 
 What happens when WezTerm is configured but cannot open the tab (no WezTerm window is open,
@@ -35,6 +39,7 @@ What happens when WezTerm is configured but cannot open the tab (no WezTerm wind
 hand and exit 1. `restore` reports that session as failed. If WezTerm does not answer within 10
 seconds, a tab may have opened anyway; skydeck then prints no command (running it could resume the
 session a second time) and tells you to run `skydeck` again to see whether the session is running.
+The commands skydeck prints are quoted for `sh`, `bash` and `zsh`; `fish` is not covered.
 
 See "WezTerm on WSL" below for the configuration.
 
@@ -269,7 +274,7 @@ npm run check
 
 | Where | What |
 |---|---|
-| `<claudeHome>/settings.json` (default `~/.claude/settings.json`) | Two hook entries are added: `SessionStart` and `SessionEnd`, each running `'<dataDir>/skydeck-hook' <event> >/dev/null 2>&1 \|\| true` with a timeout of 5 seconds. Everything else in the file keeps its content and key order; the file is written with two-space indentation. If the file does not exist but the folder does, install creates it. Hook entries that belong to something else are never touched. |
+| `<claudeHome>/settings.json` (default `~/.claude/settings.json`) | Two hook entries are added: `SessionStart` and `SessionEnd`, each running `'<dataDir>/skydeck-hook' <event> >/dev/null 2>&1 \|\| true` with a timeout of 5 seconds. Everything else in the file keeps its content and key order. The file is parsed and written back in skydeck's formatting (two-space indentation, a newline at the end); when that changes more than the entries, the question has one more line (below). If the file does not exist but the folder does, install creates it. Hook entries that belong to something else are never touched. |
 | `<claudeHome>/settings.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>` | The file as it was before, readable by you only. The time is UTC; a second backup in the same second gets `-2`, and so on. Every install that changes the settings makes a new one. skydeck never removes one, not even with `uninstall --purge`. |
 | `<dataDir>/skydeck-hook` | Symbolic link to `<checkout>/bin/skydeck-hook`. |
 | `~/.local/bin/skydeck` | Symbolic link to `<checkout>/bin/skydeck`. The folder is created when missing. |
@@ -290,6 +295,15 @@ Install **refuses**, before it creates anything, when:
 - there is no settings file and Claude Code's folder does not exist either
   (`Claude Code's directory ... does not exist; run claude once, or set claudeHome`). It never
   creates Claude Code's folder.
+
+When the settings file is not already in skydeck's formatting (indented with four spaces, no newline
+at the end, a number written another way), install does not refuse: it adds one line to the question,
+which names the backup it is going to keep. A number that could not be written back exactly, such as
+an integer above 2^53, is named by its key:
+
+```
+the rest of the file will be rewritten in skydeck's formatting and big would lose digits; the file as it is now is kept in /home/you/.claude/settings.json.skydeck-backup-20261113T120727Z
+```
 
 After your `y` it stops, and writes nothing, when the settings file is no longer what it showed
 (you or Claude Code saved it while the question was open): `... changed while the question was open,
@@ -415,14 +429,14 @@ installation.
 
 | Check | A `problem` means |
 |---|---|
-| hook entries | `SessionStart` or `SessionEnd` has no entry for `<dataDir>/skydeck-hook` in the settings file. Run `skydeck install`. |
+| hook entries | `SessionStart` or `SessionEnd` has no entry in the settings file that is exactly what install writes for `<dataDir>/skydeck-hook`. Run `skydeck install`. |
 | the hook link | `<dataDir>/skydeck-hook` does not resolve to a file. Run `bin/skydeck install` from the checkout. |
 | Node.js | The Node.js that runs `doctor` is older than 24.12. |
 | database | The database does not exist (run `skydeck install`), cannot be opened, or is not writable. |
 | spool, last event | `info`: how many hook events wait to be read, and how long ago the last one came. A problem only above 1000 waiting files. `no events yet` is normal until the first session starts after the install. |
 | `spool/bad` | Hook files that could not be read are kept there for seven days, then removed. The line gives their count and age. |
 | `hook.log` | `info`: its last five lines. The hook writes there when it had to drop an event. |
-| scripted runs dropped | `info`: how many `claude -p` and SDK runs were not recorded as sessions (they are not sessions a person works in). |
+| scripted runs dropped | `info`: how many events of scripted runs (print mode, SDK hosts, editor extensions) were dropped; they are not sessions a person works in. A scripted run that holds a session skydeck knows is not dropped (see "If something goes wrong"). |
 | last refresh | Something was skipped at the last command: a hook file, a process, or a transcript folder or file that could not be read. The line says what and why. |
 | Claude Code's folders | `<claudeHome>/sessions` or something under `<claudeHome>/projects` cannot be read. A folder that does not exist yet is only `info`. |
 | `gh` | `gh` is not installed, or not logged in, or GitHub cannot be reached. Run `gh auth status`. |
@@ -471,9 +485,14 @@ It undoes the install, in this order:
 
 1. **Settings.** When the settings file is still exactly what install wrote, and the backup install
    made still exists, the file is replaced by that backup (`restored ... from ...`). Otherwise (you
-   or Claude Code changed the file since) it removes only the two hook entries that name
-   `<dataDir>/skydeck-hook` and leaves everything else (`removed the hook entries from ...`). When
-   there was no settings file before the install, and nobody changed it since, it removes the file.
+   or Claude Code changed the file since) it removes only the two hook entries that are exactly what
+   install wrote, and leaves everything else (`removed the hook entries from ...`). A hook that
+   merely mentions `<dataDir>/skydeck-hook`, or an entry of an install with another hook path, is
+   not skydeck's and stays. This path writes the file in skydeck's formatting too: when that changes
+   more than the removed entries, it first keeps the file as it is in a new backup and says so
+   (`the rest of the file was rewritten in skydeck's formatting; the file as it was is kept in ...`,
+   naming any number that lost digits). When there was no settings file before the install, and
+   nobody changed it since, it removes the file.
 2. **Links.** It removes `<dataDir>/skydeck-hook`, `~/.local/bin/skydeck` and `<dataDir>/node`, each
    only when it still points where install pointed it. One that points elsewhere (another checkout,
    or another Node.js) is left alone and named: `left ... alone: it points at ...`.
@@ -481,7 +500,7 @@ It undoes the install, in this order:
    one.
 
 The database, the spool and `config.json` stay. Sessions that are running keep running: skydeck
-never stops a process. `uninstall` creates nothing.
+never stops a process. `uninstall` creates nothing, except that one backup when it needs it.
 
 ```sh
 skydeck uninstall --purge
@@ -524,6 +543,7 @@ Sessions and transcripts live in Claude Code's folder, and skydeck only reads th
 | `skydeck: cannot run 'node'; install Node.js or set SKYDECK_NODE ...` (exit 127) | There is no `node` on `PATH` and no working link. Install Node.js 24.12 or newer, or set `SKYDECK_NODE`. |
 | `skydeck: not started through bin/skydeck` | A `--here` start needs the launcher. Run skydeck as `~/.local/bin/skydeck` or `bin/skydeck`, not as `node bin/bootstrap.mjs`. |
 | `doctor`: `no SessionStart hook entry ...` | Run `skydeck install`. Claude Code may have rewritten its settings file. |
-| A session you expect is not in `skydeck ls` | A session that is not running and never received a prompt has no transcript and is not listed. One marked done needs `--all`. `claude -p` and SDK runs are not sessions (`doctor` counts them), and neither is a session whose transcript says it was not started by the interactive `claude` (its entry point is not `cli`). Run `skydeck doctor`. |
+| A session you expect is not in `skydeck ls` | A session that is not running and never received a prompt has no transcript and is not listed. One marked done needs `--all`. A scripted run (print mode, an SDK host, an editor extension) is not a session of its own and is not listed (`doctor` counts what it drops), and neither is a session whose transcript says it was not started by the interactive `claude` (its entry point is not `cli`). Run `skydeck doctor`. |
 | `skydeck: <id> is running (pid <n>)` when you resume | The session runs in another terminal. skydeck never resumes a session twice (exit 4). |
+| The same, but you see no such terminal | A scripted run (print mode such as `claude -p --resume <id>`, an SDK host, an editor extension) holds that session. skydeck shows it as `running`, `skydeck show <ref>` says `(scripted run)` next to the holder, and `resume` is refused until that process ends. |
 | `skydeck: <id> is being resumed (<n> s ago); try again in <m> s` | A resume of that session started less than a minute ago. When skydeck printed a command for you to run, the same hold applies for that minute. |

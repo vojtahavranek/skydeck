@@ -662,12 +662,23 @@ export interface ResumeCommand {
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
+ * Whether `text` is a session id: a lowercase UUID (8-4-4-4-12 hex digits) and nothing more. Every
+ * session id skydeck takes from a Claude Code file passes through this check, because the id ends
+ * up on a command line after `--resume`, where a value such as `--dangerously-skip-permissions`
+ * would be read as a flag (principle 5). The one rule: `live.ts` re-exports it, `hookinput.ts`
+ * lowercases first and then asks it.
+ */
+export function isSessionId(text: string): boolean {
+  return SESSION_ID.test(text);
+}
+
+/**
  * The id goes onto a command line after `--resume` or `--session-id`, where a value such as
  * `--dangerously-skip-permissions` would be read as a flag: only a lowercase UUID is built into a
  * command, whatever the caller checked.
  */
 function assertSessionId(sessionId: string): void {
-  if (!SESSION_ID.test(sessionId)) {
+  if (!isSessionId(sessionId)) {
     throw new RangeError(`not a session id (a lowercase UUID): ${JSON.stringify(sessionId)}`);
   }
 }

@@ -89,6 +89,16 @@ function realClock(): Clock {
         setTimeout(resolve, ms);
       });
     },
+    every(ms: number, callback: () => void): () => void {
+      if (!Number.isSafeInteger(ms) || ms < 1) {
+        throw new RangeError(`not a positive whole number of milliseconds: ${ms}`);
+      }
+      const timer = setInterval(callback, ms);
+      timer.unref(); // whatever reads the keys keeps the process alive, not this
+      return () => {
+        clearInterval(timer);
+      };
+    },
   };
 }
 

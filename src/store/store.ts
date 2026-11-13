@@ -28,7 +28,14 @@ export interface Store {
   readonly path: string;
   /** Closes the connection; a second call does nothing. */
   close(): void;
-  /** The connection's PRAGMA values (they are per connection, so tests and doctor read them here). */
+  /**
+   * PRAGMA data_version (added by fix 4): a number that differs from the one the previous call
+   * returned when another connection — another skydeck — committed to the database in between;
+   * this connection's own commits do not change it. The interactive list reads it to tell whether
+   * the rows can have changed.
+   */
+  dataVersion(): number;
+  /** The connection's PRAGMA values (they are per connection, so tests read them here). */
   connectionSettings(): {
     journalMode: string;
     synchronous: number;
@@ -59,14 +66,15 @@ export interface Store {
   ): EventRow | null;
   /** Whether any event of that process has a non-null argv. */
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
-  /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean;
   /**
-   * Whether a 'start' event of a real process for the session exists with time_ns >= sinceNs: one
-   * with a pid (not 0) and a process start time. A start the hook wrote without them names no
-   * process that could hold the session, so it says nothing about a resume that is under way.
+   * Whether a 'start' event of a real process for the session exists with time_ns >= sinceNs and an
+   * id greater than `afterEventId` (null: any id): one with a pid (not 0) and a process start time.
+   * A start the hook wrote without them names no process that could hold the session, so it says
+   * nothing about a resume that is under way. Ids grow in the order events are stored, whatever
+   * their times, so a start stored before a given event is left out even when it is dated later
+   * (the clock was ahead when it was written).
    */
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;
   /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
   latestEventIdOfSession(sessionId: string): number | null;
   /** All links ordered by time_ns. */
@@ -77,6 +85,11 @@ export interface Store {
   allMeta(): SessionMeta[];
   /** Creates the row (created_ns = updated_ns = nowNs) when absent; applies the patch; returns the row. */
   updateMeta(sessionId: string, patch: MetaPatch, nowNs: Ns): SessionMeta;
+  /**
+   * Deletes the session's row; whether there was one. Only for a row skydeck has just written for a
+   * session that never started (`new`, 7.7): principle 6 keeps every other.
+   */
+  deleteMeta(sessionId: string): boolean;
 
   // transcripts (5.6)
   transcripts(): TranscriptRow[];
@@ -441,6 +454,10 @@ class SqliteStore implements Store {
     }
   }
 
+  dataVersion(): number {
+    return Number(pragma(this.#db, 'data_version'));
+  }
+
   connectionSettings(): {
     journalMode: string;
     synchronous: number;
@@ -531,25 +548,16 @@ class SqliteStore implements Store {
     );
   }
 
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean {
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean {
     return (
       this.#get(
         `SELECT 1 AS found FROM events
-         WHERE session_id = ? AND kind = 'start' AND time_ns >= ? LIMIT 1`,
-        sessionId,
-        sinceNs,
-      ) !== undefined
-    );
-  }
-
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean {
-    return (
-      this.#get(
-        `SELECT 1 AS found FROM events
-         WHERE session_id = ? AND kind = 'start' AND time_ns >= ?
+         WHERE session_id = ? AND kind = 'start' AND time_ns >= ? AND (? IS NULL OR id > ?)
            AND pid <> 0 AND proc_start IS NOT NULL LIMIT 1`,
         sessionId,
         sinceNs,
+        afterEventId,
+        afterEventId,
       ) !== undefined
     );
   }
@@ -603,6 +611,10 @@ class SqliteStore implements Store {
       throw new Error(`session_meta row of ${sessionId} is missing after the update`);
     }
     return row;
+  }
+
+  deleteMeta(sessionId: string): boolean {
+    return this.#run('DELETE FROM session_meta WHERE session_id = ?', sessionId) > 0;
   }
 
   transcripts(): TranscriptRow[] {

@@ -23,8 +23,9 @@ const SPEC: ArgSpec = {
 
 Resumes the sessions that ended unexpectedly in the last boot before this one (a restart, or a
 WSL shutdown), a few at a time in new tabs; without a terminal that opens tabs, the first one here
-and the commands of the others printed. Preselected are the sessions that were still open when
-that boot ended; at a terminal you can change the selection before anything starts.
+and, for each of the others, a "skydeck resume <id> --here" line printed to run in another
+terminal. Preselected are the sessions that were still open when that boot ended; at a terminal
+you can change the selection before anything starts.
 
   --all      also offer what ended unexpectedly in older boots and in this one
   --dry-run  print the sessions and their commands, start nothing
@@ -88,14 +89,31 @@ export const command: Command = {
           `restore stopped: not enough memory to start ${outcome.notStarted.length} more (listed above)`,
         );
       }
-      return outcome.failed.length > 0 || outcome.timedOut.length > 0 ? EXIT.failure : EXIT.ok;
+      const notResumed = outcome.failed.length + outcome.timedOut.length;
+      if (outcome.handedOff !== null && notResumed > 0) {
+        // The launcher execs claude once this returns, so the caller sees claude's exit status,
+        // never this one: the failure is said here instead.
+        ctx.io.stderr(
+          `skydeck: ${notResumed} of ${chosen.length} selected sessions could not be resumed; see above\n`,
+        );
+      }
+      return notResumed > 0 ? EXIT.failure : EXIT.ok;
     });
   },
 };
 
-/** The entries planRestore gives for the rows in list order (`ls --all`). */
+/**
+ * The entries planRestore gives for the rows in list order (`ls --all`), with the boot id the rows
+ * were derived with as the current one: never a second read, so a read that failed for the rows and
+ * one that worked are not mixed (design 7.6). No rows: nothing to restore.
+ */
 function plan(deck: Deck, all: boolean): RestoreEntry[] {
-  const bootId = deck.platform.proc.bootId();
+  const loaded = loadRows(deck);
+  const [first] = loaded;
+  if (first === undefined) {
+    return [];
+  }
+  const { bootId } = first.session;
   if (bootId === null) {
     // Without it every process looks dead: this boot's running sessions would be offered, and the
     // guard could not see that they run (principle 7).
@@ -104,7 +122,7 @@ function plan(deck: Deck, all: boolean): RestoreEntry[] {
     );
   }
   const rows = flatRows(
-    buildList(loadRows(deck), { showAll: true, filter: '', nowNs: deck.platform.clock.nowNs() }),
+    buildList(loaded, { showAll: true, filter: '', nowNs: deck.platform.clock.nowNs() }),
   );
   return planRestore(rows, deck.store.events(), bootId, all);
 }

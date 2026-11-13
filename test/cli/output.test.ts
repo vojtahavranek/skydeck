@@ -43,8 +43,13 @@ function link(over: Partial<LinkRow> & Pick<LinkRow, 'fromSession' | 'toSession'
   return { eventId: 1, kind: 'clear', timeNs: T0, ...over };
 }
 
-function holder(pid: number, sinceNs: bigint, procStart: number | null = 777): Holder {
-  return { process: { bootId: BOOT_A, pid, procStart }, sinceNs, live: null };
+function holder(
+  pid: number,
+  sinceNs: bigint,
+  procStart: number | null = 777,
+  scripted = false,
+): Holder {
+  return { process: { bootId: BOOT_A, pid, procStart }, sinceNs, live: null, scripted };
 }
 
 /** A row with every field of the session object set. */
@@ -166,6 +171,14 @@ test('sessionJson: dir is the empty string when the directory is not known; labe
   assert.deepEqual(json.prs, []);
 });
 
+test('sessionJson: dir is the directory as stored, not the sanitised text the row shows', () => {
+  const raw = '/home/dev/pro\u0007jects/a\u009bb';
+  const row = listRow({ id: S1, dir: '/home/dev/projects/ab', session: ds({ id: S1, dir: raw }) });
+
+  assert.equal(sessionJson(row).dir, raw);
+  assert.equal(showJson(row, []).dir, raw);
+});
+
 test('sessionJson does not hand out the row own marks array', () => {
   const row = listRow({ id: S1, marks: ['was-working'] });
   const json = sessionJson(row);
@@ -236,8 +249,28 @@ test('showJson: the session object, then note, launch, unknownFlags, links and h
   assert.deepEqual(json.launch, ['claude', '--model', 'opus']);
   assert.deepEqual(json.unknownFlags, []);
   assert.deepEqual(json.holders, [
-    { pid: 4242, bootId: BOOT_A, procStart: 100, since: '2026-11-12T08:57:00.000Z' },
+    {
+      pid: 4242,
+      bootId: BOOT_A,
+      procStart: 100,
+      since: '2026-11-12T08:57:00.000Z',
+      scripted: false,
+    },
   ]);
+});
+
+test('showJson: a holder that is a scripted run has scripted true', () => {
+  const row = listRow({
+    id: S1,
+    session: ds({ id: S1, holders: [holder(5555, T0, 777, true), holder(4242, T0 - MIN)] }),
+  });
+  assert.deepEqual(
+    showJson(row, []).holders.map((h) => [h.pid, h.scripted]),
+    [
+      [5555, true],
+      [4242, false],
+    ],
+  );
 });
 
 test('showJson: doneAt is the time the session was marked done, null when it is not done', () => {
@@ -523,6 +556,23 @@ test('formatShow: one "holder:" line per live holder', () => {
   ]);
 });
 
+test('formatShow: a holder that is a scripted run says so', () => {
+  const row = listRow({
+    id: S1,
+    session: ds({
+      id: S1,
+      holders: [holder(5555, T0 - MIN, 777, true), holder(4242, T0 - 2n * MIN)],
+    }),
+  });
+  const lines = showText(row)
+    .split('\n')
+    .filter((line) => line.startsWith('holder:'));
+  assert.deepEqual(lines, [
+    'holder:    pid 5555 since 2026-11-12T08:59:00.000Z (scripted run)',
+    'holder:    pid 4242 since 2026-11-12T08:58:00.000Z',
+  ]);
+});
+
 test('formatShow: a never-fetched pull request is "not fetched", with no review or checks', () => {
   const text = showText(listRow({ id: S1, prs: [UNFETCHED] }));
   assert.ok(text.includes(`\npr:        ${PR1}  not fetched\n`), text);
@@ -607,6 +657,17 @@ test('formatShow: lines that are nothing once sanitised leave no empty line befo
   assert.ok(before.endsWith('\nnote:\n  a\n'), JSON.stringify(before));
 });
 
+test('formatShow: a lone carriage return is a line break', () => {
+  const text = showText(listRow({ id: S1, hasNote: true, note: 'a\rb' }));
+  assert.ok(text.endsWith('\nnote:\n  a\n  b\n'), JSON.stringify(text));
+});
+
+test('formatShow: a state detail that is nothing once sanitised has no brackets', () => {
+  const text = showText(listRow({ id: S1, state: 'waiting', stateDetail: '' }));
+  assert.match(text, /^state: {5}waiting since /m);
+  assert.doesNotMatch(text, /\(\)/);
+});
+
 test('formatShow: an empty line inside a note stays empty, without trailing spaces', () => {
   const text = showText(listRow({ id: S1, hasNote: true, note: 'a\n\nb' }));
   assert.ok(text.endsWith('\nnote:\n  a\n\n  b\n'), JSON.stringify(text));
@@ -618,7 +679,7 @@ test('formatShow: a note is sanitised line by line, and its line breaks are kept
   const text = showText(listRow({ id: S1, hasNote: true, note }));
   assert.ok(!/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(text), JSON.stringify(text));
   assert.ok(
-    text.endsWith('\nnote:\n  one red\n  two with tab \n  three link\n'),
+    text.endsWith('\nnote:\n  one red\n  two with tab\n  three link\n'),
     JSON.stringify(text),
   );
 });

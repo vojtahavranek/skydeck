@@ -138,14 +138,14 @@ Each is binding for the implementer. The last column names the task that records
 | D13 | `Context` gains `platform`; `Io` gains `isTTY`, `size`, `readLine`, `keys` (task 1, once). Commands open the database through `withDeck` (task 12). | Brief 18: the platform task extends `Context` once. | — |
 | D14 | `$VISUAL`, else `$EDITOR`, else `vi`; the value is split on spaces; the note file path is appended. | 7.1 only says `$EDITOR`. | 15 (7.1) |
 | D15 | The WezTerm adapter runs `wezterm cli --no-auto-start spawn`; when `wezterm` is not found and `$WSL_DISTRO_NAME` is set, it retries with `wezterm.exe`. | 13 "Open": tabs from WSL. | 7 (7.6) |
-| D16 | A resume lock is the `kv` entry `resume_lock:<session id>`, its value the creation time in ns (decimal). `acquireLock` reads it and, unless it holds, writes it inside one `store.transaction()` (BEGIN IMMEDIATE: one skydeck at a time); `sweepLocks` deletes the stale ones in one transaction at the end of every refresh (only when a first look without a transaction found some). Stale: 60 s old or older, dated 60 s or more in the future, a value that is not a time, or a `start` event of the session at or after it that names a real process (pid not 0, with a process start time: `hasProcessStartSince`). `locksDir` stays in `Places` but holds no lock. `prepareResume` hands `acquireLock` the id of the latest event of the session that its row was derived from (`DerivedSession.lastEventId`, null for none); inside the transaction, before it writes, `acquireLock` reads that id again and refuses (exit 4) when it differs. `prepareResume` refuses first when the row's own boot id (`DerivedSession.bootId`, the one the rows were derived with) is null. `prepareResumeById` refreshes and loads the rows itself right before it calls `prepareResume`, and is the entry point of every caller. *Ruled in task 18:* whoever took a lock may renew it (`renewLock`: set to now, in one transaction, only while it still holds the value that process wrote) while it waits longer than 60 s for the session to start, and releases it the same way (`releaseLock`) when the launch definitely started nothing (not a timeout) and no command is printed for the user to run (restore's tab path; a command with control characters) — where a command is printed, the lock stays for its 60 s. `isLockHeld` reads whether a lock holds, taking none. | The database already serialises skydecks across processes; a lock file taken over without an atomic step would let two resumes both succeed (principle 7). Without the re-check, a skydeck that looked at the session (not running), then lost a few seconds, could take a lock that a sweep had just removed for another skydeck's resume (its start event had been ingested) and resume the session a second time. Without the boot id every recorded process looks dead and a running session cannot be seen; the row's value is used so that a failed read and a later successful one are never mixed. A start event without a process (pid 0, or no start time) cannot be the claude that a resume started, so it must not release a lock. A start event still in the spool is invisible to a row loaded before it and to the store check of the lock, so the guard refreshes and loads by itself. Fake clock in tests. | 16 (7.6) |
+| D16 | A resume lock is the `kv` entry `resume_lock:<session id>`, its value the creation time in ns (decimal), then — *fix-2, ruled by the plan owner* — `:` and the session's latest event id at that moment (`saw.latestEventId`; *fix-5:* `0` when the session had no event; the time alone is a lock an earlier version wrote, which keeps working). `acquireLock` reads it and, unless it holds, writes it inside one `store.transaction()` (BEGIN IMMEDIATE: one skydeck at a time); `sweepLocks` deletes the stale ones in one transaction at the end of every refresh (only when a first look without a transaction found some). Stale: 60 s old or older, dated 60 s or more in the future, a value that is not a lock skydeck writes, or a `start` event of the session that names a real process (pid not 0, with a process start time), is dated at or after the lock AND was stored after it (an event id greater than the one the lock records: `hasProcessStartSince(id, time, afterEventId)`) — a start stored earlier but dated later, because the clock was ahead when it was written, is not the resume's own and would otherwise make every lock of the session stale at once. (After fix 1: a `scripted` or `scripted-end` event is no `start` and releases nothing, and it counts for the latest event id that `saw` and the lock record.) *Fix-5, ruled by the plan owner:* where the lock records an event id, the start may be dated up to `LOCK_START_TOLERANCE_NS` (5 s) before the lock and still release it (`resumeStarted`), because the wall clock steps back (measured on one WSL machine: about 1.7 to 1.9 s every 32 s) and would otherwise stamp a claude that started after the lock before it, so restore reported it timed out; a start older than the tolerance that is stored late still releases nothing. The id says when a start was recorded, not when its process began: a start stamped up to 5 s before the lock and recorded only after it releases the lock even when it is not the resume's own (another process on the session that began within those 5 s, recorded late and already gone, then a second resume before the first one's claude reports) — accepted, because the guard still refuses while any holder lives. A session without events gets `<time>:0` (any start has a greater id), so the tolerance applies to it too; only a bare time — a lock an earlier version wrote — keeps the exact time. `locksDir` stays in `Places` but holds no lock. `prepareResume` hands `acquireLock` the id of the latest event of the session that its row was derived from (`DerivedSession.lastEventId`, null for none); inside the transaction, before it writes, `acquireLock` reads that id again and refuses (exit 4) when it differs. `checkResumable` (and so `prepareResume`) refuses first when the row's own boot id (`DerivedSession.bootId`, the one the rows were derived with) is null (*fix-2:* moved from `prepareResume` into `checkResumable`, so restore's printed path refuses too). `prepareResumeById` refreshes and loads the rows itself right before it calls `prepareResume`, and is the entry point of every caller. *Ruled in task 18:* whoever took a lock may renew it (`renewLock`: set to now, keeping the event id it records, in one transaction, only while it still holds the value that process wrote) while it waits longer than 60 s for the session to start, and releases it the same way (`releaseLock`) when the launch definitely started nothing (not a timeout) and no command is printed for the user to run (restore's tab path; a command with control characters) — where a command is printed, the lock stays for its 60 s. `isLockHeld` reads whether a lock holds, taking none. | The database already serialises skydecks across processes; a lock file taken over without an atomic step would let two resumes both succeed (principle 7). Without the re-check, a skydeck that looked at the session (not running), then lost a few seconds, could take a lock that a sweep had just removed for another skydeck's resume (its start event had been ingested) and resume the session a second time. Without the boot id every recorded process looks dead and a running session cannot be seen; the row's value is used so that a failed read and a later successful one are never mixed. A start event without a process (pid 0, or no start time) cannot be the claude that a resume started, so it must not release a lock. A start event still in the spool is invisible to a row loaded before it and to the store check of the lock, so the guard refreshes and loads by itself. Fake clock in tests. | 16 (7.6) |
 | D17 | `--all` restore entries are preselected relative to the last event of *their own* boot. | 7.8 defines it for the default set only. | 18 (7.8) |
 | D18 | Arguments are read as Claude Code's own parser reads them: a several-value flag takes the next argument whatever it is and then the following ones up to the next flag-like one (starts with `-`, more than one character, so a lone `-` is a value); `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value (`-rabc`), and a token of no-value short flags (`-cp`) is one flag; `--` ends the flags and everything after it is positional. A flag that is in no table is stored as its bare name and not passed on at resume: what follows it cannot be classified. | 7.6 "several values"; principle 4. | 2 (7.6, 5.3, principle 4) |
 | D19 | Restore's selection prompt: a numbered list, the user types numbers to toggle, an empty line confirms, `q` or the end of input cancels (exit 5); a line with anything that is not a number of the list is refused whole and asked again; confirming with nothing selected starts nothing (exit 0). | 7.8 says only "confirms or changes". | 18 (7.8) |
 | D20 | Install offers the first-run "mark as done" only once (kv `first_run_offered`). | 8 "Running it again changes nothing". | 17 (8) |
 | D21 | An `observed` event's time is the clock at reconcile; its launch command gets the same path-flag rewrite as a spooled one. | 5.4 is silent. | 8 (5.4) |
 | D22 | `<ref>` by label searches the sessions `ls --all` would show (done ones included), not only the default list. | Otherwise `skydeck undone <label>` could never work. | 11 (7.5) |
-| D23 | Exit codes of `restore`: 0 when every selected session started (or was handed off, or had its command printed), 1 when any was refused, failed to open or timed out (and when the boot id cannot be read), 5 when stopped by the memory check or cancelled at the prompt. | 7.5 names 5 only. | 18 (7.8) |
+| D23 | Exit codes of `restore`: 0 when every selected session started (or was handed off, or — *fix-2* — had its `skydeck resume <id> --here` line printed), 1 when any was refused, failed to open or timed out (and when the boot id cannot be read), 5 when stopped by the memory check or cancelled at the prompt. *Fix-2, ruled by the plan owner:* after a hand-off the launcher execs `claude`, so the caller sees `claude`'s exit status, never these; when any selected session was refused, failed or timed out, restore prints `skydeck: <n> of <m> selected sessions could not be resumed; see above` on stderr just before the hand-off (the hand-off is not skipped). | 7.5 names 5 only. | 18 (7.8) |
 | D24 | `resume --tab` (or a `tab` default) without a tab adapter configured prints the command and exits 1; `label`/`group` take the remaining positionals joined by one space. | 7.5/7.6 are silent. | 15 (7.5: joined text), 16 (7.6: no tab adapter) |
 | D25 | `src/sessions/` may import `src/github.ts` (`prKey`, `prLevel`, `chipFor` — pure functions): the scan attaches pull requests by key, the list model computes the chip. | Design 11 leaves `github` out of the sessions row. | 8 (11) |
 | D26 | `SKYDECK_HOME`, `XDG_*_HOME` and `CLAUDE_CONFIG_DIR` count only when non-empty and absolute — in `resolvePlaces`, in the hook and in the launcher alike. | 9.1 "the hook resolves stateDir by the same rule". | 1 (9.1) |
@@ -194,6 +194,14 @@ export type Ns = bigint;
 export interface Clock {
   nowNs(): Ns;
   sleep(ms: number): Promise<void>;
+  /**
+   * (Added by fix 4, ruled by the plan owner: the interactive list's background refresh.) Calls `callback` every `ms`
+   * milliseconds (a positive whole number; RangeError otherwise) until the returned function is called (again: no
+   * effect). The real clock uses `setInterval` with `unref()`, so the timer does not keep the process alive by itself;
+   * the fake one calls `callback` from `advanceMs` (and so from `sleep`) once per period that passed, at its time.
+   * `callback` must not throw: a timer has nobody to report to (the real one would end the process).
+   */
+  every(ms: number, callback: () => void): () => void;
 }
 
 export interface FileInfo {
@@ -444,8 +452,11 @@ export class RestoreStoppedError extends SkydeckError {
 /** The constants of section 3, shared by every test. */
 export const T0: Ns, SEC: Ns, S1: string, S2: string, S3: string, BOOT_A: string, BOOT_B: string;
 export interface FakeClock extends Clock {
-  setNs(ns: Ns): void;
-  advanceMs(ms: number): void;      // sleep(ms) calls this and resolves on the next microtask
+  setNs(ns: Ns): void;              // calls no timer of `every`; (fix 4) each running one is next due one period
+                                    // after `ns`, as a real interval is after the wall clock jumped
+  advanceMs(ms: number): void;      // sleep(ms) calls this and resolves on the next microtask; (fix 4) every timer of
+                                    // `every` that falls due on the way is called at its time, in time order
+  timers(): number;                 // (fix 4) the timers of `every` that run: started and not stopped
 }
 export function fakeClock(startNs: Ns): FakeClock;
 
@@ -569,7 +580,7 @@ export function formatAge(durationNs: bigint): string;
 ```ts
 import type { Ns } from '../platform/types.ts';
 
-export type EventKind = 'start' | 'end' | 'observed';
+export type EventKind = 'start' | 'end' | 'observed' | 'scripted' | 'scripted-end';   // the two scripted kinds: ruled in fix 1 (design 5.3)
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
 
@@ -680,7 +691,9 @@ export type KvKey =
   | 'ingest_problems'
   | 'reconcile_problems'
   | 'scan_problems'
-  // (Task 16, D16.) A resume lock: the decimal time in ns it was taken; one per session id.
+  // (Task 16, D16.) A resume lock: the decimal time in ns it was taken, then `:<id>` of the
+  // session's latest event at that moment (fix-2; fix-5: 0 without one; a bare time is an earlier
+  // version's lock); one per session id.
   | `resume_lock:${string}`;
 ```
 
@@ -702,7 +715,13 @@ export interface Store {
   readonly path: string;
   /** Closes the connection; a second call does nothing. */
   close(): void;
-  /** The connection's PRAGMA values (they are per connection, so tests and doctor read them here). */
+  /**
+   * (Added by fix 4.) PRAGMA data_version: differs from what the previous call returned when another connection
+   * (another skydeck) committed in between; this connection's own commits do not change it. The interactive list
+   * reads it to tell whether its rows can have changed.
+   */
+  dataVersion(): number;
+  /** The connection's PRAGMA values (they are per connection, so tests read them here). */
   connectionSettings(): { journalMode: string; synchronous: number; busyTimeout: number; foreignKeys: number };
   /** Runs fn inside BEGIN IMMEDIATE … COMMIT; rolls back and rethrows on error. Not re-entrant. */
   transaction<T>(fn: () => T): T;
@@ -720,10 +739,8 @@ export interface Store {
   latestEventOfProcess(bootId: string, pid: number, procStart: number | null, beforeNs: Ns): EventRow | null;
   /** Whether any event of that process has a non-null argv. */
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
-  /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean;
-  /** As hasStartSince, but only a start of a real process counts: pid not 0 and a process start time (proc_start not NULL). A start the hook wrote without them names no process that could hold the session. */
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
+  /** (Fix-2: `hasStartSince`, which counted a start without a process too and had no caller, is removed.) Whether a 'start' event for the session exists with time_ns >= sinceNs; only a start of a real process counts: pid not 0 and a process start time (proc_start not NULL). A start the hook wrote without them names no process that could hold the session. (Fix-2.) Only a start with an id greater than `afterEventId` counts (null: any): ids grow in the order events are stored, so a start stored before a given event is left out even when it is dated later. */
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;
   /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
   latestEventIdOfSession(sessionId: string): number | null;
   /** All links ordered by time_ns. */
@@ -734,6 +751,8 @@ export interface Store {
   allMeta(): SessionMeta[];
   /** Creates the row (created_ns = updated_ns = nowNs) when absent; applies the patch; returns the row. */
   updateMeta(sessionId: string, patch: MetaPatch, nowNs: Ns): SessionMeta;
+  /** (Fix-2.) Deletes the session's row; whether there was one. Only for the row `new` has just written for a session that never started (7.7). */
+  deleteMeta(sessionId: string): boolean;
 
   // transcripts (5.6)
   transcripts(): TranscriptRow[];
@@ -1303,10 +1322,19 @@ export interface SettingsEdit {
 export function addHookEntries(settingsText: string | null, hookPath: string): SettingsEdit;
 
 /**
- * Removes every hook object whose `command` contains hookPath; then drops matcher groups left with
+ * Removes, from each hooked event, the hook objects whose `command` is exactly
+ * hookCommand(hookPath, event) (fix 3: the one test of install, doctor and uninstall; a hook that
+ * only names the path, or sits under another event, is not ours); then drops matcher groups left with
  * no hooks, event arrays left empty, and `hooks` when left empty. Nothing else changes.
  */
 export function removeHookEntries(settingsText: string, hookPath: string): SettingsEdit;
+
+/**
+ * What writing the file back through `serialize(parse(text))` would change besides the entries (fix 3):
+ * `reformatted` when the bytes would differ, `lossyPaths` for the numbers that would not keep their
+ * digits (read with the reviver's `context.source`), each named by its path (`env.ID`, `a.b[1]`).
+ */
+export function rewriteReport(text: string): { reformatted: boolean; lossyPaths: string[] };
 
 /** For each event: does an entry whose command equals hookCommand(hookPath, event) exist? */
 export function hookStatus(settingsText: string | null, hookPath: string): Record<HookEvent, boolean>;
@@ -1529,6 +1557,7 @@ export interface Holder {
   process: ProcessKey;
   sinceNs: Ns;                    // time of the process's latest event
   live: LiveFile | null;          // its trusted live file naming this session, if any
+  scripted: boolean;              // its latest event is a `scripted` one (ruled in fix 1, design 5.3)
 }
 
 export interface LastHolding {
@@ -1748,7 +1777,9 @@ export const LOCK_TTL_NS: Ns;   // 60 s
 /** The kv key of the session's resume lock, `resume_lock:<sessionId>` (D16). RangeError when sessionId is not a lowercase UUID. */
 export function lockKey(sessionId: string): `resume_lock:${string}`;
 /**
- * 7.6 refusals (ResumeRefusedError), in this order: running → "<short> is running (pid <p>[, pid <p>…])"
+ * 7.6 refusals (ResumeRefusedError), in this order: (fix-2, moved here from prepareResume so that
+ * restore's printed path checks it too) `row.session.bootId` null → "cannot tell which sessions are
+ * running: the boot id could not be read"; running → "<short> is running (pid <p>[, pid <p>…])"
  * (holders latest first); no transcript → "<short> has no transcript"; expired → "<short> has expired:
  * its transcript is gone"; project directory null → "<short>: its project directory is not known";
  * not absolute → "<short>: directory <dir> is not an absolute path"; the existence check throws →
@@ -1768,7 +1799,11 @@ export function checkResumable(row: ListRow, files: Files): void;
  * the session's latest event id is read again
  * (store.latestEventIdOfSession), and when it is not `saw.latestEventId` the call throws
  * ResumeRefusedError "the session's state changed while preparing; run the command again" and writes
- * nothing. Otherwise it writes the lock with the clock's time.
+ * nothing. Otherwise it writes the lock: the clock's time, then `:<saw.latestEventId>` when that is
+ * not null (fix-2). Only a start event with a greater id releases it (hasProcessStartSince with the
+ * lock's time and that id): a start stored before the lock but dated after it (the clock was ahead
+ * then) is not this resume's. A value without the id (an earlier version wrote it) is released by
+ * any such start at or after its time, as before.
  */
 export interface SawEvents { latestEventId: number | null }
 export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void;
@@ -1777,19 +1812,39 @@ export function sweepLocks(deck: Deck): number;
 // Task 18 (ruled): the lock's owner renews or releases its own lock; anyone may ask whether one holds.
 /** The value of the session's lock, null without one; a caller that just took the lock keeps it as "ours". */
 export function readLock(deck: Deck, sessionId: string): string | null;
-/** In one store.transaction(): when the lock still holds `ours`, sets it to the clock's time and returns the new value; else changes nothing and returns null. */
+/** In one store.transaction(): when the lock still holds `ours`, sets it to the clock's time (keeping the event id it records) and returns the new value; else changes nothing and returns null. */
 export function renewLock(deck: Deck, sessionId: string, ours: string): string | null;
+/** (Fix-2.) The event id a lock value records (fix-5: 0 when the session had no event); null for a bare time (an earlier version wrote it) or a value that is not a lock. Restore counts a session as started by the lock's rule with it. */
+export function lockEventId(value: string): number | null;
+/** (Fix-5.) 5 s: how far before the lock's time a start may be dated when the lock records an event id. */
+export const LOCK_START_TOLERANCE_NS: Ns;
+/** (Fix-5.) store.hasProcessStartSince(sessionId, sinceNs − LOCK_START_TOLERANCE_NS when afterEventId is not null, else sinceNs, afterEventId): the release rule of the lock and restore's "started". */
+export function resumeStarted(store: Store, sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;
 /** In one store.transaction(): deletes the lock when it still holds `ours`; whether it did. */
 export function releaseLock(deck: Deck, sessionId: string, ours: string): boolean;
 /** Whether a lock that holds by the rules of acquireLock exists for the session. Reads only. */
 export function isLockHeld(deck: Deck, sessionId: string): boolean;
 
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }   // kind: ruled in review
+// Fix-2 (item 9, ruled): what launchPrepared (cli) and restore (sessions) share about starting a
+// prepared launch, so that each rule and wording exists once. They live here, not in src/cli/launching.ts,
+// because src/sessions does not import src/cli and uses terminals only as an interface (design 11).
+/** The lines a resume says before it starts, unprefixed: "original flags unknown; resuming with defaults" when !flagsKnown; "started with flags skydeck does not know, not passed on resume: <names>" (sanitised, joined by one space) when unknownFlags is not empty. */
+export function flagWarnings(launch: Pick<PreparedLaunch, 'flagsKnown' | 'unknownFlags'>): string[];
+/** terminal.open(spec), a rejection turned into { ok: false, error: "cannot open the terminal (<reason>)", timedOut: false }. */
+export function openSafely(terminal: Terminal, spec: LaunchSpec): Promise<OpenResult>;
 /**
- * First, ResumeRefusedError "cannot tell which sessions are running: the boot id could not be read"
- * when `row.session.bootId` is null: the boot id the row was derived with, never a second read of
- * `proc.bootId()` (a failed read and a later successful one must not be mixed; without the boot id
- * every recorded process looks dead, so the row cannot show a running session); then checkResumable, acquireLock(deck, row.id, { latestEventId:
+ * After a failed open: the command line to print instead (printableCommand), or null after a timeout
+ * and when it holds a control character. When the launch definitely started nothing (not a timeout)
+ * and no command can be printed, it releases `lock` (releaseLock, while still that one) and, for
+ * kind 'new', deletes the session_meta row prepareNew wrote (store.deleteMeta); otherwise both stay.
+ */
+export function settleFailedLaunch(deck: Deck, prepared: PreparedLaunch, lock: string | null, timedOut: boolean): string | null;
+/**
+ * checkResumable — which refuses first, "cannot tell which sessions are running: the boot id could not
+ * be read", when `row.session.bootId` is null: the boot id the row was derived with, never a second read
+ * of `proc.bootId()` (a failed read and a later successful one must not be mixed; without the boot id
+ * every recorded process looks dead, so the row cannot show a running session) — then acquireLock(deck, row.id, { latestEventId:
  * row.session.lastEventId }) — the lock transaction compares it with the store, so a session that
  * another skydeck acted on since the row was read is refused — and buildResumeCommand(config.claudeCommand,
  * row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command).
@@ -1830,7 +1885,7 @@ export interface RestoreOutcome {
   failed: { id: string; reason: string }[];   // refused by the guard or the terminal failed
   notStarted: string[];           // left out by the memory stop
   handedOff: string | null;       // resumed --here (no tab adapter)
-  printed: string[];              // command lines printed instead (no tab adapter)
+  printed: string[];              // lines printed for the user to run (no tab adapter): `skydeck resume <id> --here` per session restore does not start (fix-2); a failed hand-off's own command
   stoppedForMemory: boolean;
 }
 export function runRestore(
@@ -2005,9 +2060,9 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
 // src/cli/notes.ts (task 15)
 /**
  * Writes the note to <stateDir>/note-<sessionId>.md, runs the editor (D14) through
- * platform.runner.runInteractive, stores what comes back, removes the file (also when the editor
- * fails). The file is created with mode 0o600. UsageError when stdin is not a terminal;
- * SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit; SkydeckError "editor did
+ * platform.runner.runInteractive, stores what comes back, removes the file (when the editor
+ * fails: only a file this edit made and the editor left as it was; fix 3). The file is created with mode 0o600. UsageError when stdin is not a terminal;
+ * SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit, with `; your text is in <path>` appended when the editor changed the file before failing (fix 3); SkydeckError "editor did
  * not finish: <program> could not be run or was killed" when runInteractive returns null; SkydeckError
  * when the editor removed the file (note unchanged: a missing file is not an empty note); SkydeckError
  * "editor could not be run: <program> (<reason>)" when runInteractive rejects (a file that is not
@@ -2039,8 +2094,12 @@ export interface LaunchOutcome { code: number; lines: string[] }   // lines as p
  * control characters and cannot be printed safely". An open() that rejects is a failed open.
  * (Task 18, ruled.) The lock prepareResume took stays after a failure, except a failure other than
  * a timeout whose command cannot be printed (control characters): nothing started and nothing to run
- * by hand, so it is released (releaseLock with the value read before opening). The command
- * line is printableCommand(prepared.cwd, prepared.argv).
+ * by hand, so it is released (releaseLock with the value read before opening). (Fix-2, ruled.) In
+ * that same case, for kind 'new', the label and group prepareNew stored are removed
+ * (store.deleteMeta); after a timeout, or where the command is printed, they stay. The command
+ * line is printableCommand(prepared.cwd, prepared.argv). (Fix-2, item 9.) The warning lines, the
+ * failed open and this rule come from flagWarnings, openSafely and settleFailedLaunch (2.8.6),
+ * which restore uses too.
  */
 export function launchPrepared(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
 ```
@@ -2079,8 +2138,10 @@ export function initModel(rows: readonly ListRow[], nowNs: Ns): TuiModel;
  * append new rows, and rows whose group changed, to the end of their group (a new named group goes before "no group", which
  * is last), drop emptied groups. `order` always holds the done rows too, with the groups ranked by the members listed under
  * the current `showAll` (design 7.4), as `skydeck ls` ranks them; a group with nothing listed comes after the others.
- * When the selected row is no longer visible the selection moves to the first visible row and an open detail or input is
- * closed (`mode` is 'list' afterwards).
+ * When the selected row is no longer visible the selection moves to the row that takes its place — the next row after it
+ * in the order shown before that is still visible, else the nearest one before it, else the first visible row (ruled in
+ * fix 4: before, it was always the first visible row, and a key pressed next acted on a session far from the one the
+ * user chose) — and an open detail or input is closed (`mode` is 'list' afterwards).
  */
 export function withRows(model: TuiModel, rows: readonly ListRow[], nowNs: Ns, reorder: boolean): TuiModel;
 export function withMessage(model: TuiModel, message: string | null): TuiModel;
@@ -2198,8 +2259,9 @@ command substitutions that `cd`, never for the program.
 
 #### 2.10.4 Resume lock
 
-The `kv` entry `resume_lock:<sessionId>`, its value the time it was taken in ns as decimal digits
-(D16). No lock file: `<stateDir>/locks/` is created but holds nothing.
+The `kv` entry `resume_lock:<sessionId>`, its value the time it was taken in ns as decimal digits,
+then (fix-2) `:` and the session's latest event id at that moment in decimal (fix-5: `0` when the
+session had no event; the time alone is a lock an earlier version wrote, read as before) (D16). No lock file: `<stateDir>/locks/` is created but holds nothing.
 
 #### 2.10.5 JSON output (`src/cli/output.ts`; key order as written)
 
@@ -2217,13 +2279,13 @@ export interface SessionJson {
 }
 export interface ListJson { version: 1; generatedAt: string; sessions: SessionJson[] }
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
-export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
+export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string; scripted: boolean }   // scripted: ruled in fix 1
 export interface ShowJson extends SessionJson {
   doneAt: string | null; note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[];
 }
 ```
 
-Times are `isoFromNs`. `dir` is `""` when unknown. `sessions` is in list order (groups in order,
+Times are `isoFromNs`. `dir` is `""` when unknown, else `row.session.dir` as stored (not the sanitised `row.dir`; fix 3). `sessions` is in list order (groups in order,
 rows in order). Output is `JSON.stringify(value, null, 2) + "\n"`, written by `jsonText`
 (`src/cli/json.ts`), which also writes DEL, the C1 controls and the bidirectional controls as
 `\uXXXX` escapes (the same value for `JSON.parse`, safe on a terminal). `show --json` adds, after
@@ -2816,7 +2878,7 @@ its cmdline is `'sleep\0' + '30\0'`.
 - Remove keeps foreign: from the foreign-entries result above → exactly the original foreign input structure.
 - A group holding a foreign hook and ours → only ours removed, the group stays with the foreign hook.
 - Nothing ours → `changed false`, `text` identical to the input.
-- An entry whose command merely contains `H` (`"\"/home/dev/.local/share/skydeck/skydeck-hook\" SessionStart"`) → removed.
+- An entry whose command merely contains `H` (`"\"/home/dev/.local/share/skydeck/skydeck-hook\" SessionStart"`), or our command under an event it does not name → not ours, left alone (fix 3).
 - `hookStatus(null, H)` → both false; after add → both true; foreign only → both false.
 - `cleanupPeriodDays(null)` → 30; `'{"cleanupPeriodDays":14}'` → 14; `'{"cleanupPeriodDays":0}'` → 30;
   `'{"cleanupPeriodDays":"9"}'` → 30; `'bad'` → 30.
@@ -2847,7 +2909,7 @@ the six allowed.
 
 ```ts
 // types.ts (field comments in 2.4.1)
-export type EventKind = 'start' | 'end' | 'observed';
+export type EventKind = 'start' | 'end' | 'observed' | 'scripted' | 'scripted-end';   // the two scripted kinds: ruled in fix 1 (design 5.3)
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
 export interface EventRow {
@@ -2895,13 +2957,13 @@ export interface Store {
   events(): EventRow[];
   latestEventOfProcess(bootId: string, pid: number, procStart: number | null, beforeNs: Ns): EventRow | null;
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean;
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;  // afterEventId: fix-2 (hasStartSince removed)
   latestEventIdOfSession(sessionId: string): number | null;
   links(): LinkRow[];
   meta(sessionId: string): SessionMeta | null;
   allMeta(): SessionMeta[];
   updateMeta(sessionId: string, patch: MetaPatch, nowNs: Ns): SessionMeta;
+  deleteMeta(sessionId: string): boolean;  // fix-2
   transcripts(): TranscriptRow[];
   saveTranscript(row: TranscriptRow): void;
   ensurePr(key: { url: string; owner: string; repo: string; number: number }): void;
@@ -2942,9 +3004,11 @@ do not exist in the schema. Events are bound with `bigint` for every `*_ns` colu
 - `latestEventOfProcess(BOOT_A, 4242, 51234567, T0 + SEC)` with events at `T0`, `T0+2s` → the `T0` one;
   with `procStart null` it matches only rows whose `proc_start` is NULL; another boot → `null`.
 - `processHasLaunch`: a process whose only event has `argv null` → `false`; add one with argv → `true`.
-- With a start event at `T0`: `hasStartSince(S1, T0)` → `true`; `hasStartSince(S1, T0 + 1n)` → `false`; an `end` row does not count.
-- `hasProcessStartSince`: as `hasStartSince` (the same three cases), and a start with `pid 0`, one with `procStart null` and one with both → `false`
-  until a start with a pid and a `procStart` exists → `true` (`hasStartSince` counts all of them).
+- `hasProcessStartSince` (null `afterEventId`): with a start event at `T0`, `(S1, T0)` → `true`, `(S1, T0 + 1n)` → `false`; an `end` row, an
+  `observed` row and another session's start do not count; a start with `pid 0`, one with `procStart null` and one with both → `false`
+  until a start with a pid and a `procStart` exists → `true`. (Fix-2.) With `afterEventId`: a start dated
+  `T0+600s` stored first (id `a`) → `false` after `a`, `true` after `a − 1` and for `null`; a start stored next at `T0+1s` → `true` after `a`
+  (and `false` from `T0+2s`, or after its own id).
 - `latestEventIdOfSession`: `null` for a session without events (another session's events do not count); otherwise the highest id of
   its events whatever their times and kinds (an `end` or an `observed` event counts, a later id with an earlier time wins).
 - `insertLink({ eventId: 1, fromSession: S1, toSession: S2, kind: 'clear', timeNs: T0 })` → `links()` returns it;
@@ -2952,6 +3016,7 @@ do not exist in the schema. Events are bound with `bigint` for every `*_ns` colu
 - `updateMeta(S1, { label: 'x' }, T0)` creates `{ label 'x', group null, note null, doneAtNs null, createdNs T0, updatedNs T0 }`;
   then `updateMeta(S1, { group: 'G' }, T0 + SEC)` keeps the label, sets group, `updatedNs T0+SEC`, `createdNs T0`;
   `updateMeta(S1, { label: null }, …)` clears only the label; `meta(S2)` → `null`; `allMeta()` lists one.
+  (Fix-2.) `deleteMeta(S1)` → `true`, the row is gone and S2's stays; again → `false`.
 - `saveTranscript(row)` with `lastTurnRole 'user'` then `transcripts()` → deep equal (the column `last_turn_role` holds `'user'`);
   saving the same path again replaces it; `lastTurnRole null` round-trips as `null`.
 - `ensurePr({ url: 'https://github.com/o/r/pull/1', owner: 'o', repo: 'r', number: 1 })` twice → one row with
@@ -3355,7 +3420,12 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 - **Ingest.** Names ending in `.ev` and not starting with `.`, in name order. Not a regular file,
   unreadable, `SpoolParseError` or any other error while reading or parsing → moved to `badDir`
   (created when needed); a file that is gone when it is read is skipped. `event.scripted` → file deleted,
-  `addToKv('dropped_scripted', 1)`. Otherwise, inside one `store.transaction`: compute the link,
+  `addToKv('dropped_scripted', 1)` — *ruled in fix 1:* except a scripted `start` with a pid and a
+  process start on a session skydeck knows (`latestEventIdOfSession` non-null, or a `transcripts` row with entrypoint
+  `cli` or null), which is inserted as kind `scripted` (`detail ''`, `rawDetail` the source,
+  `argv null`, `name null`, no link) and counted as ingested; and a scripted `end` whose process's
+  latest event (`latestEventOfProcess`) is a `scripted` one naming the same session, which is
+  inserted the same way as kind `scripted-end`. Otherwise, inside one `store.transaction`: compute the link,
   `insertEvent`, `insertLink`; after the commit, delete the file. A `null` from `insertEvent`
   counts as a duplicate (the file is deleted too). **Link:** for a `start` with detail `clear`,
   `resume` or `fork`, `prev = store.latestEventOfProcess(boot, pid, procStart, event.timeNs)`
@@ -3363,6 +3433,9 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   `{ fromSession: prev.sessionId, toSession: event.sessionId, kind: clear→'clear', resume→'switch', fork→'fork', timeNs: event.timeNs, eventId: <new id> }`.
   Events with `pid` 0 never get links. The stored `argv` is the one `parseSpoolFile` returns,
   `storableArgv(recorded)`: no positional arguments, no removed flags, unknown flags as bare names (principle 4).
+  *Ruled in fix 1:* a `start` of a process with a pid and a process start that already has an
+  earlier `start` with a stored `argv` is stored with the `argv` of the first such start (its relative path flags were
+  resolved against the cwd the process was launched in; a later hook input's cwd need not be it).
 - **Retention (design 5.3).** After the files are processed: every file in `badDir` whose
   `mtimeNs < now − 7 days` is removed, and so is every entry of `spoolDir` whose name starts with
   `.` and ends with `.tmp` and whose `mtimeNs < now − 1 hour` (`now` = `platform.clock.nowNs()`).
@@ -3393,8 +3466,12 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   `absolutizePathFlags(argv, file.cwd, exists)`, then `storableArgv` of that, exactly as
   `parseSpoolFile` does it, so neither an initial prompt, nor a removed flag such as `--prefill-b64`,
   nor the argument of an unknown flag is ever stored (principle 4). Insert an `observed` event when
-  `latest` is null or names another session, or when `!processHasLaunch(key)` and `argv` is
-  non-null. Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
+  `latest` is null; when `latest` names the file's session and `!processHasLaunch(key)` and `argv`
+  is non-null; or when `latest` names another session and is `observed` or has `latest.timeNs <= file.mtimeNs`
+  (*ruled in fix 1:* a hook event newer than the file is the hook speaking after the file was last
+  written — an in-session `/resume` or `/clear` — and the file is stale: nothing is inserted; an
+  `observed` event is stamped at reconcile, after the file it was read from, so it never makes a
+  file stale). Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
   The check and the insert run again inside one transaction, with the clock read again there
   (it is the bound of `latestEventOfProcess` and the row's `timeNs`), so two refreshes at once
   record a process once.
@@ -3629,7 +3706,7 @@ never shown as closed.
 export type State = 'working' | 'waiting' | 'running' | 'not-running';
 export type Mark = 'ended-unexpectedly' | 'was-working' | 'continued' | 'expired' | 'expiring' | 'duplicate';
 export const MARK_ORDER: readonly Mark[];
-export interface Holder { process: ProcessKey; sinceNs: Ns; live: LiveFile | null }
+export interface Holder { process: ProcessKey; sinceNs: Ns; live: LiveFile | null; scripted: boolean }
 export interface LastHolding { process: ProcessKey; alive: boolean; endedAtNs: Ns | null; endDetail: EndDetail | 'moved-on' | null }
 export interface DerivedSession {
   id: string; state: State; stateDetail: string | null; sinceNs: Ns; lastActivityNs: Ns; firstSeenNs: Ns;
@@ -3653,7 +3730,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 - A **process** is `(bootId, pid, procStart)`; events with `pid` 0 belong to no process. A process
   **holds** the session of its latest event when that event is not an `end`.
 - **holders**: processes that hold the session and `isAlive`, latest event first. `sinceNs` = time
-  of that latest event; `live` = a live file with the same pid, procStart and sessionId that `isTrusted`.
+  of that latest event; `live` = a live file with the same pid, procStart and sessionId that `isTrusted`;
+  `scripted` = that latest event is of kind `scripted`. *Ruled in fix 1:* `scripted` events count for
+  holding (a `scripted-end` ends it, like an `end`), and both kinds count for `lastActivityNs`,
+  `firstSeenNs` and `lastEventId`, and for nothing else (`dir`, `launch`, `lastHolding` and activity
+  after done ignore them).
 - **state**: no holders → `not-running`. Otherwise from `holders[0].live`: status `busy` →
   `working`; `idle` or `waiting` → `waiting` (`stateDetail` = `waitingFor`); no live file or any
   other status → `running`.
@@ -3667,10 +3748,15 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 - **lastActivityNs** = the larger of transcript `lastRecordNs` and the latest event time naming the
   session; falls back to transcript `mtimeNs`. **firstSeenNs** = the smaller of transcript
   `firstRecordNs` and the earliest event time; falls back to `mtimeNs`.
-- **lastHolding**: `E` = latest event naming the session with `pid` ≠ 0; none → null. `E` is an
-  `end` → `{ process: E's, endedAtNs: E.timeNs, endDetail: E.detail }`. Otherwise `L` = that
-  process's latest event: `L` names the session and is not an `end` → `{ endedAtNs: null, endDetail: null }`;
-  else → `{ endedAtNs: L.timeNs, endDetail: 'moved-on' }`. `alive` = `isAlive(process)`.
+- **lastHolding** (*ruled in fix 1:* per process, not by the latest event row): for each process
+  with an event naming the session (`pid` ≠ 0; none → null), `E` = its latest event naming the
+  session. `E` is an `end` → `{ endedAtNs: E.timeNs, endDetail: E.detail }`, ending at `E`.
+  Otherwise `A` = the process's first event after `E`: there is one → `{ endedAtNs: A.timeNs,
+  endDetail: 'moved-on' }`, ending at `A` (at `E` when `A` is `observed`: reconcile's time is not the move's); none → `{ endedAtNs: null, endDetail: null }`, going on
+  while the process is alive, else ending when it was last seen: the later of `E.timeNs` and the
+  `mtimeNs` of its leftover live files (same pid and procStart) naming the session, tie by `E.id`.
+  The last holding is the one that goes on, else the one that ended last (time, then event id).
+  `alive` = `isAlive(process)`.
 - **Marks** (in `MARK_ORDER`): `ended-unexpectedly` when not running, `lastHolding` non-null, not
   alive, and `endDetail` is null or `'other'`. `was-working` when ended-unexpectedly and either some
   live file with that pid and procStart has status `busy`, or the transcript's `lastTurnRole` is
@@ -4110,7 +4196,7 @@ export interface SessionJson {
 }
 export interface ListJson { version: 1; generatedAt: string; sessions: SessionJson[] }
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
-export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
+export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string; scripted: boolean }   // scripted: ruled in fix 1
 export interface ShowJson extends SessionJson { doneAt: string | null; note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[] }
 export function sessionJson(row: ListRow): SessionJson;
 export function listJson(model: ListModel): ListJson;
@@ -4154,7 +4240,7 @@ and `ls --json` are written by `jsonText`; the JSON holds the note and the launc
   (`Object.keys` compared), times as `isoFromNs`, `dir ''` when null, PR `repo 'o/r'`, `okAt` ISO or null.
 - `listJson` → `{ version: 1, generatedAt: isoFromNs(model.generatedAtNs), sessions: <flatRows order> }`.
 - `showJson` → the session object followed by `note`, `launch`, `unknownFlags`, `links` (only links from/to the row, by time,
-  `at` ISO), `holders` (`pid`, `bootId`, `procStart`, `since`).
+  `at` ISO), `holders` (`pid`, `bootId`, `procStart`, `since`, `scripted` — ruled in fix 1).
 - `formatList` of two groups → `'ABC-123\n  <row>\n\nno group\n  <row>\n'`; empty → `'no sessions\n'`.
 - `formatShow` of a row whose `session.launch` is `['claude','--model','opus']` contains `'id:        ' + S1`,
   `'launch:    claude --model opus'` (the recorded command, `shellJoin`), and `'launch:    unknown'` when `launch` is null;
@@ -4374,6 +4460,13 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
   events of other sessions do not count; the argument is required (a test with `// @ts-expect-error` makes `npm run typecheck` fail when it becomes optional);
   the latest event is read inside the one transaction, before the write.
 - `acquireLock`: a start event with `pid 0` and/or no `procStart` after a fresh lock does not release it (still "is being resumed"); `sweepLocks` keeps such a lock.
+- (Fix-2.) With events, the lock is `` `${T0}:${id}` `` (`id` = `saw.latestEventId`). A start of a real process stored before the lock but dated
+  `T0+600s` does not release it (`acquireLock` refuses, `isLockHeld` true, `sweepLocks` keeps it); a start stored after it and dated at or after
+  it does; one stored after it but dated before it does not. A lock that records no id (an earlier version wrote it) is released as before; a
+  value with a malformed id part is stale. `renewLock` keeps the id. `lockEventId` reads it back.
+- (Fix-5.) A start stored after a lock with an id and dated `T0 − 1.7s` or `T0 − 5s` releases it; `T0 − 5s − 1ns` and `T0 − 6s` do not
+  (the late-stored old start stays a non-release). A lock without an id: a start at `T0 − 1.7s` releases nothing. `resumeStarted` direct cases.
+  A session without events gets `` `${T0}:0` ``, released by a start at `T0 − 1.7s`; `lockEventId` reads `:0` as 0 and a bare time as null.
 - `prepareResume`: with a row whose `session.bootId` is null (also when `proc.bootId()` works now) → `ResumeRefusedError` `'cannot tell which sessions are running: the boot id could not be read'` before every other
   refusal, no lock; a row whose `bootId` is set resumes whatever `proc.bootId()` says now; with a row whose `lastEventId` is behind the store's (a start event inserted after the row was read, also from inside `files.stat`, which
   `checkResumable` calls between the read and the lock) → the "state changed" refusal and no lock — also when A took the lock, its start event was ingested and `sweepLocks`
@@ -4406,6 +4499,10 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `new --label -x` → 2. `new -- -r <id>` → 2. `new -- -n x` → 2 and stderr names `--label`. `new -- --worktree` → 0 and the handoff is
   `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> --worktree\n`; `new -- -w feat --model x 'fix the bug'` → 0, the flags reach the command.
 - After a failed open and after a WezTerm timeout the lock still holds (a second resume → 4); after a timeout no command is printed. `new --tab` timing out → `'skydeck: the new session\'s id is <uuid1>; running skydeck shows whether it started'`.
+- (Fix-2.) A start of S1 in the spool dated `T0+600s` by a dead pid: three `resume 0b5f --here` in a row → 0, 4, 4. `launchPrepared` after a timeout
+  whose command holds a control character keeps the lock. `new --tab --label … --group …` whose tab definitely did not open (refused, not
+  installed) and whose command holds a control character → 1 and no `session_meta` row for the id; after a timeout, or without a tab adapter
+  (the command is printed), the label and group stay.
 
 **Steps**
 - [ ] Write the three test files. `npm test` → fails.
@@ -4472,7 +4569,9 @@ export const command: Command;   // in each of the three files
   `hookPath` → `<appRoot>/bin/skydeck-hook`, `binLink` → `<appRoot>/bin/skydeck` (creating
   `~/.local/bin`), `nodeLink` → `platform.nodePath`. (3) `addHookEntries(<settings text or null>, hookPath)`;
   when `changed`: print to stderr `skydeck will add these hook entries to <settingsPath>:` and the
-  added groups as JSON, ask `readLine('Add them? [y/N] ')`; anything but `y`/`yes` (or null) →
+  added groups as JSON, then, when `rewriteReport(text).reformatted` (fix 3), the line
+  `the rest of the file will be rewritten in skydeck's formatting[ and <paths> would lose digits]; the file as it is now is kept in <backup>`
+  (the backup's name is fixed at this point), ask `readLine('Add them? [y/N] ')`; anything but `y`/`yes` (or null) →
   print `settings not changed` and return 1. On yes (ruled by the plan owner in pull request #20):
   write a NEW backup of the old content, `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC,
   from `platform.clock`; when that exact name exists, `-2`, `-3`, …), mode 600, created with
@@ -4482,15 +4581,17 @@ export const command: Command;   // in each of the three files
   `hook entries already present`; no backup is written and kv is left as it is. (4) `refreshWithProgress(ctx, deck)`. (5) Unless kv `first_run_offered`:
   count rows that are listed, not done, not running, with `lastActivityNs` older than
   `firstRunDoneAfterDays`; when > 0 ask `Mark <n> sessions older than <d> days as done? [y/N] `
-  and on yes set their `doneAtNs` with `store.updateMeta(id, { doneAtNs: now }, now)`; set `first_run_offered`. Return `EXIT.ok`.
-- **uninstall** never creates anything: `resolveDeckPlaces`; when `dbPath` exists, it reads and
+  and on yes set their `doneAtNs` with `markDone(deck, id)` (`src/sessions/meta.ts`; it reads the clock for each session); set `first_run_offered`. Return `EXIT.ok`.
+- **uninstall** never creates anything (but the backup just named): `resolveDeckPlaces`; when `dbPath` exists, it reads and
   deletes the kv keys through `openStore(dbPath)` (not `withDeck`, which would re-create
   directories; ruled above), otherwise kv counts as empty.
   When kv `settings_hash` equals the sha256 of the current settings text → restore:
   backup path, when that file still exists → copy it over `settings.json` (the backup stays);
   `none` → remove `settings.json`.
   Otherwise (hash mismatch, or the recorded backup is gone), when the file exists →
-  `removeHookEntries` and write if changed. Remove the three
+  `removeHookEntries` and write if changed; when `rewriteReport(text).reformatted`, first keep the
+  file as it is in a new backup (fix 3: `src/cli/settings-backup.ts`, shared with install) and print
+  where. Remove the three
   links, each only when it is a symlink pointing where install pointed it. Never remove a backup
   file, with or without `--purge`; print one line per `<settingsPath>.skydeck-backup-*` file
   (ruled by the plan owner in pull request #20). Delete kv
@@ -4582,7 +4683,7 @@ export const command: Command;
 **Rules fixed here.**
 - **Boots.** For every boot id in `events`, its last event time. The **latest earlier boot** is
   the boot ≠ `currentBootId` with the largest last event time among boots that have a `start` or
-  `observed` event.
+  `observed` event. *Ruled in fix 1:* `scripted` events are left out of both.
 - **Set.** Default: rows with mark `ended-unexpectedly`, not `done`, not `expired`, whose
   `session.lastHolding.process.bootId` is the latest earlier boot. `all`: additionally every other
   row with `ended-unexpectedly`, not done, not expired, from any boot including the current one.
@@ -4599,8 +4700,10 @@ export const command: Command;
   nothing was started, and no command is printed for it; *ruled:* a failure with `timedOut` may have opened the tab, so
   that entry is waited for like an opened one, its lock kept, and no command is printed).
   Then, from the clock time taken before opening the batch,
-  loop: `ingestSpool(deck)`; entries with `store.hasProcessStartSince(id, batchStartNs)` →
-  `started` (a start of a real process, as for the lock);
+  loop: `ingestSpool(deck)`; entries with `resumeStarted(store, id, batchStartNs, afterEventId)` (fix-5: the lock's rule, with its 5 s tolerance when the id is known) →
+  `started` (a start of a real process, as for the lock; *fix-2:* `afterEventId` is `lockEventId` of
+  the lock value read right after `prepareResumeById`, so only a start stored after restore took the
+  lock counts — one stored before but dated later, the clock having been ahead, does not);
   until all started or `restoreStartTimeoutSeconds` elapsed, `clock.sleep(1000)` between checks;
   the rest → `timedOut` (reported, skipped). *Ruled:* the resume lock of each entry whose tab was
   opened is renewed (`renewLock` with the value read after `prepareResumeById`) before each further
@@ -4623,13 +4726,25 @@ export const command: Command;
   only when the command cannot be printed; after a timeout nothing is printed and the lock stays), and no other handoff is tried. Every other entry: `refresh` and
   `loadRows`, its fresh row and `checkResumable` (no `prepareResumeById`, so no lock; refusal →
   `failed`), and when `isLockHeld` →
-  `failed` "<short> is being resumed by another skydeck"; then its command
-  (`printableCommand(dir, buildResumeCommand(…).argv)`) goes to `printed` and to `report` — except
-  when that is null (a control character): never printed, → `failed` "the command contains control
-  characters and cannot be printed safely".
+  `failed` "<short> is being resumed by another skydeck"; then — *fix-2, ruled by the plan owner* —
+  the line `skydeck resume <full session id> --here` goes to `printed` and to `report` (after the
+  flag lines below), not the session's own command: the user may paste it minutes later, and it runs
+  the guard and takes the lock at that moment, where a raw `claude --resume` line would start a
+  second process on a session resumed meanwhile (principle 7). It is always printable, so a session
+  whose own command holds a control character is no failure here. Before each printed command (this
+  one and the failed hand-off's), one line names the session: `<short> <q title> in <q dir>:` (the
+  row's sanitised title and directory, each quoted with `shellQuote`: pasted along with the command,
+  the line runs a command that does not exist and nothing else — unquoted, a title such as
+  `notes -> README.md` would empty a file), because with `--yes` no list was shown; the command keeps
+  a line of its own so it can be pasted alone. `resumeLine` puts only a lowercase UUID into the line
+  (RangeError otherwise). The failed hand-off above keeps
+  printing its own command (restore holds its lock, as `resume` does after a failed launch), and
+  `--dry-run` keeps showing the real command lines (information, not something to paste).
 - **Command.** *Ruled:* when the boot id cannot be read the command refuses (`SkydeckError`,
   exit 1): every process would look dead, so this boot's running sessions would be offered and the
-  guard could not see them. Rows are passed to `planRestore` in list order (`ls --all`).
+  guard could not see them. *Fix-2:* the boot id is the one the loaded rows carry
+  (`DerivedSession.bootId`), never a second read (design 7.6); with no rows there is nothing to
+  restore. Rows are passed to `planRestore` in list order (`ls --all`).
   Without `--yes` or `--dry-run` (*ruled:* a dry run starts nothing, so it needs no
   confirmation), stdin must be a terminal (else `UsageError`). The list shows per
   entry `<n>. [x| ] <shortId>  <title>  <how it ended>[  was working]` with how it ended =
@@ -4642,7 +4757,9 @@ export const command: Command;
   spaces; a command holding control characters is replaced by a note) and returns 0 without
   opening anything. Empty set → `nothing to restore`, 0. The list and the report lines go to
   stdout, the prompt to stderr. Exit code per D23; the memory stop throws `RestoreStoppedError`
-  after the report lines.
+  after the report lines. *Fix-2, ruled:* after a hand-off the caller sees `claude`'s exit status, so
+  when any selected session was refused, failed or timed out the command prints
+  `skydeck: <n> of <m> selected sessions could not be resumed; see above` on stderr before it returns.
 
 **Test cases**
 
@@ -4675,7 +4792,11 @@ export const command: Command;
 4. A selected session became running → `failed` with `'… is running (pid …)'`; no `open` for it.
 5. `open` returns `{ ok: false, error: 'boom', timedOut: false }` → `failed` with `'boom'`.
 6. Without tabs (`hereTerminal` with `SKYDECK_HANDOFF`) and three entries → first `handedOff` (handoff file
-   written), two lines in `printed`, each `cd -- <dir> && claude --resume <id> …`; only one resume lock exists.
+   written), two lines in `printed`, each `skydeck resume <id> --here` (fix-2; before it, the raw
+   `cd -- <dir> && claude --resume <id> …`), and in `report` each after a line `<short> <q title> in <q dir>:`
+   (the label when there is one; `shellQuote`d); only one resume lock exists. A title holding `->`, `;`, `$(…)`,
+   a backtick or a `'`, and a directory with a space and `$(…)`, give the exact quoted line, and the name lines
+   fed to `sh -s` in a scratch folder create and change nothing.
 7. (Ruled.) `open` returns `{ ok: false, …, timedOut: true }` and the session starts → `started`, and the
    next batch waited for it; it never starts → `timedOut` after 3 sleeps, lock kept, no command printed.
 8. (Ruled.) A second restore run from inside the first one's `open()` on the same entries: every session is
@@ -4690,14 +4811,25 @@ export const command: Command;
    the user quits the first one is accepted.
    Without tabs, a session whose lock another skydeck holds gets no printed command.
 9. (Ruled.) Without tabs: a first entry that became running → `failed`, the second handed off; a handoff
-   that fails → `failed` and its command printed; a later entry that became running, or whose command holds
-   control characters → `failed`, not printed; memory below the minimum → nothing started.
+   that fails → `failed` and its own command printed; a later entry that became running → `failed`, not
+   printed; (fix-2) a later entry whose own command holds control characters → its `skydeck resume <id>
+   --here` line, no failure; a handoff that times out (a fake non-tab terminal) → `failed`, nothing printed,
+   the lock kept, whether its command is printable or not; memory below the minimum → nothing started.
+11. (Fix-2.) A start of a real process stored before restore took the lock but dated ten minutes later → not
+   `started`: the session times out and keeps its lock.
+12. (Fix-5.) The clock steps back while a tab opens: its claude stamped 1.7 s before restore read the clock → `started`,
+   lock dropped; stamped 6 s before → `timedOut`, lock kept.
 
 `commands/restore.test.ts` (`d = testDeck(t, { lines: [...], stdinTTY: … })`; `await main(['restore', …], d.ctx)`)
 - `restore --help` → 0; `restore extra` → 2.
 - `restore --dry-run` → 0, prints the default entries with `[x]`/`[ ]` and their commands, opens nothing.
 - `restore` with stdin not a TTY and no `--yes` → 2.
-- `restore --yes` (here terminal) with S1 and S2 preselected → hands off S1, prints S2's command, exit 0.
+- `restore --yes` (here terminal) with S1 and S2 preselected → hands off S1, prints `skydeck resume <S2> --here`
+  (fix-2), exit 0, nothing on stderr. Running that line after S2 was resumed elsewhere → 4, "is running".
+- (Fix-2.) A hand-off with one of three selected sessions refused → exit 1 and, last on stderr,
+  `skydeck: 1 of 3 selected sessions could not be resumed; see above`; no such line without a hand-off.
+- (Fix-2.) Whichever read of the boot id fails, `restore --all --dry-run` never lists a session running now. With no
+  session at all and no boot id → `nothing to restore`, 0 (ratified).
 - Interactive: `lines ['3', '']` → entry 3 toggled on, run starts with it included; `lines ['q']` → 5.
 - Empty set → `'nothing to restore\n'`, 0.
 - `restore --all --dry-run` lists S5 and S6 as well.
@@ -4725,7 +4857,8 @@ export const command: Command;
   command: when it cannot be found the installation is broken, and it fails as an unknown command
   does, usage on stderr and exit 2); both go through the same error mapping as `command.run` (task
   12); `--help` keeps printing the usage
-- Modify (ruled by the plan owner): `src/platform/types.ts`, `src/platform/real.ts` (`RunOptions.signal`, 2.2),
+- Modify (ruled by the plan owner): `src/platform/types.ts`, `src/platform/real.ts` (`RunOptions.signal`, 2.2; and,
+  added by fix 4, `Clock.every`, 2.2.1, with the fake clock's `every` and `timers()` in `test/helpers/platform.ts`, 2.2.7),
   `src/github.ts` (`signal` of `fetchPrs` / `refreshPrs`, 2.6), `src/cli/context.ts` (`Io.onResize`,
   `Io.onTerminate`, 2.9.1), and the test helpers `test/helpers/platform.ts` (the fake runner honours the signal),
   `test/helpers/capture.ts` and `test/helpers/context.ts` (`resize(size)` triggers `onResize`, `terminate(signal)`
@@ -4753,7 +4886,39 @@ frame (`\x1b[H\x1b[2J` + `render(...).join('\r\n')`), then start a background `r
 refreshMinutes, signal }`; deps include `env: ctx.platform.env`, 2.6); when it settles having fetched or failed
 something, `loadRows` and `withRows(…, reorder false)` and repaint (nothing when it saved nothing; a rejection becomes
 the message, it never rejects). For every chunk from `io.keys()`: `decodeKeys`, then `reduce` per key, run the
-effect, repaint. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
+effect, repaint.
+
+**Background refresh** (added by fix 4, ruled by the plan owner: design 7.3 and 7.4 say the list refreshes "when it
+opens, and in the background"). After the first frame, `clock.every(5000, …)` (one named constant,
+`BACKGROUND_REFRESH_MS`; no configuration key). Each tick: `refresh(deck)` (the refresh every command starts with; not
+`refreshWithProgress`, nothing is written under the list), `loadRows` + `withRows(…, reorder false)` — the order is
+kept, the selection follows its session id, a new session goes to the end of its group (`keepOrder`) — and a frame
+only when it differs from the one on screen; then, unless a fetch of any kind is running, the automatic `refreshPrs`
+of the opening (`force: false`). Loading the rows costs time in proportion to everything recorded, so a tick loads
+them only when they can have changed: the refresh saved something (events ingested or observed, transcripts read or
+marked missing, pull requests attached), a live-session file (any of its fields, its modification time included:
+derive takes it as the last sign of a process that is gone) or whether it is trusted changed, `store.dataVersion()`
+moved (another skydeck saved something: it may have ingested the spool first), or the previous tick failed (its
+refresh may have saved something before it failed); and at least once a minute (`FULL_RELOAD_NS`, for what that check does not see: expiry, a holder without a live file, Claude
+Code's settings). Otherwise only the time moves on (`withRows` with the rows in hand), so the times shown stay right.
+When the selected session leaves the list at any reload (a tick, `r`, a fetch, the editor's return), the cursor goes
+to the row that takes its place (2.9.5) and the message line says `session "<label>" left the list` (the short id
+when it has no label); after `r` that comes first, followed by `refreshing pull requests…`, and stays when the fetch
+has ended. A background failure message is taken away when that work next succeeds, if it is still shown. The title
+line counts the visible sessions in each state (`2 waiting · 3 working · 11 not-running`), in the list's order of the
+states, so that a session that starts waiting out of view is still seen; the counts come after the filter and
+`(all)`, so that a narrow terminal cuts them and not those. The deck part is synchronous, so two can never overlap; a fetch still running at
+the next tick is not joined by another one, and an automatic fetch never starts while the fetch of `r` runs. A tick
+does nothing while a key's effect is carried out (a tab being opened), while the list is off screen (the editor, a
+hand-off, after the end) and while an input is open (a reload could close it; the next tick after it refreshes); in
+the filter and the detail it refreshes as usual. A failure (of the refresh, or of an automatic fetch) is the message
+line once: the same failure again says nothing more until that work has succeeded; it never ends the list. Measured
+with the real files and `/proc` and 4 live processes: at 300 sessions (246 MB of transcripts) a tick that always
+loaded the rows cost 18 ms (median; p95 35 ms); at 3,000 sessions it cost 70 ms (loading the 7,243 events 30 ms,
+deriving 14 ms, the scan 11 ms), and with the change check a tick of the real list costs 15 ms (median; the
+once-a-minute reload 81 ms; mean of all ticks 21 ms), flat over 1,200 ticks. Known cost: with 3,000 transcripts on
+disk and all of them listed, an idle tick is about 60 ms, 40 of it the transcript scan (one `stat` per file); the
+follow-up, when it matters, is to scan less often than every tick. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
 resize (`io.onResize`, which also repaints at once). Nothing is painted while the alternate screen is left.
 
 Effects: `label`/`group` → `cleanLabel`/`cleanGroup` (empty text clears) + `setLabel`/`setGroup`; `note` → leave the
@@ -4786,7 +4951,7 @@ starts no second fetch (the message says one is running); when it settles, `load
 when it saved something, the message taken away, repaint.
 
 Giving the terminal back — on `quit`, the end of `io.keys()`, a `--here` resume, an error, SIGTERM, SIGHUP or an
-outside SIGINT: abort
+outside SIGINT: stop the background refresh's timer (fix 4), abort
 the fetches (one `AbortController` for all: an aborted fetch ends at once and saves nothing), write
 `\x1b[?7h\x1b[?25h\x1b[?1049l` (autowrap, cursor, normal screen), call `return()` on the key iterator, print the
 lines kept for the end on stderr; then (except for a signal, after which the process ends) unsubscribe and return —
@@ -4839,6 +5004,29 @@ parts beyond the first version of this paragraph were ruled by the plan owner af
     (After the re-check of review 2.) A second `r` after the first fetch finished fetches again and the message goes away;
     `r` while a fetch runs still re-reads and reorders; `q` while the fetch of `p` hangs returns at once; a failed
     background fetch is shown in the message line.
+13. (Fix 4, the background refresh; the fake clock's `advanceMs` fires the timer.) After 5 s, not before, a session
+    that started working and a new session are shown, the order and the selected session kept; a tick that changes
+    nothing on screen paints nothing (and still reads the spool); none while an input is open (what is typed stays,
+    the next tick after it refreshes), while the editor runs, or while a tab is being opened; a tick fetches the pull
+    requests that are due and starts no fetch while one runs, nor while the fetch of `r` runs; `q` while a tick's
+    fetch hangs returns at once and nothing is saved or painted after; a failing refresh, and a failing automatic
+    fetch, is said once, the list goes on, and a failure after a refresh that worked is said again. `clock.timers()` is
+    0 after `q`, ctrl-c, the end of the keys, an error, when the handoff is written and at SIGTERM / SIGHUP / SIGINT.
+    (After the review, ruled by the plan owner.) When the selected session leaves the list at a tick (done in another
+    skydeck), the cursor goes to the next row, not the first, the message names it once, and `d` then acts on that row;
+    the same on `r` (the message first, then `refreshing pull requests…`, and the notice left when the fetch ends); a
+    failure message goes away when that work succeeds again; a failed refresh starts no fetch; a tick while the filter
+    is typed keeps it open, and one in the detail shows the session as it is now; a tick that finds nothing new loads
+    no rows (counted by the reads of Claude Code's settings file) while the times shown move on; what another skydeck
+    saved, a live file that changed status and a process that ended without removing its file each show at the next
+    tick, and so does a new transcript; the rows are loaded again after a minute of ticks that found nothing; the
+    title line's counts follow a tick. (After the re-check, ruled.) Each reload condition is the only trigger in a
+    case of its own: an end event alone turns `working` into `not-running`; a session only its live file shows appears
+    at the tick after reconcile observed it; a deleted transcript takes its row away; a leftover live file whose
+    modification time alone changed gives `ended-unexpectedly`; after a tick that failed having ingested an event, the
+    next tick loads the rows. Over two minutes: one load for a change, none for the ticks that find nothing, one a
+    minute after the last loading. The notice of a session that left while the editor ran follows the outcome. On a
+    narrow title line the counts are cut, not the filter or `(all)`.
 
 **Steps**
 - [ ] Write both test files; replace the bare-`skydeck` test in `test/cli/main.test.ts`. `npm test` → fails.
@@ -4889,7 +5077,7 @@ expected result:
    turn record is `user`).
 7. **Reboot drill:** open three sessions (one busy), run `wsl --shutdown` from Windows, reopen →
    `skydeck restore --dry-run` lists all three, the busy one `was working`; `skydeck restore`
-   brings them back in tabs (or the first `--here` and the commands for the others).
+   brings them back in tabs (or the first `--here` and a `skydeck resume <id> --here` line for each of the others).
 8. **Uninstall:** `skydeck uninstall` → `settings.json` equals the backup again.
 
 **Steps**

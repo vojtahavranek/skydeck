@@ -81,22 +81,44 @@ export function visibleRows(model: TuiModel): ListRow[] {
 
 /**
  * Keeps the selection on a visible row. When the selected row is not visible any more the cursor
- * goes to the first visible row (or nowhere), and whatever was open on the old row — the detail,
- * or an input about to be applied to it — is closed, so that nothing is ever applied to a row the
- * user did not choose. A filter being typed stays open: the cursor follows what it matches.
+ * goes to the row that takes its place: given `before` (the model the row was visible in), the
+ * first row after it in `before`'s visible order that is still visible, else the nearest one
+ * before it; without `before`, or when none of those is left, the first visible row (or nowhere).
+ * Whatever was open on the old row — the detail, or an input about to be applied to it — is
+ * closed, so that nothing is ever applied to a row the user did not choose. A filter being typed
+ * stays open: the cursor follows what it matches.
  */
-function settle(model: TuiModel): TuiModel {
+function settle(model: TuiModel, before?: TuiModel): TuiModel {
   const visible = visibleRows(model);
-  if (model.selected !== null && visible.some((row) => row.id === model.selected)) {
+  const shown = new Set(visible.map((row) => row.id));
+  if (model.selected !== null && shown.has(model.selected)) {
     return model;
   }
   const closes = model.mode === 'detail' || model.mode === 'input';
   return {
     ...model,
-    selected: visible[0]?.id ?? null,
+    selected: successor(before, model.selected, shown) ?? visible[0]?.id ?? null,
     mode: closes ? 'list' : model.mode,
     input: closes ? null : model.input,
   };
+}
+
+/** The row that takes the place of `gone` in `before`'s visible order, among the ids in `shown`. */
+function successor(
+  before: TuiModel | undefined,
+  gone: string | null,
+  shown: ReadonlySet<string>,
+): string | null {
+  if (before === undefined || gone === null) {
+    return null;
+  }
+  const old = visibleRows(before).map((row) => row.id);
+  const at = old.indexOf(gone);
+  if (at < 0) {
+    return null;
+  }
+  const after = old.slice(at + 1).find((id) => shown.has(id));
+  return after ?? old.slice(0, at).findLast((id) => shown.has(id)) ?? null;
 }
 
 export function initModel(rows: readonly ListRow[], nowNs: Ns): TuiModel {
@@ -158,8 +180,11 @@ function keepOrder(old: TuiModel['order'], fresh: TuiModel['order']): TuiModel['
  * order is kept (it does not change under the cursor) and only adjusted for rows that appeared,
  * went away, are no longer listed at all, or changed group. The filter, `showAll` and the message
  * stay, and so does the selection, unless its row is not visible any more: then the cursor goes
- * to the first visible row and a detail or an input that was open on the old row is closed
- * (`mode` is 'list' afterwards), so that the caller must not assume the mode survives.
+ * to the row that takes its place — the next row after it in the order shown before that is still
+ * visible, else the nearest one before it, else the first visible row (ruled in fix 4: a key
+ * pressed next must not act on a row far from the one the user chose) — and a detail or an input
+ * that was open on the old row is closed (`mode` is 'list' afterwards), so that the caller must
+ * not assume the mode survives.
  */
 export function withRows(
   model: TuiModel,
@@ -168,12 +193,15 @@ export function withRows(
   reorder: boolean,
 ): TuiModel {
   const fresh = orderOf(rows, nowNs, model.showAll);
-  return settle({
-    ...model,
-    rows: new Map(rows.map((row) => [row.id, row])),
-    order: reorder ? fresh : keepOrder(model.order, fresh),
-    nowNs,
-  });
+  return settle(
+    {
+      ...model,
+      rows: new Map(rows.map((row) => [row.id, row])),
+      order: reorder ? fresh : keepOrder(model.order, fresh),
+      nowNs,
+    },
+    model,
+  );
 }
 
 export function withMessage(model: TuiModel, message: string | null): TuiModel {

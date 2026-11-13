@@ -1,22 +1,33 @@
 // Restore (design 7.8): bring back the sessions that were open when the machine went down — which
 // ones, and starting them a few at a time, each through the resume guard and its lock (principle
 // 7), and only while there is memory to spare.
-import { buildResumeCommand, unknownFlags } from '../claude/launch.ts';
+import { unknownFlags } from '../claude/launch.ts';
+import { isSessionId } from '../claude/live.ts';
 import { RefError, ResumeRefusedError } from '../platform/errors.ts';
 import { NS_PER_MINUTE, NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
 import type { EventRow } from '../store/types.ts';
-import type { OpenResult, Terminal } from '../terminals/types.ts';
+import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { printableCommand } from '../text/shell.ts';
+import { shellQuote } from '../text/shell.ts';
 import type { Deck } from './deck.ts';
 import { ingestSpool } from './ingest.ts';
 import type { ListRow } from './list.ts';
 import { loadRows } from './load.ts';
-import { describeError } from './problems.ts';
 import { refresh } from './refresh.ts';
 import { prepareResumeById } from './resume-by-id.ts';
-import { checkResumable, isLockHeld, readLock, releaseLock, renewLock } from './resume.ts';
+import {
+  checkResumable,
+  flagWarnings,
+  isLockHeld,
+  lockEventId,
+  openSafely,
+  readLock,
+  releaseLock,
+  renewLock,
+  resumeStarted,
+  settleFailedLaunch,
+} from './resume.ts';
 import type { PreparedLaunch } from './resume.ts';
 
 export interface RestoreEntry {
@@ -42,7 +53,8 @@ const START_CHECK_MS = 1000;
  * set is the rows marked `ended-unexpectedly`, not done and not expired, whose last holding was in
  * that boot; `all` takes such rows from every boot, the current one included. An entry is
  * preselected when no exit was recorded, or when it ended at most two minutes before the last
- * event of its own boot (D17).
+ * event of its own boot (D17). `scripted` and `scripted-end` events (design 5.3) are left out of both: a scripted run
+ * neither makes a boot the latest earlier one nor moves the last event of its boot.
  */
 export function planRestore(
   rows: readonly ListRow[],
@@ -53,6 +65,9 @@ export function planRestore(
   const lastEventOf = new Map<string, Ns>();
   const heldIn = new Set<string>();
   for (const event of events) {
+    if (event.kind === 'scripted' || event.kind === 'scripted-end') {
+      continue; // a scripted run (design 5.3) is not what the user had open: it moves no boot's end
+    }
     const last = lastEventOf.get(event.bootId);
     if (last === undefined || event.timeNs > last) {
       lastEventOf.set(event.bootId, event.timeNs);
@@ -111,7 +126,10 @@ export interface RestoreOutcome {
   notStarted: string[];
   /** Resumed --here (no tab adapter). */
   handedOff: string | null;
-  /** Command lines printed instead (no tab adapter). */
+  /**
+   * Lines printed for the user to run (no tab adapter): `skydeck resume <id> --here` for each session
+   * restore does not start itself; the session's own command when its hand-off failed.
+   */
   printed: string[];
   stoppedForMemory: boolean;
 }
@@ -128,7 +146,8 @@ interface Run {
  * only when there is enough memory, and followed by a wait (one look a second, at most
  * config.restoreStartTimeoutSeconds) until each of its sessions has a start event (a tab whose
  * opening timed out is waited for too: it may have opened). Without one: the first session the
- * guard accepts is handed off here, and the commands of the others are printed.
+ * guard accepts is handed off here, and for each of the others that the guard would let through
+ * now, `skydeck resume <id> --here` is printed (it runs the guard again when the user runs it).
  *
  * Every session goes through the resume guard on fresh state (a refresh just before it), so a
  * session another skydeck resumed meanwhile is refused, not resumed a second time (principle 7).
@@ -173,31 +192,43 @@ async function runInTabs(run: Run, entries: readonly RestoreEntry[]): Promise<vo
       if (taken === null) {
         continue;
       }
-      const result = await openSafely(run.terminal, taken.prepared);
+      const { prepared, lock, afterEventId } = taken;
+      const result = await openSafely(run.terminal, { cwd: prepared.cwd, argv: prepared.argv });
       // A call that timed out may have opened the tab anyway: its session is waited for like the
       // others, so that no more than one batch is starting at a time.
       if (result.ok || result.timedOut) {
-        opened.push({ row: entry.row, lock: taken.lock });
-      } else {
-        startedNothing(run, entry.row, taken.lock);
-        fail(run, entry.row, result.error);
+        opened.push({ row: entry.row, lock, afterEventId });
+        continue;
+      }
+      fail(run, entry.row, result.error);
+      // The tab definitely did not open, and restore prints no command for it: the lock would only
+      // keep the user waiting.
+      if (lock !== null) {
+        releaseLock(deck, entry.row.id, lock);
       }
     }
     await awaitStarts(run, opened, sinceNs);
   }
 }
 
-/** A session whose tab was opened and whose start event has not been seen yet; `lock`: the value of its resume lock that restore wrote last. */
+/** A session whose tab was opened and whose start event has not been seen yet. */
 interface Waiting {
   row: ListRow;
+  /** The value of its resume lock that restore wrote last; null once the lock is no longer restore's. */
   lock: string | null;
+  /** The event id its lock records (lockEventId): only a start stored after it is this resume's. */
+  afterEventId: number | null;
 }
 
 /**
- * Looks for the start events of `opened` (at or after `sinceNs`) once a second until all are there
- * or the time is up. At every look the locks of the sessions still waited for are renewed, the
- * last time when restore gives up on them: the wait (default 120 s) is longer than a lock holds
- * (60 s), and a tab that is slow to start claude must not let another resume start it again.
+ * Looks for the start events of `opened` once a second until all are there or the time is up. A
+ * session has started by the rule of the lock (resumeStarted, D16), with `sinceNs` as its time: a
+ * start event of a real process stored after restore took its lock, dated at or after `sinceNs` (or
+ * up to LOCK_START_TOLERANCE_NS before it, the clock having stepped back). One stored before the
+ * lock, but dated later because the clock was ahead then, is not the claude its tab started. At
+ * every look the locks of the sessions still waited for are renewed, the last time when restore
+ * gives up on them: the wait (default 120 s) is longer than a lock holds (60 s), and a tab that is
+ * slow to start claude must not let another resume start it again.
  */
 async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): Promise<void> {
   const { deck, outcome, report } = run;
@@ -206,8 +237,8 @@ async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): P
   let waiting = [...opened];
   while (waiting.length > 0) {
     ingestSpool(deck);
-    waiting = waiting.filter(({ row, lock }) => {
-      if (!deck.store.hasProcessStartSince(row.id, sinceNs)) {
+    waiting = waiting.filter(({ row, lock, afterEventId }) => {
+      if (!resumeStarted(deck.store, row.id, sinceNs, afterEventId)) {
         return true;
       }
       // D16: a start removes the lock. Restore may have renewed it after the start (before it read
@@ -241,17 +272,6 @@ function renewLocks(deck: Deck, sessions: readonly Waiting[]): void {
   }
 }
 
-/**
- * A launch that definitely started nothing (the terminal refused, is not installed, or the open
- * rejected; not a timeout) and for which no command is printed: the lock restore took would only
- * keep the user waiting, so it goes, if it is still that lock.
- */
-function startedNothing(run: Run, row: ListRow, lock: string | null): void {
-  if (lock !== null) {
-    releaseLock(run.deck, row.id, lock);
-  }
-}
-
 async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void> {
   if (!enoughMemory(run, entries)) {
     return;
@@ -265,19 +285,22 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       }
       handoffTried = true;
       const { prepared } = taken;
-      const result = await openSafely(run.terminal, prepared);
+      const result = await openSafely(run.terminal, { cwd: prepared.cwd, argv: prepared.argv });
       if (result.ok) {
         run.outcome.handedOff = entry.row.id;
         run.report(`resuming ${entry.row.shortId} ${entry.row.title} in this terminal`);
         continue;
       }
       fail(run, entry.row, result.error);
-      // As `resume` does when it cannot start the session: the command is printed for the user to
-      // run, and the lock stays so that no other skydeck starts the session meanwhile. Not after a
-      // timeout, when the program may have started anyway (the lock stays then too).
-      if (!result.timedOut && !print(run, prepared.cwd, prepared.argv)) {
+      // As `resume` does when it cannot start the session (settleFailedLaunch): the command is
+      // printed for the user to run, and the lock stays so that no other skydeck starts the session
+      // meanwhile. After a timeout nothing is printed and the lock stays: the program may have
+      // started. With nothing started and nothing printable, the lock is released.
+      const command = settleFailedLaunch(run.deck, prepared, taken.lock, result.timedOut);
+      if (command !== null) {
+        printLine(run, entry.row, command);
+      } else if (!result.timedOut) {
         run.report(`${entry.row.shortId}: ${UNPRINTABLE}`);
-        startedNothing(run, entry.row, taken.lock); // nothing to run by hand: nothing to protect
       }
       continue;
     }
@@ -292,48 +315,55 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       fail(run, row, error.message);
       continue;
     }
-    // The guard's lock, read only: another skydeck is starting this session, and a command run by
-    // hand now would start it twice.
+    // The guard's lock, read only: another skydeck is starting this session. Said now, rather than
+    // a line printed that the guard would refuse when it is run.
     if (isLockHeld(run.deck, row.id)) {
       fail(run, row, `${row.shortId} is being resumed by another skydeck`);
       continue;
     }
     const launch = row.session.launch;
-    const command = buildResumeCommand({
-      claudeCommand: run.deck.config.claudeCommand,
-      launch,
-      sessionId: row.id,
-      label: row.label,
+    warn(run, row, {
+      flagsKnown: launch !== null,
+      unknownFlags: launch === null ? [] : unknownFlags(launch),
     });
-    warn(run, row, command.flagsKnown, launch === null ? [] : unknownFlags(launch));
-    const dir = row.session.dir;
-    if (dir === null) {
-      throw new Error('checkResumable let a session without a directory through'); // unreachable
-    }
-    if (!print(run, dir, command.argv)) {
-      fail(run, row, UNPRINTABLE);
-    }
+    printLine(run, row, resumeLine(row.id));
   }
+}
+
+/**
+ * What restore prints for a session it does not start itself: not the session's own command, but a
+ * resume of it. The user may paste the line minutes later, and the session may have been resumed
+ * elsewhere meanwhile: `skydeck resume` runs the guard and takes the lock at the moment it is run,
+ * where a raw `claude --resume` would start a second process on the transcript (principle 7). Only
+ * a lowercase UUID is put into the line (RangeError otherwise, as buildResumeCommand does), so it is
+ * always safe to print and paste.
+ */
+function resumeLine(sessionId: string): string {
+  if (!isSessionId(sessionId)) {
+    throw new RangeError(`not a session id (a lowercase UUID): ${JSON.stringify(sessionId)}`);
+  }
+  return `skydeck resume ${sessionId} --here`;
 }
 
 const UNPRINTABLE = 'the command contains control characters and cannot be printed safely';
 
 /**
- * Prints "cd -- <q dir> && <q argv…>" (to `printed` and `report`), after a header line the first
- * time; false, and nothing printed, when the directory or a word holds anything sanitize() would
- * change: such a line could act on the terminal, or break when it is pasted.
+ * A line for the user to run, to `printed` and `report`, after a header line the first time. Before
+ * it, a line that names the session: `<short> <title> in <dir>:`, with the title and the directory
+ * (sanitised in the row) quoted for a shell. With --yes no list was shown, and the command names only
+ * an id. The name line sits right under "run:", so a user may paste it along with the command: quoted,
+ * it is a command that does not exist and nothing else, where a title such as `notes -> README.md`
+ * would truncate a file. Not a `#` comment after the command: zsh takes none in an interactive shell.
+ * The command keeps a line of its own, so that it can be pasted alone.
  */
-function print(run: Run, dir: string, argv: readonly string[]): boolean {
-  const line = printableCommand(dir, argv);
-  if (line === null) {
-    return false;
-  }
+function printLine(run: Run, row: ListRow, line: string): void {
   if (run.outcome.printed.length === 0) {
     run.report('to resume these yourself, run:');
   }
+  const where = row.dir === null ? '' : ` in ${shellQuote(row.dir)}`;
+  run.report(`${row.shortId} ${shellQuote(row.title)}${where}:`);
   run.outcome.printed.push(line);
   run.report(line);
-  return true;
 }
 
 /**
@@ -359,7 +389,7 @@ function enoughMemory(run: Run, rest: readonly RestoreEntry[]): boolean {
 }
 
 /**
- * The entry's row as it is now, for a command that is printed rather than started (no lock): a
+ * The entry's row as it is now, for a session whose resume is printed rather than started (no lock): a
  * refresh and the rows read again, as prepareResumeById does, so that the check sees what happened
  * since the entries were planned. A session the deck no longer knows is a failure (null).
  */
@@ -376,12 +406,12 @@ function freshRow(run: Run, entry: RestoreEntry): ListRow | null {
 /**
  * prepareResumeById (a refresh, the rows read again, then the guard and the lock), and the lines
  * about its flags; null when refused or no longer known. `lock` is the value of the lock it took,
- * to renew or release that lock and no other.
+ * to renew or release that lock and no other; `afterEventId` the event id that lock records.
  */
 function prepare(
   run: Run,
   entry: RestoreEntry,
-): { prepared: PreparedLaunch; lock: string | null } | null {
+): { prepared: PreparedLaunch; lock: string | null; afterEventId: number | null } | null {
   const { row } = entry;
   let prepared: PreparedLaunch;
   try {
@@ -395,32 +425,19 @@ function prepare(
     fail(run, row, error.message);
     return null;
   }
-  warn(run, row, prepared.flagsKnown, prepared.unknownFlags);
-  return { prepared, lock: readLock(run.deck, row.id) };
+  warn(run, row, prepared);
+  const lock = readLock(run.deck, row.id);
+  return { prepared, lock, afterEventId: lock === null ? null : lockEventId(lock) };
 }
 
-/** What `resume` says before it starts a session, as one line each, naming the session. */
-function warn(run: Run, row: ListRow, flagsKnown: boolean, unknown: readonly string[]): void {
-  if (!flagsKnown) {
-    run.report(`${row.shortId}: original flags unknown; resuming with defaults`);
-  }
-  if (unknown.length > 0) {
-    run.report(
-      `${row.shortId}: started with flags skydeck does not know, not passed on resume: ${unknown.map(sanitize).join(' ')}`,
-    );
-  }
-}
-
-/** terminal.open, with a rejection turned into a failed open. */
-async function openSafely(terminal: Terminal, prepared: PreparedLaunch): Promise<OpenResult> {
-  try {
-    return await terminal.open({ cwd: prepared.cwd, argv: prepared.argv });
-  } catch (error) {
-    return {
-      ok: false,
-      error: `cannot open the terminal (${describeError(error)})`,
-      timedOut: false,
-    };
+/** What `resume` says before it starts a session (flagWarnings), one line each, naming the session. */
+function warn(
+  run: Run,
+  row: ListRow,
+  launch: Pick<PreparedLaunch, 'flagsKnown' | 'unknownFlags'>,
+): void {
+  for (const line of flagWarnings(launch)) {
+    run.report(`${row.shortId}: ${line}`);
   }
 }
 

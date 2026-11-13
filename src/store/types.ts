@@ -1,6 +1,11 @@
 import type { Ns } from '../platform/types.ts';
 
-export type EventKind = 'start' | 'end' | 'observed';
+/**
+ * `scripted`: a scripted run (`claude -p`, an SDK run) started on a session skydeck already knew
+ * (design 5.3). It says only that its process holds the session while it is alive.
+ * `scripted-end`: that process ended its holding (it cleared or switched); it holds nothing more.
+ */
+export type EventKind = 'start' | 'end' | 'observed' | 'scripted' | 'scripted-end';
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
 
@@ -9,7 +14,7 @@ export interface EventRow {
   spoolName: string | null; // null for observed events
   timeNs: Ns;
   kind: EventKind;
-  detail: StartDetail | EndDetail | ''; // '' for observed
+  detail: StartDetail | EndDetail | ''; // '' for observed and scripted
   rawDetail: string | null; // source / reason as received
   sessionId: string;
   bootId: string;
@@ -118,5 +123,7 @@ export type KvKey =
   | 'ingest_problems'
   | 'reconcile_problems'
   | 'scan_problems'
-  // A resume lock (design 7.6, D16): the decimal time in ns it was taken; one per session id.
+  // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
+  // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
+  // version wrote); one per session id.
   | `resume_lock:${string}`;

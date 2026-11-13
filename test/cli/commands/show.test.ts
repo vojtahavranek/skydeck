@@ -10,7 +10,13 @@ import { refCases } from '../../helpers/command-cases.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
 import { S1, S2, SEC, T0, fakeRunner, runResult } from '../../helpers/platform.ts';
 import type { RunCall } from '../../helpers/platform.ts';
-import { twoSessions, withRunner } from '../../helpers/session-files.ts';
+import {
+  twoSessions,
+  userRecord,
+  withRunner,
+  writeTranscript,
+} from '../../helpers/session-files.ts';
+import { testDeck } from '../../helpers/deck.ts';
 
 const USAGE_FIRST_LINE = 'skydeck show <ref> [--json] [--refresh]';
 const PR1 = 'https://github.com/o/r/pull/1';
@@ -107,6 +113,17 @@ test('show --json prints one parsed object with the session fields and the extra
   assert.deepEqual(json.links, []);
   assert.deepEqual(json.holders, []);
   assert.equal(d.stdout(), `${JSON.stringify(json, null, 2)}\n`);
+});
+
+test('show --json carries the directory as it is', async (t) => {
+  const d = testDeck(t);
+  const dir = '/home/dev/pro\u0007jects/a\u009bb';
+  writeTranscript(d, S1, [{ ...userRecord(S1, T0 - 30n * SEC), cwd: dir }]);
+
+  assert.equal(await main(['show', S1, '--json'], d.ctx), 0);
+
+  assert.equal((JSON.parse(d.stdout()) as ShowJson).dir, dir);
+  assert.doesNotMatch(d.stdout(), /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
 });
 
 test('show --json comes before or after the reference', async (t) => {

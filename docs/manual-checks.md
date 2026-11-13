@@ -22,7 +22,8 @@ Setup:
 When an item fails, run `skydeck doctor` first, then read `<stateDir>/hook.log` (by default
 `~/.local/state/skydeck/hook.log`).
 
-Run item 8 last: it removes the hook. Install again afterwards.
+Run item 8 last: it removes the hook. Item 9 needs the hook, so run it before item 8 (or after you
+install again).
 
 ## 1. Install
 
@@ -40,7 +41,9 @@ Answer `y`.
 Expected:
 
 - Before the question, the two hook entries (`SessionStart` and `SessionEnd`) are printed: exactly what
-  is going to be added.
+  is going to be added. When the file is not in skydeck's formatting (four-space indentation, no
+  newline at the end), one more line follows: `the rest of the file will be rewritten in skydeck's
+  formatting; the file as it is now is kept in <backup path>`.
 - Three `linked ...` lines (fewer when links already exist), then
   `added the hook entries to ...; the file as it was is kept in ...settings.json.skydeck-backup-<UTC time>`,
   then `skydeck is installed`.
@@ -48,7 +51,7 @@ Expected:
   `cmp /tmp/settings.before.json ~/.claude/settings.json.skydeck-backup-*` prints nothing (with
   more than one backup, name the one that was printed).
 - `~/.claude/settings.json` still has everything it had, plus the two entries. Its layout may
-  change: it is written with two-space indentation.
+  change: it is written with two-space indentation and a newline at the end.
 - `skydeck doctor` prints no line that starts with `problem`, and `echo $?` right after it prints
   `0`. (It needs `gh` logged in.)
 - `bin/skydeck install` a second time prints `hook entries already present` and makes no new backup.
@@ -180,8 +183,12 @@ Expected: the same list without the command lines (only `--dry-run` prints them)
   at a time), skydeck prints `started <short id> <title>` for each session when it reports its
   start, and the exit code is 0. `skydeck ls` shows the three sessions `waiting` or `working`.
 - With `"terminal": "here"`: skydeck prints `resuming <short id> <title> in this terminal`, then
-  `to resume these yourself, run:` with one command line for each other session, and `claude` takes
-  over this terminal. Run each printed command in its own terminal.
+  `to resume these yourself, run:` and, for each other session, a line naming it
+  (`<short id> '<title>' in <folder>:`) with `skydeck resume <full session id> --here` under it, and
+  `claude` takes over this terminal. Run each printed `skydeck resume ... --here` in its own
+  terminal. The exit status you see afterwards is `claude`'s own. If a session could not be resumed,
+  `skydeck: <n> of <m> selected sessions could not be resumed; see above` is printed before `claude`
+  takes over.
 - When less than `restoreMinFreeMb` (default 4096 MiB) of memory is available, `restore` starts
   nothing, prints `stopped: only <n> MiB of memory available, ...` and the sessions `not started`,
   and exits 5. Lower the key in `config.json`, or free memory.
@@ -200,8 +207,35 @@ Sessions that are running are not touched.
 
 If you or Claude Code changed the settings file after the install, the line is
 `removed the hook entries from <settings file>` instead, and your later changes stay. That is the
-right result too.
+right result too. A hook of yours that only mentions the skydeck hook's path stays as well: only the
+two entries that are exactly what install wrote are removed. When that rewrites more of the file than
+those entries, uninstall first keeps the file as it is in a new backup and prints
+`the rest of the file was rewritten in skydeck's formatting; the file as it was is kept in <backup>`.
 
 `bin/skydeck doctor` now reports `problem  no SessionStart hook entry ...`, or, with a default `node`
 older than 24.12 (the link is gone), the line about `SKYDECK_NODE`. Run `bin/skydeck install` (with
 `SKYDECK_NODE=...` in front in that case) to put skydeck back.
+
+## 9. The list refreshes by itself
+
+skydeck is installed. In terminal S, open the interactive list (a terminal, not a pipe):
+
+```sh
+skydeck
+```
+
+Expected: the title line reads `skydeck  <n> sessions  <a> waiting · <b> working · <c> not-running`
+(a state with no session is left out), and the cursor is on a row. Leave the list open.
+
+In A, start `claude` in `~/skydeck-try`. Expected, within about 5 seconds and without a key press:
+the new session appears in the list, the counts in the title line change, and the cursor stays on
+the session it was on: the rows do not move. Send a prompt in A: its row goes from `waiting` to
+`working` and back by itself.
+
+In another terminal C, mark the session under the cursor as done: `skydeck done <ref>`. Expected,
+within about 5 seconds: the cursor moves to the row that takes its place, and the last line says
+`session "<label>" left the list` (the short id instead of the label when it has none). Press `a`
+to show all rows: the done session is back; select it and press `d` to undo.
+
+Press `r`: the list refreshes at once, puts the rows in order again, and reads the status of the
+pull requests again. Press `q` to leave.

@@ -79,6 +79,51 @@ describe('real clock', () => {
 
     assert.ok(clock.nowNs() - before >= 20_000_000n);
   });
+
+  test('every calls back every that many milliseconds until it is stopped', async () => {
+    const { clock } = realPlatform();
+    let calls = 0;
+
+    const stop = clock.every(10, () => {
+      calls++;
+    });
+    // Until it was called twice; a loaded machine may take its time, so the deadline is generous.
+    const deadline = Date.now() + 10_000;
+    while (calls < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    stop();
+    const atStop = calls;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.ok(atStop >= 2, String(atStop));
+    assert.equal(calls, atStop, 'nothing after it was stopped');
+  });
+
+  test('every refuses a period that is not a positive whole number of milliseconds', () => {
+    const { clock } = realPlatform();
+
+    for (const ms of [0, -5, 1.5, Number.NaN]) {
+      assert.throws(() => clock.every(ms, () => {}), RangeError, String(ms));
+    }
+  });
+
+  test('a timer of every does not keep the process alive', async (t) => {
+    const s = sandbox(t);
+    const script = [
+      `const { realPlatform } = await import(${JSON.stringify(REAL_MODULE)});`,
+      'realPlatform().clock.every(60_000, () => {});',
+    ].join('\n');
+
+    const result = await realPlatform().runner.run(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { cwd: s.root, env: s.env(), timeoutMs: 20_000 },
+    );
+
+    assert.equal(result.timedOut, false);
+    assert.equal(result.code, 0, result.stderr);
+  });
 });
 
 describe('real files', () => {

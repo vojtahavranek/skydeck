@@ -81,6 +81,9 @@ function withRunner(
   return { ctx: { ...d.ctx, platform: { ...d.platform, runner } }, runner };
 }
 
+/** The value of S1's lock taken at T0: the time and S1's latest event id. */
+const takenAtT0 = (d: TestDeck): string => `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`;
+
 const fallback = (dir: string, argv: readonly string[]): string =>
   `cd -- ${shellQuote(dir)} && ${argv.map(shellQuote).join(' ')}`;
 
@@ -239,7 +242,7 @@ test('resume --tab that WezTerm refuses prints the reason and the quoted command
   const dir = session(d, { argv: ['claude', '--append-system-prompt', "it's"] });
   const { ctx } = withRunner(d, () => runResult({ code: 1, stderr: 'no window\n' }));
   assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 1);
-  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`); // the printed command may be run now
+  assert.equal(d.deck.store.getKv(lockKey(S1)), takenAtT0(d)); // the printed command may be run now
   d.clock.setNs(T0 + 5n * SEC);
   assert.equal(await main(['resume', '0b5f', '--tab'], d.ctx), 4);
   d.clock.setNs(T0);
@@ -272,7 +275,7 @@ test('resume --tab that timed out prints no command and keeps the lock: the tab 
     'skydeck: wezterm timed out; a tab may have opened\n' +
       `skydeck: run skydeck again to see whether session ${S1} is running\n`,
   );
-  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), takenAtT0(d));
   d.clock.setNs(T0 + 5n * SEC);
   assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 4);
 });
@@ -343,6 +346,28 @@ test('resume twice within 60 s: the second is refused', async (t) => {
   d.clock.setNs(T0 + 20n * SEC);
   assert.equal(await main(['resume', '0b5f'], d.ctx), 4);
   assert.equal(d.stderr(), 'skydeck: 0b5f3c1e is being resumed (20 s ago); try again in 40 s\n');
+});
+
+test('a start dated in the future does not release the lock: of three resumes in a row only the first goes through', async (t) => {
+  const d = deck(t);
+  const dir = session(d, { argv: ['claude'] });
+  // The clock was ten minutes ahead when this claude (pid 5151, dead now) started, then stepped back.
+  const fields = {
+    event: 'SessionStart' as const,
+    timeNs: T0 + 600n * SEC,
+    pid: 5151,
+    pwd: dir,
+    argv: ['claude'],
+    input: hookInput('SessionStart', S1, { source: 'resume', cwd: dir }),
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 3)), spoolText(fields));
+  assert.equal(await main(['resume', '0b5f', '--here'], d.ctx), 0);
+  assert.equal(await main(['resume', '0b5f', '--here'], d.ctx), 4);
+  assert.equal(await main(['resume', '0b5f', '--here'], d.ctx), 4);
+  assert.equal(
+    d.stderr(),
+    'skydeck: 0b5f3c1e is being resumed (0 s ago); try again in 60 s\n'.repeat(2),
+  );
 });
 
 test('resume twice, 61 s apart: both go through', async (t) => {

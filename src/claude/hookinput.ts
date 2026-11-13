@@ -4,7 +4,7 @@
  * Pure: it reads no file and calls no program; whether a path exists is asked through a callback.
  */
 import type { Ns } from '../platform/types.ts';
-import { absolutizePathFlags, isPrintRun, storableArgv } from './launch.ts';
+import { absolutizePathFlags, isPrintRun, isSessionId, storableArgv } from './launch.ts';
 import { argvFromCmdline, procStartFromStat } from './procstat.ts';
 
 export interface SpoolEvent {
@@ -69,7 +69,6 @@ export class SpoolParseError extends Error {
 
 const NAME = /^[0-9]+-[0-9]+-[0-9]+\.ev$/;
 const DIGITS = /^[0-9]+$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 /** The database column is a signed 64-bit integer. */
 const INT64_MAX = 9_223_372_036_854_775_807n;
@@ -84,9 +83,13 @@ function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
 }
 
-/** The value as a lower-case UUID when it is a string that is one. */
+/** The value lowercased, when it is a string that is then a session id (`isSessionId`). */
 function uuid(value: unknown): string | null {
-  return typeof value === 'string' && UUID.test(value) ? value.toLowerCase() : null;
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const lower = value.toLowerCase();
+  return isSessionId(lower) ? lower : null;
 }
 
 /**

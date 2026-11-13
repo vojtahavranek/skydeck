@@ -119,6 +119,37 @@ test('new --tab without a tab adapter prints the command and exits 1', async (t)
   );
 });
 
+test('new --tab without a tab adapter keeps the label and group: the printed command may be run', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--tab', '--label', 'fix it', '--group', 'ABC-1'], d.ctx), 1);
+  assert.equal(d.deck.store.meta(UUID1)?.label, 'fix it');
+  assert.equal(d.deck.store.meta(UUID1)?.group, 'ABC-1');
+});
+
+test('new whose tab definitely did not open, with no command printed, removes the label and group it stored', async (t) => {
+  const answers = [
+    runResult({ code: 1, stderr: 'no window\n' }), // refused
+    runResult({ code: null, notFound: true }), // not installed
+  ];
+  for (const answer of answers) {
+    const d = deck(t, { config: { terminal: 'wezterm' } });
+    d.platform.runner = fakeRunner(() => answer);
+    const args = ['new', '--tab', '--label', 'fix it', '--group', 'ABC-1'];
+    assert.equal(await main([...args, '--', '--model', 'op\x1b[31mus'], d.ctx), 1);
+    assert.ok(d.stderr().includes('cannot be printed safely'), d.stderr());
+    assert.equal(d.deck.store.meta(UUID1), null, d.stderr()); // a session that never existed
+    assert.deepEqual(d.deck.store.allMeta(), []);
+  }
+});
+
+test('new whose tab timed out keeps the label and group even when no command can be printed', async (t) => {
+  const d = deck(t, { config: { terminal: 'wezterm' } });
+  d.platform.runner = fakeRunner(() => runResult({ code: null, timedOut: true }));
+  const args = ['new', '--tab', '--label', 'fix it', '--', '--model', 'op\x1b[31mus'];
+  assert.equal(await main(args, d.ctx), 1);
+  assert.equal(d.deck.store.meta(UUID1)?.label, 'fix it'); // the tab may have opened
+});
+
 test('new -- -r <id> is refused: it would resume a session past the guard', async (t) => {
   const d = deck(t);
   const id = '0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d';

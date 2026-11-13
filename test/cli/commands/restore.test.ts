@@ -7,16 +7,27 @@ import type { Context } from '../../../src/cli/context.ts';
 import { main } from '../../../src/cli/main.ts';
 import { isoFromNs } from '../../../src/platform/time.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
+import { acquireLock } from '../../../src/sessions/resume.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
+import { shellQuote } from '../../../src/text/shell.ts';
 import { testContext } from '../../helpers/context.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
-import { BOOT_A, BOOT_B, SEC, T0, fakeRunner, runResult } from '../../helpers/platform.ts';
+import {
+  BOOT_A,
+  BOOT_B,
+  SEC,
+  T0,
+  fakeRunner,
+  runResult,
+  statLine,
+} from '../../helpers/platform.ts';
 import {
   BOOT_C,
   DAY,
   HOUR,
   MINUTE,
   NOW,
+  PROC_START,
   addSession,
   projectDir,
   restoreDeck,
@@ -76,6 +87,11 @@ function command(d: TestDeck, id: string): string {
   return `cd -- ${projectDir(d)} && claude --resume ${id}`;
 }
 
+/** What restore prints for a session it does not start itself. */
+function resumeLine(id: string): string {
+  return `skydeck resume ${id} --here`;
+}
+
 /** The context of `d` with a runner whose WezTerm tabs start claude for the sessions in `starting`. */
 function withTabs(d: TestDeck, starting: readonly string[]): Context {
   const runner = fakeRunner((call) => {
@@ -92,6 +108,8 @@ test('restore --help prints the usage and exits 0', async () => {
   const c = testContext();
   assert.equal(await main(['restore', '--help'], c.ctx), 0);
   assert.ok(c.stdout().startsWith(USAGE_FIRST_LINE), c.stdout());
+  // What it prints without a tab terminal: a resume line per session it does not start itself.
+  assert.ok(c.stdout().includes('"skydeck resume <id> --here"'), c.stdout());
   assert.equal(c.stderr(), '');
 });
 
@@ -152,7 +170,7 @@ test('restore without --yes when stdin is not a terminal is a usage error', asyn
   assert.equal(existsSync(handoffPath(d)), false);
 });
 
-test('restore --yes hands off the first preselected session and prints the command of the next', async (t) => {
+test('restore --yes hands off the first preselected session and prints a skydeck resume of the next', async (t) => {
   const d = machine(t);
   assert.equal(await main(['restore', '--yes'], d.ctx), 0);
   assert.equal(
@@ -160,12 +178,47 @@ test('restore --yes hands off the first preselected session and prints the comma
     handoffScript({ cwd: projectDir(d), argv: ['claude', '--resume', sid(1)] }),
   );
   const out = d.stdout();
-  assert.ok(out.includes(`${command(d, sid(2))}\n`), out);
+  assert.ok(
+    out.includes(
+      `to resume these yourself, run:\n00000002 ${shellQuote(titleOf(d, sid(2)))} in ${shellQuote(projectDir(d))}:\n${resumeLine(sid(2))}\n`,
+    ),
+    out,
+  );
+  assert.equal(out.includes('cd --'), false, out);
   assert.equal(out.includes(sid(3)), false, out);
   assert.deepEqual(
     d.deck.store.kvEntries('resume_lock:').map((entry) => entry.key),
     [`resume_lock:${sid(1)}`],
   );
+  assert.equal(d.stderr(), ''); // nothing failed: no summary before the hand-off
+});
+
+test('before a hand-off restore says on stderr how many sessions failed: the exit status will be claude’s', async (t) => {
+  const d = machine(t, { stdinTTY: true, lines: ['3', ''] });
+  // Another skydeck is resuming sid(2): it fails; sid(1) is handed off, sid(3) printed.
+  acquireLock(d.deck, sid(2), { latestEventId: d.deck.store.latestEventIdOfSession(sid(2)) });
+  assert.equal(await main(['restore'], d.ctx), 1);
+  assert.ok(existsSync(handoffPath(d)));
+  assert.ok(d.stdout().includes('failed 00000002: 00000002 is being resumed by another skydeck\n'));
+  assert.ok(d.stdout().includes(`${resumeLine(sid(3))}\n`), d.stdout());
+  // After the prompts (stderr too); the printed sid(3) is not counted: its line is the user's to run.
+  assert.equal(
+    d.stderr(),
+    `${PROMPT}${PROMPT}skydeck: 1 of 3 selected sessions could not be resumed; see above\n`,
+  );
+});
+
+test('the line restore prints runs the guard when the user runs it: a session resumed meanwhile is refused', async (t) => {
+  const d = machine(t);
+  assert.equal(await main(['restore', '--yes'], d.ctx), 0);
+  assert.ok(d.stdout().includes(`${resumeLine(sid(2))}\n`), d.stdout());
+  // Minutes later, before the user pastes the line, sid(2) has been resumed in another terminal.
+  d.clock.setNs(NOW + 5n * MINUTE);
+  startClaude(d, sid(2), 4242);
+  const [program, ...args] = resumeLine(sid(2)).split(' ');
+  assert.equal(program, 'skydeck');
+  assert.equal(await main(args, d.ctx), 4);
+  assert.ok(d.stderr().endsWith('skydeck: 00000002 is running (pid 4242)\n'), d.stderr());
 });
 
 test('restore at a terminal: the user toggles entry 3 on, and the run includes it', async (t) => {
@@ -175,8 +228,8 @@ test('restore at a terminal: the user toggles entry 3 on, and the run includes i
   const out = d.stdout();
   assert.ok(out.includes(`3. [ ] 00000003`), out);
   assert.ok(out.includes(`3. [x] 00000003`), out);
-  assert.ok(out.includes(`${command(d, sid(2))}\n`), out);
-  assert.ok(out.includes(`${command(d, sid(3))}\n`), out);
+  assert.ok(out.includes(`${resumeLine(sid(2))}\n`), out);
+  assert.ok(out.includes(`${resumeLine(sid(3))}\n`), out);
   assert.equal(
     readFileSync(handoffPath(d), 'utf8'),
     handoffScript({ cwd: projectDir(d), argv: ['claude', '--resume', sid(1)] }),
@@ -203,7 +256,7 @@ test('restore at a terminal: a number not in the list is refused and asked again
   assert.ok(d.stderr().includes("'7' is not a number from 1 to 3"), d.stderr());
   assert.ok(d.stderr().includes("'x' is not a number from 1 to 3"), d.stderr());
   // Nothing of a refused line is toggled: entry 2 is still selected.
-  assert.ok(d.stdout().includes(`${command(d, sid(2))}\n`), d.stdout());
+  assert.ok(d.stdout().includes(`${resumeLine(sid(2))}\n`), d.stdout());
 });
 
 test('restore at a terminal with everything toggled off starts nothing and exits 0', async (t) => {
@@ -250,6 +303,7 @@ test('restore exits 1 when a selected session was refused', async (t) => {
     1,
   );
   assert.ok(d.stdout().includes('failed 00000002: 00000002 is running (pid 4242)\n'), d.stdout());
+  assert.equal(d.stderr(), ''); // no hand-off: the exit status says it
 });
 
 test('restore exits 5 when memory is short, listing what was not started', async (t) => {
@@ -263,12 +317,38 @@ test('restore exits 5 when memory is short, listing what was not started', async
   assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
 });
 
+test('restore with no session at all says there is nothing to restore, even without a boot id', async (t) => {
+  // No rows carry a boot id, and there is nothing that could be offered by mistake.
+  const d = restoreDeck(t);
+  d.proc.setBootId(null);
+  assert.equal(await main(['restore', '--yes'], d.ctx), 0);
+  assert.equal(d.stdout(), 'nothing to restore\n');
+  assert.equal(d.stderr(), '');
+});
+
 test('restore refuses to run when the boot id cannot be read', async (t) => {
   const d = machine(t);
   d.proc.setBootId(null);
   assert.equal(await main(['restore', '--yes'], d.ctx), 1);
   assert.ok(d.stderr().includes('boot id'), d.stderr());
   assert.equal(existsSync(handoffPath(d)), false);
+});
+
+test('restore decides on the boot id its rows were loaded with: a read that failed there is never mixed with one that worked', async (t) => {
+  // Whichever read of the boot id fails, a session running now is never offered: without the boot
+  // id every process looks dead, and its session would look as if it had ended unexpectedly.
+  for (let failing = 1; failing <= 6; failing++) {
+    const d = machine(t);
+    addSession(d, sid(7), { boot: BOOT_B, pid: 107, startNs: NOW - HOUR });
+    d.proc.setProcess(107, { stat: statLine(107, PROC_START), cmdline: ['claude'] });
+    const real = d.proc.bootId;
+    let reads = 0;
+    d.proc.bootId = () => (++reads === failing ? null : real());
+    const code = await main(['restore', '--all', '--dry-run'], d.ctx);
+    const out = d.stdout();
+    assert.equal(out.includes('00000007'), false, `read ${failing} failed:\n${out}`);
+    assert.equal(code, out === '' ? 1 : 0, `read ${failing} failed: ${d.stderr()}`);
+  }
 });
 
 test('restore --dry-run never prints a command that holds control characters', async (t) => {
