@@ -305,7 +305,10 @@ Marks are shown next to the state.
   across `/clear`.
 - **Group.** One line without control characters, optional. When no group is set and the title starts with a ticket key
   (configuration `groupPattern`, default `^[A-Z][A-Z0-9]+-[0-9]+`), that key is the group.
-- **Note.** Free text of any length, edited in `$EDITOR`.
+- **Note.** Free text of any length, stored as typed. It is edited in `$VISUAL`, else `$EDITOR`,
+  else `vi`: the value is split on spaces and the path of a temporary file holding the note
+  (`<stateDir>/note-<session id>.md`, removed afterwards) is appended; stdin must be a terminal.
+  `skydeck note <ref> --set <text>` sets it without an editor, and an empty note is no note.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
@@ -331,8 +334,10 @@ never received a prompt has no transcript (14).
   Owner, repository and number are validated before use.
 - **Automatic.** Pull requests named in a session's `pr-link` records are attached with origin
   `auto`. Such a record means the session acted on the pull request, not that it created it.
-- **Manual.** `pr add` attaches with origin `manual` and clears an earlier detach. `pr rm`
-  detaches; a detached pull request is not attached again by a later `pr-link` record.
+- **Manual.** `pr add` attaches with origin `manual` and clears an earlier detach, then fetches
+  that pull request at once (same 10 second timeout, so a fresh attachment shows its status); a
+  failed fetch leaves it "can't read" and `pr add` still succeeds. `pr rm` detaches; a detached
+  pull request is not attached again by a later `pr-link` record.
 - **Status** is fetched with `gh api graphql`, using query variables, in batches of at most 50
   pull requests per query, with a 10 second timeout. Per pull request it stores state (`open`,
   `draft`, `merged`, `closed`), review decision, the combined checks result, the time of the last
@@ -380,8 +385,8 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 | `skydeck` | Interactive list. |
 | `skydeck ls [--all] [--json]` | Print the list. |
 | `skydeck show <ref> [--json]` | One session: state, marks, project directory, launch command, links, note, pull requests, holders. |
-| `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text, clear. |
-| `skydeck note <ref> [--set <text>]` | Edit in `$EDITOR`, or set directly. |
+| `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text, clear. The text is all the arguments after `<ref>`, joined by one space. |
+| `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
 | `skydeck new [--label <text>] [--group <text>] [-- <claude flags>]` | Start a new session in the current directory (7.7). |
