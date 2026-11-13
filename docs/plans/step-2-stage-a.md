@@ -474,7 +474,11 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
   null, both null exactly when `started` is false (S2 8.1: null before the start); `snapSeq` ≤
   `seq`; `meta.sessionId` passes `isSessionId`; `meta.kind` `resume` or `new`; `meta.slot` 1–9 or
   null (S2 7.6); `exited`, when not null, as `X` below, with `notStarted` set exactly when
-  `started` is false.
+  `started` is false. The keeper refuses a spec that would make it write a `hello` these rules
+  refuse (ruled by the plan owner, task 9): `id`, `startBy`, `lock` and every `meta` field are
+  checked by them when the spec arrives, and the socket must be an absolute path without NUL; a
+  refused spec is one line `keeper <id>: bad-spec` (`-` without a valid id), exit 2, nothing
+  created or started.
 - **`T` started**: `pid` from 1, `procStart` from 0.
 - **`X` exit — how an exit is represented.** `code` is the exit status (0–255) of a program that
   exited, else null; `signal` is the number (1–255) of the signal that killed it, else null —
@@ -482,6 +486,14 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
   which the keeper sends as `code: null, signal: N`. A program that ran has exactly one of the
   two; one that never started has neither, and `notStarted` holds the reason, never empty (a failed
   `exec` is a program that ran: `code` 127).
+- **`D` records end at UTF-8 character boundaries** (ruled by the plan owner, task 9): a snapshot is
+  text, so a record boundary inside a character could not be reproduced by one. When a read ends
+  with the first bytes (at most three) of a multi-byte character, the keeper holds them back and
+  puts them in front of the next read; an `R` record that comes meanwhile waits too, so no resize
+  stands between the two halves of a character. Bytes that cannot begin a valid character are never
+  held; held bytes are sent as they are when the next read shows they do not go on as one, or when
+  the program has ended (before `X`). Nothing is dropped or reordered. Escape sequences split
+  across records are not the keeper's (task 33).
 
 ### 2.4 The stand-in: `test/fixtures/standin/` (task 3)
 
@@ -1643,7 +1655,9 @@ export function ageBetween(nowNs, thenNs) {} // (string, string) → string
 
 **Depends on:** 1, 3, 5, 7 · **Wave:** 2 · **Design:** S2 2 (principle 3, crash dumps), 4.2 (pid lines, sockets), 7.1, 7.7, 7.8, 8.1, 17.2 · **Contracts:** 2.3, 2.4 · **Decisions:** A2, A12, A14
 
-**Goal.** `bin/skydeck-keeper`: one python3 file, standard library only, about 250–300 lines,
+**Goal.** `bin/skydeck-keeper`: one python3 file, standard library only, about 810 lines (about 700
+without comments and blank lines; ruled by the plan owner on #47: the first estimate counted the
+prototype's loop, and S2 7.1's rules and the checks of every input the keeper reads add the rest),
 that owns one terminal's pty and program, as S2 7.1 specifies step by step, speaking S2 8.1.
 Start from the research prototype `step2-research/terminals/keeper-helper.py` (read it: it
 starts the program on the first connection, has no claim, no `G`/`N`, no `startBy`, no pid line, no
@@ -1670,7 +1684,12 @@ quote a frame's data (S2 2). Additions the design leaves to the code:
 the 10-minute linger after exit is `SKYDECK_TEST_KEEPER_LINGER_SECONDS` when set (tests only); the
 keeper writes its errors to stderr as one line each (`keeper <id>: <kind>`), never output or
 input; the tail and send caps are `SKYDECK_TEST_KEEPER_TAIL_BYTES` / `SKYDECK_TEST_KEEPER_SEND_BYTES` when
-set (tests only, so the cap tests need not move 8 MiB).
+set (tests only, so the cap tests need not move 8 MiB). Ruled by the plan owner on #47: the input
+queue holds at most 4 MiB — an `I` frame that does not fit waits unread in the connection, one
+larger than 4 MiB closes it (`input-too-long`); at most 8 connections wait for their claim, a ninth
+closes the oldest; a `P` numbered below the current snapshot or beyond the last record closes the
+connection (`bad-park`); `D` records end at UTF-8 character boundaries (2.3); the spec is checked
+by the `hello` rules (2.3).
 
 **Tests** (platform: `realTestPlatform`; real python3, the stand-in of 2.4 as the program; the client claims with `C`)
 - `start.test.ts`: a connection alone, and a `C` alone, start nothing (no `start` record, `hello`
@@ -1688,7 +1707,12 @@ set (tests only, so the cap tests need not move 8 MiB).
   `Z 100 30` → the pty size changes (the stand-in records it) and an `R` record comes back;
   `P` with record number n → the keeper keeps the snapshot and drops records ≤ n; a new
   connection then gets `H` (`snapSeq` n, `seq`), `S`, exactly the records after n, and live ones; a
-  second claim replaces the first connection (the first is closed); a first frame other than `C`
+  second claim replaces the first connection (the first is closed); a ninth unclaimed connection
+  closes the oldest; a park numbered below the current snapshot closes the connection; an `I` frame
+  of more than 4 MiB closes it, one of exactly 4 MiB is taken whole; a character split across two
+  reads at each of its bytes is one record, bytes that cannot begin a character are not held, held
+  bytes that do not go on as one and those left when the program ends are sent as they are, and a
+  resize while a character is half read comes after it (ruled, 2.3); a first frame other than `C`
   closes that connection, and the keeper still serves the next; an unparseable frame (type `Q`)
   closes the connection and the keeper lives on; the keeper only accepts its own uid (a test that
   can connect as another uid is skipped with a reason when it cannot).
@@ -1698,12 +1722,16 @@ set (tests only, so the cap tests need not move 8 MiB).
   when the program reads; the tail cap → oldest records dropped and `hello.gap` true on the next
   claim; the send-queue cap with a client that does not read → the connection is closed, the
   keeper keeps reading the pty, and a new claim gets snapshot and tail.
-- `exit.test.ts`: `/exit` → `X` `{ code: 0 }` after the last `D`; `/fail 3` → 3; `SIGKILL` of the
-  stand-in → `signal` 9; a spec and a frame carrying a marker string that make the keeper fail
+- `exit.test.ts`: `/exit` → `X` `{ code: 0 }` after the last `D`; `/fail 3` → 3; a program that
+  kills itself with `SIGKILL` (`sh -c 'kill -KILL $$'`, so that the test signals nothing itself,
+  A34; ruled) → `signal` 9; a spec and a frame carrying a marker string that make the keeper fail
   (a spec with a wrong type, a `P` payload that cannot be decoded) leave the marker in no line of
   its stderr, which holds only `keeper <id>: <kind>`; `A` → the keeper ends and removes its socket
   and pid line; no `A` and no
-  connection → it ends after the linger; killing the keeper (`SIGKILL`) → the stand-in records
+  connection → it ends after the linger, also when it was never started and never connected to
+  (ruled); a `meta` the `hello` rules refuse → `bad-spec`; the exception hook, reached through a
+  module put before the standard library's, logs only the class name of an error that quotes the
+  spec or a frame (ruled); killing the keeper (`SIGKILL`) → the stand-in records
   `hup` and its `SessionEnd` with reason `other` is in the spool; `I` after the exit is dropped.
 
 **Done when:** every case passes on python3 3.12 in CI and locally; the file uses only the

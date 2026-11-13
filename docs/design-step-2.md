@@ -517,7 +517,10 @@ hibernation (WSL issue #8696, section 21): then nothing in WSL answers and 6.3's
 ### 7.1 The keeper
 
 `bin/skydeck-keeper` is one python3 file, standard library only (`pty`, `os`, `select`,
-`socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `time`), about 250 lines,
+`socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `time`), about 810 lines
+(about 700 without comments and blank lines; the first estimate counted the prototype's loop, and
+the rules below — claim, start deadline, pid line, queues and caps, linger — and the checks of every
+input it reads add the rest),
 for python3 3.9 or newer (the newest thing it uses, `os.waitstatus_to_exitcode`, came with 3.9;
 tested on 3.12 only, section 21). The server starts it as `python3 -I
 <runtimeDir>/keeper-<build>.py` — the code it read at its own start (16.5), and isolated mode, so
@@ -568,11 +571,20 @@ The keeper:
    passive until its first frame, which must be `C` (**claim**, 8.1): it makes the connection the
    screen side, replacing an earlier one (a restarted server must not wait for a half-dead
    connection to time out). It accepts only a peer with its own user id (`SO_PEERCRED`).
-4. reads the pty and keeps every chunk as a record in the tail; never interprets it.
+4. reads the pty and keeps every chunk as a record in the tail; never interprets it, but for one
+   rule: a record never ends inside a UTF-8 character. The first bytes (at most three) of a
+   character the program has not finished writing wait for the next read and go in front of it;
+   a resize record that comes meanwhile waits too, so it never stands between the two halves.
+   Bytes that cannot begin a valid character are never held, and held bytes are sent as they are
+   when the next read shows they do not go on as one, or when the program has ended: nothing is
+   dropped or reordered. A snapshot is text, so a record boundary inside a character could not be
+   reproduced by one (ruled, plan task 9).
 5. applies input and resizes from the screen side (8.1). The pty's master is non-blocking: input
    goes into a queue that is written whenever the pty can take it, while the keeper goes on reading
    the program's output, so a large paste into a busy program never stops the keeper. The queue
-   holds at most 4 MiB; while it is full the keeper stops reading from the server's connection, and
+   holds at most 4 MiB: an input frame that does not fit waits, unread, in the connection, and
+   while it waits the keeper stops reading from the server's connection (a frame larger than the
+   whole queue could never fit and closes the connection; the server sends at most 64 KiB), and
    the server, which then cannot write to the keeper, refuses further input for that terminal with
    `notice input-full` ("the program is not reading its input") rather than queue without end.
    Parks and resizes travel on the same connection and wait as well; the server makes no park
