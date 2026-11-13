@@ -889,7 +889,7 @@ export interface Tokens {
   drop(id: string): boolean; // false for an unknown id
   /** Constant-time check of `proof` against every token a proof can still reach — waiting, used or
    *  reused; one dropped or expired before its use can only give 'none' and is skipped: timingSafeEqual
-   *  on equal-length buffers, not stopping at a match. A proof that is not 43 bytes, or an sN or cN
+   *  on equal-length buffers, not stopping at a match. A proof that is not a string of 43 bytes, or an sN or cN
    *  that is not isNonce, is 'none' without comparing; it never throws. A match marks the token
    *  used; a proof with a used token marks it reused and calls onAlarm (each time): the alarm. */
   check(proof: string, sN: string, cN: string, origin: string): { kind: 'match'; token: Uint8Array } | { kind: 'reused' } | { kind: 'none' };

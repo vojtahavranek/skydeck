@@ -3,6 +3,7 @@ import crypto, { createDecipheriv, hkdfSync } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { inspect } from 'node:util';
 
 import { openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
@@ -131,7 +132,9 @@ test('wrapSecret is the IV, then the ciphertext, then the 16-byte tag', () => {
 test("wrapSecret's output opens with the token and both nonces", () => {
   assert.deepEqual(unwrap(WRAPPED, TOKEN, SN, CN), SECRET);
   const iv = counting(0x10, 12);
-  assert.deepEqual(unwrap(wrapSecret(SECRET, TOKEN, SN2, CN2, iv), TOKEN, SN2, CN2), SECRET);
+  const wrapped = wrapSecret(SECRET, TOKEN, SN2, CN2, iv);
+  assert.deepEqual(new Uint8Array(Buffer.from(wrapped, 'base64url').subarray(0, 12)), iv);
+  assert.deepEqual(unwrap(wrapped, TOKEN, SN2, CN2), SECRET);
 });
 
 test("wrapSecret's output does not open with another token or with the nonces swapped", () => {
@@ -416,6 +419,16 @@ test('after 30 s an unused token is expired and its proof matches nothing', (t) 
   assert.equal(alarms(), 0);
 });
 
+test('a token is expired when the wall clock stands exactly at expiresAtNs', (t) => {
+  const { tokens, clock } = tokenRig(t);
+  const { id, token, expiresAtNs } = tokens.mint(30);
+  clock.setNs(expiresAtNs - 1n);
+  assert.equal(tokens.state(id), 'waiting');
+  clock.setNs(expiresAtNs);
+  assert.equal(tokens.state(id), 'expired');
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'none' });
+});
+
 test('mint(600) lives 10 minutes', (t) => {
   const { tokens, clock } = tokenRig(t);
   const { id, token, expiresAtNs } = tokens.mint(600);
@@ -547,12 +560,50 @@ test('a proof made with the server label, another mode, another origin or other 
   assert.equal(tokens.check(launchProof(token), SN, CN, ORIGIN).kind, 'match');
 });
 
+test('the whole proof is compared: one character changed anywhere matches nothing', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  const proof = launchProof(token);
+  for (const at of [0, 1, 21, 41, 42]) {
+    const other = proof[at] === 'A' ? 'B' : 'A';
+    const changed = `${proof.slice(0, at)}${other}${proof.slice(at + 1)}`;
+    assert.equal(changed.length, 43);
+    assert.deepEqual(tokens.check(changed, SN, CN, ORIGIN), { kind: 'none' }, `position ${at}`);
+  }
+  assert.equal(tokens.state(id), 'waiting');
+  assert.equal(alarms(), 0);
+  assert.equal(tokens.check(proof, SN, CN, ORIGIN).kind, 'match');
+});
+
+test('check uses the origin it is given', (t) => {
+  const { tokens } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  const origin = 'http://127.0.0.1:47614';
+  const proof = pageProof(token, 'launch', SN, CN, origin);
+  assert.deepEqual(tokens.check(proof, SN, CN, ORIGIN), { kind: 'none' });
+  assert.equal(tokens.state(id), 'waiting');
+  assert.equal(tokens.check(proof, SN, CN, origin).kind, 'match');
+});
+
 test('check with a nonce that is not one matches nothing and throws nothing', (t) => {
   const { tokens } = tokenRig(t);
   const { id, token } = tokens.mint(30);
   const proof = launchProof(token);
   assert.deepEqual(tokens.check(proof, SN.slice(1), CN, ORIGIN), { kind: 'none' });
   assert.deepEqual(tokens.check(proof, SN, `${CN}=`, ORIGIN), { kind: 'none' });
+  assert.equal(tokens.state(id), 'waiting');
+});
+
+test('check with a proof or nonce that is not a string matches nothing and throws nothing', (t) => {
+  const { tokens } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  const proof = launchProof(token);
+  for (const notText of [42, null, undefined, {}, ['x'], Buffer.from(proof)]) {
+    const value = notText as unknown as string;
+    assert.deepEqual(tokens.check(value, SN, CN, ORIGIN), { kind: 'none' });
+    assert.deepEqual(tokens.check(proof, value, CN, ORIGIN), { kind: 'none' });
+    assert.deepEqual(tokens.check(proof, SN, value, ORIGIN), { kind: 'none' });
+  }
   assert.equal(tokens.state(id), 'waiting');
 });
 
@@ -640,46 +691,122 @@ test('a proof of another length is none without comparing', (t) => {
 // ---------------------------------------------------------------------------------------------
 // The secret's bytes never appear in a string the module returns.
 
-test("the secret's base64url appears in no string the module returns", (t) => {
+/** Every text form a byte string takes when it is encoded or interpolated: base64url, base64 with and
+ *  without padding, hex in both cases, a Buffer's inspection, `String(bytes)` (the decimals joined
+ *  by commas) and the decimals joined by ", " (an array's inspection) or by spaces. */
+function textForms(bytes: Uint8Array): string[] {
+  const buffer = Buffer.from(bytes);
+  const hex = buffer.toString('hex');
+  const decimals = Array.from(bytes, String);
+  return [
+    buffer.toString('base64url'),
+    buffer.toString('base64'),
+    buffer.toString('base64').replace(/=+$/, ''),
+    hex,
+    hex.toUpperCase(),
+    (hex.match(/../g) ?? []).join(' '),
+    String(bytes),
+    decimals.join(', '),
+    decimals.join(' '),
+  ];
+}
+
+/** Bytes that look random, so that no form of them turns up in a text by chance. */
+function arbitrary(seed: string): Uint8Array {
+  return new Uint8Array(crypto.createHash('sha256').update(seed).digest());
+}
+
+test('no form of the secret or a token appears in a string the module returns or throws', (t) => {
   const { deck } = testDeck(t);
-  const { random } = countingRandom(t);
-  const secret = ensureSecret(deck.store, random);
-  const needle = b64(secret);
+  const { clock } = testPlatform(t);
+  deck.store.setKv('window_secret', b64(arbitrary('the secret')));
+  const secret = ensureSecret(deck.store, () => assert.fail('the secret exists'));
+  const token = arbitrary('a launch token');
+  const iv = arbitrary('an IV').subarray(0, 12);
   const returned: string[] = [];
-  const keep = (value: unknown): void => {
-    if (typeof value === 'string') {
-      returned.push(value);
-    } else if (value instanceof Error) {
-      returned.push(value.message, String(value.stack));
-    }
+  const keep = (value: string | null): void => {
+    returned.push(String(value));
   };
-  for (const mode of ['key', 'launch'] as const) {
-    keep(pageProof(secret, mode, SN, CN, ORIGIN));
-    keep(serverProof(secret, mode, SN, CN, ORIGIN));
-  }
-  const { tokens } = tokenRig(t);
-  const { id, token } = tokens.mint(30);
-  keep(id);
-  keep(wrapSecret(secret, token, SN, CN, random(12)));
-  keep(tokens.state(id));
-  const checked = tokens.check(launchProof(token), SN, CN, ORIGIN);
-  keep(checked.kind);
-  keep(tokens.state(id));
-  for (const fail of [
-    () => pageProof(secret, 'key', 'x', CN, ORIGIN),
-    () => wrapSecret(secret, token, SN, CN, new Uint8Array(1)),
-    () => wrapSecret(secret.subarray(1), token, SN, CN, random(12)),
-  ]) {
+  const thrown: string[] = [];
+  const fails = (what: string, act: () => unknown): void => {
     try {
-      fail();
-      assert.fail('expected a throw');
+      act();
     } catch (error) {
-      keep(error);
+      assert.ok(error instanceof Error, what);
+      thrown.push(error.message, String(error.stack));
+      return;
+    }
+    assert.fail(`${what}: expected a throw`);
+  };
+
+  for (const mode of ['key', 'launch'] as const) {
+    for (const key of [secret, token]) {
+      keep(pageProof(key, mode, SN, CN, ORIGIN));
+      keep(serverProof(key, mode, SN, CN, ORIGIN));
     }
   }
-  assert.ok(returned.length >= 10);
-  for (const text of returned) {
-    assert.ok(!text.includes(needle), `the secret appears in ${JSON.stringify(text)}`);
+  keep(wrapSecret(secret, token, SN, CN, iv)); // ciphertext: the one exception the plan allows
+  const { tokens } = tokenRig(t);
+  const minted = tokens.mint(30);
+  keep(minted.id);
+  keep(tokens.state(minted.id));
+  keep(tokens.check(launchProof(minted.token), SN, CN, ORIGIN).kind);
+  keep(tokens.state(minted.id));
+  keep(tokens.check(launchProof(minted.token), SN, CN, ORIGIN).kind);
+  keep(tokens.state(minted.id));
+
+  // Every thrown case of contract 2.8, with the secret or a token as an argument.
+  for (const prove of [pageProof, serverProof]) {
+    for (const key of [secret, token]) {
+      fails('a bad mode', () => prove(key, 'other' as 'key', SN, CN, ORIGIN));
+      fails('a bad sN', () => prove(key, 'key', 'x', CN, ORIGIN));
+      fails('a bad cN', () => prove(key, 'launch', SN, `${CN}=`, ORIGIN));
+      fails('a short key', () => prove(key.subarray(1), 'key', SN, CN, ORIGIN));
+      fails('a long key', () => prove(Uint8Array.from([...key, 0]), 'key', SN, CN, ORIGIN));
+    }
   }
-  assert.equal(isNonce(needle), true, 'the needle is the 43-character form');
+  fails('a short secret', () => wrapSecret(secret.subarray(1), token, SN, CN, iv));
+  fails('a short token', () => wrapSecret(secret, token.subarray(1), SN, CN, iv));
+  fails('a short IV', () => wrapSecret(secret, token, SN, CN, iv.subarray(1)));
+  fails('a bad sN', () => wrapSecret(secret, token, 'x', CN, iv));
+  fails('a bad cN', () => wrapSecret(secret, token, SN, 'x', iv));
+  fails('a short random source', () => replaceSecret(deck.store, () => secret.subarray(1)));
+  fails('seconds', () => tokens.mint(31 as 30));
+  fails('a short random source', () =>
+    createTokens(
+      clock,
+      () => token.subarray(1),
+      () => {},
+    ).mint(30),
+  );
+  const repeating = createTokens(
+    clock,
+    (n) => token.subarray(0, n),
+    () => {},
+  );
+  repeating.mint(30);
+  fails('a repeated id', () => repeating.mint(30));
+
+  assert.equal(thrown.length, 2 * (2 * 2 * 5 + 9));
+  const needles = [...textForms(secret), ...textForms(token)];
+  for (const text of [...returned, ...thrown]) {
+    for (const needle of needles) {
+      assert.ok(
+        !text.includes(needle),
+        `${JSON.stringify(needle)} appears in ${JSON.stringify(text)}`,
+      );
+    }
+  }
+});
+
+test('the leak search finds bytes where code would interpolate or encode them', () => {
+  const bytes = arbitrary('x');
+  const buffer = Buffer.from(bytes);
+  const found = (text: string): boolean => textForms(bytes).some((form) => text.includes(form));
+  assert.ok(found(`a key of ${bytes}`));
+  assert.ok(found(`a key ${inspect(buffer)}`));
+  assert.ok(found(`a key ${buffer.toString('hex')}`));
+  assert.ok(found(`a key ${buffer.toString('base64')}`));
+  assert.ok(found(`a key ${buffer.toString('base64url')}`));
+  assert.ok(!found('a key must be 32 bytes, not 31'));
 });

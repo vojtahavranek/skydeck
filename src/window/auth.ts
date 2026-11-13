@@ -250,8 +250,8 @@ function stopTimer(held: HeldToken): void {
  * so that a second use is always recognised; `onAlarm` is called for each such second use, after
  * the token is marked `reused` (the server records it with raiseAlarm).
  *
- * `check` takes a page's proof in mode `launch`. A proof that is not 43 bytes long, or nonces that
- * are not nonces, match nothing and are compared with nothing. Otherwise the proof is compared,
+ * `check` takes a page's proof in mode `launch`. A proof that is not a string of 43 bytes, or nonces
+ * that are not nonces, match nothing and are compared with nothing. Otherwise the proof is compared,
  * with `timingSafeEqual` on two 43-byte buffers, against the proof of every token that a proof can
  * still reach — waiting, used or reused; one dropped or expired before its use can only be `none`
  * — and the comparison does not stop at a match.
@@ -301,7 +301,12 @@ export function createTokens(
       return true;
     },
     check(given, sN, cN, origin) {
-      if (Buffer.byteLength(given, 'utf8') !== PROOF_LENGTH || !isNonce(sN) || !isNonce(cN)) {
+      if (
+        typeof given !== 'string' ||
+        Buffer.byteLength(given, 'utf8') !== PROOF_LENGTH ||
+        !isNonce(sN) ||
+        !isNonce(cN)
+      ) {
         return { kind: 'none' };
       }
       const givenBytes = Buffer.from(given, 'utf8');
