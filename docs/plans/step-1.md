@@ -4474,8 +4474,9 @@ guard works on fresh state, design 7.6) → `prepareResume` on the fresh row; wi
 `launchPrepared(deck, p, 'tab')` and stay, message `opened <short> in a new tab` (or its returned
 lines, warnings included, when there are any); without one, leave the screen and
 `launchPrepared(deck, p, 'here')`, print its lines on stderr, then return its code. A
-`ResumeRefusedError` becomes the message. `refresh` → `refreshWithProgress(ctx, deck)` + `loadRows` +
-`withRows(reorder true)`. `quit` or the end of `io.keys()` → write `\x1b[?25h\x1b[?1049l`,
+`ResumeRefusedError` becomes the message. `refresh` → `refreshWithProgress(ctx, deck)`, then an explicit
+`refreshPrs` (`{ force: true, refreshMinutes }`, deps with `env`; design 7.3: the refresh key asks about every attached pull request that
+is not merged or closed, a failure is saved on the pull request) + `loadRows` + `withRows(reorder true)`. `quit` or the end of `io.keys()` → write `\x1b[?25h\x1b[?1049l`,
 call `return()` on the key iterator, return 0. Errors from an effect never leave the terminal in
 the alternate screen.
 
@@ -4511,6 +4512,7 @@ the alternate screen.
 9. Background refresh: a PR with `okAtNs null` and a fake gh answering it `open` → a later frame shows the chip of the new level,
    and the row order of the first frame is unchanged.
 10. `[() => { <write a start spool file for S3>; return 'r'; }, 'q']` → after `r` the file is ingested and S3 appears in a later frame.
+    A PR read a minute ago (`okAtNs`, `triedAtNs` T0−1m, 5 minutes) is asked about again by `r` (one more `gh` call), not by the background refresh.
 
 **Steps**
 - [ ] Write both test files; replace the bare-`skydeck` test in `test/cli/main.test.ts`. `npm test` → fails.
