@@ -65,7 +65,8 @@ function noteHead(note: string | null): string[] {
  * One row as the page receives it (S2 8.2.3): the list row's display fields (its strings were
  * sanitised when the list model was built; the note is sanitised here, line by line), and the
  * window's own: `terminal` and `slot` from the terminal the row is shown with, `elsewhere` with the
- * holder's pid and tty and the row's directory (S2 7.9), and `starting` when that terminal's program
+ * holder's pid, its terminal device (sanitised: it is read from /proc) and the row's directory
+ * (S2 7.9), and `starting` when that terminal's program
  * holds no session yet and may still come to (S2 7.5) while the session is not running. Stage A has
  * no attention and no stacks.
  */
@@ -101,7 +102,14 @@ export function rowPayload(
     chip: row.chip === null ? null : { level: row.chip.level, count: row.chip.count },
     terminal: terminal?.id ?? null,
     slot: terminal?.slot ?? null,
-    elsewhere: elsewhere === null ? null : { pid: elsewhere.pid, tty: elsewhere.tty, dir: row.dir },
+    elsewhere:
+      elsewhere === null
+        ? null
+        : {
+            pid: elsewhere.pid,
+            tty: elsewhere.tty === null ? null : sanitize(elsewhere.tty),
+            dir: row.dir,
+          },
     starting:
       terminal !== null &&
       terminal.sessionId === null &&

@@ -345,6 +345,48 @@ test('open order: a running row the mapping does not place is ordered with the e
   assert.equal(message.counts.elsewhere, 1);
 });
 
+test('open order: a holder whose process start is unknown comes last', () => {
+  const unknown = running(S1, { holders: [holder(1, null)] });
+  const known = running(S2, { pid: 999, procStart: 999 });
+  for (const list of [
+    [unknown, known],
+    [known, unknown],
+  ]) {
+    assert.deepEqual(ids(buildListMessage(input({ rows: rows(list) })), 'open'), [S2, S1]);
+  }
+});
+
+test('open order: a session running elsewhere is not placed by an ended terminal of the window', () => {
+  // S1 exited in the window's terminal, then the user resumed it by hand in another terminal.
+  const message = buildListMessage(
+    input({
+      rows: rows([
+        running(S1, { pid: 5000, procStart: 5000 }),
+        running(S2, { pid: 10, procStart: 10 }),
+      ]),
+      terminals: [
+        term(1, {
+          expectedSessionId: S1,
+          sessionId: S1,
+          state: 'ended',
+          slot: 1,
+          exit: { code: 0, signal: null, atNs: String(NOW), notStarted: null },
+        }),
+      ],
+      elsewhere: new Map([
+        [S1, { pid: 5000, tty: '/dev/pts/9' }],
+        [S2, { pid: 10, tty: null }],
+      ]),
+    }),
+  );
+  assert.deepEqual(ids(message, 'open'), [S2, S1]);
+  const row = rowIn(message, S1);
+  assert.equal(row.terminal, null);
+  assert.equal(row.slot, null);
+  assert.deepEqual(row.elsewhere, { pid: 5000, tty: '/dev/pts/9', dir: '/home/dev/projects/demo' });
+  assert.equal(message.counts.elsewhere, 2);
+});
+
 // --- rows tied to terminals --------------------------------------------------------------------
 
 test('rows: a terminal showing a session gives that row its terminal and slot', () => {
@@ -647,6 +689,68 @@ test('starting: a resume terminal whose session has no row gives no row', () => 
     [],
   );
   assert.equal(message.terminals.length, 1);
+});
+
+test('starting: a live terminal wins over an ended one of the same session (resumed again)', () => {
+  const ended = (sessionId: string | null) =>
+    term(1, {
+      expectedSessionId: S1,
+      sessionId,
+      state: 'ended',
+      slot: 1,
+      exit: { code: 0, signal: null, atNs: String(NOW), notStarted: null },
+    });
+  const again = term(2, { expectedSessionId: S1, sessionId: null, state: 'starting', slot: 2 });
+  for (const endedShows of [null, S1]) {
+    const message = buildListMessage(
+      input({ rows: rows([ds({ id: S1 })]), terminals: [ended(endedShows), again] }),
+    );
+    assert.deepEqual(ids(message, 'open'), [S1], String(endedShows));
+    const row = rowIn(message, S1);
+    assert.equal(row.terminal, termId(2), String(endedShows));
+    assert.equal(row.slot, 2);
+    assert.equal(row.starting, true);
+    assert.equal(message.counts.starting, 1);
+  }
+  // Once the second terminal's program holds the session, it still wins over the ended one.
+  const holding = buildListMessage(
+    input({
+      rows: rows([running(S1)]),
+      terminals: [ended(S1), term(2, { expectedSessionId: S1, slot: 2 })],
+    }),
+  );
+  assert.equal(rowIn(holding, S1).terminal, termId(2));
+  assert.equal(rowIn(holding, S1).slot, 2);
+});
+
+test('starting: a new terminal keeps its row when the session has a row step 1 does not list', () => {
+  // `claude` started (so the session has events), then ended before any prompt: no transcript.
+  const newSession = ds({ id: NEW, transcript: null, lastActivityNs: NOW - SEC });
+  const ended = term(1, {
+    expectedSessionId: NEW,
+    sessionId: null,
+    kind: 'new',
+    label: 'fix',
+    state: 'ended',
+    slot: 1,
+    exit: { code: 0, signal: null, atNs: String(NOW), notStarted: null },
+  });
+  const message = buildListMessage(input({ rows: rows([newSession]), terminals: [ended] }));
+  assert.deepEqual(ids(message, 'week'), [NEW]);
+  assert.equal(rowIn(message, NEW).terminal, termId(1));
+  assert.equal(rowIn(message, NEW).starting, false);
+  assert.equal(message.counts.notRunning, 1);
+  // A row of that session marked done is hidden as any done row that stopped.
+  const done = buildListMessage(
+    input({
+      rows: rows([ds({ id: NEW, transcript: null, hidden: true, doneAtNs: T0 })]),
+      terminals: [ended],
+    }),
+  );
+  assert.deepEqual(
+    done.sections.flatMap((s) => s.rows),
+    [],
+  );
 });
 
 // --- done --------------------------------------------------------------------------------------

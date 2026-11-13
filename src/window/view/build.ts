@@ -10,7 +10,7 @@ import { isListed, matchesFilter } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import type { DerivedSession } from '../../sessions/types.ts';
 import { sanitize } from '../../text/sanitize.ts';
-import type { TerminalInfo } from '../hub.ts';
+import type { TerminalInfo, TerminalState } from '../hub.ts';
 import type {
   ListMessage,
   RowPayload,
@@ -36,6 +36,16 @@ const SHORT_ID_LENGTH = 8;
 
 type SectionName = SectionPayload['name'];
 const SECTIONS: readonly SectionName[] = ['open', 'week', 'earlier'];
+
+/** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was lost or
+ *  never started has no program that could. The same set as `rowPayload`'s `starting` (sections.ts),
+ *  kept private to each file so that each exports exactly its contract. */
+const MAY_START: ReadonlySet<TerminalState> = new Set([
+  'starting',
+  'running',
+  'reconnecting',
+  'newer-keeper',
+]);
 
 /** One row of the message and what places it. */
 interface Entry {
@@ -63,23 +73,28 @@ function compareTerminals(a: TerminalInfo, b: TerminalInfo): number {
   return compareNs(a.openedNs, b.openedNs) || compareText(a.id, b.id);
 }
 
+/** Which terminal a session's row gets when several want it: one whose program may still run
+ *  first (an ended terminal never hides the one that resumed the session again), then one that
+ *  shows the session before one still waiting for it. */
+function claimRank(terminal: TerminalInfo): number {
+  return (MAY_START.has(terminal.state) ? 0 : 2) + (terminal.sessionId === null ? 1 : 0);
+}
+
 /**
  * The terminal each session's row is shown with. A terminal goes to the session it shows (S2 7.5)
- * or, while its program holds none, to the session it was opened for; one that shows a session
- * comes before one still waiting for it, then by slot and opening time. A terminal whose session
- * already has one is on no row (the page still has it in `terminals`).
+ * or, while its program holds none, to the session it was opened for; of several, the first by
+ * `claimRank`, then by slot and opening time. A terminal whose session already has one is on no
+ * row (the page still has it in `terminals`).
  */
 function terminalsBySession(terminals: readonly TerminalInfo[]): Map<string, TerminalInfo> {
-  const ordered = [...terminals].sort(compareTerminals);
+  const ordered = [...terminals].sort(
+    (a, b) => claimRank(a) - claimRank(b) || compareTerminals(a, b),
+  );
   const bySession = new Map<string, TerminalInfo>();
   for (const terminal of ordered) {
-    if (terminal.sessionId !== null && !bySession.has(terminal.sessionId)) {
-      bySession.set(terminal.sessionId, terminal);
-    }
-  }
-  for (const terminal of ordered) {
-    if (terminal.sessionId === null && !bySession.has(terminal.expectedSessionId)) {
-      bySession.set(terminal.expectedSessionId, terminal);
+    const sessionId = terminal.sessionId ?? terminal.expectedSessionId;
+    if (!bySession.has(sessionId)) {
+      bySession.set(sessionId, terminal);
     }
   }
   return bySession;
@@ -208,7 +223,8 @@ function sectionPayload(
  *
  * - Listed (design 7.2 through `isListed`): done sessions only with `showDone`; a session that is
  *   open — running, or starting in a terminal of the window — whatever its done mark (S2 12.10);
- *   the row of a `new` terminal whose session has none yet, while the terminal is there (A28).
+ *   the row of a `new` terminal's own session while the terminal is there, one of its own when
+ *   the session has none yet (A28), unless it is done and stopped.
  * - Sections (S2 12.1, `sectionOf`): Open, This week, Earlier; Earlier folded unless the view
  *   unfolds it or a filter is set (S2 12.8, ruled), a folded one with its count and time span and
  *   no rows.
@@ -223,31 +239,41 @@ export function buildListMessage(
   const { view, nowNs } = input;
   const bySession = terminalsBySession(input.terminals);
   const known = new Set(input.rows.map((row) => row.id));
-  const candidates: { row: ListRow; own: boolean }[] = input.rows.map((row) => ({
-    row,
-    own: false,
-  }));
+  const candidates: ListRow[] = [...input.rows];
   for (const [sessionId, terminal] of bySession) {
     if (
       terminal.kind === 'new' &&
       sessionId === terminal.expectedSessionId &&
       !known.has(sessionId)
     ) {
-      candidates.push({ row: newSessionRow(terminal), own: true });
+      candidates.push(newSessionRow(terminal));
     }
   }
 
   const counts = { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 };
   const shown = new Map<SectionName, Entry[]>(SECTIONS.map((name) => [name, []]));
   let doneHidden = 0;
-  for (const { row, own } of candidates) {
-    const terminal = bySession.get(row.id) ?? null;
+  for (const row of candidates) {
+    const claimed = bySession.get(row.id) ?? null;
+    // A terminal whose program is gone stays with a session that is not running (the ended bar,
+    // S2 7.8), not with one that runs again elsewhere: that row shows the card of 7.9 (S2 12.6).
+    const terminal =
+      claimed !== null && (MAY_START.has(claimed.state) || row.state === 'not-running')
+        ? claimed
+        : null;
     const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
     const payload = rowPayload(row, { terminal, elsewhere });
     const open = payload.starting || row.state !== 'not-running';
     const matches = matchesFilter(row, view.filter);
-    if (!own && !isListed(row, open || view.showDone)) {
-      if (matches && isListed(row, true)) {
+    // A `new` terminal keeps its own session's row while it is there (A28, ruled), also a row step
+    // 1 does not list (a session that ended before its first prompt has no transcript); a done one
+    // is hidden as any done row that stopped.
+    const ownNew =
+      terminal !== null && terminal.kind === 'new' && terminal.expectedSessionId === row.id;
+    const listed =
+      isListed(row, open || view.showDone) || (ownNew && (open || view.showDone || !row.done));
+    if (!listed) {
+      if (matches && (ownNew || isListed(row, true))) {
         doneHidden += 1;
       }
       continue;

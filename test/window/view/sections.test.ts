@@ -235,6 +235,15 @@ test("rowPayload: elsewhere carries the holder's pid and tty and the row's direc
   assert.equal(rowPayload(row, NONE).elsewhere, null);
 });
 
+test("rowPayload: the elsewhere holder's terminal device is sanitised", () => {
+  const row = rowOf(ds({ id: S1, state: 'running' }));
+  const payload = rowPayload(row, {
+    terminal: null,
+    elsewhere: { pid: 777, tty: '/dev/pts/4\x1b]0;x\x07\x1b[2J' },
+  });
+  assert.equal(payload.elsewhere?.tty, '/dev/pts/4');
+});
+
 test('rowPayload: attention and stack are null in stage A', () => {
   const payload = rowPayload(rowOf(ds({ id: S1 })), NONE);
   assert.equal(payload.attention, null);
