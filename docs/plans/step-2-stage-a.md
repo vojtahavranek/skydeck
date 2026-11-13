@@ -494,6 +494,16 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
   held; held bytes are sent as they are when the next read shows they do not go on as one, or when
   the program has ended (before `X`). Nothing is dropped or reordered. Escape sequences split
   across records are not the keeper's (task 33).
+- **The input queue** (ruled by the plan owner, task 9; S2 7.1 step 5): it holds at most 4 MiB, and
+  no input byte is ever dropped while the program runs. An `I` frame that would take it above
+  4 MiB is not appended: it stays unread in the connection, and the keeper reads nothing more from
+  that connection — parks and resizes wait as well — until the program has read enough to make
+  room. The server then cannot write to the keeper and refuses further input with `notice
+  input-full` (task 16). A single `I` frame larger than 4 MiB could never fit: it closes the
+  connection (`input-too-long`). The server sends at most 64 KiB per frame.
+- **The pid line's temporary file** (task 15's rule): the keeper writes `terms/.<id>.<pid>.tmp` and
+  renames it to `terms/<id>.pid`, so the temporary never has the `<12 hex>.pid` shape that
+  `listKeeperLines` reads.
 
 ### 2.4 The stand-in: `test/fixtures/standin/` (task 3)
 
@@ -1792,7 +1802,10 @@ by the `hello` rules (2.3).
   no `Dumpable` line in `status`; checked on this kernel) — and the stand-in's
   `coreSoft` record equals the spec's `coreSoft`; the stand-in's `cwd` and environment are the
   spec's (`PWD` included); `exec` of a missing program → `T`, then `X` with code 127 and a line
-  naming the reason on the pty.
+  naming the reason on the pty; the pid line is written through `.<id>.<pid>.tmp`, never a name of
+  the `<12 hex>.pid` shape that task 15's `listKeeperLines` reads (seen with `fs.watch`). The
+  dumpable checks always run; only the `coreSoft` check is skipped where the hard core limit is 0
+  (ruled).
 - `stream.test.ts`: output, input and resizes arrive as records in order with numbers from 1;
   `Z 100 30` → the pty size changes (the stand-in records it) and an `R` record comes back;
   `P` with record number n → the keeper keeps the snapshot and drops records ≤ n; a new
