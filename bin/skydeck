@@ -64,13 +64,16 @@ if ! runnable "$node"; then
 fi
 
 # Cache compiled modules between runs; the start-up time of a short command is mostly compiling.
-if [ -z "${NODE_COMPILE_CACHE:-}" ]; then
+# It is given to node alone below, not exported: the program the --here handoff starts must not
+# inherit skydeck's cache, but a NODE_COMPILE_CACHE the user set is theirs and stays as it was.
+if [ -n "${NODE_COMPILE_CACHE:-}" ]; then
+  cache=$NODE_COMPILE_CACHE
+else
   case ${XDG_CACHE_HOME:-} in
-    /*) NODE_COMPILE_CACHE=$XDG_CACHE_HOME/skydeck/compile-cache ;;
-    *) NODE_COMPILE_CACHE=$HOME/.cache/skydeck/compile-cache ;;
+    /*) cache=$XDG_CACHE_HOME/skydeck/compile-cache ;;
+    *) cache=$HOME/.cache/skydeck/compile-cache ;;
   esac
 fi
-export NODE_COMPILE_CACHE
 
 # The handoff file: node writes "cd -- <dir> || exit 1" and "exec <program and arguments>", every
 # word quoted for sh (src/terminals/here.ts), and exits. The launcher reads it, deletes it and only
@@ -82,7 +85,7 @@ trap 'exit 130' HUP INT TERM
 SKYDECK_HANDOFF=$handoff
 export SKYDECK_HANDOFF
 status=0
-"$node" "$root/bin/bootstrap.mjs" "$@" || status=$?
+NODE_COMPILE_CACHE=$cache "$node" "$root/bin/bootstrap.mjs" "$@" || status=$?
 if [ -s "$handoff" ]; then
   script=$(cat -- "$handoff")
   rm -f -- "$handoff"

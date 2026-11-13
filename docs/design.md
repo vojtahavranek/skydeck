@@ -382,11 +382,13 @@ The lock is removed when a `start` event for the session appears or after 60 sec
 hands the directory and the argument list back to the `bin/skydeck` launcher through a handoff
 file, and the launcher `exec`s it, so no wrapper process stays behind. `--tab` opens a new tab
 through the terminal adapter named in the configuration (first adapter: WezTerm, which runs
-`wezterm cli spawn`; when `wezterm` is not found and `$WSL_DISTRO_NAME` is set it retries with
-`wezterm.exe`, so tabs can be opened from WSL). The default is the configured `terminal`. If
-opening a tab fails, skydeck prints the command instead, quoted for a POSIX shell. Commands are
-run as argument lists; the one exception is the `--here` handoff, a generated `sh` fragment in
-which every word is quoted by the same function as the printed fallback.
+`wezterm cli --no-auto-start spawn`: with no WezTerm window open it fails instead of starting a
+hidden server that would hold the session where nobody can see it; when `wezterm` is not found
+and `$WSL_DISTRO_NAME` is set it retries with `wezterm.exe`, so tabs can be opened from WSL). The
+default is the configured `terminal`. If opening a tab fails, skydeck prints the command instead,
+quoted for a POSIX shell. Commands are run as argument lists; the one exception is the `--here`
+handoff, a generated `sh` fragment in which every word is quoted by the same function as the
+printed fallback.
 
 ### 7.7 New
 

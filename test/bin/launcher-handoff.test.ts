@@ -141,6 +141,69 @@ describe('bin/skydeck: the handoff', () => {
     assert.equal(readFileSync(stale, 'utf8'), 'echo should-not-run\n');
   });
 
+  test('the program replaces the launcher: no wrapper process stays behind', (t) => {
+    const r = rig(t);
+    handoff(r, { cwd: r.s.root, argv: ['/bin/sh', '-c', 'echo $$'] });
+
+    const result = run(r, { STUB_SOURCE: r.source });
+
+    assert.equal(result.stdout, `${result.pid}\n`);
+  });
+
+  test("the program does not inherit the launcher's compile cache setting", (t) => {
+    const r = rig(t);
+    handoff(r, {
+      cwd: r.s.root,
+      argv: ['/bin/sh', '-c', 'echo "[${NODE_COMPILE_CACHE-unset}]"'],
+    });
+
+    const result = run(r, { STUB_SOURCE: r.source });
+
+    assert.equal(result.stdout, '[unset]\n');
+  });
+
+  test("a NODE_COMPILE_CACHE the caller set is still the caller's for the program", (t) => {
+    const r = rig(t);
+    handoff(r, {
+      cwd: r.s.root,
+      argv: ['/bin/sh', '-c', 'echo "[${NODE_COMPILE_CACHE-unset}]"'],
+    });
+
+    const result = run(r, { STUB_SOURCE: r.source, NODE_COMPILE_CACHE: '/my/cache' });
+
+    assert.equal(result.stdout, '[/my/cache]\n');
+  });
+
+  test('an empty NODE_COMPILE_CACHE of the caller stays empty for the program', (t) => {
+    const r = rig(t);
+    handoff(r, {
+      cwd: r.s.root,
+      argv: ['/bin/sh', '-c', 'echo "[${NODE_COMPILE_CACHE-unset}]"'],
+    });
+
+    const result = run(r, { STUB_SOURCE: r.source, NODE_COMPILE_CACHE: '' });
+
+    assert.equal(result.stdout, '[]\n');
+  });
+
+  for (const signal of ['TERM', 'INT', 'HUP']) {
+    test(`${signal} while node runs: exit 130 and no handoff file left`, (t) => {
+      const r = rig(t);
+      const stub = join(r.s.root, 'signalling-node');
+      writeFileSync(
+        stub,
+        `#!/bin/sh\necho "$SKYDECK_HANDOFF" > "$STUB_SEEN"\nkill -${signal} "$PPID"\nexit 0\n`,
+      );
+      chmodSync(stub, 0o755);
+
+      const result = run(r, { SKYDECK_NODE: stub });
+
+      assert.equal(result.status, 130);
+      assert.ok(readFileSync(r.seen, 'utf8').trim().startsWith(r.tmp));
+      assert.deepEqual(leftovers(r), []);
+    });
+  }
+
   test('an empty handoff file is no handoff', (t) => {
     const r = rig(t);
     writeFileSync(r.source, '');

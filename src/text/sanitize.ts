@@ -14,7 +14,7 @@ const ESCAPE_SEQUENCE =
 
 const LINE_BREAKS_AND_TABS = /[\t\n\r]/g;
 const CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
-const BIDIRECTIONAL_CONTROLS = /[‪-‮⁦-⁩]/g;
+const BIDIRECTIONAL_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/g;
 
 /**
  * Makes a foreign string safe to print on one terminal line. In this order:

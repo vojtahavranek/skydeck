@@ -29,7 +29,7 @@ describe('sanitize', () => {
     ['removes an ESC at the end of the string', 'esc at end \x1b', 'esc at end '],
     ['turns TAB, LF and CR into one space each', 'tab\there\nnew\rline', 'tab here new line'],
     ['removes the other C0 controls and DEL', 'bell\x07 nul\x00 del\x7f', 'bell nul del'],
-    ['removes bidirectional controls', 'abc‮evil⁦x', 'abcevilx'],
+    ['removes bidirectional controls', 'abc\u202Eevil\u2066x', 'abcevilx'],
     ['leaves non-ASCII text alone', 'ünïcödé ✳ 日本', 'ünïcödé ✳ 日本'],
   ];
   for (const [name, input, output] of cases) {
@@ -100,6 +100,13 @@ describe('shellQuote and shellJoin', () => {
       assert.equal(shellQuote(word), quoted);
     });
   }
+
+  test('a word that starts with = is quoted, so that zsh does not expand it as a command path', () => {
+    assert.equal(shellQuote('=ls'), "'=ls'");
+    assert.equal(shellQuote('='), "'='");
+    assert.equal(shellQuote('a=b'), 'a=b');
+    assert.equal(shellQuote('--x=y'), '--x=y');
+  });
 
   test('shellJoin quotes each word and joins with one space', () => {
     assert.equal(

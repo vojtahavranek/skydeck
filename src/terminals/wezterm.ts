@@ -20,10 +20,14 @@ function failure(result: RunResult): string {
 }
 
 /**
- * open() runs `wezterm cli spawn [--domain-name <domain>] --cwd <cwd> -- <argv…>` with a 10 s
- * timeout; on notFound with env WSL_DISTRO_NAME set it retries once with `wezterm.exe` (D15).
- * ok when the exit code is 0; otherwise error = first line of stderr, or "wezterm exited <code>",
- * "wezterm timed out", "wezterm is not installed".
+ * open() runs `wezterm cli --no-auto-start spawn [--domain-name <domain>] --cwd <cwd> -- <argv…>`
+ * with a 10 s timeout; on notFound with env WSL_DISTRO_NAME set it retries once with
+ * `wezterm.exe` (D15). ok when the exit code is 0; otherwise error = first line of stderr, or
+ * "wezterm exited <code>", "wezterm timed out", "wezterm is not installed".
+ *
+ * `--no-auto-start`: without it, `wezterm cli` starts a hidden mux server when no WezTerm window is
+ * open, and the session would run in a terminal nobody can see, where skydeck's guard then counts
+ * it as running. With it the call fails, and the caller takes its fallback (print the command).
  */
 export function weztermTerminal(
   deps: { runner: Runner; env: Env },
@@ -35,6 +39,7 @@ export function weztermTerminal(
     async open(spec: LaunchSpec): Promise<OpenResult> {
       const args = [
         'cli',
+        '--no-auto-start',
         'spawn',
         ...(domain === null ? [] : ['--domain-name', domain]),
         '--cwd',

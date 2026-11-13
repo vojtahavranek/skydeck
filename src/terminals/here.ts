@@ -22,13 +22,15 @@ export function hereTerminal(deps: { files: Files; env: Env }): Terminal {
   return {
     name: 'here',
     opensTabs: false,
-    open(spec: LaunchSpec): Promise<OpenResult> {
+    // async, so that a file that cannot be written is a rejected promise like any other failure of
+    // open(), not an exception thrown before a promise exists.
+    async open(spec: LaunchSpec): Promise<OpenResult> {
       const path = deps.env[HANDOFF_ENV];
       if (path === undefined || path === '') {
-        return Promise.resolve({ ok: false, error: 'not started through bin/skydeck' });
+        return { ok: false, error: 'not started through bin/skydeck' };
       }
       deps.files.writeText(path, handoffScript(spec));
-      return Promise.resolve({ ok: true });
+      return { ok: true };
     },
   };
 }

@@ -81,13 +81,28 @@ describe('hereTerminal', () => {
     assert.equal(platform.files.readText(file), handoffScript(spec));
   });
 
+  test('a handoff file that cannot be written is a rejected promise, not a synchronous throw', async (t) => {
+    const { platform, sandbox } = testPlatform(t);
+    const terminal = hereTerminal({
+      files: platform.files,
+      env: { SKYDECK_HANDOFF: join(sandbox.root, 'no-such-dir', 'h') },
+    });
+
+    let promise: Promise<unknown> | undefined;
+    assert.doesNotThrow(() => {
+      promise = terminal.open(spec);
+    });
+
+    await assert.rejects(promise as Promise<unknown>, { code: 'ENOENT' });
+  });
+
   test('the variable is named SKYDECK_HANDOFF', () => {
     assert.equal(HANDOFF_ENV, 'SKYDECK_HANDOFF');
   });
 });
 
 describe('weztermTerminal', () => {
-  const ARGS = ['cli', 'spawn', '--cwd', '/w', '--', 'claude', '--resume', S1];
+  const ARGS = ['cli', '--no-auto-start', 'spawn', '--cwd', '/w', '--', 'claude', '--resume', S1];
 
   test('is the wezterm terminal and opens tabs', () => {
     const terminal = weztermTerminal({ runner: fakeRunner(), env: {} }, null);
@@ -110,6 +125,14 @@ describe('weztermTerminal', () => {
     });
   });
 
+  test('never starts a WezTerm server of its own: with no window open the call fails', async () => {
+    const runner = fakeRunner(() => runResult({ code: 0 }));
+
+    await weztermTerminal({ runner, env: {} }, null).open(spec);
+
+    assert.deepEqual(runner.calls[0]?.args.slice(0, 3), ['cli', '--no-auto-start', 'spawn']);
+  });
+
   test('passes the domain name before --cwd', async () => {
     const runner = fakeRunner(() => runResult({ code: 0 }));
 
@@ -117,6 +140,7 @@ describe('weztermTerminal', () => {
 
     assert.deepEqual(runner.calls[0]?.args, [
       'cli',
+      '--no-auto-start',
       'spawn',
       '--domain-name',
       'WSL:Ubuntu',
@@ -137,6 +161,7 @@ describe('weztermTerminal', () => {
 
     assert.deepEqual(runner.calls[0]?.args, [
       'cli',
+      '--no-auto-start',
       'spawn',
       '--cwd',
       '/w x',
@@ -302,8 +327,9 @@ describe('terminalFor', () => {
     const result = await terminalFor('wezterm', platform, config).open(spec);
 
     assert.deepEqual(result, { ok: true });
-    assert.deepEqual(runner.calls[0]?.args.slice(0, 4), [
+    assert.deepEqual(runner.calls[0]?.args.slice(0, 5), [
       'cli',
+      '--no-auto-start',
       'spawn',
       '--domain-name',
       'WSL:Ubuntu',
