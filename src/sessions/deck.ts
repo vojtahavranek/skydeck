@@ -37,10 +37,11 @@ export function resolveDeckPlaces(platform: Platform): { places: Places; config:
 
 /**
  * resolveConfigDir → loadConfig → resolvePlaces(env, homeDir, config.claudeHome) → mkdirp (0o700)
- * dataDir, stateDir, configDir, spoolDir, locksDir → openStore(dbPath). Throws ConfigError; a
- * directory it cannot create, or a database it cannot open, is a SkydeckError (exit 1) naming it.
+ * dataDir, stateDir, configDir, spoolDir, locksDir → openStore(dbPath, options). Throws
+ * ConfigError; a directory it cannot create, or a database it cannot open, is a SkydeckError (exit
+ * 1) naming it. `guardSchema` is for the server's deck only (openStore, S2 10.1).
  */
-export function openDeck(platform: Platform): Deck {
+export function openDeck(platform: Platform, options: { guardSchema?: boolean } = {}): Deck {
   const { places, config } = resolveDeckPlaces(platform);
   for (const dir of [
     places.dataDir,
@@ -55,5 +56,5 @@ export function openDeck(platform: Platform): Deck {
       throw new SkydeckError(`cannot create the directory ${dir} (${describeError(error)})`);
     }
   }
-  return { platform, places, config, store: openStore(places.dbPath) };
+  return { platform, places, config, store: openStore(places.dbPath, options) };
 }

@@ -65,7 +65,7 @@ function leftovers(r: Rig): string[] {
   return readdirSync(r.tmp);
 }
 
-function handoff(r: Rig, spec: LaunchSpec): void {
+function handoff(r: Rig, spec: Pick<LaunchSpec, 'cwd' | 'argv'>): void {
   writeFileSync(r.source, handoffScript(spec));
 }
 

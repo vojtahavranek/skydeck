@@ -160,7 +160,7 @@ The places of design 9.1 stay. Step 2 adds:
 | `<runtimeDir>` | The server chooses it by the first rule that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck-<store id>` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run-<store id>`. `<store id>` is the first 8 hex digits of the sha256 of the store's path, so two installations never share a runtime directory. The server records the directory it uses in the store (`kv` `window_runtime_dir`, 10.2) when it takes its lock, and leaves the record while any keeper lives. **A starting server follows the record first**: when it names a directory that exists and holds a keeper alive by its `.pid` line, the server uses that directory, whatever its own environment would give, so that it finds the keepers a server started with another environment left there; a record whose directory is missing or holds nothing alive is ignored, and the server chooses by the rule and replaces the record. **Commands follow the record**, not their own environment — a command run without `XDG_RUNTIME_DIR` (from cron, `wsl.exe --exec`, `sudo -u`) still finds the server and the keepers — and resolve the rule themselves only when there is no record. `uninstall --purge` looks in the recorded directory and in every directory the rule can give (16.2). The keep-alive script is given the directory as an argument (6.1). Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the others are not, so the server treats anything there from another boot as stale (6.3, 7.8). A test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
 | `<runtimeDir>/server.json` | The running server: `pid`, `procStart`, `bootId`, `port`, `serverId` (random per start), `build` (16.5), `checkout` (its `appRoot`), `startedAt`, and where its environment came from (5.2). Mode 600. Written after the server listens, removed when it stops. |
 | `<runtimeDir>/server.sock` | The server's unix socket for the command line (8.3), mode 600. |
-| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
+| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A reader that cannot tell — the boot id cannot be read, or reading `/proc` fails — counts the line as unknown, not dead: nothing is ever removed, ended or given up on an unknown line; only a dead one allows removing a socket or a `.pid` file. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
 | `<runtimeDir>/keeper-<build>.py` | The keeper's code as the server read it at start (16.5): what new keepers run. Written by the server at start through a temporary name and a rename, mode 600. A running keeper has read its code when it started, so the server removes the files of other builds at start. |
 | `<runtimeDir>/keepalive.interop` | The keep-alive's `$WSL_INTEROP` (6.4). |
 | `<runtimeDir>/terms/<terminal id>.sock` | A keeper's unix socket, mode 600, in a directory of mode 700. |
@@ -183,7 +183,8 @@ Added to design 11:
 | `bin/skydeck-keepalive` | The keep-alive's inner script (6.1): `sh` builtins, `sleep` and `mv` only. | — |
 | `src/claude/terminal.ts` | What Claude Code sets in its children's environment (7.4); the meaning of a live-file status change for a turn end (10.3). | platform |
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses. | platform, text, store, claude, sessions, terminals, github |
-| `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | — |
+| `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
+| `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, stacks, attention, the switcher's ranking, the filter (12). | sessions (types), text |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS. No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
@@ -208,7 +209,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `bin/skydeck` (launcher) | For `serve`: Node.js is started through a short program passed with `/usr/bin/python3 -I -S -c` (never a python3 from `PATH`) that sets the soft core limit to 1 byte and records the old one (2); without `/usr/bin/python3`, directly. For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside a `NODE_COMPILE_CACHE` the launcher chose itself, so the server can drop the launcher's cache variable from the programs' environment and keep one the user set (5.2, 7.4); the program of the `--here` handoff gets no marker. Tests in `test/bin/` for both. | A |
 | `src/platform/` | New interfaces: detached processes with a given environment, long-lived children, TCP and unix sockets, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
-| `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value and the start deadline; the `Terminal` names gain `window` (11.1, 11.2). | A |
+| `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value, the start deadline and the label; the `Terminal` names gain `window` (11.1, 11.2). | A |
 | `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). | A |
 | `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). | C |
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
@@ -631,9 +632,20 @@ The server's environment (5.2), with:
 
 - removed: the variables that say which terminal or multiplexer a process runs in
   (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `WT_SESSION`, `WT_PROFILE_ID`, every `WEZTERM_*`,
-  `TMUX`, `TMUX_PANE`, `STY`, `VTE_VERSION`, `KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, `KONSOLE_*`),
-  `SKYDECK_HANDOFF`, `SKYDECK_LAUNCHER_CACHE` and the launcher's `NODE_COMPILE_CACHE` (5.2), and
-  `SKYDECK_CORE_SOFT` (2; its value goes into the keeper's spec instead);
+  `TMUX`, `TMUX_PANE`, `STY`, `VTE_VERSION`, `KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, `KONSOLE_*`,
+  every `VSCODE_*`), and those that describe the terminal the server was started from rather than
+  the new one: `GPG_TTY` and `SSH_TTY` (a pinentry would draw on that tty), and
+  `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION` (an editor's Claude Code extension; every
+  session would reach that editor), and `GIT_ASKPASS` when `VSCODE_GIT_ASKPASS_MAIN` is set beside
+  it (it is then the editor's askpass script, which runs the `VSCODE_*` names removed here and
+  would answer git with empty credentials; a `GIT_ASKPASS` the user set stays). `WEZTERM_`,
+  `KONSOLE_` and `VSCODE_` are the only prefix rules: those programs set a family of variables
+  whose names change between versions (an editor's integrated terminal sets many `VSCODE_*`,
+  pointing at that editor's sockets); every other name is exact. Also removed:
+  `SKYDECK_HANDOFF`, `SKYDECK_LAUNCHER_CACHE` and the launcher's `NODE_COMPILE_CACHE` (5.2),
+  `SKYDECK_CORE_SOFT` (2; its value goes into the keeper's spec instead) and `SKYDECK_ENV_ORIGIN`
+  (5.2: where the server's environment came from). The other `SKYDECK_*` variables pass:
+  `SKYDECK_HOME` and `SKYDECK_NODE` are the user's settings, and the hook needs them;
 - removed, as a second line of defence behind 5.1's refusal to start a server inside a Claude Code
   session: the variables Claude Code sets for the programs it runs, so that no program in the
   window looks like another session's child or carries its messaging token. The list lives in
@@ -911,7 +923,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `t` | Fields | Effect |
 |---|---|---|
 | `ping` | `n` | `pong` with the same `n`, `bootId`, `serverId`. |
-| `view` | `filter`, `chips`, `unfolded`, `showDone`, `selected` | The page's view state; the server answers with `list` and keeps sending `list` when it changes (12). |
+| `view` | `filter`, `chips` (from stage E; stage A's `view` has none), `unfolded`, `showDone`, `selected` | The page's view state; the server answers with `list` and keeps sending `list` when it changes (12). |
 | `focus` | `focused`, `selected`, `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
 | `attach` | `term`, `cols`, `rows` | Start a terminal stream (8.2.4). The page's size is a proposal (8.2.6). |
 | `detach` | `term` | Stop it. |
@@ -933,7 +945,9 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `open-link` | `url` | 9.6. |
 | `dismiss-restore` | `bootId` | 12.7. |
 
-An unknown kind or field is refused. No action carries a program or an argument list to run (8.3):
+An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
+URLs 4,096, `input.data` 64 KiB, other text 1,024; the action of 9.6 then opens a URL only up to
+2,048 characters) or a size that is not a whole number from 1 to 65,535. No action carries a program or an argument list to run (8.3):
 `resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
 fields that become part of a launch, checked as `skydeck new` checks them.
 
@@ -943,13 +957,13 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions) when it changed, at most once a second: `counts`; `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `cols`, `rows`, whether this page owns the size). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests, chip) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions) when it changed, at most once a second: `counts`; `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests, chip) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
-| `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`. |
+| `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null). |
 | `notify` | `sessionId`, `title`, `reason` (13). |
-| `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `restore-progress`), `text`. |
+| `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. |
 | `bye` | `reason` (5.5). |
 
 Output is sent in binary frames: one byte 1, the channel number as a 4-byte big-endian integer,
@@ -1024,8 +1038,8 @@ absolute and existing, no flag that picks a session or names it). The program is
 
 | Request | Answer |
 |---|---|
-| `GET /ping` | `{ serverId, bootId, build, protocol, pid, port }`. |
-| `GET /status` | `{ pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python }`, for `skydeck window` and `doctor`. |
+| `GET /ping` | `{ serverId, bootId, build, protocol, pid, port, checkout }` (`checkout`: the checkout the server runs from, which 5.1 compares). |
+| `GET /status` | `{ pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin }` (`envOrigin`: where the server's environment came from and when, 5.2), for `skydeck window` and `doctor`. |
 | `POST /resume` | `{ sessionId }` → `prepareResumeById` and the window terminal (11.2) → `{ code, lines }`: the exit code and the lines `skydeck resume` prints (design 7.6), refusals included. |
 | `POST /new` | `{ dir, label, group, flags }` (`flags` an array of strings) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
 | `POST /restore` | `{ sessionIds, all }` → 11.4. The answer is a stream of JSON lines: one per report line of the run, the last one the outcome. |
@@ -1103,8 +1117,11 @@ Ctrl+click on a URL in a terminal (an OSC 8 link, or plain text that looks like 
 send `act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so
 for one whose text is not its URL the page first shows the target and opens it only on a second
 click. The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme
-`http` or `https`, and is re-serialised by the WHATWG URL parser (so it cannot start with `-`), by
-running
+`http` or `https`, and is still at most 2,048 characters once the WHATWG URL parser has
+re-serialised it (so it cannot start with `-`; percent-encoding can make it several times longer,
+and the re-serialised URL is what Edge gets), and holds no `"` and no backslash: it becomes one
+argument of a Windows program, and either can change how that program splits its command line. It
+opens it by running
 `window.edge` with that URL as its only argument (no profile folder): it opens in the user's own
 Edge profile, where they are logged in, not in the window's profile. The page itself never
 navigates away: it cancels drag and drop over the window, which would otherwise open a dropped file
@@ -1233,19 +1250,25 @@ restore.
 Four changes to step 1's code make that possible, with no change of behaviour for the commands
 (4.4 lists every change step 2 makes to step 1's code, with its stage):
 
-- **Starting a prepared launch** (`launchPrepared`, today in `src/cli/launching.ts`) moves to
+- **Starting a prepared launch** (`launchPrepared`, in step 1 in `src/cli/launching.ts`) moves to
   `src/sessions/launch.ts` and takes the `Terminal` to open with as a parameter. The command line
-  keeps choosing the terminal (`--here`, `--tab`, configuration) and printing the lines; the server
-  passes the window terminal (11.2) and shows the lines (12.6). The flag warnings, the printable
+  keeps choosing the terminal (`--here`, `--tab`, configuration: `launchWhere`, all that stays in
+  `src/cli/launching.ts`) and printing the lines; the server passes the window terminal (11.2) and
+  shows the lines (12.6). The flag warnings, the printable
   fallback command, and `settleFailedLaunch` (which releases the lock, and for `new` removes the
   label and group, only after a definite failure with nothing printable) are the same code.
 - **`prepareNew`** takes the directory as a parameter instead of reading the current directory.
-  The command passes `platform.cwd`; the window passes the directory chosen in the form (12.6),
-  refused unless it is absolute and an existing directory.
-- **`LaunchSpec`** (`src/terminals/types.ts`, today `{ cwd, argv }`) gains `sessionId`, `kind`
-  (`resume` or `new`), the lock value the launch took (or null) and the deadline of 7.1, which
-  `launchPrepared` and `runRestore` fill in and pass to `openSafely`. The `here` and `wezterm`
-  adapters ignore them; the window terminal needs them for the keeper's spec (11.2).
+  The command passes `platform.cwd`; the window passes the directory chosen in the form (12.6).
+  `prepareNew` refuses one that is not absolute or not an existing directory, as a usage error,
+  before it stores anything.
+- **`LaunchSpec`** (`src/terminals/types.ts`, in step 1 `{ cwd, argv }`) gains `sessionId`, `kind`
+  (`resume` or `new`), the lock value the launch took (or null), the deadline of 7.1 and the label,
+  which `launchPrepared` and `runRestore` fill in (`launchSpec`) and pass to `openSafely`. One
+  function computes the deadline, `startDeadline` in `src/sessions/launch.ts`: for a resume, the
+  time in the lock's value plus `LOCK_TTL_NS − LOCK_START_TOLERANCE_NS`; for a new session, the
+  clock when `prepareNew` ran plus the same (`PreparedLaunch` records that time as `preparedAtNs`,
+  and the label as `label`). The `here` and `wezterm` adapters ignore the new fields; the window
+  terminal needs them for the keeper's spec (11.2).
 - **Restore planning** moves out of `src/cli/commands/restore.ts`, where `plan()` is private (the
   boot-id refusal, `buildList`, `flatRows`, `planRestore`), into `src/sessions/restore.ts` as one
   function the command and the server share. It also returns the earlier boot and the time of its
@@ -1451,8 +1474,11 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
   the label, the group and extra flags. A label that starts with a ticket key gives the group
-  through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by spaces;
-  `'…'` and `"…"` group words (no escapes, no variables); design 7.7's refusals apply. It starts in
+  through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by
+  any whitespace (spaces, tabs, line breaks, the no-break space of a pasted text: nothing can hide
+  inside one word);
+  `'…'` and `"…"` group words (no escapes, no variables); a NUL is refused (no program can be given
+  it); design 7.7's refusals apply. It starts in
   the window (11.3).
 
 ### 12.7 The restore banner
@@ -1489,11 +1515,17 @@ window stayed open). So the page cancels exactly the keys it handles itself (thi
 keys below) and the keys it passes to the terminal (xterm.js cancels those it sends), and no
 other. Alt+F4 is never passed to the terminal and never cancelled, in either focus zone, so the
 window closes with it as any window does. Alt+Space never reaches the page (Windows keeps it for
-the window menu). The reload keys are the page's own in the list zone: F5, Ctrl+R, Ctrl+Shift+R and
-Ctrl+F5 make the page open a new connection, wait for the server's proof, and only then reload
-(15.3); in the terminal zone F5, Ctrl+R and Ctrl+F5 go to the program like any key, while
-Ctrl+Shift+R — for which xterm.js sends nothing and cancels nothing (9.1) — is the page's there
-too, so that Edge never reloads the page by itself. A key that neither zone uses
+the window menu). The reload keys are the page's own in the list zone: F5, Shift+F5, Ctrl+F5,
+Ctrl+R, Ctrl+Shift+R and the keyboard's BrowserRefresh key (alone, with Shift, with Ctrl) make the
+page open a new connection, wait for the server's proof, and only then reload (15.3); in the
+terminal zone F5, Shift+F5, Ctrl+F5 and Ctrl+R go to the program like any key while xterm.js has
+the keyboard, while Ctrl+Shift+R and BrowserRefresh — for which xterm.js sends nothing and cancels
+nothing (9.1) — are the page's there too, so that Edge never reloads the page by itself. When
+something of the page has the keyboard in the terminal zone (the find bar, the New form, a card,
+the ended bar), F5, Shift+F5, Ctrl+F5 and Ctrl+R are the page's own reload too, after the
+server's proof, exactly as in the list zone. That Chromium also reloads on Shift+F5
+and BrowserRefresh is from memory of its accelerator table, not verified; the page handling them
+is harmless if Edge does not. A key that neither zone uses
 keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no session.
 
 | Key | Action |
@@ -1512,7 +1544,10 @@ keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no s
 Letters are matched by the character the key types (Claude Code's own rule). A digit is matched by
 the character typed when that is a digit — on a Czech layout Shift on the number row types the
 digits — and otherwise by the physical key (`Digit1` … `Digit9`), because on a US layout Shift+1
-types `!`. No chord is matched by a physical key alone that could type something else on another
+types `!`. The Ctrl+Shift letter chords (and Ctrl+R, Ctrl+V) are matched by the typed Latin
+character, so on a layout whose letters are not Latin (Russian, Greek) they do not match — those
+chords do nothing (Ctrl+Shift+1–9 and Ctrl+Tab still work), Edge reloads on Ctrl+R by itself and
+Ctrl+V does not paste: a known limit, US and Czech are not affected. No chord is matched by a physical key alone that could type something else on another
 layout: that is why the help is Ctrl+Shift+H and not Ctrl+Shift+/, whose physical key types `-` on
 a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on the kitty keyboard
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
@@ -1708,8 +1743,10 @@ Edge reaches that program instead.
   can pass both proofs along and then read and type everything, without ever learning the secret
   (15.1).
 - **A reload** fetches the page from whoever holds the port at that moment. The page therefore
-  handles F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 itself in the list zone (12.9): it first opens a new
-  connection, waits for the server's proof, and only then reloads.
+  handles F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and the BrowserRefresh key (alone, with
+  Shift, with Ctrl) itself in the list zone, and in the terminal zone Ctrl+Shift+R and
+  BrowserRefresh always and the others while the page, not xterm.js, has the keyboard (12.9): it first opens a new connection, waits for the server's proof, and only then
+  reloads. (Shift+F5 and BrowserRefresh as Chromium reload keys are from memory, not verified.)
 
 Accepted: it takes a program that binds this one port at the moment a window is opened or
 reloaded, the window then shows that program's page rather than skydeck's, and the worst case —
@@ -1755,7 +1792,8 @@ Before what it does in step 1:
   profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
 `--purge` refuses (exit 1) while any keeper is alive — by its `.pid` line and design 5.5's rule,
-never by connecting to it (7.1) — naming the open terminals. It looks for `.pid` lines in every
+never by connecting to it (7.1); a line that cannot be told dead counts as alive (4.2) — naming the
+open terminals. It looks for `.pid` lines in every
 directory that can be the runtime directory: the one the store records and each one the rule of
 4.2 can give (`$SKYDECK_HOME/run`, `$XDG_RUNTIME_DIR/skydeck-<store id>`, `<stateDir>/run-<store
 id>`), because the command may run with another environment than the server did. Purging
@@ -1823,8 +1861,24 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
 CSS), `@xterm/headless` 6.0.0, `@xterm/addon-serialize` 0.14.0, `@xterm/addon-fit` 0.11.0,
 `@xterm/addon-search` 0.16.0 (published together with xterm.js 6.0.0 on 2025-12-22, and its
 latest release on 2026-11-13; npm registry), `@xterm/addon-unicode-graphemes`
-0.4.0, and their type declarations for `tsc`. `vendor/MANIFEST.json` lists every file with its
-package, version and sha256. The same packages at the same versions are development dependencies;
+0.4.0, and their type declarations for `tsc`. Only what is used is vendored, at
+`vendor/xterm/<package directory>/<path in the package>` (`vendor/xterm/xterm/lib/xterm.mjs`,
+`vendor/xterm/headless/lib-headless/xterm-headless.mjs`): each package's ES module bundle
+(`.mjs`), its `typings/*.d.ts` and its `LICENSE`, and `@xterm/xterm`'s `css/xterm.css` — no UMD
+`.js`, no source maps, no sources. `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0
+ship no `LICENSE` file: for them `npm run vendor` writes `@xterm/xterm`'s, and only after checking
+that the package's `package.json` declares `MIT` and the repository of `@xterm/xterm`
+(`github.com/xtermjs/xterm.js`; a `#branch` or a path inside the repository is ignored), and fails
+otherwise. Beside each bundle it writes a declaration file `<name>.d.mts` that re-exports the
+package's typings by the package's name, so that `tsc` for `web/` never reads a bundle; the
+typings themselves are vendored beside the bundles, within a type checker's reach.
+`@xterm/addon-unicode-graphemes` bundles adapted copies of tiny-inflate and unicode-trie (both
+MIT) without their notices, so the script also writes `vendor/xterm/THIRD-PARTY-NOTICES`, which
+names that bundle and holds both licences as their packages publish them on npm.
+`vendor/MANIFEST.json` lists every file with its
+package, version and sha256 — paths relative to the checkout, the shims and the notices under
+the package `skydeck` with version `-`, a borrowed licence with `licenseFrom` (`@xterm/xterm`) and
+`licenseReason`. The same packages at the same versions are development dependencies;
 `npm run vendor` copies them into `vendor/` and writes the manifest, and a test fails when
 `vendor/` and the installed packages differ, so they are updated only together. `addon-webgl` is
 not vendored in the first version: the DOM renderer is enough for Claude Code's output, and WebGL
@@ -1990,8 +2044,10 @@ In the browser suite, besides those:
   proof it sends nothing at all and shows the warning;
 - a dropped file does not navigate the window; OSC 52 from a hidden terminal does not reach the
   clipboard;
-- reload: F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 in the list zone, and Ctrl+Shift+R in the terminal
-  zone, reload only after a server's proof, and not at all against
+- reload: F5, Shift+F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 in the list zone, Ctrl+Shift+R in the
+  terminal zone, BrowserRefresh in both if Playwright can send it, and F5 and Ctrl+R in the
+  terminal zone while the page, not xterm.js, has the keyboard, reload only after a server's
+  proof, and not at all against
   a stand-in server without one;
 - a stand-in server holding the port serves a page that registers a service worker; after the real
   server is back, whether the worker still answers the next load (the 404 of 15.3) is recorded, so
@@ -2008,7 +2064,9 @@ In the browser suite, besides those:
   playwright install chromium`), so that a local check does not pass where CI would fail.
 - CI, on every pull request: both legs of the Node matrix run format check, type checks, `npm
   test` (keeper and server tests included; Ubuntu runners have python3), `python3 -m py_compile
-  bin/skydeck-keeper`, the vendored-files check (16.6), and `shellcheck` on the shell scripts by
+  bin/skydeck-keeper`, the vendored-files check (16.6: `test/vendor/vendor.test.ts`, a test in
+  `npm test` that needs the packages `npm ci` installed, so it has no step of its own), and
+  `shellcheck` on the shell scripts by
   name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
   bin/skydeck*` would also match the python keeper. Only the newest leg (Node 24) runs the page
   suite, after `npx playwright install --with-deps chromium` with `~/.cache/ms-playwright` cached
@@ -2026,7 +2084,7 @@ folder, as in manual-checks.md.
 | # | Check | Stage | Decides |
 |---|---|---|---|
 | W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified by the user on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) Write down how long Edge took from the command to the page's connection, cold and warm: the token and the command's wait last 30 seconds (5.1). | A | 5, 8.2.2 |
-| W2 | The chords of 12.9 that the key test of 2026-11-13 did not press reach the page and the browser does nothing: Ctrl+Shift+P, J, L, F, C, H and 1–9; and Alt+F4 still closes the window once the page is built (12.9). In a normal tab (`--print-url`), which chords the browser keeps. | A | 12.9 |
+| W2 | The chords of 12.9 that the key test of 2026-11-13 did not press reach the page and the browser does nothing: Ctrl+Shift+P, J, L, F, C, H and 1–9; and Alt+F4 still closes the window once the page is built (12.9). Whether Edge reloads on Shift+F5 and on the BrowserRefresh key (alone, with Shift, with Ctrl) when the page does not cancel them, and whether a cancelled BrowserRefresh still reloads (through `WM_APPCOMMAND`) (12.9, 15.3). In a normal tab (`--print-url`), which chords the browser keeps. | A | 12.9 |
 | W3 | The window has its own taskbar button with skydeck's icon (12.12), the same one after `skydeck window --restart` and after a WSL restart, and the title `(n) skydeck`; a second `skydeck window` opens no second window. | A, B, E | 5.1, 12.1, 12.12 |
 | W4 | **Real claude** in a window terminal: status line, subagent display, spinner, redraw on resize. Then `skydeck window --restart`: the screen is exactly what it was. | A | 7.2, 7.3 |
 | W5 | **Real claude**, the screen side answering alone: does Claude Code use synchronized output; does the OSC 11 answer make its automatic theme right; with an XTVERSION answer `xterm.js(6.0.0)` (a one-line change), any visible effect? | A | 9.3 |
@@ -2078,6 +2136,11 @@ sessions and to switch between their real terminals.
 - Terminals in the window: attach and switch by click, Ctrl+Shift+1–9, Ctrl+Tab and Ctrl+Shift+O,
   Ctrl+Shift+L; the keys of 9.1, find (9.7), links (9.6), the clipboard (9.5); the ended bar; the
   card for sessions running in another terminal; the key help.
+- Every key of 12.9 is the window's from stage A on, also those whose action comes in a later
+  stage, so that a key never means Edge's action in one stage and the window's in the next:
+  Ctrl+Shift+J (B), Ctrl+Shift+P (E) and, in the list, `l`, `g`, `n`, `p`, `d` and F2 (D) are
+  cancelled and show `<key>: comes in a later stage` in the key bar; the key help lists them as
+  coming later.
 - Resume into the window (resume card, Enter, double click) and New (12.6), through the shared code
   of 11.1.
 - Design 7.4's filter (`/`).
@@ -2095,7 +2158,7 @@ configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` 
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
 and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3) and the
-pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d`.
+pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2.
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
 the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The

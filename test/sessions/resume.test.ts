@@ -29,7 +29,7 @@ import {
   sweepLocks,
 } from '../../src/sessions/resume.ts';
 import type { PreparedLaunch, SawEvents } from '../../src/sessions/resume.ts';
-import type { Terminal } from '../../src/terminals/types.ts';
+import type { LaunchSpec, Terminal } from '../../src/terminals/types.ts';
 import type { DerivedSession, Holder } from '../../src/sessions/types.ts';
 import type { Store } from '../../src/store/store.ts';
 import type { NewEvent } from '../../src/store/types.ts';
@@ -882,7 +882,15 @@ test('flagWarnings: what a resume says about the flags it could not take over, u
 });
 
 test('openSafely turns a terminal that rejects into a failed open, not a timeout', async () => {
-  const spec = { cwd: '/w', argv: ['claude'] };
+  const spec: LaunchSpec = {
+    cwd: '/w',
+    argv: ['claude'],
+    sessionId: S1,
+    kind: 'resume',
+    lock: null,
+    startByNs: T0,
+    label: null,
+  };
   const rejecting: Terminal = {
     name: 'wezterm',
     opensTabs: true,
@@ -905,6 +913,8 @@ function launch(d: TestDeck, over: Partial<PreparedLaunch> = {}): PreparedLaunch
     flagsKnown: true,
     unknownFlags: [],
     kind: 'resume',
+    preparedAtNs: T0,
+    label: null,
     ...over,
   };
 }
@@ -970,6 +980,8 @@ test('prepareResume builds the command and takes the lock', (t) => {
     flagsKnown: true,
     unknownFlags: [],
     kind: 'resume',
+    preparedAtNs: T0,
+    label: 'fix',
   });
   assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '-n', 'fix', '--model', 'opus']);
   assert.equal(lockOf(d, S1), `${T0}:0`);
@@ -1148,7 +1160,12 @@ test("the boot id of the decision is the row's: a read that failed then is not r
 
 test('prepareNew stores the cleaned label and group and builds the command', (t) => {
   const d = testDeck(t);
-  const prepared = prepareNew(d.deck, { label: ' x ', group: 'G', extra: ['--model', 'opus'] });
+  const prepared = prepareNew(d.deck, {
+    dir: d.platform.cwd,
+    label: ' x ',
+    group: 'G',
+    extra: ['--model', 'opus'],
+  });
   assert.deepEqual(prepared, {
     sessionId: UUID1,
     cwd: d.platform.cwd,
@@ -1156,6 +1173,8 @@ test('prepareNew stores the cleaned label and group and builds the command', (t)
     flagsKnown: true,
     unknownFlags: [],
     kind: 'new',
+    preparedAtNs: T0,
+    label: 'x',
   });
   const stored = d.deck.store.meta(UUID1);
   assert.equal(stored?.label, 'x');
@@ -1164,35 +1183,101 @@ test('prepareNew stores the cleaned label and group and builds the command', (t)
 
 test('prepareNew without a label or group stores nothing and passes no name', (t) => {
   const d = testDeck(t, { config: { claudeCommand: 'cc' } });
-  const prepared = prepareNew(d.deck, { label: null, group: null, extra: [] });
+  const prepared = prepareNew(d.deck, { dir: d.platform.cwd, label: null, group: null, extra: [] });
   assert.deepEqual(prepared.argv, ['cc', '--session-id', UUID1]);
   assert.deepEqual(d.deck.store.allMeta(), []);
 });
 
 test('prepareNew refuses a bad label or group before it stores anything', (t) => {
   const d = testDeck(t);
-  assert.throws(() => prepareNew(d.deck, { label: '-x', group: 'G', extra: [] }), UsageError);
-  assert.throws(() => prepareNew(d.deck, { label: 'x', group: 'a\nb', extra: [] }), UsageError);
+  assert.throws(
+    () => prepareNew(d.deck, { dir: d.platform.cwd, label: '-x', group: 'G', extra: [] }),
+    UsageError,
+  );
+  assert.throws(
+    () => prepareNew(d.deck, { dir: d.platform.cwd, label: 'x', group: 'a\nb', extra: [] }),
+    UsageError,
+  );
   assert.deepEqual(d.deck.store.allMeta(), []);
 });
 
 test('prepareNew does not need the boot id: it resumes nothing', (t) => {
   const d = testDeck(t);
   d.proc.setBootId(null);
-  const prepared = prepareNew(d.deck, { label: null, group: null, extra: [] });
+  const prepared = prepareNew(d.deck, { dir: d.platform.cwd, label: null, group: null, extra: [] });
   assert.deepEqual(prepared.argv, ['claude', '--session-id', UUID1]);
 });
 
 test('prepareNew takes no lock', (t) => {
   const d = testDeck(t);
-  prepareNew(d.deck, { label: null, group: null, extra: [] });
+  prepareNew(d.deck, { dir: d.platform.cwd, label: null, group: null, extra: [] });
   assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
+test('prepareNew starts the session in the directory it is given, and records when it ran', (t) => {
+  const d = testDeck(t);
+  const dir = join(d.sandbox.root, 'project');
+  mkdirSync(dir);
+  d.clock.advanceMs(3000);
+  const prepared = prepareNew(d.deck, { dir, label: null, group: 'G', extra: [] });
+  assert.equal(prepared.cwd, dir);
+  assert.equal(prepared.preparedAtNs, T0 + 3n * SEC);
+  assert.equal(prepared.label, null);
+  assert.equal(d.deck.store.meta(UUID1)?.createdNs, T0 + 3n * SEC);
+});
+
+test('prepareNew refuses a directory that is relative, missing or a file, and stores nothing', (t) => {
+  const d = testDeck(t);
+  const file = join(d.sandbox.root, 'file');
+  writeFileSync(file, 'x');
+  const missing = join(d.sandbox.root, 'missing');
+  const cases: [dir: string, message: string][] = [
+    ['project', 'the directory project is not absolute'],
+    ['', 'the directory  is not absolute'],
+    [missing, `the directory ${missing} does not exist`],
+    [file, `the directory ${file} does not exist`],
+  ];
+  for (const [dir, message] of cases) {
+    assert.throws(
+      () => prepareNew(d.deck, { dir, label: 'x', group: 'G', extra: [] }),
+      (error: unknown) => error instanceof UsageError && error.message === message,
+      dir,
+    );
+  }
+  assert.deepEqual(d.deck.store.allMeta(), []);
+});
+
+test('prepareNew refuses a directory it cannot look at, and stores nothing', (t) => {
+  const d = testDeck(t);
+  const deck = deckWith(d.deck, {
+    files: {
+      stat: () => {
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      },
+    },
+  });
+  assert.throws(
+    () => prepareNew(deck, { dir: '/w', label: 'x', group: null, extra: [] }),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      error.message === 'the directory /w cannot be checked (EACCES)',
+  );
+  assert.deepEqual(d.deck.store.allMeta(), []);
+});
+
+test('prepareNew names a directory with a control character safely', (t) => {
+  const d = testDeck(t);
+  assert.throws(
+    () => prepareNew(d.deck, { dir: 'a\x1b[31mb', label: null, group: null, extra: [] }),
+    (error: unknown) =>
+      error instanceof UsageError && error.message === 'the directory ab is not absolute',
+  );
 });
 
 /** The UsageError prepareNew throws for these extra flags; nothing may be stored. */
 function refusedExtra(d: TestDeck, extra: string[]): string {
   try {
-    prepareNew(d.deck, { label: 'x', group: 'G', extra });
+    prepareNew(d.deck, { dir: d.platform.cwd, label: 'x', group: 'G', extra });
   } catch (error) {
     assert.ok(error instanceof UsageError, `not a UsageError: ${String(error)}`);
     assert.deepEqual(d.deck.store.allMeta(), []);
@@ -1247,7 +1332,7 @@ test('prepareNew refuses a cluster that picks a session before an unknown letter
   assert.match(refusedExtra(d, ['-pc-frob']), /^cannot pass -pc-frob \(--continue\) to claude: /);
   // nothing that picks a session was read before the unknown part: the flags are passed on
   for (const extra of [['-pZ'], ['-Zc'], ['-p-frob'], ['--frob', 'x']]) {
-    const prepared = prepareNew(d.deck, { label: null, group: null, extra });
+    const prepared = prepareNew(d.deck, { dir: d.platform.cwd, label: null, group: null, extra });
     assert.deepEqual(prepared.argv.slice(3), extra, extra.join(' '));
   }
 });
@@ -1278,7 +1363,7 @@ test('prepareNew refuses --name and -n and points to --label, which skydeck pass
 test('prepareNew passes --worktree and the other flags that say where a new session starts', (t) => {
   const d = testDeck(t);
   const passed = (extra: string[]): string[] =>
-    prepareNew(d.deck, { label: null, group: null, extra }).argv.slice(3);
+    prepareNew(d.deck, { dir: d.platform.cwd, label: null, group: null, extra }).argv.slice(3);
   assert.deepEqual(passed(['--worktree']), ['--worktree']);
   assert.deepEqual(passed(['-w', 'feat', '--model', 'x', 'fix the bug']), [
     '-w',
@@ -1299,7 +1384,7 @@ test('prepareNew passes every removed flag that does not pick a session, except 
   for (const spec of rest) {
     for (const name of spec.names) {
       const extra = spec.shape === 'none' ? [name] : [name, 'v'];
-      const prepared = prepareNew(d.deck, { label: 'x', group: null, extra });
+      const prepared = prepareNew(d.deck, { dir: d.platform.cwd, label: 'x', group: null, extra });
       assert.deepEqual(prepared.argv.slice(-extra.length), extra, name);
     }
   }
@@ -1308,6 +1393,7 @@ test('prepareNew passes every removed flag that does not pick a session, except 
 test('prepareNew passes other flags and a prompt on as they are', (t) => {
   const d = testDeck(t);
   const prepared = prepareNew(d.deck, {
+    dir: d.platform.cwd,
     label: null,
     group: null,
     extra: ['--model', 'x', 'fix the bug', '--frob', '--', '-r'],

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { argvFromCmdline, procStartFromStat } from '../../src/claude/procstat.ts';
+import {
+  argvFromCmdline,
+  parentPidFromStat,
+  procStartFromStat,
+} from '../../src/claude/procstat.ts';
+import { statLine } from '../helpers/platform.ts';
 
 const TAIL = '4194304 1 0 0 0 1 0 0 0 20 0 11 0';
 
@@ -107,4 +112,35 @@ test('argvFromCmdline keeps a leading byte-order mark as part of the first argum
 
 test('argvFromCmdline replaces invalid UTF-8 instead of throwing', () => {
   assert.deepEqual(argvFromCmdline(Uint8Array.from([0x61, 0xff, 0x62, 0])), ['a\uFFFDb']);
+});
+
+test('parentPidFromStat reads field 4 after the LAST closing parenthesis', () => {
+  // statLine writes 1 as the parent; the name holds ") " to defeat a split at the first ')'.
+  assert.equal(parentPidFromStat(statLine(4242, 99, 'we) ird')), 1);
+});
+
+test('parentPidFromStat reads a parent other than init', () => {
+  assert.equal(parentPidFromStat(`4242 (a) b (c) S 4100 4242 4100 34816 4242 ${TAIL} 7 0 0`), 4100);
+});
+
+test('parentPidFromStat gives 0 for a process without a parent (pid 1, kernel threads)', () => {
+  assert.equal(parentPidFromStat(`1 (init) S 0 1 1 0 -1 ${TAIL} 7 0 0`), 0);
+});
+
+test('parentPidFromStat ignores the trailing newline of a real /proc read', () => {
+  assert.equal(parentPidFromStat(`4242 (claude) S 4100 4242\n`), 4100);
+});
+
+test('parentPidFromStat gives null for empty and malformed input', () => {
+  assert.equal(parentPidFromStat(''), null);
+  assert.equal(parentPidFromStat('garbage 4100'), null);
+  assert.equal(parentPidFromStat('4242 (claude)'), null);
+  assert.equal(parentPidFromStat('4242 (claude) S'), null);
+});
+
+test('parentPidFromStat gives null when field 4 is not a non-negative safe integer', () => {
+  assert.equal(parentPidFromStat('4242 (claude) S x 4242'), null);
+  assert.equal(parentPidFromStat('4242 (claude) S -1 4242'), null);
+  assert.equal(parentPidFromStat('4242 (claude) S 41x 4242'), null);
+  assert.equal(parentPidFromStat('4242 (claude) S 9007199254740992 4242'), null);
 });

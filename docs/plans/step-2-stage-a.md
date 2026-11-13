@@ -162,9 +162,9 @@ Each is binding for the implementer. The last column names the task that records
 
 | # | Decision | Why | Design update |
 |---|---|---|---|
-| A1 | The server's parts meet at interfaces fixed in section 2.5 (`TerminalHub`, `ActionHandler`, `PageSink`) and defined as code by task 1: pages (17) code against `TerminalHub` and `ActionHandler`, the registry (16) and the actions (23) implement them. | Pages and terminals are built in the same wave; neither may wait for the other. | — |
+| A1 | The server's parts meet at interfaces fixed in section 2.5 (`TerminalHub`, `ActionHandler`, `StreamSink`) and defined as code by task 1: pages (17) code against `TerminalHub` and `ActionHandler`, the registry (16) and the actions (23) implement them. | Pages and terminals are built in the same wave; neither may wait for the other. | — |
 | A2 | The keeper frame codec is TypeScript, `src/window/frames.ts` (task 1, 2.3). The python keeper implements the same byte layout; task 9's tests drive the keeper through this codec, so both sides are tested against each other. | One definition of S2 8.1 that the server and the keeper's tests share. | — |
-| A3 | Vendored layout: `vendor/xterm/<directory name of the package>/<path inside the package>` (`vendor/xterm/xterm/lib/xterm.mjs`, `vendor/xterm/headless/lib-headless/xterm-headless.mjs`). Only what is used is vendored: each package's `.mjs` bundle, its `typings/*.d.ts`, `@xterm/xterm`'s `css/xterm.css`, and its `LICENSE`. No `.js` (UMD), no `.map`, no `src/`. `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0 ship **no LICENSE file** (checked with `npm pack --dry-run` while writing this plan): for them `npm run vendor` writes `@xterm/xterm`'s `LICENSE`, only after checking that the package's `package.json` declares `"license": "MIT"` and the same repository as `@xterm/xterm` (`github.com/xtermjs/xterm.js`, ignoring a `#branch` suffix; both hold at these versions, checked with `npm view`), and fails otherwise; the manifest records `"licenseFrom": "@xterm/xterm"` and `"licenseReason": "no LICENSE in the package; its package.json declares MIT and the repository of @xterm/xterm"` (ruling 1). Beside each vendored `.mjs` the script writes a declaration file `<name>.d.mts` that re-exports the package's typings, recorded in the manifest with package `skydeck`, so that `tsc` for `web/` never reads a bundle. | S2 16.6 asks for each package's licence file; two packages have none. Type-checking a 400 KB bundle with `checkJs` would be slow and fail. | 2 (16.6) |
+| A3 | Vendored layout: `vendor/xterm/<directory name of the package>/<path inside the package>` (`vendor/xterm/xterm/lib/xterm.mjs`, `vendor/xterm/headless/lib-headless/xterm-headless.mjs`). Only what is used is vendored: each package's `.mjs` bundle, its `typings/*.d.ts`, `@xterm/xterm`'s `css/xterm.css`, and its `LICENSE`. No `.js` (UMD), no `.map`, no `src/`. `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0 ship **no LICENSE file** (checked with `npm pack --dry-run` while writing this plan): for them `npm run vendor` writes `@xterm/xterm`'s `LICENSE`, only after checking that the package's `package.json` declares `"license": "MIT"` and the same repository as `@xterm/xterm` (`github.com/xtermjs/xterm.js`, ignoring a `#branch` suffix and a path inside the repository: the installed addons' `package.json` say `https://github.com/xtermjs/xterm.js/tree/master/addons/<addon>`, `npm view` shows the registry's `git+https://github.com/xtermjs/xterm.js.git#master`; both hold at these versions), and fails otherwise; the manifest records `"licenseFrom": "@xterm/xterm"` and `"licenseReason": "no LICENSE in the package; its package.json declares MIT and the repository of @xterm/xterm"` (ruling 1). Beside each vendored `.mjs` the script writes a declaration file `<name>.d.mts` that re-exports the package's typings, recorded in the manifest with package `skydeck`, so that `tsc` for `web/` never reads a bundle. The script also writes `vendor/xterm/THIRD-PARTY-NOTICES` (package `skydeck`, version `-`; ruling on #38): `@xterm/addon-unicode-graphemes` 0.4.0's bundle contains adapted copies of tiny-inflate and unicode-trie (both MIT, Devon Govett) with no notice, so the file names that bundle and holds each package's licence exactly as its `LICENSE` is published on npm (tiny-inflate 1.0.3, unicode-trie 2.0.0); the script refuses another version of that addon until its bundle has been checked again. | S2 16.6 asks for each package's licence file; two packages have none. Type-checking a 400 KB bundle with `checkJs` would be slow and fail. | 2 (16.6) |
 | A4 | The server loads `@xterm/headless` and its addons from `vendor/xterm/` with a dynamic `import()` of a `file:` URL computed from `appRoot` (`src/window/xterm.ts`), typed with `import type` from the development dependencies. Nothing under `src/` imports a vendored file statically, and nothing imports from `node_modules` at run time. | Users never run `npm ci` (docs/install.md): only `vendor/` exists on their machine. | — |
 | A5 | Exact development dependencies: `@xterm/xterm` 6.0.0, `@xterm/headless` 6.0.0, `@xterm/addon-serialize` 0.14.0, `@xterm/addon-fit` 0.11.0, `@xterm/addon-search` 0.16.0, `@xterm/addon-unicode-graphemes` 0.4.0, `ws` 8.23.0, `@types/ws` 8.18.2 (task 2); `playwright` 1.60.0 (task 20; released 2026-05-11, the one version whose Chromium is build 1223, which is already installed on the development machine — 1.59.0 uses 1217, 1.61.x 1228, 1.64.1 1248; checked in each version's `browsers.json`; ruling 6). All verified to exist in the npm registry while writing this plan. | S2 16.6 and 17.4: exact versions. | 2 (16.6), 20 (17.4, 17.5) |
 | A6 | `window.port` in `config.json` accepts 1–65535 only. Tests pass `port: 0` to `runServer` (2.5.4) directly, never through the configuration. | S2 17: "`window.port` 0 in tests only" without making 0 a valid user setting. | 5 (16.4) |
@@ -183,7 +183,7 @@ Each is binding for the implementer. The last column names the task that records
 | A19 | Server tests run the server in the test process through `runServer` (2.5.4) with the real platform's sockets and real keepers; only `serve`'s exit codes, its core limit and its `CLAUDECODE` refusal are tested through `bin/skydeck serve` as a child process. | Speed and direct access to the server's state; the launcher is tested where it matters. | — |
 | A20 | The start deadline (S2 7.1 `startBy`) is computed by `startDeadline` in `src/sessions/launch.ts` (2.7): for a resume, the time in the lock's value plus `LOCK_TTL_NS − LOCK_START_TOLERANCE_NS`; for `new`, the clock at `prepareNew` plus the same. `PreparedLaunch` gains `preparedAtNs`. | S2 7.1 defines the value; one function computes it for `launchPrepared` and `runRestore`. | 4 (11.1) |
 | A21 | Terminal ids are 12 lowercase hex characters from `platform.randomBytes(6)`; server ids and window ids 16 hex characters from 8 bytes. | S2 3 fixes the terminal id only. | — |
-| A22 | Validators of foreign input (`parsePageMessage`, `parseControlBody`, the keeper's `hello`) return `{ ok: false, kind }` with a fixed kind string instead of throwing, so that a caller can log the kind and never a message (S2 2, 5.2). | Node's `JSON.parse` error quotes its input. | — |
+| A22 | Validators of foreign input (`parsePageMessage`, `parseControlRequest`, the keeper's `hello`) return `{ ok: false, kind }` with a fixed kind string instead of throwing, so that a caller can log the kind and never a message (S2 2, 5.2). | Node's `JSON.parse` error quotes its input. | — |
 | A23 | `skydeck serve` and `skydeck window` share `src/window/lifecycle.ts` (task 22) for finding, starting and stopping a server; `uninstall` uses the same stop. | S2 16.2: "stops it as `skydeck window --stop` does". | — |
 | A24 | The server's tick reuses step 1's refresh rule of the interactive list (fix 4): the rows are reloaded when the refresh saved something, a live file or its trust changed, `Store.dataVersion()` moved, a tick failed, or a minute passed. | S2 10.1 names that rule. | — |
 | A25 | `result` carries `sessionId`: the session a successful `resume` or `new` started, else null. | The page must select the new terminal's row (S2 11.3), and only the server knows a new session's id. | 1 (8.2.3) |
@@ -212,7 +212,10 @@ the contract.
 - **Import rules (S2 4.3).** `src/window/` imports `platform`, `text`, `store`, `claude`,
   `sessions`, `terminals`, `github`. `src/window/view/` imports types of `sessions` and `text`,
   and the two functions of A8. `src/window/protocol.ts`, `src/window/frames.ts` and
-  `src/window/hub.ts` import nothing from `src/` but `platform/types.ts` (types). `src/cli/`
+  `src/window/hub.ts` import nothing from `src/` but `platform/types.ts` (types) and step 1's one
+  session-id rule, `isSessionId`, from `src/claude/session-id.ts` — a file that imports nothing, so
+  that the page's type check (which reads `protocol.ts`) needs no Node.js types; `launch.ts`
+  re-exports it (ruled by the plan owner, task 1). `src/cli/`
   imports `src/window/` (the commands `window`, `serve`, `doctor`, `uninstall`). Nothing outside
   `src/window/` imports `src/window/`'s server parts; `src/sessions/` never imports `src/window/`.
 - **Only `src/platform/real.ts`** opens a socket, starts a program, sends a signal, reads `/proc`,
@@ -411,6 +414,38 @@ export function encodeResize(cols: number, rows: number): Uint8Array;
 export const KEEPER_PROTOCOL = 1;
 ```
 
+**What the codec refuses** (ruled by the plan owner, task 1). The keeper (task 9) must write
+nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encoders throw a
+`RangeError`.
+
+- **Frames.** A type byte outside the thirteen above is `unknown-type` as soon as it arrives; a
+  length above `MAX_PAYLOAD` is `too-long` as soon as the 5-byte header is complete. A push that
+  hits either returns the error even when it completed earlier frames, and every later push
+  returns it too. `encodeFrame` throws for an unknown type or a payload above `MAX_PAYLOAD`.
+- **Sizes** (`cols`, `rows` in `H`, `R`, `S`, `P`, `Z`): whole numbers 1–65535, the range of the
+  2-byte fields. **Record numbers** (`seq`, `snapSeq`, the 8-byte field of `S` and `P`): whole
+  numbers from 0 up to `Number.MAX_SAFE_INTEGER`. `encodeSnapshot` and `encodeResize` throw
+  outside these; `decodeSnapshot` is null for a payload shorter than 12 bytes, a record number
+  beyond a safe integer, a size of 0 or a snapshot that is not UTF-8.
+- **JSON payloads** (`H`, `T`, `X`, `R`): UTF-8 (strict) holding a JSON object; a field the parser
+  does not know is ignored (a newer keeper's `hello` must still say that it is newer, S2 7.7),
+  every field listed is required with exactly its type, `null` only where the type allows it.
+- **Times** (`startBy`, `atNs`, `meta.openedNs`): a decimal string without sign or leading zero,
+  at most `2^63 − 1`.
+- **`hello`**: `protocol` a whole number from 0 (any value: the caller decides, S2 7.7); `id` 12
+  lower-case hex characters (A21); `pid` a whole number from 1 or null, `procStart` from 0 or
+  null, both null exactly when `started` is false (S2 8.1: null before the start); `snapSeq` ≤
+  `seq`; `meta.sessionId` passes `isSessionId`; `meta.kind` `resume` or `new`; `meta.slot` 1–9 or
+  null (S2 7.6); `exited`, when not null, as `X` below, with `notStarted` set exactly when
+  `started` is false.
+- **`T` started**: `pid` from 1, `procStart` from 0.
+- **`X` exit — how an exit is represented.** `code` is the exit status (0–255) of a program that
+  exited, else null; `signal` is the number (1–255) of the signal that killed it, else null —
+  never negative: python's `os.waitstatus_to_exitcode` returns `−N` for a death by signal `N`,
+  which the keeper sends as `code: null, signal: N`. A program that ran has exactly one of the
+  two; one that never started has neither, and `notStarted` holds the reason, never empty (a failed
+  `exec` is a program that ran: `code` 127).
+
 ### 2.4 The stand-in: `test/fixtures/standin/` (task 3)
 
 A Node.js program that behaves like the parts of Claude Code skydeck depends on (S2 17.1), and
@@ -570,18 +605,30 @@ export interface LaunchSpec {
 }
 export interface Terminal { readonly name: 'here' | 'wezterm' | 'window'; readonly opensTabs: boolean; open(spec: LaunchSpec): Promise<OpenResult> }
 // `terminalFor` keeps taking 'here' | 'wezterm' (the window terminal exists only inside the server).
+// src/terminals/here.ts (ruled in #39): handoffScript(spec: Pick<LaunchSpec, 'cwd' | 'argv'>) — the
+// handoff uses only those two, so callers and tests need not invent the other fields.
 
 // src/sessions/resume.ts — PreparedLaunch gains:
 //   preparedAtNs: Ns   (the clock when prepareResume / prepareNew ran)
 //   label: string | null
 // prepareNew's options gain `dir: string` (absolute, an existing directory: UsageError
-// "the directory <dir> does not exist" / "… is not absolute" otherwise, nothing stored);
-// the command passes platform.cwd.
+// "the directory <dir> does not exist" (nothing there, or not a directory) / "… is not absolute" /
+// "… cannot be checked (<reason>)" when looking at it fails (ruled in #39), <dir> sanitised;
+// nothing stored); the command passes platform.cwd.
+/** The time a lock value records (when it was taken or last renewed); null for a value that is not
+ *  a lock skydeck writes. Beside lockEventId; startDeadline and task 21 read a lock's time with it
+ *  (ruled in #39). */
+export function lockTakenNs(value: string): Ns | null;
 
 // src/sessions/launch.ts (new; launchPrepared moves here from src/cli/launching.ts)
 export interface LaunchOutcome { code: number; lines: string[] }
-/** A20: lock time + LOCK_TTL_NS − LOCK_START_TOLERANCE_NS for a resume (the time read from `lock`);
- *  preparedAtNs + the same for `new` or when `lock` is null. */
+/** A20: lock time + LOCK_TTL_NS − LOCK_START_TOLERANCE_NS for a resume (the time read from `lock`
+ *  with lockTakenNs); preparedAtNs + the same for `new`, and for a resume whose `lock` is null or
+ *  not a lock skydeck writes (ruled in #39: it has no time to read). Such a resume is protected by
+ *  no lock of its own, so the window terminal (task 21) does not start a resume whose spec's lock
+ *  is null or `lockTakenNs(lock) === null`: it answers `{ ok: false, timedOut: false }` without
+ *  spawning a keeper. `launchPrepared` keeps step 1's behaviour for `here` and `wezterm`, which
+ *  ignore the deadline and the lock. */
 export function startDeadline(prepared: PreparedLaunch, lock: string | null): Ns;
 export function launchSpec(prepared: PreparedLaunch, lock: string | null): LaunchSpec;
 /** launchPrepared of step 1 with the terminal as a parameter; `terminal` null means "no terminal
@@ -592,11 +639,21 @@ export function launchPrepared(deck: Deck, prepared: PreparedLaunch, terminal: T
 export function launchWhere(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
 
 // src/store/store.ts
-export class StoreNewerError extends SkydeckError {} // "skydeck was updated; run skydeck window"
+/** The store throws it with "skydeck was updated; run skydeck window". isDatabaseFailure counts it
+ *  (ruled in #39): a refresh's per-item catches rethrow it instead of recording it against one spool
+ *  file, process or transcript and going on. */
+export class StoreNewerError extends SkydeckError {}
 /** guardSchema (the server's connection only, S2 10.1): before every write transaction and every
  *  single-statement write outside a transaction it reads kv schema_version and throws
- *  StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION. */
+ *  StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION.
+ *  (ruled in #39) The store's read helpers prepare through prepareRead, which refuses anything but
+ *  a SELECT (not WITH, which can stand before a write, nor PRAGMA, which can assign); a test over
+ *  store.ts checks that only the write helpers prepare SQL themselves. That guards against the
+ *  usual mistake, a write sent through a read helper; a function handed the database object
+ *  directly is not covered. */
 export function openStore(path: string, options?: { guardSchema?: boolean }): Store;
+/** Prepares a SELECT; throws Error "not a read statement: …" for anything else. Exported for its test. */
+export function prepareRead(db: DatabaseSync, sql: string): StatementSync;
 // src/sessions/deck.ts
 export function openDeck(platform: Platform, options?: { guardSchema?: boolean }): Deck;
 // src/store/types.ts — KvKey gains:
@@ -705,6 +762,22 @@ export type ControlRequest =
 export function parseControlRequest(method: string, path: string, body: string): { ok: true; value: ControlRequest } | { ok: false; kind: string };
 ```
 
+**Limits `parsePageMessage` applies** (ruled by the plan owner, task 1; also in S2 8.2.3), so
+that the page (tasks 26–29) never sends what the server refuses: strings are measured in UTF-8
+bytes — paths (`new.dir`) and URLs (`open-link.url`; the action then opens one only up to 2,048
+characters, S2 9.6) at most 4,096, `input.data` at most 64 KiB (65,536 bytes; with `binary`, at most
+65,536 characters, each U+0000–U+00FF), every other string at most 1,024 — and every string must
+be well formed (no lone surrogate). `encodeOutputFrame` throws a `RangeError` for a channel that is
+not a whole number 0–2³²−1. `cols` and `rows` (also `focus.area`'s) are whole numbers
+1–65,535; `ping.n` and `act.id` whole numbers from 0; `term` 12 lower-case hex characters,
+`windowId` 16 (A21); `selected` and `sessionId` pass `isSessionId`; `unfolded` holds section names,
+each once; `binary` is `true` or absent; `hello.protocol` any whole number from 0 (the server
+answers 4426) and `hello.nonce`/`proof` only length-checked (their form is `isNonce`, 2.8).
+`parseControlRequest`'s kind starts with `route` when no route matches the method and path (stage
+C's `/resume`, `/new`, `/restore` included; task 18 answers 404) and with `body` for a bad body
+(400); a `GET` has the empty body, `POST /shutdown` the empty body or `{}`; token ids are 32
+lower-case hex characters.
+
 Two additions to S2 8.2.3 and 8.3 that task 1 records in the design: `result` carries
 `sessionId`, so a page can select the session a `new` started (A25); `GET /ping` carries
 `checkout`, which S2 5.1 compares but 8.3's table does not list (A26).
@@ -744,7 +817,8 @@ export function prepareRuntimeDir(platform: Platform, files: RuntimeFiles): void
 /** S2 16.5: writes <dir>/keeper-<build>.py (0o600, through a temporary name) and removes the
  *  keeper files of other builds. */
 export function writeKeeperFile(files: Files, runtime: RuntimeFiles, build: string, code: string): void;
-/** S2 7.8: removes terms/<id>.sock and .pid of keepers dead by their line or whose socket refuses. */
+/** S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
+ *  whose socket refuses connections; a line that is 'unknown' never removes anything by itself. */
 export function removeDeadKeeperFiles(platform: Platform, runtime: RuntimeFiles): Promise<string[]>;
 export interface ServerJson { pid: number; procStart: number; bootId: string; port: number; serverId: string; build: string; checkout: string; startedAt: NsText; envOrigin: { dir: string; atNs: NsText } }
 export function readServerJson(files: Files, path: string): ServerJson | null;
@@ -753,8 +827,11 @@ export function writeServerJson(files: Files, path: string, value: ServerJson): 
  *  5.5's rule. */
 export function takeServerLock(deck: Deck, value: { pid: number; procStart: number; bootId: string; checkout: string }): { taken: true } | { taken: false; holder: { pid: number; checkout: string } };
 export function releaseServerLock(deck: Deck): void;
-/** Keepers by their .pid lines (S2 4.2), alive or not, for doctor, uninstall and the server's rediscovery. */
-export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; alive: boolean }[];
+/** Keepers by their .pid lines (S2 4.2), whatever their state (pidLineState, 2.8), for doctor,
+ *  uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
+ *  server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
+ *  is 'alive' or 'unknown'). */
+export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; state: PidLineState }[];
 
 // src/window/log.ts (task 15)
 /** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1. */
@@ -767,9 +844,31 @@ export function rotateLog(files: Files, path: string): void;
 //   terms/<id>.pid (a keeper): "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f 1 0"
 //   — pid, process start (field 22), boot id, and for a keeper its KEEPER_VERSION and started 0|1,
 //   separated by one space. Tasks 7 (sh), 8 (TypeScript) and 9 (python) write and read this form.
+//   The boot id and the version are any token without whitespace (tests invent boot ids); pid
+//   (1 or more) and process start (0 or more) decimal integers (safe integers). The final '\n' may
+//   be missing when read.
 export interface PidLine { pid: number; procStart: number; bootId: string; keeper?: { version: string; started: boolean } }
+/** Throws for a pid that is not a positive whole number, a process start that is not a
+ *  non-negative whole number, and an empty boot id or version or one holding whitespace. */
 export function formatPidLine(line: PidLine): string;
-export function parsePidLine(text: string): PidLine | null;
+export function parsePidLine(text: string): PidLine | null; // null for pid 0, too
+/** Design 5.5, three-valued. 'unknown' = it could not tell: no current boot id (`bootId` null),
+ *  a /proc read that failed (the platform threw), a stat line whose process start cannot be read.
+ *  'dead' = another boot, no process with the pid, or another process start.
+ *  NOTHING IS EVER REMOVED, ENDED OR GIVEN UP ON 'unknown': only 'dead' allows removing a socket or
+ *  a pid file. Who uses which:
+ *  - pidLineState, acting only on 'dead': removing a keeper's socket and pid file
+ *    (removeDeadKeeperFiles, the server's rediscovery, tasks 15 and 16); giving up a recorded
+ *    runtime directory (resolveRuntimeDir 'take': only when every keeper line in it is 'dead');
+ *    taking the server lock from the server it names (takeServerLock); `uninstall --purge`
+ *    (refuses unless every keeper is 'dead'); the keep-alive (task 7, sh) ends only when the
+ *    server's and every keeper's line is dead, never when it cannot read the boot id.
+ *  - isPidLineAlive ("known alive"): showing and counting (doctor counts state 'alive'), and
+ *    before signalling a process (stopServer, the tests' killKeepersIn): only a process known alive
+ *    is signalled. */
+export type PidLineState = 'alive' | 'dead' | 'unknown';
+export function pidLineState(line: PidLine, proc: Proc, bootId: string | null): PidLineState;
+/** pidLineState(...) === 'alive'. */
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean;
 
 // src/window/client.ts (task 18): the command line's side of server.sock
@@ -825,10 +924,25 @@ export function terminalKey(e) {}
 /** List-zone keys (S2 12.9): { kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' } |
  *  { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' } |
  *  { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' } |
- *  { kind: 'later', stage: 'D' } (A11: `l`, `g`, `n`, `p`, `d`, F2) | null */
+ *  { kind: 'later', stage: 'D' } (A11: `l`, `g`, `n`, `p`, `d`, F2) | null
+ *  `reload`: F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R, BrowserRefresh alone / with Shift / with
+ *  Ctrl (ruled for task 31); windowChord gives `reload` for Ctrl+Shift+R and BrowserRefresh. */
 export function listKey(e) {}
-/** Whether the page cancels the key (preventDefault): exactly the keys it handles (Alt+F4 never). */
+/** Whether the page cancels the key (preventDefault): exactly the keys it handles (Alt+F4 never).
+ *  `handled` (boolean) means "the page acted on this key" (ruled for task 31). False for Alt+F4,
+ *  and for Ctrl+V in the terminal zone, whatever `handled` says; true, whatever `handled` says,
+ *  for every windowChord (`later` ones included), the list zone's reload keys, and the terminal
+ *  keys the page sends itself (terminalKey `{ send }`: Shift+Enter, Ctrl+Shift+V); for every
+ *  other key it returns `handled`. While a text field of the page has the keyboard (the filter,
+ *  the new form), app.js passes `handled = false` for the keys it leaves to the field, so that
+ *  `j` or `/` type there. In the terminal zone F5, Shift+F5, Ctrl+F5 and Ctrl+R go to the program
+ *  only while xterm.js has the keyboard; while something of the page has it (the find bar, the
+ *  New form, a card, the ended bar) app.js treats them as the page's reload (`listKey` gives
+ *  `reload` in any zone) and passes `handled = true` (ruled for task 31). */
 export function cancels(e, zone, handled) {}
+// Tasks 26 and 28: a key that two functions classify (Ctrl+Shift+V: windowChord `paste-raw` and
+// terminalKey `{ send: '\x16' }`; Ctrl+Shift+R and BrowserRefresh: windowChord and listKey
+// `reload`) is acted on once.
 
 // web/list.js — replaced by task 27
 /** @param {HTMLElement} root
@@ -882,10 +996,13 @@ arrives from a page or a command, the keeper frame codec and payload parsers, an
 between the server's parts. No behaviour beyond encoding, decoding and validation.
 
 **Files**
-- Create: `src/window/protocol.ts`, `src/window/frames.ts`, `src/window/hub.ts`
-- Modify: `docs/design-step-2.md` 8.2.3 (`tick-failed`, `result.sessionId`, `list.selected`,
-  `list.dirs`, `terminals[].notReported`, `notice.term`, stage A's `view` without `chips`), 8.3
-  (`checkout` in `/ping`)
+- Create: `src/window/protocol.ts`, `src/window/frames.ts`, `src/window/hub.ts`,
+  `src/claude/session-id.ts` (`isSessionId` moved there; ruled by the plan owner, see 2.1)
+- Modify: `src/claude/launch.ts` (re-exports `isSessionId`); `docs/design-step-2.md` 4.3
+  (`protocol.ts` may import `session-id.ts`), 8.2.3 (`tick-failed`, `result.sessionId`,
+  `list.selected`, `list.dirs`, `terminals[].notReported`, `notice.term`, stage A's `view` without
+  `chips`, the page messages' limits), 8.3 (`checkout` in `/ping`; `/status`'s `build`,
+  `checkout`, `startedAtNs`, `envOrigin`)
 - Test: `test/window/protocol.test.ts`, `test/window/frames.test.ts`
 
 **Tests** (platform: none — pure)
@@ -938,7 +1055,7 @@ the server (task 14) check the files against the manifest.
 
 **Files**
 - Modify: `package.json` (devDependencies of A5 except `playwright`; script `"vendor": "node scripts/vendor.ts"`), `package-lock.json`, `.prettierignore` (`vendor/`), `tsconfig.json` (`include` gains `scripts`)
-- Create: `scripts/vendor.ts`, `vendor/xterm/**`, `vendor/MANIFEST.json`, `src/window/vendor.ts`
+- Create: `scripts/vendor.ts`, `vendor/xterm/**` (with `vendor/xterm/THIRD-PARTY-NOTICES`), `vendor/MANIFEST.json`, `src/window/vendor.ts`
 - Modify: `docs/design-step-2.md` 16.6 (A3: the layout, the missing licences, the shims), 17.5 (A13)
 - Test: `test/vendor/vendor.test.ts`, `test/window/vendor.test.ts`
 
@@ -948,13 +1065,29 @@ the server (task 14) check the files against the manifest.
 `addon-fit`, `addon-search`, `addon-unicode-graphemes`): `lib/<name>.mjs`, `typings/<name>.d.ts`.
 The implementer checks the bundles for third-party notices (`addon-unicode-graphemes` bundles
 `tiny-inflate` and `unicode-trie`) and says in the pull request what licence text covers them.
+Ruled on #38: none did, so `vendor/xterm/THIRD-PARTY-NOTICES` carries them (A3), checked like
+every other vendored file; a test pins each licence text to the sha256 of the published `LICENSE`.
 
 ```ts
 // src/window/vendor.ts
+/** `path` is relative to the checkout (`vendor/xterm/xterm/lib/xterm.mjs`). */
 export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string; licenseReason?: string }
+/** null when the manifest is missing, unreadable or not a manifest — also when any entry's path
+ *  lies outside `vendor/xterm/`, has a segment that is empty, `.` or `..` or holds anything but
+ *  ASCII letters, digits, `.`, `_` and `-` (no backslash, space or control character), or is
+ *  listed twice (task 14 serves the listed paths). Never throws. */
 export function readManifest(files: Files, appRoot: string): ManifestEntry[] | null;
-/** One line per problem: a listed file missing, or its sha256 different; [] when all match. */
+/** One line per problem: a listed file missing, or its sha256 different; [] when all match.
+ *  Also one line for a listed path that is not a file or cannot be read, and one line for a
+ *  manifest that is missing, unreadable, not valid or lists no files. Never throws. */
 export function verifyVendored(files: Files, appRoot: string): string[];
+
+// scripts/vendor.ts — for tests: the seam the fixture `node_modules` test needs
+export interface VendorOptions { from: string /* holds node_modules/@xterm */; to: string /* receives vendor/ */ }
+/** Checks everything, then replaces `<to>/vendor/xterm/` and `<to>/vendor/MANIFEST.json`;
+ *  throws before writing anything. Returns the manifest's entries. */
+export function vendor(options: VendorOptions): ManifestEntry[];
+// `node scripts/vendor.ts [<directory>]`: from the checkout into <directory> (the checkout by default).
 ```
 
 **Tests** (platform: none — the files of the checkout and a temporary directory)
@@ -1037,14 +1170,19 @@ write guard; `kv` gets the window's keys.
 **Files**
 - Create: `src/sessions/launch.ts`
 - Modify: `src/terminals/types.ts`, `src/terminals/here.ts`, `src/terminals/wezterm.ts` (names
-  only; they ignore the new fields), `src/sessions/resume.ts` (`PreparedLaunch` fields,
+  only; they ignore the new fields; `handoffScript` takes `Pick<LaunchSpec, 'cwd' | 'argv'>`,
+  ruled in #39), `src/sessions/resume.ts` (`PreparedLaunch` fields,
   `prepareNew` with `dir`), `src/sessions/restore.ts` (fills the new `LaunchSpec` fields through
   `launchSpec`), `src/cli/launching.ts` (only `launchWhere`), `src/cli/commands/resume.ts`,
   `src/cli/commands/new.ts`, `src/cli/tui/run.ts` (call `launchWhere`; `new` passes
   `platform.cwd`), `src/store/store.ts`, `src/store/types.ts`, `src/sessions/deck.ts`
-- Modify: `docs/design-step-2.md` 11.1 (A20)
+- Modify: `docs/design-step-2.md` 11.1 (A20), and the 4.4 row of `src/terminals/types.ts` (the
+  label; ruled in #39)
 - Test: `test/sessions/launch.test.ts` (moved from `test/cli/launching.test.ts` and extended),
-  `test/store/store.test.ts`, `test/sessions/resume.test.ts`, `test/sessions/restore.test.ts`
+  `test/store/store.test.ts`, `test/sessions/resume.test.ts`, `test/sessions/restore.test.ts`,
+  `test/sessions/deck.test.ts` (`openDeck`'s option), `test/fixtures/migrate-while-locked.ts` (a
+  worker thread that commits a migration while a guarded write waits for the lock); call sites
+  only in `test/terminals/terminals.test.ts` and `test/bin/launcher-handoff.test.ts` (ruled in #39)
 
 **Tests** (platform: `testPlatform` (through `testDeck`))
 - Every existing test of `resume`, `new`, `restore`, the interactive list and `launching` passes
@@ -1062,6 +1200,17 @@ write guard; `kv` gets the window's keys.
   `SCHEMA_VERSION + 1`; then `setKv`, `updateMeta`, `insertEvent` and `transaction(fn)` each throw
   `StoreNewerError` and write nothing (`fn` is not called); reads still work. Without the option
   the same writes succeed (a command migrates, it does not refuse). The `kv` keys of 2.6 type-check.
+- Store guard under the lock: a migration that commits while a guarded write waits for the write
+  lock is seen, and the write is refused (the version is read after BEGIN IMMEDIATE).
+- The read helpers take only a SELECT (ruled in #39): `prepareRead` accepts SELECT (any case,
+  after whitespace) and refuses WITH (also before a SELECT), PRAGMA (also a read), INSERT, UPDATE,
+  DELETE, REPLACE, CREATE, a word that only begins like SELECT, and empty text, running nothing
+  (a WITH…INSERT, a WITH…DELETE, `PRAGMA user_version = 7` and `PRAGMA journal_mode = DELETE`
+  change nothing); a test over the store's source finds `this.#db.prepare(` only in the two write
+  helpers, inside `#write`, and no `this.#db.exec(`.
+- `isDatabaseFailure(new StoreNewerError('<message>'))` is true (ruled in #39): otherwise ingest, reconcile and
+  scan, which rethrow only failures of the database as a whole, would record the refusal item by
+  item and go on, and the server's tick would not stop at the first refused write.
 
 **Done when:** all step 1 tests pass; no command's output changes; the server can call
 `launchPrepared` with its own terminal and get the spec it needs.
@@ -1277,21 +1426,31 @@ export const CLAUDE_CHILD_VARIABLES: readonly string[];
 // src/window/env.ts
 /** S2 5.2: the server's own environment without SKYDECK_HANDOFF, without NODE_COMPILE_CACHE when it
  *  equals SKYDECK_LAUNCHER_CACHE, without the marker; SKYDECK_CORE_SOFT and SKYDECK_ENV_ORIGIN
- *  (A29) taken out and returned. */
+ *  (A29) always taken out and returned — null when absent or unusable (a core limit that is not
+ *  decimal bytes or `unlimited`, an origin that is not an absolute path). */
 export function serverEnvironment(env: Env): { env: Record<string, string>; coreSoft: string | null; origin: string | null };
-/** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). */
+/** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). Removes
+ *  SKYDECK_ENV_ORIGIN too (S2 7.4's list); SKYDECK_HOME and SKYDECK_NODE pass (the hook needs them).
+ *  Prefix rules: WEZTERM_, KONSOLE_, VSCODE_ (S2 7.4 says why); every other name is exact.
+ *  GIT_ASKPASS goes only when VSCODE_GIT_ASKPASS_MAIN is set beside it (the editor's). */
 export function programEnvironment(serverEnv: Readonly<Record<string, string>>, options: { cwd: string; interop: string | null }): Record<string, string>;
 // src/window/windows.ts
-/** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/. */
+/** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/, and for one
+ *  with a segment Windows cannot have: '.' or '..', a control character, " * : < > ? | or a
+ *  backslash, a trailing space or dot. */
 export function windowsPath(linuxPath: string): string | null;
 /** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
 export function deriveProfileDir(files: Files): { ok: true; dir: string } | { ok: false; error: string };
+/** For tests: deriveProfileDir with `usersRoot` standing for /mnt/c/Users (a sandbox folder). */
+export function deriveProfileDirUnder(files: Files, usersRoot: string): { ok: true; dir: string } | { ok: false; error: string };
 /** S2 5.3: the arguments for msedge.exe. */
 export function edgeArgs(port: number, token: string, profileDir: string): string[];
-/** S2 9.6: the URL to open (re-serialised), or null when it must not be opened. */
+/** S2 9.6: the URL to open (re-serialised), or null when it must not be opened; the re-serialised
+ *  URL must also be at most 2,048 characters and hold no '"' and no backslash. */
 export function linkToOpen(url: string): string | null;
 // src/window/flags.ts
-/** S2 12.6: words separated by spaces, '…' and "…" group words, no escapes; an unclosed quote is an error. */
+/** S2 12.6: words separated by any whitespace (JavaScript's \s: a no-break space too), '…' and
+ *  "…" group words, no escapes; an unclosed quote or a NUL is an error. */
 export function splitFlags(text: string): { ok: true; flags: string[] } | { ok: false; error: string };
 // src/claude/procstat.ts
 export function parentPidFromStat(line: string): number | null; // field 4, after the last ')'
@@ -1308,8 +1467,9 @@ export function parentPidFromStat(line: string): number | null; // field 4, afte
 - pid lines: round trip with and without the keeper fields; garbled lines → null; `isPidLineAlive`
   with the fake proc: alive, other boot, reused pid, no boot id.
 - `windowsPath`, `deriveProfileDir` with sandbox folders standing for `/mnt/c/Users/*/AppData/Local/Microsoft/Edge`
-  (the function takes the `/mnt/c/Users` root as a parameter in its private helper so the test can
-  point it into the sandbox): one user → the folder; none, two, an unreadable one.
+  (the function takes the `/mnt/c/Users` root as a parameter in a helper, `deriveProfileDirUnder`,
+  exported for tests only, so the test can point it into the sandbox): one user → the folder;
+  none, two, an unreadable one.
 - `edgeArgs(47613, 'abc', 'C:\\x')` → exactly the four arguments of S2 5.3.
 - `linkToOpen`: `https://github.com/a/b/pull/1` → itself; `http://x` → `http://x/`; `file:///etc`,
   `javascript:…`, a 2,049-character URL, `-https://x`, `not a url` → null.
@@ -1346,7 +1506,9 @@ cancels) and `web/format.js` (the age format of design 7.4). No DOM, no state: f
 // web/format.js
 /** design 7.4's compact age: < 60 s "<n>s", < 60 min "<n>m", < 48 h "<n>h", else "<n>d"; negative counts as 0. */
 export function formatAge(durationNs) {} // bigint → string
-/** The age between two decimal-string nanosecond times of the protocol. */
+/** The age between two decimal-string nanosecond times of the protocol. Never throws: when either
+ *  is not an integer in decimal digits (empty, null, malformed) it returns '' (ruled for task 31:
+ *  one bad value must not break the list). */
 export function ageBetween(nowNs, thenNs) {} // (string, string) → string
 ```
 
@@ -1356,13 +1518,15 @@ export function ageBetween(nowNs, thenNs) {} // (string, string) → string
   character is not a digit; letters, Ctrl+Shift+H included, by the character typed), in both zones;
   Ctrl+Shift+- is not the window's; `terminalKey`: Shift+Enter → `\n`, Ctrl+V → `'browser'`,
   Ctrl+Shift+V → `\x16`, Alt+F4 → `'browser'`, a plain letter → null; `listKey`: ↑ ↓ `j` `k` Home
-  End PgUp PgDn ← → Enter `/` `a` Esc, F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5; A11: Ctrl+Shift+P and
+  End PgUp PgDn ← → Enter `/` `a` Esc, F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5, Shift+F5 and BrowserRefresh
+  (alone, with Shift, with Ctrl; ruled for task 31); A11: Ctrl+Shift+P and
   Ctrl+Shift+J → `later` (E, B) in both zones, `l` `g` `n` `p` `d` F2 → `later` (D) in the list zone
   and null in the terminal zone; `cancels`: Alt+F4 never, a key neither zone uses never, F5 and
   Ctrl+R in the list zone yes and in the terminal zone no, Ctrl+Shift+R in both, every `later` key
   yes.
 - `format.test.ts`: `formatAge` equals `src/text/age.ts`'s for 0, 59 s, 60 s, 59 min, 47 h, 48 h,
-  400 days and a negative duration (A18); `ageBetween` on decimal strings above 2^53.
+  400 days and a negative duration (A18); `ageBetween` on decimal strings above 2^53, and `''`
+  for an empty, null or malformed time.
 
 **Done when:** the whole key policy of S2 12.9 and 9.1 is a tested pure function, on both layouts.
 
@@ -2499,7 +2663,9 @@ session into a terminal pane that says "terminal view comes with task 28".
 - `web/keys.js`, `web/format.js` (task 31) and task 27's `web/list-text.js` use no DOM, so that
   node:test and the root `tsc` can load them; every module of `web/` is checked by `tsc -p web`.
 - Create: `web/tsconfig.json` (DOM library, `allowJs`, `checkJs`, `noEmit`, the vendored `.d.mts`
-  shims and `src/window/protocol.ts` in reach)
+  shims and `src/window/protocol.ts` in reach; `protocol.ts` needs an ES2024 library or later for
+  `String.prototype.isWellFormed` and `allowImportingTsExtensions` for its `.ts` import of
+  `src/claude/session-id.ts`)
 - Modify: `package.json` (`"typecheck": "tsc --noEmit && tsc --noEmit -p web"`)
 - Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`
 
@@ -2529,8 +2695,10 @@ with `@import` and `@typedef`, ruling 5).
   server whose proof is wrong the page sends nothing
   after `hello` and shows the warning with the port.
 - `shell.test.ts`: the CSP lets the page's files load and an inline script injected into the
-  served HTML by a stand-in server does not run; F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 in the list
-  zone, and Ctrl+Shift+R in the terminal zone, reload only after a server's proof, and not at
+  served HTML by a stand-in server does not run; F5, Shift+F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5
+  in the list zone, Ctrl+Shift+R in the terminal zone, BrowserRefresh in both if Playwright can
+  send it, and F5 and Ctrl+R in the terminal zone while the page, not xterm.js, has the keyboard
+  (the placeholder pane; the find bar from task 28 on), reload only after a server's proof, and not at
   all against a stand-in server without one; a dropped file does not navigate the window; the
   server stopped → the bar of S2 6.3 within 4 s; started again (same boot) → "skydeck's server
   restarted; your sessions kept running" and the list back; a server started with another boot
