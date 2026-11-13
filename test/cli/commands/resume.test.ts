@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -103,7 +103,7 @@ test('resume --here --tab is a usage error', async (t) => {
   assert.equal(await main(['resume', '0b5f', '--here', '--tab'], d.ctx), 2);
   assert.ok(d.stderr().includes(USAGE_FIRST_LINE), d.stderr());
   assert.equal(existsSync(handoffPath(d)), false);
-  assert.deepEqual(readdirSync(d.deck.places.locksDir), []);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
 });
 
 test('resume <prefix> with the default terminal hands the command to the launcher', async (t) => {
