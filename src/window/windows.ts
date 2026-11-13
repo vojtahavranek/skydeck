@@ -9,17 +9,29 @@ import { join } from 'node:path';
 import type { Files } from '../platform/types.ts';
 
 /** `/mnt/<letter>` and what follows it; WSL mounts drives under lowercase letters. */
-const DRIVE_PATH = /^\/mnt\/([a-z])(?:\/(.*))?$/s;
+const DRIVE_PATH = /^\/mnt\/([a-z])(?:\/(.*))?$/;
+/** Characters no Windows file name holds: the control characters and " * : < > ? | \\. */
+const NOT_IN_A_WINDOWS_NAME = /[\x00-\x1f"*:<>?|\\]/;
 
-/** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/. */
+/**
+ * A name Windows cannot have, or one that names something else there: '.' and '..' (they would
+ * leave the drive), a forbidden character (a backslash would split the name, ':' names a stream,
+ * '"' would end a quoted argument), a trailing space or dot (Windows drops it).
+ */
+function notAWindowsName(name: string): boolean {
+  return NOT_IN_A_WINDOWS_NAME.test(name) || name.endsWith(' ') || name.endsWith('.');
+}
+
+/**
+ * '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/, and for one
+ * with a segment Windows cannot have (see notAWindowsName).
+ */
 export function windowsPath(linuxPath: string): string | null {
   const match = DRIVE_PATH.exec(linuxPath);
   if (match === null) return null;
   const [, letter = '', rest = ''] = match;
   const parts = rest.split('/').filter((part) => part !== '');
-  // '.' and '..' would leave the drive or name another folder than they seem to; a backslash
-  // would split a name in two on Windows.
-  if (parts.some((part) => part === '.' || part === '..' || part.includes('\\'))) return null;
+  if (parts.some(notAWindowsName)) return null;
   return `${letter.toUpperCase()}:\\${parts.join('\\')}`;
 }
 
@@ -102,7 +114,10 @@ const MAX_LINK_LENGTH = 2048;
 /**
  * S2 9.6: the URL to open (re-serialised), or null when it must not be opened: longer than 2,048
  * characters, not a URL, or not http/https. The re-serialised URL — the one passed to Edge — must
- * fit the same limit (percent-encoding can make it longer than what the page sent).
+ * fit the same limit (percent-encoding can make it longer than what the page sent), and must hold
+ * no '"' and no backslash: it becomes one argument of a Windows program, and either can change how
+ * that program splits its command line. (The parser encodes a '"' everywhere but in the host, and
+ * a backslash keeps only in the query and the fragment.)
  */
 export function linkToOpen(url: string): string | null {
   if (url.length > MAX_LINK_LENGTH) return null;
@@ -111,5 +126,6 @@ export function linkToOpen(url: string): string | null {
     return null;
   }
   const href = parsed.href;
-  return href.length <= MAX_LINK_LENGTH ? href : null;
+  if (href.length > MAX_LINK_LENGTH || href.includes('"') || href.includes('\\')) return null;
+  return href;
 }

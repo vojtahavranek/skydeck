@@ -68,6 +68,32 @@ test('windowsPath gives null for a path that leaves its drive or cannot be writt
   }
 });
 
+test('windowsPath gives null for a name Windows cannot have', () => {
+  const names = [
+    'a\nb', // a line break
+    'a\tb',
+    'a\u0000b',
+    'a\u001fb', // any control character
+    'a"b', // the one that matters inside --user-data-dir=
+    'a:b', // on Windows: the stream b of a
+    'a<b',
+    'a>b',
+    'a|b',
+    'a?b',
+    'a*b',
+    'name ', // Windows drops a trailing space or dot: it would name another folder
+    'name.',
+  ];
+  for (const name of names) {
+    assert.equal(windowsPath(`/mnt/c/Users/${name}/x`), null, JSON.stringify(name));
+    assert.equal(windowsPath(`/mnt/c/Users/${name}`), null, JSON.stringify(name));
+  }
+});
+
+test('windowsPath keeps names Windows allows: inner dots and spaces, a leading space, # and %', () => {
+  assert.equal(windowsPath('/mnt/c/a.b/c d/ e/#1%/x.y.z'), 'C:\\a.b\\c d\\ e\\#1%\\x.y.z');
+});
+
 // ---------------------------------------------------------------------------------------------
 // deriveProfileDir (S2 5.4), with a sandbox folder standing for /mnt/c/Users
 
@@ -296,6 +322,19 @@ test('linkToOpen refuses every scheme but http and https', () => {
   ]) {
     assert.equal(linkToOpen(url), null, url);
   }
+});
+
+test('linkToOpen refuses a URL that keeps a " or a backslash once re-serialised', () => {
+  // Either could change how a Windows program splits its command line.
+  for (const url of ['https://a"b/', 'https:%22b', 'https://x/?a\\b', 'https://x/#a\\b']) {
+    assert.equal(linkToOpen(url), null, url);
+  }
+});
+
+test('linkToOpen opens a URL whose " or backslash the parser rewrites', () => {
+  assert.equal(linkToOpen('https://x/a"b'), 'https://x/a%22b');
+  assert.equal(linkToOpen('https://x/?q="a"'), 'https://x/?q=%22a%22');
+  assert.equal(linkToOpen('https://x/a\\b'), 'https://x/a/b');
 });
 
 test('linkToOpen refuses what is not a URL, or could be read as an option', () => {
