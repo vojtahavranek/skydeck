@@ -6,7 +6,7 @@ import type { ArgSpec, ParsedArgs } from '../args.ts';
 import type { Command } from '../command.ts';
 import { withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
-import { launchPrepared } from '../launching.ts';
+import { launchWhere } from '../launching.ts';
 
 const SPEC: ArgSpec = {
   usage: `skydeck new [--label <text>] [--group <text>] [--here | --tab] [-- <claude flags>]
@@ -58,11 +58,12 @@ export const command: Command = {
     const where = whereFrom(parsed, SPEC.usage);
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const prepared = prepareNew(deck, {
+        dir: deck.platform.cwd,
         label: text(parsed.flags['label']),
         group: text(parsed.flags['group']),
         extra: parsed.rest,
       });
-      const outcome = await launchPrepared(deck, prepared, where);
+      const outcome = await launchWhere(deck, prepared, where);
       for (const line of outcome.lines) {
         ctx.io.stderr(`${line}\n`);
       }

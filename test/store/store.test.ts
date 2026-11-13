@@ -1,15 +1,22 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { chmodSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { Worker } from 'node:worker_threads';
 
 import { SkydeckError } from '../../src/platform/errors.ts';
 import { NS_PER_SECOND as SEC } from '../../src/platform/time.ts';
 import { MIGRATIONS, SCHEMA_VERSION } from '../../src/store/migrations.ts';
-import { isDatabaseFailure, openStore } from '../../src/store/store.ts';
+import {
+  StoreNewerError,
+  isDatabaseFailure,
+  openStore,
+  prepareRead,
+} from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import type {
   EventRow,
@@ -1171,5 +1178,291 @@ describe('isDatabaseFailure', () => {
     assert.equal(isDatabaseFailure(Object.assign(new Error('x'), { code: 'EACCES' })), false);
     assert.equal(isDatabaseFailure('database is locked'), false);
     assert.equal(isDatabaseFailure(null), false);
+  });
+});
+
+describe('the schema guard of the server (S2 10.1)', () => {
+  const REFUSAL = 'skydeck was updated; run skydeck window';
+
+  function refused(error: unknown): boolean {
+    return error instanceof StoreNewerError && error.message === REFUSAL;
+  }
+
+  /** Every row of every table, read through a connection that is not the store's. */
+  function dump(path: string): Record<string, unknown[]> {
+    const db = new DatabaseSync(path, { readOnly: true, readBigInts: true });
+    try {
+      const tables = ['events', 'links', 'session_meta', 'transcripts', 'prs', 'session_prs', 'kv'];
+      return Object.fromEntries(
+        tables.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]),
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  /** What another skydeck's migration does to the store: a newer schema version. */
+  function makeNewer(path: string): void {
+    const db = new DatabaseSync(path);
+    try {
+      db.prepare("UPDATE kv SET value = ? WHERE key = 'schema_version'").run(
+        String(SCHEMA_VERSION + 1),
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  /** A database with one row in every table, and a store on it opened with `options`. */
+  function seeded(t: TestContext, options?: { guardSchema?: boolean }): Opened {
+    const { path } = fresh(t);
+    const seed = openStore(path);
+    seed.insertEvent(ev());
+    seed.insertLink({ eventId: 1, fromSession: S1, toSession: S2, kind: 'clear', timeNs: T0 });
+    seed.updateMeta(S1, { label: 'old' }, T0);
+    seed.saveTranscript(transcript());
+    seed.ensurePr(KEY1);
+    seed.attachPr(S1, URL1, 'auto', T0);
+    seed.setKv('first_scan_done', '1');
+    seed.close();
+    const reopen = (): Store => {
+      const store = openStore(path, options);
+      t.after(() => {
+        store.close();
+      });
+      return store;
+    };
+    return { store: reopen(), path, reopen };
+  }
+
+  /** Each write of the Store interface that is a single statement. */
+  const WRITES: [name: string, write: (store: Store) => unknown][] = [
+    ['setKv', (store) => store.setKv('window_secret', 'x')],
+    ['deleteKv', (store) => store.deleteKv('first_scan_done')],
+    ['addToKv', (store) => store.addToKv('dropped_scripted', 1)],
+    ['insertEvent', (store) => store.insertEvent(ev({ spoolName: 'b.ev', sessionId: S2 }))],
+    [
+      'insertLink',
+      (store) => {
+        store.insertLink({ eventId: 2, fromSession: S2, toSession: S1, kind: 'fork', timeNs: T0 });
+      },
+    ],
+    ['updateMeta', (store) => store.updateMeta(S1, { label: 'new' }, T0 + SEC)],
+    ['deleteMeta', (store) => store.deleteMeta(S1)],
+    ['saveTranscript', (store) => store.saveTranscript(transcript({ sizeRead: 1300 }))],
+    [
+      'ensurePr',
+      (store) => store.ensurePr({ ...KEY1, url: 'https://github.com/o/r/pull/2', number: 2 }),
+    ],
+    [
+      'savePrResult',
+      (store) => store.savePrResult(URL1, { ok: false, atNs: T0, error: 'gh failed' }),
+    ],
+    ['attachPr', (store) => store.attachPr(S2, URL1, 'manual', T0)],
+    ['detachPr', (store) => store.detachPr(S1, URL1, T0)],
+  ];
+
+  test('a guarded store refuses every write into a newer store and writes nothing; reads still work', (t) => {
+    const { store, path } = seeded(t, { guardSchema: true });
+    makeNewer(path);
+    const before = dump(path);
+    for (const [name, write] of WRITES) {
+      assert.throws(() => write(store), refused, name);
+      assert.deepEqual(dump(path), before, name);
+    }
+    let called = false;
+    assert.throws(
+      () =>
+        store.transaction(() => {
+          called = true;
+          store.setKv('window_server', 'x');
+        }),
+      refused,
+    );
+    assert.equal(called, false);
+    assert.deepEqual(dump(path), before);
+
+    assert.equal(store.getKv('schema_version'), String(SCHEMA_VERSION + 1));
+    assert.equal(store.meta(S1)?.label, 'old');
+    assert.deepEqual(
+      store.events().map((event) => event.spoolName),
+      ['a.ev'],
+    );
+    assert.equal(store.latestEventIdOfSession(S1), 1);
+    assert.equal(store.transcripts().length, 1);
+    assert.equal(sessionPr(store)?.detachedAtNs, null);
+    assert.deepEqual(store.kvEntries('first_'), [{ key: 'first_scan_done', value: '1' }]);
+  });
+
+  test('a refused write leaves no transaction open: another connection can write at once', (t) => {
+    const { store, path } = seeded(t, { guardSchema: true });
+    makeNewer(path);
+    assert.throws(() => store.setKv('window_alarm', '1'), refused);
+    assert.throws(() => store.transaction(() => 0), refused);
+    const other = new DatabaseSync(path);
+    t.after(() => {
+      other.close();
+    });
+    other.exec('PRAGMA busy_timeout = 0');
+    other.exec("INSERT INTO kv (key, value) VALUES ('doctor_probe', '1')");
+    assert.equal(store.getKv('doctor_probe'), '1');
+  });
+
+  test('without the option the same writes go into a newer store: a command migrates, it does not refuse', (t) => {
+    const { store, path } = seeded(t);
+    makeNewer(path);
+    for (const [name, write] of WRITES) {
+      assert.doesNotThrow(() => write(store), name);
+    }
+    assert.equal(
+      store.transaction(() => {
+        store.setKv('window_server', 'x');
+        return 7;
+      }),
+      7,
+    );
+    assert.equal(store.getKv('window_secret'), 'x');
+    assert.equal(store.getKv('window_server'), 'x');
+    assert.equal(store.meta(S1), null); // updateMeta, then deleteMeta
+  });
+
+  test('a guarded store writes into a store of its own version, inside a transaction and outside', (t) => {
+    const { store, path } = seeded(t, { guardSchema: true });
+    for (const [name, write] of WRITES) {
+      assert.doesNotThrow(() => write(store), name);
+    }
+    assert.equal(
+      rawRows(path, "SELECT value FROM kv WHERE key = 'window_secret'")[0]?.['value'],
+      'x',
+    );
+    const result = store.transaction(() => {
+      store.setKv('window_server', 'a');
+      store.updateMeta(S2, { group: 'G' }, T0);
+      store.insertEvent(ev({ spoolName: 'c.ev', sessionId: S2 }));
+      return 'done';
+    });
+    assert.equal(result, 'done');
+    assert.equal(store.getKv('window_server'), 'a');
+    assert.equal(store.meta(S2)?.group, 'G');
+    assert.equal(store.latestEventIdOfSession(S2), 3);
+  });
+
+  test('the version is read inside the write lock: a migration that commits while a write waits is seen', async (t) => {
+    const { store, path } = seeded(t, { guardSchema: true });
+    for (const write of [
+      () => store.setKv('window_alarm', '1'),
+      () => store.transaction(() => store.setKv('window_alarm', '1')),
+    ]) {
+      makeOlderAgain(path);
+      const migrator = new Worker(new URL('../fixtures/migrate-while-locked.ts', import.meta.url), {
+        workerData: { path, version: SCHEMA_VERSION + 1, holdMs: 300 },
+      });
+      await once(migrator, 'message'); // it holds the write lock, the new version not yet committed
+      assert.throws(write, refused); // waits for the lock (busy timeout), then reads the new version
+      await once(migrator, 'exit');
+      assert.equal(store.getKv('window_alarm'), null);
+    }
+  });
+
+  /** Back to this skydeck's version, for the next case of a test. */
+  function makeOlderAgain(path: string): void {
+    const db = new DatabaseSync(path);
+    try {
+      db.prepare("UPDATE kv SET value = ? WHERE key = 'schema_version'").run(
+        String(SCHEMA_VERSION),
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  test('StoreNewerError is a failure of the database as a whole: a refresh must not skip it per item', () => {
+    assert.equal(isDatabaseFailure(new StoreNewerError(REFUSAL)), true);
+  });
+
+  test('StoreNewerError is a SkydeckError constructed as one (contract 2.6): message, exit code', () => {
+    const error = new StoreNewerError('m');
+    assert.ok(error instanceof SkydeckError);
+    assert.equal(error.name, 'StoreNewerError');
+    assert.equal(error.message, 'm');
+    assert.equal(error.exitCode, 1);
+    assert.equal(new StoreNewerError('m', 5).exitCode, 5);
+  });
+
+  test('the read helpers prepare only a SELECT: a write cannot go round the guard through them', (t) => {
+    const { path } = fresh(t);
+    const db = new DatabaseSync(path);
+    t.after(() => {
+      db.close();
+    });
+    for (const sql of ['SELECT value FROM kv', '  select 1', '\n\tSelect 2']) {
+      assert.doesNotThrow(() => prepareRead(db, sql).all(), sql);
+    }
+    // WITH and PRAGMA are refused too: a WITH clause can stand before a write, a PRAGMA can assign.
+    for (const sql of [
+      '\n\tWITH x AS (SELECT 1) SELECT * FROM x',
+      "WITH x AS (SELECT 1) INSERT INTO kv (key, value) VALUES ('doctor_probe', '1')",
+      "WITH x AS (SELECT 1) DELETE FROM kv WHERE key = 'schema_version' RETURNING key",
+      'PRAGMA data_version',
+      'PRAGMA user_version = 7',
+      'PRAGMA journal_mode = DELETE',
+      "INSERT INTO kv (key, value) VALUES ('doctor_probe', '1')",
+      "  insert or replace into kv (key, value) VALUES ('doctor_probe', '1')",
+      "UPDATE kv SET value = '9' WHERE key = 'schema_version'",
+      'DELETE FROM kv',
+      "REPLACE INTO kv (key, value) VALUES ('doctor_probe', '1')",
+      'CREATE TABLE x (a)',
+      'SELECTED',
+      '',
+    ]) {
+      assert.throws(() => prepareRead(db, sql), /^Error: not a read statement/, sql);
+    }
+    assert.deepEqual(
+      rawRows(path, 'SELECT key FROM kv').map((row) => row['key']),
+      ['schema_version'],
+    );
+    assert.equal(rawRows(path, 'PRAGMA user_version')[0]?.['user_version'], 0);
+    assert.equal(rawRows(path, 'PRAGMA journal_mode')[0]?.['journal_mode'], 'wal');
+  });
+
+  test('inside the store only the two write helpers prepare a statement themselves (S2 10.1)', () => {
+    // Every other method reads through #all / #get (prepareRead) or writes through #run /
+    // #runReturning (#write, the guard): a method that prepared or ran SQL on its own could write
+    // round the schema guard.
+    const source = readFileSync(
+      join(import.meta.dirname, '..', '..', 'src', 'store', 'store.ts'),
+      'utf8',
+    );
+    const body = source.slice(source.indexOf('class SqliteStore'));
+    assert.equal(body.match(/this\.#db\.prepare\(/g)?.length, 2);
+    assert.equal(body.match(/this\.#db\.exec\(/g), null);
+    assert.equal(body.match(/prepareRead\(this\.#db, sql\)/g)?.length, 2);
+    for (const helper of ['#run(', '#runReturning(']) {
+      const start = body.indexOf(`  ${helper}sql: string`);
+      assert.ok(start > 0, helper);
+      assert.match(
+        body.slice(start, body.indexOf('\n  }\n', start)),
+        /this\.#write\(\(\) => [^\n]*this\.#db\.prepare\(/,
+        helper,
+      );
+    }
+  });
+
+  test("the window's keys are kv keys (S2 10.2)", (t) => {
+    const { store } = fresh(t);
+    const keys: KvKey[] = [
+      'window_secret',
+      'window_server',
+      'window_runtime_dir',
+      'window_alarm',
+      'window_launching',
+    ];
+    for (const key of keys) {
+      store.setKv(key, `value of ${key}`);
+    }
+    assert.deepEqual(
+      store.kvEntries('window_'),
+      [...keys].sort().map((key) => ({ key, value: `value of ${key}` })),
+    );
   });
 });

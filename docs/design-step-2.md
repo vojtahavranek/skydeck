@@ -199,7 +199,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `bin/skydeck` (launcher) | For `serve`: Node.js is started through a `python3 -I -c` line that sets the soft core limit to 1 byte and records the old one (2); without python3, directly. For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside `NODE_COMPILE_CACHE`, so the server can drop the launcher's cache variable from the programs' environment (5.2, 7.4). Tests in `test/bin/` for both. | A |
 | `src/platform/` | New interfaces: detached processes with a given environment, long-lived children, TCP and unix sockets, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
-| `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value and the start deadline; the `Terminal` names gain `window` (11.1, 11.2). | A |
+| `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value, the start deadline and the label; the `Terminal` names gain `window` (11.1, 11.2). | A |
 | `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). | A |
 | `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). | C |
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
@@ -1236,19 +1236,25 @@ restore.
 Four changes to step 1's code make that possible, with no change of behaviour for the commands
 (4.4 lists every change step 2 makes to step 1's code, with its stage):
 
-- **Starting a prepared launch** (`launchPrepared`, today in `src/cli/launching.ts`) moves to
+- **Starting a prepared launch** (`launchPrepared`, in step 1 in `src/cli/launching.ts`) moves to
   `src/sessions/launch.ts` and takes the `Terminal` to open with as a parameter. The command line
-  keeps choosing the terminal (`--here`, `--tab`, configuration) and printing the lines; the server
-  passes the window terminal (11.2) and shows the lines (12.6). The flag warnings, the printable
+  keeps choosing the terminal (`--here`, `--tab`, configuration: `launchWhere`, all that stays in
+  `src/cli/launching.ts`) and printing the lines; the server passes the window terminal (11.2) and
+  shows the lines (12.6). The flag warnings, the printable
   fallback command, and `settleFailedLaunch` (which releases the lock, and for `new` removes the
   label and group, only after a definite failure with nothing printable) are the same code.
 - **`prepareNew`** takes the directory as a parameter instead of reading the current directory.
-  The command passes `platform.cwd`; the window passes the directory chosen in the form (12.6),
-  refused unless it is absolute and an existing directory.
-- **`LaunchSpec`** (`src/terminals/types.ts`, today `{ cwd, argv }`) gains `sessionId`, `kind`
-  (`resume` or `new`), the lock value the launch took (or null) and the deadline of 7.1, which
-  `launchPrepared` and `runRestore` fill in and pass to `openSafely`. The `here` and `wezterm`
-  adapters ignore them; the window terminal needs them for the keeper's spec (11.2).
+  The command passes `platform.cwd`; the window passes the directory chosen in the form (12.6).
+  `prepareNew` refuses one that is not absolute or not an existing directory, as a usage error,
+  before it stores anything.
+- **`LaunchSpec`** (`src/terminals/types.ts`, in step 1 `{ cwd, argv }`) gains `sessionId`, `kind`
+  (`resume` or `new`), the lock value the launch took (or null), the deadline of 7.1 and the label,
+  which `launchPrepared` and `runRestore` fill in (`launchSpec`) and pass to `openSafely`. One
+  function computes the deadline, `startDeadline` in `src/sessions/launch.ts`: for a resume, the
+  time in the lock's value plus `LOCK_TTL_NS − LOCK_START_TOLERANCE_NS`; for a new session, the
+  clock when `prepareNew` ran plus the same (`PreparedLaunch` records that time as `preparedAtNs`,
+  and the label as `label`). The `here` and `wezterm` adapters ignore the new fields; the window
+  terminal needs them for the keeper's spec (11.2).
 - **Restore planning** moves out of `src/cli/commands/restore.ts`, where `plan()` is private (the
   boot-id refusal, `buildList`, `flatRows`, `planRestore`), into `src/sessions/restore.ts` as one
   function the command and the server share. It also returns the earlier boot and the time of its
