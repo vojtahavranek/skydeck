@@ -224,8 +224,13 @@ describe('real files', () => {
     const { files } = realPlatform();
     const dir = tmp(t);
     const q = join(dir, 'q');
-
-    assert.equal(files.createExclusive(q, 'x', 0o600), true);
+    // With no umask, a file made without the mode would come out 0666 on any machine.
+    const umask = process.umask(0);
+    try {
+      assert.equal(files.createExclusive(q, 'x', 0o600), true);
+    } finally {
+      process.umask(umask);
+    }
 
     assert.equal(mode(q), 0o600);
     assert.equal(files.readText(q), 'x');

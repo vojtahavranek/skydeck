@@ -118,12 +118,7 @@ function prepare(platform: Platform, places: Places): Prepared {
   const { files } = platform;
   const links = linksFor(platform, places);
   for (const { path } of links) {
-    const info = files.lstat(path);
-    if (info !== null && info.kind !== 'symlink') {
-      throw new SkydeckError(
-        `${path} exists and is not a symbolic link; move it away and run skydeck install again`,
-      );
-    }
+    refuseNonLink(files, path);
   }
   const path = settingsPath(places.claudeHome);
   const text = readSettings(files, path);
@@ -139,6 +134,16 @@ function prepare(platform: Platform, places: Places): Prepared {
     );
   }
   return { settingsPath: path, text, edit: addHookEntries(text, places.hookPath), links };
+}
+
+/** Something at a link path that is not a symbolic link is not skydeck's: it is never replaced. */
+function refuseNonLink(files: Files, path: string): void {
+  const info = files.lstat(path);
+  if (info !== null && info.kind !== 'symlink') {
+    throw new SkydeckError(
+      `${path} exists and is not a symbolic link; move it away and run skydeck install again`,
+    );
+  }
 }
 
 function readSettings(files: Files, path: string): string | null {
@@ -169,21 +174,23 @@ function showChange(ctx: Context, hookPath: string, prepared: Prepared): void {
 function requireUnchanged(files: Files, prepared: Prepared): void {
   if (readSettings(files, prepared.settingsPath) !== prepared.text) {
     throw new SkydeckError(
-      `${prepared.settingsPath} changed while the question was open; nothing was written; ` +
-        'run skydeck install again',
+      `${prepared.settingsPath} changed while the question was open, so skydeck left it as it ` +
+        'is; run skydeck install again',
     );
   }
 }
 
 /**
  * Creates the links, or points a link left by another checkout at this one. A link that already
- * points where it should is not touched. (prepare() has refused anything that is not a link.)
+ * points where it should is not touched. prepare() refused anything that is not a link; each path
+ * is looked at again here, since the question was open in between.
  */
 function makeLinks(ctx: Context, files: Files, links: readonly Link[]): void {
   for (const { path, target } of links) {
     if (files.readlink(path) === target) {
       continue;
     }
+    refuseNonLink(files, path);
     try {
       files.mkdirp(dirname(path));
       files.symlink(target, path);

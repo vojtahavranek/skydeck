@@ -117,8 +117,13 @@ describe('install: links and hook entries', () => {
     const d = testPlatform(t);
     writeFileSync(settingsFile(d.places), '{"env":{"TOKEN":"x"}}');
     chmodSync(settingsFile(d.places), 0o644); // the usual mode, whatever the umask
-
-    await run(d.platform, ['install'], { lines: ['y'] });
+    // With no umask, a backup made without its own mode would come out 0666 on any machine.
+    const umask = process.umask(0);
+    try {
+      await run(d.platform, ['install'], { lines: ['y'] });
+    } finally {
+      process.umask(umask);
+    }
 
     assert.equal(statSync(backupOf(d)).mode & 0o777, 0o600);
   });
@@ -317,6 +322,26 @@ describe('install: links and hook entries', () => {
     assert.match(r.stderr, /changed while the question was open/);
     assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"sonnet"}');
     assert.deepEqual(backups(d.places), []);
+  });
+
+  test('a file that appears at a link path while the question is open is not replaced', async (t) => {
+    const d = testPlatform(t);
+    const captured = capture({ lines: ['y'] });
+    const io = {
+      ...captured.io,
+      readLine: (prompt: string) => {
+        mkdirSync(join(d.sandbox.home, '.local', 'bin'), { recursive: true });
+        writeFileSync(d.places.binLink, 'mine');
+        return captured.io.readLine(prompt);
+      },
+    };
+
+    const code = await main(['install'], { io, platform: d.platform });
+
+    assert.equal(code, 1);
+    assert.match(captured.stderr(), /not a symbolic link/);
+    assert.equal(readFileSync(d.places.binLink, 'utf8'), 'mine');
+    assert.equal(existsSync(settingsFile(d.places)), false);
   });
 
   test('a settings file that cannot be written: a plain error naming it, and no backup left behind', async (t) => {
