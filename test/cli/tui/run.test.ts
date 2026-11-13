@@ -964,6 +964,7 @@ test('every 5 s the list refreshes by itself: new states and sessions show, the 
   assert.deepEqual(rowOrder(refreshed), [short(S1), short(S2), short(S3)]);
   assert.equal(selectedIn(refreshed), short(S2), 'the cursor stays on its session');
   assert.ok(lineOf(refreshed, S2).includes('working'), refreshed.join('\n'));
+  assert.equal(refreshed[0], 'skydeck  3 sessions: 1 working · 2 not-running', 'the counts too');
   assert.deepEqual(spooled(d), []);
   assert.equal(d.stderr(), '');
 });
@@ -1289,4 +1290,329 @@ test('an automatic fetch that fails again and again says so once', async (t) => 
 
   assert.equal(ghCalls(runner).length, 2, 'asked when the list opened and again 5 s later');
   assert.equal(framesSaying(d, FAILED), 1, lastLines(d).join('\n'));
+});
+
+test('when the selected session leaves the list at a background refresh, the cursor takes the next row and the message says so', async (t) => {
+  let d: TestDeck | undefined;
+  d = listDeck(t, [
+    'j',
+    () => {
+      markDone((d as TestDeck).deck, S2); // done in another skydeck
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      return '';
+    },
+    'd', // acts on the row the cursor went to: S3, never the first row
+    'q',
+  ]);
+  writeTranscript(d, S3, [userRecord(S3, T0 - 120n * MINUTE)]);
+  setLabel(d.deck, S2, 'beta');
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const refreshed = frames(d).find((frame) => frame.at(-1) === 'session "beta" left the list');
+  assert.ok(refreshed !== undefined, lastLines(d).join('\n'));
+  assert.equal(selectedIn(refreshed), short(S3));
+  assert.notEqual(d.deck.store.meta(S3)?.doneAtNs ?? null, null);
+  assert.equal(d.deck.store.meta(S1)?.doneAtNs ?? null, null);
+  assert.equal(framesSaying(d, 'session "beta" left the list'), 1, 'said once');
+});
+
+test('r: when the selected session left the list, the cursor takes the row after it and the message says so first', async (t) => {
+  let answer: (result: RunResult) => void = () => {};
+  const runner = gh(
+    () =>
+      new Promise<RunResult>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  let d: TestDeck | undefined;
+  d = listDeck(t, [
+    'j',
+    () => {
+      const deck = d as TestDeck;
+      markDone(deck.deck, S2);
+      startRunning(deck, S3, 4545); // S3 moves to the top when the order is computed again
+      return 'r';
+    },
+    () => {
+      answer(runResult({ stdout: OPEN_GREEN })); // the fetch of r ends
+      return '';
+    },
+    'q',
+  ]);
+  writeTranscript(d, S3, [userRecord(S3, T0 - 120n * MINUTE)]);
+  attachManualPr(d.deck, S1, PR1); // read a minute ago: only r asks about it
+  d.deck.store.savePrResult(PR1, {
+    ok: true,
+    atNs: T0 - MINUTE,
+    title: 'Fix the retry',
+    state: 'open',
+    review: null,
+    checks: 'passing',
+  });
+
+  assert.equal(await main([], patient(withRunner(d, runner))), 0);
+
+  const LEFT = `session ${short(S2)} left the list`;
+  const afterR = frames(d).find((frame) => frame.at(-1)?.startsWith(LEFT) === true);
+  assert.ok(afterR !== undefined, lastLines(d).join('\n'));
+  assert.equal(afterR.at(-1), `${LEFT}  refreshing pull requests…`);
+  assert.deepEqual(rowOrder(afterR.slice(0, -1)), [short(S3), short(S1)]);
+  assert.equal(selectedIn(afterR), short(S3), 'the row after S2 in the order shown before');
+  assert.equal(lastLines(d).at(-1), LEFT, 'once the fetch has ended, the notice stays');
+});
+
+test('a background failure message goes away when that work succeeds again', async (t) => {
+  const BUSY = 'the list could not be refreshed: Error: database is locked';
+  let broken = false;
+  let d: TestDeck | undefined;
+  d = listDeck(t, [
+    () => {
+      broken = true;
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      return '';
+    },
+    () => {
+      broken = false;
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      return '';
+    },
+    'q',
+  ]);
+  const bootId = d.proc.bootId;
+  d.proc.bootId = () => {
+    if (broken) {
+      throw new Error('database is locked');
+    }
+    return bootId();
+  };
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.equal(framesSaying(d, BUSY), 1, lastLines(d).join('\n'));
+  assert.notEqual(lastLines(d).at(-1), BUSY);
+});
+
+test('a background refresh that fails starts no fetch', async (t) => {
+  let broken = false;
+  let d: TestDeck | undefined;
+  const runner = gh(() => runResult({ stdout: OPEN_GREEN }));
+  d = listDeck(t, [
+    '',
+    () => {
+      broken = true;
+      (d as TestDeck).clock.setNs(T0 + 10n * MINUTE); // the pull request is due
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      return '';
+    },
+    'q',
+  ]);
+  attachManualPr(d.deck, S1, PR1);
+  d.deck.store.savePrResult(PR1, {
+    ok: true,
+    atNs: T0 - MINUTE,
+    title: 'Fix the retry',
+    state: 'open',
+    review: null,
+    checks: 'passing',
+  });
+  const bootId = d.proc.bootId;
+  d.proc.bootId = () => {
+    if (broken) {
+      throw new Error('database is locked');
+    }
+    return bootId();
+  };
+
+  assert.equal(await main([], patient(withRunner(d, runner))), 0);
+
+  assert.equal(ghCalls(runner).length, 0);
+});
+
+test('a background refresh while the filter is being typed shows what changed and keeps the filter open', async (t) => {
+  let d: TestDeck | undefined;
+  let afterTick: string[] = [];
+  d = listDeck(t, [
+    '/',
+    'd',
+    'e',
+    () => {
+      const deck = d as TestDeck;
+      startRunning(deck, S2, 4343);
+      deck.clock.advanceMs(PERIOD_MS);
+      afterTick = frames(deck).at(-1) ?? [];
+      return 'm';
+    },
+    'o',
+    '\r',
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.equal(afterTick.at(-1), '/de_', afterTick.join('\n'));
+  assert.ok(lineOf(afterTick, S2).includes('working'), afterTick.join('\n'));
+  assert.ok(frames(d).at(-1)?.[0]?.includes('filter: demo'), (frames(d).at(-1) ?? []).join('\n'));
+});
+
+test('a background refresh while the detail is open shows the session as it is now', async (t) => {
+  let d: TestDeck | undefined;
+  let afterTick: string[] = [];
+  d = listDeck(t, [
+    'j',
+    '\r',
+    () => {
+      const deck = d as TestDeck;
+      startRunning(deck, S2, 4343);
+      deck.clock.advanceMs(PERIOD_MS);
+      afterTick = frames(deck).at(-1) ?? [];
+      return '\x1b';
+    },
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.ok(afterTick.includes(`id: ${S2}`), afterTick.join('\n'));
+  assert.ok(
+    afterTick.some((line) => line.startsWith('state: working')),
+    afterTick.join('\n'),
+  );
+});
+
+/** The context of `d` with every read of Claude Code's settings file counted: one per loading of the rows. */
+function countingLoads(d: TestDeck, ctx: Context = d.ctx): { ctx: Context; loads: () => number } {
+  const settings = join(d.deck.places.claudeHome, 'settings.json');
+  const files = ctx.platform.files;
+  let loads = 0;
+  return {
+    ctx: {
+      ...ctx,
+      platform: {
+        ...ctx.platform,
+        files: {
+          ...files,
+          readText: (path: string) => {
+            if (path === settings) {
+              loads++;
+            }
+            return files.readText(path);
+          },
+        },
+      },
+    },
+    loads: () => loads,
+  };
+}
+
+test('a background refresh that finds nothing new loads no rows; the times shown still move on', async (t) => {
+  let d: TestDeck | undefined;
+  let counting: ReturnType<typeof countingLoads> | undefined;
+  const loadsAt: number[] = [];
+  d = listDeck(t, [
+    () => {
+      loadsAt.push((counting as ReturnType<typeof countingLoads>).loads());
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      loadsAt.push((counting as ReturnType<typeof countingLoads>).loads());
+      return '';
+    },
+    'q',
+  ]);
+  counting = countingLoads(d);
+
+  assert.equal(await main([], counting.ctx), 0);
+
+  const [before = -1, after = -1] = loadsAt;
+  assert.ok(before >= 1, 'the rows were loaded when the list opened');
+  assert.equal(after, before, 'not again by the refresh');
+  assert.ok(lineOf(frames(d)[0] ?? [], S1).includes(' 30s '), (frames(d)[0] ?? []).join('\n'));
+  assert.ok(
+    lineOf(frames(d).at(-1) ?? [], S1).includes(' 35s '),
+    (frames(d).at(-1) ?? []).join('\n'),
+  );
+});
+
+test('what another skydeck saved, a live file that changed, and a process that ended show at the next refresh', async (t) => {
+  let d: TestDeck | undefined;
+  const shown: string[] = [];
+  const tick = (change: () => void) => (): string => {
+    change();
+    const deck = d as TestDeck;
+    deck.clock.advanceMs(PERIOD_MS);
+    shown.push(lineOf(frames(deck).at(-1) ?? [], S2));
+    return '';
+  };
+  const liveFile = (deck: TestDeck): string =>
+    join(deck.deck.places.claudeHome, 'sessions', '4343.json');
+  d = listDeck(t, [
+    tick(() => {
+      startRunning(d as TestDeck, S2, 4343); // working
+    }),
+    tick(() => {
+      setLabel((d as TestDeck).deck, S2, 'beta'); // another connection, as another skydeck
+    }),
+    tick(() => {
+      const path = liveFile(d as TestDeck);
+      const live = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      writeFileSync(path, JSON.stringify({ ...live, status: 'waiting' }));
+    }),
+    tick(() => {
+      (d as TestDeck).proc.setProcess(4343, null); // ended without removing its file
+    }),
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const [working = '', labelled = '', waiting = '', ended = ''] = shown;
+  assert.ok(working.includes('working'), working);
+  assert.ok(labelled.includes('beta'), labelled);
+  assert.ok(waiting.includes('waiting'), waiting);
+  assert.ok(ended.includes('not-running'), ended);
+});
+
+test('the rows are loaded again at least once a minute, whatever the refresh found', async (t) => {
+  let d: TestDeck | undefined;
+  let counting: ReturnType<typeof countingLoads> | undefined;
+  const loadsAt: number[] = [];
+  const count = (): void => {
+    loadsAt.push((counting as ReturnType<typeof countingLoads>).loads());
+  };
+  d = listDeck(t, [
+    () => {
+      count();
+      (d as TestDeck).clock.advanceMs(55_000);
+      count();
+      (d as TestDeck).clock.advanceMs(PERIOD_MS);
+      count();
+      return '';
+    },
+    'q',
+  ]);
+  counting = countingLoads(d);
+
+  assert.equal(await main([], counting.ctx), 0);
+
+  const [opened = -1, at55 = -1, at60 = -1] = loadsAt;
+  assert.equal(at55, opened, 'eleven refreshes with nothing new');
+  assert.equal(at60, opened + 1, 'the twelfth, a minute after the last loading');
+});
+
+test('what the refresh itself read in shows at once: a session known only from a new transcript', async (t) => {
+  let d: TestDeck | undefined;
+  let refreshed: string[] = [];
+  d = listDeck(t, [
+    () => {
+      const deck = d as TestDeck;
+      writeTranscript(deck, S3, [userRecord(S3, T0 - 120n * MINUTE)]); // no live file, no other skydeck
+      deck.clock.advanceMs(PERIOD_MS);
+      refreshed = frames(deck).at(-1) ?? [];
+      return '';
+    },
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.deepEqual(rowOrder(refreshed), [short(S1), short(S2), short(S3)]);
 });

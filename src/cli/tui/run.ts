@@ -2,8 +2,10 @@
 // render.ts) fed with the keys the user types, and the effects `reduce` asks for carried out on the
 // deck. It paints from the cache, refreshes itself and the pull requests in the background and
 // repaints (design 7.3, 7.4); leaving the list never waits for `gh`.
+import { isLiveFileTrusted, readLiveFiles } from '../../claude/live.ts';
 import { fetchPrs, refreshPrs } from '../../github.ts';
 import { SkydeckError } from '../../platform/errors.ts';
+import { NS_PER_SECOND } from '../../platform/time.ts';
 import type { Ns } from '../../platform/types.ts';
 import type { Deck } from '../../sessions/deck.ts';
 import { cleanGroup, cleanLabel } from '../../sessions/labels.ts';
@@ -19,6 +21,7 @@ import {
 } from '../../sessions/meta.ts';
 import { describeError } from '../../sessions/problems.ts';
 import { refresh } from '../../sessions/refresh.ts';
+import type { RefreshResult } from '../../sessions/refresh.ts';
 import { prepareResumeById } from '../../sessions/resume-by-id.ts';
 import type { PreparedLaunch } from '../../sessions/resume.ts';
 import { terminalFor } from '../../terminals/index.ts';
@@ -46,6 +49,12 @@ const REFRESHING = 'refreshing pull requests…';
 const OWN_PREFIX = 'skydeck: ';
 /** How often the list refreshes by itself while it is on screen (design 7.4). */
 const BACKGROUND_REFRESH_MS = 5000;
+/**
+ * The background refresh loads the rows again at least this often, even when it found nothing new:
+ * what the change check does not see (the time a session expires, a holder that has no live file
+ * ending, Claude Code's settings) is shown a minute late at most.
+ */
+const FULL_RELOAD_NS = 60n * NS_PER_SECOND;
 
 type Size = { columns: number; rows: number };
 type Fetched = { fetched: number; failed: number };
@@ -54,8 +63,15 @@ type Fetched = { fetched: number; failed: number };
  * ones, design 7.3), `explicit` for `r`, `attached` for the one `p` attached.
  */
 type FetchKind = 'automatic' | 'explicit' | 'attached';
-/** The work in the background whose failures are said once (see #failedInBackground). */
+/** The work in the background whose failures are said once (see #backgroundOutcome). */
 type BackgroundWork = 'refresh' | 'automatic fetch';
+/**
+ * What tells the background refresh that the rows can have changed although its own refresh saved
+ * nothing: the live-session files with whether each is trusted (a status, a process that ended),
+ * and the database's data version (what another skydeck saved: it may have ingested the spool
+ * first, set a label, marked a session done).
+ */
+type ChangeMarks = { live: string; data: number };
 type Change = Extract<TuiEffect, { kind: 'label' | 'group' | 'done' | 'pr-add' | 'pr-rm' }>;
 
 /** Opens the deck (withDeck, refresh: true) and runs the list until quit or a --here resume; returns the exit code. */
@@ -76,6 +92,26 @@ function messageOf(lines: readonly string[]): string {
     .join('  ');
 }
 
+/**
+ * When the selected session is no longer visible after new rows came in (`withRows` has moved the
+ * cursor to the row that takes its place), the line that says so, naming it by its label, else
+ * its short id; null when the cursor stayed.
+ */
+function leftNotice(before: TuiModel, after: TuiModel): string | null {
+  const id = before.selected;
+  if (id === null || after.selected === id) {
+    return null;
+  }
+  const row = before.rows.get(id);
+  const name = row?.label == null ? id.slice(0, SHORT_ID_LENGTH) : `"${row.label}"`;
+  return `session ${name} left the list`;
+}
+
+/** Whether a refresh saved anything that a row shows. */
+function savedSomething({ ingest, observed, scan }: RefreshResult): boolean {
+  return ingest.ingested + observed + scan.read + scan.missing + scan.prsAttached > 0;
+}
+
 /** The message of a SkydeckError (a refusal, a usage error, a failed editor); anything else is rethrown. */
 function failureMessage(error: unknown): string {
   if (error instanceof SkydeckError) {
@@ -93,6 +129,10 @@ class TerminalList {
   readonly #deck: Deck;
   #model: TuiModel;
   #size: Size;
+  /** When the rows were last loaded from the deck. */
+  #loadedAtNs: Ns;
+  /** The change marks the last background refresh (or the opening) saw. */
+  #marks: ChangeMarks;
   #onScreen = false;
   /** The frame last painted on the screen now; null when the screen holds none of ours. */
   #painted: string | null = null;
@@ -107,6 +147,8 @@ class TerminalList {
   readonly #fetches = new Set<Promise<void>>();
   /** Whether the fetch of the refresh key is one of them: `r` starts no second one meanwhile. */
   #explicitFetchRunning = false;
+  /** The message `r` showed while its fetch runs, and what is left of it when the fetch ends. */
+  #refreshing: { shown: string; after: string | null } | null = null;
   /** Lines for the user that the message line could not hold (a failed launch): printed when the list ends. */
   #atExit: string[] = [];
   /** Fired when the list ends or hands the terminal to `claude`: every fetch stops, saving nothing more. */
@@ -116,7 +158,9 @@ class TerminalList {
     this.#ctx = ctx;
     this.#deck = deck;
     this.#size = ctx.io.size();
-    this.#model = scrolled(initModel(loadRows(deck), this.#now()), this.#size);
+    this.#marks = this.#marksNow();
+    this.#loadedAtNs = this.#now();
+    this.#model = scrolled(initModel(loadRows(deck), this.#loadedAtNs), this.#size);
   }
 
   async run(): Promise<number> {
@@ -262,8 +306,10 @@ class TerminalList {
       outcome = failureMessage(error);
     }
     this.#keys = this.#ctx.io.keys();
-    this.#reload(false);
-    this.#setModel(withMessage(this.#model, messageOf([outcome, ...said])));
+    const left = this.#reload(false);
+    this.#setModel(
+      withMessage(this.#model, messageOf([outcome, ...said, ...(left === null ? [] : [left])])),
+    );
     this.#enterScreen();
   }
 
@@ -314,12 +360,15 @@ class TerminalList {
    * every pull request of the sessions now shown is asked about, whatever its age (design 7.3: an
    * explicit refresh), in the background, so that keys are read meanwhile and `q` never waits for
    * `gh`. While that fetch runs, `r` starts no second one and says that it runs. A pull request
-   * that cannot be read is saved as such, not thrown.
+   * that cannot be read is saved as such, not thrown. When the selected session left the list, the
+   * message says that first, and keeps saying it when the fetch has ended.
    */
   #refresh(): void {
     refreshWithProgress(this.#ctx, this.#deck);
-    this.#reload(true);
-    this.#setModel(withMessage(this.#model, REFRESHING));
+    const left = this.#reload(true);
+    const shown = left === null ? REFRESHING : `${left}  ${REFRESHING}`;
+    this.#refreshing = { shown, after: left };
+    this.#setModel(withMessage(this.#model, shown));
     if (this.#explicitFetchRunning) {
       return;
     }
@@ -341,28 +390,44 @@ class TerminalList {
    * The background refresh (design 7.3, 7.4), every BACKGROUND_REFRESH_MS: what changed on disk is
    * read in (the refresh every command starts with, design 5.3), the rows are loaded again in the
    * order shown (the cursor stays on its session, a new one goes to the end of its group) and the
-   * frame is painted when it changed; then, unless a fetch runs, the pull requests that are due are
+   * frame is painted when it changed. Loading the rows costs time in proportion to everything ever
+   * recorded, so it is done only when they can have changed — the refresh saved something, or the
+   * change marks moved — and at least every FULL_RELOAD_NS; otherwise only the time moves on, for
+   * the times shown (ruled in fix 4). Then, unless a fetch runs, the pull requests that are due are
    * fetched (automatic, design 7.3). That part is the one that takes time: a fetch still running at
    * the next tick is not joined by another one, while reading the disk again (synchronous, so it
    * can never overlap itself) goes on at every tick.
    *
-   * It runs only between keys and while the list is on screen: not while a key's effect is carried
-   * out (a tab being opened), not while the editor has the terminal, never after the list has
-   * given it back, and not while an input is open (a reload could close it under the user's
-   * fingers; the next tick after it does the refresh). A failure is the message line, once.
+   * It runs only between keys: not while a key's effect is carried out (a tab being opened, the
+   * editor, which is the only time the list is off screen before it ends), never after the list
+   * has given the terminal back (the timer is stopped first), and not while an input is open (a
+   * reload could close it under the user's fingers; the next tick after it does the refresh). A
+   * failure is the message line, once.
    */
   #refreshInBackground(): void {
-    if (!this.#onScreen || this.#busy || this.#model.mode === 'input') {
+    if (this.#busy || this.#model.mode === 'input') {
       return;
     }
     let failure: string | null = null;
     try {
-      refresh(this.#deck); // not refreshWithProgress: nothing may be written under the list
-      this.#reload(false);
+      const result = refresh(this.#deck); // not refreshWithProgress: nothing under the list
+      const marks = this.#marksNow();
+      const now = this.#now();
+      const changed =
+        savedSomething(result) ||
+        marks.live !== this.#marks.live ||
+        marks.data !== this.#marks.data ||
+        now - this.#loadedAtNs >= FULL_RELOAD_NS;
+      this.#marks = marks;
+      if (changed) {
+        this.#reload(false);
+      } else {
+        this.#setModel(withRows(this.#model, [...this.#model.rows.values()], now, false));
+      }
     } catch (error) {
       failure = `the list could not be refreshed: ${describeError(error)}`;
     }
-    this.#failedInBackground('refresh', failure);
+    this.#backgroundOutcome('refresh', failure);
     try {
       this.#paint(true);
     } catch {
@@ -387,14 +452,19 @@ class TerminalList {
   }
 
   /**
-   * Says a failure of the work the list does by itself in the message line — once: the same
-   * failure of the same work again says nothing more (the user has seen it, and a key took it
-   * away), until that work has succeeded (`failure` null), after which a failure is new again.
+   * The outcome of work the list does by itself. A failure is said in the message line once: the
+   * same failure of the same work again says nothing more (the user has seen it, and a key took it
+   * away). A success (`failure` null) takes that work's failure away from the message line if it
+   * is still there, and makes a later failure new again.
    */
-  #failedInBackground(work: BackgroundWork, failure: string | null): void {
+  #backgroundOutcome(work: BackgroundWork, failure: string | null): void {
+    const said = this.#failures.get(work);
     if (failure === null) {
       this.#failures.delete(work);
-    } else if (this.#failures.get(work) !== failure) {
+      if (said !== undefined && this.#model.message === said) {
+        this.#setModel(withMessage(this.#model, null));
+      }
+    } else if (said !== failure) {
       this.#failures.set(work, failure);
       this.#setModel(withMessage(this.#model, failure));
     }
@@ -411,7 +481,7 @@ class TerminalList {
    * One fetch (design 7.3): automatic (the pull requests that are due: when the list opens and in
    * the background), the one pull request `p` attached, or explicit for `r`. When it saved
    * something, the rows are loaded again, in the order shown, and painted if that changed the
-   * frame; an explicit one also takes its "refreshing" message away. It never rejects: a failure
+   * frame; an explicit one also takes its "refreshing" away from the message. It never rejects: a failure
    * is the message (an automatic one's once, as for the background refresh). Once the list has
    * ended or handed the terminal over (the signal fired), nothing is done with its result.
    */
@@ -435,12 +505,16 @@ class TerminalList {
       if (saved > 0 || failure !== null) {
         this.#reload(false);
       }
+      const refreshing = kind === 'explicit' ? this.#refreshing : null;
+      if (kind === 'explicit') {
+        this.#refreshing = null;
+      }
       if (kind === 'automatic') {
-        this.#failedInBackground('automatic fetch', failure);
+        this.#backgroundOutcome('automatic fetch', failure);
       } else if (failure !== null) {
         this.#setModel(withMessage(this.#model, failure));
-      } else if (kind === 'explicit' && this.#model.message === REFRESHING) {
-        this.#setModel(withMessage(this.#model, null));
+      } else if (refreshing !== null && this.#model.message === refreshing.shown) {
+        this.#setModel(withMessage(this.#model, refreshing.after));
       }
       this.#paint(true);
     } catch {
@@ -457,14 +531,46 @@ class TerminalList {
     return this.#deck.platform.clock.nowNs();
   }
 
+  /** The change marks now (see ChangeMarks): a few small files and one PRAGMA. */
+  #marksNow(): ChangeMarks {
+    const { platform, places, store } = this.#deck;
+    const live = readLiveFiles(platform.files, places.claudeHome).map((file) =>
+      [
+        file.pid,
+        file.sessionId,
+        file.procStart,
+        file.status,
+        file.waitingFor,
+        file.name,
+        file.updatedAtNs,
+        file.statusUpdatedAtNs,
+        file.mtimeNs,
+        isLiveFileTrusted(file, platform.proc),
+      ].join(' '),
+    );
+    return { live: live.join('\n'), data: store.dataVersion() };
+  }
+
   /** Every model goes through `scrolled`: after a key, after new rows, after a resize. */
   #setModel(model: TuiModel): void {
     this.#model = scrolled(model, this.#size);
   }
 
-  /** New rows from the deck, the order kept (`reorder` false) or computed again. */
-  #reload(reorder: boolean): void {
-    this.#setModel(withRows(this.#model, loadRows(this.#deck), this.#now(), reorder));
+  /**
+   * New rows from the deck, the order kept (`reorder` false) or computed again. When the selected
+   * session is no longer visible, the cursor has gone to the row that takes its place (withRows)
+   * and the message line says which session left, so that the move is seen before a key acts on
+   * the new row (ruled in fix 4). Returns that notice; null when the cursor stayed.
+   */
+  #reload(reorder: boolean): string | null {
+    const before = this.#model;
+    this.#loadedAtNs = this.#now();
+    this.#setModel(withRows(before, loadRows(this.#deck), this.#loadedAtNs, reorder));
+    const left = leftNotice(before, this.#model);
+    if (left !== null) {
+      this.#setModel(withMessage(this.#model, left));
+    }
+    return left;
   }
 
   /** Takes the terminal's size; true when it changed (the model is scrolled for the new one). */
