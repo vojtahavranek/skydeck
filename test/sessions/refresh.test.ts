@@ -146,3 +146,29 @@ test('a refresh in which saving one spool event, one observed event and one tran
     assert.equal((JSON.parse(store.getKv(key) ?? '[]') as string[]).length, 1, key);
   }
 });
+
+test('a locked database stops the refresh at the first item and records no item problems', (t) => {
+  const d = testDeck(t);
+  writeFileSync(join(d.deck.places.spoolDir, '1-2-3.ev'), 'garbage'); // would be recorded as bad
+  spoolStart(d, S1, 4242);
+  liveFile(d, S2, 4343);
+  transcript(d, S3);
+  let attempts = 0;
+  const deck = deckWith(d.deck, {
+    store: {
+      insertEvent: () => {
+        attempts++;
+        throw Object.assign(new Error('database is locked'), {
+          code: 'ERR_SQLITE_ERROR',
+          errcode: 5,
+        });
+      },
+    },
+  });
+  assert.throws(() => refresh(deck), /database is locked/);
+  assert.equal(attempts, 1);
+  for (const key of ['ingest_problems', 'reconcile_problems', 'scan_problems'] as const) {
+    assert.equal(d.deck.store.getKv(key), null, key);
+  }
+  assert.deepEqual(d.deck.store.transcripts(), [], 'the scan did not run');
+});

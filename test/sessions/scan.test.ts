@@ -439,26 +439,6 @@ test('a transcript another refresh saved while this one was listing is not taken
   assert.equal(rowOf(d, p3)?.missingSinceNs, null);
 });
 
-test('a deleted transcript that cannot be marked missing is recorded; the others are marked', (t) => {
-  const d = testDeck(t);
-  const { p1, p2 } = two(d);
-  scanTranscripts(d.deck);
-  unlinkSync(p1);
-  unlinkSync(p2);
-  const deck = deckWith(d.deck, {
-    store: {
-      saveTranscript: (row) => {
-        if (row.path === p1) throw new RangeError('cannot bind');
-        d.deck.store.saveTranscript(row);
-      },
-    },
-  });
-  assert.deepEqual(scanTranscripts(deck), { read: 0, skipped: 0, missing: 1, prsAttached: 0 });
-  assert.equal(rowOf(d, p1)?.missingSinceNs, null);
-  assert.equal(rowOf(d, p2)?.missingSinceNs, T0);
-  assert.deepEqual(problems(d), [`cannot mark ${p1} missing (RangeError: cannot bind)`]);
-});
-
 /** What node:sqlite throws while another connection holds the write lock. */
 const locked = (): Error =>
   Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });

@@ -106,19 +106,13 @@ export function scanTranscripts(
   );
   if (missing.length > 0) {
     store.transaction(() => {
+      // A row from the database with a time from the clock: only the database itself can fail.
       for (const row of missing) {
-        try {
-          store.saveTranscript({ ...row, missingSinceNs: now });
-          result.missing++;
-        } catch (error) {
-          if (isDatabaseFailure(error)) {
-            throw error;
-          }
-          problems.push(`cannot mark ${row.path} missing (${describeError(error)})`);
-        }
+        store.saveTranscript({ ...row, missingSinceNs: now });
       }
     });
   }
+  result.missing = missing.length;
 
   if (store.getKv('first_scan_done') !== '1') {
     store.setKv('first_scan_done', '1');

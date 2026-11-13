@@ -144,11 +144,11 @@ Every skydeck command except `hook` starts with the same three steps, in this or
 3. **Scan transcripts** (5.6).
 
 A refresh that failed would make every command fail, so no single spool file, live process,
-folder or transcript can stop it, whatever fails while it is read or saved: that one is skipped
-(a spool file whose event cannot be saved stays in the spool for the next refresh), and a line
-naming it and why (never its content) is kept in the database for `skydeck doctor` (8) until the
-next refresh. Only a failure of the database itself (locked, read-only, full, corrupt) ends the
-command.
+folder or transcript can stop it: item-caused errors are recorded and skipped, whether they come
+from reading the item or from saving it. That one is skipped (a spool file whose event cannot be
+saved stays in the spool for the next refresh), and a line naming it and why (never its content)
+is kept in the database for `skydeck doctor` (8) until the next refresh. Database-wide errors
+(locked, read-only, I/O, corrupt, full) stop the refresh at once and end the command.
 
 Parsing (in `src/claude/hookinput.ts`) normalises each event:
 

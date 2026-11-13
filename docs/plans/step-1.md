@@ -3123,7 +3123,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   `mtimeNs < now − 7 days` is removed, and so is every entry of `spoolDir` whose name starts with
   `.` and ends with `.tmp` and whose `mtimeNs < now − 1 hour` (`now` = `platform.clock.nowNs()`).
   Nothing else is removed (directories never).
-- **One item never stops a refresh.** A refresh that throws makes every command fail, so nothing
+- **One item never stops a refresh: item-caused errors are recorded and skipped; database-wide
+  errors stop the refresh.** A refresh that throws makes every command fail, so nothing
   that comes from one spool file, one live process, one folder or one transcript escapes as an
   exception. The whole handling of one item — reading, deriving AND saving it — is guarded, so an
   error the store throws for one item counts as that item's error — except a failure of the
@@ -3166,7 +3167,9 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   keeps its row as it was; one that is gone by then is marked missing. A file whose facts hold a
   time outside the database's 64-bit range (a timestamp, or the file's modification time, before
   1677 or after 2262) is not saved.
-  The row of a file and its pull-request attachments are saved in one transaction. At the end
+  The row of a file and its pull-request attachments are saved in one transaction. The rows marked
+  missing are saved in one transaction with no per-row catch (a row from the database with a time
+  from the clock can only fail with the database). At the end
   `setKv('first_scan_done', '1')`.
 
 **Test cases** (`testDeck(t)`; `put(fields, seq)` writes `spoolText(fields)` as `spoolName(fields, seq)` into `spoolDir`; `P` = pid 4242 / procStart 51234567 / `BOOT_A`)
@@ -3248,7 +3251,7 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
     `9999-12-31T23:59:59Z` → not saved, a problem line, the other transcripts read; an unreadable
     folder `demo` does not protect `demo-b`. An `lstat` mtime of 2^64 ns → not saved, a problem
     line; `saveTranscript` or `attachPr` throws for one file → neither its row nor its attachments
-    are saved, the others are; marking one deleted row missing fails → the others are marked; a
+    are saved, the others are; a
     row another refresh saves while this scan lists is not marked missing.
 
 `refresh.test.ts`
@@ -3258,6 +3261,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 3. A bad spool file, a process whose `cmdline` throws and a transcript whose `readBytes` throws →
    `refresh` returns normally; the three problem keys are set. The same with the store failing to
    save one spool event, one observed event and one transcript: the others are saved.
+   A store that throws "database is locked" for the first item → `refresh` throws once, after one
+   attempt, and no problem key is written.
 
 **Steps**
 - [ ] Write `test/helpers/deck.ts` and the four test files. `npm test` → fails.
