@@ -13,6 +13,7 @@ import {
   detachSessionPr,
   markDone,
   markUndone,
+  requirePrKey,
   setGroup,
   setLabel,
   setNote,
@@ -156,6 +157,26 @@ describe('markDone, markUndone', () => {
     assert.notEqual(d.proc.stat(4242), null, 'its process is still there');
     assert.deepEqual(d.runner.calls, []);
     assert.deepEqual(d.runner.interactiveCalls, []);
+  });
+});
+
+describe('requirePrKey', () => {
+  test('is the key of the url, the same one attachManualPr stores', () => {
+    assert.deepEqual(requirePrKey('https://GitHub.com/O/R/pull/5/files?x=1'), {
+      url: PR,
+      owner: 'o',
+      repo: 'r',
+      number: 5,
+    });
+  });
+
+  test('a url that is no pull request is a usage error with the sanitised text', () => {
+    assert.throws(
+      () => requirePrKey('https://example.com/\x1b[31mx'),
+      (error: unknown) =>
+        error instanceof UsageError &&
+        error.message === 'not a GitHub pull-request URL: https://example.com/x',
+    );
   });
 });
 

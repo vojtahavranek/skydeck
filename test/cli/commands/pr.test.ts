@@ -150,6 +150,22 @@ test('pr add with a url that is not a pull request is a usage error (exit 2): no
   assert.deepEqual(d.deck.store.prs(), []);
 });
 
+test('the url is checked before the reference: a bad url is exit 2 whatever the reference is', async (t) => {
+  const d = twoSessions(t);
+  const runner = ghAnswers(OPEN_GREEN);
+  for (const sub of ['add', 'rm']) {
+    const before = d.stderr().length;
+    assert.equal(await main(['pr', sub, 'nope1234', 'not-a-url'], withRunner(d, runner)), 2, sub);
+    assert.equal(
+      d.stderr().slice(before),
+      'skydeck: not a GitHub pull-request URL: not-a-url\n',
+      sub,
+    );
+  }
+  assert.deepEqual(runner.calls, []);
+  assert.deepEqual(d.deck.store.sessionPrs(), []);
+});
+
 test('pr add with a reference that matches nothing exits 3 and runs no gh', async (t) => {
   const d = twoSessions(t);
   const runner = ghAnswers(OPEN_GREEN);
@@ -271,6 +287,24 @@ test('pr refresh when gh times out prints the failure count, exits 0 and keeps t
   assert.equal(d.stdout(), 'fetched 0, failed 1\n');
   assert.equal(prRow(d)?.error, 'gh timed out after 10 s');
   assert.equal(prRow(d)?.state, 'open');
+});
+
+test('pr refresh does not ask about a pull request that every session has detached', async (t) => {
+  const d = twoSessions(t);
+  await main(['pr', 'add', '0b5f', PR1], withRunner(d, ghTimesOut())); // cannot be read
+  await main(['pr', 'rm', '0b5f', PR1], d.ctx);
+  const runner = ghTimesOut();
+
+  assert.equal(await main(['pr', 'refresh'], withRunner(d, runner)), 0);
+
+  assert.ok(d.stdout().endsWith('fetched 0, failed 0\n'), d.stdout());
+  assert.deepEqual(runner.calls, []);
+
+  // attached again, it is asked about again
+  await main(['pr', 'add', '0b5f', PR1], withRunner(d, ghAnswers(OPEN_GREEN)));
+  const again = ghAnswers(OPEN_GREEN);
+  await main(['pr', 'refresh'], withRunner(d, again));
+  assert.equal(again.calls.length, 1);
 });
 
 test('pr refresh with nothing to fetch prints zeros and does not run gh', async (t) => {

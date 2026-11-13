@@ -43,6 +43,17 @@ test("a reference can be the session's label, and the label is replaced", async 
   assert.equal(d.deck.store.meta(S1)?.label, 'other');
 });
 
+test('an empty text, or one of only spaces, clears the label like no text at all (a script may pass an empty variable)', async (t) => {
+  const d = twoSessions(t);
+  for (const blank of [[''], ['   '], ['', ''], ['\t']]) {
+    await main(['label', '0b5f', 'keep'], d.ctx);
+    assert.equal(await main(['label', '0b5f', ...blank], d.ctx), 0, JSON.stringify(blank));
+    assert.equal(d.deck.store.meta(S1)?.label, null, JSON.stringify(blank));
+    assert.ok(d.stdout().endsWith('0b5f3c1e label cleared\n'));
+  }
+  assert.equal(d.stderr(), '');
+});
+
 test('a label that starts with "-" is a usage error (exit 2) and changes nothing', async (t) => {
   const d = twoSessions(t);
   await main(['label', '0b5f', 'keep'], d.ctx);
@@ -57,8 +68,6 @@ test('a label with a control character or a line break is a usage error (exit 2)
   assert.equal(d.stderr(), 'skydeck: a label cannot contain control characters\n');
   assert.equal(await main(['label', '0b5f', 'a\nb'], d.ctx), 2);
   assert.match(d.stderr(), /\nskydeck: a label must be one line\n$/);
-  assert.equal(await main(['label', '0b5f', '   '], d.ctx), 2);
-  assert.match(d.stderr(), /\nskydeck: a label cannot be empty\n$/);
   assert.equal(d.deck.store.meta(S1), null);
   assert.equal(d.stdout(), '');
 });

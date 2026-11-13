@@ -36,7 +36,12 @@ export function markUndone(deck: Deck, sessionId: string): void {
   deck.store.updateMeta(sessionId, { doneAtNs: null }, deck.platform.clock.nowNs());
 }
 
-function keyOf(url: string): PrKey {
+/**
+ * The key of a pull-request URL (design 7.3). UsageError "not a GitHub pull-request URL: <text>"
+ * when `url` is none; the text is sanitised, because the message is shown on a terminal. Also
+ * exported for a command that must check its arguments before it opens the database.
+ */
+export function requirePrKey(url: string): PrKey {
   const key = prKey(url);
   if (key === null) {
     throw new UsageError(`not a GitHub pull-request URL: ${sanitize(url)}`);
@@ -49,7 +54,7 @@ function keyOf(url: string): PrKey {
  * detach (7.3). The pull request is not fetched here. UsageError when `url` is not a pull request.
  */
 export function attachManualPr(deck: Deck, sessionId: string, url: string): PrKey {
-  const key = keyOf(url);
+  const key = requirePrKey(url);
   deck.store.transaction(() => {
     deck.store.ensurePr(key);
     deck.store.attachPr(sessionId, key.url, 'manual', deck.platform.clock.nowNs());
@@ -62,7 +67,7 @@ export function attachManualPr(deck: Deck, sessionId: string, url: string): PrKe
  * UsageError when `url` is not a pull request; SkydeckError (exit 1) when it was not attached.
  */
 export function detachSessionPr(deck: Deck, sessionId: string, url: string): PrKey {
-  const key = keyOf(url);
+  const key = requirePrKey(url);
   if (!deck.store.detachPr(sessionId, key.url, deck.platform.clock.nowNs())) {
     throw new SkydeckError(`${key.url} is not attached to ${sessionId.slice(0, 8)}`);
   }

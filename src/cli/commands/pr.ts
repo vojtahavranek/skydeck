@@ -5,7 +5,7 @@ import { UsageError } from '../../platform/errors.ts';
 import { isoFromNs } from '../../platform/time.ts';
 import { loadRows } from '../../sessions/load.ts';
 import type { PrView } from '../../sessions/list.ts';
-import { attachManualPr, detachSessionPr } from '../../sessions/meta.ts';
+import { attachManualPr, detachSessionPr, requirePrKey } from '../../sessions/meta.ts';
 import { resolveRef } from '../../sessions/refs.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
@@ -67,7 +67,8 @@ export const command: Command = {
     switch (subcommand) {
       case 'add': {
         expectArguments(rest, 2);
-        const [ref = '', url = ''] = rest;
+        const [ref = '', text = ''] = rest;
+        const url = requirePrKey(text).url; // arguments first: a bad url is exit 2 whatever <ref> is
         return withDeck(ctx, { refresh: true }, async (deck) => {
           const row = resolveRef(ref, loadRows(deck));
           const key = attachManualPr(deck, row.id, url);
@@ -85,7 +86,8 @@ export const command: Command = {
       }
       case 'rm': {
         expectArguments(rest, 2);
-        const [ref = '', url = ''] = rest;
+        const [ref = '', text = ''] = rest;
+        const url = requirePrKey(text).url;
         return withDeck(ctx, { refresh: true }, async (deck) => {
           const row = resolveRef(ref, loadRows(deck));
           const key = detachSessionPr(deck, row.id, url);

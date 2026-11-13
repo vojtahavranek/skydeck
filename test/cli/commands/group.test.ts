@@ -36,6 +36,17 @@ test('group <ref> without text clears the group', async (t) => {
   assert.equal(loadRows(d.deck).find((r) => r.id === S1)?.group, null);
 });
 
+test('an empty text, or one of only spaces, clears the group like no text at all', async (t) => {
+  const d = twoSessions(t);
+  for (const blank of [[''], ['   '], ['', ''], ['\t']]) {
+    await main(['group', '0b5f', 'ABC-9'], d.ctx);
+    assert.equal(await main(['group', '0b5f', ...blank], d.ctx), 0, JSON.stringify(blank));
+    assert.equal(d.deck.store.meta(S1)?.group, null, JSON.stringify(blank));
+    assert.ok(d.stdout().endsWith('0b5f3c1e group cleared\n'));
+  }
+  assert.equal(d.stderr(), '');
+});
+
 test('a group may start with "-" (only a label may not)', async (t) => {
   const d = twoSessions(t);
   assert.equal(await main(['group', '0b5f', '--', '-x'], d.ctx), 0);
@@ -48,8 +59,6 @@ test('a group with a control character or a line break is a usage error (exit 2)
   assert.equal(d.stderr(), 'skydeck: a group cannot contain control characters\n');
   assert.equal(await main(['group', '0b5f', 'a\nb'], d.ctx), 2);
   assert.match(d.stderr(), /\nskydeck: a group must be one line\n$/);
-  assert.equal(await main(['group', '0b5f', '  '], d.ctx), 2);
-  assert.match(d.stderr(), /\nskydeck: a group cannot be empty\n$/);
   assert.equal(d.deck.store.meta(S1), null);
   assert.equal(d.stdout(), '');
 });

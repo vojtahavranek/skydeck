@@ -13,8 +13,8 @@ const SPEC: ArgSpec = {
   usage: `skydeck label <ref> [<text>]
 
 Sets the label of a session. The text is all the arguments after <ref>, joined by one space; it
-must be one line without control characters, and must not start with '-'. Without text, the label
-is cleared.
+must be one line without control characters, and must not start with '-'. Without text, or with
+an empty text (a script may pass an empty variable), the label is cleared.
 `,
   flags: {},
   min: 1,
@@ -31,7 +31,8 @@ export const command: Command = {
       return EXIT.ok;
     }
     const [ref = '', ...words] = parsed.positionals; // `min` guarantees the reference
-    const label = words.length === 0 ? null : cleanLabel(words.join(' '));
+    const text = words.join(' ');
+    const label = text.trim() === '' ? null : cleanLabel(text); // no text, or an empty one, clears
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const row = resolveRef(ref, loadRows(deck));
       setLabel(deck, row.id, label);

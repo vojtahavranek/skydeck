@@ -8,7 +8,7 @@ import type { Context } from '../../src/cli/context.ts';
 import { SkydeckError, UsageError } from '../../src/platform/errors.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import { setNote } from '../../src/sessions/meta.ts';
-import { testDeck } from '../helpers/deck.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { S1, fakeRunner } from '../helpers/platform.ts';
 import type { RunCall } from '../helpers/platform.ts';
@@ -31,6 +31,8 @@ function withEditor(
     stdinTTY?: boolean;
     edit?: (path: string) => void;
     code?: number | null;
+    /** The runner rejects, as `child_process` does for a spawn error other than ENOENT. */
+    spawnError?: Error;
   },
 ): {
   d: TestDeck;
@@ -47,6 +49,10 @@ function withEditor(
     options.edit?.(path);
     return options.code === undefined ? 0 : options.code;
   });
+  if (options.spawnError !== undefined) {
+    const error = options.spawnError;
+    runner.runInteractive = () => Promise.reject(error);
+  }
   const platform = { ...d.platform, runner };
   const ctx: Context = { io: d.ctx.io, platform };
   return { d, ctx, deck: { ...d.deck, platform }, startedWith, runner };
@@ -139,6 +145,59 @@ describe('editNote', () => {
     await assert.rejects(editNote(ctx, deck, S1), (error: unknown) => {
       return error instanceof SkydeckError && /^editor did not finish/.test(error.message);
     });
+
+    assert.equal(noteOf(d), 'old');
+    assert.equal(existsSync(join(d.places.stateDir, `note-${S1}.md`)), false);
+  });
+
+  test('when saving fails after the editor, the typed text stays in the note file and the error names it', async (t) => {
+    const { d, ctx, deck } = withEditor(t, {
+      env: { EDITOR: 'ed' },
+      edit: (path) => writeFileSync(path, 'ten minutes of careful typing'),
+    });
+    setNote(d.deck, S1, 'old');
+    const locked = Object.assign(new Error('database is locked'), {
+      code: 'ERR_SQLITE_ERROR',
+      errcode: 5,
+    });
+    const failing = deckWith(deck, {
+      store: {
+        updateMeta: () => {
+          throw locked;
+        },
+      },
+    });
+    const file = join(d.places.stateDir, `note-${S1}.md`);
+
+    await assert.rejects(
+      editNote(ctx, failing, S1),
+      (error: unknown) =>
+        error instanceof SkydeckError &&
+        error.exitCode === 1 &&
+        error.message ===
+          `the note was not saved (Error: database is locked); your text is in ${file}` &&
+        error.cause === locked,
+    );
+
+    assert.equal(readFileSync(file, 'utf8'), 'ten minutes of careful typing');
+    assert.equal(noteOf(d), 'old');
+  });
+
+  test('an editor that cannot be run (the runner rejects) is a failure that names it; the note is unchanged and the file is gone', async (t) => {
+    const { d, ctx, deck } = withEditor(t, {
+      env: { EDITOR: '/etc/not-executable --flag' },
+      spawnError: Object.assign(new Error('spawn /etc/not-executable EACCES'), { code: 'EACCES' }),
+    });
+    setNote(d.deck, S1, 'old');
+
+    await assert.rejects(
+      editNote(ctx, deck, S1),
+      (error: unknown) =>
+        error instanceof SkydeckError &&
+        !(error instanceof UsageError) &&
+        error.exitCode === 1 &&
+        error.message === 'editor could not be run: /etc/not-executable (EACCES)',
+    );
 
     assert.equal(noteOf(d), 'old');
     assert.equal(existsSync(join(d.places.stateDir, `note-${S1}.md`)), false);

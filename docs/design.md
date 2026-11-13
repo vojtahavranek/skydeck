@@ -343,7 +343,8 @@ never received a prompt has no transcript (14).
   `draft`, `merged`, `closed`), review decision, the combined checks result, the time of the last
   successful fetch and the time and error of the last attempt.
 - Merged and closed pull requests are never fetched again. Open ones are refreshed when their
-  last successful fetch is older than `prRefreshMinutes` (default 5).
+  last successful fetch is older than `prRefreshMinutes` (default 5). A pull request that no
+  session has attached any more (every attachment detached) is not refreshed, `pr refresh` included.
 - `skydeck ls` and `show` print the cached status and never wait for the network. The
   interactive list paints from the cache, refreshes in the background and repaints.
   `skydeck pr refresh` fetches now.
@@ -385,7 +386,7 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 | `skydeck` | Interactive list. |
 | `skydeck ls [--all] [--json]` | Print the list. |
 | `skydeck show <ref> [--json]` | One session: state, marks, project directory, launch command, links, note, pull requests, holders. |
-| `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text, clear. The text is all the arguments after `<ref>`, joined by one space. |
+| `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text (or with an empty text), clear. The text is all the arguments after `<ref>`, joined by one space. |
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |

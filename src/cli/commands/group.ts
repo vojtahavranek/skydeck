@@ -13,8 +13,9 @@ const SPEC: ArgSpec = {
   usage: `skydeck group <ref> [<text>]
 
 Sets the group of a session. The text is all the arguments after <ref>, joined by one space; it
-must be one line without control characters. Without text, the group is cleared (a title that
-starts with a ticket key still gives the session that key as its group).
+must be one line without control characters. Without text, or with an empty text (a script may
+pass an empty variable), the group is cleared (a title that starts with a ticket key still gives
+the session that key as its group).
 `,
   flags: {},
   min: 1,
@@ -31,7 +32,8 @@ export const command: Command = {
       return EXIT.ok;
     }
     const [ref = '', ...words] = parsed.positionals; // `min` guarantees the reference
-    const group = words.length === 0 ? null : cleanGroup(words.join(' '));
+    const text = words.join(' ');
+    const group = text.trim() === '' ? null : cleanGroup(text); // no text, or an empty one, clears
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const row = resolveRef(ref, loadRows(deck));
       setGroup(deck, row.id, group);
