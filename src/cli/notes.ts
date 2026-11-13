@@ -44,15 +44,33 @@ function discard(files: Files, path: string): void {
 }
 
 /**
+ * Removes the file an edit made after its editor failed, but only while it still holds `written`,
+ * what the edit put there: then nothing the user typed is in it. A file the editor changed, or one
+ * that cannot be read, stays: its text was never stored (principle 6).
+ */
+function discardUnlessChanged(files: Files, path: string, written: string): void {
+  try {
+    if (files.readText(path) !== written) {
+      return;
+    }
+  } catch {
+    return;
+  }
+  discard(files, path);
+}
+
+/**
  * Writes the note to `<stateDir>/note-<sessionId>.md` (readable by the user only), runs the editor
  * (D14) on it through `platform.runner.runInteractive`, stores what comes back and removes the
  * file. UsageError when stdin is not a terminal; SkydeckError when the editor cannot be run,
- * exits with a non-zero code (`editor exited <code>`) or removes the file: the note is unchanged
- * and the file is removed. When the editor ended well but storing the text fails (the database is
- * locked, the disk is full), the file is KEPT: it holds what the user just typed, and the error
- * names its path. A file that is there when an edit starts (kept like that, or left by a crash) is
- * not overwritten: the editor opens it, and one line on stderr says so. Quitting that editor with a
- * failure code discards it, as for any other edit.
+ * exits with a non-zero code (`editor exited <code>`) or removes the file: the note is unchanged,
+ * and the file is removed when this edit made it and the editor left it as it was. When the editor
+ * ended well but storing the text fails (the database is locked, the disk is full), the file is
+ * KEPT: it holds what the user just typed, and the error names its path.
+ *
+ * A file that is there when an edit starts (kept like that, or left by a crash) is not overwritten:
+ * the editor opens it, and one line on stderr says so. It is not this edit's own, so it is never
+ * removed when the editor fails: only a successful save removes it (design 7.1, principle 6).
  */
 export async function editNote(ctx: Context, deck: Deck, sessionId: string): Promise<void> {
   if (!ctx.io.isTTY.stdin) {
@@ -64,8 +82,11 @@ export async function editNote(ctx: Context, deck: Deck, sessionId: string): Pro
     throw new Error('editorCommand returned no program');
   }
   const path = notePath(deck, sessionId);
+  /** What this edit put in the file; null when the file was already there. */
+  let written: string | null = null;
   if (files.readText(path) === null) {
-    files.writeText(path, deck.store.meta(sessionId)?.note ?? '', 0o600);
+    written = deck.store.meta(sessionId)?.note ?? '';
+    files.writeText(path, written, 0o600);
   } else {
     // What an earlier edit left: its text was typed by the user and never stored (a failed save,
     // a crash). Overwriting it with the stored note would lose that text.
@@ -77,7 +98,9 @@ export async function editNote(ctx: Context, deck: Deck, sessionId: string): Pro
   try {
     text = await runEditor(ctx, program, [...options, path], path);
   } catch (error) {
-    discard(files, path);
+    if (written !== null) {
+      discardUnlessChanged(files, path, written);
+    }
     throw error;
   }
   try {
