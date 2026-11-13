@@ -386,7 +386,7 @@ otherwise it behaves like `skydeck ls`.
 - Every string that comes from a transcript, a live-session file or GitHub passes through the
   sanitiser, which removes control characters and escape sequences, when the list model is built.
   So do the label and the group, although setting them refuses such characters (7.1): the
-  database can be changed by other means. A note is free multi-line text: a row only shows that there is one, and whoever prints a note sanitises it.
+  database can be changed by other means. A note is free multi-line text: a row only shows that there is one, and whoever prints a note sanitises it. `show` and the detail view of the list print it the same way, by one function: split at every line break (a lone carriage return too), each line sanitised on its own and indented by two spaces, empty lines at the start and end dropped. They also print a state detail the same way: in brackets after the state, and no brackets when it is empty once sanitised.
 
 Keys: arrows or `j`/`k` move; `Enter` detail; `l` label; `g` group; `n` note; `d` done or undo;
 `p` pull requests; `R` resume; `/` filter; `a` show all; `r` refresh; `q` quit. The filter
@@ -419,6 +419,7 @@ match or more than one match is an error that lists the candidates.
 
 **Exit codes:** 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not
 found or ambiguous; 4 resume refused; 5 restore stopped before finishing.
+A reader that closes standard output early (`skydeck ls | head -1`) is not an error: nothing more is written and nothing is said on stderr, the command runs to its end (a state change finishes, the database is closed), and the process exits 141, the status a shell shows for a program killed by SIGPIPE, when the command itself returned 0; a command that failed keeps its own code.
 
 **`--json`** output of `ls` is stable and versioned:
 
