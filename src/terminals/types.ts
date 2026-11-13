@@ -3,7 +3,11 @@ export interface LaunchSpec {
   argv: readonly string[];
 }
 
-export type OpenResult = { ok: true } | { ok: false; error: string };
+/**
+ * `timedOut`: the adapter's call was killed for taking too long, so the program may have started
+ * anyway (a WezTerm tab may have opened). A caller must not offer a command to run by hand then.
+ */
+export type OpenResult = { ok: true } | { ok: false; error: string; timedOut: boolean };
 
 export interface Terminal {
   readonly name: 'here' | 'wezterm';

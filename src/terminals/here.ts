@@ -15,7 +15,7 @@ export function handoffScript(spec: LaunchSpec): string {
 
 /**
  * open() writes handoffScript to the file named by env SKYDECK_HANDOFF (Files.writeText).
- * Without that variable: { ok: false, error: 'not started through bin/skydeck' }.
+ * Without that variable: { ok: false, error: 'not started through bin/skydeck', timedOut: false }.
  * The caller must exit right after a successful open(); the launcher then execs the command.
  */
 export function hereTerminal(deps: { files: Files; env: Env }): Terminal {
@@ -27,7 +27,7 @@ export function hereTerminal(deps: { files: Files; env: Env }): Terminal {
     async open(spec: LaunchSpec): Promise<OpenResult> {
       const path = deps.env[HANDOFF_ENV];
       if (path === undefined || path === '') {
-        return { ok: false, error: 'not started through bin/skydeck' };
+        return { ok: false, error: 'not started through bin/skydeck', timedOut: false };
       }
       if (spec.argv.length === 0) {
         // `exec` with nothing after it does nothing: the launcher would exit 0 as if all went well.

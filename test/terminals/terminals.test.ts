@@ -54,7 +54,11 @@ describe('hereTerminal', () => {
 
     const result = await hereTerminal({ files: platform.files, env: {} }).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'not started through bin/skydeck' });
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'not started through bin/skydeck',
+      timedOut: false,
+    });
   });
 
   test('an empty SKYDECK_HANDOFF counts as missing', async (t) => {
@@ -65,7 +69,11 @@ describe('hereTerminal', () => {
       env: { [HANDOFF_ENV]: '' },
     }).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'not started through bin/skydeck' });
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'not started through bin/skydeck',
+      timedOut: false,
+    });
   });
 
   test('with SKYDECK_HANDOFF it writes the handoff script to that file', async (t) => {
@@ -188,7 +196,7 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'no running wezterm' });
+    assert.deepEqual(result, { ok: false, error: 'no running wezterm', timedOut: false });
   });
 
   test('the stderr line is printable: escapes and a carriage return are removed', async () => {
@@ -198,7 +206,7 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'no running wezterm' });
+    assert.deepEqual(result, { ok: false, error: 'no running wezterm', timedOut: false });
   });
 
   test('a stderr that is blank counts as no stderr', async () => {
@@ -206,7 +214,7 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'wezterm exited 2' });
+    assert.deepEqual(result, { ok: false, error: 'wezterm exited 2', timedOut: false });
   });
 
   test('a failure without stderr reports the exit code', async () => {
@@ -214,7 +222,7 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'wezterm exited 1' });
+    assert.deepEqual(result, { ok: false, error: 'wezterm exited 1', timedOut: false });
   });
 
   test('a timeout is reported as such', async () => {
@@ -222,7 +230,11 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'wezterm timed out; a tab may have opened' });
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'wezterm timed out; a tab may have opened',
+      timedOut: true,
+    });
   });
 
   test('a program that is not found is not retried outside WSL', async () => {
@@ -230,7 +242,7 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'wezterm is not installed' });
+    assert.deepEqual(result, { ok: false, error: 'wezterm is not installed', timedOut: false });
     assert.equal(runner.calls.length, 1);
   });
 
@@ -271,7 +283,7 @@ describe('weztermTerminal', () => {
       spec,
     );
 
-    assert.deepEqual(result, { ok: false, error: 'wezterm is not installed' });
+    assert.deepEqual(result, { ok: false, error: 'wezterm is not installed', timedOut: false });
     assert.equal(runner.calls.length, 2);
   });
 
@@ -286,7 +298,7 @@ describe('weztermTerminal', () => {
       spec,
     );
 
-    assert.deepEqual(result, { ok: false, error: 'boom' });
+    assert.deepEqual(result, { ok: false, error: 'boom', timedOut: false });
   });
 
   test('in WSL a wezterm that is found is not retried', async () => {
@@ -302,7 +314,11 @@ describe('weztermTerminal', () => {
 
     const result = await weztermTerminal({ runner, env: {} }, null).open(spec);
 
-    assert.deepEqual(result, { ok: false, error: 'wezterm exited without a status' });
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'wezterm exited without a status',
+      timedOut: false,
+    });
   });
 });
 

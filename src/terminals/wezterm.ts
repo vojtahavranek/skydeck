@@ -24,7 +24,8 @@ function failure(result: RunResult): string {
  * open() runs `wezterm cli --no-auto-start spawn [--domain-name <domain>] --cwd <cwd> -- <argv…>`
  * with a 10 s timeout; on notFound with env WSL_DISTRO_NAME set it retries once with
  * `wezterm.exe` (D15). ok when the exit code is 0; otherwise error = first line of stderr, or
- * "wezterm exited <code>", "wezterm timed out; a tab may have opened", "wezterm is not installed".
+ * "wezterm exited <code>", "wezterm timed out; a tab may have opened", "wezterm is not installed",
+ * and timedOut = whether the call was killed for taking too long.
  *
  * `--no-auto-start`: without it, `wezterm cli` starts a hidden mux server when no WezTerm window is
  * open, and the session would run in a terminal nobody can see, where skydeck's guard then counts
@@ -53,7 +54,9 @@ export function weztermTerminal(
       if (result.notFound && inWsl) {
         result = await deps.runner.run('wezterm.exe', args, { timeoutMs: TIMEOUT_MS });
       }
-      return result.code === 0 ? { ok: true } : { ok: false, error: failure(result) };
+      return result.code === 0
+        ? { ok: true }
+        : { ok: false, error: failure(result), timedOut: result.timedOut };
     },
   };
 }
