@@ -627,8 +627,6 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
     });
   }
 
-  // @xterm/addon-serialize 0.14.0 turns bold off and dim off both with SGR 22, which turns off
-  // both; scripts/vendor.ts patches the vendored bundle. Each case also leaves a pen behind.
   // Two defects of @xterm/addon-serialize 0.14.0 that the screen side corrects on the addon's
   // output, `correctSerialized` (review 2 of #48: N1 twice, N2).
   const ADDON_CASES: { name: string; cols: number; rows: number; bytes: string }[] = [
@@ -668,6 +666,8 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
     });
   }
 
+  // @xterm/addon-serialize 0.14.0 turns bold off and dim off both with SGR 22, which turns off
+  // both; scripts/vendor.ts patches the vendored bundle. Each case also leaves a pen behind.
   const BOLD_DIM_CASES: { name: string; bytes: string }[] = [
     { name: 'dim, then bold', bytes: '\x1b[2mab\x1b[22m\x1b[1mcd' },
     { name: 'bold, then dim', bytes: '\x1b[1mab\x1b[22m\x1b[2mcd' },
