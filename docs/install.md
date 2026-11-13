@@ -43,20 +43,61 @@ See "WezTerm on WSL" below for the configuration.
 - **Linux, or Windows with WSL2 (Ubuntu).** skydeck reads `/proc`. Native Windows and macOS are not
   supported. On Windows, run everything below inside the WSL distribution.
 - **Node.js 24.12 or newer.** Check with `node --version`. If there is none, or the default `node` is
-  older, install a newer one from nodejs.org or with nvm (`nvm install 24`; nvm is at
-  github.com/nvm-sh/nvm), beside the old one if you like, and give skydeck its path; see "Install",
-  step 2. skydeck has no runtime dependencies.
+  older, see "On a fresh WSL" below, and "Install", step 2, for a newer one beside an older default.
+  skydeck has no runtime dependencies.
 - **Claude Code, installed on this Linux side and started at least once**, so that `~/.claude`
   exists. skydeck relies on the file formats of Claude Code 2.1.3xx (design section 14).
-- **`git`** to clone the repository. Install it with your distribution's package manager.
-- **`gh`, the GitHub command line, logged in** (`gh auth login`; check with `gh auth status`; see
-  cli.github.com for installing it). The repository is private, so the clone needs it (or an SSH key
-  that GitHub accepts). skydeck also uses it later to read pull-request status. Without it
+- **`git`** to clone the repository.
+- **`gh`, the GitHub command line, logged in** (`gh auth login`; check with `gh auth status`). The
+  repository is private, so the clone needs it (or an SSH key that GitHub accepts). skydeck also uses it later to read pull-request status. Without it
   everything else works; pull requests stay "not fetched" or show "can't read", and `skydeck doctor`
   reports a problem.
 - **WezTerm, optional.** Only for tabs; see above.
 
 The hook uses `sh`, `date`, `cat`, `base64`, `mkdir` and `mv`, which a standard Ubuntu has.
+
+## On a fresh WSL
+
+Skip what you already have. Do this before the first `bin/skydeck` command, which needs Node.js.
+
+`git` and `curl`, from Ubuntu's own packages:
+
+```sh
+sudo apt update
+sudo apt install git curl
+```
+
+Node.js 24 with nvm (the version number in the URL is nvm's latest release as of this writing; see
+github.com/nvm-sh/nvm for the current one). Open a new terminal when the script has finished, so
+that `nvm` is loaded:
+
+```sh
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash
+nvm install 24
+node --version
+```
+
+`node --version` should print `v24.12.0` or newer. The first version nvm installs becomes the default
+of new terminals; when you already had another default, `nvm alias default 24` changes it. With a
+default of 24.12 or newer you never need `SKYDECK_NODE`.
+
+`gh`, from GitHub's own apt repository (the commands of cli.github.com's Linux instructions), and
+then the login:
+
+```sh
+(type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
+	&& sudo mkdir -p -m 755 /etc/apt/keyrings \
+	&& out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+	&& cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+	&& sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+	&& sudo mkdir -p -m 755 /etc/apt/sources.list.d \
+	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+	&& sudo apt update \
+	&& sudo apt install gh -y
+gh auth login
+```
+
+Claude Code itself: install it as Anthropic's documentation describes, and start it once.
 
 ## Install
 
@@ -90,8 +131,9 @@ SKYDECK_NODE="$HOME/.nvm/versions/node/v24.19.0/bin/node" bin/skydeck --version
 ```
 
 Put the same `SKYDECK_NODE=...` in front of `bin/skydeck install` in the next step. `install` links
-that binary as `<dataDir>/node`, and from then on the launcher uses the link, so the variable is
-needed only for the install itself.
+that binary as `<dataDir>/node`. You do not need the variable again: whenever `SKYDECK_NODE` is not
+set, the launcher runs the node that link points at (and `skydeck doctor` prints which one that is),
+and only when the link is gone does it fall back to `node` on `PATH`.
 
 **3. Install.**
 
@@ -189,8 +231,9 @@ ok       terminal: here (sessions start in the terminal skydeck runs in)
 ```
 
 `doctor` exits 1 when any line starts with `problem`. "Checking" below says what each check means.
-If you cloned with an SSH key and never logged `gh` in, the `gh` line is a `problem` and the exit
-code is 1: run `gh auth login`.
+A `gh` that is not logged in is not healthy either: `doctor` prints
+`problem  gh is not logged in, or GitHub cannot be reached (gh auth status: exit 1); run gh auth status to see why`
+and exits 1. That happens, for example, after a clone with an SSH key and no `gh auth login`.
 
 **6. Look at it work.** Start `claude` in some project folder, then, in another terminal:
 
@@ -200,10 +243,10 @@ skydeck ls
 
 The steps to try by hand are in [manual-checks.md](manual-checks.md).
 
-**7. Optional: check that this machine can run the tests.** skydeck itself needs no `npm ci`: it has
-no runtime dependencies, and this installs the development tools only (TypeScript, Prettier,
-`@types/node`). The tests run with the `node` on your `PATH`, which therefore must be 24.12 or newer
-here (`SKYDECK_NODE` is not used by `npm`).
+**7. Optional: check that this machine can run the tests.** `npm ci` is needed for development only:
+it installs TypeScript, Prettier and `@types/node`, which `npm run check` (format check, type check,
+tests) uses. skydeck itself has no runtime dependencies and runs without it. `npm` runs the tests with
+the `node` on your `PATH`, which therefore must be 24.12 or newer here (`SKYDECK_NODE` is not used).
 
 ```sh
 npm ci
@@ -300,7 +343,7 @@ skydeck: /home/you/.config/skydeck/config.json: "claudeHome" must be an absolute
 | Variable | Effect |
 |---|---|
 | `SKYDECK_NODE` | The `node` binary the launcher runs. It wins over the link `<dataDir>/node`, which wins over `node` on `PATH`. |
-| `SKYDECK_HOME` | Replaces the three skydeck folders with `$SKYDECK_HOME/data`, `/state` and `/config`. Meant for tests. It moves skydeck's own folders only: to try skydeck out in a scratch folder, point `HOME` (the `~/.local/bin/skydeck` link) and `CLAUDE_CONFIG_DIR` (the settings file) there as well, or install writes to the real ones. |
+| `SKYDECK_HOME` | Replaces the three skydeck folders with `$SKYDECK_HOME/data`, `/state` and `/config`. Meant for tests. It moves skydeck's own folders only. To try skydeck out without touching your real setup, point all three of `SKYDECK_HOME`, `HOME` (the link `~/.local/bin/skydeck`, the compile cache) and `CLAUDE_CONFIG_DIR` (the settings file and its backups) into a scratch folder. |
 | `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` | Move the folders of the same names (to `.../skydeck`), unless `SKYDECK_HOME` is set. |
 | `CLAUDE_CONFIG_DIR` | Claude Code's folder, when `config.json` has no `claudeHome`. |
 | `NODE_COMPILE_CACHE`, `XDG_CACHE_HOME` | Where the cache of compiled modules is kept: `$NODE_COMPILE_CACHE`, else `$XDG_CACHE_HOME/skydeck/compile-cache`, else `~/.cache/skydeck/compile-cache`. |
@@ -328,10 +371,14 @@ skydeck runs for each one is:
 wezterm cli --no-auto-start spawn --domain-name <domain> --cwd <session directory> -- claude --resume <id> ...
 ```
 
-- `--domain-name` is left out when `wezterm.domain` is `null`, which is the place to start. Set it
-  when the tab must open in a particular WezTerm domain, for example the one that runs your WSL
-  distribution; the domains are the ones in your WezTerm configuration (a domain WezTerm makes for a
-  WSL distribution is named like `WSL:Ubuntu`).
+- `--domain-name` is left out when `wezterm.domain` is `null`, which is the place to start: WezTerm
+  then uses the domain of the pane skydeck runs in. skydeck passes the value as it is, so it must
+  be a domain name WezTerm knows. For a WSL distribution WezTerm's own documentation names the
+  domains it makes `WSL:` followed by the distribution's name (its example is `WSL:Ubuntu-18.04`).
+  The distribution's name is in `$WSL_DISTRO_NAME` (and in `wsl -l -v` on Windows), so
+  `echo "WSL:$WSL_DISTRO_NAME"` prints the usual value. If your WezTerm configuration defines its
+  own `wsl_domains`, use the names it gives them. This has not been checked on a live WezTerm; if the
+  tab does not open, try without `wezterm.domain`.
 - `--no-auto-start` is deliberate. With no WezTerm window open the call fails, and skydeck takes its
   fallback (it prints the command). Without the flag WezTerm would start a hidden server, and the
   session would run where nobody can see it. So open a WezTerm window first, and run skydeck from it.
@@ -377,8 +424,8 @@ git pull
 ```
 
 That is all. The links point into the checkout, so the command and the hook are the new code at
-once, and the database upgrades itself the next time a command runs. Run `npm ci` as well only if
-you also run the tests. Then `skydeck doctor`.
+once, and the database upgrades itself the next time a command runs. `npm ci` is needed only for
+development (`npm run check`); skip it otherwise. Then `skydeck doctor`.
 
 A database written by a newer skydeck is not opened by an older one: the command stops with
 `the database ... was written by a newer skydeck ...; update skydeck`.

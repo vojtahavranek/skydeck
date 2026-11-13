@@ -620,7 +620,8 @@ stopped by the memory check or cancelled at the prompt.
   restoring it could undo what the user changed since. An install that changes nothing writes no
   backup. Every check that can stop install runs before it creates anything, and the question is
   asked before anything is created too, so a refusal or a no leaves no directory, database or link
-  behind: a link is created or re-pointed only where there is nothing or a symbolic link; a settings
+  behind (apart from the compile cache under `~/.cache/skydeck` that every run of the launcher
+  creates, 10): a link is created or re-pointed only where there is nothing or a symbolic link; a settings
   file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
   to nothing (install names the link and its target and never replaces it with a file), and a
   missing Claude Code directory (never created for it). After the yes, install reads the settings
