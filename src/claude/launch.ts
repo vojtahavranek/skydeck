@@ -495,6 +495,19 @@ export interface ResumeCommand {
   flagsKnown: boolean;
 }
 
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The id goes onto a command line after `--resume` or `--session-id`, where a value such as
+ * `--dangerously-skip-permissions` would be read as a flag: only a lowercase UUID is built into a
+ * command, whatever the caller checked.
+ */
+function assertSessionId(sessionId: string): void {
+  if (!SESSION_ID.test(sessionId)) {
+    throw new RangeError(`not a session id (a lowercase UUID): ${JSON.stringify(sessionId)}`);
+  }
+}
+
 /** `-n <label>` when there is a label (design 14: with `--resume` it names the resumed session). */
 function labelArgs(label: string | null): string[] {
   return label === null || label === '' ? [] : ['-n', label];
@@ -506,7 +519,7 @@ function labelArgs(label: string | null): string[] {
  *          ...every kept token of launch.slice(1) in order].
  * Removed: flags with remove: true (with their values), positionals, and flags that are in no table
  * (with what follows them; `unknownFlags` names them). flagsKnown is false when launch is null. No
- * permission flag is ever added.
+ * permission flag is ever added. Throws RangeError when sessionId is not a lowercase UUID.
  */
 export function buildResumeCommand(input: {
   claudeCommand: string;
@@ -514,6 +527,7 @@ export function buildResumeCommand(input: {
   sessionId: string;
   label: string | null;
 }): ResumeCommand {
+  assertSessionId(input.sessionId);
   const kept = input.launch === null ? [] : passedOnTokens(input.launch.slice(1));
   return {
     argv: [input.claudeCommand, '--resume', input.sessionId, ...labelArgs(input.label), ...kept],
@@ -521,13 +535,17 @@ export function buildResumeCommand(input: {
   };
 }
 
-/** 7.7: [claudeCommand, '--session-id', sessionId, ...(label ? ['-n', label] : []), ...extra]. */
+/**
+ * 7.7: [claudeCommand, '--session-id', sessionId, ...(label ? ['-n', label] : []), ...extra].
+ * Throws RangeError when sessionId is not a lowercase UUID.
+ */
 export function buildNewCommand(input: {
   claudeCommand: string;
   sessionId: string;
   label: string | null;
   extra: readonly string[];
 }): string[] {
+  assertSessionId(input.sessionId);
   return [
     input.claudeCommand,
     '--session-id',

@@ -1011,13 +1011,17 @@ export interface ResumeCommand { argv: string[]; flagsKnown: boolean }
  *          ...every kept token of launch.slice(1) in order].
  * Removed: flags with remove: true (with their values), positionals, and flags that are in no table
  * (with what follows them; unknownFlags names them). flagsKnown is false when launch is null. No
- * permission flag is ever added.
+ * permission flag is ever added. Throws RangeError when sessionId is not a lowercase UUID: it goes
+ * onto a command line, where `--dangerously-skip-permissions` would be read as a flag.
  */
 export function buildResumeCommand(input: {
   claudeCommand: string; launch: readonly string[] | null; sessionId: string; label: string | null;
 }): ResumeCommand;
 
-/** 7.7: [claudeCommand, '--session-id', sessionId, ...(label ? ['-n', label] : []), ...extra]. */
+/**
+ * 7.7: [claudeCommand, '--session-id', sessionId, ...(label ? ['-n', label] : []), ...extra].
+ * Throws RangeError when sessionId is not a lowercase UUID (as buildResumeCommand).
+ */
 export function buildNewCommand(input: {
   claudeCommand: string; sessionId: string; label: string | null; extra: readonly string[];
 }): string[];
@@ -1074,8 +1078,10 @@ export class SpoolParseError extends Error {}
  * digits, or is larger than a signed 64-bit integer (the database column); boot_id is missing or
  * empty; claude_pid is neither empty nor digits, or is digits that are not a safe integer; the
  * argv_b64 of a SessionStart is not base64; the hook input is not a JSON object; no session id
- * (input session_id, else session_env) is a UUID. The hook writes a value that contained a newline or a
- * carriage return as empty, and a claude_pid that is not all digits as empty (name part 0), so pwd,
+ * (input session_id, else session_env) is a UUID. The session id of the event is always a lowercase
+ * UUID (a UUID in either case is written in lower case; a value of any other shape is no session
+ * id), because it ends up after `--resume` on a command line. The hook writes a value that
+ * contained a newline or a carriage return as empty, and a claude_pid that is not all digits as empty (name part 0), so pwd,
  * session_env and entrypoint_env may be empty: empty means "unknown", never a valid value. The
  * launch command is normalised: `argv` is storableArgv(absolutizePathFlags(recorded, cwd, exists)),
  * so no positional argument, no removed flag (with its values) and no value of an unknown flag is
@@ -2372,6 +2378,9 @@ removed flag and no value of an unknown flag survives in the stored command.
 `buildNewCommand`: `{ claudeCommand: 'claude', sessionId: S1, label: null, extra: [] }` →
 `['claude','--session-id',S1]`; `label 'x y', extra ['--model','opus']` →
 `['claude','--session-id',S1,'-n','x y','--model','opus']`.
+
+Both builders throw `RangeError` for a `sessionId` that is not a lowercase UUID (`''`,
+`'--dangerously-skip-permissions'`, an upper-case UUID, a UUID with anything around it).
 
 **Steps**
 - [ ] Write the three test files and the fixture. `npm test` → new tests fail ("Cannot find module").

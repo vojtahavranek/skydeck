@@ -356,6 +356,30 @@ describe('parseSpoolFile: name and session id', () => {
     assert.throws(() => parse(start({ input: bare, sessionEnv: '' })), SpoolParseError);
   });
 
+  test('a session id that would be read as a flag is never the id', () => {
+    // The id ends up after `--resume` on a command line.
+    const flag = '--dangerously-skip-permissions';
+    const input = hookInput('SessionStart', flag, { source: 'startup' });
+    assert.equal(parse(start({ input, sessionEnv: S2 })).sessionId, S2);
+    assert.throws(() => parse(start({ input, sessionEnv: flag })), SpoolParseError);
+    assert.throws(() => parse(start({ input, sessionEnv: '' })), SpoolParseError);
+  });
+
+  test('whatever the file holds, the session id is a lowercase UUID', () => {
+    const ids = [S1, S1.toUpperCase(), 'nope', '', 7, null, `${S1}\n`, '--resume'];
+    for (const fromInput of ids) {
+      for (const fromEnv of ids) {
+        const input = hookInput('SessionStart', S1, { source: 'startup', session_id: fromInput });
+        try {
+          const id = parse(start({ input, sessionEnv: String(fromEnv ?? '') })).sessionId;
+          assert.match(id, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+        } catch (error) {
+          assert.ok(error instanceof SpoolParseError);
+        }
+      }
+    }
+  });
+
   test('an id with anything around it is not a UUID', () => {
     for (const id of [`${S1}\n`, ` ${S1}`, `${S1}0`, S1.slice(1), S1.replaceAll('-', '')]) {
       const input = hookInput('SessionStart', id, {});
