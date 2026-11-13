@@ -1312,10 +1312,10 @@ export function removeHookEntries(settingsText: string, hookPath: string): Setti
 
 /**
  * What writing the file back through `serialize(parse(text))` would change besides the entries (fix 3):
- * `reformatted` when the bytes would differ, `lossyKeys` for the numbers that would not keep their
- * digits (read with the reviver's `context.source`).
+ * `reformatted` when the bytes would differ, `lossyPaths` for the numbers that would not keep their
+ * digits (read with the reviver's `context.source`), each named by its path (`env.ID`, `a.b[1]`).
  */
-export function rewriteReport(text: string): { reformatted: boolean; lossyKeys: string[] };
+export function rewriteReport(text: string): { reformatted: boolean; lossyPaths: string[] };
 
 /** For each event: does an entry whose command equals hookCommand(hookPath, event) exist? */
 export function hookStatus(settingsText: string | null, hookPath: string): Record<HookEvent, boolean>;
@@ -4482,7 +4482,7 @@ export const command: Command;   // in each of the three files
   `~/.local/bin`), `nodeLink` → `platform.nodePath`. (3) `addHookEntries(<settings text or null>, hookPath)`;
   when `changed`: print to stderr `skydeck will add these hook entries to <settingsPath>:` and the
   added groups as JSON, then, when `rewriteReport(text).reformatted` (fix 3), the line
-  `the rest of the file will be rewritten in skydeck's formatting[ and <keys> would lose digits]; the file as it is now is kept in <backup>`
+  `the rest of the file will be rewritten in skydeck's formatting[ and <paths> would lose digits]; the file as it is now is kept in <backup>`
   (the backup's name is fixed at this point), ask `readLine('Add them? [y/N] ')`; anything but `y`/`yes` (or null) →
   print `settings not changed` and return 1. On yes (ruled by the plan owner in pull request #20):
   write a NEW backup of the old content, `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC,
@@ -4493,7 +4493,7 @@ export const command: Command;   // in each of the three files
   `hook entries already present`; no backup is written and kv is left as it is. (4) `refreshWithProgress(ctx, deck)`. (5) Unless kv `first_run_offered`:
   count rows that are listed, not done, not running, with `lastActivityNs` older than
   `firstRunDoneAfterDays`; when > 0 ask `Mark <n> sessions older than <d> days as done? [y/N] `
-  and on yes set their `doneAtNs` with `store.updateMeta(id, { doneAtNs: now }, now)`; set `first_run_offered`. Return `EXIT.ok`.
+  and on yes set their `doneAtNs` with `markDone(deck, id)` (`src/sessions/meta.ts`; it reads the clock for each session); set `first_run_offered`. Return `EXIT.ok`.
 - **uninstall** never creates anything (but the backup just named): `resolveDeckPlaces`; when `dbPath` exists, it reads and
   deletes the kv keys through `openStore(dbPath)` (not `withDeck`, which would re-create
   directories; ruled above), otherwise kv counts as empty.

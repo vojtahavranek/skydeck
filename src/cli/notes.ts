@@ -44,19 +44,30 @@ function discard(files: Files, path: string): void {
 }
 
 /**
- * Removes the file an edit made after its editor failed, but only while it still holds `written`,
- * what the edit put there: then nothing the user typed is in it. A file the editor changed, or one
- * that cannot be read, stays: its text was never stored (principle 6).
+ * What an editor that failed left in the file `path`, which held `atStart` when the editor started
+ * (`made`: the edit made the file, from the stored note). The file is removed when the edit made it
+ * and the editor did not change it: nothing the user typed is in it. Anything else stays, because
+ * its text was never stored (principle 6): a file kept from an earlier edit, and one the editor
+ * changed or that cannot be read. Returns true when the editor changed the file, so that text the
+ * user typed is in it and the error should name it.
  */
-function discardUnlessChanged(files: Files, path: string, written: string): void {
+function afterFailedEditor(files: Files, path: string, atStart: string, made: boolean): boolean {
+  let now: string | null;
   try {
-    if (files.readText(path) !== written) {
-      return;
-    }
+    now = files.readText(path);
   } catch {
-    return;
+    return false; // cannot be read: kept, and nothing is known about what is in it
   }
-  discard(files, path);
+  if (now === null) {
+    return false;
+  }
+  if (now !== atStart) {
+    return true;
+  }
+  if (made) {
+    discard(files, path);
+  }
+  return false;
 }
 
 /**
@@ -64,7 +75,8 @@ function discardUnlessChanged(files: Files, path: string, written: string): void
  * (D14) on it through `platform.runner.runInteractive`, stores what comes back and removes the
  * file. UsageError when stdin is not a terminal; SkydeckError when the editor cannot be run,
  * exits with a non-zero code (`editor exited <code>`) or removes the file: the note is unchanged,
- * and the file is removed when this edit made it and the editor left it as it was. When the editor
+ * and the file is removed when this edit made it and the editor left it as it was; when the editor
+ * changed it before failing, the error names it (the text in it was never stored). When the editor
  * ended well but storing the text fails (the database is locked, the disk is full), the file is
  * KEPT: it holds what the user just typed, and the error names its path.
  *
@@ -82,11 +94,11 @@ export async function editNote(ctx: Context, deck: Deck, sessionId: string): Pro
     throw new Error('editorCommand returned no program');
   }
   const path = notePath(deck, sessionId);
-  /** What this edit put in the file; null when the file was already there. */
-  let written: string | null = null;
-  if (files.readText(path) === null) {
-    written = deck.store.meta(sessionId)?.note ?? '';
-    files.writeText(path, written, 0o600);
+  const left = files.readText(path); // the text of an earlier edit, null when there is none
+  const made = left === null;
+  const atStart = left ?? deck.store.meta(sessionId)?.note ?? '';
+  if (made) {
+    files.writeText(path, atStart, 0o600);
   } else {
     // What an earlier edit left: its text was typed by the user and never stored (a failed save,
     // a crash). Overwriting it with the stored note would lose that text.
@@ -98,8 +110,10 @@ export async function editNote(ctx: Context, deck: Deck, sessionId: string): Pro
   try {
     text = await runEditor(ctx, program, [...options, path], path);
   } catch (error) {
-    if (written !== null) {
-      discardUnlessChanged(files, path, written);
+    if (afterFailedEditor(files, path, atStart, made) && error instanceof SkydeckError) {
+      const named = new SkydeckError(`${error.message}; your text is in ${path}`, error.exitCode);
+      named.cause = error;
+      throw named;
     }
     throw error;
   }

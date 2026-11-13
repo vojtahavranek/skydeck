@@ -307,8 +307,9 @@ export function removeHookEntries(settingsText: string, hookPath: string): Setti
 
 /**
  * For each event: does an entry that install wrote (isOwnHook) exist? Settings that cannot be
- * read, or whose hooks have the wrong shape, have no entries. Throws SkydeckError like hookCommand
- * when hookPath contains a quote.
+ * read, or whose hooks have the wrong shape, have no entries. When hookPath contains a quote,
+ * hookCommand's SkydeckError is thrown as soon as a hook of one of the two events is compared with
+ * it: for settings that have no such hook the answer is false and nothing is thrown.
  */
 export function hookStatus(
   settingsText: string | null,

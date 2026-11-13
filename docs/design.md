@@ -620,9 +620,11 @@ stopped by the memory check or cancelled at the prompt.
   in skydeck's formatting (JSON, 2-space indentation, a newline at the end), as Claude Code itself
   writes it; when writing it back unchanged would not give the same bytes, the question has one
   more line that says the rest of the file will be rewritten in skydeck's formatting and names the
-  backup (its name is fixed when the question is asked), and when a number would lose digits (an
-  integer a double cannot hold, which is the one case where content and not formatting changes)
-  it names the key. Neither refuses; (4) runs ingest, reconcile and the
+  backup (its name is fixed when the question is asked), and when a number would lose digits (any
+  number that does not come back as written once it is a double, such as `12345678901234567890`,
+  `0.1000000000000000055511151231257827` or `1e999`; `1.50` becoming `1.5` is formatting, not loss;
+  the one case where content and not formatting changes) it names the place, as a path such as
+  `env.TOKEN_ID` or `a.b[1]`. Neither refuses; (4) runs ingest, reconcile and the
   first transcript scan; (5) makes the first-run offer (7.1), once: a later install does not offer
   it again, whatever the answer was. Running it again changes nothing. Hook entries that belong to
   something else are never touched. Every install that changes the settings file writes a new
@@ -645,7 +647,8 @@ stopped by the memory check or cancelled at the prompt.
   merely names `<hookPath>`, or an entry of an install with another hook path, is not skydeck's and
   stays; install, doctor and uninstall use this one test). That path rewrites the file in
   skydeck's formatting too: when this changes more than the removed entries, it first keeps the
-  file as it is in a new backup (named and protected like install's) and says where. Removes the
+  file as it is in a new backup (named and protected like install's), says where, and names the
+  numbers that lost digits as install's question does. Removes the
   links that still point where install pointed them. It never removes a backup, not even with
   `--purge`, and names each one. It creates nothing but that backup: no directory, database or
   file, also none the user removed after install. The database stays unless `--purge` is given.
