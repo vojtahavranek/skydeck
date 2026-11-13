@@ -35,8 +35,9 @@ section first.
    does not depend on Node.js or on the database.
 4. **No conversation content.** skydeck stores no prompt text and no assistant output — not in the
    database, not in logs, not in test fixtures. The one exception is the spool: a prompt passed on
-   the command line is part of the recorded launch command and can sit in a private spool file until
-   the next ingest, which drops it before storing anything.
+   the command line is part of the recorded launch command and can sit in a private spool file
+   until the next ingest, which drops it before storing anything; a file that cannot be parsed
+   (`spool/bad/`) or a leftover temporary file keeps it, in the same private directory.
 5. **Resume by id, with the session's own launch command.** Never by name (names are not unique).
    skydeck never adds a permission flag that the session was not started with.
 6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one

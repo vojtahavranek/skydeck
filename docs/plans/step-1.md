@@ -912,7 +912,8 @@ export class SpoolParseError extends Error {}
  * empty, and a claude_pid that is not all digits as empty (name part 0), so pwd, session_env and
  * entrypoint_env may be empty: empty means "unknown", never a valid value. The launch command is
  * normalised to flags and flag values: positional arguments are dropped before anything is
- * stored (design principle 4). `exists` is used only by absolutizePathFlags.
+ * stored (design principle 4). Lines are split on '\n' only; a '\r' belongs to the value.
+ * `exists` is used only by absolutizePathFlags.
  */
 export function parseSpoolFile(name: string, content: string, exists: (path: string) => boolean): SpoolEvent;
 
@@ -1641,6 +1642,8 @@ argv_b64=Y2xhdWRlAC0tbW9kZWwAb3B1cwA=
 --
 {"session_id":"0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d","transcript_path":"/home/dev/.claude/projects/-home-dev-projects-demo/0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d.jsonl","cwd":"/home/dev/projects/demo","hook_event_name":"SessionStart","source":"startup"}
 ```
+
+Lines end with `\n` only; a `\r` is part of the value, so the parser splits on `\n` and nothing else.
 
 `argv_b64` is present for `SessionStart` only, and empty when `/proc/<pid>/cmdline` cannot be
 read. `stat` is empty when `/proc/<pid>/stat` cannot be read. Missing variables give empty values,
