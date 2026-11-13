@@ -660,7 +660,12 @@ export type KvKey =
   | 'settings_backup'     // absolute path of the backup, or "none" when there was no settings file
   | 'first_scan_done'     // "1" after the first complete transcript scan
   | 'first_run_offered'   // "1" after install made the first-run offer (D20)
-  | 'doctor_probe';       // written by doctor to prove the database is writable
+  | 'doctor_probe'        // written by doctor to prove the database is writable
+  // What the last ingest / reconcile / scan skipped and why (task 8, for doctor): a JSON array of
+  // one-line strings naming files, folders or processes (never their content); absent when none.
+  | 'ingest_problems'
+  | 'reconcile_problems'
+  | 'scan_problems';
 ```
 
 #### 2.4.2 `src/store/migrations.ts`
@@ -1475,21 +1480,32 @@ export interface IngestResult { ingested: number; duplicates: number; bad: numbe
  * the files in <badDir> older than seven days and the leftover `.<name>.tmp` files in <spoolDir>
  * older than one hour (age = modification time against the platform clock; a younger temporary
  * file may belong to a running hook). The removals are not counted in the result.
+ * Never throws for one file: one that cannot be read or parsed for any reason goes to bad/; every
+ * problem is recorded in kv `ingest_problems`. Only an error of the database itself is thrown.
  */
 export function ingestSpool(deck: Deck): IngestResult;
 
 // src/sessions/reconcile.ts
-/** 5.4. Inserts observed events (launch command = storableArgv of the recorded one); returns how many. */
+/**
+ * 5.4. Inserts observed events (launch command = storableArgv of the recorded one); returns how many.
+ * An error with one live process skips it and is recorded in kv `reconcile_problems`.
+ */
 export function reconcile(deck: Deck): { observed: number };
 
 // src/sessions/scan.ts
 export interface ScanResult { read: number; skipped: number; missing: number; prsAttached: number }
-/** 5.6. progress(done, total) is called after each file that is read. Sets kv first_scan_done. */
+/**
+ * 5.6. progress(done, total) is called after each file that is read. Sets kv first_scan_done.
+ * What cannot be read (listing or file) is recorded in kv `scan_problems` and is not marked missing.
+ */
 export function scanTranscripts(deck: Deck, progress?: (done: number, total: number) => void): ScanResult;
 
 // src/sessions/refresh.ts
 export interface RefreshResult { ingest: IngestResult; observed: number; scan: ScanResult }
-/** ingestSpool, reconcile, scanTranscripts — in this order (5.3). Task 16 adds sweepLocks at the end. */
+/**
+ * ingestSpool, reconcile, scanTranscripts — in this order (5.3). Task 16 adds sweepLocks at the end.
+ * Throws only for an error of the database itself, never for one spool file, process or transcript.
+ */
 export function refresh(deck: Deck, progress?: (done: number, total: number) => void): RefreshResult;
 ```
 
@@ -2609,7 +2625,8 @@ export type PrFetchResult =
 export type PrOrigin = 'auto' | 'manual';
 export interface SessionPrRow { sessionId: string; url: string; origin: PrOrigin; firstSeenNs: Ns; detachedAtNs: Ns | null }
 export type KvKey = 'schema_version' | 'dropped_scripted' | 'settings_hash' | 'settings_backup'
-  | 'first_scan_done' | 'first_run_offered' | 'doctor_probe';
+  | 'first_scan_done' | 'first_run_offered' | 'doctor_probe'
+  | 'ingest_problems' | 'reconcile_problems' | 'scan_problems';   // the last three: task 8
 // migrations.ts
 export const MIGRATIONS: readonly string[];
 export const SCHEMA_VERSION: number;
@@ -3035,8 +3052,10 @@ handoff file outlives the launcher.
 
 **Files**
 - Create: `src/sessions/deck.ts`, `src/sessions/ingest.ts`, `src/sessions/reconcile.ts`,
-  `src/sessions/scan.ts`, `src/sessions/refresh.ts`
+  `src/sessions/scan.ts`, `src/sessions/refresh.ts`, `src/sessions/problems.ts` (private: the kv
+  problem lines)
 - Create: `test/helpers/deck.ts`
+- Modify: `src/store/types.ts` (`KvKey`: the three problem keys)
 - Modify: `docs/design.md` 5.4 (D21) and the `src/sessions/` row of 11 (D25)
 - Test: `test/sessions/deck.test.ts`, `test/sessions/ingest.test.ts`, `test/sessions/reconcile.test.ts`, `test/sessions/scan.test.ts`, `test/sessions/refresh.test.ts`
 
@@ -3069,8 +3088,9 @@ export function testDeck(t: TestContext, options?: TestPlatformOptions & Capture
 Rules that are part of this task (design 5.3–5.6, 9.1):
 - **openDeck.** `resolveConfigDir` → `loadConfig` → `resolvePlaces(env, homeDir, config.claudeHome)`
   → mkdirp (mode `0o700`) dataDir, stateDir, configDir, spoolDir, locksDir → `openStore(dbPath)`.
-- **Ingest.** Names ending in `.ev` and not starting with `.`, in name order. Unreadable or
-  `SpoolParseError` → moved to `badDir` (created when needed). `event.scripted` → file deleted,
+- **Ingest.** Names ending in `.ev` and not starting with `.`, in name order. Not a regular file,
+  unreadable, `SpoolParseError` or any other error while reading or parsing → moved to `badDir`
+  (created when needed); a file that is gone when it is read is skipped. `event.scripted` → file deleted,
   `addToKv('dropped_scripted', 1)`. Otherwise, inside one `store.transaction`: compute the link,
   `insertEvent`, `insertLink`; after the commit, delete the file. A `null` from `insertEvent`
   counts as a duplicate (the file is deleted too). **Link:** for a `start` with detail `clear`,
@@ -3082,7 +3102,15 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 - **Retention (design 5.3).** After the files are processed: every file in `badDir` whose
   `mtimeNs < now − 7 days` is removed, and so is every entry of `spoolDir` whose name starts with
   `.` and ends with `.tmp` and whose `mtimeNs < now − 1 hour` (`now` = `platform.clock.nowNs()`).
-  Nothing else is removed.
+  Nothing else is removed (directories never).
+- **One item never stops a refresh.** A refresh that throws makes every command fail, so nothing
+  that comes from one spool file, one live process, one folder or one transcript escapes as an
+  exception: the item is skipped (a spool file moved to `badDir`; a spool file that cannot be moved
+  or removed stays) and one line naming it and the reason (an error code, or the error's name and
+  message; never content) is recorded. Each step replaces its own kv key at its end:
+  `ingest_problems`, `reconcile_problems`, `scan_problems` (a JSON array of at most 20 strings;
+  deleted when there is none; written only when it changes). `doctor` (task 17) shows them. An error
+  of the database itself is not about one item and is thrown.
 - **Reconcile.** `bootId = proc.bootId()`; when it is null, do nothing. For each `readLiveFiles`
   file that `isLiveFileTrusted`, whose `entrypoint` is `'cli'` or null, and whose
   `mtimeNs < now − 2 s`: key `(bootId, pid, procStart)`; `latest = latestEventOfProcess(key, now)`;
@@ -3092,6 +3120,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   nor the argument of an unknown flag is ever stored (principle 4). Insert an `observed` event when
   `latest` is null or names another session, or when `!processHasLaunch(key)` and `argv` is
   non-null. Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
+  The check and the insert run again inside one transaction, so two refreshes at once record a
+  process once.
 - **Scan.** For each `listTranscriptFiles` file: when a row with this path exists with equal
   `fileSize` and `mtimeNs` and `missingSinceNs` null → skipped. Else `readTranscript` (previous =
   the row's facts and `sizeRead`, or null) → `saveTranscript` with `missingSinceNs null`, then
@@ -3100,7 +3130,11 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   get `missingSinceNs = now` — except a row whose path equals an `unreadable` path reported by
   `listTranscriptFiles` or lies under `<unreadable path>/` (an unreadable `projects` covers every
   row): what is missing from a partial listing must not be taken for deleted. Other rows are marked
-  as usual, and the scan still reads what it can. At the end `setKv('first_scan_done', '1')`.
+  as usual, and the scan still reads what it can. A listed file that `readTranscript` cannot read
+  keeps its row as it was; one that is gone by then is marked missing. A file whose facts hold a
+  time outside the database's 64-bit range (a timestamp before 1677 or after 2262) is not saved.
+  The row of a file and its pull-request attachments are saved in one transaction. At the end
+  `setKv('first_scan_done', '1')`.
 
 **Test cases** (`testDeck(t)`; `put(fields, seq)` writes `spoolText(fields)` as `spoolName(fields, seq)` into `spoolDir`; `P` = pid 4242 / procStart 51234567 / `BOOT_A`)
 
@@ -3134,6 +3168,10 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 9. argv `['claude','--mcp-config','mcp.json']`, input `cwd` = a temp dir containing `mcp.json` → stored argv has its absolute path.
 10. argv `['claude','--model','opus','fix the bug']` → the stored argv is `['claude','--model','opus']`;
     argv `['claude','--prefill-b64=Zml4','--model','opus']` → `['claude','--model','opus']`.
+11. One file's `readText` throws a `TypeError` (a wrapped `Files`) → that file is in `bad/`, the
+    next file is ingested, `ingest_problems` names the file and the error; a directory named
+    `*.ev` → `bad/`; a spool that cannot be listed, a file that cannot be moved or removed → no
+    exception, a problem line each; a clean run deletes `ingest_problems`.
 
 `reconcile.test.ts` (fake proc current boot `BOOT_A`, process 4242 `statLine(4242, 51234567)` with cmdline `['claude','--model','opus']`; live file `C/sessions/4242.json` from `busy.json` with mtime set by `fs.utimesSync` to `T0 − 10 s`; clock `T0`)
 1. No events → one observed row `{ spoolName: null, timeNs: T0, kind: 'observed', detail: '', rawDetail: null, sessionId: S1, bootId: BOOT_A, pid: 4242, procStart: 51234567, cwd: '/home/dev/projects/demo', argv: ['claude','--model','opus'], name: 'demo name', payload: null }`; returns `{ observed: 1 }`.
@@ -3147,6 +3185,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 9. `proc.bootId()` null → `0`.
 10. cmdline `['claude','--model','opus','fix the bug']` → the observed row's argv is `['claude','--model','opus']`;
     cmdline `['claude','--prefill-b64=Zml4','--model','opus']` → `['claude','--model','opus']`.
+11. `proc.cmdline` throws for 4242 while 4343 (S2) is fine → `{ observed: 1 }` for 4343,
+    `reconcile_problems` `['process 4242: TypeError: …']`; the next clean run deletes it.
 
 `scan.test.ts` (transcripts under `C/projects/demo/`)
 1. Two transcripts → `read 2`; rows hold their facts; `getKv('first_scan_done')` `'1'`; `progress` called with `(1,2)` and `(2,2)`.
@@ -3163,11 +3203,17 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
    `prs()` urls `['https://github.com/o/r/pull/7', 'https://github.com/o/r/pull/8']`; both attached to S1 with origin `auto`; `prsAttached 2`.
 8. `detachPr(S1, …/pull/7)`, then rewrite the file shorter with the same `pr-link` (full re-read) → still detached.
 9. A transcript whose first entrypoint is `sdk-ts` → saved with `entrypoint 'sdk-ts'`.
+10. A changed file deleted between listing and reading → marked missing; one whose `readBytes`
+    fails with `EACCES` → row unchanged, not missing, `scan_problems` names it; a timestamp
+    `9999-12-31T23:59:59Z` → not saved, a problem line, the other transcripts read; an unreadable
+    folder `demo` does not protect `demo-b`.
 
 `refresh.test.ts`
 1. A start spool file for S1 (process `P`), a live file for another process 4343 (S2, trusted, old mtime), a transcript for S3 →
    `refresh` returns `ingest.ingested 1`, `observed 1`, `scan.read 1`.
 2. A start spool file and a live file for the same process and session → `observed 0` (ingest ran before reconcile).
+3. A bad spool file, a process whose `cmdline` throws and a transcript whose `readBytes` throws →
+   `refresh` returns normally; the three problem keys are set.
 
 **Steps**
 - [ ] Write `test/helpers/deck.ts` and the four test files. `npm test` → fails.

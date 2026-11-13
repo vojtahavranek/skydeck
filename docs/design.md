@@ -137,11 +137,16 @@ Every skydeck command except `hook` starts with the same three steps, in this or
 
 1. **Ingest the spool.** Files are read in name order. Each becomes at most one row in `events`,
    keyed by the spool file name so that reading a file twice changes nothing; the file is deleted
-   after its row is committed. A file that cannot be parsed is moved to `spool/bad/`. Files in
-   `spool/bad/` older than seven days are removed, and so are leftover `.<name>.tmp` files in
-   `spool/` older than one hour (a younger one may belong to a running hook).
+   after its row is committed. A file that cannot be read or parsed is moved to `spool/bad/`.
+   Files in `spool/bad/` older than seven days are removed, and so are leftover `.<name>.tmp`
+   files in `spool/` older than one hour (a younger one may belong to a running hook).
 2. **Reconcile with live processes** (5.4).
 3. **Scan transcripts** (5.6).
+
+A refresh that failed would make every command fail, so no single spool file, live process,
+folder or transcript can stop it: that one is skipped, and a line naming it and why (never its
+content) is kept in the database for `skydeck doctor` (8) until the next refresh. Only a failure
+of the database itself ends the command.
 
 Parsing (in `src/claude/hookinput.ts`) normalises each event:
 
@@ -189,7 +194,9 @@ hook file was lost.
   and that were last modified more than 2 seconds ago.
 - For each such process whose latest event does not name the file's `sessionId`, or that has no
   event with a launch command, it inserts an `observed` event with the process facts from `/proc`
-  (launch command from `/proc/<pid>/cmdline`, `cwd` from the file).
+  (launch command from `/proc/<pid>/cmdline`, `cwd` from the file). The event's time is the clock
+  at reconcile, and its launch command is reduced and its path flags made absolute exactly as for a
+  spooled one (5.3).
 
 An `observed` event never creates a link.
 
@@ -654,7 +661,7 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 | `src/claude/transcripts.ts` | Finds and incrementally reads transcripts (5.6). | platform |
 | `src/claude/launch.ts` | The flag table; builds resume and new commands (7.6, 7.7). | — |
 | `src/claude/settings.ts` | Adds and removes hook entries; reads `cleanupPeriodDays`. | platform |
-| `src/sessions/` | Ingest, reconcile, the transcript scan, derived state and marks (6), the list model, reference resolution, the resume guard and lock, restore planning and running. | platform, text, store, claude, terminals (as an interface) |
+| `src/sessions/` | Ingest, reconcile, the transcript scan, derived state and marks (6), the list model, reference resolution, the resume guard and lock, restore planning and running. | platform, text, store, claude, github (its pure functions: the scan attaches pull requests by key, the list computes the chip), terminals (as an interface) |
 | `src/github.ts` | Pull-request keys, batched status, cache rules (7.3). | platform, store |
 | `src/terminals/` | The terminal interface and its implementations: `here` (handoff file), `wezterm`. | platform, text |
 | `src/cli/` | Arguments, commands, output formats, the interactive list. | everything above |
