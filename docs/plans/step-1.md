@@ -180,7 +180,8 @@ behaviour the other side relies on. Bodies are only given where the body is the 
   `shortId` is the first 8 characters.
 - Errors that end a command are `SkydeckError` subclasses (2.2.6); `dispatch` maps them to exit
   codes (2.9.2, task 12). Commands return `EXIT.*` values, never bare numbers.
-  Anything else is a bug and exits 1 with `skydeck: internal error: <message>`.
+  Anything else is a bug and exits 1 with `skydeck: internal error: <message>`. A failure of the
+  database as a whole is not a bug: `withDeck` (2.9.3) turns it into a `SkydeckError`.
 
 ### 2.2 `src/platform/`
 
@@ -1742,6 +1743,11 @@ export async function dispatch(argv: string[], ctx: Context, commandsDir: URL): 
 `dispatch` changes exactly twice. **Task 12** wraps `command.run`: a thrown `SkydeckError` →
 `skydeck: <message>\n` on stderr (a `RefError` adds one line `  <shortId>  <title>` per candidate)
 and its `exitCode`; any other error → `skydeck: internal error: <message>\n` and `EXIT.failure`.
+The text goes through the sanitiser (design 7.4) line by line, because a message can carry foreign
+text (a path, a label, text from `gh`): the line breaks of a `SkydeckError` message are kept, in an
+internal error's message they become spaces. One trailing newline of a `SkydeckError` message is
+dropped before the final `\n` is added, so a message that ends with a usage text (2.9.3) is not
+followed by a blank line.
 **Task 19** routes bare `skydeck`: the interactive list when stdin and stdout are terminals, else
 the `ls` command with no arguments. The `SkydeckError` exit codes equal the `EXIT` values:
 `SkydeckError`/`ConfigError` → `failure`, `UsageError` → `usage`, `RefError` → `ref`,
@@ -1751,12 +1757,17 @@ the `ls` command with no arguments. The `SkydeckError` exit codes equal the `EXI
 
 ```ts
 // deck.ts
-/** openDeck(ctx.platform); refreshWithProgress when options.refresh; await fn(deck); deck.store.close() in a finally. */
+/**
+ * openDeck(ctx.platform); refreshWithProgress when options.refresh; await fn(deck); deck.store.close() in a finally
+ * (an error from close() is ignored: it must not hide the error that ended the command). A failure of the
+ * database as a whole (`isDatabaseFailure`) out of the refresh or of `fn` is rethrown as a SkydeckError
+ * "the database <path> failed: <reason>" (exit 1, `cause` kept); every other error passes through unchanged.
+ */
 export function withDeck<T>(ctx: Context, options: { refresh: boolean }, fn: (deck: Deck) => Promise<T>): Promise<T>;
 /**
  * refresh(deck). When io.isTTY.stderr and kv first_scan_done is absent, shows
  * "\rskydeck: reading transcripts <done>/<total>" on stderr while scanning and clears it with
- * "\r\x1b[K" at the end (design 5.6).
+ * "\r\x1b[K" at the end (design 5.6), also when the scan fails; nothing is written when no file is read.
  */
 export function refreshWithProgress(ctx: Context, deck: Deck): RefreshResult;
 
@@ -1777,7 +1788,8 @@ export interface ParsedArgs {
 /**
  * node:util parseArgs (strict). '--help' or '-h' before any '--' → { help: true } and nothing else
  * is checked. A parse error, or a positional count outside [min, max], throws UsageError whose
- * message is the reason, a newline, and spec.usage.
+ * message is the reason, a newline, and spec.usage. With `allowRest` only the first '--' ends the
+ * arguments of the command; without it '--' makes what follows positional.
  */
 export function parseCommandArgs(args: readonly string[], spec: ArgSpec): ParsedArgs;
 ```
@@ -3599,7 +3611,9 @@ descending; the null group last; ties by name ascending. Rows by rank — `waiti
 - Create fixtures: `test/fixtures/commands-throwing/` — one command file per error case
   (`usage.ts` throws `UsageError('bad')`, `ref.ts` throws a `RefError` with two candidates,
   `refused.ts`, `stopped.ts`, `failure.ts` (`SkydeckError`), `internal.ts` (`new Error('boom')`),
-  `ok.ts` returns `EXIT.ok`); each exports `command` named like its file
+  `ok.ts` returns `EXIT.ok`; and, for the cases below that the first list does not cover,
+  `usage-text.ts`, `internal-text.ts`, `escapes.ts`, `internal-escapes.ts`) and a `README.md`;
+  each exports `command` named like its file
 - Test: `test/cli/dispatch-errors.test.ts`, `test/cli/deck.test.ts`, `test/cli/args.test.ts`
 
 **Exported API**
@@ -3629,13 +3643,25 @@ export function parseCommandArgs(args: readonly string[], spec: ArgSpec): Parsed
 6. For each error class: `new X(…).exitCode === EXIT.<name>` (`ConfigError`/`SkydeckError` → `failure`,
    `UsageError` → `usage`, `RefError` → `ref`, `ResumeRefusedError` → `refused`, `RestoreStoppedError` → `stopped`).
 7. The scaffold's `test/cli/main.test.ts` passes unchanged.
+8. `usage-text` (`UsageError("unknown option '--nope'\nskydeck x [--all]\n")`) → stderr
+   `"skydeck: unknown option '--nope'\nskydeck x [--all]\n"` (no blank line); `internal-text`
+   (throws the string `'plain text'`) → `'skydeck: internal error: plain text\n'`.
+9. `escapes` (a `RefError` whose message and candidate title contain escape sequences, `\r` and `\n`)
+   and `internal-escapes` → the text printed has them removed (line breaks of the `SkydeckError`
+   message kept, in the internal error replaced by spaces).
 
 `deck.test.ts` (`testContext(t, …)`)
 1. `withDeck(ctx, { refresh: false }, fn)` → `fn` receives an open deck; the store is closed after `fn` resolves and after it throws (the error is rethrown).
 2. A spool start file for S1 exists: `refresh: true` → inside `fn`, `deck.store.events().length` is 1; `refresh: false` → 0.
 3. `config.json` `'{"colour":1}'` → `withDeck` rejects with `ConfigError`.
+   An error thrown by `fn` is rethrown as it is (same object); one that `isDatabaseFailure` (a
+   `SQLITE_BUSY` error) becomes a `SkydeckError` `the database <dbPath> failed: database is locked`
+   with exit code 1 and the original as `cause`; an error of one row (`SQLITE_CONSTRAINT`) is
+   rethrown as it is. The store is closed in every case.
 4. `refreshWithProgress` with `stderrTTY` and one transcript → stderr contains `'skydeck: reading transcripts 1/1'` and ends with `'\r\x1b[K'`;
-   a second call writes nothing more (`first_scan_done` set); with `stderrTTY` false nothing is ever written.
+   a second call writes nothing more (`first_scan_done` set); with `stderrTTY` false nothing is ever written;
+   a first scan with no file to read writes nothing; a scan that throws (a database failure after the
+   first of two files) still ends with `'\r\x1b[K'`.
 
 `args.test.ts` (spec `{ usage: 'U\n', flags: { all: {type:'boolean'}, json: {type:'boolean'}, set: {type:'string'} }, min: 0, max: 1 }` unless stated)
 - `['--all','--json']` → `{ help: false, flags: { all: true, json: true }, positionals: [], rest: [] }`.
@@ -3646,7 +3672,11 @@ export function parseCommandArgs(args: readonly string[], spec: ArgSpec): Parsed
 - `allowRest` spec `{ usage: 'U\n', flags: { label: {type:'string'} }, min: 0, max: 0, allowRest: true }`:
   `['--label','x','--','--model','opus']` → `flags.label 'x'`, `rest ['--model','opus']`, `positionals []`;
   `['--','--help']` → `help false`, `rest ['--help']`.
-- Without `allowRest`, `['--','x']` → `positionals ['x']`.
+- Without `allowRest`, `['--','x']` → `positionals ['x']`, and `['--','--help']` → `help false`, `positionals ['--help']`.
+- With `allowRest`, only the first `--` ends the flags (`['--','a','--','b']` → `rest ['a','--','b']`) and positionals
+  before it count against `max`; a flag of the spec after `--` is part of `rest`.
+- Messages: an unknown flag's reason has node:util's hint about `--` removed and starts with a lower-case letter;
+  `['--set','--all']` and `['--all=1']` → `UsageError`.
 
 **Steps**
 - [ ] Write the fixtures and the three test files. `npm test` → fails.
