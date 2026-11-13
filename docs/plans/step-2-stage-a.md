@@ -1187,7 +1187,7 @@ linked into the sandbox where needed)
 
 **Goal.** `bin/skydeck-keepalive <runtimeDir>`: the inner script `wsl.exe` runs. It writes its own
 pid line and `$WSL_INTEROP`, then stays while the server or any keeper is alive, judged by design
-5.5's rule with `sh` builtins only.
+5.5's rule with `sh` builtins only (plus `sleep`, `mv` and `rm`, see below).
 
 **Files**
 - Create: `bin/skydeck-keepalive`
@@ -1202,6 +1202,17 @@ temporary name and `mv`. Every 10 seconds (`SKYDECK_TEST_KEEPALIVE_SECONDS` over
 it reads `server.pid` and `terms/*.pid` and exits 0 when none names a process alive on the current
 boot with the same process start. It removes `keepalive.pid` when it exits, only while that file
 still holds its own line.
+
+Also ruled by the plan owner in pull request #34: `keepalive.interop` holds the value exactly, with
+no newline added, and is empty (zero bytes) also when the value contains a newline or a carriage
+return. The script creates its files under `umask 077`. It refuses wrong arguments (none, more than
+one, a relative path, not a directory) with a usage line on stderr and exit 2, writing nothing; it
+exits 1 when it cannot read the boot id or its own process start, cannot write its files, or
+`sleep` fails. `SKYDECK_TEST_KEEPALIVE_SECONDS` counts only as a whole number of at least 1 without
+leading zeros; anything else gives the 10 seconds. On SIGHUP, SIGINT or SIGTERM it exits at once
+with 129, 130 or 143 and the same cleanup: its `sleep` runs in the background and is killed, so
+that a signal does not wait for the interval and "removes `keepalive.pid` when it exits" also holds
+for a terminated script.
 
 **Tests** (platform: none; real `sh`, real processes, the interval set to 1 s)
 - with a `server.pid` naming a live `sleep` → still running after 3 s; after the `sleep` is killed

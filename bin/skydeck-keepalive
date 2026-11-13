@@ -7,8 +7,8 @@
 # has anything to keep. In the runtime directory it writes, each through a temporary name and a
 # rename, so that a reader never sees a part of one:
 #   keepalive.pid      its own pid line, "<pid> <process start> <boot id>" (plan contract 2.8);
-#   keepalive.interop  its $WSL_INTEROP exactly, no newline added; empty when that is unset
-#                      (design-step-2 6.4).
+#   keepalive.interop  its $WSL_INTEROP exactly, no newline added; empty when that is unset or
+#                      holds a newline or a carriage return (design-step-2 6.4).
 # Then, every 10 seconds, it checks whether server.pid or any terms/*.pid names a process alive by
 # design 5.5's rule (same boot id; /proc/<pid>/stat exists and gives the recorded process start).
 # When none does it exits 0. On SIGHUP, SIGINT or SIGTERM it exits at once, 128 + the signal's
@@ -27,6 +27,7 @@ umask 077
 
 nl='
 '
+cr=$(printf '\r')
 
 dir=
 boot_id=
@@ -146,8 +147,14 @@ main() {
   read_proc_start "$$"
   [ -n "$proc_start" ] || exit 1
 
+  # A value with a newline or a carriage return is written empty, as the hook does: it is no
+  # socket path a reader could use (it never has one in practice).
+  interop=${WSL_INTEROP-}
+  case $interop in
+    *"$nl"* | *"$cr"*) interop= ;;
+  esac
   # keepalive.interop first: whoever sees keepalive.pid can read it.
-  write_file keepalive.interop "${WSL_INTEROP-}" || exit 1
+  write_file keepalive.interop "$interop" || exit 1
   own_line="$$ $proc_start $boot_id"
   write_file keepalive.pid "$own_line$nl" || exit 1
 

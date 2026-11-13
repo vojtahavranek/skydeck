@@ -306,6 +306,20 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
     assert.equal(read(join(p.dir, 'keepalive.interop')), '');
   });
 
+  for (const [name, value] of [
+    ['a newline', `${INTEROP}\n${INTEROP}`],
+    ['a carriage return', `${INTEROP}\r`],
+  ]) {
+    test(`keepalive.interop is empty when WSL_INTEROP contains ${name}`, async (t) => {
+      const p = place(t);
+      const server = await liveProcess(t, p.s);
+      writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
+      startKeepAlive(t, p, { env: { WSL_INTEROP: value } });
+      await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
+      assert.equal(read(join(p.dir, 'keepalive.interop')), '');
+    });
+  }
+
   test('neither file is ever seen half written: a reader in a loop reads whole contents only', async (t) => {
     const p = place(t);
     const pidPattern = new RegExp(`^\\d+ \\d+ ${BOOT_ID}\\n$`);
