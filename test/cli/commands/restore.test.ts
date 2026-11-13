@@ -107,6 +107,8 @@ test('restore --help prints the usage and exits 0', async () => {
   const c = testContext();
   assert.equal(await main(['restore', '--help'], c.ctx), 0);
   assert.ok(c.stdout().startsWith(USAGE_FIRST_LINE), c.stdout());
+  // What it prints without a tab terminal: a resume line per session it does not start itself.
+  assert.ok(c.stdout().includes('"skydeck resume <id> --here"'), c.stdout());
   assert.equal(c.stderr(), '');
 });
 

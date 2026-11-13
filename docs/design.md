@@ -617,9 +617,9 @@ lock stays for its 60 seconds, so that no other skydeck starts the session while
 command; when that command cannot be printed, the lock is released. `--dry-run` shows each
 session's own command line: it is information, not something to paste.
 
-**Exit codes.** 0 when every selected session started, was handed off or had its command
-printed; 1 when any was refused, failed to open or did not start in time; 5 when restore was
-stopped by the memory check or cancelled at the prompt. After a hand-off the exit status is
+**Exit codes.** 0 when every selected session started, was handed off or had its `skydeck
+resume` line printed; 1 when any was refused, failed to open or did not start in time; 5 when
+restore was stopped by the memory check or cancelled at the prompt. After a hand-off the exit status is
 `claude`'s own (7.5): when any selected session was refused, failed or did not start in time,
 restore says so in one line on stderr just before the hand-off (`skydeck: 1 of 3 selected sessions
 could not be resumed; see above`).

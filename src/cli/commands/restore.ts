@@ -23,8 +23,9 @@ const SPEC: ArgSpec = {
 
 Resumes the sessions that ended unexpectedly in the last boot before this one (a restart, or a
 WSL shutdown), a few at a time in new tabs; without a terminal that opens tabs, the first one here
-and the commands of the others printed. Preselected are the sessions that were still open when
-that boot ended; at a terminal you can change the selection before anything starts.
+and, for each of the others, a "skydeck resume <id> --here" line printed to run in another
+terminal. Preselected are the sessions that were still open when that boot ended; at a terminal
+you can change the selection before anything starts.
 
   --all      also offer what ended unexpectedly in older boots and in this one
   --dry-run  print the sessions and their commands, start nothing
