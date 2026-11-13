@@ -129,9 +129,11 @@ export function hostOk(host: string | undefined, port: number): boolean {
  * `port()` is the bound port, read at each request: with port 0 it is known only after
  * listenHttp has resolved (tasks 20, 23 pass a function that returns it then).
  *
- * In this order: a wrong Host → 421; OPTIONS → 403; GET or HEAD of a path on the list → the file
- * (the query is not part of the path; '/' is not cached, a versioned path is immutable); anything
- * else → 404. No answer carries a CORS header.
+ * In this order: a wrong Host → 421; OPTIONS → 403; any other method but GET → 405 with
+ * `Allow: GET` (HEAD included: the one listener other pages can reach answers as few requests as
+ * it can; ruled); GET of a path on the list → the file, the query ignored and never used ('/' is
+ * `no-store`, a versioned path `max-age=31536000, immutable`); any other GET → 404. Refusals are
+ * `no-store`. No answer carries a CORS header.
  */
 export function httpHandler(
   assets: Assets,
@@ -139,17 +141,24 @@ export function httpHandler(
 ): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     const bound = port();
-    const answer = (status: number, type: string, body: Uint8Array, cache: string): void => {
+    const answer = (
+      status: number,
+      type: string,
+      body: Uint8Array,
+      cache: string,
+      extra: Record<string, string> = {},
+    ): void => {
       res.writeHead(status, {
         ...securityHeaders(bound),
         'Content-Type': type,
         'Content-Length': String(body.byteLength),
         'Cache-Control': cache,
+        ...extra,
       });
-      res.end(body); // for HEAD, node:http sends the headers only
+      res.end(body);
     };
-    const refusal = (status: number, text: string): void => {
-      answer(status, 'text/plain; charset=utf-8', Buffer.from(`${text}\n`), 'no-store');
+    const refusal = (status: number, text: string, extra?: Record<string, string>): void => {
+      answer(status, 'text/plain; charset=utf-8', Buffer.from(`${text}\n`), 'no-store', extra);
     };
 
     if (!hostOk(req.headers.host, bound)) {
@@ -160,10 +169,14 @@ export function httpHandler(
       refusal(403, 'forbidden');
       return;
     }
+    if (req.method !== 'GET') {
+      refusal(405, 'method not allowed', { Allow: 'GET' });
+      return;
+    }
     const target = req.url ?? '';
     const query = target.indexOf('?');
     const path = query === -1 ? target : target.slice(0, query);
-    const asset = req.method === 'GET' || req.method === 'HEAD' ? assets.get(path) : null;
+    const asset = assets.get(path);
     if (asset === null) {
       refusal(404, 'not found');
       return;

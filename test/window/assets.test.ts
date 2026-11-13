@@ -545,7 +545,7 @@ describe('httpHandler', () => {
     assert.equal((await send(port, `/assets/${build}/web/app.js?v=2`)).body, OTHERS['web/app.js']);
   });
 
-  test('every answer (200, 404, 421, 403) carries the security headers and no CORS header', async (t) => {
+  test('every answer (200, 404, 421, 403, 405) carries the security headers and no CORS header', async (t) => {
     const { port, build } = await served(t);
 
     const answers = [
@@ -554,11 +554,12 @@ describe('httpHandler', () => {
       await send(port, '/nothing'),
       await send(port, '/', { host: `localhost:${port}` }),
       await send(port, '/', { method: 'OPTIONS' }),
+      await send(port, '/', { method: 'POST' }),
     ];
 
     assert.deepEqual(
       answers.map((a) => a.status),
-      [200, 200, 404, 421, 403],
+      [200, 200, 404, 421, 403, 405],
     );
     for (const answer of answers) {
       assertSecurityHeaders(answer, port);
@@ -598,28 +599,28 @@ describe('httpHandler', () => {
     );
   });
 
-  test('a method other than GET, HEAD and OPTIONS → 404', async (t) => {
+  test('a method other than GET and OPTIONS → 405 with Allow: GET, whatever the path', async (t) => {
     const { port, build } = await served(t);
 
-    for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
-      assert.equal((await send(port, '/', { method })).status, 404, method);
-      assert.equal(
-        (await send(port, `/assets/${build}/web/app.js`, { method })).status,
-        404,
-        method,
-      );
+    for (const method of ['HEAD', 'POST', 'PUT', 'DELETE', 'PATCH']) {
+      for (const path of ['/', `/assets/${build}/web/app.js`, '/nothing']) {
+        const answer = await send(port, path, { method });
+        assert.equal(answer.status, 405, `${method} ${path}`);
+        assert.equal(answer.headers.allow, 'GET', `${method} ${path}`);
+        assert.equal(answer.headers['cache-control'], 'no-store', `${method} ${path}`);
+        assert.doesNotMatch(answer.body, /doctype|import/);
+      }
     }
   });
 
-  test('HEAD → the headers of GET without the body', async (t) => {
+  test('a method other than GET with a wrong Host → 421 first', async (t) => {
     const { port } = await served(t);
 
-    const answer = await send(port, '/', { method: 'HEAD' });
-
-    assert.equal(answer.status, 200);
-    assert.equal(answer.body, '');
-    assert.equal(answer.headers['content-type'], HTML);
-    assert.ok(Number(answer.headers['content-length']) > 0);
+    for (const method of ['HEAD', 'POST']) {
+      const answer = await send(port, '/', { method, host: `localhost:${port}` });
+      assert.equal(answer.status, 421, method);
+      assert.equal(answer.headers.allow, undefined, method);
+    }
   });
 
   test('no web/: GET / → 404', async (t) => {

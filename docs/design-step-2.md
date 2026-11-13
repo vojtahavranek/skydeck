@@ -792,21 +792,30 @@ The server listens on `127.0.0.1:<port>` only. Every request must have the `Host
 | Request | Answer |
 |---|---|
 | `GET /` | `web/index.html`, with the asset version put into its asset URLs by the server when it reads the file at start (there is no build step). No secret needed: the page holds no secret of its own. |
-| `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list). `Cache-Control: immutable` under the versioned path. |
+| `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list): every file of `web/` but `web/tsconfig.json`, and the vendored `.mjs` and `.css` files of `vendor/MANIFEST.json`. `Cache-Control: max-age=31536000, immutable` under the versioned path. |
 | `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
-| anything else | 404. |
+| `OPTIONS` | 403. |
+| any other method but `GET` (`HEAD` included) | 405 with `Allow: GET`. |
+| any other `GET` | 404. |
+
+A query string is ignored and never used: `/?x` is `/`. `/` and every refusal (404, 405, 421,
+403) carry `Cache-Control: no-store`, so that a page reloading after a server restart always gets
+the new asset version.
 
 The server reads every file it serves into memory when it starts, and its build (16.5) is the hash
-of exactly those bytes: it serves what it hashed, never a file a `git pull` changed under it.
+of exactly those bytes: it serves what it hashed, never a file a `git pull` changed under it. It
+does not start when a vendored file differs from the manifest (also one that changed between its
+reads), or when `bin/skydeck-keeper` is missing or not UTF-8.
 
 Every answer carries `Content-Security-Policy: default-src 'none'; script-src 'self';
 style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; manifest-src 'self';
 connect-src 'self' ws://127.0.0.1:<port>; base-uri 'none'; form-action 'none'; frame-ancestors
 'none'`,
 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and
-no CORS header ever. `OPTIONS` is answered 403. Nothing on the TCP port acts on anything: the static
-files are not secret, and every action goes through the WebSocket after the proof (8.2.2).
+no CORS header ever. `OPTIONS` is answered 403, any other method but `GET` 405. Nothing on the
+TCP port acts on anything: the static files are not secret, and every action goes through the
+WebSocket after the proof (8.2.2).
 
 **Why `'unsafe-inline'` for styles, and only for styles.** xterm.js 6.0.0's DOM renderer creates
 `<style>` elements at run time and writes the colour palette, cursor and selection rules into them

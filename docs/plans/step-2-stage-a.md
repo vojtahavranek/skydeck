@@ -973,6 +973,10 @@ export function stopServer(deck: Deck, times?: LifecycleTimes): Promise<{ stoppe
 // src/window/build.ts (task 14)
 /** sha256 over the sorted paths and contents of every file under bin/, src/, web/, vendor/ (A12), first 16 hex. */
 export function computeBuild(files: Files, appRoot: string): string;
+/** Every file of the build read once (path relative to the app root → bytes, in sorted order) and
+ *  the build over exactly those bytes; computeBuild is its `build`. loadAssets serves these bytes,
+ *  and a command that compares builds can use it too (ruled by the plan owner, task 14). */
+export function readBuild(files: Files, appRoot: string): { build: string; files: Map<string, Uint8Array> };
 ```
 
 ### 2.9 The page's modules (tasks 26 and 31)
@@ -1936,15 +1940,23 @@ export interface Assets {
   build: string;
   /** The keeper's code as read at start (S2 16.5). */
   keeperCode: string;
-  /** null when the path is not on the list. */
+  /** By the path of a request without its query: '/' (index.html with the build put in) or
+   *  '/assets/<build>/<path in the checkout>'. null when the path is not on the list. */
   get(path: string): { body: Uint8Array; type: string } | null;
 }
 /** Reads web/** (but web/tsconfig.json), the vendored files of the manifest that the page loads
- *  (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper. Refuses (Error) when verifyVendored
- *  reports a problem. A missing or empty web/ is no error (task 23's tests run before task 26
- *  creates it): then `GET /` is 404. */
+ *  (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper, each once through readBuild (2.8),
+ *  so that the build is the hash of exactly the bytes served. Refuses (Error) when verifyVendored
+ *  reports a problem, when a served vendored file's bytes as read do not have the manifest's hash
+ *  (it changed between the two reads), when bin/skydeck-keeper is missing, and when it is not
+ *  UTF-8 (ruled by the plan owner, task 14). A missing or empty web/ is no error (task 23's tests
+ *  run before task 26 creates it): then `GET /` is 404. */
 export function loadAssets(files: Files, appRoot: string): Assets;
-/** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. */
+/** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. In
+ *  this order: a wrong Host → 421; OPTIONS → 403; any other method but GET → 405 with
+ *  `Allow: GET`; GET of a path on the list → the file, a query ignored and never used; any other
+ *  GET → 404. `Cache-Control`: `max-age=31536000, immutable` under `/assets/<build>/`, `no-store`
+ *  for `/` and every refusal (ruled by the plan owner, task 14). */
 /** `port()` is the bound port, read at each request: with port 0 it is known only after
  *  listenHttp has resolved (tasks 20, 23 pass a function that returns it then). */
 export function httpHandler(assets: Assets, port: () => number): (req: IncomingMessage, res: ServerResponse) => void;
@@ -1952,7 +1964,7 @@ export function httpHandler(assets: Assets, port: () => number): (req: IncomingM
 export function hostOk(host: string | undefined, port: number): boolean;
 /** The headers every answer carries (the policy with the port, nosniff, DENY, no-referrer). */
 export function securityHeaders(port: number): Record<string, string>;
-// src/window/build.ts — computeBuild of 2.8
+// src/window/build.ts — computeBuild and readBuild of 2.8
 ```
 
 **Files**
@@ -1965,17 +1977,21 @@ export function securityHeaders(port: number): Record<string, string>;
 - `GET /` → `index.html` with every `/assets/__VERSION__/` replaced by `/assets/<build>/`
   (the placeholder `__VERSION__` is the contract with task 26); `GET /assets/<build>/web/app.js`
   and `/assets/<build>/vendor/xterm/xterm/lib/xterm.mjs` → the bytes read at start with the right
-  `Content-Type` and `Cache-Control: immutable`; another version in the path, `../`, an encoded
+  `Content-Type` and `Cache-Control: max-age=31536000, immutable`; `/` and every refusal
+  `no-store`; a query string ignored; another version in the path, `../`, an encoded
   `%2e%2e`, a file added to `web/` after start → 404; the file changed on disk after start → the
   old bytes (S2 17.3 "updating").
-- Every answer (also 404, 421, 403) carries the CSP of S2 8.2.1 with the port,
+- Every answer (also 404, 421, 403, 405) carries the CSP of S2 8.2.1 with the port,
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and no `Access-Control-*` header.
 - `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port → 421; `OPTIONS` → 403;
+  `HEAD`, `POST` and any other method → 405 with `Allow: GET` (a wrong Host is 421 first);
   `GET /manifest.webmanifest` and `/favicon.ico` → 404 in stage A (the icon is stage E).
 - `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes, is
   added or removed; does not change for `docs/`, `test/`, `__pycache__/` or a dot-file; the same
   tree gives the same build.
-- `loadAssets` refuses a checkout whose vendored file was altered.
+- `loadAssets` refuses a checkout whose vendored file was altered, one whose served vendored file
+  changed between the build's read and the manifest check, and one whose `bin/skydeck-keeper` is
+  missing or not UTF-8.
 
 **Done when:** the server's static side is complete and the build is the one `skydeck window`
 will compute for the checkout.
