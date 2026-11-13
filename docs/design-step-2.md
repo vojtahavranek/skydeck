@@ -600,15 +600,36 @@ It is the **only responder to terminal queries**: what the headless terminal ans
 DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answers (9.3). It
 answers OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme
 the last focused page reports (the headless terminal has no colours); a reported colour is used
-only when it is exactly `#rrggbb`, else the default theme's is. It does not answer XTVERSION
-in the first version (9.3). It never answers while it replays (7.3).
+only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
+default colour is (foreground `#ffffff`, background `#000000`). It does not answer XTVERSION
+in the first version (9.3). It never answers while it replays (7.3). The answers to a record's
+queries go to the keeper once that record has been applied.
 
 The serialise addon does not restore everything (section 21). The server adds what it misses at
-the end of every snapshot, from state it tracks with parser hooks: cursor visibility (mode 25),
-SGR mouse encoding (mode 1006) and the cursor style (DECSCUSR); and a cursor position (CUP)
-always, because the addon puts the cursor one column too far left when the last row is full.
+the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own
+handling of DECSET and DECRST, DECSCUSR, RIS and DECSTR: cursor visibility (mode 25), the mouse
+encoding (SGR, mode 1006; SGR pixels, mode 1016), the cursor style (DECSCUSR) and the cursor's
+blinking (mode 12, which xterm.js keeps as an option apart from DECSCUSR); then the cursor
+position. The addon puts the cursor one column too far left when the last row is full, so the
+position is set with CUP — except when the cursor stands past the last column (a character was
+just printed there and the next one wraps), which CUP cannot reach: then the last character of
+that row is printed again with its own attributes, which leaves the cursor past it. The pen (the
+attributes the next character gets) is then that character's; the program's pen differs only
+when the program changed SGR after that character and before the snapshot.
 Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain URLs still are
 (9.6).
+
+Known limits: a snapshot does not restore the scroll region (DECSTBM), the saved cursor (DECSC,
+and so where leaving the alternate screen puts the cursor) or the character sets (`ESC ( 0`);
+xterm.js's API does not show them, and Claude Code's normal screen is not known to use them
+(check W26).
+
+A record can end inside an escape sequence or inside a UTF-8 character, and a snapshot taken
+there would cut it: the next record's continuation would reach a screen rebuilt from the snapshot
+as text. The keeper never ends a record inside a UTF-8 character (7.1; stage A's plan, task 9),
+and the screen side follows the stream far enough to keep the escape sequence it stands inside
+and appends it to every snapshot, last, so that the next record completes it (the snapshot's
+seam; closed by task 33 of stage A's plan).
 
 ### 7.3 Attaching, parking, rebuilding
 
@@ -636,7 +657,8 @@ Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain U
 
 A server restart therefore shows every screen exactly as it was (verified with the prototype for
 every viewport cell, colour, attribute, 119 lines of scrollback, wrap flags and modes after two
-resizes, and after SIGKILL of the screen side with unparked records, section 21).
+resizes, and after SIGKILL of the screen side with unparked records, section 21), within the
+known limits of 7.2.
 
 ### 7.4 The environment of a terminal's program
 
@@ -2144,6 +2166,7 @@ folder, as in manual-checks.md.
 | W23 | **Real claude**: which `CLAUDE*` variables Claude Code sets for the programs it runs — print the variable names (never their values) in a session's `!env` against a plain shell's — to confirm 7.4's list. And `skydeck window` run from a session's `!` command refuses (5.1). | A | 5.1, 7.4 |
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404 (the page suite tests this in Chromium, 17.4)? | A | 15.3 |
+| W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

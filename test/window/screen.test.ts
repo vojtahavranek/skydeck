@@ -343,22 +343,37 @@ describe('createScreen: size and scrollback', () => {
     screen.dispose();
   });
 
-  test('a size outside 1-65,535 or not a whole number is refused', () => {
-    for (const [cols, rows] of [
-      [0, 24],
-      [80, 0],
-      [65536, 24],
-      [80, 1.5],
-      [Number.NaN, 24],
-    ] as const) {
+  const BAD_SIZES = [
+    [0, 24],
+    [80, 0],
+    [65536, 24],
+    [80, 1.5],
+    [Number.NaN, 24],
+    [-1, 24],
+  ] as const;
+
+  test('createScreen throws a RangeError for a size outside 1-65,535 or not a whole number', () => {
+    for (const [cols, rows] of BAD_SIZES) {
       assert.throws(
         () => createScreen(modules, { cols, rows, snapshot: null }, () => {}),
         RangeError,
       );
     }
-    const screen = createScreen(modules, { cols: 80, rows: 24, snapshot: null }, () => {});
-    assert.throws(() => screen.resize(80, 65536), RangeError);
-    assert.throws(() => screen.resize(-1, 24), RangeError);
+  });
+
+  test('resize gives a promise rejected with a RangeError for such a size, and changes nothing', async () => {
+    const { screen, term } = open({ cols: 80, rows: 24, snapshot: null });
+
+    for (const [cols, rows] of BAD_SIZES) {
+      let result: Promise<void> | undefined;
+      assert.doesNotThrow(() => {
+        result = screen.resize(cols, rows);
+      });
+      await assert.rejects(result ?? Promise.resolve(), RangeError);
+    }
+
+    await settled(screen);
+    assert.deepEqual([screen.cols, screen.rows, term.cols, term.rows], [80, 24, 80, 24]);
     screen.dispose();
   });
 

@@ -8,6 +8,7 @@ import type { XtermModules } from './xterm.ts';
 export interface ScreenSide {
   /** Applies a record in order; resolves when applied. While replaying, query answers are dropped. */
   output(bytes: Uint8Array): Promise<void>;
+  /** Applies a resize in order. A size outside 1–65,535 gives a promise rejected with a RangeError. */
   resize(cols: number, rows: number): Promise<void>;
   /** Ends the replay: from now on answers go to `answer`. */
   goLive(): void;
@@ -200,7 +201,10 @@ function additions(term: Terminal, t: Tracked): string {
   return out + cursorPosition(term);
 }
 
-/** `answer` receives what the program must get as input (query answers). Scrollback 5,000. */
+/**
+ * `answer` receives what the program must get as input (query answers). Scrollback 5,000.
+ * Throws a RangeError for a size outside 1–65,535.
+ */
 export function createScreen(
   modules: XtermModules,
   init: { cols: number; rows: number; snapshot: string | null },
@@ -226,6 +230,13 @@ export function createScreen(
   let chain: Promise<void> = Promise.resolve();
   const state = { tracked: fresh() };
   track(term, state);
+
+  /**
+   * The snapshot's seam (S2 7.2): the escape sequence the stream stands inside at the chain point,
+   * appended last so that the next record completes it. Empty until plan task 33 follows the
+   * stream; until then a snapshot taken inside an escape sequence is not exact.
+   */
+  const unfinished = (): string => '';
 
   /** Runs `step` after everything queued before it; a failed step does not stop the chain. */
   function enqueue<T>(step: () => T | Promise<T>): Promise<T> {
@@ -300,7 +311,11 @@ export function createScreen(
       );
     },
     resize(cols, rows) {
-      checkSize(cols, rows);
+      try {
+        checkSize(cols, rows);
+      } catch (error) {
+        return Promise.reject(error);
+      }
       return enqueue(() => {
         if (!disposed) {
           term.resize(cols, rows);
@@ -318,7 +333,7 @@ export function createScreen(
         if (disposed) {
           throw new Error('the screen is disposed');
         }
-        const data = serializer.serialize() + additions(term, state.tracked);
+        const data = serializer.serialize() + additions(term, state.tracked) + unfinished();
         return { cols: size.cols, rows: size.rows, data };
       });
     },
