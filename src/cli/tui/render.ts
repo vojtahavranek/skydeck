@@ -121,7 +121,7 @@ function bodyHeight(size: { rows: number }): number {
  * for the first row of a group) in view on a screen of this size: one line for every row the
  * cursor moves, two when it steps onto the first row of a group from below. A scroll that is out
  * of range or leaves blank lines under a full list is made valid. The terminal wrapper calls this
- * after every key and on resize, so that the window does not jump; `render` uses the same rule,
+ * after every key, every `withRows` (a refresh can move the selection) and every resize, so that the window does not jump; `render` uses the same rule,
  * so it also shows the selected row when the wrapper has not. The detail does not scroll.
  */
 export function scrolled(model: TuiModel, size: { columns: number; rows: number }): TuiModel {

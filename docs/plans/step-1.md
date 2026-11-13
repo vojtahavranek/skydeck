@@ -1933,7 +1933,7 @@ export function render(model: TuiModel, size: { columns: number; rows: number })
 /**
  * The model with `scroll` moved by the least that keeps the selected row, and its group header when it is the first row of
  * its group, in view (one line per row the cursor moves, two onto a group's first row from below); a scroll out of range is
- * made valid. The wrapper calls it after every key and on resize. `render` uses the same rule, so it shows the selected row
+ * made valid. The wrapper calls it after every key, every `withRows` (a refresh can move the selection) and every resize. `render` uses the same rule, so it shows the selected row
  * even when the wrapper has not called it. The detail does not scroll (the model is returned as it is).
  */
 export function scrolled(model: TuiModel, size: { columns: number; rows: number }): TuiModel;
