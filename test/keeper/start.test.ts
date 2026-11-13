@@ -2,7 +2,7 @@
 // deadline; T before any output; the pid line; not dumpable; the program's directory, environment
 // and core limit. Real python3, the stand-in as the program, in a sandbox (realTestPlatform).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, openSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, statSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -204,6 +204,33 @@ describe('keeper: the process', { concurrency: true }, () => {
     const start = await waitForRecord(k.record, (r): r is StartRecord => r.ev === 'start', 5000);
     assert.equal(start.coreSoft, k.spec.coreSoft);
     assert.notEqual(coreLimits(k.pid).soft, k.spec.coreSoft, 'the keeper has another limit');
+  });
+
+  test('the pid line goes through a temporary name that is never <id>.pid', async (t) => {
+    // Task 15's listKeeperLines reads every file named <12 hex>.pid under terms/.
+    const box = keeperSandbox(t);
+    const seen = new Set<string>();
+    const watcher = watch(box.termsDir, (_event, name) => {
+      if (name !== null) {
+        seen.add(String(name));
+      }
+    });
+    try {
+      const k = await box.start();
+      const { client } = await k.claim();
+      client.send('G'); // the line is written again, with started 1
+      await client.next('T');
+      await until(() => k.pidLine()?.keeper?.started === true, 'the line says started 1');
+      await sleep(200);
+      const own = [`${k.spec.id}.pid`, `${k.spec.id}.sock`];
+      const temporaries = [...seen].filter((name) => !own.includes(name));
+      assert.ok(temporaries.length > 0, `a temporary file was seen: ${[...seen].join(' ')}`);
+      for (const name of temporaries) {
+        assert.match(name, new RegExp(`^\\.${k.spec.id}\\.${k.pid}\\.tmp$`));
+      }
+    } finally {
+      watcher.close();
+    }
   });
 
   test('with coreSoft null the program keeps the keeper’s core limit', async (t) => {
