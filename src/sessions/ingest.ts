@@ -1,0 +1,206 @@
+// 5.3 step 1: the spool files the hook wrote become event rows (and links), then the spool is
+// cleaned up. Nothing that comes from one spool file stops the ingest: a file that cannot be read
+// or parsed is moved to spool/bad/ and the reason recorded for doctor (problems.ts). An error of
+// the database itself is not about one file and ends the command.
+import { join } from 'node:path';
+
+import { SpoolParseError, parseSpoolFile } from '../claude/hookinput.ts';
+import type { SpoolEvent } from '../claude/hookinput.ts';
+import { NS_PER_DAY, NS_PER_MINUTE } from '../platform/time.ts';
+import type { Files, Ns } from '../platform/types.ts';
+import type { LinkKind } from '../store/types.ts';
+import type { Deck } from './deck.ts';
+import { describeError, recordProblems } from './problems.ts';
+
+export interface IngestResult {
+  ingested: number;
+  duplicates: number;
+  bad: number;
+  scripted: number;
+}
+
+/** Files in spool/bad/ are kept this long for diagnosis (design 5.3). */
+const BAD_FILE_AGE_NS = 7n * NS_PER_DAY;
+/** A younger leftover `.<name>.tmp` may belong to a hook that is still writing it (design 5.3). */
+const TEMPORARY_FILE_AGE_NS = 60n * NS_PER_MINUTE;
+
+/** A start event with one of these details links the process's previous session to its new one. */
+const LINK_KINDS: Readonly<Partial<Record<SpoolEvent['detail'], LinkKind>>> = {
+  clear: 'clear',
+  resume: 'switch',
+  fork: 'fork',
+};
+
+/**
+ * 5.3 step 1. Reads <spoolDir>/*.ev in name order (dot files and bad/ ignored). Afterwards removes
+ * the files in <badDir> older than seven days and the leftover `.<name>.tmp` files in <spoolDir>
+ * older than one hour (age = modification time against the platform clock; a younger temporary
+ * file may belong to a running hook). The removals are not counted in the result.
+ *
+ * Never throws for one file: a spool file that is not a regular file, cannot be read, or does not
+ * parse (for any reason) is moved to spool/bad/; a file that cannot be moved or removed stays where
+ * it is. Each such problem is recorded in kv `ingest_problems` (replaced on every run).
+ */
+export function ingestSpool(deck: Deck): IngestResult {
+  const { files } = deck.platform;
+  const { spoolDir } = deck.places;
+  const result: IngestResult = { ingested: 0, duplicates: 0, bad: 0, scripted: 0 };
+  const problems: string[] = [];
+  const names = listOrNote(files, spoolDir, problems);
+
+  for (const name of names) {
+    if (name.startsWith('.') || !name.endsWith('.ev')) {
+      continue;
+    }
+    const path = join(spoolDir, name);
+    let event: SpoolEvent;
+    try {
+      const read = readSpoolFile(files, path);
+      if (read === null) {
+        continue; // gone: another skydeck took it
+      }
+      event = parseSpoolFile(name, read, (p) => files.stat(p) !== null);
+    } catch (error) {
+      result.bad++;
+      moveToBad(deck, name, describeError(error), problems);
+      continue;
+    }
+    if (event.scripted) {
+      deck.store.addToKv('dropped_scripted', 1);
+      result.scripted++;
+    } else if (insert(deck, event) === null) {
+      result.duplicates++;
+    } else {
+      result.ingested++;
+    }
+    // Only now, with the row committed: a file is never lost before its event is stored.
+    removeOrNote(files, path, `spool file ${name}`, problems);
+  }
+
+  removeExpired(deck, names, problems);
+  recordProblems(deck.store, 'ingest_problems', problems);
+  return result;
+}
+
+/** The text of a spool file; null when it is gone. Throws when it is not a regular file. */
+function readSpoolFile(files: Files, path: string): string | null {
+  const info = files.lstat(path);
+  if (info === null) {
+    return null;
+  }
+  if (info.kind !== 'file') {
+    throw new SpoolParseError('not a regular file');
+  }
+  return files.readText(path);
+}
+
+/**
+ * Inserts the event and, for a start that clears, resumes or forks, the link from the session the
+ * same process held before (5.3 "Links"), in one transaction. Returns the new id, or null when the
+ * spool file was ingested before.
+ */
+function insert(deck: Deck, event: SpoolEvent): number | null {
+  const { store } = deck;
+  const linkKind = event.kind === 'start' ? LINK_KINDS[event.detail] : undefined;
+  return store.transaction(() => {
+    // Before inserting, so that the new event is not its own predecessor. pid 0: no process (D7).
+    const previous =
+      linkKind !== undefined && event.pid !== 0
+        ? store.latestEventOfProcess(event.bootId, event.pid, event.procStart, event.timeNs)
+        : null;
+    const id = store.insertEvent({
+      spoolName: event.spoolName,
+      timeNs: event.timeNs,
+      kind: event.kind,
+      detail: event.detail,
+      rawDetail: event.rawDetail,
+      sessionId: event.sessionId,
+      bootId: event.bootId,
+      pid: event.pid,
+      procStart: event.procStart,
+      cwd: event.cwd,
+      argv: event.argv,
+      name: event.name,
+      payload: event.payload,
+    });
+    if (
+      id !== null &&
+      linkKind !== undefined &&
+      previous !== null &&
+      previous.sessionId !== event.sessionId
+    ) {
+      store.insertLink({
+        eventId: id,
+        fromSession: previous.sessionId,
+        toSession: event.sessionId,
+        kind: linkKind,
+        timeNs: event.timeNs,
+      });
+    }
+    return id;
+  });
+}
+
+/** Moves <spoolDir>/<name> to <badDir>/<name> (creating badDir), noting what happened. */
+function moveToBad(deck: Deck, name: string, reason: string, problems: string[]): void {
+  const { files } = deck.platform;
+  const { spoolDir, badDir } = deck.places;
+  const path = join(spoolDir, name);
+  try {
+    files.mkdirp(badDir, 0o700);
+    files.rename(path, join(badDir, name));
+    problems.push(`spool file ${name} moved to spool/bad/: ${reason}`);
+  } catch (error) {
+    problems.push(
+      `cannot move spool file ${name} to spool/bad/ (${describeError(error)}): ${reason}`,
+    );
+  }
+}
+
+/**
+ * Design 5.3 retention. A bad file's age is the time since the hook wrote it: a move keeps the
+ * modification time. Directories are never removed.
+ */
+function removeExpired(deck: Deck, spoolNames: readonly string[], problems: string[]): void {
+  const { files } = deck.platform;
+  const { spoolDir, badDir } = deck.places;
+  const now = deck.platform.clock.nowNs();
+  for (const name of spoolNames) {
+    if (name.startsWith('.') && name.endsWith('.tmp')) {
+      removeIfOlder(files, join(spoolDir, name), now - TEMPORARY_FILE_AGE_NS, problems);
+    }
+  }
+  for (const name of listOrNote(files, badDir, problems)) {
+    removeIfOlder(files, join(badDir, name), now - BAD_FILE_AGE_NS, problems);
+  }
+}
+
+function removeIfOlder(files: Files, path: string, beforeNs: Ns, problems: string[]): void {
+  try {
+    const info = files.lstat(path);
+    if (info === null || info.kind === 'dir' || info.mtimeNs >= beforeNs) {
+      return;
+    }
+    files.remove(path);
+  } catch (error) {
+    problems.push(`cannot remove ${path} (${describeError(error)})`);
+  }
+}
+
+function removeOrNote(files: Files, path: string, what: string, problems: string[]): void {
+  try {
+    files.remove(path);
+  } catch (error) {
+    problems.push(`cannot remove ${what} (${describeError(error)})`);
+  }
+}
+
+/** The names in `dir` ([] when it does not exist); a directory that cannot be listed is noted. */
+function listOrNote(files: Files, dir: string, problems: string[]): string[] {
+  try {
+    return files.list(dir);
+  } catch (error) {
+    problems.push(`cannot list ${dir} (${describeError(error)})`);
+    return [];
+  }
+}

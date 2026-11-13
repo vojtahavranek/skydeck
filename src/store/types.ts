@@ -112,4 +112,9 @@ export type KvKey =
   | 'settings_backup' // absolute path of the backup, or "none" when there was no settings file
   | 'first_scan_done' // "1" after the first complete transcript scan
   | 'first_run_offered' // "1" after install made the first-run offer (D20)
-  | 'doctor_probe'; // written by doctor to prove the database is writable
+  | 'doctor_probe' // written by doctor to prove the database is writable
+  // What the last ingest / reconcile / scan skipped and why: a JSON array of one-line strings,
+  // absent when it skipped nothing. Written by refresh (task 8) for doctor; holds no message text.
+  | 'ingest_problems'
+  | 'reconcile_problems'
+  | 'scan_problems';

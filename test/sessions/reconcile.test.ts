@@ -1,0 +1,231 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+import { NS_PER_SECOND } from '../../src/platform/time.ts';
+import type { Ns, Proc } from '../../src/platform/types.ts';
+import type { Deck } from '../../src/sessions/deck.ts';
+import { ingestSpool } from '../../src/sessions/ingest.ts';
+import { reconcile } from '../../src/sessions/reconcile.ts';
+import { testDeck } from '../helpers/deck.ts';
+import type { TestDeck } from '../helpers/deck.ts';
+import { BOOT_A, S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
+import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
+
+const START = 51234567;
+const busy = (): Record<string, unknown> =>
+  JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL('../fixtures/claude/sessions/busy.json', import.meta.url)),
+      'utf8',
+    ),
+  ) as Record<string, unknown>;
+
+/** Sets the modification time of `path` to `ns` (whole seconds). */
+function touch(path: string, ns: Ns): void {
+  const seconds = Number(ns / NS_PER_SECOND);
+  utimesSync(path, seconds, seconds);
+}
+
+/** Writes `C/sessions/<pid>.json`: busy.json with `over` applied (undefined removes a key). */
+function live(
+  d: TestDeck,
+  over: Record<string, unknown> = {},
+  mtimeNs: Ns = T0 - 10n * SEC,
+): string {
+  const content: Record<string, unknown> = { ...busy(), ...over };
+  for (const [key, value] of Object.entries(over)) {
+    if (value === undefined) delete content[key];
+  }
+  const path = join(d.deck.places.claudeHome, 'sessions', `${String(content.pid)}.json`);
+  writeFileSync(path, JSON.stringify(content));
+  touch(path, mtimeNs);
+  return path;
+}
+
+/** The deck of the plan: process 4242 runs `claude --model opus`, its live file is 10 s old. */
+function setup(t: Parameters<typeof testDeck>[0]): TestDeck {
+  const d = testDeck(t);
+  d.proc.setProcess(4242, { stat: statLine(4242, START), cmdline: ['claude', '--model', 'opus'] });
+  live(d);
+  return d;
+}
+
+const observed = (d: TestDeck) => d.deck.store.events().filter((e) => e.kind === 'observed');
+const problems = (d: TestDeck): string[] | null => {
+  const value = d.deck.store.getKv('reconcile_problems');
+  return value === null ? null : (JSON.parse(value) as string[]);
+};
+
+/** A hook start event for S1 by process 4242 (with argv), ingested. */
+function hookStart(d: TestDeck, sessionId = S1): void {
+  const fields = {
+    event: 'SessionStart' as const,
+    timeNs: T0 - 20n * SEC,
+    pid: 4242,
+    input: hookInput('SessionStart', sessionId, { source: 'startup' }),
+    argv: ['claude', '--model', 'opus'],
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 1)), spoolText(fields));
+  assert.equal(ingestSpool(d.deck).ingested, 1);
+}
+
+test('a live process without events gets one observed event', (t) => {
+  const d = setup(t);
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.deepEqual(d.deck.store.events(), [
+    {
+      id: 1,
+      spoolName: null,
+      timeNs: T0,
+      kind: 'observed',
+      detail: '',
+      rawDetail: null,
+      sessionId: S1,
+      bootId: BOOT_A,
+      pid: 4242,
+      procStart: START,
+      cwd: '/home/dev/projects/demo',
+      argv: ['claude', '--model', 'opus'],
+      name: 'demo name',
+      payload: null,
+    },
+  ]);
+  assert.equal(problems(d), null);
+});
+
+test('reconciling again adds nothing', (t) => {
+  const d = setup(t);
+  reconcile(d.deck);
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  assert.equal(d.deck.store.events().length, 1);
+});
+
+test('a process with a hook start event for its session gets no observed event', (t) => {
+  const d = setup(t);
+  hookStart(d);
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+});
+
+test('a process whose latest event names another session gets an observed event', (t) => {
+  const d = setup(t);
+  hookStart(d);
+  live(d, { sessionId: S2 });
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.deepEqual(
+    observed(d).map((e) => e.sessionId),
+    [S2],
+  );
+});
+
+test('a live file modified in the last 2 seconds is left for later', (t) => {
+  const d = setup(t);
+  live(d, {}, T0 - 1n * SEC);
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+});
+
+test('only trusted cli live files count', async (t) => {
+  await t.test('pid reused (procStart differs)', (t) => {
+    const d = setup(t);
+    live(d, { procStart: '999' });
+    assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  });
+  await t.test('pid absent from /proc', (t) => {
+    const d = setup(t);
+    d.proc.setProcess(4242, null);
+    assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  });
+  await t.test("entrypoint 'sdk-ts'", (t) => {
+    const d = setup(t);
+    live(d, { entrypoint: 'sdk-ts' });
+    assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  });
+  await t.test('no entrypoint key', (t) => {
+    const d = setup(t);
+    live(d, { entrypoint: undefined });
+    assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  });
+});
+
+test('an unreadable or empty cmdline gives argv null, and a readable one later adds its launch', (t) => {
+  const d = setup(t);
+  d.proc.setProcess(4242, { stat: statLine(4242, START), cmdline: [] });
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.equal(observed(d)[0]?.argv, null);
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  d.proc.setProcess(4242, { stat: statLine(4242, START), cmdline: ['claude'] });
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.deepEqual(observed(d)[1]?.argv, ['claude']);
+
+  // /proc/<pid>/cmdline that cannot be read at all (null) is the same as an empty one
+  const e = setup(t);
+  const proc: Proc = { ...e.proc, cmdline: () => null };
+  assert.deepEqual(reconcile({ ...e.deck, platform: { ...e.deck.platform, proc } }), {
+    observed: 1,
+  });
+  assert.equal(observed(e)[0]?.argv, null);
+});
+
+test('a relative path-flag value is stored absolute against the live file cwd', (t) => {
+  const d = setup(t);
+  const project = join(d.sandbox.root, 'project');
+  mkdirSync(project);
+  writeFileSync(join(project, 's.json'), '{}');
+  live(d, { cwd: project });
+  d.proc.setProcess(4242, {
+    stat: statLine(4242, START),
+    cmdline: ['claude', '--settings', 's.json'],
+  });
+  reconcile(d.deck);
+  assert.deepEqual(observed(d)[0]?.argv, ['claude', '--settings', join(project, 's.json')]);
+});
+
+test('no boot id: nothing is reconciled', (t) => {
+  const d = setup(t);
+  d.proc.setBootId(null);
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+});
+
+test('no positional argument and no removed flag is ever stored', (t) => {
+  const d = setup(t);
+  d.proc.setProcess(4242, {
+    stat: statLine(4242, START),
+    cmdline: ['claude', '--model', 'opus', 'fix the bug'],
+  });
+  reconcile(d.deck);
+  assert.deepEqual(observed(d)[0]?.argv, ['claude', '--model', 'opus']);
+
+  const e = setup(t);
+  e.proc.setProcess(4242, {
+    stat: statLine(4242, START),
+    cmdline: ['claude', '--prefill-b64=Zml4', '--model', 'opus'],
+  });
+  reconcile(e.deck);
+  assert.deepEqual(observed(e)[0]?.argv, ['claude', '--model', 'opus']);
+});
+
+test('a process whose handling throws an unexpected error is recorded and skipped; the others are reconciled', (t) => {
+  const d = setup(t);
+  d.proc.setProcess(4343, { stat: statLine(4343, START), cmdline: ['claude'] });
+  live(d, { pid: 4343, sessionId: S2 });
+  const proc: Proc = {
+    ...d.proc,
+    cmdline: (pid) => {
+      if (pid === 4242) throw new TypeError('something unexpected');
+      return d.proc.cmdline(pid);
+    },
+  };
+  const deck: Deck = { ...d.deck, platform: { ...d.deck.platform, proc } };
+  assert.deepEqual(reconcile(deck), { observed: 1 });
+  assert.deepEqual(
+    observed(d).map((e) => [e.pid, e.sessionId]),
+    [[4343, S2]],
+  );
+  assert.deepEqual(problems(d), ['process 4242: TypeError: something unexpected']);
+
+  // the next clean run clears the record
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.equal(problems(d), null);
+});
