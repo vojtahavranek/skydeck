@@ -108,6 +108,39 @@ def is_text(value):
     return type(value) is str
 
 
+def is_path(value):
+    """An absolute path the system takes as written: no NUL (bind would cut it there), encodable."""
+    try:
+        return is_text(value) and value.startswith("/") and b"\0" not in os.fsencode(value)
+    except UnicodeEncodeError:
+        return False
+
+
+def is_session_id(value):
+    """Step 1's one rule (src/claude/session-id.ts): a lowercase UUID, 8-4-4-4-12."""
+    return (
+        is_text(value)
+        and len(value) == 36
+        and all((c == "-") if i in (8, 13, 18, 23) else (c in HEX) for i, c in enumerate(value))
+    )
+
+
+def is_meta(meta):
+    """What the codec accepts as a hello's meta (contract 2.3): the keeper echoes it there."""
+    return (
+        type(meta) is dict
+        and is_session_id(meta.get("sessionId"))
+        and meta.get("kind") in ("resume", "new")
+        and "slot" in meta
+        and (meta["slot"] is None or (type(meta["slot"]) is int and 1 <= meta["slot"] <= 9))
+        and is_ns(meta.get("openedNs"))
+        and is_text(meta.get("build"))
+        and "label" in meta
+        and (meta["label"] is None or is_text(meta["label"]))
+        and is_text(meta.get("dir"))
+    )
+
+
 def read_spec():
     """The spec from stdin (S2 7.1), or None when it is not one; it sets the id of log lines."""
     global _tag
@@ -131,8 +164,7 @@ def read_spec():
     valid = (
         type(spec.get("protocol")) is int
         and spec["protocol"] == PROTOCOL
-        and is_text(spec.get("socket"))
-        and spec["socket"].startswith("/")
+        and is_path(spec.get("socket"))
         and is_size(spec.get("cols"))
         and is_size(spec.get("rows"))
         and is_text(spec.get("cwd"))
@@ -146,7 +178,7 @@ def read_spec():
         and (spec["lock"] is None or is_text(spec["lock"]))
         and "coreSoft" in spec
         and (core is None or core == "unlimited" or (is_text(core) and core.isascii() and core.isdigit()))
-        and type(spec.get("meta")) is dict
+        and is_meta(spec.get("meta"))
     )
     return spec if valid else None
 
@@ -164,6 +196,29 @@ def boot_id():
     if not text or any(c.isspace() for c in text):
         raise ValueError("boot id")
     return text
+
+
+# The second byte of a character whose lead byte allows less than 0x80–0xBF (no overlong form, no
+# surrogate, nothing above U+10FFFF).
+SECOND_BYTE = {0xE0: (0xA0, 0xBF), 0xED: (0x80, 0x9F), 0xF0: (0x90, 0xBF), 0xF4: (0x80, 0x8F)}
+
+
+def utf8_cut(data):
+    """Where the UTF-8 character that `data` ends inside begins (one to three bytes from its end),
+    else len(data): bytes that cannot begin a valid character are never held back (ruled, task 9)."""
+    end = len(data)
+    for back in range(1, min(3, end) + 1):
+        lead = data[end - back]
+        if lead & 0xC0 == 0x80:
+            continue  # a continuation byte: the character begins further back
+        need = 2 if 0xC2 <= lead <= 0xDF else 3 if 0xE0 <= lead <= 0xEF else 4 if 0xF0 <= lead <= 0xF4 else 0
+        if back >= need:
+            return end  # complete, or no lead byte
+        low, high = SECOND_BYTE.get(lead, (0x80, 0xBF))
+        if back >= 2 and not low <= data[end - back + 1] <= high:
+            return end
+        return end - back
+    return end
 
 
 def parse_size(payload):
@@ -232,6 +287,7 @@ class Conn:
         self.inbuf = bytearray()
         self.out = bytearray()
         self.replay = 0  # bytes of `out` that are the claim's snapshot and tail: not held to SEND_CAP
+        self.waiting = False  # its next frame is input the queue has no room for yet (step 5)
 
 
 class Keeper:
@@ -248,7 +304,9 @@ class Keeper:
         self.proc_start = None
         self.master = None  # the pty, while it is open
         self.status = None  # the program's exit, once reaped (os.waitstatus_to_exitcode)
-        self.inq = bytearray()  # input waiting for the pty
+        self.inq = bytearray()  # input waiting for the pty, at most INPUT_CAP
+        self.held = b""  # the first bytes of a character the program has not finished writing
+        self.deferred = []  # R payloads that wait until that character is whole
         self.seq = 0  # records so far
         self.tail = []  # (seq, b"D" | b"R", payload); the records kept are tail[head:]
         self.head = 0
@@ -385,7 +443,16 @@ class Keeper:
                 fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
             except OSError:
                 pass
-        self.record(b"R", as_json({"cols": cols, "rows": rows}))
+        payload = as_json({"cols": cols, "rows": rows})
+        if self.held:
+            self.deferred.append(payload)  # never between the two halves of a character
+        else:
+            self.record(b"R", payload)
+
+    def release(self):
+        deferred, self.deferred = self.deferred, []
+        for payload in deferred:
+            self.record(b"R", payload)
 
     # Starting (steps 1 and 2).
     def start(self):
@@ -451,13 +518,25 @@ class Keeper:
         if not data:
             self.close_pty()
             return False
-        self.record(b"D", data)
+        # A record never ends inside a UTF-8 character (ruled, task 9): its first bytes wait for
+        # the next read.
+        data = self.held + data
+        cut = utf8_cut(data)
+        self.held = data[cut:]
+        if cut:
+            self.record(b"D", data[:cut])
+        if not self.held:
+            self.release()
         return True
 
     def close_pty(self):
         os.close(self.master)
         self.master = None
         self.inq = bytearray()
+        if self.held:
+            self.record(b"D", self.held)  # the program has ended: sent as they are
+            self.held = b""
+        self.release()
 
     def write_pty(self):
         try:
@@ -574,6 +653,7 @@ class Keeper:
         self.read_frames(conn)
 
     def read_frames(self, conn):
+        conn.waiting = False
         while self.screen is conn and conn.inbuf:
             kind = bytes(conn.inbuf[:1])
             if kind not in SERVER_TYPES:
@@ -587,6 +667,13 @@ class Keeper:
                 return
             if len(conn.inbuf) < 5 + length:
                 return
+            if kind == b"I" and length > INPUT_CAP:
+                self.refuse("input-too-long")  # it could never fit
+                return
+            if kind == b"I" and self.master is not None and self.exit is None:
+                if len(self.inq) + length > INPUT_CAP:
+                    conn.waiting = True  # unread until the program has read enough (step 5)
+                    return
             payload = bytes(conn.inbuf[5 : 5 + length])
             del conn.inbuf[: 5 + length]
             self.handle(kind, payload)
@@ -638,7 +725,7 @@ class Keeper:
             readers = [self.wake_r, self.listener] + [c.sock for c in self.pending]
             writers = []
             if screen is not None:
-                if len(self.inq) < INPUT_CAP:  # step 5: a full queue stops reading the server
+                if not screen.waiting:  # step 5: a full queue stops reading the server
                     readers.append(screen.sock)
                 if screen.out:
                     writers.append(screen.sock)
@@ -669,6 +756,8 @@ class Keeper:
                 self.flush()
             self.check_exit()
             self.check_timers()
+            if self.screen is not None and self.screen.waiting:
+                self.read_frames(self.screen)  # the queue may have room now, or input is dropped
 
     def end(self):
         for conn in self.pending + ([self.screen] if self.screen is not None else []):
