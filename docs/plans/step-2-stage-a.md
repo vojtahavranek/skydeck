@@ -906,9 +906,12 @@ export function prepareRuntimeDir(platform: Platform, files: RuntimeFiles): void
  *  function creates; anything else stays. */
 export function writeKeeperFile(files: Files, runtime: RuntimeFiles, build: string, code: string): void;
 /** S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
- *  whose socket refuses connections (ECONNREFUSED; a socket without a .pid line, or beside one that
- *  is not a pid line, too); a line that is 'unknown' never removes anything by itself. Resolves to
- *  the terminal ids whose files it removed, in order. */
+ *  whose socket refuses connections (a socket without a .pid line, or beside one that is not a pid
+ *  line, too); a line that is 'unknown' never removes anything by itself. Only ECONNREFUSED is a
+ *  refusal: a full accept queue (EAGAIN) or any other error belongs to a keeper that may live
+ *  (ruled, task 15). Nothing is removed for a keeper whose .pid file cannot be read (`line` null
+ *  in listKeeperLines), whatever its socket says; a directory with such a name is neither tried
+ *  nor removed. Resolves to the terminal ids whose files it removed, in order. */
 export function removeDeadKeeperFiles(platform: Platform, runtime: RuntimeFiles): Promise<string[]>;
 export interface ServerJson { pid: number; procStart: number; bootId: string; port: number; serverId: string; build: string; checkout: string; startedAt: NsText; envOrigin: { dir: string; atNs: NsText } }
 /** null when the file is missing or does not hold a valid value; a field a newer skydeck adds is
@@ -933,18 +936,27 @@ export function releaseServerLock(deck: Deck): void;
  *  uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
  *  server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
  *  is 'alive' or 'unknown'). Reads only regular files terms/<terminal id>.pid (a keeper's
- *  temporary must not have that name); one that holds no pid line is skipped; the boot id is read
- *  once, and every line is 'unknown' when it cannot be read. */
-export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; state: PidLineState }[];
+ *  temporary must not have that name); one that holds no pid line, or was removed meanwhile, is
+ *  skipped. A file that cannot be read (EACCES, EIO …) gives `line: null` with state 'unknown'
+ *  (ruled, task 15: never removed, counted as alive wherever something would be given up) and
+ *  the others are still read; tasks 16 and 24 handle a null `line`. The boot id is read once, and
+ *  every line is 'unknown' when it cannot be read. */
+export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine | null; state: PidLineState }[];
 
 // src/window/log.ts (task 15)
-/** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1.
- *  The line is passed through `sanitize` (one line: breaks become spaces, escapes removed). The
- *  file is only appended to (other writers' lines, the launcher's and Node.js's, stay) and is
- *  rotated before a line is appended; the function never throws: a line it cannot append goes to
- *  stderr. */
+/** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1
+ *  (rotateLog, before the line is appended). The line is passed through `sanitize` (one line:
+ *  breaks become spaces, escapes removed). The file is only appended to (other writers' lines, the
+ *  launcher's and Node.js's, stay). The function never throws and never ends the process (ruled,
+ *  task 15): a rotation that fails does not stop the line, a time that cannot be shown is `-`, a
+ *  line it cannot append goes to fd 2 by a synchronous write, and one that cannot be written there
+ *  either is lost. */
 export function serverLog(platform: Platform, path: string, foreground: boolean): (line: string) => void;
-/** Renames `path` to `<path>.1` when it is 1 MiB or more (keepers.log, which keepers append to). */
+/** When `path` is 1 MiB or more: copies it to `<path>.1` (through `.<name>.1.tmp`, renamed over an
+ *  older .1; mode 0o600) and truncates `path` in place (ruled, task 15): a writer holding the file
+ *  open in append mode (the server's own stdout and stderr in server.log, each keeper's stderr in
+ *  keepers.log) goes on writing into it; a line appended between the copy and the truncate can be
+ *  lost. A failure is thrown and leaves `path` as it was. */
 export function rotateLog(files: Files, path: string): void;
 
 // src/window/pidline.ts (task 8). The line, exactly, with one '\n' at the end:
@@ -2042,7 +2054,8 @@ file (`writeKeeperFile`: mode 0o600, through a temporary name, other builds' fil
 removal of dead keepers' files (`removeDeadKeeperFiles`, S2 7.8), `server.json` and the lock;
 `log.ts` exports `serverLog` and `rotateLog`. `xdgUsable` for the rule checks owner, mode (no group
 or other bits) and `/var/lib/systemd/linger/<userName>`. `serverLog` writes one line per call with
-an ISO time and renames the file to `.1` at 1 MiB (one older file kept); `rotateLog` does the same
+an ISO time and, at 1 MiB, copies the file to `.1` and empties it in place (one older file kept;
+ruled: not a rename, so that writers holding the file open stay in it); `rotateLog` does the same
 for `keepers.log`, which the keepers append to.
 
 **Tests** (platform: `testDeck(t, { real: true })` where a live process holds the lock or a keeper line; `testPlatform` for the rule)
@@ -2066,8 +2079,9 @@ for `keepers.log`, which the keepers append to.
   child processes).
 - `server.json` round trip, mode 0o600; `readServerJson` of garbage → null.
 - `listKeeperLines` reads every `terms/*.pid`, ignores other files and temporaries.
-- Logs: lines appended; at 1 MiB the file becomes `.1` and a new one starts; an older `.1` is
-  replaced.
+- Logs: lines appended; at 1 MiB the file is copied to `.1` and emptied in place, and a writer
+  holding it open goes on writing into it; an older `.1` is replaced; a full disk on the file and
+  on stderr does not end the process (a child process whose stderr is `/dev/full`).
 
 **Done when:** every place of S2 4.2 has one function that names or prepares it, and the commands
 and the server find the same directory whatever their environment.
