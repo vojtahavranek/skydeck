@@ -5,21 +5,33 @@
  * UTF-8 in a text message with 1007, any other breach of the protocol (an unmasked client frame
  * among them) with 1002.
  *
+ * Once a connection closes, whichever side began it, a peer that has not closed its side
+ * CLOSE_WAIT_MS later has its socket destroyed, so that a peer which neither reads nor closes
+ * cannot hold a connection for ever (ruled, #44).
+ *
  * Not here: the `Host` and `Origin` checks and the handshake of S2 8.2.2, which the caller does
- * (task 17); timers (no clock is used: a peer that never finishes the closing handshake keeps its
- * socket until it goes away or the listener closes).
+ * (task 17).
  */
 import { createHash } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 
+import type { Clock } from '../platform/types.ts';
+
 export interface WebSocketConnection {
   sendText(text: string): void;
   sendBinary(bytes: Uint8Array): void;
   /** Bytes written to the socket and not yet flushed (for S2 8.2.8). */
   readonly buffered: number;
+  /** Sends a close frame and ends the socket; the socket is destroyed if the peer has not closed
+   *  its side CLOSE_WAIT_MS later. RangeError for a code a server may not send (outside
+   *  1000–1014 and 3000–4999, or 1004, 1005, 1006) or a reason above 123 UTF-8 bytes; nothing is
+   *  sent then. */
   close(code: number, reason?: string): void;
+  /** Destroys the socket at once, with no close frame; onClose gets 1006 unless it had a code. */
+  destroy(): void;
+  // Each onX adds a listener; earlier ones stay.
   onText(listener: (text: string) => void): void;
   onBinary(listener: (bytes: Uint8Array) => void): void;
   onDrain(listener: () => void): void;
@@ -27,6 +39,8 @@ export interface WebSocketConnection {
 }
 
 export const MAX_MESSAGE = 1024 * 1024;
+/** How long a closing connection waits for the peer to close its side before destroying it. */
+export const CLOSE_WAIT_MS = 5_000;
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 /** The base64 of 16 bytes (RFC 6455 4.1). */
@@ -58,11 +72,13 @@ const FIXED_HEADERS =
   "Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n";
 
 /** Answers 101 and returns the connection, or answers 400 and returns null for a request that is
- *  not a valid version-13 upgrade. The caller has checked Host and Origin before (task 17). */
+ *  not a valid version-13 upgrade. The caller has checked Host and Origin before (task 17).
+ *  `clock` times CLOSE_WAIT_MS (the platform's clock). */
 export function acceptWebSocket(
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
+  clock: Clock,
 ): WebSocketConnection | null {
   const key = req.headers['sec-websocket-key'];
   if (!isUpgrade(req) || typeof key !== 'string' || !KEY.test(key)) {
@@ -72,7 +88,7 @@ export function acceptWebSocket(
   const accept = createHash('sha1')
     .update(key + GUID)
     .digest('base64');
-  return new Connection(socket, head, accept);
+  return new Connection(socket, head, accept, clock);
 }
 
 /** A GET over HTTP/1.1 or later asking for `Upgrade: websocket`, version 13 (RFC 6455 4.2.1). */
@@ -236,6 +252,7 @@ function encodeFrame(opcode: number, payload: Uint8Array | string): Buffer {
 
 class Connection implements WebSocketConnection {
   readonly #socket: Duplex;
+  readonly #clock: Clock;
   /** open: messages flow; closing: a close frame was sent, input is dropped; the code is known. */
   #state: 'open' | 'closing' = 'open';
   #closeCode: number | null = null;
@@ -258,17 +275,21 @@ class Connection implements WebSocketConnection {
   readonly #control = new Bytes();
   /** The latest ping's payload while the socket is backed up; its pong goes out at the drain. */
   #pendingPong: Uint8Array | null = null;
+  /** Cancels the destruction CLOSE_WAIT_MS after the close began; null when none waits. */
+  #closeTimer: (() => void) | null = null;
   readonly #textListeners: ((text: string) => void)[] = [];
   readonly #binaryListeners: ((bytes: Uint8Array) => void)[] = [];
   readonly #drainListeners: (() => void)[] = [];
   readonly #closeListeners: ((code: number) => void)[] = [];
 
-  constructor(socket: Duplex, head: Buffer, accept: string) {
+  constructor(socket: Duplex, head: Buffer, accept: string, clock: Clock) {
     this.#socket = socket;
+    this.#clock = clock;
     socket.on('error', () => {
       socket.destroy();
     });
     socket.on('close', () => {
+      this.#stopWaiting();
       this.#gone();
     });
     if (socket.destroyed) {
@@ -280,6 +301,7 @@ class Connection implements WebSocketConnection {
       // ending ours as well lets it close.
       this.#gone();
       socket.end();
+      this.#waitForPeer();
     });
     socket.on('drain', () => {
       if (this.#state !== 'open') return;
@@ -327,6 +349,12 @@ class Connection implements WebSocketConnection {
     this.#closeWith(code, reasonBytes);
   }
 
+  destroy(): void {
+    this.#gone();
+    this.#stopWaiting();
+    this.#socket.destroy();
+  }
+
   onText(listener: (text: string) => void): void {
     this.#textListeners.push(listener);
   }
@@ -363,8 +391,23 @@ class Connection implements WebSocketConnection {
       }
       this.#socket.write(encodeFrame(CLOSE, payload));
       this.#socket.end();
+      this.#waitForPeer();
     }
     this.#report(code ?? NO_STATUS);
+  }
+
+  /** Destroys the socket if the peer has not closed its side CLOSE_WAIT_MS from now. */
+  #waitForPeer(): void {
+    if (this.#closeTimer !== null || this.#socket.destroyed) return;
+    this.#closeTimer = this.#clock.after(CLOSE_WAIT_MS, () => {
+      this.#closeTimer = null;
+      this.#socket.destroy();
+    });
+  }
+
+  #stopWaiting(): void {
+    this.#closeTimer?.();
+    this.#closeTimer = null;
   }
 
   /** The socket ended or closed without a closing handshake, or after it. */

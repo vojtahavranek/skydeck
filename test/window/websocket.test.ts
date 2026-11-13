@@ -11,9 +11,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import WebSocket from 'ws';
 
-import { MAX_MESSAGE, acceptWebSocket } from '../../src/window/websocket.ts';
+import { CLOSE_WAIT_MS, MAX_MESSAGE, acceptWebSocket } from '../../src/window/websocket.ts';
 import type { WebSocketConnection } from '../../src/window/websocket.ts';
-import { testPlatform } from '../helpers/platform.ts';
+import { T0, fakeClock, testPlatform } from '../helpers/platform.ts';
+import type { FakeClock } from '../helpers/platform.ts';
 
 const MiB = 1024 * 1024;
 const SIZES = [0, 125, 126, 65_535, 65_536, MiB];
@@ -80,6 +81,8 @@ interface Accepted {
 
 interface Served {
   port: number;
+  /** The fake clock the connections were given. */
+  clock: FakeClock;
   /** One entry per upgrade: what acceptWebSocket returned (null for a refusal). */
   accepted: Queue<Accepted | null>;
   /** The `head` length of each upgrade, in order. */
@@ -91,7 +94,7 @@ async function serve(
   t: TestContext,
   options: { echo?: boolean; beforeAccept?: (socket: Duplex) => void } = {},
 ): Promise<Served> {
-  const { platform } = testPlatform(t);
+  const { platform, clock } = testPlatform(t);
   const accepted = queue<Accepted | null>();
   const heads: number[] = [];
   const listener = await platform.net.listenHttp(
@@ -104,13 +107,13 @@ async function serve(
       upgrade: (req, socket, head) => {
         heads.push(head.length);
         options.beforeAccept?.(socket);
-        const conn = acceptWebSocket(req, socket, head);
+        const conn = acceptWebSocket(req, socket, head, clock);
         accepted.push(conn === null ? null : record(conn, options.echo ?? true));
       },
     },
   );
   t.after(() => listener.close());
-  return { port: listener.port, accepted, heads };
+  return { port: listener.port, clock, accepted, heads };
 }
 
 function record(conn: WebSocketConnection, echo: boolean): Accepted {
@@ -407,7 +410,7 @@ function direct(
   } as unknown as IncomingMessage;
   const chunks: Buffer[] = [];
   peer.on('data', (chunk: Buffer) => chunks.push(chunk));
-  const conn = acceptWebSocket(req, socket, Buffer.alloc(0));
+  const conn = acceptWebSocket(req, socket, Buffer.alloc(0), fakeClock(T0));
   return {
     accepted: conn === null ? null : record(conn, false),
     peer,
@@ -1170,5 +1173,120 @@ describe('WebSocket: reads of any size', () => {
 
     assertMessage(await accepted.messages.next('the message'), { binary: Buffer.from('ab') }, 'ab');
     assert.ok(grown < 16 * MiB, `the heap grew by ${grown} bytes`);
+  });
+});
+
+describe('WebSocket: a peer that does not finish closing, and destroy() (ruled, #44)', () => {
+  /** A served connection whose server-side socket the test can see, and a raw client that keeps
+   *  its end open when the server ends its own. */
+  async function halfOpen(t: TestContext): Promise<{
+    served: Served;
+    accepted: Accepted;
+    socket: Duplex;
+    r: Raw;
+  }> {
+    const sockets: Duplex[] = [];
+    const served = await serve(t, { echo: false, beforeAccept: (s) => sockets.push(s) });
+    const r = await raw(t, served.port, upgradeRequest(served.port), new Uint8Array(0), true);
+    const accepted = await acceptedOf(served);
+    return { served, accepted, socket: sockets[0] as Duplex, r };
+  }
+
+  /** The socket is destroyed CLOSE_WAIT_MS after the close began, by the clock, not before. */
+  function assertDestroyedAfterWait(clock: FakeClock, socket: Duplex): void {
+    clock.advanceMs(CLOSE_WAIT_MS - 1);
+    assert.equal(socket.destroyed, false, 'not destroyed before the wait is over');
+    clock.advanceMs(1);
+    assert.equal(socket.destroyed, true, 'destroyed when the wait is over');
+    assert.equal(clock.timers(), 0);
+  }
+
+  test('close() to a peer that neither reads nor closes: destroyed CLOSE_WAIT_MS later', async (t) => {
+    const { served, accepted, socket, r } = await halfOpen(t);
+    r.socket.pause();
+
+    accepted.conn.close(4001);
+
+    assert.equal(await within('onClose', accepted.closed), 4001);
+    assertDestroyedAfterWait(served.clock, socket);
+  });
+
+  test('a breach, to a peer that keeps its end open: destroyed CLOSE_WAIT_MS later', async (t) => {
+    const { served, accepted, socket, r } = await halfOpen(t);
+
+    r.socket.write(clientFrame(OP.binary, Buffer.from('A'), { masked: false }));
+
+    assert.equal(await serverCloseCode(r), 1002);
+    assert.equal(await within('onClose', accepted.closed), 1002);
+    assertDestroyedAfterWait(served.clock, socket);
+  });
+
+  test('the peer sends its close but keeps its end open: destroyed CLOSE_WAIT_MS later', async (t) => {
+    const { served, accepted, socket, r } = await halfOpen(t);
+
+    r.socket.write(clientFrame(OP.close, closePayload(4000)));
+
+    assert.equal(await within('onClose', accepted.closed), 4000);
+    assert.equal(await serverCloseCode(r), 4000);
+    assertDestroyedAfterWait(served.clock, socket);
+  });
+
+  test('the peer ends its side but does not read what is queued: destroyed CLOSE_WAIT_MS later', async (t) => {
+    const { served, accepted, socket, r } = await halfOpen(t);
+    r.socket.pause();
+    for (let frames = 0; accepted.conn.buffered <= MiB && frames < 1100; frames++) {
+      accepted.conn.sendBinary(bytesOf(60_000));
+    }
+
+    r.socket.end();
+
+    assert.equal(await within('onClose', accepted.closed), 1006);
+    assertDestroyedAfterWait(served.clock, socket);
+  });
+
+  test('a close the peer finishes leaves no timer', async (t) => {
+    const sockets: Duplex[] = [];
+    const served = await serve(t, { beforeAccept: (s) => sockets.push(s) });
+    const { ws } = await client(t, served.port);
+    const accepted = await acceptedOf(served);
+    const closed = closeOf(ws);
+
+    accepted.conn.close(4001);
+    await closed;
+    await until('the server socket to close', () => (sockets[0] as Duplex).closed);
+
+    assert.equal(served.clock.timers(), 0);
+  });
+
+  test('destroy() ends the connection at once: onClose gets 1006, the client sees it go', async (t) => {
+    const sockets: Duplex[] = [];
+    const served = await serve(t, { beforeAccept: (s) => sockets.push(s) });
+    const { ws, messages } = await client(t, served.port);
+    const accepted = await acceptedOf(served);
+    const codes: number[] = [];
+    accepted.conn.onClose((code) => codes.push(code));
+    const closed = closeOf(ws);
+
+    accepted.conn.destroy();
+    accepted.conn.destroy();
+    accepted.conn.sendText('after');
+
+    assert.deepEqual(codes, [1006]);
+    assert.equal((sockets[0] as Duplex).destroyed, true);
+    assert.equal((await closed).code, 1006);
+    assert.equal(messages.items.length, 0);
+    assert.equal(served.clock.timers(), 0);
+  });
+
+  test('destroy() after close() keeps the code and stops the wait', async (t) => {
+    const { served, accepted, socket, r } = await halfOpen(t);
+    r.socket.pause();
+
+    accepted.conn.close(4003);
+    accepted.conn.destroy();
+
+    assert.equal(await within('onClose', accepted.closed), 4003);
+    assert.equal(socket.destroyed, true);
+    assert.equal(served.clock.timers(), 0);
   });
 });

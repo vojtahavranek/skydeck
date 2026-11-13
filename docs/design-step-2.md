@@ -840,7 +840,11 @@ latest ping's pong is kept and sent when it drains (RFC 6455 5.5.3), so that a p
 and never reads cannot grow the queue. The answers of the WebSocket endpoint itself (its 101 and
 its 400 for a request that is not a valid upgrade) are not pages: they carry
 `Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none';
-frame-ancestors 'none'` with the same other headers as every answer, and no CORS header.
+frame-ancestors 'none'` with the same other headers as every answer, and no CORS header. Once a
+connection closes, whichever side began it, the server destroys its socket if the peer has not
+closed its side a few seconds later: a peer that neither reads nor closes cannot hold a
+connection. What a peer makes the server keep grows only with what it sent, however it splits
+its frames into reads and its messages into fragments.
 
 #### 8.2.2 Handshake, proof and versions
 
