@@ -1,7 +1,9 @@
 // Runs the real bin/skydeck-keepalive the way wsl.exe runs it (`/bin/sh <script> <runtimeDir>`):
 // the test stands in for wsl.exe, which is never started. Nothing is on PATH but sh and the
-// programs the script may use (sleep, mv, rm). The processes it watches are `sleep`s the test
-// starts, so their /proc entries are real; the interval is 1 s (SKYDECK_TEST_KEEPALIVE_SECONDS).
+// programs the script may use (sleep, mv, rm). The processes it watches are `sleep`s and `sh`s the
+// test starts, so their /proc entries are real, except where a test hands it a stand-in for /proc
+// (SKYDECK_TEST_PROC) to make an entry unreadable. The interval is 1 s
+// (SKYDECK_TEST_KEEPALIVE_SECONDS).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -13,10 +15,12 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -28,10 +32,20 @@ import type { Sandbox } from '../helpers/sandbox.ts';
 const script = fileURLToPath(new URL('../../bin/skydeck-keepalive', import.meta.url));
 
 const INTERVAL_MS = 1000;
+/**
+ * The wait for an exit that comes before the loop or from a signal, not from an interval. Generous:
+ * on a loaded machine starting a shell can take a second. Where it matters that the exit does not
+ * wait for the interval, that interval is far longer (30 s) or the alternative never exits.
+ */
+const QUICK_MS = 5000;
 const BOOT_ID = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
 /** A boot id that is not the current one: the same text with its first digit changed. */
 const OTHER_BOOT_ID = (BOOT_ID.startsWith('0') ? '1' : '0') + BOOT_ID.slice(1);
 const INTEROP = '/run/WSL/1234_interop';
+/** Root can read and write whatever the mode says, so the tests that rely on a mode prove nothing. */
+const IS_ROOT = process.getuid?.() === 0;
+/** A directory name the script must quote everywhere: a space, quotes, glob characters, a newline. */
+const ODD_NAME = `dir 'q" *[x]\n`;
 
 /** Field 22 of /proc/<pid>/stat, counted after the last `)` (design 5.5). */
 function procStart(pid: number): number {
@@ -51,13 +65,35 @@ interface Place {
   dir: string;
 }
 
-/** A sandbox whose PATH holds only sh and the programs the keep-alive may use. */
-function place(t: TestContext): Place {
+/**
+ * A sandbox whose PATH holds only sh and the programs the keep-alive may use (`programs`), and a
+ * runtime directory whose name needs quoting.
+ */
+function place(t: TestContext, programs: string[] = ['sleep', 'mv', 'rm']): Place {
   const s = sandbox(t);
-  s.link('sh', 'sleep', 'mv', 'rm');
-  const dir = join(s.root, 'run');
+  s.link('sh', ...programs);
+  const dir = join(s.root, `run ${ODD_NAME}`);
   mkdirSync(join(dir, 'terms'), { recursive: true, mode: 0o700 });
   return { s, dir };
+}
+
+/**
+ * A stand-in for /proc (SKYDECK_TEST_PROC), so that a test can make an entry unreadable: it holds
+ * the real boot id in `sys/kernel/random/boot_id` and, for each pid in `live`, a link to the real
+ * `/proc/<pid>`. Returns its path.
+ */
+function fakeProc(p: Place, live: number[] = []): string {
+  const proc = join(p.s.root, `proc ${ODD_NAME}`);
+  mkdirSync(join(proc, 'sys', 'kernel', 'random'), { recursive: true });
+  writeFileSync(join(proc, 'sys', 'kernel', 'random', 'boot_id'), `${BOOT_ID}\n`);
+  for (const pid of live) {
+    symlinkSync(`/proc/${pid}`, join(proc, String(pid)));
+  }
+  return proc;
+}
+
+function bootIdFile(proc: string): string {
+  return join(proc, 'sys', 'kernel', 'random', 'boot_id');
 }
 
 interface Live {
@@ -295,6 +331,9 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
 
     assert.equal(read(pidFile), pidLine(k.pid, procStart(k.pid), BOOT_ID));
     assert.equal(read(join(p.dir, 'keepalive.interop')), INTEROP);
+    for (const name of ['keepalive.pid', 'keepalive.interop']) {
+      assert.equal(statSync(join(p.dir, name)).mode & 0o777, 0o600, `${name} is the user's only`);
+    }
     // Nothing else: no temporary file is left behind.
     assert.deepEqual(readdirSync(p.dir).sort(), [
       'keepalive.interop',
@@ -314,16 +353,19 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
     assert.equal(read(join(p.dir, 'keepalive.interop')), '');
   });
 
-  // Judging the value is the reader's job (task 19), so even an odd one is written as it is.
-  test('keepalive.interop holds WSL_INTEROP exactly, even with a newline and a carriage return in it', async (t) => {
-    const p = place(t);
-    const server = await liveProcess(t, p.s);
-    writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
-    const value = `${INTEROP}\n${INTEROP}\r`;
-    startKeepAlive(t, p, { env: { WSL_INTEROP: value } });
-    await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
-    assert.equal(read(join(p.dir, 'keepalive.interop')), value);
-  });
+  for (const [name, value] of [
+    ['a newline', `${INTEROP}\n${INTEROP}`],
+    ['a carriage return', `${INTEROP}\r`],
+  ]) {
+    test(`keepalive.interop is empty when WSL_INTEROP contains ${name}`, async (t) => {
+      const p = place(t);
+      const server = await liveProcess(t, p.s);
+      writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
+      startKeepAlive(t, p, { env: { WSL_INTEROP: value } });
+      await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
+      assert.equal(read(join(p.dir, 'keepalive.interop')), '');
+    });
+  }
 
   // The kernel names a process after the file it was started from: here a symlink of that name to
   // sh, for the keep-alive itself and for the server it watches (an sh waiting in `read`). Not a
@@ -364,16 +406,17 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
       const k = startKeepAlive(t, p, { env: { SKYDECK_TEST_KEEPALIVE_SECONDS: '30' } });
       const pidFile = join(p.dir, 'keepalive.pid');
       const children = `/proc/${k.pid}/task/${k.pid}/children`;
-      await waitFor(
-        () => existsSync(pidFile) && (read(children) ?? '').trim() !== '',
-        5000,
-        'keepalive.pid and the sleep',
-      );
+      // Its only child once it waits: the sleep (before that, briefly, its mv).
+      const sleeping = (): boolean => {
+        const pid = (read(children) ?? '').trim();
+        return pid !== '' && (read(`/proc/${pid}/stat`) ?? '').includes(' (sleep) ');
+      };
+      await waitFor(() => existsSync(pidFile) && sleeping(), 5000, 'keepalive.pid and the sleep');
       const sleeper = Number((read(children) ?? '').trim());
 
       k.child.kill(signal);
       // It exits by itself (128 + the signal's number) rather than dying of the signal.
-      assert.deepEqual(await exitsWithin(k, INTERVAL_MS), { code, signal: null });
+      assert.deepEqual(await exitsWithin(k, QUICK_MS), { code, signal: null });
       assert.equal(existsSync(pidFile), false);
       await waitFor(
         () => {
@@ -412,7 +455,7 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
           await delay(1.5 * INTERVAL_MS);
           assert.equal(k.status(), undefined, 'still running after 1.5 s with nothing to watch');
           k.child.kill('SIGTERM');
-          await exitsWithin(k, INTERVAL_MS);
+          await exitsWithin(k, QUICK_MS);
         });
       }
     },
@@ -421,7 +464,8 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
   describe('it refuses to start, exit 2, writing nothing', { concurrency: true }, () => {
     const cases: [string, (p: Place) => string[]][] = [
       ['without an argument', () => []],
-      ['with a relative directory', () => ['run']],
+      // It exists, relative to the working directory the test gives it.
+      ['with a relative directory', (p) => [basename(p.dir)]],
       ['with a directory that does not exist', (p) => [join(p.s.root, 'missing')]],
       ['with a file instead of a directory', (p) => [join(p.dir, 'terms', 'x')]],
       ['with two arguments', (p) => [p.dir, p.dir]],
@@ -431,7 +475,7 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
         const p = place(t);
         writeFileSync(join(p.dir, 'terms', 'x'), '');
         const k = startKeepAlive(t, p, { args: args(p) });
-        assert.deepEqual(await exitsWithin(k, INTERVAL_MS), { code: 2, signal: null });
+        assert.deepEqual(await exitsWithin(k, QUICK_MS), { code: 2, signal: null });
         assert.match(k.stderr(), /usage: skydeck-keepalive <runtime directory>/);
         assert.deepEqual(readdirSync(p.dir).sort(), ['terms']);
         assert.deepEqual(readdirSync(join(p.dir, 'terms')), ['x']);
@@ -439,20 +483,106 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
     }
   });
 
-  test('a runtime directory it cannot write to: it exits 1 and leaves nothing behind', async (t) => {
-    const p = place(t);
-    const dir = join(p.s.root, 'read-only');
-    mkdirSync(dir, { mode: 0o700 });
-    chmodSync(dir, 0o500);
-    t.after(() => {
-      // So that the sandbox can be removed even if something was written; it may be gone already.
-      if (existsSync(dir)) chmodSync(dir, 0o700);
-    });
-    const k = startKeepAlive(t, { ...p, dir });
-    const status = await exitsWithin(k, INTERVAL_MS);
-    assert.deepEqual(status, { code: 1, signal: null });
-    assert.deepEqual(readdirSync(dir), []);
+  test('when sleep fails it exits 1 at once rather than looping, and removes keepalive.pid', async (t) => {
+    const p = place(t, ['mv', 'rm']);
+    const server = await liveProcess(t, p.s, [join(p.s.bin, 'sh'), '-c', 'read -r line']);
+    writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
+    const k = startKeepAlive(t, p);
+    assert.deepEqual(await exitsWithin(k, QUICK_MS), { code: 1, signal: null });
+    assert.equal(existsSync(join(p.dir, 'keepalive.pid')), false);
   });
+
+  test('a boot id it cannot read at start: it exits 1 and writes nothing', async (t) => {
+    const p = place(t);
+    const proc = fakeProc(p);
+    rmSync(bootIdFile(proc));
+    const k = startKeepAlive(t, p, { env: { SKYDECK_TEST_PROC: proc } });
+    assert.deepEqual(await exitsWithin(k, QUICK_MS), { code: 1, signal: null });
+    assert.deepEqual(readdirSync(p.dir), ['terms']);
+  });
+
+  // Design 5.5 has three answers: alive, dead, unknown. The keep-alive ends only when every line
+  // is known dead; a line it cannot judge keeps it (plan task 7, ruled in pull request #34).
+  describe(
+    'a line it cannot judge keeps it, until the line is known dead',
+    { concurrency: true },
+    () => {
+      test(
+        'the boot id cannot be read any more: even a line whose process has ended keeps it',
+        { skip: IS_ROOT },
+        async (t) => {
+          const p = place(t);
+          const server = await liveProcess(t, p.s);
+          writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
+          const proc = fakeProc(p, [server.pid]);
+          const k = startKeepAlive(t, p, { env: { SKYDECK_TEST_PROC: proc } });
+          await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
+
+          chmodSync(bootIdFile(proc), 0o000);
+          await server.end();
+          await delay(2.5 * INTERVAL_MS);
+          assert.equal(k.status(), undefined, 'still running while it cannot tell');
+
+          chmodSync(bootIdFile(proc), 0o644);
+          assert.deepEqual(await exitsWithin(k, 2 * INTERVAL_MS), { code: 0, signal: null });
+        },
+      );
+
+      const stats: [string, { mode: number; text: string }, boolean][] = [
+        ['/proc/<pid>/stat cannot be read', { mode: 0o000, text: '' }, true],
+        ['/proc/<pid>/stat holds no process start', { mode: 0o644, text: '4242 (x) S 1\n' }, false],
+      ];
+      for (const [name, stat, needsMode] of stats) {
+        test(name, { skip: needsMode && IS_ROOT }, async (t) => {
+          const p = place(t);
+          const proc = fakeProc(p);
+          mkdirSync(join(proc, '4242'));
+          const statFile = join(proc, '4242', 'stat');
+          writeFileSync(statFile, stat.text, { mode: stat.mode });
+          writeFileSync(
+            join(p.dir, 'terms', '0123456789ab.pid'),
+            pidLine(4242, 777, BOOT_ID, true),
+          );
+          const k = startKeepAlive(t, p, { env: { SKYDECK_TEST_PROC: proc } });
+
+          await delay(2.5 * INTERVAL_MS);
+          assert.equal(k.status(), undefined, 'still running while it cannot tell');
+
+          // Now readable, and naming another process start: the line is known dead.
+          chmodSync(statFile, 0o644);
+          writeFileSync(statFile, `4242 (x) S${' 0'.repeat(18)} 778 0\n`);
+          assert.deepEqual(await exitsWithin(k, 2 * INTERVAL_MS), { code: 0, signal: null });
+        });
+      }
+
+      test('a pid with no /proc entry is known dead', async (t) => {
+        const p = place(t);
+        const proc = fakeProc(p);
+        writeFileSync(join(p.dir, 'server.pid'), pidLine(4242, 777, BOOT_ID));
+        const k = startKeepAlive(t, p, { env: { SKYDECK_TEST_PROC: proc } });
+        assert.deepEqual(await exitsWithin(k, 2 * INTERVAL_MS), { code: 0, signal: null });
+      });
+    },
+  );
+
+  test(
+    'a runtime directory it cannot write to: it exits 1 and leaves nothing behind',
+    { skip: IS_ROOT },
+    async (t) => {
+      const p = place(t);
+      const dir = join(p.s.root, 'read-only');
+      mkdirSync(dir, { mode: 0o700 });
+      chmodSync(dir, 0o500);
+      t.after(() => {
+        // So that the sandbox can be removed even if something was written; it may be gone already.
+        if (existsSync(dir)) chmodSync(dir, 0o700);
+      });
+      const k = startKeepAlive(t, { ...p, dir });
+      const status = await exitsWithin(k, QUICK_MS);
+      assert.deepEqual(status, { code: 1, signal: null });
+      assert.deepEqual(readdirSync(dir), []);
+    },
+  );
 });
 
 // Outside the concurrent block above: its busy loop holds this process's event loop, which would
