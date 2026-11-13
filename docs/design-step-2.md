@@ -619,15 +619,49 @@ It is the **only responder to terminal queries**: what the headless terminal ans
 DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answers (9.3). It
 answers OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme
 the last focused page reports (the headless terminal has no colours); a reported colour is used
-only when it is exactly `#rrggbb`, else the default theme's is. It does not answer XTVERSION
-in the first version (9.3). It never answers while it replays (7.3).
+only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
+default colour is (foreground `#ffffff`, background `#000000`). It does not answer XTVERSION
+in the first version (9.3). It never answers while it replays (7.3). The answers to a record's
+queries go to the keeper once that record has been applied.
 
 The serialise addon does not restore everything (section 21). The server adds what it misses at
-the end of every snapshot, from state it tracks with parser hooks: cursor visibility (mode 25),
-SGR mouse encoding (mode 1006) and the cursor style (DECSCUSR); and a cursor position (CUP)
-always, because the addon puts the cursor one column too far left when the last row is full.
+the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own
+handling of DECSET and DECRST, DECSCUSR, RIS and DECSTR: cursor visibility (mode 25), the mouse
+encoding (SGR, mode 1006; SGR pixels, mode 1016), the cursor style (DECSCUSR) and the cursor's
+blinking (mode 12, which xterm.js keeps as an option apart from DECSCUSR); and, read through
+xterm.js's API, synchronized output (mode 2026) and new-line mode (mode 20); then the cursor
+position. The addon puts the cursor one column too far left when the last row is full, so the
+position is set with CUP — except when the cursor stands past the last column (a character was
+just printed there and the next one wraps), which CUP cannot reach: then the last character of
+that row is printed again with its own attributes, which leaves the cursor past it. Last comes the
+pen (the attributes the next character gets), read from the headless terminal's own state — the
+same internal the serialise addon reads for its pen, so a test pins it to the vendored version.
+The addon turned bold off and dim off both with SGR 22, which turns off both, so a rebuilt cell
+lost its bold after a dim one; its vendored bundle is patched (16.6). Two more of its defects are
+corrected on its output, exactly, since no cell holds ESC: it serialises the alternate screen as
+if the pen were the default, so SGR 0 goes before the alternate screen; and above a blank row
+followed by a wrapped one it writes cursor moves of 0 columns, which move one and left a stray
+`-`, so those moves are dropped.
 Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain URLs still are
 (9.6).
+
+Known limits: a snapshot does not restore the scroll region (DECSTBM), the saved cursor (DECSC,
+and so where leaving the alternate screen puts the cursor), the character sets (`ESC ( 0`) or tab
+stops set by the program (HTS, TBC); xterm.js's API does not show them, and Claude Code's normal screen is not known to use them
+(check W26). Nor are these rebuilt exactly, by the serialise addon:
+
+- an alternate-screen line marked wrapped comes back unwrapped (its cells are equal, and the
+  alternate screen never reflows);
+- with autowrap off (DECAWM), a wide character overwritten at the right margin leaves a cell pair
+  that is serialised one column too wide (Claude Code keeps autowrap on);
+- a colour set as `38;5;n` with n below 16 comes back in its 16-colour form (it renders the same).
+
+A record can end inside an escape sequence or inside a UTF-8 character, and a snapshot taken
+there would cut it: the next record's continuation would reach a screen rebuilt from the snapshot
+as text. The keeper never ends a record inside a UTF-8 character (7.1; stage A's plan, task 9),
+and the screen side follows the stream far enough to keep the escape sequence it stands inside
+and appends it to every snapshot, last, so that the next record completes it (the snapshot's
+seam; closed by task 33 of stage A's plan).
 
 ### 7.3 Attaching, parking, rebuilding
 
@@ -655,7 +689,8 @@ Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain U
 
 A server restart therefore shows every screen exactly as it was (verified with the prototype for
 every viewport cell, colour, attribute, 119 lines of scrollback, wrap flags and modes after two
-resizes, and after SIGKILL of the screen side with unparked records, section 21).
+resizes, and after SIGKILL of the screen side with unparked records, section 21), within the
+known limits of 7.2.
 
 ### 7.4 The environment of a terminal's program
 
@@ -854,7 +889,16 @@ The WebSocket is the server's own RFC 6455 code on `node:http` (the prototype is
 and passed every frame test, section 21): text and binary frames, fragmentation, ping and pong,
 close codes; invalid UTF-8 closes with 1007, an unmasked client frame with 1002; a message over
 1 MiB from a page closes with 1009. The page never sends one: it splits input (a large paste) into
-`input` messages of at most 64 KiB, in order.
+`input` messages of at most 64 KiB, in order. While the socket to a page is backed up, only the
+latest ping's pong is kept and sent when it drains (RFC 6455 5.5.3), so that a peer that pings
+and never reads cannot grow the queue. The answers of the WebSocket endpoint itself (its 101 and
+its 400 for a request that is not a valid upgrade) are not pages: they carry
+`Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none';
+frame-ancestors 'none'` with the same other headers as every answer, and no CORS header. Once a
+connection closes, whichever side began it, the server destroys its socket if the peer has not
+closed its side a few seconds later: a peer that neither reads nor closes cannot hold a
+connection. What a peer makes the server keep grows only with what it sent, however it splits
+its frames into reads and its messages into fragments.
 
 #### 8.2.2 Handshake, proof and versions
 
@@ -1931,11 +1975,19 @@ package's typings by the package's name, so that `tsc` for `web/` never reads a 
 typings themselves are vendored beside the bundles, within a type checker's reach.
 `@xterm/addon-unicode-graphemes` bundles adapted copies of tiny-inflate and unicode-trie (both
 MIT) without their notices, so the script also writes `vendor/xterm/THIRD-PARTY-NOTICES`, which
-names that bundle and holds both licences as their packages publish them on npm.
+names that bundle and holds both licences as their packages publish them on npm. One vendored
+file is changed: `@xterm/addon-serialize` 0.14.0's `_diffStyle` turns bold off and dim off both
+with SGR 22, which turns off both, so a snapshot rebuilt a bold cell after a dim one without its
+bold (section 21; unfixed on xterm.js's master on 2026-11-13). `npm run vendor` checks that the
+installed bundle is the one the patch was written for (its version and sha256), replaces the two
+clauses — each text must occur exactly once — so that SGR 22 comes first whenever bold or dim
+goes off, followed by SGR 1 and 2 for what the cell keeps, and refuses otherwise; the notices
+file says the bundle is modified and how. The patch is dropped when a release fixes it.
 `vendor/MANIFEST.json` lists every file with its
 package, version and sha256 — paths relative to the checkout, the shims and the notices under
 the package `skydeck` with version `-`, a borrowed licence with `licenseFrom` (`@xterm/xterm`) and
-`licenseReason`. The same packages at the same versions are development dependencies;
+`licenseReason`, the patched bundle with `upstreamSha256` (the file as the package ships it) and
+`patch` (what was changed and why). The same packages at the same versions are development dependencies;
 `npm run vendor` copies them into `vendor/` and writes the manifest, and a test fails when
 `vendor/` and the installed packages differ, so they are updated only together. `addon-webgl` is
 not vendored in the first version: the DOM renderer is enough for Claude Code's output, and WebGL
@@ -2192,6 +2244,7 @@ folder, as in manual-checks.md.
 | W23 | **Real claude**: which `CLAUDE*` variables Claude Code sets for the programs it runs — print the variable names (never their values) in a session's `!env` against a plain shell's — to confirm 7.4's list. And `skydeck window` run from a session's `!` command refuses (5.1). | A | 5.1, 7.4 |
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404 (the page suite tests this in Chromium, 17.4)? | A | 15.3 |
+| W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
@@ -2230,7 +2283,7 @@ sessions and to switch between their real terminals.
 - Design 7.4's filter (`/`).
 - Configuration, `doctor`, `install` and `uninstall` changes (16) — `terminal` gains `"window"`
   only in C — vendored files, CI (17.5).
-- Manual checks W1–W10, W12–W15, W17, W18, W20, W22–W25.
+- Manual checks W1–W10, W12–W15, W17, W18, W20, W22–W26.
 
 **Stage B — attention and notifications.** Migration 2 (10.2), turn ends (10.3), seen, the three
 reasons and their marks (12.4), Ctrl+Shift+J, the title bar's `needs you` count and `(n) skydeck`,
@@ -2300,6 +2353,8 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | When the owner of a pty's master ends, the program gets SIGHUP and exits; for Claude Code that fires `SessionEnd` with reason `other`. | verified with a stand-in (terminal research T6); Claude Code's side observed in step 1 (design 14) |
 | A python3 keeper's output equals node-pty's cell for cell; snapshot plus tail rebuilds the screen exactly (every viewport cell, colour, attribute, 119 scrollback lines, wrap flags, modes, after two resizes; after SIGKILL of the screen side with 9 unparked records including a resize, no query answered twice, exit status delivered). Keeper about 12 MB. | verified (T1, T4, T10) |
 | `@xterm/addon-serialize` 0.14.0 restores modes 1, 66, 2004, 4, 6, 45, 1004, 7 and mouse modes 9/1000/1002/1003, but not cursor visibility (25), SGR mouse encoding (1006), the cursor style or OSC 8 link ids; the cursor lands one column left when the last row is full width. | verified |
+| `@xterm/addon-serialize` 0.14.0's `_diffStyle` writes SGR 22 both for "bold off" and for "dim off", and 22 turns off both: a dim cell followed by a bold one serialises as `1;22` and the bold is lost; bold and dim followed by only one of them loses that one too. It serialises the alternate screen as if the pen were the default, so after a pen is set the alternate screen's cells take it; above a blank row before a wrapped one its wrap trick writes CUF 0 and CUB 0, which move one column, and leaves a stray `-`. All three unfixed on xterm.js's master on 2026-11-13 (the first patched in the vendored bundle, the other two corrected on the addon's output, 7.2). An alternate-screen line marked wrapped comes back unwrapped; with DECAWM off a wide character overwritten at the right margin is serialised one column too wide; `38;5;n` with n below 16 comes back as the 16-colour form. Nor does it restore modes 2026, 20 and 1016, mode 12, the scroll region, the saved cursor, the character sets or tab stops. | verified (task 12) |
+| xterm.js 6.0.0 in the browser leaves synchronized output (mode 2026) by itself: a held-back refresh starts a 1-second timer that turns the mode off and renders. The headless terminal has no renderer and keeps the mode until `?2026l`, RIS or DECSTR. | read in the vendored bundles (task 12) |
 | A headless terminal with 10,000 lines of 120 columns is about 25 MB; serialising it 145–166 ms (1.24 MB); the last 1,000 lines 18–41 ms; parsing about 10 MB/s. | verified |
 | The headless terminal answers DA1, DA2, DECRQM 2026, CPR, DSR and DECRQSS; it cannot answer OSC 10/11; xterm.js 6.0.0 has no XTVERSION answer. Starting the program before a screen side is connected makes its first probe time out and swallow the first keys. | verified (T9) |
 | xterm.js 6.0.0 sends `\r` for Shift+Enter; Ctrl+J inserts a newline in Claude Code in every terminal. | verified (xterm.js) / documentation (Claude Code terminal setup page) |

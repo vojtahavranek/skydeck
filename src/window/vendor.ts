@@ -19,6 +19,13 @@ export interface ManifestEntry {
   licenseFrom?: string;
   /** Why the licence file was taken from `licenseFrom`. */
   licenseReason?: string;
+  /**
+   * For a file skydeck patches (S2 16.6): the sha256 of the file as the package ships it, which
+   * the script checks before patching; `sha256` is the patched file's. Always with `patch`.
+   */
+  upstreamSha256?: string;
+  /** For a patched file: what the patch changes and why. Always with `upstreamSha256`. */
+  patch?: string;
 }
 
 const MANIFEST = 'vendor/MANIFEST.json';
@@ -56,6 +63,8 @@ function entryOf(value: unknown): ManifestEntry | null {
     sha256,
     licenseFrom,
     licenseReason,
+    upstreamSha256,
+    patch,
   } = value as Record<string, unknown>;
   if (
     !isString(path) ||
@@ -65,7 +74,11 @@ function entryOf(value: unknown): ManifestEntry | null {
     !isString(sha256) ||
     !/^[0-9a-f]{64}$/.test(sha256) ||
     (licenseFrom !== undefined && !isString(licenseFrom)) ||
-    (licenseReason !== undefined && !isString(licenseReason))
+    (licenseReason !== undefined && !isString(licenseReason)) ||
+    (upstreamSha256 === undefined) !== (patch === undefined) ||
+    (upstreamSha256 !== undefined &&
+      !(isString(upstreamSha256) && /^[0-9a-f]{64}$/.test(upstreamSha256))) ||
+    (patch !== undefined && !isString(patch))
   ) {
     return null;
   }
@@ -75,6 +88,10 @@ function entryOf(value: unknown): ManifestEntry | null {
   }
   if (licenseReason !== undefined) {
     entry.licenseReason = licenseReason;
+  }
+  if (isString(upstreamSha256) && isString(patch)) {
+    entry.upstreamSha256 = upstreamSha256;
+    entry.patch = patch;
   }
   return entry;
 }

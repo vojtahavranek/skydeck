@@ -42,8 +42,8 @@ body is the contract (the frame layout, the message fields, the stand-in's comma
 file list), copy it. Private helpers are yours. A contract that looks wrong is implemented as
 written and named in the pull request; the lead rules.
 
-Tasks 31 and 32 were split out of tasks 26 and 23 in review; their numbers do not follow their
-waves (step 1's plan did the same with task 14).
+Tasks 31 and 32 were split out of tasks 26 and 23 in review, and task 33 was added by a ruling on
+task 12; their numbers do not follow their waves (step 1's plan did the same with task 14).
 
 **Per-task workflow** (every task, in this order):
 
@@ -110,6 +110,7 @@ Task 0 is `main` at 394d3e6: step 1 complete, the design of step 2 merged.
 | 18 | Control socket and its client | 11, 15 | 3 | ~450 |
 | 19 | Edge, the keep-alive and the interop link | 5, 7, 8, 15 | 3 | ~500 |
 | 20 | CI and the page-test leg | 2, 9, 14 | 3 | ~300 |
+| 33 | The snapshot seam: the unfinished escape sequence | 12 | 3 | ~400 |
 | 21 | The window terminal; sessions in terminals | 4, 16 | 4 | ~600 |
 | 22 | Server lifecycle for commands: start, find, stop | 15, 18 | 4 | ~500 |
 | 32 | Actions: resume, new, close, open link; the resume card's payload | 1, 4, 8 | 4 | ~450 |
@@ -125,7 +126,7 @@ Task 0 is `main` at 394d3e6: step 1 complete, the design of step 2 merged.
 ```
 wave 1:  1  2  3  4  5  6  7  8  31
 wave 2:  9  10  11  12  13  14  15
-wave 3:  16  17  18  19  20
+wave 3:  16  17  18  19  20  33
 wave 4:  21  22  32
 wave 5:  23  24
 wave 6:  25  26
@@ -153,6 +154,7 @@ more than one task edits, and who edits them, never two tasks of one wave:
 | `src/claude/procstat.ts` | 8 (1) |
 | `src/sessions/resume.ts`, `src/sessions/restore.ts`, `src/cli/launching.ts` | 4 (1) |
 | `src/window/terminals.ts` | 16 (3) creates it; 21 (4) uses only the `Registry` API task 16 exports |
+| `src/window/screen.ts`, `test/window/screen.test.ts` | 12 (2) creates them; 33 (3) edits them; 16 (3) only calls `createScreen` |
 | `web/index.html`, `web/app.js`, `web/style.css` | 26 (6) only; tasks 27–29 own `web/list.*`, `web/terminal-view.*`, `web/cards.*`/`web/help.js` |
 | `docs/design-step-2.md` | several tasks record a decision of 1a in the sections named for them, disjoint within every wave; a conflict is rebased keeping both edits |
 | `docs/manual-checks.md`, `docs/install.md`, `README.md` | 30 (8) only |
@@ -1239,8 +1241,12 @@ development dependencies the server's tests need (`ws`).
 versions (A5); `npm ci` fetches them from the registry and checks each tarball against the
 `integrity` (sha512) in `package-lock.json`. `npm run vendor` (`node scripts/vendor.ts`) copies the
 files of A3 from `node_modules/@xterm/*` into `vendor/xterm/`, writes the `.d.mts` shims and
-`vendor/MANIFEST.json` (`{ files: [{ path, package, version, sha256, licenseFrom?, licenseReason? }] }`, sorted by
-path). The committed `vendor/` is what users run; **nothing is fetched at install time**: users do
+`vendor/MANIFEST.json` (`{ files: [{ path, package, version, sha256, licenseFrom?, licenseReason?, upstreamSha256?, patch? }] }`, sorted by
+path). One file is patched (ruled on #48, built by task 12): `@xterm/addon-serialize` 0.14.0's
+bundle, whose `_diffStyle` loses bold or dim when either goes off (SGR 22 turns off both). The
+script checks the installed bundle's version and sha256, replaces the two clauses (each exactly
+once), records `upstreamSha256` and `patch` beside the patched file's `sha256`, and the notices
+file says the bundle is modified and how (S2 16.6). The committed `vendor/` is what users run; **nothing is fetched at install time**: users do
 not run `npm ci` (docs/install.md), and `install` runs no package manager. `doctor` (task 24) and
 the server (task 14) check the files against the manifest.
 
@@ -1262,11 +1268,13 @@ every other vendored file; a test pins each licence text to the sha256 of the pu
 ```ts
 // src/window/vendor.ts
 /** `path` is relative to the checkout (`vendor/xterm/xterm/lib/xterm.mjs`). */
-export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string; licenseReason?: string }
+export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string; licenseReason?: string; upstreamSha256?: string; patch?: string }
 /** null when the manifest is missing, unreadable or not a manifest — also when any entry's path
  *  lies outside `vendor/xterm/`, has a segment that is empty, `.` or `..` or holds anything but
  *  ASCII letters, digits, `.`, `_` and `-` (no backslash, space or control character), or is
- *  listed twice (task 14 serves the listed paths). Never throws. */
+ *  listed twice (task 14 serves the listed paths), or when an entry has `upstreamSha256` without
+ *  `patch` or `patch` without `upstreamSha256`, an `upstreamSha256` that is not 64 lowercase hex,
+ *  or a `patch` that is not a string. Never throws. */
 export function readManifest(files: Files, appRoot: string): ManifestEntry[] | null;
 /** One line per problem: a listed file missing, or its sha256 different; [] when all match.
  *  Also one line for a listed path that is not a file or cannot be read, and one line for a
@@ -1278,6 +1286,10 @@ export interface VendorOptions { from: string /* holds node_modules/@xterm */; t
 /** Checks everything, then replaces `<to>/vendor/xterm/` and `<to>/vendor/MANIFEST.json`;
  *  throws before writing anything. Returns the manifest's entries. */
 export function vendor(options: VendorOptions): ManifestEntry[];
+/** `text` with each replacement made; throws unless each old text occurs exactly once. Exported so
+ *  that its refusals (an old text missing, an old text twice) are tested directly: through
+ *  `vendor` the upstream sha256 check refuses any other bundle first (ruled on #48). */
+export function applyPatch(text: string, replacements: ReadonlyArray<readonly [string, string]>): string;
 // `node scripts/vendor.ts [<directory>]`: from the checkout into <directory> (the checkout by default).
 ```
 
@@ -1874,29 +1886,67 @@ export interface WebSocketConnection {
   sendBinary(bytes: Uint8Array): void;
   /** Bytes written to the socket and not yet flushed (for S2 8.2.8). */
   readonly buffered: number;
+  /** Sends a close frame and ends the socket; the socket is destroyed if the peer has not closed
+   *  its side CLOSE_WAIT_MS later (ruled, #44). RangeError for a code a server may not send
+   *  (outside 1000–1014 and 3000–4999, or 1004, 1005, 1006) or a reason above 123 UTF-8 bytes;
+   *  nothing is sent then (ruled, #44). */
   close(code: number, reason?: string): void;
+  /** Destroys the socket at once, with no close frame; onClose gets 1006 unless it had a code
+   *  (ruled, #44). */
+  destroy(): void;
+  // Each onX adds a listener; earlier ones stay. When a listener that a read calls throws (onText,
+  // onBinary, or onClose for a close the read caused), the socket is destroyed (onClose gets 1006
+  // unless it had a code) and the error is thrown on. onDrain, and onClose called from close(),
+  // destroy() or the socket's end or close, are outside this rule (ruled, #44).
   onText(listener: (text: string) => void): void;
   onBinary(listener: (bytes: Uint8Array) => void): void;
   onDrain(listener: () => void): void;
   onClose(listener: (code: number) => void): void;
 }
 /** Answers 101 and returns the connection, or answers 400 and returns null for a request that is
- *  not a valid version-13 upgrade. The caller has checked Host and Origin before (task 17). */
-export function acceptWebSocket(req: IncomingMessage, socket: Duplex, head: Buffer): WebSocketConnection | null;
+ *  not a valid version-13 upgrade. The caller has checked Host and Origin before (task 17).
+ *  `clock` (the platform's) times CLOSE_WAIT_MS (ruled, #44). */
+export function acceptWebSocket(req: IncomingMessage, socket: Duplex, head: Buffer, clock: Clock): WebSocketConnection | null;
 export const MAX_MESSAGE = 1024 * 1024;
+/** How long a closing connection waits for the peer to close its side (ruled, #44). */
+export const CLOSE_WAIT_MS = 5_000;
 ```
+
+Once a connection closes, whichever side began it (the server's `close`, a breach of the
+protocol, the answer to the peer's close, the peer's end of its side), the socket is destroyed if
+the peer has not closed its side `CLOSE_WAIT_MS` later, so that a peer which neither reads nor
+closes cannot hold a connection for ever; the wait stops when the socket closes (ruled, #44).
+
+A ping is answered with a pong carrying the same payload; while the socket is backed up (a write
+was refused by its queue), only the latest ping's pong is kept and sent at the drain, as RFC 6455
+5.5.3 allows, so that a peer that pings and never reads cannot grow the queue (ruled, #44). The
+101 and the 400 are answers of the WebSocket endpoint, not pages: they carry
+`Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none';
+frame-ancestors 'none'` (no port is needed) with the other headers of S2 8.2.1 (ruled, #44).
 
 **Files**
 - Create: `src/window/websocket.ts`
 - Test: `test/window/websocket.test.ts` (a `node:http` server from `platform.net.listenHttp` on
   port 0; the `ws` package as the client)
 
-**Tests** (platform: `testPlatform` (its `net` is real))
+**Tests** (platform: `testPlatform` (its `net` is real, its clock fake))
 - text and binary messages of 0 bytes, 125, 126, 65,535, 65,536 and 1 MiB both ways; a message
   fragmented into three frames with a ping between them; ping → pong with the same payload; close
   with a code → the same code echoed; invalid UTF-8 in a text message → close 1007; an unmasked
   client frame (written with a raw socket) → close 1002; a message over 1 MiB (also as fragments
   that add up to more) → close 1009; a missing `Sec-WebSocket-Key` → 400.
+- The 101 and the 400 carry the headers above and no CORS header; `close()`'s RangeErrors; many
+  pings while the socket is backed up → one pong, for the latest (ruled, #44).
+- With the fake clock: after `close()`, a breach, the peer's close and the peer's end, a peer that
+  keeps its side open has the socket destroyed `CLOSE_WAIT_MS` later and not before; a close the
+  peer finishes leaves no timer; `destroy()` → onClose 1006 at once, the client sees the
+  connection go, no timer left; `destroy()` after `close()` keeps the code (ruled, #44).
+- Reads of any size (ruled, #44): a sequence of every frame kind fed in one read, split at every
+  byte and one byte per read does the same; a frame sent one byte per read is read in linear time
+  (its last byte at once); a long run of empty continuation frames keeps no memory (a heap
+  bound); a control frame whose length takes the 16- or 64-bit form → close 1002; every breach
+  also fed one byte per read; a peer that resets the connection after the 101 or right after a
+  refused request leaves nothing uncaught.
 - `buffered` grows while the client does not read (a paused socket) and `onDrain` fires once it
   reads again.
 
@@ -1983,8 +2033,9 @@ export function loadXterm(appRoot: string): Promise<XtermModules>;
 
 // src/window/screen.ts
 export interface ScreenSide {
-  /** Applies a record in order; resolves when applied. While replaying, query answers are dropped. */
+  /** Applies a record in order; resolves when applied. While replaying, query answers are dropped. Rejects with the error when `answer` throws for this record's answers; the record is applied all the same. */
   output(bytes: Uint8Array): Promise<void>;
+  /** Applies a resize in order. A size outside 1–65,535 gives a promise rejected with a RangeError. */
   resize(cols: number, rows: number): Promise<void>;
   /** Ends the replay: from now on answers go to `answer`. */
   goLive(): void;
@@ -1994,7 +2045,7 @@ export interface ScreenSide {
   readonly cols: number; readonly rows: number;
   dispose(): void;
 }
-/** `answer` receives what the program must get as input (query answers). Scrollback 5,000. */
+/** `answer` receives what the program must get as input (query answers). Scrollback 5,000. Throws a RangeError for a size outside 1–65,535. */
 export function createScreen(modules: XtermModules, init: { cols: number; rows: number; snapshot: string | null }, answer: (bytes: Uint8Array) => void): ScreenSide;
 ```
 
@@ -2019,7 +2070,9 @@ export function createScreen(modules: XtermModules, init: { cols: number; rows: 
 
 **Done when:** a snapshot rebuilds the screen exactly as S2 7.3 claims, verified by the tests.
 
-**Not in it:** the keeper connection and park policy (task 16).
+**Not in it:** the keeper connection and park policy (task 16); the unfinished escape sequence at
+the snapshot's seam (task 33: task 12 leaves the seam, appending an empty string after S2 7.2's
+additions).
 
 ---
 
@@ -2579,6 +2632,98 @@ Playwright is not installed; run: npx playwright install chromium`.
 runs the page suite locally.
 
 **Not in it:** any page test of the window (tasks 26–29); `web/tsconfig.json` (task 26).
+
+---
+
+### Task 33: The snapshot seam: the unfinished escape sequence
+
+**Depends on:** 12 · **Wave:** 3 · **Design:** S2 7.2 (the snapshot's seam), 7.3 · **Contracts:** — · **Decisions:** —
+
+Added by the plan owner's ruling on task 12 (section 6), and built by task 12's implementer once
+task 12 has merged.
+
+**Goal.** A snapshot taken where a record ends inside an escape sequence rebuilds the screen
+exactly. Records are pty reads, so a large redraw is cut at arbitrary bytes, and a park or an
+attach lands on such a cut at random: without this, the next record's continuation reaches a
+screen rebuilt from the snapshot as text (`ab ESC[3` | `1mX` rebuilds as `ab1mX`; checked with the
+vendored xterm.js while building task 12). A pure scanner follows the bytes the screen side
+applies far enough to know whether the stream stands inside an escape sequence, and keeps that
+sequence's bytes; the screen side appends them to every snapshot at task 12's seam, after S2 7.2's
+additions, so that the next record completes the sequence on the rebuilt screen as it does on the
+original. The other half — a record that ends inside a UTF-8 character — is the keeper's: task 9's
+keeper never ends a record there, so the scanner never sees a cut character.
+
+```ts
+// src/window/escape-tail.ts — pure; imports nothing. Not a contract: only screen.ts uses it.
+export interface EscapeTail {
+  /** Follows the stream: every byte the screen side applies, in order, in any chunks. */
+  push(bytes: Uint8Array): void;
+  /** The escape sequence the stream stands inside; '' in the ground state. */
+  unfinished(): string;
+}
+export function escapeTail(): EscapeTail;
+```
+
+**Behaviour**
+- The scanner follows xterm.js 6.0.0's parser (its `EscapeSequenceParser`, the VT500 state
+  machine) on decoded code points: ESC and its intermediates (`ESC ( 0`, `ESC # 8`), CSI (`ESC [`
+  or U+009B) with its prefix, parameters, sub-parameters and intermediates, OSC (`ESC ]` or
+  U+009D), DCS (`ESC P` or U+0090), and SOS, PM and APC (`ESC X`, `ESC ^`, `ESC _`, or U+0098,
+  U+009E, U+009F). CAN and SUB abort a sequence, an ESC inside one starts a new one, BEL ends an
+  OSC, ST (`ESC \` or U+009C) ends a string, and an ESC at the end of a string is kept (half an
+  ST). Where xterm.js disagrees with the VT500 diagram, xterm.js wins: the rebuilt screen is
+  xterm.js too.
+- It keeps exactly the bytes that put a fresh parser into the state of the original: a C0 control
+  that xterm.js executes inside a CSI is not kept (its effect is already in the snapshot); the
+  bytes of a string that its handler will receive are.
+- The kept bytes are decoded as UTF-8: ESC and CSI sequences are ASCII, and a string sequence
+  carries whole characters only (task 9), so the snapshot stays valid UTF-8 and no message
+  changes.
+- A string sequence whose kept bytes would pass 64 KiB (an OSC 52 or a DCS payload can be large)
+  is kept as its introducer followed by what makes xterm.js 6.0.0 ignore the sequence, so that
+  the rebuilt screen swallows the rest and no handler acts on a cut payload; the original acts on
+  it (xterm.js's own limit is 10 MB). The tail of a snapshot is therefore at most about 64 KiB.
+- `src/window/screen.ts` keeps one scanner per screen, feeds it each record in the chain as the
+  record is applied, and feeds it the snapshot a screen starts from (which can itself end inside a
+  sequence); the seam's `unfinished()` returns the scanner's tail, appended last, after the cursor
+  position, so that nothing the snapshot adds is swallowed into the sequence.
+- Option, not built: the scanner sees every complete CSI, so it could also carry the last scroll
+  region (DECSTBM, `CSI t ; b r`) cheaply, closing one of S2 7.2's known limits. The region is per
+  buffer (normal and alternate), resize, RIS, DECSTR and entering the alternate screen reset it,
+  and DECSTBM homes the cursor, so the snapshot would set it before the CUP. Build it only if
+  W26 shows the region matters.
+
+**Files**
+- Create: `src/window/escape-tail.ts`
+- Modify: `src/window/screen.ts` (the seam), `test/window/screen.test.ts`
+- Test: `test/window/escape-tail.test.ts`
+
+**Tests** (platform: none — the vendored modules)
+- The scanner, a table of streams and the tail after each: ground state `''`; `ESC`; `ESC [ 3 8 ;
+  5`; `ESC [ ?`; sub-parameters `ESC [ 3 8 : 2 : : 1`; `ESC (`; `ESC #`; `ESC ] 0 ; tit`; an OSC
+  ending in ESC; an OSC with UTF-8 characters; `ESC P $ q`; SOS, PM, APC; the introducers U+009B,
+  U+009D, U+0090 as UTF-8; after BEL, ST, CAN and SUB `''`; an ESC inside a CSI keeps only the new
+  sequence; a C0 control inside a CSI is not kept. Every stream pushed one byte at a time gives
+  the same tail as pushed whole.
+- The seam, exactly: short sample streams (a few kilobytes each: the cost is one snapshot per
+  byte) — part of task 12's recorded stream, and one dense with sequences (SGR with
+  sub-parameters, DECSET and DECRST, DECSCUSR, OSC 0 titles, OSC 8 links, an OSC 52, DECRQSS, the
+  alternate screen) that avoids what S2 7.2 names as not restored — split at every byte that is
+  not inside a UTF-8 character: screen A gets the first part, screen B is built from A's snapshot
+  and gets the rest, and B equals a screen that got the stream whole, by task 12's comparison.
+- A query cut across two records (`ESC [` | `c`): A, live, answers it once when the second
+  record is applied; B, built from A's snapshot between the two and live after its replay,
+  answers it once too.
+- An OSC 52 cut after more than 64 KiB: the snapshot's tail is the bounded introducer; the
+  rebuilt screen prints none of the rest and equals the original cell for cell.
+- Task 12's tests still pass; the seam's tail is the last thing in every snapshot.
+
+**Done when:** a snapshot taken at any record boundary outside a UTF-8 character rebuilds the
+screen exactly, tested at every such boundary of the sample streams.
+
+**Not in it:** UTF-8 boundaries (task 9's keeper); the scroll region, the saved cursor and the
+character sets (S2 7.2's known limits; the scroll region is the option above). No design update:
+S2 7.2 already describes the seam.
 
 ---
 
@@ -3212,7 +3357,7 @@ only they can make.
 - `README.md`: `window` and `serve` in the command table; the window in two sentences; the
   Development section gains `npm run test:page` and `npx playwright install chromium`.
 - `docs/manual-checks.md`: one section per check of stage A — W1–W10, W12–W15, W17, W18, W20,
-  W22–W25 — each with what to set up, the commands, what to look at and what to write down;
+  W22–W26 — each with what to set up, the commands, what to look at and what to write down;
   "real claude" checks in a throwaway folder as the existing sections do. W2 uses the window
   itself (every chord, those of later stages included, is the page's, A11) and, for a normal
   browser tab, `docs/check-kit/keytest.html` through `serve.py` and `edge-app.sh`. W14's first
@@ -3257,7 +3402,7 @@ check of S2 18 is in `docs/manual-checks.md`.
 | 6.4 Interop link | 19, 21 (programs' environment), 23 (every 30 s) |
 | 6.5 Sleep | 26 (reconnect), 16 (reconnecting keepers); W15 |
 | 7.1 Keeper | 9; 16 (spawn), 21 (spec, `G`) |
-| 7.2 Screen side | 12, 16 |
+| 7.2 Screen side | 12, 16, 33 (the snapshot's seam) |
 | 7.3 Attach, park, rebuild | 12, 16, 21 (found keepers) |
 | 7.4 Program environment | 8, 21 |
 | 7.5 Terminal and session | 21 (mapping), 13 (rows), 23 (tick) |
@@ -3335,7 +3480,8 @@ server; a session ends only when you end it inside `claude`.
   --restart` and the screen is unchanged), W6 (Shift+Enter, Ctrl+V, Ctrl+Shift+V image paste,
   Ctrl+Shift+C, OSC 52), W22 (a session from a WSL terminal shows "running in another terminal" and
   resumes into the window after `/exit`), W23 (which `CLAUDE*` variables Claude Code sets; `skydeck
-  window` refused inside a session), W5, W10, W17, W18.
+  window` refused inside a session), W5, W10, W17, W18, W26 (a restart while it uses the alternate
+  screen: what a snapshot does not restore).
 - **Keys and fonts in Edge** — W2 (in the window: every chord of S2 12.9 reaches the page and Edge
   does nothing, Ctrl+Shift+P and J included, which say they come in a later stage; Alt+F4 still
   closes; for a normal browser tab, `docs/check-kit/keytest.html`), W8 (Czech layout, AltGr, dead keys,
@@ -3370,3 +3516,28 @@ follows the rulings.
 
 Rulings on the two reviews (2026-11-13): task 26's pure modules become task 31 (wave 1); task 23's
 actions become task 32 (wave 4); task 9 stays whole; `checkJs` stays for `web/`.
+
+Rulings on task 12's findings (2026-11-13):
+
+9. **A snapshot where a record ends inside an escape sequence or a UTF-8 character** is not
+   exact. Ruled: both halves are closed in stage A — the keeper never ends an output record
+   inside a UTF-8 character (task 9), and the new task 33 (wave 3) keeps the unfinished escape
+   sequence and appends it to every snapshot; task 12 leaves the seam.
+10. **What the serialise addon does not restore beyond S2 7.2's first list.** Ruled: task 12 also
+    restores mode 1016 beside 1006 and mode 12, re-prints the last cell when the cursor stands
+    past the last column (the pen can then differ in one case, named in S2 7.2 — superseded by
+    item 11: the pen is restored), and answers OSC
+    10 and 11 with xterm.js's default colours until a page has sent its theme. The scroll region,
+    the saved cursor and the character sets stay known limits (S2 7.2, check W26).
+11. **From task 12's review 2.** Ruled: `@xterm/addon-serialize` 0.14.0 loses bold or dim when
+    either goes off (SGR 22 turns off both); its vendored bundle is patched at vendor time, in
+    task 12's pull request (task 2's script and manifest gain the patch, S2 16.6). The snapshot
+    ends with the pen read from the headless terminal's own state (the internal the serialise
+    addon reads; a test pins it), so S2 7.2 has no pen limit. Modes 2026 and 20 are restored; tab
+    stops join the known limits. Review 2's re-check found two more defects of the same addon —
+    the alternate screen took the program's pen; cursor moves of 0 columns left a stray `-` above
+    a wrapped row after a blank one. Ruled: corrected in `src/window/screen.ts` on the serialised
+    text (`correctSerialized`; exact, since no cell holds ESC), not in the vendor patch, which
+    stays for what cannot be corrected from outside. Three smaller differences become named
+    limits in S2 7.2 (an alternate-screen line marked wrapped, DECAWM off with a wide character at
+    the margin, `38;5;n` below 16).

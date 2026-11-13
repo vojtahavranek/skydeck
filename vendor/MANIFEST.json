@@ -4,7 +4,7 @@
       "path": "vendor/xterm/THIRD-PARTY-NOTICES",
       "package": "skydeck",
       "version": "-",
-      "sha256": "cfe9abdd2be0358e6739511562a2f98c9ec30a8e50f9aff06bb24575c5971d1b"
+      "sha256": "b64d60ed04225646955ed808020aee6bc816bac26e623d5524364f84a019c387"
     },
     {
       "path": "vendor/xterm/addon-fit/LICENSE",
@@ -72,7 +72,9 @@
       "path": "vendor/xterm/addon-serialize/lib/addon-serialize.mjs",
       "package": "@xterm/addon-serialize",
       "version": "0.14.0",
-      "sha256": "6c93dff90bef3b7aac8664fa4c1cb4026bf4b701f3014a1fb88edde943dab906"
+      "sha256": "d89e18d90232656dfe6004fa75d3efdc8f9abd583760bfeebf531cc31a16d44d",
+      "upstreamSha256": "6c93dff90bef3b7aac8664fa4c1cb4026bf4b701f3014a1fb88edde943dab906",
+      "patch": "skydeck: _diffStyle turned bold off and dim off both with SGR 22, which turns off both, so a rebuilt cell lost its bold after a dim one, or one of bold and dim when only the other went off. Patched: when bold or dim changes and either goes off, SGR 22 first, then 1 and 2 for what the cell has; otherwise only the codes that go on. Unfixed upstream on 2026-11-13; drop the patch when a release fixes it."
     },
     {
       "path": "vendor/xterm/addon-serialize/typings/addon-serialize.d.ts",
