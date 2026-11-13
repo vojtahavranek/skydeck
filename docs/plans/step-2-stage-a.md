@@ -857,23 +857,59 @@ Two additions to S2 8.2.3 and 8.3 that task 1 records in the design: `result` ca
 ### 2.8 Server modules other tasks call
 
 ```ts
-// src/window/auth.ts (task 11)
-export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array; // one transaction
-export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm
+// src/window/auth.ts (task 11). Thrown errors below were ruled by the plan owner (task 11); their
+// messages name sizes, never values. Callers (tasks 17 and 18) run isNonce on every nonce a peer
+// sent before they call pageProof, serverProof or wrapSecret, so a page's bad nonce closes the
+// connection (4001) and never reaches a throw.
+/** One transaction. A stored value that is not 32 bytes in isNonce's form is replaced as if absent
+ *  (ruled): it could prove nothing, and a page holding a key from it gets 4003 and asks for a new launch.
+ *  Both: RangeError, and nothing stored, when the random source gives another number of bytes. */
+export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array;
+export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm; one transaction
+/** RangeError for a key that is not 32 bytes, a mode other than 'key' | 'launch', or an sN or cN that is not isNonce. */
 export function pageProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string;
-export function serverProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string;
+export function serverProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string; // as pageProof
+/** RangeError for a secret or token that is not 32 bytes, an IV that is not 12, or an sN or cN that is not isNonce. */
 export function wrapSecret(secret: Uint8Array, token: Uint8Array, sN: string, cN: string, iv: Uint8Array): string;
-export function isNonce(text: string): boolean; // 43 characters of base64url, 32 bytes
+/** 43 characters of base64url, 32 bytes, in the canonical form (ruled): the two bits the last
+ *  character has to spare are zero, as an encoder writes them, so one value has one text. */
+export function isNonce(text: string): boolean;
+/** Mode `key` (ruled, review 2 of task 11): whether `proof` is the page's proof made with the
+ *  secret, by check's rules — timingSafeEqual on two 43-byte buffers; false without comparing for a
+ *  proof that is not a string of 43 bytes, an sN or cN that is not isNonce, an origin that is not a
+ *  string or a secret that is not 32 bytes. Never throws. Task 17 uses it for mode `key` and never
+ *  compares proofs itself. */
+export function keyProofMatches(secret: Uint8Array, proof: string, sN: string, cN: string, origin: string): boolean;
 export interface Tokens {
+  /** `id`: 32 lower-case hex characters (16 random bytes, the control parser's form). RangeError for
+   *  seconds other than 30 and 600, or a random source that gives another number of bytes; Error
+   *  when it repeats an id. How a token ends (ruled): it expires when its `clock.after` timer of
+   *  `seconds` runs out (a timer counts on a clock that does not jump, so WSL's wall clock stepping
+   *  back cannot stretch it) or when it is looked at (`state`, `check`) with the wall clock at or past
+   *  `expiresAtNs` (a PC that slept), whichever comes first. It holds its timer only while it waits:
+   *  a use, a drop and forgetAll stop it. */
   mint(seconds: 30 | 600): { id: string; token: Uint8Array; expiresAtNs: Ns };
+  /** null for an id never minted (or forgotten). A used token stays 'used' (or 'reused') whatever
+   *  comes later; an unused one is 'dropped' once given up, else 'expired', else 'waiting'. */
   state(id: string): TokenState | null;
-  drop(id: string): boolean;
-  /** Constant-time check of `proof` against every token; a match marks it used (or reused: the alarm). */
-  check(proof: string, sN: string, cN: string, origin: string): { kind: 'match'; token: Uint8Array } | { kind: 'reused' } | { kind: 'none' };
-  forgetAll(): void;
+  drop(id: string): boolean; // false for an unknown id
+  /** Constant-time check of `proof` against every token a proof can still reach — waiting, used or
+   *  reused; one dropped or expired before its use can only give 'none' and is skipped: timingSafeEqual
+   *  on equal-length buffers, not stopping at a match. A proof that is not a string of 43 bytes, an
+   *  sN or cN that is not isNonce, or an origin that is not a string is 'none' without comparing.
+   *  A match marks the token used. The alarm (ruled, review 2 of task 11): a proof with a used token
+   *  marks it reused FIRST, then calls onAlarm on that token's first reuse only (again on a later
+   *  reuse only while every earlier call failed), so a used token presented in a loop costs no store
+   *  write. check NEVER throws, whatever onAlarm does: the verdict stays 'reused', and a failing
+   *  onAlarm (a refused store write, a locked database) comes back as `alarmFailure` — the error's
+   *  name and string code, never its message — for the caller to log; else null. */
+  check(proof: string, sN: string, cN: string, origin: string): { kind: 'match'; token: Uint8Array } | { kind: 'reused'; alarmFailure: string | null } | { kind: 'none' };
+  forgetAll(): void; // empties everything, stops every timer
 }
 export function createTokens(clock: Clock, random: (n: number) => Uint8Array, onAlarm: () => void): Tokens;
-export function raiseAlarm(store: Store, nowNs: Ns): void; // kv window_alarm
+/** kv window_alarm, in one transaction: the time of the FIRST second use is kept (ruled, review 2
+ *  of task 11) — a recorded time is never overwritten; a value that is not a decimal time is. */
+export function raiseAlarm(store: Store, nowNs: Ns): void;
 
 // src/window/runtime.ts (task 15)
 export interface RuntimeFiles { dir: string; serverJson: string; serverSock: string; serverPid: string; keepalivePid: string; keepaliveInterop: string; interop: string; termsDir: string; keeperFile(build: string): string; termSock(id: string): string; termPid(id: string): string }
@@ -973,6 +1009,10 @@ export function stopServer(deck: Deck, times?: LifecycleTimes): Promise<{ stoppe
 // src/window/build.ts (task 14)
 /** sha256 over the sorted paths and contents of every file under bin/, src/, web/, vendor/ (A12), first 16 hex. */
 export function computeBuild(files: Files, appRoot: string): string;
+/** Every file of the build read once (path relative to the app root → bytes, in sorted order) and
+ *  the build over exactly those bytes; computeBuild is its `build`. loadAssets serves these bytes,
+ *  and a command that compares builds can use it too (ruled by the plan owner, task 14). */
+export function readBuild(files: Files, appRoot: string): { build: string; files: Map<string, Uint8Array> };
 ```
 
 ### 2.9 The page's modules (tasks 26 and 31)
@@ -1790,20 +1830,36 @@ and a random source; no socket.
 - `wrapSecret`'s output opens with Node's AES-256-GCM under the HKDF key of the token and both
   nonces, and not with another token or with the nonces swapped.
 - `ensureSecret` creates 32 bytes once (two calls return the same; a second connection's call in
-  between returns the first's), stored base64url without padding; `replaceSecret` changes it and
-  clears `window_alarm`.
+  between returns the first's), stored base64url without padding; a stored value that is not a
+  secret in that form is replaced (ruled); `replaceSecret` changes it and clears `window_alarm`.
 - Tokens (fake clock): `mint(30)` → `state` `waiting`; a proof made with it → `match` and
   `used`; the same proof again → `reused`, `onAlarm` called once; after 30 s an unused token →
   `none` and `state` `expired`; `drop` → `dropped`, and a later proof with it → `none` (`reused`
   when it had been used); `mint(600)` lives 10 minutes; a used token stays known after `forgetAll`
-  is not called (the server's life); `forgetAll` empties everything.
+  is not called (the server's life); `forgetAll` empties everything. A token lives no longer than
+  its seconds when the wall clock steps back, expires at once when it jumps past `expiresAtNs`,
+  and holds a timer only while it waits (ruled).
 - `check` compares in constant time (`crypto.timingSafeEqual` on equal-length buffers; a proof
   of another length is `none` without comparing); a proof made with the server's label never
   matches a page proof.
-- `isNonce`: 43 base64url characters of 32 bytes → true; 42, 44, `+`, `/`, `=` → false.
-- `raiseAlarm` writes the time; the secret's bytes never appear in any string the module returns
-  except `wrapSecret`'s ciphertext (checked by searching every returned string for the
-  base64url of the secret).
+- `isNonce`: 43 base64url characters of 32 bytes → true; 42, 44, `+`, `/`, `=`, a last character
+  whose two spare bits are not zero → false.
+- The thrown cases of 2.8 (ruled): a key, nonce, mode or IV of the wrong kind, seconds other than
+  30 and 600, a random source that gives the wrong number of bytes or repeats an id.
+- The alarm (ruled, review 2): a used token presented again and again is `reused` each time and
+  calls `onAlarm` on its first reuse only; each token raises it on its own first reuse; the
+  callback sees the token already `reused` (the order is pinned); a throwing callback leaves the
+  verdict `reused` with `alarmFailure` naming the error's name and code (never its message), and
+  the next reuse calls it again.
+- `keyProofMatches` (ruled, review 2): the vector's mode `key` proof → true; the server's label,
+  mode `launch`, another origin, other nonces or key, one character changed anywhere → false; one
+  `timingSafeEqual` on two 43-byte buffers; no comparison and no throw for a proof that is not a
+  string of 43 bytes, a nonce that is not one, an origin that is not a string, a secret of another
+  size.
+- `raiseAlarm` writes the time and keeps the first one (one transaction; ruled); the secret's bytes never appear in any string the module returns
+  except `wrapSecret`'s ciphertext (checked by searching every returned string, and every error
+  of each thrown case provoked with the secret or a token as an argument, for the secret's and the
+  token's base64url, base64, hex and decimal forms; ruled, review 2).
 
 **Done when:** the vector is pinned and every token state of S2 8.3's `GET /token/<id>` is reachable.
 
@@ -1892,11 +1948,39 @@ export interface ViewInput {
   selected: SelectedPayload | null;
   nowNs: Ns;
 }
+/** Ruled by the plan owner (task 13, #45): listed are design 7.2's rows (`isListed` with
+ *  `showDone`), every open row (running, or starting in the window) whatever its done mark
+ *  (S2 12.10), and a `new` terminal's own session's row while the terminal is there — also one
+ *  step 1 does not list (ended before its first prompt), unless it is done and stopped. The
+ *  filter picks the sections' rows and the done rows `doneHidden` counts (only those that match
+ *  it); `counts` ignore it. While a filter is set every section is unfolded (S2 12.8); otherwise
+ *  Earlier is folded unless `view.unfolded` names it, and a folded section carries `count`,
+ *  `firstNs` and `lastNs` with `rows: []`. `elsewhere` is taken only for a row that is running; a
+ *  row held both in the window and elsewhere (a duplicate) counts as `elsewhere`. `selected` is
+ *  passed on only when its `sessionId` equals `view.selected`, else null.
+ *  Terminals on rows: a terminal that may still run (not `ended`, `lost`, `not-started`) claims a
+ *  session's row before one that may not, one showing the session before one waiting for it, then
+ *  by slot and opening time; a terminal that may not run is put only on a row that is not running.
+ *  The view model may assume that an ended terminal never belongs to a running session for longer
+ *  than one tick: it is dropped, its slot freed, when its session runs again (by the resume action
+ *  in the window, task 32; by the server's tick when the session runs anywhere else, task 23). */
 export function buildListMessage(input: ViewInput): Omit<ListMessage, 'terminals'> & { terminals: Omit<TerminalPayload, 'ownsSize'>[] };
 // src/window/view/sections.ts — the parts, exported for tests
+/** Shared inside the view model (ruled, #45): the terminal states whose program may still come to
+ *  hold a session (S2 7.5) — `starting`, `running`, `reconnecting`, `newer-keeper`. `rowPayload`'s
+ *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. */
+export const MAY_START: ReadonlySet<TerminalState>;
 export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'week' | 'earlier';
+/** Ruled (#45): `starting` when the terminal's program holds no session (`sessionId` null), the
+ *  terminal may still start one (not `ended`, `lost` or `not-started`) and the row is not
+ *  running. `noteHead`: the note's first three lines as step 1 shows a note (`formatNoteLines`'s
+ *  rule: split at every line break, each line sanitised, empty lines at the start and end
+ *  dropped), each cut to 1,024 UTF-16 units with the cut marked by `…` (never inside a surrogate
+ *  pair). `elsewhere.tty` is sanitised like every other foreign text. */
 export function rowPayload(row: ListRow, extra: { terminal: TerminalInfo | null; elsewhere: { pid: number; tty: string | null } | null }): RowPayload;
-export function projectDirs(rows: readonly ListRow[]): string[]; // most recent first, unique
+/** Most recent first, unique, of the rows step 1 lists (`isListed(row, true)`); left out: a
+ *  directory the sanitiser changes, and one that is not absolute (ruled, #45). */
+export function projectDirs(rows: readonly ListRow[]): string[];
 ```
 
 **Files**
@@ -1915,12 +1999,16 @@ export function projectDirs(rows: readonly ListRow[]): string[]; // most recent 
 - Done: hidden with `doneHidden` counted; `showDone` lists them; a running done session stays
   under open with its `done` mark (S2 12.10).
 - Filter (design 7.4): matches title, group, note, directory, pull requests; a filter does not
-  show done sessions in stage A (that is stage E).
-- Rows: `noteHead` is at most the note's first three lines; `chip` is design 7.3's; `slot` and
-  `terminal` from the terminal; `elsewhere` with pid and tty; `attention` and `stack` null.
+  show done sessions in stage A (that is stage E); while a filter is set every section is
+  unfolded (S2 12.8, ruled in #45).
+- Rows: `noteHead` is at most the note's first three lines as step 1 shows a note; `chip` is
+  design 7.3's; `slot` and `terminal` from the terminal; `elsewhere` with pid and tty;
+  `attention` and `stack` null.
 - Starting: a resume terminal whose program holds no session yet marks the expected session's
   row `starting`; a `new` terminal without a session row gives a row with the new id, `starting`,
-  titled with the label or `new session in <dir>` (A28); once the session has a row, that row.
+  titled with the label or `new session in <dir>` (A28); once the session has a row, that row; a
+  `new` program that ends before its session started leaves its row, no longer starting, until
+  the terminal is closed (ruled in #45).
 - Counts: per state of the listed rows, `starting` and `elsewhere` separately.
 - Terminals carry `state` and `notReported` from `TerminalInfo` (`reconnecting` included).
 - `projectDirs`: unique, most recent activity first, sanitised paths excluded when they differ
@@ -1948,23 +2036,35 @@ export interface Assets {
   build: string;
   /** The keeper's code as read at start (S2 16.5). */
   keeperCode: string;
-  /** null when the path is not on the list. */
+  /** By the path of a request without its query: '/' (index.html with the build put in) or
+   *  '/assets/<build>/<path in the checkout>'. null when the path is not on the list. */
   get(path: string): { body: Uint8Array; type: string } | null;
 }
-/** Reads web/** (but web/tsconfig.json), the vendored files of the manifest that the page loads
- *  (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper. Refuses (Error) when verifyVendored
- *  reports a problem. A missing or empty web/ is no error (task 23's tests run before task 26
- *  creates it): then `GET /` is 404. */
+/** Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only), the vendored files
+ *  of the manifest that the page loads (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper,
+ *  each once through readBuild (2.8),
+ *  so that the build is the hash of exactly the bytes served. Refuses (Error) when verifyVendored
+ *  reports a problem, when a served vendored file's bytes as read do not have the manifest's hash
+ *  (it changed between the two reads), when bin/skydeck-keeper is missing, and when it is not
+ *  UTF-8 (ruled by the plan owner, task 14). A missing or empty web/ is no error (task 23's tests
+ *  run before task 26 creates it): then `GET /` is 404. */
 export function loadAssets(files: Files, appRoot: string): Assets;
-/** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. */
+/** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. In
+ *  this order: a wrong Host → 421; OPTIONS → 403; any other method but GET → 405 with
+ *  `Allow: GET`; GET of a path on the list → the file, a query ignored and never used; any other
+ *  GET → 404. `Cache-Control`: `max-age=31536000, immutable` under `/assets/`, `no-store` for
+ *  every other path (`/` included) and every refusal (ruled by the plan owner, task 14). */
 /** `port()` is the bound port, read at each request: with port 0 it is known only after
  *  listenHttp has resolved (tasks 20, 23 pass a function that returns it then). */
 export function httpHandler(assets: Assets, port: () => number): (req: IncomingMessage, res: ServerResponse) => void;
-/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17). */
+/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17).
+ *  For port 80 also `127.0.0.1` (a browser leaves out its default port), never `localhost`; task
+ *  17's Origin check needs the same rule for 80 (`http://127.0.0.1`) (ruled by the plan owner,
+ *  task 14). */
 export function hostOk(host: string | undefined, port: number): boolean;
 /** The headers every answer carries (the policy with the port, nosniff, DENY, no-referrer). */
 export function securityHeaders(port: number): Record<string, string>;
-// src/window/build.ts — computeBuild of 2.8
+// src/window/build.ts — computeBuild and readBuild of 2.8
 ```
 
 **Files**
@@ -1977,17 +2077,25 @@ export function securityHeaders(port: number): Record<string, string>;
 - `GET /` → `index.html` with every `/assets/__VERSION__/` replaced by `/assets/<build>/`
   (the placeholder `__VERSION__` is the contract with task 26); `GET /assets/<build>/web/app.js`
   and `/assets/<build>/vendor/xterm/xterm/lib/xterm.mjs` → the bytes read at start with the right
-  `Content-Type` and `Cache-Control: immutable`; another version in the path, `../`, an encoded
-  `%2e%2e`, a file added to `web/` after start → 404; the file changed on disk after start → the
-  old bytes (S2 17.3 "updating").
-- Every answer (also 404, 421, 403) carries the CSP of S2 8.2.1 with the port,
+  `Content-Type` and `Cache-Control: max-age=31536000, immutable`; every path outside `/assets/`
+  (`/` included) and every refusal `no-store`; a query string ignored, also by the cache rule;
+  another version in the path, `../`, an encoded `%2e%2e`, `/assets/<build>/web/index.html`, a
+  file added to `web/` after start → 404; the file changed on disk after start → the old bytes
+  (S2 17.3 "updating").
+- Every answer (also 404, 421, 403, 405) carries the CSP of S2 8.2.1 with the port,
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and no `Access-Control-*` header.
-- `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port → 421; `OPTIONS` → 403;
+- `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port, no `Host` (HTTP/1.0) →
+  421; at port 80 `127.0.0.1` and `127.0.0.1:80` are accepted, `localhost` and `localhost:80`
+  not; `OPTIONS` → 403;
+  `HEAD`, `POST` and any other method → 405 with `Allow: GET` (a wrong Host is 421 first);
   `GET /manifest.webmanifest` and `/favicon.ico` → 404 in stage A (the icon is stage E).
-- `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes, is
-  added or removed; does not change for `docs/`, `test/`, `__pycache__/` or a dot-file; the same
-  tree gives the same build.
-- `loadAssets` refuses a checkout whose vendored file was altered.
+- `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes (one
+  byte, its length kept), is added or removed; does not change for `docs/`, `test/`,
+  `__pycache__/` or a dot-file; the same tree gives the same build; a file removed between its
+  `stat` and its read, a dangling link and a link to itself are no files of the build.
+- `loadAssets` refuses a checkout whose vendored file was altered, one whose served vendored file
+  changed between the build's read and the manifest check, and one whose `bin/skydeck-keeper` is
+  missing or not UTF-8.
 
 **Done when:** the server's static side is complete and the build is the one `skydeck window`
 will compute for the checkout.
@@ -2161,6 +2269,10 @@ lock release on exit (task 21); size ownership (task 17).
 
 **Goal.** `src/window/pages.ts` and `src/window/size.ts`: every page's connection from the upgrade
 to `bye`, against `TerminalHub` and `ActionHandler` (fakes in the tests).
+
+The handshake checks a proof only through 2.8 (ruled, task 11): mode `key` with `keyProofMatches`,
+mode `launch` with `tokens.check`, never by a comparison of its own; `reused` closes with 4004
+whatever `alarmFailure` says, and a non-null `alarmFailure` is logged by that kind.
 
 **Exported API**
 
@@ -2787,7 +2899,9 @@ session into a terminal pane that says "terminal view comes with task 28".
 - Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`
 
 **Behaviour.** `auth.js`: S2 8.2.2 steps 3–6 and "where the page keeps its key" — HMAC proofs,
-HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. `connection.js`:
+HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. The page
+encodes its nonce `cN` from its 32 random bytes in canonical base64url without padding, and takes
+the server's `sN` only in that form (the rule of 2.8's `isNonce`; ruled, task 11). `connection.js`:
 S2 6.3, 8.2.5 and the reload keys of S2 12.9 and 15.3 (a new connection, the server's proof, only
 then `location.reload()`); `input` split into messages of at most 64 KiB. `app.js`: `start`,
 `view` and `focus` messages; selection, zones (the terminal by default; a coloured top edge and
