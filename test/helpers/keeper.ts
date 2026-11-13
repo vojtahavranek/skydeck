@@ -489,11 +489,12 @@ export function keeperSandbox(t: TestContext): KeeperBox {
 
 /** Answers the stand-in's DA1 and CPR at start, as a screen side does, and waits for its prompt. */
 export async function answerStart(client: KeeperClient): Promise<void> {
-  await client.waitForOutput(DA1);
+  // Node.js starting the stand-in can take seconds on a loaded machine.
+  await client.waitForOutput(DA1, 15_000);
   client.send('I', DA1_ANSWER);
-  await client.waitForOutput(CPR);
+  await client.waitForOutput(CPR, 15_000);
   client.send('I', CPR_ANSWER);
-  await client.waitForOutput(PROMPT);
+  await client.waitForOutput(PROMPT, 15_000);
 }
 
 /** Claims, sends G, answers the start queries and waits for the prompt. */
@@ -502,7 +503,7 @@ export async function startProgram(
 ): Promise<{ client: KeeperClient; hello: KeeperHello; started: KeeperStarted }> {
   const { client, hello: first } = await keeper.claim();
   client.send('G');
-  const startedFrame = await client.next('T');
+  const startedFrame = await client.next('T', 15_000);
   await answerStart(client);
   return { client, hello: first, started: started(startedFrame) };
 }

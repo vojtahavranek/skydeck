@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 import {
+  answerStart,
   CPR_ANSWER,
   DA1,
   DA1_ANSWER,
@@ -16,6 +17,9 @@ import {
   procStartOf,
   sleep,
   started,
+  startProgram,
+  stillRuns,
+  typeLine,
   until,
 } from '../helpers/keeper.ts';
 import { readRecords, waitForRecord } from '../helpers/standin.ts';
@@ -39,6 +43,8 @@ describe('keeper: what starts the program', { concurrency: true }, () => {
     const box = keeperSandbox(t);
     const k = await box.start();
     assert.deepEqual(k.pidLine()?.keeper, { version: '1', started: false });
+    assert.equal(statSync(k.spec.socket).mode & 0o777, 0o600, 'the socket is the user’s only');
+    assert.equal(statSync(k.pidFile).mode & 0o777, 0o600);
 
     const idle = await k.connect();
     await sleep(300);
@@ -169,6 +175,50 @@ describe('keeper: what starts the program', { concurrency: true }, () => {
     const later = await k.claim();
     assert.equal(later.hello.started, false);
     assert.equal(later.hello.exited?.notStarted, 'the session runs elsewhere');
+  });
+
+  test('input before G is dropped, never given to the program later', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const { client } = await k.claim();
+    client.send('I', 'early\r');
+    await sleep(200);
+    client.send('G');
+    await client.next('T');
+    await answerStart(client);
+    await typeLine(client, 'late');
+    const typed = readRecords(k.record)
+      .flatMap((r) => (r.ev === 'input' ? [r.hex] : []))
+      .join('');
+    assert.equal(typed, Buffer.from('late\r').toString('hex'));
+  });
+
+  test('N after the start does nothing: no X, the program and the keeper go on', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const { client, started: program } = await startProgram(k);
+    client.send('N', 'too late');
+    client.send('A');
+    await sleep(500);
+    assert.equal(client.frames.filter((f) => f.type === 'X').length, 0);
+    assert.equal(k.hasExited(), false);
+    assert.ok(stillRuns(program.pid, program.procStart), 'the program runs');
+    const later = await k.claim();
+    assert.equal(later.hello.started, true);
+    assert.equal(later.hello.exited, null);
+  });
+
+  test('the program does not inherit python3’s ignored SIGPIPE and SIGXFSZ', async (t) => {
+    const box = keeperSandbox(t);
+    box.s.link('grep');
+    const k = await box.start({ spec: { argv: ['sh', '-c', 'grep SigIgn /proc/$$/status'] } });
+    const { client } = await k.claim();
+    client.send('G');
+    await client.next('X');
+    const match = /SigIgn:\s*([0-9a-f]{16})/.exec(client.output());
+    assert.ok(match?.[1], `no SigIgn line in ${JSON.stringify(client.output())}`);
+    // Bits 13 (SIGPIPE) and 25 (SIGXFSZ); other ignored signals may come from the test runner.
+    assert.equal(BigInt(`0x${match[1]}`) & 0x1001000n, 0n);
   });
 });
 

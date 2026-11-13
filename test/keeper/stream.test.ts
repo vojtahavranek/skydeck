@@ -6,6 +6,7 @@ import { describe, test } from 'node:test';
 
 import { encodeFrame, encodeResize, encodeSnapshot } from '../../src/window/frames.ts';
 import {
+  exit,
   frameKey,
   isRecord,
   keeperSandbox,
@@ -186,6 +187,7 @@ describe('keeper: claims and connections', { concurrency: true }, () => {
     ['a park of 0 rows', encodeRaw('P', parkBytes(0, 80, 0, utf8('x')))],
     ['a park that is not UTF-8', encodeRaw('P', parkBytes(0, 80, 24, new Uint8Array([0xff])))],
     ['a refusal that is not UTF-8', encodeRaw('N', new Uint8Array([0xc3, 0x28]))],
+    ['a refusal above 1,024 bytes (ruled)', encodeFrame('N', new Uint8Array(1025).fill(0x61))],
   ];
   for (const [what, bytes] of bad) {
     test(`${what} closes the connection; the keeper lives on`, async (t) => {
@@ -393,6 +395,20 @@ describe('keeper: records end at character boundaries (ruled)', { concurrency: t
     assert.deepEqual(raw(client), Buffer.from('a€b', 'utf8'));
     assertWholeCharacters(client);
   });
+
+  test('a resize behind a half character comes out when the program ends', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start({ spec: { argv: ['sh', '-c', `printf 'a\\342'; sleep 1`] } });
+    const { client } = await k.claim();
+    client.send('G');
+    await until(() => raw(client).includes('a'), 'the first record');
+    await sleep(200);
+    client.send('Z', encodeResize(100, 30));
+    await client.next('X', 10_000);
+    const types = client.frames.map((f) => f.type).join('');
+    assert.equal(types.endsWith('DRX'), true, `the held byte, the resize, then X: ${types}`);
+    assert.deepEqual(raw(client), Buffer.from([0x61, 0xe2]));
+  });
 });
 
 describe('keeper: limits on connections and frames (ruled)', { concurrency: true }, () => {
@@ -446,6 +462,24 @@ describe('keeper: limits on connections and frames (ruled)', { concurrency: true
       false,
       'nothing of it reached the program',
     );
+  });
+
+  test('an input frame announced above 4 MiB closes the connection at its header', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const { client } = await startProgram(k);
+    client.sendRaw(lengthOnly('I', 4 * 1024 * 1024 + 1));
+    await within(client.closed, 'closed before any of the payload came', 2000);
+    assert.deepEqual(box.logLines(), [`keeper ${k.spec.id}: input-too-long`]);
+  });
+
+  test('a refusal of exactly 1,024 bytes is taken as the reason', async (t) => {
+    const box = keeperSandbox(t);
+    const k = await box.start();
+    const { client } = await k.claim();
+    const why = 'é'.repeat(512); // 1,024 bytes of UTF-8
+    client.send('N', why);
+    assert.equal(exit(await client.next('X')).notStarted, why);
   });
 
   test('an input frame of exactly 4 MiB is taken whole', async (t) => {

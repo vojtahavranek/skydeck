@@ -29,6 +29,33 @@ async function gone(k: Keeper): Promise<void> {
 }
 
 describe('keeper: the exit status', { concurrency: true }, () => {
+  for (const tail of [undefined, '4096']) {
+    test(`what the pty still holds when the program is reaped comes before X${tail === undefined ? '' : ', whatever the tail cap'}`, async (t) => {
+      const box = keeperSandbox(t);
+      box.s.link('stty', 'head', 'tr');
+      // 10,000 bytes fit in the pty's buffer (11,776 here), so the program can end while the
+      // keeper is stopped; on its return the keeper reaps it with all of that still unread.
+      const program = 'stty raw -echo; sleep 0.5; head -c 10000 /dev/zero | tr "\\0" a';
+      const k = await box.start({
+        spec: { argv: ['sh', '-c', program] },
+        env: { SKYDECK_TEST_KEEPER_TAIL_BYTES: tail },
+      });
+      const { client } = await k.claim();
+      client.send('G');
+      await client.next('T');
+      k.pause(true);
+      try {
+        await sleep(1500);
+      } finally {
+        k.pause(false);
+      }
+      const x = exit(await client.next('X'));
+      assert.deepEqual([x.code, x.signal], [0, null]);
+      const output = client.frames.filter((f) => f.type === 'D').map((f) => Buffer.from(f.payload));
+      assert.equal(Buffer.concat(output).toString(), 'a'.repeat(10_000));
+    });
+  }
+
   test('/exit: X { code 0 } after the last output', async (t) => {
     const box = keeperSandbox(t);
     const k = await box.start();
@@ -288,6 +315,31 @@ describe('keeper: what reaches its log', { concurrency: true }, () => {
       assert.deepEqual(readdirSync(box.termsDir), [], 'no socket under a shortened name');
     });
   }
+
+  for (const [what, change] of [
+    ['a startBy of 5,000 digits', { startBy: '9'.repeat(5000) }],
+    ['a coreSoft of 5,000 digits', { coreSoft: '9'.repeat(5000) }],
+    ['a coreSoft of 21 digits', { coreSoft: '1'.repeat(21) }],
+  ] as const) {
+    test(`${what}: refused as a bad spec, exit 2`, async (t) => {
+      const box = keeperSandbox(t);
+      const spec = { ...box.spec(), ...change };
+      const k = await box.start({ rawSpec: JSON.stringify(spec), waitReady: false });
+      assert.equal((await within(k.exited, 'the keeper ended')).code, 2);
+      assert.deepEqual(checkLog(box.keepersLog), [`keeper ${spec.id}: bad-spec`]);
+    });
+  }
+
+  test('meta is echoed by its checked fields only, so its hello is one the codec takes', async (t) => {
+    const box = keeperSandbox(t);
+    const spec = box.spec();
+    // python's json reads NaN, which JSON.parse refuses: an unknown field must not come back.
+    const raw = JSON.stringify(spec).replace('"meta":{', '"meta":{"extra":NaN,');
+    assert.ok(raw.includes('NaN'));
+    const k = await box.start({ spec, rawSpec: raw });
+    const { hello } = await k.claim();
+    assert.deepEqual(hello.meta, spec.meta);
+  });
 
   test('an error no check foresaw, quoting the spec: only its class name', async (t) => {
     const box = keeperSandbox(t);

@@ -34,10 +34,12 @@ def _excepthook(kind, value, traceback):
 
 sys.excepthook = _excepthook
 
-import ctypes  # noqa: E402  (after the hook, so that a failing import is logged by kind too)
+import collections  # noqa: E402  (after the hook, so that a failing import is logged by kind too)
+import ctypes  # noqa: E402
 import fcntl  # noqa: E402
 import json  # noqa: E402
 import pty  # noqa: E402
+import resource  # noqa: E402
 import select  # noqa: E402
 import signal  # noqa: E402
 import socket  # noqa: E402
@@ -51,10 +53,12 @@ INPUT_CAP = 4 * MiB
 READ_SIZE = 65536
 SEND_CHUNK = 256 * 1024
 MAX_PENDING = 8
+MAX_REASON = 1024  # bytes of an N reason (ruled, task 9)
+RECORD_COST = 64  # what each record costs the tail besides its payload
+DRAIN_READS = 64  # reads of what the pty still holds once the program is reaped (it holds ~12 KB)
 MAX_WAIT = 3600.0
 INT64_MAX = 2**63 - 1
 PR_SET_DUMPABLE = 4
-RLIMIT_CORE = 4
 HEX = "0123456789abcdef"
 ALL_TYPES = b"CHGTNSDRXIZPA"
 SERVER_TYPES = b"GNIZPA"  # after the claim; a second C is refused too
@@ -78,10 +82,6 @@ TAIL_CAP = test_number("SKYDECK_TEST_KEEPER_TAIL_BYTES", 8 * MiB)
 SEND_CAP = test_number("SKYDECK_TEST_KEEPER_SEND_BYTES", 8 * MiB)
 
 
-class RLimit(ctypes.Structure):
-    _fields_ = [("soft", ctypes.c_ulong), ("hard", ctypes.c_ulong)]
-
-
 def frame(kind, payload=b""):
     return kind + struct.pack(">I", len(payload)) + payload
 
@@ -93,6 +93,7 @@ def as_json(value):
 def is_ns(value):
     return (
         type(value) is str
+        and 0 < len(value) <= 19  # python's int() refuses more than 4,300 digits
         and value.isascii()
         and value.isdigit()
         and (value == "0" or value[0] != "0")
@@ -123,6 +124,9 @@ def is_session_id(value):
         and len(value) == 36
         and all((c == "-") if i in (8, 13, 18, 23) else (c in HEX) for i, c in enumerate(value))
     )
+
+
+META_FIELDS = ("sessionId", "kind", "slot", "openedNs", "build", "label", "dir")
 
 
 def is_meta(meta):
@@ -177,7 +181,7 @@ def read_spec():
         and "lock" in spec
         and (spec["lock"] is None or is_text(spec["lock"]))
         and "coreSoft" in spec
-        and (core is None or core == "unlimited" or (is_text(core) and core.isascii() and core.isdigit()))
+        and (core is None or core == "unlimited" or (is_text(core) and 0 < len(core) <= 20 and core.isascii() and core.isdigit()))
         and is_meta(spec.get("meta"))
     )
     return spec if valid else None
@@ -246,14 +250,12 @@ def reason(error):
 
 def set_core_soft(text):
     """In the child: the soft core limit the user had (S2 2), within the hard one; else unchanged."""
-    limit = RLimit()
-    if LIBC.getrlimit(RLIMIT_CORE, ctypes.byref(limit)) != 0:
-        return
-    infinity = ctypes.c_ulong(-1).value
-    soft = infinity if text == "unlimited" else int(text)
-    if soft <= infinity and (limit.hard == infinity or soft <= limit.hard):
-        limit.soft = soft
-        LIBC.setrlimit(RLIMIT_CORE, ctypes.byref(limit))
+    hard = resource.getrlimit(resource.RLIMIT_CORE)[1]
+    soft = resource.RLIM_INFINITY if text == "unlimited" else int(text)
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
+    except (ValueError, OverflowError, OSError):
+        pass  # above the hard limit, or beyond what the system takes
 
 
 def run_program(go_r, spec):
@@ -308,9 +310,8 @@ class Keeper:
         self.held = b""  # the first bytes of a character the program has not finished writing
         self.deferred = []  # R payloads that wait until that character is whole
         self.seq = 0  # records so far
-        self.tail = []  # (seq, b"D" | b"R", payload); the records kept are tail[head:]
-        self.head = 0
-        self.tail_bytes = 0
+        self.tail = collections.deque()  # (seq, b"D" | b"R", payload)
+        self.tail_bytes = 0  # payloads plus RECORD_COST each
         self.dropped = 0  # the newest record the tail cap dropped
         self.snap = None  # the parked P payload, sent back as S
         self.snap_seq = 0
@@ -358,7 +359,7 @@ class Keeper:
             "seq": self.seq,
             "snapSeq": self.snap_seq,
             "gap": self.dropped > self.snap_seq,
-            "meta": spec["meta"],
+            "meta": {name: spec["meta"][name] for name in META_FIELDS},
             "exited": self.exit,
         }
 
@@ -406,16 +407,10 @@ class Keeper:
     def record(self, kind, payload):
         self.seq += 1
         self.tail.append((self.seq, kind, payload))
-        self.tail_bytes += len(payload)
+        self.tail_bytes += len(payload) + RECORD_COST
         while self.tail_bytes > TAIL_CAP:
-            seq, _, dropped = self.tail[self.head]
-            self.tail[self.head] = None
-            self.head += 1
-            self.tail_bytes -= len(dropped)
-            self.dropped = seq
-        if self.head > 1024 and self.head * 2 > len(self.tail):
-            del self.tail[: self.head]
-            self.head = 0
+            self.dropped, _, dropped = self.tail.popleft()
+            self.tail_bytes -= len(dropped) + RECORD_COST
         self.send(frame(kind, payload))
 
     def park(self, payload):
@@ -429,9 +424,8 @@ class Keeper:
         except UnicodeDecodeError:
             return False
         self.snap, self.snap_seq = payload, seq
-        self.tail = [r for r in self.tail[self.head :] if r[0] > seq]
-        self.head = 0
-        self.tail_bytes = sum(len(r[2]) for r in self.tail)
+        while self.tail and self.tail[0][0] <= seq:
+            self.tail_bytes -= len(self.tail.popleft()[2]) + RECORD_COST
         return True
 
     def resize(self, cols, rows):
@@ -563,7 +557,7 @@ class Keeper:
         if self.status is None or self.exit is not None:
             return
         if self.master is not None:
-            for _ in range(TAIL_CAP // READ_SIZE + 1):
+            for _ in range(DRAIN_READS):
                 if not self.read_pty():
                     break
             if self.master is not None:
@@ -632,7 +626,7 @@ class Keeper:
         parts = [frame(b"H", as_json(self.hello()))]
         if self.snap is not None:
             parts.append(frame(b"S", self.snap))
-        parts.extend(frame(kind, payload) for _, kind, payload in self.tail[self.head :])
+        parts.extend(frame(kind, payload) for _, kind, payload in self.tail)
         if self.exit is not None:
             parts.append(frame(b"X", as_json(self.exit)))
         conn.out += b"".join(parts)
@@ -665,10 +659,13 @@ class Keeper:
             if length > MAX_PAYLOAD:
                 self.refuse("too-long")
                 return
-            if len(conn.inbuf) < 5 + length:
-                return
             if kind == b"I" and length > INPUT_CAP:
                 self.refuse("input-too-long")  # it could never fit
+                return
+            if kind == b"N" and length > MAX_REASON:
+                self.refuse("bad-refusal")
+                return
+            if len(conn.inbuf) < 5 + length:
                 return
             if kind == b"I" and self.master is not None and self.exit is None:
                 if len(self.inq) + length > INPUT_CAP:

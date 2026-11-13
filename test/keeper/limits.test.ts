@@ -71,9 +71,9 @@ describe('keeper: input', { concurrency: true }, () => {
     const box = keeperSandbox(t);
     const k = await box.start();
     const { client } = await startProgram(k);
+    const data = pasteText(8 * MiB); // built before the stall, which it would otherwise shorten
     client.send('I', '/stall 3\r');
     await client.waitForOutput('stalling 3 s');
-    const data = pasteText(8 * MiB);
     const head = data.subarray(0, 64).toString('latin1');
     paste(client, data);
 
@@ -102,9 +102,9 @@ describe('keeper: input', { concurrency: true }, () => {
     const box = keeperSandbox(t);
     const k = await box.start();
     const { client } = await startProgram(k);
-    client.send('I', '/stall 4\r');
-    await client.waitForOutput('stalling 4 s');
-    const data = pasteText(8 * MiB);
+    const data = pasteText(8 * MiB); // built before the stall, which it would otherwise shorten
+    client.send('I', '/stall 6\r');
+    await client.waitForOutput('stalling 6 s');
     paste(client, data);
     await sleep(1500);
     // At most the 4 MiB queue, the pty's buffer and the socket's buffers left this process.
@@ -112,7 +112,7 @@ describe('keeper: input', { concurrency: true }, () => {
     assert.ok(waiting > 2 * MiB, `the writes wait (${waiting} bytes still here)`);
     await sleep(1000);
     assert.equal(client.socket.writableLength, waiting, 'nothing more is read while it stalls');
-    const typed = '/stall 4\r'.length;
+    const typed = '/stall 6\r'.length;
     assert.equal(inputBytes(k.record), typed, 'the program read nothing of the paste yet');
     // The program reads again: so does the keeper.
     await until(() => client.socket.writableLength === 0, 'the rest of the paste written', 60_000);
@@ -121,6 +121,22 @@ describe('keeper: input', { concurrency: true }, () => {
 });
 
 describe('keeper: caps', { concurrency: true }, () => {
+  test('the tail cap counts each record, so many small records cannot outgrow it', async (t) => {
+    const box = keeperSandbox(t);
+    const cap = 64 * 1024;
+    const k = await box.start({ env: { SKYDECK_TEST_KEEPER_TAIL_BYTES: String(cap) } });
+    const { client } = await k.claim();
+    for (let i = 0; i < 3000; i++) {
+      client.send('Z', `${100 + (i % 2)} 30`); // an R record of 23 bytes each
+    }
+    await until(() => client.frames.filter((f) => f.type === 'R').length === 3000, 'every R');
+    const { client: second, hello } = await k.claim();
+    assert.equal(hello.gap, true);
+    await quiet(second);
+    const kept = second.frames.filter((f) => f.type === 'R').length;
+    assert.ok(kept > 0 && kept <= cap / 64, `${kept} records kept for a cap of ${cap} bytes`);
+  });
+
   test('the tail cap drops the oldest records and sets gap until a park covers them', async (t) => {
     const box = keeperSandbox(t);
     const cap = 64 * 1024;
@@ -146,6 +162,50 @@ describe('keeper: caps', { concurrency: true }, () => {
     const third = await k.claim();
     assert.equal(third.hello.gap, false);
     assert.equal(third.hello.snapSeq, all.length);
+  });
+
+  test('a claim’s snapshot and tail are not held to the send cap; its live records are', async (t) => {
+    const box = keeperSandbox(t);
+    box.s.link('stty', 'head', 'tr');
+    // 3 MB of output while no server is connected, then whatever comes in is echoed (a live record).
+    const program = 'stty raw -echo; head -c 3000000 /dev/zero | tr "\\0" a; exec cat';
+    const k = await box.start({
+      spec: { argv: ['sh', '-c', program] },
+      env: { SKYDECK_TEST_KEEPER_SEND_BYTES: String(64 * 1024) },
+    });
+    const { client } = await k.claim();
+    client.send('G');
+    await client.next('T');
+    client.socket.destroy();
+    // Until the output is all in the tail: the record count stops growing.
+    let seq = -1;
+    for (let tries = 0; ; tries++) {
+      assert.ok(tries < 40, 'the program kept writing');
+      await sleep(500);
+      const probe = await k.claim();
+      probe.client.socket.destroy();
+      if (probe.hello.seq === seq) {
+        break;
+      }
+      seq = probe.hello.seq;
+    }
+
+    // A server slow to read the claim's 3 MB tail is not closed for it when a live record comes.
+    const { client: second } = await k.claim();
+    second.socket.pause();
+    second.send('I', 'x');
+    await sleep(500);
+    second.socket.resume();
+    const bytes = (): number =>
+      second.frames.filter((f) => f.type === 'D').reduce((n, f) => n + f.payload.length, 0);
+    await until(
+      () => bytes() === 3_000_001,
+      () => `the tail and the echo (${bytes()} bytes)`,
+      15_000,
+    );
+    assert.equal(second.output().endsWith('ax'), true);
+    assert.equal(second.isClosed(), false);
+    assert.equal(box.logLines().length, 0, 'nothing closed for the send cap');
   });
 
   test('the send-queue cap closes a connection that does not read; the pty is still read', async (t) => {
