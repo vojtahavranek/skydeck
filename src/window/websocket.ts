@@ -134,94 +134,83 @@ function decodeUtf8(bytes: Uint8Array): string {
   }
 }
 
-/** Received bytes not read yet, kept as the chunks they came in until a whole frame is there. */
-class ByteQueue {
-  #chunks: Buffer[] = [];
+/**
+ * Payload bytes gathered in one buffer that grows by doubling, up to the size it will need: what a
+ * peer makes the server keep grows with what it sent, whatever the size of its reads, and an empty
+ * fragment costs nothing.
+ */
+class Bytes {
+  #buffer = new Uint8Array(0);
   #length = 0;
 
   get length(): number {
     return this.#length;
   }
 
-  push(chunk: Buffer): void {
-    if (chunk.length === 0) return;
-    this.#chunks.push(chunk);
-    this.#length += chunk.length;
-  }
-
-  /** A copy of the first `count` bytes (at most `length`), which stay in the queue. */
-  peek(count: number): Buffer {
-    const out = Buffer.alloc(Math.min(count, this.#length));
-    let at = 0;
-    for (const chunk of this.#chunks) {
-      if (at === out.length) break;
-      at += chunk.copy(out, at, 0, Math.min(chunk.length, out.length - at));
+  /**
+   * Appends `source[from, to)` unmasked: XOR with `mask`, `at` being the place of `source[from]` in
+   * its frame's payload. `limit` is the most this will ever hold (the buffer never grows past it).
+   */
+  appendUnmasked(
+    source: Uint8Array,
+    from: number,
+    to: number,
+    mask: Uint8Array,
+    at: number,
+    limit: number,
+  ): void {
+    const start = this.#length;
+    const length = start + to - from;
+    if (length > this.#buffer.length) {
+      const grown = new Uint8Array(Math.max(length, Math.min(2 * this.#buffer.length, limit)));
+      grown.set(this.#buffer.subarray(0, start));
+      this.#buffer = grown;
     }
-    return out;
-  }
-
-  /** Removes the first `count` bytes (at most `length`) and returns them in an array of their own. */
-  take(count: number): Uint8Array {
-    const out = new Uint8Array(count);
-    let at = 0;
-    while (at < count) {
-      const chunk = this.#chunks[0] as Buffer;
-      const n = Math.min(chunk.length, count - at);
-      out.set(chunk.subarray(0, n), at);
-      at += n;
-      if (n === chunk.length) this.#chunks.shift();
-      else this.#chunks[0] = chunk.subarray(n);
+    const buffer = this.#buffer;
+    for (let i = from; i < to; i++) {
+      buffer[start + i - from] = (source[i] as number) ^ (mask[(at + i - from) & 3] as number);
     }
-    this.#length -= count;
-    return out;
+    this.#length = length;
   }
 
-  clear(): void {
-    this.#chunks = [];
+  /** The bytes, in an array of exactly their length and of their own; this is empty after. */
+  take(): Uint8Array {
+    const { length } = this;
+    const bytes = this.#buffer.length === length ? this.#buffer : this.#buffer.slice(0, length);
+    this.#buffer = new Uint8Array(0);
     this.#length = 0;
+    return bytes;
   }
 }
 
-interface FrameHeader {
-  fin: boolean;
-  opcode: number;
-  /** Header and mask bytes before the payload. */
-  size: number;
-  length: number;
+const OPCODES: ReadonlySet<number> = new Set([CONTINUATION, TEXT, BINARY, CLOSE, PING, PONG]);
+
+/** The size of a frame's header, its 4 mask bytes included, as the header's second byte gives it. */
+function headerSize(b1: number): number {
+  const length = b1 & 0x7f;
+  return (length === 127 ? 10 : length === 126 ? 4 : 2) + 4;
 }
 
-/**
- * The frame header at the start of `bytes`, or null when more bytes are needed. Throws a Breach for
- * a header that breaks the protocol, whatever its payload.
- */
-function readHeader(bytes: Buffer): FrameHeader | null {
-  if (bytes.length < 2) return null;
-  const b0 = bytes[0] as number;
-  const b1 = bytes[1] as number;
-  const fin = (b0 & 0x80) !== 0;
-  const opcode = b0 & 0x0f;
+/** The first two bytes of a frame, which are enough to refuse every breach but its length. */
+function checkStart(b0: number, b1: number): void {
   if ((b0 & 0x70) !== 0) throw new Breach(PROTOCOL_ERROR); // no extension gives the bits a meaning
   if ((b1 & 0x80) === 0) throw new Breach(PROTOCOL_ERROR); // a client masks every frame
-  const control = opcode >= CLOSE;
-  if (![CONTINUATION, TEXT, BINARY, CLOSE, PING, PONG].includes(opcode)) {
+  const opcode = b0 & 0x0f;
+  if (!OPCODES.has(opcode)) throw new Breach(PROTOCOL_ERROR);
+  // A control frame is never fragmented and its length takes the 7-bit form (RFC 6455 5.5, 5.2).
+  if (opcode >= CLOSE && ((b0 & 0x80) === 0 || (b1 & 0x7f) > MAX_CONTROL)) {
     throw new Breach(PROTOCOL_ERROR);
   }
-  let length = b1 & 0x7f;
-  let size = 2;
-  if (length === 126) {
-    if (bytes.length < 4) return null;
-    length = bytes.readUInt16BE(2);
-    size = 4;
-  } else if (length === 127) {
-    if (bytes.length < 10) return null;
-    const long = bytes.readBigUInt64BE(2);
-    if (long >> 63n !== 0n) throw new Breach(PROTOCOL_ERROR); // RFC 6455 5.2: the top bit is 0
-    length = Number(long); // inexact above 2^53, but then far above MAX_MESSAGE all the same
-    size = 10;
-  }
-  if (control && (!fin || length > MAX_CONTROL)) throw new Breach(PROTOCOL_ERROR);
-  if (length > MAX_MESSAGE) throw new Breach(TOO_BIG);
-  return { fin, opcode, size: size + 4, length };
+}
+
+/** The payload length a complete header announces. */
+function payloadLength(head: DataView): number {
+  const length = head.getUint8(1) & 0x7f;
+  if (length < 126) return length;
+  if (length === 126) return head.getUint16(2);
+  const high = head.getUint32(2);
+  if (high >= 0x8000_0000) throw new Breach(PROTOCOL_ERROR); // RFC 6455 5.2: the top bit is 0
+  return high * 2 ** 32 + head.getUint32(6); // inexact above 2^53, far above MAX_MESSAGE then
 }
 
 /** A frame the server sends: never masked, never fragmented. */
@@ -247,13 +236,26 @@ function encodeFrame(opcode: number, payload: Uint8Array | string): Buffer {
 
 class Connection implements WebSocketConnection {
   readonly #socket: Duplex;
-  readonly #input = new ByteQueue();
   /** open: messages flow; closing: a close frame was sent, input is dropped; the code is known. */
   #state: 'open' | 'closing' = 'open';
   #closeCode: number | null = null;
-  #fragments: Uint8Array[] | null = null;
-  #fragmentOpcode = TEXT;
-  #fragmentBytes = 0;
+  // The frame being read. Its header is copied into #head, then its payload, unmasked, into
+  // #message (a data frame) or #control. A read, a header and a fragment allocate nothing beyond
+  // the growth of those buffers; only a whole message or control frame gets an array of its own.
+  readonly #head = new Uint8Array(LONGEST_HEADER);
+  readonly #headView = new DataView(this.#head.buffer);
+  #headLength = 0;
+  /** Whether #head holds a whole header, so that the bytes that come are its payload. */
+  #inPayload = false;
+  #fin = false;
+  #opcode = 0;
+  #length = 0;
+  #read = 0;
+  readonly #mask = new Uint8Array(4);
+  /** TEXT or BINARY from a message's first frame until its last; null between messages. */
+  #messageOpcode: number | null = null;
+  readonly #message = new Bytes();
+  readonly #control = new Bytes();
   /** The latest ping's payload while the socket is backed up; its pong goes out at the drain. */
   #pendingPong: Uint8Array | null = null;
   readonly #textListeners: ((text: string) => void)[] = [];
@@ -351,9 +353,7 @@ class Connection implements WebSocketConnection {
   /** Sends a close frame (`code` null: one without a code), ends the socket, reports the code. */
   #closeWith(code: number | null, reason: Uint8Array = new Uint8Array(0)): void {
     if (this.#state !== 'open') return;
-    this.#state = 'closing';
-    this.#input.clear();
-    this.#fragments = null;
+    this.#stopReading();
     if (!this.#socket.destroyed) {
       let payload = new Uint8Array(0);
       if (code !== null) {
@@ -369,10 +369,19 @@ class Connection implements WebSocketConnection {
 
   /** The socket ended or closed without a closing handshake, or after it. */
   #gone(): void {
-    this.#state = 'closing';
-    this.#input.clear();
-    this.#fragments = null;
+    this.#stopReading();
     this.#report(ABNORMAL);
+  }
+
+  /** From now on what comes is dropped; what was gathered is let go. */
+  #stopReading(): void {
+    this.#state = 'closing';
+    this.#inPayload = false;
+    this.#headLength = 0;
+    this.#messageOpcode = null;
+    this.#message.take();
+    this.#control.take();
+    this.#pendingPong = null;
   }
 
   #report(code: number): void {
@@ -383,19 +392,28 @@ class Connection implements WebSocketConnection {
 
   #receive(chunk: Buffer): void {
     if (this.#state !== 'open') return; // after a close frame, what still comes is dropped
-    this.#input.push(chunk);
     try {
+      let at = 0;
       while (this.#state === 'open') {
-        const header = readHeader(this.#input.peek(LONGEST_HEADER));
-        if (header === null) return;
-        this.#checkSequence(header);
-        if (this.#input.length < header.size + header.length) return;
-        const mask = this.#input.take(header.size).subarray(header.size - 4);
-        const payload = this.#input.take(header.length);
-        for (let i = 0; i < payload.length; i++) {
-          payload[i] = (payload[i] as number) ^ (mask[i & 3] as number);
+        if (!this.#inPayload) {
+          at = this.#readHeader(chunk, at);
+          if (!this.#inPayload) return;
         }
-        this.#frame(header, payload);
+        const end = Math.min(chunk.length, at + this.#length - this.#read);
+        if (end > at) {
+          const control = this.#opcode >= CLOSE;
+          const into = control ? this.#control : this.#message;
+          // A last frame's message ends with this payload, so its buffer grows to that size only.
+          const limit =
+            control || this.#fin ? into.length + this.#length - this.#read : MAX_MESSAGE;
+          into.appendUnmasked(chunk, at, end, this.#mask, this.#read, limit);
+          this.#read += end - at;
+          at = end;
+        }
+        if (this.#read < this.#length) return;
+        this.#inPayload = false;
+        this.#headLength = 0;
+        this.#frame();
       }
     } catch (error) {
       if (!(error instanceof Breach)) throw error;
@@ -403,44 +421,69 @@ class Connection implements WebSocketConnection {
     }
   }
 
-  /** Fragmentation rules (RFC 6455 5.4) and the message limit, checked before the payload is read. */
-  #checkSequence({ opcode, length }: FrameHeader): void {
-    if (opcode >= CLOSE) return;
-    if ((opcode === CONTINUATION) !== (this.#fragments !== null)) throw new Breach(PROTOCOL_ERROR);
-    const total = (opcode === CONTINUATION ? this.#fragmentBytes : 0) + length;
-    if (total > MAX_MESSAGE) throw new Breach(TOO_BIG);
+  /**
+   * Copies header bytes from `chunk` at `at` until the header is whole (then #inPayload is true)
+   * or `chunk` is used up; returns where the bytes not taken start.
+   */
+  #readHeader(chunk: Buffer, at: number): number {
+    const head = this.#head;
+    for (;;) {
+      const size = this.#headLength < 2 ? 2 : headerSize(head[1] as number);
+      if (this.#headLength === size) break;
+      if (at === chunk.length) return at;
+      const n = Math.min(size - this.#headLength, chunk.length - at);
+      for (let i = 0; i < n; i++) head[this.#headLength + i] = chunk[at + i] as number;
+      this.#headLength += n;
+      at += n;
+      if (this.#headLength === 2) checkStart(head[0] as number, head[1] as number);
+    }
+    this.#fin = ((head[0] as number) & 0x80) !== 0;
+    this.#opcode = (head[0] as number) & 0x0f;
+    this.#length = payloadLength(this.#headView);
+    this.#read = 0;
+    for (let i = 0; i < 4; i++) this.#mask[i] = head[this.#headLength - 4 + i] as number;
+    this.#checkSequence();
+    this.#inPayload = true;
+    return at;
   }
 
-  #frame({ fin, opcode }: FrameHeader, payload: Uint8Array): void {
-    switch (opcode) {
+  /**
+   * Fragmentation rules (RFC 6455 5.4) and the message limit, checked as soon as the header is
+   * whole, before any of the payload is kept.
+   */
+  #checkSequence(): void {
+    const opcode = this.#opcode;
+    if (opcode >= CLOSE) return;
+    if ((opcode === CONTINUATION) !== (this.#messageOpcode !== null)) {
+      throw new Breach(PROTOCOL_ERROR);
+    }
+    if (this.#message.length + this.#length > MAX_MESSAGE) throw new Breach(TOO_BIG);
+    if (opcode !== CONTINUATION) this.#messageOpcode = opcode;
+  }
+
+  /** The frame whose payload has just been read whole. */
+  #frame(): void {
+    switch (this.#opcode) {
       case CLOSE:
-        this.#peerClose(payload);
+        this.#peerClose(this.#control.take());
         return;
-      case PING:
+      case PING: {
         // A peer that pings and never reads must not make the queue grow with pongs: while the
         // socket is backed up only the latest ping is answered (RFC 6455 5.5.3 allows that).
+        const payload = this.#control.take();
         if (this.#socket.writableNeedDrain) this.#pendingPong = payload;
         else this.#socket.write(encodeFrame(PONG, payload));
         return;
-      case PONG:
-        return;
-      case CONTINUATION: {
-        const fragments = this.#fragments as Uint8Array[];
-        fragments.push(payload);
-        this.#fragmentBytes += payload.length;
-        if (!fin) return;
-        this.#fragments = null;
-        this.#deliver(this.#fragmentOpcode, join(fragments, this.#fragmentBytes));
-        return;
       }
-      default:
-        if (fin) {
-          this.#deliver(opcode, payload);
-          return;
-        }
-        this.#fragments = [payload];
-        this.#fragmentOpcode = opcode;
-        this.#fragmentBytes = payload.length;
+      case PONG:
+        this.#control.take();
+        return;
+      default: {
+        if (!this.#fin) return;
+        const opcode = this.#messageOpcode as number;
+        this.#messageOpcode = null;
+        this.#deliver(opcode, this.#message.take());
+      }
     }
   }
 
@@ -465,15 +508,4 @@ class Connection implements WebSocketConnection {
       for (const listener of this.#binaryListeners) listener(payload);
     }
   }
-}
-
-function join(parts: readonly Uint8Array[], length: number): Uint8Array {
-  if (parts.length === 1) return parts[0] as Uint8Array;
-  const out = new Uint8Array(length);
-  let at = 0;
-  for (const part of parts) {
-    out.set(part, at);
-    at += part.length;
-  }
-  return out;
 }

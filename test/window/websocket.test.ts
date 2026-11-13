@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import type { IncomingMessage } from 'node:http';
 import { connect } from 'node:net';
 import type { Socket } from 'node:net';
+import { duplexPair } from 'node:stream';
 import type { Duplex } from 'node:stream';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -223,8 +225,10 @@ async function raw(
   port: number,
   request: string,
   after: Uint8Array = new Uint8Array(0),
+  /** Keep this end open when the server ends its own (a default client ends at once). */
+  allowHalfOpen = false,
 ): Promise<Raw> {
-  const socket = connect(port, '127.0.0.1');
+  const socket = connect({ port, host: '127.0.0.1', allowHalfOpen });
   t.after(() => socket.destroy());
   const chunks: Buffer[] = [];
   let length = 0;
@@ -259,26 +263,31 @@ async function raw(
 function clientFrame(
   opcode: number,
   payload: Uint8Array = new Uint8Array(0),
-  options: { fin?: boolean; rsv?: number; masked?: boolean; length64?: bigint } = {},
+  options: {
+    fin?: boolean;
+    rsv?: number;
+    masked?: boolean;
+    /** The length announced in the 64-bit form, whatever the payload. */
+    length64?: bigint;
+    /** The form the payload's length is written in; by default the shortest. */
+    form?: 7 | 16 | 64;
+  } = {},
 ): Buffer {
   const { fin = true, rsv = 0, masked = true } = options;
   const first = (fin ? 0x80 : 0) | (rsv << 4) | opcode;
   const maskBit = masked ? 0x80 : 0;
+  const form = options.form ?? (payload.length < 126 ? 7 : payload.length < 65_536 ? 16 : 64);
   let header: Buffer;
-  if (options.length64 !== undefined) {
+  if (options.length64 !== undefined || form === 64) {
     header = Buffer.alloc(10);
     header[1] = maskBit | 127;
-    header.writeBigUInt64BE(options.length64, 2);
-  } else if (payload.length < 126) {
+    header.writeBigUInt64BE(options.length64 ?? BigInt(payload.length), 2);
+  } else if (form === 7) {
     header = Buffer.from([0, maskBit | payload.length]);
-  } else if (payload.length < 65_536) {
+  } else {
     header = Buffer.alloc(4);
     header[1] = maskBit | 126;
     header.writeUInt16BE(payload.length, 2);
-  } else {
-    header = Buffer.alloc(10);
-    header[1] = maskBit | 127;
-    header.writeBigUInt64BE(BigInt(payload.length), 2);
   }
   header[0] = first;
   if (!masked) return Buffer.concat([header, payload]);
@@ -346,6 +355,73 @@ async function rawAnswer(t: TestContext, port: number, request: string): Promise
   return r.response;
 }
 
+/** The headers of the WebSocket endpoint's own answers (ruled, #44). */
+function assertFixedHeaders(answer: string): void {
+  assert.match(answer, /\r\nX-Content-Type-Options: nosniff\r\n/);
+  assert.match(answer, /\r\nX-Frame-Options: DENY\r\n/);
+  assert.match(answer, /\r\nReferrer-Policy: no-referrer\r\n/);
+  assert.match(
+    answer,
+    /\r\nContent-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n/,
+  );
+}
+
+// ---- a direct pair, for reads of an exact size and requests node:http would not pass on ----
+
+interface Direct {
+  /** null when acceptWebSocket refused the request. */
+  accepted: Accepted | null;
+  /** The client's end: what it writes is one read on the server's side. */
+  peer: Duplex;
+  /** The server's side. */
+  socket: Duplex;
+  /** Everything the server wrote, the handshake's answer included. */
+  output(): Buffer;
+}
+
+/** acceptWebSocket on one end of a duplexPair, with a request object built here. */
+function direct(
+  t: TestContext,
+  request: { method?: string; minor?: number; headers?: Record<string, string | undefined> } = {},
+): Direct {
+  const [socket, peer] = duplexPair();
+  t.after(() => {
+    socket.destroy();
+    peer.destroy();
+  });
+  const headers = Object.fromEntries(
+    Object.entries({
+      host: '127.0.0.1:1',
+      upgrade: 'websocket',
+      connection: 'Upgrade',
+      'sec-websocket-key': RFC_KEY,
+      'sec-websocket-version': '13',
+      ...request.headers,
+    }).filter((entry) => entry[1] !== undefined),
+  );
+  const req = {
+    method: request.method ?? 'GET',
+    httpVersionMajor: 1,
+    httpVersionMinor: request.minor ?? 1,
+    headers,
+  } as unknown as IncomingMessage;
+  const chunks: Buffer[] = [];
+  peer.on('data', (chunk: Buffer) => chunks.push(chunk));
+  const conn = acceptWebSocket(req, socket, Buffer.alloc(0));
+  return {
+    accepted: conn === null ? null : record(conn, false),
+    peer,
+    socket,
+    output: () => Buffer.concat(chunks),
+  };
+}
+
+/** The frames the server wrote after its 101 on a direct pair. */
+function framesAfterHandshake(d: Direct): ServerFrame[] {
+  const out = d.output();
+  return serverFrames(out.subarray(out.indexOf('\r\n\r\n') + 4));
+}
+
 describe('WebSocket: the opening handshake', () => {
   test('answers 101 with the accept value of RFC 6455, and negotiates no extension or subprotocol', async (t) => {
     const served = await serve(t);
@@ -370,7 +446,49 @@ describe('WebSocket: the opening handshake', () => {
       r.response,
       /Sec-WebSocket-Extensions|Sec-WebSocket-Protocol|Access-Control-/i,
     );
+    assertFixedHeaders(r.response);
     assert.notEqual(await acceptedOf(served), null);
+  });
+
+  const spellings: [string, Record<string, string>][] = [
+    [
+      'Connection: keep-alive, Upgrade (as Firefox sends it)',
+      { connection: 'keep-alive, Upgrade' },
+    ],
+    ['Upgrade: WebSocket', { upgrade: 'WebSocket' }],
+  ];
+  for (const [name, headers] of spellings) {
+    test(`${name} is an upgrade`, (t) => {
+      const d = direct(t, { headers });
+
+      assert.notEqual(d.accepted, null);
+    });
+  }
+
+  test('an upgrade over HTTP/1.0 → 400, no connection', async (t) => {
+    const d = direct(t, { minor: 0 });
+
+    assert.equal(d.accepted, null);
+    await until('the answer', () => d.output().includes('\r\n\r\n'));
+    assert.match(d.output().toString('latin1'), /^HTTP\/1\.1 400 /);
+  });
+
+  test('a 400 destroys the socket even when the client keeps its end open', async (t) => {
+    const sockets: Duplex[] = [];
+    const served = await serve(t, { beforeAccept: (socket) => sockets.push(socket) });
+
+    const r = await raw(
+      t,
+      served.port,
+      upgradeRequest(served.port, { 'Sec-WebSocket-Version': '8' }),
+      new Uint8Array(0),
+      true,
+    );
+    await served.accepted.next('the upgrade');
+
+    assert.match(r.response, /^HTTP\/1\.1 400 /);
+    await until('the server to destroy its socket', () => sockets[0]?.destroyed === true);
+    assert.equal(r.socket.writableEnded, false, 'the client kept its end open');
   });
 
   test('a ws client that offers permessage-deflate gets no extension', async (t) => {
@@ -422,13 +540,7 @@ describe('WebSocket: the opening handshake', () => {
     );
 
     assert.doesNotMatch(answer, /Access-Control-/i);
-    assert.match(answer, /\r\nX-Content-Type-Options: nosniff\r\n/);
-    assert.match(answer, /\r\nX-Frame-Options: DENY\r\n/);
-    assert.match(answer, /\r\nReferrer-Policy: no-referrer\r\n/);
-    assert.match(
-      answer,
-      /\r\nContent-Security-Policy: default-src 'none';[^\r]*frame-ancestors 'none'\r\n/,
-    );
+    assertFixedHeaders(answer);
   });
 
   test('a frame sent together with the request (the upgrade head) is delivered', async (t) => {
@@ -547,6 +659,35 @@ describe('WebSocket: messages', () => {
     assertMessage(await accepted.messages.next('the message'), { binary: bytes }, 'fragments');
   });
 
+  test('messages after a fragmented one: a second fragmented one, then a whole one', async (t) => {
+    const served = await serve(t, { echo: false });
+    const { ws } = await client(t, served.port);
+    const accepted = await acceptedOf(served);
+
+    ws.send(Buffer.from('ab'), { binary: true, fin: false });
+    ws.send(Buffer.from('cd'), { binary: true, fin: true });
+    ws.send(Buffer.from('ef'), { binary: true, fin: false });
+    ws.send(Buffer.from('gh'), { binary: true, fin: true });
+    ws.send('ij');
+
+    const next = (): Promise<Message> => accepted.messages.next('a message');
+    assertMessage(await next(), { binary: Buffer.from('abcd') }, 'first');
+    assertMessage(await next(), { binary: Buffer.from('efgh') }, 'second');
+    assertMessage(await next(), { text: 'ij' }, 'third');
+  });
+
+  test('fragments that add up to exactly MAX_MESSAGE are one message', async (t) => {
+    const served = await serve(t, { echo: false });
+    const { ws } = await client(t, served.port);
+    const accepted = await acceptedOf(served);
+    const bytes = bytesOf(MAX_MESSAGE);
+
+    ws.send(bytes.subarray(0, MAX_MESSAGE / 2), { binary: true, fin: false });
+    ws.send(bytes.subarray(MAX_MESSAGE / 2), { binary: true, fin: true });
+
+    assertMessage(await accepted.messages.next('the message'), { binary: bytes }, 'fragments');
+  });
+
   test('a byte order mark at the start of a text message is kept', async (t) => {
     const served = await serve(t, { echo: false });
     const { ws } = await client(t, served.port);
@@ -661,6 +802,17 @@ describe('WebSocket: closing', () => {
     assert.equal(await within('onClose', accepted.closed), 1006);
   });
 
+  test('the client ends its side without a close frame → onClose gets 1006 and the server ends too', async (t) => {
+    const served = await serve(t);
+    const r = await raw(t, served.port, upgradeRequest(served.port));
+    const accepted = await acceptedOf(served);
+
+    r.socket.end();
+
+    assert.equal(await within('onClose', accepted.closed), 1006);
+    await until('the server to end its side', () => r.ended());
+  });
+
   test('sending after the close does nothing and does not throw', async (t) => {
     const served = await serve(t);
     const { ws, messages } = await client(t, served.port);
@@ -768,6 +920,11 @@ describe('WebSocket: protocol errors', () => {
       'a 64-bit length with its top bit set',
       clientFrame(OP.binary, new Uint8Array(0), { length64: 1n << 63n }),
     ],
+    ['a ping whose length takes the 16-bit form', clientFrame(OP.ping, bytesOf(5), { form: 16 })],
+    [
+      'a close whose length takes the 64-bit form',
+      clientFrame(OP.close, closePayload(1000), { form: 64 }),
+    ],
   ];
   for (const [name, bytes] of violations) {
     test(`${name} → close 1002`, async (t) => {
@@ -779,6 +936,20 @@ describe('WebSocket: protocol errors', () => {
 
       assert.equal(await serverCloseCode(r), 1002);
       assert.equal(await within('onClose', accepted.closed), 1002);
+      assert.equal(accepted.messages.items.length, 0);
+    });
+  }
+
+  for (const length of [2n ** 32n, 2n ** 32n + 5n, 2n ** 53n + 1n, 2n ** 63n - 1n]) {
+    test(`a 64-bit length of ${length} → close 1009`, async (t) => {
+      const served = await serve(t);
+      const r = await raw(t, served.port, upgradeRequest(served.port));
+      const accepted = await acceptedOf(served);
+
+      r.socket.write(clientFrame(OP.binary, bytesOf(5), { length64: length }));
+
+      assert.equal(await serverCloseCode(r), 1009);
+      assert.equal(await within('onClose', accepted.closed), 1009);
       assert.equal(accepted.messages.items.length, 0);
     });
   }
@@ -896,5 +1067,108 @@ describe('WebSocket: backpressure', () => {
     const pongs = serverFrames(r.received()).filter(isPong);
     assert.equal(pongs.length, 1);
     assertSameBytes((pongs[0] as ServerFrame).payload, payload(pings - 1), 'the latest ping');
+  });
+});
+
+describe('WebSocket: reads of any size', () => {
+  /** Frames with every length form, a fragmented message with a ping inside it, and a close. */
+  const SEQUENCE = Buffer.concat([
+    clientFrame(OP.text, Buffer.from('hi')),
+    clientFrame(OP.binary, Buffer.from([1, 2, 3]), { form: 16 }),
+    clientFrame(OP.text, Buffer.from('ab'), { fin: false, form: 64 }),
+    clientFrame(OP.ping, Buffer.from('p')),
+    clientFrame(OP.continuation, Buffer.from('c€')),
+    clientFrame(OP.close, closePayload(1000)),
+  ]);
+
+  interface Outcome {
+    messages: Message[];
+    replies: { opcode: number; payload: string }[];
+    code: number;
+  }
+
+  /** Feeds `parts` to a fresh connection, one read each, and returns what it did. */
+  async function feed(t: TestContext, parts: Uint8Array[]): Promise<Outcome> {
+    const d = direct(t);
+    const accepted = d.accepted as Accepted;
+    for (const part of parts) d.peer.write(part);
+    const code = await within('onClose', accepted.closed);
+    return {
+      messages: [...accepted.messages.items],
+      replies: framesAfterHandshake(d).map((f) => ({
+        opcode: f.opcode,
+        payload: f.payload.toString('hex'),
+      })),
+      code,
+    };
+  }
+
+  test('the sequence in one read', async (t) => {
+    const outcome = await feed(t, [SEQUENCE]);
+
+    assert.equal(outcome.messages.length, 3);
+    assertMessage(outcome.messages[0] as Message, { text: 'hi' }, 'first');
+    assertMessage(outcome.messages[1] as Message, { binary: Buffer.from([1, 2, 3]) }, 'second');
+    assertMessage(outcome.messages[2] as Message, { text: 'abc€' }, 'third');
+    assert.deepEqual(outcome.replies, [
+      { opcode: OP.pong, payload: Buffer.from('p').toString('hex') },
+      { opcode: OP.close, payload: closePayload(1000).toString('hex') },
+    ]);
+    assert.equal(outcome.code, 1000);
+  });
+
+  test('the sequence split in two at every byte, and one byte per read, does the same', async (t) => {
+    const whole = await feed(t, [SEQUENCE]);
+    const splits: Uint8Array[][] = [];
+    for (let at = 1; at < SEQUENCE.length; at++) {
+      splits.push([SEQUENCE.subarray(0, at), SEQUENCE.subarray(at)]);
+    }
+    splits.push(Array.from(SEQUENCE, (byte) => Uint8Array.of(byte)));
+
+    for (const parts of splits) {
+      const outcome = await feed(t, parts);
+      const name = `${parts.length} reads, the first of ${parts[0]?.length}`;
+      assert.deepEqual(outcome.replies, whole.replies, name);
+      assert.equal(outcome.code, whole.code, name);
+      assert.equal(outcome.messages.length, whole.messages.length, name);
+      whole.messages.forEach((message, i) => {
+        assertMessage(outcome.messages[i] as Message, message, `${name}, message ${i}`);
+      });
+    }
+  });
+
+  test('a frame of 200,000 bytes that arrives one byte per read is read in linear time', async (t) => {
+    const d = direct(t);
+    const accepted = d.accepted as Accepted;
+    const payload = bytesOf(200_000);
+    const frame = clientFrame(OP.binary, payload);
+
+    for (let i = 0; i < frame.length - 1; i++) d.peer.write(frame.subarray(i, i + 1));
+    await until('every byte but the last to be read', () => d.peer.writableLength === 0);
+    const started = performance.now();
+    d.peer.write(frame.subarray(frame.length - 1));
+    const message = await accepted.messages.next('the message');
+    const ms = performance.now() - started;
+
+    assertMessage(message, { binary: payload }, 'one byte per read');
+    assert.ok(ms < 1000, `the last read took ${Math.round(ms)} ms`);
+  });
+
+  test('empty continuation frames keep no memory', async (t) => {
+    const d = direct(t);
+    const accepted = d.accepted as Accepted;
+    const empty = clientFrame(OP.continuation, new Uint8Array(0), { fin: false });
+    const block = Buffer.concat(Array.from({ length: 10_000 }, () => empty));
+
+    d.peer.write(clientFrame(OP.binary, Buffer.from('a'), { fin: false }));
+    await until('the first fragment to be read', () => d.peer.writableLength === 0);
+    const before = process.memoryUsage().heapUsed;
+    for (let i = 0; i < 50; i++) d.peer.write(block); // 500,000 empty fragments
+    await until('every fragment to be read', () => d.peer.writableLength === 0);
+    const grown = process.memoryUsage().heapUsed - before;
+    d.peer.write(clientFrame(OP.continuation, Buffer.from('b')));
+
+    assertMessage(await accepted.messages.next('the message'), { binary: Buffer.from('ab') }, 'ab');
+    assert.ok(grown < 16 * MiB, `the heap grew by ${grown} bytes`);
   });
 });
