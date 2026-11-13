@@ -10,6 +10,13 @@ export interface FlagSpec {
   names: readonly string[]; // every spelling, long and short
   shape: FlagShape;
   remove: boolean; // removed when building a resume command (7.6)
+  /**
+   * The flag picks an existing session or replays one (`--resume`, `--continue`, `--fork-session`,
+   * the deep-link flags, …), so `skydeck new` refuses it (7.7). Always a removed flag. A removed
+   * flag that only says where or how a NEW session starts (`--worktree`, `--tmux`, the cloud flags)
+   * is `false`: a resume drops it, but `new` may pass it.
+   */
+  picksSession: boolean;
   path: boolean; // values are paths made absolute at ingest (5.3)
 }
 
@@ -20,58 +27,130 @@ export interface FlagSpec {
  */
 export const FLAGS: readonly FlagSpec[] = [
   // removed at resume (7.6)
-  { names: ['-r', '--resume'], shape: 'optional', remove: true, path: false },
-  { names: ['-c', '--continue'], shape: 'none', remove: true, path: false },
-  { names: ['--session-id'], shape: 'one', remove: true, path: false },
-  { names: ['--fork-session'], shape: 'none', remove: true, path: false },
-  { names: ['-n', '--name'], shape: 'one', remove: true, path: false },
-  { names: ['-w', '--worktree'], shape: 'optional', remove: true, path: false },
-  { names: ['--bg', '--background'], shape: 'none', remove: true, path: false },
-  { names: ['--from-pr'], shape: 'optional', remove: true, path: false },
+  { names: ['-r', '--resume'], shape: 'optional', remove: true, picksSession: true, path: false },
+  { names: ['-c', '--continue'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['--session-id'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--fork-session'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['-n', '--name'], shape: 'one', remove: true, picksSession: false, path: false },
+  {
+    names: ['-w', '--worktree'],
+    shape: 'optional',
+    remove: true,
+    picksSession: false,
+    path: false,
+  },
+  {
+    names: ['--bg', '--background'],
+    shape: 'none',
+    remove: true,
+    picksSession: false,
+    path: false,
+  },
+  { names: ['--from-pr'], shape: 'optional', remove: true, picksSession: true, path: false },
   // they choose which session is opened or where it runs (D28); --tmux needs -w, which is removed
-  { names: ['--tmux'], shape: 'none', remove: true, path: false },
-  { names: ['--teleport'], shape: 'optional', remove: true, path: false },
-  { names: ['--cloud', '--remote'], shape: 'optional', remove: true, path: false },
-  { names: ['--desktop'], shape: 'none', remove: true, path: false },
-  { names: ['--environment', '--pool'], shape: 'one', remove: true, path: false },
+  { names: ['--tmux'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--teleport'], shape: 'optional', remove: true, picksSession: true, path: false },
+  {
+    names: ['--cloud', '--remote'],
+    shape: 'optional',
+    remove: true,
+    picksSession: false,
+    path: false,
+  },
+  { names: ['--desktop'], shape: 'none', remove: true, picksSession: false, path: false },
+  {
+    names: ['--environment', '--pool'],
+    shape: 'one',
+    remove: true,
+    picksSession: false,
+    path: false,
+  },
   // they choose a session or act once (D28)
-  { names: ['--rewind-files'], shape: 'one', remove: true, path: false },
-  { names: ['--resume-session-at'], shape: 'one', remove: true, path: false },
-  { names: ['--resume-drops-turn'], shape: 'one', remove: true, path: false },
-  { names: ['--reply-on-resume'], shape: 'none', remove: true, path: false },
-  { names: ['--attach-serve'], shape: 'one', remove: true, path: false },
-  { names: ['--session-began-as-copy'], shape: 'one', remove: true, path: false },
-  { names: ['--init-only'], shape: 'none', remove: true, path: false },
-  { names: ['--handle-uri'], shape: 'one', remove: true, path: false },
+  { names: ['--rewind-files'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--resume-session-at'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--resume-drops-turn'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--reply-on-resume'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['--attach-serve'], shape: 'one', remove: true, picksSession: true, path: false },
+  {
+    names: ['--session-began-as-copy'],
+    shape: 'one',
+    remove: true,
+    picksSession: true,
+    path: false,
+  },
+  { names: ['--init-only'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--handle-uri'], shape: 'one', remove: true, picksSession: true, path: false },
   // they only work with the cloud flags above, which are removed
-  { names: ['--ref'], shape: 'one', remove: true, path: false },
-  { names: ['--on-branch'], shape: 'one', remove: true, path: false },
-  { names: ['--correlation-id'], shape: 'one', remove: true, path: false },
-  { names: ['--forward-home-settings'], shape: 'one', remove: true, path: false },
+  { names: ['--ref'], shape: 'one', remove: true, picksSession: false, path: false },
+  { names: ['--on-branch'], shape: 'one', remove: true, picksSession: false, path: false },
+  { names: ['--correlation-id'], shape: 'one', remove: true, picksSession: false, path: false },
+  {
+    names: ['--forward-home-settings'],
+    shape: 'one',
+    remove: true,
+    picksSession: false,
+    path: false,
+  },
   // one-time actions
-  { names: ['--init'], shape: 'none', remove: true, path: false },
-  { names: ['--maintenance'], shape: 'none', remove: true, path: false },
+  { names: ['--init'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--maintenance'], shape: 'none', remove: true, picksSession: false, path: false },
   // deep-link launches carry prompt text, which skydeck never stores (principle 4)
-  { names: ['--deep-link-origin'], shape: 'none', remove: true, path: false },
-  { names: ['--deep-link-repo'], shape: 'one', remove: true, path: false },
-  { names: ['--deep-link-last-fetch'], shape: 'one', remove: true, path: false },
-  { names: ['--deep-link-cwd-b64'], shape: 'one', remove: true, path: false },
-  { names: ['--prefill'], shape: 'one', remove: true, path: false },
-  { names: ['--prefill-b64'], shape: 'one', remove: true, path: false },
+  { names: ['--deep-link-origin'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['--deep-link-repo'], shape: 'one', remove: true, picksSession: true, path: false },
+  {
+    names: ['--deep-link-last-fetch'],
+    shape: 'one',
+    remove: true,
+    picksSession: true,
+    path: false,
+  },
+  { names: ['--deep-link-cwd-b64'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--prefill'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--prefill-b64'], shape: 'one', remove: true, picksSession: true, path: false },
   // path flags (5.3), kept
-  { names: ['--mcp-config'], shape: 'many', remove: false, path: true },
-  { names: ['--add-dir'], shape: 'many', remove: false, path: true },
-  { names: ['--settings'], shape: 'one', remove: false, path: true },
-  { names: ['--plugin-dir'], shape: 'one', remove: false, path: true },
-  { names: ['--plugin-dir-no-mcp'], shape: 'one', remove: false, path: true },
-  { names: ['--system-prompt-file'], shape: 'one', remove: false, path: true },
-  { names: ['--append-system-prompt-file'], shape: 'one', remove: false, path: true },
-  { names: ['--append-subagent-system-prompt-file'], shape: 'one', remove: false, path: true },
+  { names: ['--mcp-config'], shape: 'many', remove: false, picksSession: false, path: true },
+  { names: ['--add-dir'], shape: 'many', remove: false, picksSession: false, path: true },
+  { names: ['--settings'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--plugin-dir'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--plugin-dir-no-mcp'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--system-prompt-file'], shape: 'one', remove: false, picksSession: false, path: true },
+  {
+    names: ['--append-system-prompt-file'],
+    shape: 'one',
+    remove: false,
+    picksSession: false,
+    path: true,
+  },
+  {
+    names: ['--append-subagent-system-prompt-file'],
+    shape: 'one',
+    remove: false,
+    picksSession: false,
+    path: true,
+  },
   // kept, several values
-  { names: ['--allowedTools', '--allowed-tools'], shape: 'many', remove: false, path: false },
-  { names: ['--disallowedTools', '--disallowed-tools'], shape: 'many', remove: false, path: false },
+  {
+    names: ['--allowedTools', '--allowed-tools'],
+    shape: 'many',
+    remove: false,
+    picksSession: false,
+    path: false,
+  },
+  {
+    names: ['--disallowedTools', '--disallowed-tools'],
+    shape: 'many',
+    remove: false,
+    picksSession: false,
+    path: false,
+  },
   ...['--tools', '--betas', '--file', '--channels', '--dangerously-load-development-channels'].map(
-    (name) => ({ names: [name], shape: 'many' as const, remove: false, path: false }),
+    (name) => ({
+      names: [name],
+      shape: 'many' as const,
+      remove: false,
+      picksSession: false,
+      path: false,
+    }),
   ),
   // kept, one value
   ...[
@@ -126,21 +205,46 @@ export const FLAGS: readonly FlagSpec[] = [
     '--messaging-socket-path',
     '--project-config-root',
     '--runner-declares',
-  ].map((name) => ({ names: [name], shape: 'one' as const, remove: false, path: false })),
+  ].map((name) => ({
+    names: [name],
+    shape: 'one' as const,
+    remove: false,
+    picksSession: false,
+    path: false,
+  })),
   // kept, optional value
-  { names: ['-d', '--debug'], shape: 'optional', remove: false, path: false },
-  { names: ['--remote-control', '--rc'], shape: 'optional', remove: false, path: false },
+  { names: ['-d', '--debug'], shape: 'optional', remove: false, picksSession: false, path: false },
+  {
+    names: ['--remote-control', '--rc'],
+    shape: 'optional',
+    remove: false,
+    picksSession: false,
+    path: false,
+  },
   ...['--project', '--prompt-suggestions'].map((name) => ({
     names: [name],
     shape: 'optional' as const,
     remove: false,
+    picksSession: false,
     path: false,
   })),
   // kept, no value
-  { names: ['-p', '--print'], shape: 'none', remove: false, path: false },
-  { names: ['-h', '--help'], shape: 'none', remove: false, path: false },
-  { names: ['-v', '--version', '-V'], shape: 'none', remove: false, path: false },
-  { names: ['-d2e', '--debug-to-stderr'], shape: 'none', remove: false, path: false },
+  { names: ['-p', '--print'], shape: 'none', remove: false, picksSession: false, path: false },
+  { names: ['-h', '--help'], shape: 'none', remove: false, picksSession: false, path: false },
+  {
+    names: ['-v', '--version', '-V'],
+    shape: 'none',
+    remove: false,
+    picksSession: false,
+    path: false,
+  },
+  {
+    names: ['-d2e', '--debug-to-stderr'],
+    shape: 'none',
+    remove: false,
+    picksSession: false,
+    path: false,
+  },
   ...[
     '--verbose',
     '--bare',
@@ -173,7 +277,13 @@ export const FLAGS: readonly FlagSpec[] = [
     '--ax-screen-reader',
     '--plan-mode-required',
     '--hard-fail',
-  ].map((name) => ({ names: [name], shape: 'none' as const, remove: false, path: false })),
+  ].map((name) => ({
+    names: [name],
+    shape: 'none' as const,
+    remove: false,
+    picksSession: false,
+    path: false,
+  })),
 ];
 
 const SPEC_BY_NAME: ReadonlyMap<string, FlagSpec> = new Map(
@@ -488,6 +598,36 @@ export function isPrintRun(argv: readonly string[]): boolean {
   return parseLaunchArgs(argv.slice(1)).some(
     (item) => item.kind === 'flag' && readFlagToken(item.tokens[0] as string).specs.includes(print),
   );
+}
+
+/** A flag found in an argument list: as written (a cluster of short flags: the whole token), and its table entry. */
+export interface FoundFlag {
+  written: string;
+  spec: FlagSpec;
+}
+
+/** Every flag of `args` (WITHOUT the program name), each flag of a cluster such as `-cp` on its own. */
+function flagsIn(args: readonly string[]): FoundFlag[] {
+  return parseLaunchArgs(args).flatMap((item) =>
+    item.kind === 'flag'
+      ? readFlagToken(item.tokens[0] as string).specs.map((spec) => ({ written: item.name, spec }))
+      : [],
+  );
+}
+
+/**
+ * The flags in `args` (WITHOUT the program name) that pick an existing session (`picksSession`), in
+ * order: alone, as `--flag=value`, or inside a cluster of short flags (`-cp`; `written` is then the
+ * whole token). A flag that is another flag's value, or comes after `--`, is not one. `skydeck new`
+ * refuses these (7.7); `--worktree` and the other flags that say where a new session starts are not.
+ */
+export function sessionPickingFlags(args: readonly string[]): FoundFlag[] {
+  return flagsIn(args).filter((found) => found.spec.picksSession);
+}
+
+/** The `--name` / `-n` flags in `args`, found the way `sessionPickingFlags` finds its flags. */
+export function nameFlags(args: readonly string[]): FoundFlag[] {
+  return flagsIn(args).filter((found) => found.spec.names.includes('--name'));
 }
 
 export interface ResumeCommand {

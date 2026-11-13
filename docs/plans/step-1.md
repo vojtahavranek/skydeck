@@ -786,6 +786,13 @@ export interface FlagSpec {
   names: readonly string[];       // every spelling, long and short
   shape: FlagShape;
   remove: boolean;                // removed when building a resume command (7.6)
+  /**
+   * The flag picks an existing session or replays one (`--resume`, `--continue`, `--fork-session`,
+   * the deep-link flags, …), so `skydeck new` refuses it (7.7). Always a removed flag. A removed
+   * flag that only says where or how a NEW session starts (`--worktree`, `--tmux`, the cloud flags)
+   * is `false`: a resume drops it, but `new` may pass it.
+   */
+  picksSession: boolean;
   path: boolean;                  // values are paths made absolute at ingest (5.3)
 }
 
@@ -796,58 +803,58 @@ export interface FlagSpec {
  */
 export const FLAGS: readonly FlagSpec[] = [
   // removed at resume (7.6)
-  { names: ['-r', '--resume'], shape: 'optional', remove: true, path: false },
-  { names: ['-c', '--continue'], shape: 'none', remove: true, path: false },
-  { names: ['--session-id'], shape: 'one', remove: true, path: false },
-  { names: ['--fork-session'], shape: 'none', remove: true, path: false },
-  { names: ['-n', '--name'], shape: 'one', remove: true, path: false },
-  { names: ['-w', '--worktree'], shape: 'optional', remove: true, path: false },
-  { names: ['--bg', '--background'], shape: 'none', remove: true, path: false },
-  { names: ['--from-pr'], shape: 'optional', remove: true, path: false },
+  { names: ['-r', '--resume'], shape: 'optional', remove: true, picksSession: true, path: false },
+  { names: ['-c', '--continue'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['--session-id'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--fork-session'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['-n', '--name'], shape: 'one', remove: true, picksSession: false, path: false },
+  { names: ['-w', '--worktree'], shape: 'optional', remove: true, picksSession: false, path: false },
+  { names: ['--bg', '--background'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--from-pr'], shape: 'optional', remove: true, picksSession: true, path: false },
   // they choose which session is opened or where it runs (D28); --tmux needs -w, which is removed
-  { names: ['--tmux'], shape: 'none', remove: true, path: false },
-  { names: ['--teleport'], shape: 'optional', remove: true, path: false },
-  { names: ['--cloud', '--remote'], shape: 'optional', remove: true, path: false },
-  { names: ['--desktop'], shape: 'none', remove: true, path: false },
-  { names: ['--environment', '--pool'], shape: 'one', remove: true, path: false },
+  { names: ['--tmux'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--teleport'], shape: 'optional', remove: true, picksSession: true, path: false },
+  { names: ['--cloud', '--remote'], shape: 'optional', remove: true, picksSession: false, path: false },
+  { names: ['--desktop'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--environment', '--pool'], shape: 'one', remove: true, picksSession: false, path: false },
   // they choose a session or act once (D28)
-  { names: ['--rewind-files'], shape: 'one', remove: true, path: false },
-  { names: ['--resume-session-at'], shape: 'one', remove: true, path: false },
-  { names: ['--resume-drops-turn'], shape: 'one', remove: true, path: false },
-  { names: ['--reply-on-resume'], shape: 'none', remove: true, path: false },
-  { names: ['--attach-serve'], shape: 'one', remove: true, path: false },
-  { names: ['--session-began-as-copy'], shape: 'one', remove: true, path: false },
-  { names: ['--init-only'], shape: 'none', remove: true, path: false },
-  { names: ['--handle-uri'], shape: 'one', remove: true, path: false },
+  { names: ['--rewind-files'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--resume-session-at'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--resume-drops-turn'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--reply-on-resume'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['--attach-serve'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--session-began-as-copy'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--init-only'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--handle-uri'], shape: 'one', remove: true, picksSession: true, path: false },
   // they only work with the cloud flags above, which are removed
-  { names: ['--ref'], shape: 'one', remove: true, path: false },
-  { names: ['--on-branch'], shape: 'one', remove: true, path: false },
-  { names: ['--correlation-id'], shape: 'one', remove: true, path: false },
-  { names: ['--forward-home-settings'], shape: 'one', remove: true, path: false },
+  { names: ['--ref'], shape: 'one', remove: true, picksSession: false, path: false },
+  { names: ['--on-branch'], shape: 'one', remove: true, picksSession: false, path: false },
+  { names: ['--correlation-id'], shape: 'one', remove: true, picksSession: false, path: false },
+  { names: ['--forward-home-settings'], shape: 'one', remove: true, picksSession: false, path: false },
   // one-time actions
-  { names: ['--init'], shape: 'none', remove: true, path: false },
-  { names: ['--maintenance'], shape: 'none', remove: true, path: false },
+  { names: ['--init'], shape: 'none', remove: true, picksSession: false, path: false },
+  { names: ['--maintenance'], shape: 'none', remove: true, picksSession: false, path: false },
   // deep-link launches carry prompt text, which skydeck never stores (principle 4)
-  { names: ['--deep-link-origin'], shape: 'none', remove: true, path: false },
-  { names: ['--deep-link-repo'], shape: 'one', remove: true, path: false },
-  { names: ['--deep-link-last-fetch'], shape: 'one', remove: true, path: false },
-  { names: ['--deep-link-cwd-b64'], shape: 'one', remove: true, path: false },
-  { names: ['--prefill'], shape: 'one', remove: true, path: false },
-  { names: ['--prefill-b64'], shape: 'one', remove: true, path: false },
+  { names: ['--deep-link-origin'], shape: 'none', remove: true, picksSession: true, path: false },
+  { names: ['--deep-link-repo'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--deep-link-last-fetch'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--deep-link-cwd-b64'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--prefill'], shape: 'one', remove: true, picksSession: true, path: false },
+  { names: ['--prefill-b64'], shape: 'one', remove: true, picksSession: true, path: false },
   // path flags (5.3), kept
-  { names: ['--mcp-config'], shape: 'many', remove: false, path: true },
-  { names: ['--add-dir'], shape: 'many', remove: false, path: true },
-  { names: ['--settings'], shape: 'one', remove: false, path: true },
-  { names: ['--plugin-dir'], shape: 'one', remove: false, path: true },
-  { names: ['--plugin-dir-no-mcp'], shape: 'one', remove: false, path: true },
-  { names: ['--system-prompt-file'], shape: 'one', remove: false, path: true },
-  { names: ['--append-system-prompt-file'], shape: 'one', remove: false, path: true },
-  { names: ['--append-subagent-system-prompt-file'], shape: 'one', remove: false, path: true },
+  { names: ['--mcp-config'], shape: 'many', remove: false, picksSession: false, path: true },
+  { names: ['--add-dir'], shape: 'many', remove: false, picksSession: false, path: true },
+  { names: ['--settings'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--plugin-dir'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--plugin-dir-no-mcp'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--system-prompt-file'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--append-system-prompt-file'], shape: 'one', remove: false, picksSession: false, path: true },
+  { names: ['--append-subagent-system-prompt-file'], shape: 'one', remove: false, picksSession: false, path: true },
   // kept, several values
-  { names: ['--allowedTools', '--allowed-tools'], shape: 'many', remove: false, path: false },
-  { names: ['--disallowedTools', '--disallowed-tools'], shape: 'many', remove: false, path: false },
+  { names: ['--allowedTools', '--allowed-tools'], shape: 'many', remove: false, picksSession: false, path: false },
+  { names: ['--disallowedTools', '--disallowed-tools'], shape: 'many', remove: false, picksSession: false, path: false },
   ...['--tools', '--betas', '--file', '--channels', '--dangerously-load-development-channels'].map(
-    (name) => ({ names: [name], shape: 'many' as const, remove: false, path: false }),
+    (name) => ({ names: [name], shape: 'many' as const, remove: false, picksSession: false, path: false }),
   ),
   // kept, one value
   ...[
@@ -902,21 +909,22 @@ export const FLAGS: readonly FlagSpec[] = [
     '--messaging-socket-path',
     '--project-config-root',
     '--runner-declares',
-  ].map((name) => ({ names: [name], shape: 'one' as const, remove: false, path: false })),
+  ].map((name) => ({ names: [name], shape: 'one' as const, remove: false, picksSession: false, path: false })),
   // kept, optional value
-  { names: ['-d', '--debug'], shape: 'optional', remove: false, path: false },
-  { names: ['--remote-control', '--rc'], shape: 'optional', remove: false, path: false },
+  { names: ['-d', '--debug'], shape: 'optional', remove: false, picksSession: false, path: false },
+  { names: ['--remote-control', '--rc'], shape: 'optional', remove: false, picksSession: false, path: false },
   ...['--project', '--prompt-suggestions'].map((name) => ({
     names: [name],
     shape: 'optional' as const,
     remove: false,
+    picksSession: false,
     path: false,
   })),
   // kept, no value
-  { names: ['-p', '--print'], shape: 'none', remove: false, path: false },
-  { names: ['-h', '--help'], shape: 'none', remove: false, path: false },
-  { names: ['-v', '--version', '-V'], shape: 'none', remove: false, path: false },
-  { names: ['-d2e', '--debug-to-stderr'], shape: 'none', remove: false, path: false },
+  { names: ['-p', '--print'], shape: 'none', remove: false, picksSession: false, path: false },
+  { names: ['-h', '--help'], shape: 'none', remove: false, picksSession: false, path: false },
+  { names: ['-v', '--version', '-V'], shape: 'none', remove: false, picksSession: false, path: false },
+  { names: ['-d2e', '--debug-to-stderr'], shape: 'none', remove: false, picksSession: false, path: false },
   ...[
     '--verbose',
     '--bare',
@@ -949,7 +957,7 @@ export const FLAGS: readonly FlagSpec[] = [
     '--ax-screen-reader',
     '--plan-mode-required',
     '--hard-fail',
-  ].map((name) => ({ names: [name], shape: 'none' as const, remove: false, path: false })),
+  ].map((name) => ({ names: [name], shape: 'none' as const, remove: false, picksSession: false, path: false })),
 ];
 
 export type ParsedArg =
@@ -1020,6 +1028,19 @@ export function unknownFlags(argv: readonly string[]): string[];
  * the RECORDED command: storableArgv drops a cluster that holds a removed flag (`-cp`) as a whole.
  */
 export function isPrintRun(argv: readonly string[]): boolean;
+
+/** A flag found in an argument list: as written (a cluster of short flags: the whole token), and its table entry. */
+export interface FoundFlag { written: string; spec: FlagSpec }
+/**
+ * The flags in `args` (WITHOUT the program name) with `picksSession: true`, in order: alone, as
+ * `--flag=value`, or inside a cluster of short flags (`-cp`: each flag of the cluster is looked at,
+ * and `written` is the whole token `-cp`). A flag that is another flag's value, or comes after `--`,
+ * is not one. `skydeck new` refuses these (7.7); `--worktree` and the other removed flags that only
+ * say where or how a new session starts are not found.
+ */
+export function sessionPickingFlags(args: readonly string[]): FoundFlag[];
+/** The `--name` / `-n` flags in `args`, found the same way (`skydeck new` refuses them too, 7.7). */
+export function nameFlags(args: readonly string[]): FoundFlag[];
 
 export interface ResumeCommand { argv: string[]; flagsKnown: boolean }
 /**
@@ -1705,7 +1726,7 @@ export function sweepLocks(deck: Deck): number;
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }   // kind: ruled in review
 /** checkResumable, acquireLock, buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command). */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;
-/** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` [], `kind` 'new' (prepareResume: 'resume'). UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse, and for an `extra` flag on the flag table's removed list, read with parseLaunchArgs (also inside a short-flag cluster such as `-cp`): "cannot pass <flag>[ (<long name>)] to claude: it chooses the session, its name or where it runs". A prompt (a positional argument) is allowed. */
+/** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` [], `kind` 'new' (prepareResume: 'resume'). UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse, for an `extra` flag that picks an existing session (`sessionPickingFlags`, also inside a short-flag cluster such as `-cp`): "cannot pass <flag>[ (<long name>)] to claude: it picks an existing session; use skydeck resume", and for `--name` / `-n` (`nameFlags`): "cannot pass <flag>[ (<long name>)] to claude: the label is given with --label, and skydeck passes it as the name". The other removed flags (`--worktree`/`-w`, `--tmux`, `--bg`, `--init`, `--init-only`, `--maintenance`, `--desktop`, the cloud flags) only say where or how a new session starts, so they pass, as does a prompt (a positional argument). */
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;
 ```
 
@@ -2362,7 +2383,7 @@ export function procStartFromStat(line: string): number | null;
 export function argvFromCmdline(bytes: Uint8Array): string[];
 // src/claude/launch.ts — FLAGS exactly as in 2.5.2
 export type FlagShape = 'none' | 'one' | 'optional' | 'many';
-export interface FlagSpec { names: readonly string[]; shape: FlagShape; remove: boolean; path: boolean }
+export interface FlagSpec { names: readonly string[]; shape: FlagShape; remove: boolean; picksSession: boolean; path: boolean }
 export const FLAGS: readonly FlagSpec[];
 export type ParsedArg =
   | { kind: 'flag'; spec: FlagSpec | null; name: string; tokens: string[]; values: string[] }
@@ -2372,6 +2393,9 @@ export function absolutizePathFlags(argv: readonly string[], cwd: string | null,
 export function storableArgv(argv: readonly string[]): string[];
 export function unknownFlags(argv: readonly string[]): string[];
 export function isPrintRun(argv: readonly string[]): boolean;
+export interface FoundFlag { written: string; spec: FlagSpec }
+export function sessionPickingFlags(args: readonly string[]): FoundFlag[];   // picksSession flags, clusters included (2.5.2)
+export function nameFlags(args: readonly string[]): FoundFlag[];             // --name / -n
 export interface ResumeCommand { argv: string[]; flagsKnown: boolean }
 export function buildResumeCommand(input: { claudeCommand: string; launch: readonly string[] | null; sessionId: string; label: string | null }): ResumeCommand;
 export function buildNewCommand(input: { claudeCommand: string; sessionId: string; label: string | null; extra: readonly string[] }): string[];
@@ -2410,6 +2434,9 @@ null for: 'https://gitlab.com/o/r/pull/1', 'https://github.com/o/r/issues/1', 'h
 `--mcp-config --add-dir --settings --plugin-dir --plugin-dir-no-mcp --system-prompt-file --append-system-prompt-file --append-subagent-system-prompt-file`;
 the names with `remove: true` are exactly
 `-r --resume -c --continue --session-id --fork-session -n --name -w --worktree --tmux --bg --background --from-pr --teleport --cloud --remote --desktop --environment --pool --rewind-files --resume-session-at --resume-drops-turn --reply-on-resume --attach-serve --session-began-as-copy --init-only --handle-uri --ref --on-branch --correlation-id --forward-home-settings --init --maintenance --deep-link-origin --deep-link-repo --deep-link-last-fetch --deep-link-cwd-b64 --prefill --prefill-b64`;
+the names with `picksSession: true` are exactly
+`-r --resume -c --continue --session-id --fork-session --from-pr --teleport --rewind-files --resume-session-at --resume-drops-turn --reply-on-resume --attach-serve --session-began-as-copy --handle-uri --deep-link-origin --deep-link-repo --deep-link-last-fetch --deep-link-cwd-b64 --prefill --prefill-b64`
+(each of them has `remove: true`; the other removed flags, `-n`/`--name` included, have `picksSession: false`);
 `--remote` shares its spec with `--cloud`, and `--pool` with `--environment`. The fixture
 `test/fixtures/claude/flags-2.1.323.json` is Claude Code 2.1.323's own table (every spelling of
 every root flag, hidden ones included, with its shape): FLAGS has every name of it with the same
@@ -2457,6 +2484,24 @@ flag of its own and not `-d` with a value, `--max-turns` takes one.
 
 The `spec` of a cluster is that of its first flag with `remove: true`, else of its last flag:
 `-pc`, `-rabc` and `-c-model` have `remove: true`, `-pv`, `-dv`, `-p-` and `-p-model` do not.
+
+`sessionPickingFlags` and `nameFlags` (`written`, first spelling of the flag found):
+
+```
+sessionPickingFlags, for every flag with picksSession (each spelling; V = [] for shape none, else ['v']):
+  [name, ...V]            → [[name, flag]]
+  [`${name}=v`]           (long flags with a value) → [[name, flag]]
+  [`-p${x}`], [`-${x}p`]  (no-value short flags, x = the letter) → [[`-p${x}`, flag]], [[`-${x}p`, flag]]
+  [`-${x}abc`]            (short flags with a value) → [[`-${x}`, flag]]
+['-pr','abc'] → [['-pr','-r']]      ['-c-model','opus'] → [['-c-model','-c']]      ['-cw'] → [['-cw','-c']]
+['-w','feat','--model','x','fix the bug'], ['--worktree'], ['-pw'], ['-wfeat'], and every other removed flag
+  that is not picksSession (with a value where it takes one)                                        → []
+['--model','-c'], ['-wc'], ['-nc'], ['--model','x','--','-r','abc']                                → []   (a value, or after `--`)
+['--worktree','-c']                                                                                  → [['-c','-c']]
+['-c','--model','x','--resume','a','--fork-session'] → [['-c','-c'],['--resume','-r'],['--fork-session','--fork-session']]
+nameFlags: ['-n','x'], ['--name=x'], ['-nx'] → [['-n','-n']], [['--name','-n']], [['-n','-n']];  ['-pn','x'] → [['-pn','-n']];
+  ['-w','n','--model','-n','-r','abc'] and ['--model','x','--','-n','x'] → []
+```
 
 `absolutizePathFlags` (`exists` = membership in a given set):
 
@@ -4211,7 +4256,7 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `acquireLock` and `sweepLocks` each read and write inside one transaction; several child processes taking one session's lock at once against one database file: exactly one succeeds, every round, with and without a stale lock and a sweep first.
 - `prepareNew({ label: ' x ', group: 'G', extra: ['--model','opus'] })` → `sessionId '00000000-0000-4000-8000-000000000001'`,
   `cwd` = `platform.cwd`, `argv ['claude','--session-id',<id>,'-n','x','--model','opus']`, `flagsKnown true`, `unknownFlags []`, `kind 'new'`, meta label `'x'` and group `'G'` stored;
-  label `'-x'` → `UsageError` and no meta stored; extra `-r <id>`, `-c`, `-cp`, `--session-id=<uuid>` → `UsageError` naming the flag, no meta stored; `--model x 'prompt'` passes.
+  label `'-x'` → `UsageError` and no meta stored; extra `-r <id>`, `-c`, `-cp`, `--session-id=<uuid>`, and every other flag with `picksSession` (alone, as `--flag=value`, in a cluster) → `UsageError` naming the flag, no meta stored; `-n x`, `--name=x`, `-nx` → `UsageError` that names `--label`; `--model x 'prompt'`, `--worktree`, `-w feat --model x 'prompt'`, `-pw --tmux` and every other removed flag that is not `picksSession` pass.
 
 `commands/resume.test.ts`, `commands/new.test.ts` (`d = testDeck(t, { env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'handoff') }) })`; `await main([...], d.ctx)`)
 - `resume --help`, `new --help` → 0 with the usage.
@@ -4228,7 +4273,8 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - Never a permission flag: the handoff of a session launched without one contains no `--dangerously-skip-permissions` and no `--permission-mode`.
 - `new --label 'fix it' --group ABC-1 -- --model opus` → 0; handoff
   `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> -n 'fix it' --model opus\n`; `meta(<uuid1>)` label `'fix it'`, group `'ABC-1'`.
-- `new --label -x` → 2. `new -- -r <id>` → 2.
+- `new --label -x` → 2. `new -- -r <id>` → 2. `new -- -n x` → 2 and stderr names `--label`. `new -- --worktree` → 0 and the handoff is
+  `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> --worktree\n`; `new -- -w feat --model x 'fix the bug'` → 0, the flags reach the command.
 - After a failed open and after a WezTerm timeout the lock still holds (a second resume → 4); after a timeout no command is printed. `new --tab` timing out → `'skydeck: the new session\'s id is <uuid1>; running skydeck shows whether it started'`.
 
 **Steps**

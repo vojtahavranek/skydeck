@@ -5,9 +5,11 @@ import { isAbsolute } from 'node:path';
 import {
   buildNewCommand,
   buildResumeCommand,
-  parseLaunchArgs,
+  nameFlags,
+  sessionPickingFlags,
   unknownFlags,
 } from '../claude/launch.ts';
+import type { FoundFlag } from '../claude/launch.ts';
 import { isSessionId } from '../claude/live.ts';
 import { ResumeRefusedError, UsageError } from '../platform/errors.ts';
 import { NS_PER_SECOND } from '../platform/time.ts';
@@ -189,27 +191,33 @@ export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
 }
 
 /**
- * Refuses (UsageError naming it) a flag of `extra` that is on the flag table's removed list (7.6):
- * one that chooses which session claude opens, its name or where it runs. `-r <id>` or `-c` would
- * resume an existing session past the guard and the lock (principle 7). A cluster of short flags
- * is refused when any flag in it is (`-cp`). Arguments that are no flag, such as a prompt, pass.
+ * Refuses (UsageError naming it) a flag of `extra` that picks an existing session (7.7): `-r <id>`
+ * or `-c` would resume one past the guard and the lock (principle 7). Refuses `--name` / `-n` too:
+ * the label is given with `--label`, and skydeck passes it as the name itself. A cluster of short
+ * flags is refused when any flag in it is (`-cp`). The flags that only say where or how a new
+ * session starts (`--worktree`, `--tmux`, …) and arguments that are no flag, such as a prompt, pass.
  */
 function refuseSessionFlags(extra: readonly string[]): void {
-  for (const item of parseLaunchArgs(extra)) {
-    if (item.kind === 'flag' && item.spec !== null && item.spec.remove) {
-      const { names } = item.spec;
-      const shown = names.includes(item.name) ? item.name : `${item.name} (${names.at(-1)})`;
-      throw new UsageError(
-        `cannot pass ${shown} to claude: it chooses the session, its name or where it runs`,
-      );
-    }
+  const shown = ({ written, spec }: FoundFlag): string =>
+    spec.names.includes(written) ? written : `${written} (${spec.names.at(-1)})`;
+  const [picking] = sessionPickingFlags(extra);
+  if (picking !== undefined) {
+    throw new UsageError(
+      `cannot pass ${shown(picking)} to claude: it picks an existing session; use skydeck resume`,
+    );
+  }
+  const [name] = nameFlags(extra);
+  if (name !== undefined) {
+    throw new UsageError(
+      `cannot pass ${shown(name)} to claude: the label is given with --label, and skydeck passes it as the name`,
+    );
   }
 }
 
 /**
  * 7.7: platform.uuid(), stores label/group (cleaned) as meta, buildNewCommand, cwd = platform.cwd;
  * `flagsKnown` true, `unknownFlags` []. UsageError, and nothing stored, for a label or group that
- * cleanLabel/cleanGroup refuse and for an extra flag on the removed list (refuseSessionFlags). No
+ * cleanLabel/cleanGroup refuse and for an extra flag that refuseSessionFlags refuses. No
  * meta row is written when there is neither a label nor a group.
  */
 export function prepareNew(

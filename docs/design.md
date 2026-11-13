@@ -515,10 +515,19 @@ every word is quoted by the same function as the printed fallback.
 
 `skydeck new` generates a session id, stores the label and group for it, and starts
 `claude --session-id <uuid> [-n <label>] <flags after -->` in the current directory, with the
-same `--here` / `--tab` choice as resume. It refuses a flag after `--` that resume removes (7.6:
-the flags that choose the session, its name or where it runs, also inside a cluster of short
-flags such as `-cp`): `-r <id>` or `-c` would resume an existing session past the guard and the
-lock (principle 7). A prompt after `--` is passed on; it is the user's own and is never stored.
+same `--here` / `--tab` choice as resume. It refuses a flag after `--` that picks an existing
+session (also inside a cluster of short flags such as `-cp`): `-r <id>` or `-c` would resume an
+existing session past the guard and the lock (principle 7). These are `--resume`/`-r`,
+`--continue`/`-c`, `--session-id`, `--fork-session`, `--from-pr`, `--teleport`, `--rewind-files`,
+`--resume-session-at`, `--resume-drops-turn`, `--reply-on-resume`, `--attach-serve`,
+`--session-began-as-copy`, `--handle-uri`, and the deep-link and prefill flags. It refuses
+`--name`/`-n` too: the label is given with `--label`, and skydeck passes it as the name itself.
+The other flags that resume removes (7.6) only say where or how a new session starts and are
+passed on: `--worktree`/`-w`, `--tmux`, `--bg`, `--init`, `--init-only`, `--maintenance`,
+`--desktop`, and the cloud flags (`--cloud`/`--remote`, `--environment`/`--pool`, `--ref`,
+`--on-branch`, `--correlation-id`, `--forward-home-settings`); a resume drops them because a
+session that already exists must not start in a new worktree or in the cloud a second time. A
+prompt after `--` is passed on; it is the user's own and is never stored.
 When opening its tab times out, `new` prints no command but the new session's id, and says that
 running `skydeck` shows whether it started: a session that never started has nothing to resume.
 

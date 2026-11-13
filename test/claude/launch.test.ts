@@ -8,11 +8,13 @@ import {
   buildResumeCommand,
   FLAGS,
   isPrintRun,
+  nameFlags,
   parseLaunchArgs,
+  sessionPickingFlags,
   storableArgv,
   unknownFlags,
 } from '../../src/claude/launch.ts';
-import type { ParsedArg } from '../../src/claude/launch.ts';
+import type { FoundFlag, ParsedArg } from '../../src/claude/launch.ts';
 
 const allNames = FLAGS.flatMap((spec) => spec.names);
 const namesWhere = (predicate: (spec: (typeof FLAGS)[number]) => boolean): string[] =>
@@ -132,6 +134,136 @@ test('the flags removed at resume are exactly the ones in the design (7.6, D28)'
       '--maintenance',
     ].sort(),
   );
+});
+
+/** What `skydeck new` refuses besides `--name` (7.7): the flags that pick an existing session. */
+const PICKING = [
+  // which session is opened, or replayed
+  '-r',
+  '--resume',
+  '-c',
+  '--continue',
+  '--session-id',
+  '--fork-session',
+  '--from-pr',
+  '--teleport',
+  '--rewind-files',
+  '--resume-session-at',
+  '--resume-drops-turn',
+  '--reply-on-resume',
+  '--attach-serve',
+  '--session-began-as-copy',
+  '--handle-uri',
+  // deep-link launches and prefill
+  '--deep-link-origin',
+  '--deep-link-repo',
+  '--deep-link-last-fetch',
+  '--deep-link-cwd-b64',
+  '--prefill',
+  '--prefill-b64',
+].sort();
+
+test('the flags that pick an existing session are exactly the ones in the design (7.7)', () => {
+  assert.deepEqual(
+    namesWhere((spec) => spec.picksSession),
+    PICKING,
+  );
+});
+
+test('a flag that picks a session is a removed flag, so a resume drops it too', () => {
+  for (const spec of FLAGS.filter((s) => s.picksSession)) {
+    assert.equal(spec.remove, true, spec.names.join(' '));
+  }
+});
+
+/** The arguments that make `name` a flag with its value, by its shape (`v` is the value). */
+function withValue(spec: (typeof FLAGS)[number], name: string): string[] {
+  return spec.shape === 'none' ? [name] : [name, 'v'];
+}
+
+/** [as written, first spelling of the flag] of each flag found. */
+const shown = (found: FoundFlag[]): string[][] =>
+  found.map((flag) => [flag.written, flag.spec.names[0] as string]);
+
+test('sessionPickingFlags finds every flag that picks a session: alone, as --flag=value, in a cluster', () => {
+  for (const spec of FLAGS.filter((s) => s.picksSession)) {
+    for (const name of spec.names) {
+      const first = spec.names[0] as string;
+      assert.deepEqual(shown(sessionPickingFlags(withValue(spec, name))), [[name, first]], name);
+      if (name.startsWith('--') && spec.shape !== 'none') {
+        const glued = shown(sessionPickingFlags([`${name}=v`]));
+        assert.deepEqual(glued, [[name, first]], `${name}=v`);
+      }
+      if (!name.startsWith('--')) {
+        const letter = name.slice(1);
+        if (spec.shape === 'none') {
+          // A no-value short flag can sit in a cluster, in either place.
+          const first2 = shown(sessionPickingFlags([`-p${letter}`]));
+          assert.deepEqual(first2, [[`-p${letter}`, first]], `-p${letter}`);
+          const last = shown(sessionPickingFlags([`-${letter}p`]));
+          assert.deepEqual(last, [[`-${letter}p`, first]], `-${letter}p`);
+        } else {
+          // A short flag with a value takes the rest of its token: `-rabc` is `--resume abc`.
+          assert.deepEqual(shown(sessionPickingFlags([`-${letter}abc`])), [[name, first]], name);
+        }
+      }
+    }
+  }
+});
+
+test('sessionPickingFlags finds a cluster that ends in a flag with a value, and one that continues with a long flag', () => {
+  assert.deepEqual(shown(sessionPickingFlags(['-pr', 'abc'])), [['-pr', '-r']]);
+  assert.deepEqual(shown(sessionPickingFlags(['-c-model', 'opus'])), [['-c-model', '-c']]);
+  assert.deepEqual(shown(sessionPickingFlags(['-cw'])), [['-cw', '-c']]);
+});
+
+test('sessionPickingFlags does not find the flags that say where or how a new session starts', () => {
+  const rest = FLAGS.filter((spec) => spec.remove && !spec.picksSession);
+  assert.ok(rest.length > 0);
+  for (const spec of rest) {
+    for (const name of spec.names) {
+      assert.deepEqual(sessionPickingFlags(withValue(spec, name)), [], name);
+    }
+  }
+  assert.deepEqual(sessionPickingFlags(['-w', 'feat', '--model', 'x', 'fix the bug']), []);
+  assert.deepEqual(sessionPickingFlags(['--worktree']), []);
+  assert.deepEqual(sessionPickingFlags(['-pw']), []);
+  assert.deepEqual(sessionPickingFlags(['-wfeat']), []);
+});
+
+test('sessionPickingFlags reads values, the end of the flags and the order as the parser does', () => {
+  assert.deepEqual(sessionPickingFlags([]), []);
+  assert.deepEqual(sessionPickingFlags(['--model', 'x', 'fix the bug']), []);
+  // another flag's value, or glued to a flag that takes the rest of the token
+  assert.deepEqual(sessionPickingFlags(['--model', '-c']), []);
+  assert.deepEqual(sessionPickingFlags(['-wc']), []);
+  assert.deepEqual(sessionPickingFlags(['-nc']), []);
+  // after `--` everything is a positional argument
+  assert.deepEqual(sessionPickingFlags(['--model', 'x', '--', '-r', 'abc']), []);
+  // a flag with an optional value does not take a flag
+  assert.deepEqual(shown(sessionPickingFlags(['--worktree', '-c'])), [['-c', '-c']]);
+  assert.deepEqual(
+    shown(sessionPickingFlags(['-c', '--model', 'x', '--resume', 'a', '--fork-session'])),
+    [
+      ['-c', '-c'],
+      ['--resume', '-r'],
+      ['--fork-session', '--fork-session'],
+    ],
+  );
+});
+
+test('nameFlags finds --name and -n: alone, as --name=value, glued, in a cluster', () => {
+  assert.deepEqual(shown(nameFlags(['-n', 'x'])), [['-n', '-n']]);
+  assert.deepEqual(shown(nameFlags(['--name', 'x'])), [['--name', '-n']]);
+  assert.deepEqual(shown(nameFlags(['--name=x'])), [['--name', '-n']]);
+  assert.deepEqual(shown(nameFlags(['-nx'])), [['-n', '-n']]);
+  assert.deepEqual(shown(nameFlags(['-pn', 'x'])), [['-pn', '-n']]);
+});
+
+test('nameFlags finds nothing else', () => {
+  assert.deepEqual(nameFlags([]), []);
+  assert.deepEqual(nameFlags(['-w', 'n', '--model', '-n', '-r', 'abc', 'fix the bug']), []);
+  assert.deepEqual(nameFlags(['--model', 'x', '--', '-n', 'x']), []);
 });
 
 test('the removed flags that Claude Code hides (deep link, aliases) have the shapes its parser gives them', () => {

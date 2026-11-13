@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { buildResumeCommand } from '../../src/claude/launch.ts';
+import { FLAGS, buildResumeCommand } from '../../src/claude/launch.ts';
 import { ResumeRefusedError, UsageError } from '../../src/platform/errors.ts';
 import { NS_PER_SECOND } from '../../src/platform/time.ts';
 import type { Ns } from '../../src/platform/types.ts';
@@ -643,21 +643,76 @@ test('prepareNew refuses such a flag inside a cluster of short flags, naming the
   assert.match(refusedExtra(d, ['-pc']), /cannot pass -pc \(--continue\) to claude/);
 });
 
-test('prepareNew refuses --session-id=<uuid> and the other flags on the removed list', (t) => {
+test('prepareNew refuses every flag that picks an existing session: alone, as --flag=value, in a cluster', (t) => {
   const d = testDeck(t);
   assert.match(refusedExtra(d, [`--session-id=${S1}`]), /cannot pass --session-id to claude/);
-  for (const flag of [
-    '--fork-session',
-    '--teleport',
-    '--from-pr',
-    '-n',
-    '--worktree',
-    '--prefill',
-  ]) {
+  const picking = FLAGS.filter((spec) => spec.picksSession);
+  assert.ok(picking.length > 0);
+  for (const spec of picking) {
+    for (const name of spec.names) {
+      const args = spec.shape === 'none' ? [name] : [name, 'v'];
+      assert.match(refusedExtra(d, args), new RegExp(`^cannot pass ${name} to claude: `), name);
+      if (name.startsWith('--') && spec.shape !== 'none') {
+        const glued = refusedExtra(d, [`${name}=v`]);
+        assert.match(glued, new RegExp(`^cannot pass ${name} to claude: `), `${name}=v`);
+      }
+      if (!name.startsWith('--') && spec.shape === 'none') {
+        assert.match(refusedExtra(d, [`-p${name.slice(1)}`]), /^cannot pass -p. \(--/, name);
+      }
+    }
+  }
+});
+
+test('prepareNew says that a refused flag picks an existing session, and what to use instead', (t) => {
+  const d = testDeck(t);
+  assert.equal(
+    refusedExtra(d, ['--fork-session']),
+    'cannot pass --fork-session to claude: it picks an existing session; use skydeck resume',
+  );
+});
+
+test('prepareNew refuses --name and -n and points to --label, which skydeck passes as the name', (t) => {
+  const d = testDeck(t);
+  for (const extra of [['-n', 'x'], ['--name', 'x'], ['--name=x'], ['-nx'], ['-pn', 'x']]) {
     assert.match(
-      refusedExtra(d, [flag, ...(flag === '-n' || flag === '--prefill' ? ['v'] : [])]),
-      new RegExp(`cannot pass ${flag} to claude`),
+      refusedExtra(d, extra),
+      /^cannot pass -?-?\w+ (\(--name\) )?to claude: .*--label/,
+      extra.join(' '),
     );
+  }
+  assert.equal(
+    refusedExtra(d, ['-n', 'x']),
+    'cannot pass -n to claude: the label is given with --label, and skydeck passes it as the name',
+  );
+});
+
+test('prepareNew passes --worktree and the other flags that say where a new session starts', (t) => {
+  const d = testDeck(t);
+  const passed = (extra: string[]): string[] =>
+    prepareNew(d.deck, { label: null, group: null, extra }).argv.slice(3);
+  assert.deepEqual(passed(['--worktree']), ['--worktree']);
+  assert.deepEqual(passed(['-w', 'feat', '--model', 'x', 'fix the bug']), [
+    '-w',
+    'feat',
+    '--model',
+    'x',
+    'fix the bug',
+  ]);
+  assert.deepEqual(passed(['-pw', '--tmux']), ['-pw', '--tmux']);
+});
+
+test('prepareNew passes every removed flag that does not pick a session, except --name', (t) => {
+  const d = testDeck(t);
+  const rest = FLAGS.filter(
+    (spec) => spec.remove && !spec.picksSession && !spec.names.includes('--name'),
+  );
+  assert.ok(rest.length > 0);
+  for (const spec of rest) {
+    for (const name of spec.names) {
+      const extra = spec.shape === 'none' ? [name] : [name, 'v'];
+      const prepared = prepareNew(d.deck, { label: 'x', group: null, extra });
+      assert.deepEqual(prepared.argv.slice(-extra.length), extra, name);
+    }
   }
 });
 

@@ -136,6 +136,49 @@ test('new -- -c, a cluster with -c, and --session-id=<uuid> are refused', async 
   assert.equal(existsSync(handoffPath(d)), false);
 });
 
+test('new -- --from-pr, --fork-session, --prefill-b64=<text> and --teleport are refused too', async (t) => {
+  const d = deck(t);
+  for (const extra of [
+    ['--from-pr', '12'],
+    ['--fork-session'],
+    ['--prefill-b64=Zml4'],
+    ['--teleport'],
+  ]) {
+    assert.equal(await main(['new', '--', ...extra], d.ctx), 2, extra.join(' '));
+    assert.ok(d.stderr().includes('it picks an existing session'), d.stderr());
+  }
+  assert.equal(existsSync(handoffPath(d)), false);
+  assert.deepEqual(d.deck.store.allMeta(), []);
+});
+
+test('new -- -n <name> is refused and points to --label', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--label', 'x', '--', '-n', 'other'], d.ctx), 2);
+  assert.ok(d.stderr().startsWith('skydeck: cannot pass -n to claude:'), d.stderr());
+  assert.ok(d.stderr().includes('--label'), d.stderr());
+  assert.deepEqual(d.deck.store.allMeta(), []);
+  assert.equal(existsSync(handoffPath(d)), false);
+});
+
+test('new -- --worktree starts a session in a new worktree', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--', '--worktree'], d.ctx), 0);
+  assert.equal(
+    handoff(d),
+    `cd -- ${shellQuote(d.platform.cwd)} || exit 1\nexec claude --session-id ${UUID1} --worktree\n`,
+  );
+  assert.equal(d.stderr(), '');
+});
+
+test('new -- -w feat --model x "prompt" passes the flags and the prompt on', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--', '-w', 'feat', '--model', 'x', 'fix the bug'], d.ctx), 0);
+  assert.equal(
+    handoff(d),
+    `cd -- ${shellQuote(d.platform.cwd)} || exit 1\nexec claude --session-id ${UUID1} -w feat --model x 'fix the bug'\n`,
+  );
+});
+
 test('new -- --model x "prompt" passes the flags and the prompt on', async (t) => {
   const d = deck(t);
   assert.equal(await main(['new', '--', '--model', 'x', 'fix the bug'], d.ctx), 0);
