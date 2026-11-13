@@ -402,6 +402,12 @@ test('formatShow: a launch command with a word that needs quoting is quoted', ()
   assert.ok(showText(row).includes("launch:    claude --append-system-prompt 'two words'"));
 });
 
+test('formatShow: an empty launch command reads "unknown" like none', () => {
+  const text = showText(listRow({ id: S1, session: ds({ id: S1, launch: [] }) }));
+  assert.ok(text.includes('\nlaunch:    unknown\n'), text);
+  assert.ok(!text.includes('unknown:'), text);
+});
+
 test('formatShow: "launch: unknown" when no command was recorded', () => {
   const text = showText(listRow({ id: S1 }));
   assert.ok(text.includes('launch:    unknown'), text);
@@ -560,6 +566,12 @@ test('formatShow: a note is sanitised line by line, and its line breaks are kept
     text.endsWith('\nnote:\n  one red\n  two with tab \n  three link\n'),
     JSON.stringify(text),
   );
+});
+
+test('formatShow: a note that is nothing once sanitised leaves no "note:" heading over nothing', () => {
+  const text = showText(listRow({ id: S1, hasNote: true, note: '\x1b[2J\n\x07' }));
+  assert.ok(!text.includes('note:'), JSON.stringify(text));
+  assert.ok(text.endsWith('launch:    unknown\n'), JSON.stringify(text));
 });
 
 test('formatShow: no note, no "note:" line', () => {

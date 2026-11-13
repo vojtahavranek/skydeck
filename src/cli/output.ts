@@ -1,7 +1,7 @@
 // What `skydeck ls` and `skydeck show` print: the stable JSON of design 7.5 (plan 2.10.5) and the
 // text forms. Pure. The strings of a `ListRow` and of a `PrView` were sanitised when the list model
-// was built; what a row carries raw (the note, the launch command, a process's boot id) is
-// sanitised here for the text, and escaped by `jsonText` for the JSON.
+// was built; what a row carries raw (the note, the launch command) is sanitised here for the text,
+// and written with escapes by `jsonText` for the JSON, which also holds a process's boot id.
 import { unknownFlags } from '../claude/launch.ts';
 import { isoFromNs } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
@@ -231,14 +231,14 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
     lines.push(field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}`));
   }
   lines.push(...row.prs.map(prField));
-  // A note is free multi-line text: sanitised line by line, so that its line breaks stay.
-  const note = row.note?.trimEnd() ?? '';
-  if (note !== '') {
-    lines.push('note:');
-    for (const noteLine of note.split('\n')) {
-      const clean = sanitize(noteLine);
-      lines.push(clean.trim() === '' ? '' : INDENT + clean);
-    }
+  // A note is free multi-line text: sanitised line by line, so that its line breaks stay. One that
+  // is nothing once sanitised (only escape sequences) has nothing to show under a heading.
+  const noteLines = (row.note?.trimEnd() ?? '').split('\n').map((line) => {
+    const clean = sanitize(line);
+    return clean.trim() === '' ? '' : INDENT + clean;
+  });
+  if (noteLines.some((line) => line !== '')) {
+    lines.push('note:', ...noteLines);
   }
   return `${lines.join('\n')}\n`;
 }
