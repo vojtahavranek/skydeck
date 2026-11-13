@@ -258,22 +258,30 @@ export function writeKeeperFile(
  * Keepers by their .pid lines (S2 4.2), whatever their state (pidLineState, 2.8), for doctor,
  * uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
  * server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
- * is 'alive' or 'unknown'). Only `terms/<terminal id>.pid` files are read: temporaries, sockets
- * and other names are not lines; a file that does not hold a pid line is skipped; one removed
- * meanwhile is skipped. The boot id is read once; when it cannot be read every line is 'unknown'.
+ * is 'alive' or 'unknown'). Only regular files `terms/<terminal id>.pid` are read: temporaries,
+ * sockets and other names are not lines; a file that does not hold a pid line, or that was removed
+ * meanwhile, is skipped. A file that cannot be read (EACCES, EIO …) is a keeper that cannot be
+ * judged: `line` null, state 'unknown' (ruled, task 15), and the others are still read. The boot id
+ * is read once; when it cannot be read every line is 'unknown'.
  */
 export function listKeeperLines(
   platform: Platform,
   files: RuntimeFiles,
-): { id: string; line: PidLine; state: PidLineState }[] {
+): { id: string; line: PidLine | null; state: PidLineState }[] {
   const bootId = currentBootId(platform.proc);
-  const found: { id: string; line: PidLine; state: PidLineState }[] = [];
+  const found: { id: string; line: PidLine | null; state: PidLineState }[] = [];
   for (const name of platform.files.list(files.termsDir)) {
     const id = PID_FILE.exec(name)?.[1];
     if (id === undefined) continue;
     const path = join(files.termsDir, name);
     if (platform.files.lstat(path)?.kind !== 'file') continue;
-    const text = platform.files.readText(path);
+    let text: string | null;
+    try {
+      text = platform.files.readText(path);
+    } catch {
+      found.push({ id, line: null, state: 'unknown' });
+      continue;
+    }
     const line = text === null ? null : parsePidLine(text);
     if (line === null) continue;
     found.push({ id, line, state: pidLineState(line, platform.proc, bootId) });
@@ -285,13 +293,20 @@ export function listKeeperLines(
  * S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
  * whose socket refuses connections; a line that is 'unknown' never removes anything by itself.
  * A socket is tried only when its line is not 'dead' (a socket without a line, or beside a line
- * that is not a pid line, too). Resolves to the terminal ids whose files it removed, in order.
+ * that is not a pid line, too), never for a keeper whose .pid file cannot be read (nothing of it
+ * is removed), and only ECONNREFUSED is a refusal: a socket whose queue is full
+ * (EAGAIN) or that cannot be reached for another reason belongs to a keeper that may live. A
+ * directory with such a name is neither tried nor removed. Resolves to the terminal ids whose
+ * files it removed, in order.
  */
 export async function removeDeadKeeperFiles(
   platform: Platform,
   runtime: RuntimeFiles,
 ): Promise<string[]> {
-  const states = new Map(listKeeperLines(platform, runtime).map((k) => [k.id, k.state]));
+  const listed = listKeeperLines(platform, runtime);
+  const states = new Map(listed.map((k) => [k.id, k.state]));
+  // A keeper whose line cannot be read is never removed, whatever its socket says (ruled).
+  const unreadable = new Set(listed.filter((k) => k.line === null).map((k) => k.id));
   const ids = new Set<string>();
   for (const name of platform.files.list(runtime.termsDir)) {
     const id = PID_FILE.exec(name)?.[1] ?? SOCK_FILE.exec(name)?.[1];
@@ -299,17 +314,30 @@ export async function removeDeadKeeperFiles(
   }
   const removed: string[] = [];
   for (const id of [...ids].sort()) {
+    if (unreadable.has(id)) continue;
     const sock = runtime.termSock(id);
     const dead =
       states.get(id) === 'dead' ||
-      (platform.files.lstat(sock) !== null && (await refusesConnections(platform, sock)));
+      (isNotDir(platform.files, sock) && (await refusesConnections(platform, sock)));
     if (dead) {
-      platform.files.remove(sock);
-      platform.files.remove(runtime.termPid(id));
-      removed.push(id);
+      const gone = [sock, runtime.termPid(id)].filter((path) => removeNotDir(platform.files, path));
+      if (gone.length > 0) removed.push(id);
     }
   }
   return removed;
+}
+
+/** Whether something other than a directory is at `path`. */
+function isNotDir(files: Files, path: string): boolean {
+  const kind = files.lstat(path)?.kind;
+  return kind !== undefined && kind !== 'dir';
+}
+
+/** Removes what is at `path` unless it is a directory; whether something was removed. */
+function removeNotDir(files: Files, path: string): boolean {
+  if (!isNotDir(files, path)) return false;
+  files.remove(path);
+  return true;
 }
 
 /** Whether connecting to the socket at `path` is refused: nothing listens there any more. */

@@ -9,6 +9,13 @@ import { realPlatform } from '../../src/platform/real.ts';
 import { openDeck } from '../../src/sessions/deck.ts';
 import { takeServerLock } from '../../src/window/runtime.ts';
 
+// Run by hand outside a test it would open the installed store: it runs only in a test sandbox.
+const home = process.env.SKYDECK_HOME;
+if (process.env.SKYDECK_TEST_NO_WINDOWS !== '1' || home === undefined || !home.startsWith('/')) {
+  process.stderr.write('server-lock-child: runs only inside a test sandbox\n');
+  process.exit(2);
+}
+
 const platform = realPlatform();
 const deck = openDeck(platform);
 const procStart = procStartFromStat(platform.proc.stat(platform.pid) ?? '');

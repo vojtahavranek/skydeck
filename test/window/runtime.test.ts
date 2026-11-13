@@ -124,6 +124,25 @@ async function listeningSocket(t: TestContext, platform: Platform, path: string)
   t.after(() => listener.close());
 }
 
+/** `platform` whose files cannot read `unreadable` (EACCES), as a .pid file of another owner. */
+function cannotRead(platform: Platform, unreadable: string): Platform {
+  const realRead = platform.files.readText.bind(platform.files);
+  return {
+    ...platform,
+    files: {
+      ...platform.files,
+      readText: (path) => {
+        if (path === unreadable) {
+          throw Object.assign(new Error(`EACCES: permission denied, open '${path}'`), {
+            code: 'EACCES',
+          });
+        }
+        return realRead(path);
+      },
+    },
+  };
+}
+
 /** The current boot id, which the tests' pid lines carry to be alive. */
 function bootOf(proc: Proc): string {
   const id = proc.bootId();
@@ -277,6 +296,21 @@ test("resolveRuntimeDir 'take' keeps a record while a keeper line in it is unkno
 
   assert.deepEqual(resolveRuntimeDir(failingStat, 'take'), { dir: recorded, rule: 'record' });
   assert.deepEqual(resolveRuntimeDir(noBootId, 'take'), { dir: recorded, rule: 'record' });
+  assert.equal(d.deck.store.getKv('window_runtime_dir'), recorded);
+});
+
+test("resolveRuntimeDir 'take' keeps a record while a keeper line in it cannot be read", async (t) => {
+  const d = testDeck(t, { real: true });
+  const recorded = join(d.sandbox.root, 'run-unreadable');
+  const files = runtimeFiles(recorded);
+  const ended = await liveSleep(t, d.sandbox, d.proc);
+  await ended.end();
+  writePidLine(files, ID_A, keeperLine(ended.pid, ended.procStart, bootOf(d.proc))); // dead
+  writePidLine(files, ID_B, keeperLine(ended.pid, ended.procStart, bootOf(d.proc))); // unreadable
+  d.deck.store.setKv('window_runtime_dir', recorded);
+  const deck: Deck = { ...d.deck, platform: cannotRead(d.platform, files.termPid(ID_B)) };
+
+  assert.deepEqual(resolveRuntimeDir(deck, 'take'), { dir: recorded, rule: 'record' });
   assert.equal(d.deck.store.getKv('window_runtime_dir'), recorded);
 });
 
@@ -677,6 +711,22 @@ test('listKeeperLines reads every terms/<id>.pid with its state, ignoring other 
   ]);
 });
 
+test('listKeeperLines gives a .pid file it cannot read as a line it cannot judge, and goes on', (t) => {
+  const d = testDeck(t);
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  prepareRuntimeDir(d.platform, files);
+  const line = keeperLine(4242, 51234567, BOOT_A);
+  writePidLine(files, ID_A, line);
+  writePidLine(files, ID_B, line);
+
+  const got = listKeeperLines(cannotRead(d.platform, files.termPid(ID_A)), files);
+
+  assert.deepEqual(got, [
+    { id: ID_A, line: null, state: 'unknown' },
+    { id: ID_B, line, state: 'dead' }, // no process 4242 on the fake /proc
+  ]);
+});
+
 test('listKeeperLines gives unknown when the boot id or /proc cannot be read, and [] without terms/', (t) => {
   const d = testDeck(t);
   const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
@@ -785,6 +835,65 @@ test('removeDeadKeeperFiles removes the files of an unknown line whose socket re
   assert.deepEqual(await removeDeadKeeperFiles(noBoot, files), [ID_A]);
   assert.equal(existsSync(files.termPid(ID_A)), false);
   assert.equal(existsSync(files.termSock(ID_A)), false);
+});
+
+test('removeDeadKeeperFiles counts only ECONNREFUSED as a refusal: a full or unreachable socket removes nothing', async (t) => {
+  const d = testDeck(t, { real: true });
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  prepareRuntimeDir(d.platform, files);
+  const live = await liveSleep(t, d.sandbox, d.proc);
+  writePidLine(files, ID_A, keeperLine(live.pid, live.procStart, bootOf(d.proc)));
+  writeFileSync(files.termSock(ID_A), ''); // its socket file
+  writeFileSync(files.termSock(ID_B), ''); // a socket without a line
+  const all = readdirSync(files.termsDir).sort();
+
+  for (const code of ['EAGAIN', 'EACCES', 'ETIMEDOUT', 'ENOENT', 'EMFILE']) {
+    const connectUnix = (): Promise<never> =>
+      Promise.reject(Object.assign(new Error(code), { code }));
+    const failing: Platform = { ...d.platform, net: { ...d.platform.net, connectUnix } };
+    const failingUnknown: Platform = { ...failing, proc: { ...failing.proc, bootId: () => null } };
+
+    assert.deepEqual(await removeDeadKeeperFiles(failing, files), [], code); // alive line
+    assert.deepEqual(await removeDeadKeeperFiles(failingUnknown, files), [], code); // unknown line
+    assert.deepEqual(readdirSync(files.termsDir).sort(), all, code);
+  }
+});
+
+test('removeDeadKeeperFiles leaves a directory named like a socket or a pid line, and goes on', async (t) => {
+  const d = testDeck(t, { real: true });
+  const boot = bootOf(d.proc);
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  prepareRuntimeDir(d.platform, files);
+  const ended = await liveSleep(t, d.sandbox, d.proc);
+  await ended.end();
+  writePidLine(files, ID_A, keeperLine(ended.pid, ended.procStart, boot)); // dead
+  mkdirSync(files.termSock(ID_A));
+  mkdirSync(files.termSock(ID_B)); // a directory alone
+  mkdirSync(files.termPid(ID_C));
+  await refusingSocket(d.platform, files.termSock(ID_C));
+
+  const removed = await removeDeadKeeperFiles(d.platform, files);
+
+  assert.deepEqual(removed, [ID_A, ID_C]);
+  assert.deepEqual(readdirSync(files.termsDir).sort(), [
+    `${ID_A}.sock`,
+    `${ID_B}.sock`,
+    `${ID_C}.pid`,
+  ]);
+});
+
+test('removeDeadKeeperFiles removes nothing of a keeper whose .pid file cannot be read, even when its socket refuses', async (t) => {
+  const d = testDeck(t, { real: true });
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  prepareRuntimeDir(d.platform, files);
+  writePidLine(files, ID_A, keeperLine(4242, 51234567, BOOT_A));
+  await refusingSocket(d.platform, files.termSock(ID_A));
+  writePidLine(files, ID_B, keeperLine(4242, 51234567, `${bootOf(d.proc)}-earlier`)); // dead
+
+  const removed = await removeDeadKeeperFiles(cannotRead(d.platform, files.termPid(ID_A)), files);
+
+  assert.deepEqual(removed, [ID_B]);
+  assert.deepEqual(readdirSync(files.termsDir).sort(), [`${ID_A}.pid`, `${ID_A}.sock`]);
 });
 
 test('removeDeadKeeperFiles of a directory without terms/ removes nothing', async (t) => {
@@ -1031,6 +1140,24 @@ function lineReader(child: ChildProcessWithoutNullStreams): () => Promise<string
       }
     });
 }
+
+test('the lock fixture refuses to run outside a test sandbox, creating nothing', async (t) => {
+  const d = testDeck(t, { real: true });
+  const before = listTree(d.sandbox.root, '');
+
+  for (const env of [
+    d.sandbox.env({ SKYDECK_HOME: undefined }),
+    d.sandbox.env({ SKYDECK_HOME: 'relative' }),
+    d.sandbox.env({ SKYDECK_TEST_NO_WINDOWS: undefined }),
+  ]) {
+    const child = spawn(process.execPath, [CHILD], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+    const [code] = (await once(child, 'close')) as [number | null];
+    assert.deepEqual({ code, stdout }, { code: 2, stdout: '' });
+  }
+  assert.deepEqual(listTree(d.sandbox.root, ''), before);
+});
 
 test('servers taking the lock at once: exactly one gets it, every round, free or stale', async (t) => {
   const d = testDeck(t, { real: true });
