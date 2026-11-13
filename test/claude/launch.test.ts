@@ -122,6 +122,14 @@ test('the flags removed at resume are exactly the ones in the design (7.6, D28)'
       '--session-began-as-copy',
       '--init-only',
       '--handle-uri',
+      // they only work with the cloud flags above, which are removed
+      '--ref',
+      '--on-branch',
+      '--correlation-id',
+      '--forward-home-settings',
+      // one-time actions
+      '--init',
+      '--maintenance',
     ].sort(),
   );
 });
@@ -147,6 +155,12 @@ test('the removed flags that Claude Code hides (deep link, aliases) have the sha
     ['--session-began-as-copy', 'one'],
     ['--init-only', 'none'],
     ['--handle-uri', 'one'],
+    ['--ref', 'one'],
+    ['--on-branch', 'one'],
+    ['--correlation-id', 'one'],
+    ['--forward-home-settings', 'one'],
+    ['--init', 'none'],
+    ['--maintenance', 'none'],
     ['--channels', 'many'],
     ['--dangerously-load-development-channels', 'many'],
     ['--enable-auto-mode', 'none'],
@@ -264,7 +278,7 @@ test('parseLaunchArgs: a short token with an unknown letter is an unknown flag a
   assert.deepEqual(parse(['-Z']), ['U["-Z"] values []']);
 });
 
-test('parseLaunchArgs: a token with an unknown letter is named up to that letter', () => {
+test('parseLaunchArgs: a token with an unknown letter is named by that letter alone', () => {
   const name = (arg: string) => {
     const [item] = parseLaunchArgs([arg]);
     assert.ok(item && item.kind === 'flag', arg);
@@ -273,8 +287,9 @@ test('parseLaunchArgs: a token with an unknown letter is named up to that letter
   };
   assert.equal(name('-Z'), '-Z');
   assert.equal(name('-Zabc'), '-Z');
-  assert.equal(name('-cZ'), '-cZ');
-  assert.equal(name('-cZfix it'), '-cZ');
+  assert.equal(name('-cZ'), '-Z');
+  assert.equal(name('-cZfix it'), '-Z');
+  assert.equal(name('-pvQ'), '-Q');
   assert.equal(name('--frob'), '--frob');
   assert.equal(name('--frob=x'), '--frob');
 });
@@ -324,6 +339,28 @@ test('parseLaunchArgs: a several-value flag takes every token up to the next fla
     'F["--add-dir","a","b"] values ["a","b"]',
     'F["--verbose"] values []',
   ]);
+});
+
+test('parseLaunchArgs: a several-value flag takes its first value whatever it is', () => {
+  assert.deepEqual(parse(['--add-dir', '-x', 'b', '--verbose']), [
+    'F["--add-dir","-x","b"] values ["-x","b"]',
+    'F["--verbose"] values []',
+  ]);
+  assert.deepEqual(parse(['--add-dir', '--model', 'opus']), [
+    'F["--add-dir","--model","opus"] values ["--model","opus"]',
+  ]);
+  assert.deepEqual(parse(['--tools', '--', 'x']), ['F["--tools","--","x"] values ["--","x"]']);
+});
+
+test('parseLaunchArgs: a several-value flag stops at a flag from its second value on', () => {
+  assert.deepEqual(parse(['--add-dir', 'a', '-x', 'b']), [
+    'F["--add-dir","a"] values ["a"]',
+    'U["-x","b"] values ["b"]',
+  ]);
+});
+
+test('parseLaunchArgs: a several-value flag at the end has no value', () => {
+  assert.deepEqual(parse(['--add-dir']), ['F["--add-dir"] values []']);
 });
 
 test('parseLaunchArgs: a several-value flag also takes a trailing prompt (D18)', () => {
@@ -646,6 +683,24 @@ test('buildResumeCommand drops positionals (an initial prompt)', () => {
   assert.deepEqual(resume(['claude', '--', '-p']).argv, R);
 });
 
+test('buildResumeCommand keeps what a several-value flag takes, a first value starting with - included', () => {
+  assert.deepEqual(resume(['claude', '--add-dir', '-scratch', 'b', '--model', 'opus']).argv, [
+    ...R,
+    '--add-dir',
+    '-scratch',
+    'b',
+    '--model',
+    'opus',
+  ]);
+  // Claude Code reads --resume here as a directory, and so does skydeck
+  assert.deepEqual(resume(['claude', '--add-dir', '--resume', 'abc']).argv, [
+    ...R,
+    '--add-dir',
+    '--resume',
+    'abc',
+  ]);
+});
+
 test('buildResumeCommand lets a several-value flag swallow a trailing prompt (D18)', () => {
   assert.deepEqual(resume(['claude', '--add-dir', '/x', 'fix it']).argv, [
     ...R,
@@ -776,6 +831,28 @@ test('buildResumeCommand removes the flags that choose a session or act once', (
   );
 });
 
+test('buildResumeCommand removes the flags that only work with a cloud session, and one-time actions', () => {
+  assert.deepEqual(
+    resume([
+      'claude',
+      '--cloud',
+      '--ref',
+      'main',
+      '--on-branch',
+      'b',
+      '--correlation-id',
+      'c',
+      '--forward-home-settings',
+      'h',
+      '--init',
+      '--maintenance',
+      '--model',
+      'opus',
+    ]).argv,
+    [...R, '--model', 'opus'],
+  );
+});
+
 test('buildResumeCommand keeps the hidden flags that only configure the run, with their values', () => {
   const kept = [
     '--enable-auto-mode',
@@ -786,7 +863,6 @@ test('buildResumeCommand keeps the hidden flags that only configure the run, wit
     '5',
     '--thinking',
     'enabled',
-    '--init',
     '-d2e',
   ];
   assert.deepEqual(resume(['claude', ...kept, 'fix it']).argv, [...R, ...kept]);
@@ -894,7 +970,7 @@ test('storableArgv keeps an unknown flag as its bare name and drops what follows
 test('storableArgv does not store text written after an unknown letter', () => {
   assert.deepEqual(
     storableArgv(['claude', '-cZfix the login bug', '--model', 'opus', '-Zsecret']),
-    ['claude', '-cZ', '--model', 'opus', '-Z'],
+    ['claude', '-Z', '--model', 'opus', '-Z'],
   );
 });
 
@@ -906,8 +982,8 @@ test('storableArgv drops the value of an unknown --flag=value', () => {
   ]);
 });
 
-test('storableArgv cuts a token after its first unknown letter, so no text glued to it is stored', () => {
-  assert.deepEqual(storableArgv(['claude', '-cZ', 'x', '-Zabc', 'y']), ['claude', '-cZ', '-Z']);
+test('storableArgv keeps a token with an unknown letter as that letter alone', () => {
+  assert.deepEqual(storableArgv(['claude', '-cZ', 'x', '-Zabc', 'y']), ['claude', '-Z', '-Z']);
 });
 
 test('storableArgv drops -- and everything after it', () => {
@@ -1031,9 +1107,12 @@ test('unknownFlags names the flags that are in no table, in order, once each', (
   );
 });
 
-test('unknownFlags names a token up to its first unknown letter', () => {
-  assert.deepEqual(unknownFlags(['claude', '-cZ', 'x']), ['-cZ']);
-  assert.deepEqual(unknownFlags(['claude', '-cZfix the login bug', '-Zabc', '-Z']), ['-cZ', '-Z']);
+test('unknownFlags names a short token with an unknown letter by that letter alone', () => {
+  assert.deepEqual(unknownFlags(['claude', '-cZ', 'x']), ['-Z']);
+  assert.deepEqual(unknownFlags(['claude', '-cZfix the login bug', '-Zabc', '-Z', '-pvQ']), [
+    '-Z',
+    '-Q',
+  ]);
 });
 
 test('unknownFlags is empty when every flag is known, and for no flags or no command', () => {
@@ -1121,6 +1200,7 @@ const PIECES = [
   '-n=x',
   '-cZ',
   '-cZfix it',
+  '-pvQ',
   '-Zabc',
   '-Z',
   '-1',
@@ -1169,10 +1249,8 @@ test('random commands keep the properties storableArgv promises (fixed seed)', (
           assert.equal(item.tokens[0], item.name, `bare name: ${text}`);
           const token = item.name;
           if (token.startsWith('-') && !token.startsWith('--')) {
-            const letters = [...token.slice(1)];
-            const knownLetter = (letter: string) => allNames.includes(`-${letter}`);
-            assert.ok(!knownLetter(letters.at(-1) ?? ''), `ends at the unknown letter: ${text}`);
-            assert.ok(letters.slice(0, -1).every(knownLetter), `known letters before it: ${text}`);
+            assert.equal([...token.slice(1)].length, 1, `one unknown letter: ${text}`);
+            assert.ok(!allNames.includes(token), `unknown: ${text}`);
           }
         }
       }

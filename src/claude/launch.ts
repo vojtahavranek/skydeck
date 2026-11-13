@@ -42,6 +42,14 @@ export const FLAGS: readonly FlagSpec[] = [
   { names: ['--session-began-as-copy'], shape: 'one', remove: true, path: false },
   { names: ['--init-only'], shape: 'none', remove: true, path: false },
   { names: ['--handle-uri'], shape: 'one', remove: true, path: false },
+  // they only work with the cloud flags above, which are removed
+  { names: ['--ref'], shape: 'one', remove: true, path: false },
+  { names: ['--on-branch'], shape: 'one', remove: true, path: false },
+  { names: ['--correlation-id'], shape: 'one', remove: true, path: false },
+  { names: ['--forward-home-settings'], shape: 'one', remove: true, path: false },
+  // one-time actions
+  { names: ['--init'], shape: 'none', remove: true, path: false },
+  { names: ['--maintenance'], shape: 'none', remove: true, path: false },
   // deep-link launches carry prompt text, which skydeck never stores (principle 4)
   { names: ['--deep-link-origin'], shape: 'none', remove: true, path: false },
   { names: ['--deep-link-repo'], shape: 'one', remove: true, path: false },
@@ -115,10 +123,6 @@ export const FLAGS: readonly FlagSpec[] = [
     '--input-format',
     '--teammate-mode',
     '--messaging-socket-path',
-    '--ref',
-    '--on-branch',
-    '--correlation-id',
-    '--forward-home-settings',
     '--project-config-root',
     '--runner-declares',
   ].map((name) => ({ names: [name], shape: 'one' as const, remove: false, path: false })),
@@ -140,8 +144,6 @@ export const FLAGS: readonly FlagSpec[] = [
     '--verbose',
     '--bare',
     '--safe-mode',
-    '--init',
-    '--maintenance',
     '--include-hook-events',
     '--include-partial-messages',
     '--forward-subagent-text',
@@ -203,7 +205,7 @@ interface FlagToken {
 /** An unknown flag takes a following plain token, exactly as an optional-value flag does. */
 const UNKNOWN_SHAPE: FlagShape = 'optional';
 
-/** `name` is as much of the token as is the flag: nothing after an unknown letter is classified. */
+/** `name` is as much of the token as can be classified: for a short token, the unknown letter alone. */
 function unknownFlag(token: string, name: string = token): FlagToken {
   return { spec: null, specs: [], name, glued: null, shape: UNKNOWN_SHAPE };
 }
@@ -213,7 +215,7 @@ function unknownFlag(token: string, name: string = token): FlagToken {
  * flag's own name is that flag, whatever its length (`-d2e`). Otherwise a short token is read
  * letter by letter as Claude Code's own parser reads it: a no-value flag lets the cluster go on; a
  * value-taking flag ends it and takes the rest of the token, `=` included, as its value when there
- * is a rest. A letter that is not in the table makes the whole token an unknown flag, named up to that letter. A cluster is
+ * is a rest. A letter that is not in the table makes the whole token an unknown flag, named by that letter alone. A cluster is
  * represented by its first removable flag, else by its last.
  */
 function readFlagToken(token: string): FlagToken {
@@ -237,7 +239,9 @@ function readFlagToken(token: string): FlagToken {
   const specs: FlagSpec[] = [];
   for (let letter = 1; letter < token.length; letter += 1) {
     const spec = SPEC_BY_NAME.get(`-${token[letter]}`);
-    if (spec === undefined) return unknownFlag(token, token.slice(0, letter + 1));
+    if (spec === undefined) {
+      return unknownFlag(token, `-${String.fromCodePoint(token.codePointAt(letter) as number)}`);
+    }
     specs.push(spec);
     const represented = specs.find((s) => s.remove) ?? spec;
     if (spec.shape !== 'none') {
@@ -268,7 +272,8 @@ function valuesEnd(args: readonly string[], start: number, shape: FlagShape): nu
     case 'optional':
       return isPlainToken(args[start]) ? start + 1 : start;
     case 'many': {
-      let end = start;
+      // The first value is taken whatever it is; the others up to the next flag-like token.
+      let end = Math.min(start + 1, args.length);
       while (isPlainToken(args[end])) end += 1;
       return end;
     }
@@ -282,8 +287,9 @@ function valuesEnd(args: readonly string[], start: number, shape: FlagShape): nu
  * - a short flag glued to its value (`-rabc`) is one token that takes nothing more; a cluster of
  *   short flags (`-cp`) is one token (see readFlagToken); `name` is the token without the value;
  * - shape none: no value; one: the next token whatever it is; optional: the next token if it
- *   exists and is not flag-like; many: every following token up to the next flag-like one — a token
- *   is flag-like when it starts with '-' and has more than one character, so a lone '-' is a value;
+ *   exists and is not flag-like; many: the next token whatever it is, then every following token up
+ *   to the next flag-like one — a token is flag-like when it starts with '-' and has more than one
+ *   character, so a lone '-' is a value;
  * - an unknown flag is a flag with spec null; it takes the next token as its value when that
  *   exists and is not flag-like;
  * - '--' and every token after it are positionals;
@@ -368,7 +374,7 @@ function passedOnTokens(args: readonly string[]): string[] {
  * (an initial prompt), `--` and everything after it, and every flag with `remove: true` (with its
  * values) are dropped, so a prompt reaches the database neither as a positional argument nor inside
  * a removed flag such as `--prefill-b64`. A flag that is in no table is stored as its bare name
- * (`--flag=value` as `--flag`, `-cZfix` as `-cZ`): what follows it cannot be classified, and skydeck
+ * (`--flag=value` as `--flag`, `-cZfix` as `-Z`): what follows it cannot be classified, and skydeck
  * never stores text it cannot classify, but the name lets a resume say the flag was not passed on
  * (`unknownFlags`).
  * [] for an empty command. `buildResumeCommand` gives the same result for a command and for
@@ -387,7 +393,7 @@ export function storableArgv(argv: readonly string[]): string[] {
 /**
  * The names of the flags in a recorded or a stored command (program first) that are in no table, in
  * order, each once. A `--flag=value` is named `--flag`; a short token with an unknown letter is
- * named up to that letter (`-cZfix` is `-cZ`). A resume does not pass these on.
+ * named by that letter alone (`-cZfix` is `-Z`). A resume does not pass these on.
  */
 export function unknownFlags(argv: readonly string[]): string[] {
   const names: string[] = [];
