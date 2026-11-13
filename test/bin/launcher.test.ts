@@ -20,7 +20,10 @@ const bootstrap = realpathSync(fileURLToPath(new URL('../../bin/bootstrap.mjs', 
 function launcherSandbox(t: TestContext): Sandbox {
   const s = sandbox(t);
   s.link('dirname', 'readlink', 'mktemp', 'cat', 'rm');
-  return s;
+  // The launcher creates its handoff file in TMPDIR: keep it inside the sandbox.
+  const tmp = join(s.root, 'tmp');
+  mkdirSync(tmp);
+  return { ...s, env: (extra) => s.env({ TMPDIR: tmp, ...extra }) };
 }
 
 function writeFakeNode(path: string, name: string): void {

@@ -193,8 +193,56 @@ describe('bin/skydeck: the handoff', () => {
     assert.equal(result.stdout, '[]\n');
   });
 
-  for (const signal of ['TERM', 'INT', 'HUP']) {
-    test(`${signal} while node runs: exit 130 and no handoff file left`, (t) => {
+  test("the program sees the caller's CDPATH, and none when the caller had none", (t) => {
+    const r = rig(t);
+    handoff(r, {
+      cwd: r.s.root,
+      argv: ['/bin/sh', '-c', 'echo "[${CDPATH-unset}]"'],
+    });
+
+    const withIt = run(r, { STUB_SOURCE: r.source, CDPATH: '.:/usr' });
+    const without = run(r, { STUB_SOURCE: r.source });
+
+    assert.equal(withIt.stdout, '[.:/usr]\n');
+    assert.equal(without.stdout, '[unset]\n');
+  });
+
+  test("variables the caller exported under the launcher's own plain names reach the program unchanged", (t) => {
+    const r = rig(t);
+    const names = [
+      'self',
+      'dir',
+      'target',
+      'root',
+      'linked_node',
+      'node',
+      'cache',
+      'tmp',
+      'handoff',
+      'status',
+      'script',
+    ];
+    handoff(r, {
+      cwd: r.s.root,
+      argv: ['/bin/sh', '-c', names.map((n) => `echo "${n}=$${n}"`).join('; ')],
+    });
+
+    const result = run(r, {
+      STUB_SOURCE: r.source,
+      ...Object.fromEntries(names.map((n) => [n, `mine-${n}`])),
+    });
+
+    assert.equal(result.stdout, names.map((n) => `${n}=mine-${n}\n`).join(''));
+  });
+
+  const signals: ReadonlyArray<readonly [name: string, status: number]> = [
+    ['TERM', 130],
+    ['INT', 130],
+    ['HUP', 130],
+    ['QUIT', 131],
+  ];
+  for (const [signal, status] of signals) {
+    test(`${signal} while node runs: exit ${status} and no handoff file left`, (t) => {
       const r = rig(t);
       const stub = join(r.s.root, 'signalling-node');
       writeFileSync(
@@ -205,7 +253,7 @@ describe('bin/skydeck: the handoff', () => {
 
       const result = run(r, { SKYDECK_NODE: stub });
 
-      assert.equal(result.status, 130);
+      assert.equal(result.status, status);
       assert.ok(readFileSync(r.seen, 'utf8').trim().startsWith(r.tmp));
       assert.deepEqual(leftovers(r), []);
     });
@@ -228,9 +276,19 @@ describe('bin/skydeck: the handoff', () => {
       ['relative (an existing directory, reached relative to the working directory)', () => 'tmp'],
       ['a directory that does not exist', (r) => join(r.s.root, 'no-such-tmp')],
       ['a file, not a directory', (r) => r.stub],
+      [
+        'a directory that cannot be written',
+        (r) => {
+          const dir = join(r.s.root, 'read-only-tmp');
+          mkdirSync(dir);
+          chmodSync(dir, 0o555);
+          return dir;
+        },
+      ],
     ];
+    const isRoot = process.getuid?.() === 0; // root writes anywhere, so the case proves nothing
     for (const [name, tmpdir] of cases) {
-      test(name, (t) => {
+      test(name, { skip: isRoot && name.includes('cannot be written') }, (t) => {
         const r = rig(t);
         handoff(r, { cwd: r.s.root, argv: ['/bin/sh', '-c', 'echo ran'] });
 

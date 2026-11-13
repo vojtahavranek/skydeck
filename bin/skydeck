@@ -13,21 +13,24 @@
 # It also runs the handoff `skydeck resume --here` asks for (design 7.6): node writes a shell
 # fragment to the file named by $SKYDECK_HANDOFF, and once node has exited the launcher runs it, so
 # that `claude` replaces this shell and no wrapper process stays behind.
+#
+# The program the handoff starts gets the caller's environment, apart from SKYDECK_HANDOFF (unset
+# before it runs). So the launcher's own shell variables carry a `skydeck_` prefix: a variable the
+# caller exported under a plain name such as `status` or `cache` is changed by an assignment here,
+# and the changed value would be inherited. CDPATH is unset only where a `cd` needs it unset.
 
-# A set CDPATH would make the relative `cd`s below land in the wrong directory.
-unset CDPATH
-
-# Find the real location of this file; it may be reached through (a chain of) symlinks.
-self=$0
-while [ -h "$self" ]; do
-  dir=$(cd -P -- "$(dirname -- "$self")" && pwd) || exit 1
-  target=$(readlink -- "$self") || exit 1
-  case $target in
-    /*) self=$target ;;
-    *) self=$dir/$target ;;
+# Find the real location of this file; it may be reached through (a chain of) symlinks. A set
+# CDPATH would make the relative `cd`s land in the wrong directory, so it is unset inside them.
+skydeck_self=$0
+while [ -h "$skydeck_self" ]; do
+  skydeck_dir=$(unset CDPATH; cd -P -- "$(dirname -- "$skydeck_self")" && pwd) || exit 1
+  skydeck_target=$(readlink -- "$skydeck_self") || exit 1
+  case $skydeck_target in
+    /*) skydeck_self=$skydeck_target ;;
+    *) skydeck_self=$skydeck_dir/$skydeck_target ;;
   esac
 done
-root=$(cd -P -- "$(dirname -- "$self")/.." && pwd) || exit 1
+skydeck_root=$(unset CDPATH; cd -P -- "$(dirname -- "$skydeck_self")/.." && pwd) || exit 1
 
 # True if $1 can be run: an executable regular file when it is a path, a command on PATH when it
 # is a bare name. (`-x` alone is true for directories, and `command -v` of a path only checks that
@@ -42,24 +45,24 @@ runnable() {
 # D26: SKYDECK_HOME and XDG_DATA_HOME count only when they are absolute paths (which also rules out
 # an empty value); a relative one would depend on the directory the user happens to be in.
 case ${SKYDECK_HOME:-} in
-  /*) linked_node=$SKYDECK_HOME/data/node ;;
+  /*) skydeck_linked_node=$SKYDECK_HOME/data/node ;;
   *)
     case ${XDG_DATA_HOME:-} in
-      /*) linked_node=$XDG_DATA_HOME/skydeck/node ;;
-      *) linked_node=$HOME/.local/share/skydeck/node ;;
+      /*) skydeck_linked_node=$XDG_DATA_HOME/skydeck/node ;;
+      *) skydeck_linked_node=$HOME/.local/share/skydeck/node ;;
     esac
     ;;
 esac
 if [ -n "${SKYDECK_NODE:-}" ]; then
-  node=$SKYDECK_NODE
-elif runnable "$linked_node"; then
-  node=$linked_node
+  skydeck_node=$SKYDECK_NODE
+elif runnable "$skydeck_linked_node"; then
+  skydeck_node=$skydeck_linked_node
 else
-  node=node
+  skydeck_node=node
 fi
 
-if ! runnable "$node"; then
-  echo "skydeck: cannot run '$node'; install Node.js or set SKYDECK_NODE to a node binary." >&2
+if ! runnable "$skydeck_node"; then
+  echo "skydeck: cannot run '$skydeck_node'; install Node.js or set SKYDECK_NODE to a node binary." >&2
   exit 127
 fi
 
@@ -67,11 +70,11 @@ fi
 # It is given to node alone below, not exported: the program the --here handoff starts must not
 # inherit skydeck's cache, but a NODE_COMPILE_CACHE the user set is theirs and stays as it was.
 if [ -n "${NODE_COMPILE_CACHE:-}" ]; then
-  cache=$NODE_COMPILE_CACHE
+  skydeck_cache=$NODE_COMPILE_CACHE
 else
   case ${XDG_CACHE_HOME:-} in
-    /*) cache=$XDG_CACHE_HOME/skydeck/compile-cache ;;
-    *) cache=$HOME/.cache/skydeck/compile-cache ;;
+    /*) skydeck_cache=$XDG_CACHE_HOME/skydeck/compile-cache ;;
+    *) skydeck_cache=$HOME/.cache/skydeck/compile-cache ;;
   esac
 fi
 
@@ -80,23 +83,27 @@ fi
 # then runs it, so no handoff file outlives the launcher, and the exec'd program does not inherit
 # the variable. Without a handoff the launcher exits with node's status.
 # $TMPDIR is used only when it is an absolute path to a directory (a relative one would name another
-# file once the handoff has changed directory); otherwise the file goes to /tmp.
-tmp=/tmp
+# file once the handoff has changed directory); if the file cannot be created there, or $TMPDIR is
+# unusable, it goes to /tmp, and only a failure there ends the launcher.
+skydeck_tmp=/tmp
 case ${TMPDIR:-} in
-  /*) if [ -d "$TMPDIR" ]; then tmp=$TMPDIR; fi ;;
+  /*) if [ -d "$TMPDIR" ]; then skydeck_tmp=$TMPDIR; fi ;;
 esac
-handoff=$(mktemp "$tmp/skydeck-handoff.XXXXXX") || exit 1
-trap 'rm -f -- "$handoff"' EXIT
+skydeck_handoff=$(mktemp "$skydeck_tmp/skydeck-handoff.XXXXXX" 2>/dev/null ||
+  mktemp /tmp/skydeck-handoff.XXXXXX) || exit 1
+trap 'rm -f -- "$skydeck_handoff"' EXIT
 trap 'exit 130' HUP INT TERM
-SKYDECK_HANDOFF=$handoff
+trap 'exit 131' QUIT
+SKYDECK_HANDOFF=$skydeck_handoff
 export SKYDECK_HANDOFF
-status=0
-NODE_COMPILE_CACHE=$cache "$node" "$root/bin/bootstrap.mjs" "$@" || status=$?
-if [ -s "$handoff" ]; then
-  script=$(cat -- "$handoff")
-  rm -f -- "$handoff"
+skydeck_status=0
+NODE_COMPILE_CACHE=$skydeck_cache "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@" ||
+  skydeck_status=$?
+if [ -s "$skydeck_handoff" ]; then
+  skydeck_script=$(cat -- "$skydeck_handoff")
+  rm -f -- "$skydeck_handoff"
   trap - EXIT
   unset SKYDECK_HANDOFF
-  eval "$script"
+  eval "$skydeck_script"
 fi
-exit "$status"
+exit "$skydeck_status"

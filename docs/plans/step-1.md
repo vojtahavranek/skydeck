@@ -1660,32 +1660,40 @@ exec claude --resume 0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d -n 'my label' --model 
 (the directory and every word through `shellQuote`). `bin/skydeck` (task 7) behaves exactly like this reference:
 
 ```sh
-tmp=/tmp
+skydeck_tmp=/tmp
 case ${TMPDIR:-} in
-  /*) if [ -d "$TMPDIR" ]; then tmp=$TMPDIR; fi ;;
+  /*) if [ -d "$TMPDIR" ]; then skydeck_tmp=$TMPDIR; fi ;;
 esac
-handoff=$(mktemp "$tmp/skydeck-handoff.XXXXXX") || exit 1
-trap 'rm -f -- "$handoff"' EXIT
+skydeck_handoff=$(mktemp "$skydeck_tmp/skydeck-handoff.XXXXXX" 2>/dev/null ||
+  mktemp /tmp/skydeck-handoff.XXXXXX) || exit 1
+trap 'rm -f -- "$skydeck_handoff"' EXIT
 trap 'exit 130' HUP INT TERM
-SKYDECK_HANDOFF=$handoff
+trap 'exit 131' QUIT
+SKYDECK_HANDOFF=$skydeck_handoff
 export SKYDECK_HANDOFF
-status=0
-NODE_COMPILE_CACHE=$cache "$node" "$root/bin/bootstrap.mjs" "$@" || status=$?
-if [ -s "$handoff" ]; then
-  script=$(cat -- "$handoff")
-  rm -f -- "$handoff"
+skydeck_status=0
+NODE_COMPILE_CACHE=$skydeck_cache "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@" ||
+  skydeck_status=$?
+if [ -s "$skydeck_handoff" ]; then
+  skydeck_script=$(cat -- "$skydeck_handoff")
+  rm -f -- "$skydeck_handoff"
   trap - EXIT
   unset SKYDECK_HANDOFF
-  eval "$script"
+  eval "$skydeck_script"
 fi
-exit "$status"
+exit "$skydeck_status"
 ```
 
-`$TMPDIR` counts only when it is an absolute path to a directory, else the file goes to `/tmp`.
-`$cache` is the compile-cache path computed above the block (`$NODE_COMPILE_CACHE` when non-empty,
-else `$XDG_CACHE_HOME/skydeck/compile-cache` when `XDG_CACHE_HOME` is absolute, else
+`$TMPDIR` counts only when it is an absolute path to a directory; if the file cannot be created
+there (or `$TMPDIR` is unusable) it goes to `/tmp`, and only a failure there ends the launcher with
+status 1. `$skydeck_cache` is the compile-cache path computed above the block (`$NODE_COMPILE_CACHE`
+when non-empty, else `$XDG_CACHE_HOME/skydeck/compile-cache` when `XDG_CACHE_HOME` is absolute, else
 `$HOME/.cache/skydeck/compile-cache`); it is given to node alone and is not exported, so the program
-the handoff starts does not inherit it.
+the handoff starts does not inherit it. The launcher's own shell variables carry the `skydeck_`
+prefix (`skydeck_self`, `skydeck_root`, `skydeck_node`, …): the program the handoff starts gets the
+caller's environment except `SKYDECK_HANDOFF`, and an assignment to a plain name the caller had
+exported (`status`, `cache`) would change what it inherits. `CDPATH` is unset only inside the
+command substitutions that `cd`, never for the program.
 
 #### 2.10.4 Lock file
 
@@ -2527,7 +2535,8 @@ no message text is kept.
   programs the handoff block uses; add cases: a relative `SKYDECK_HOME` does not select
   `<SKYDECK_HOME>/data/node`, and a relative `XDG_DATA_HOME` does not select `<XDG_DATA_HOME>/skydeck/node`
   (both fall back to `$HOME/.local/share/skydeck/node`); a relative `XDG_CACHE_HOME` is ignored for the
-  compile cache, and an empty `NODE_COMPILE_CACHE` counts as unset
+  compile cache, and an empty `NODE_COMPILE_CACHE` counts as unset; `launcherSandbox` puts `TMPDIR` inside the
+  sandbox
 - Modify: `docs/design.md` 7.6 (D5: the sentence "Commands are always run as argument lists, never through a shell string" becomes "commands are run as argument lists; the one exception is the `--here` handoff, a generated `sh` fragment in which every word is quoted by the same function as the printed fallback"; D15)
 - Test: `test/text/text.test.ts`, `test/terminals/terminals.test.ts`, `test/bin/launcher-handoff.test.ts`
 
@@ -2619,10 +2628,12 @@ is a script the test writes: `#!/bin/sh` + `echo "$SKYDECK_HANDOFF" > "$STUB_SEE
 2. No `STUB_SOURCE`, `STUB_STATUS=7` → exit 7, empty stdout, nothing left in `TMPDIR`.
 3. A handoff whose `cwd` does not exist → exit 1, nothing left in `TMPDIR`.
 4. The path in `STUB_SEEN` starts with `<TMPDIR>/skydeck-handoff.`; with `TMPDIR` unset, empty, relative, naming
-   a directory that does not exist, or naming a file, it starts with `/tmp/skydeck-handoff.` and the file is gone afterwards.
+   a directory that does not exist, naming a file, or naming a directory that cannot be written (skipped as root), it starts with `/tmp/skydeck-handoff.` and the file is gone afterwards.
 5. The program the handoff starts replaces the launcher (`echo $$` prints the launcher's pid), does not see
    `SKYDECK_HANDOFF`, and does not see `NODE_COMPILE_CACHE` unless the caller set it (the caller's value, even an empty one, is left as it was).
-   A TERM, INT or HUP sent to the launcher while node runs ends it with status 130 and leaves no handoff file.
+   A TERM, INT or HUP sent to the launcher while node runs ends it with status 130, a QUIT with 131, and leaves no handoff file.
+   The program sees the caller's `CDPATH`, and variables the caller exported under the launcher's former plain names
+   (`status`, `cache`, `handoff`, …) unchanged.
 6. The scaffold's `test/bin/launcher.test.ts` (with the three extra links) and `test/bin/bootstrap.test.ts` still pass.
 
 **Steps**
