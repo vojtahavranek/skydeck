@@ -2,13 +2,14 @@
 // lost — are recorded from Claude Code's live-session files as `observed` events. Nothing that
 // comes from one live process stops the reconcile: the whole handling of one (looking at it and
 // saving its event) is guarded, and an error is recorded for doctor (problems.ts) and that process
-// skipped.
+// skipped. A failure of the database as a whole (isDatabaseFailure) ends the command at once.
 import { absolutizePathFlags, storableArgv } from '../claude/launch.ts';
 import { isLiveFileTrusted, readLiveFiles } from '../claude/live.ts';
 import type { LiveFile } from '../claude/live.ts';
 import { argvFromCmdline } from '../claude/procstat.ts';
 import { NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns, Platform } from '../platform/types.ts';
+import { isDatabaseFailure } from '../store/store.ts';
 import type { Deck } from './deck.ts';
 import { describeError, recordProblems } from './problems.ts';
 
@@ -26,7 +27,7 @@ const SETTLE_NS = 2n * NS_PER_SECOND;
  *
  * Never throws for one process: an error while looking at one or saving its event (the store's
  * included) is recorded in kv `reconcile_problems` (replaced on every run) and the next one is
- * looked at. Without a boot id nothing is reconciled, and that is recorded too.
+ * looked at. A failure of the database as a whole is thrown at once. Without a boot id nothing is reconciled, and that is recorded too.
  */
 export function reconcile(deck: Deck): { observed: number } {
   const { platform, store } = deck;
@@ -46,6 +47,9 @@ export function reconcile(deck: Deck): { observed: number } {
         observed++;
       }
     } catch (error) {
+      if (isDatabaseFailure(error)) {
+        throw error; // not about this process: every other one would wait and fail the same way
+      }
       problems.push(`process ${file.pid}: ${describeError(error)}`);
     }
   }

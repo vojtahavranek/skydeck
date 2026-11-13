@@ -295,3 +295,24 @@ test('a process another refresh recorded in the meantime is not recorded twice',
   assert.deepEqual(reconcile(deck), { observed: 0 });
   assert.equal(observed(d).length, 1);
 });
+
+/** What node:sqlite throws while another connection holds the write lock. */
+const locked = (): Error =>
+  Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });
+
+test('a failure of the database itself ends the reconcile at once', (t) => {
+  const d = setup(t);
+  d.proc.setProcess(4343, { stat: statLine(4343, START), cmdline: ['claude'] });
+  live(d, { pid: 4343, sessionId: S2 });
+  let attempts = 0;
+  const deck = deckWith(d.deck, {
+    store: {
+      insertEvent: () => {
+        attempts++;
+        throw locked();
+      },
+    },
+  });
+  assert.throws(() => reconcile(deck), /database is locked/);
+  assert.equal(attempts, 1);
+});

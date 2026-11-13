@@ -753,6 +753,13 @@ export interface Store {
  * SCHEMA_VERSION ("the database was written by a newer skydeck").
  */
 export function openStore(path: string): Store;
+/**
+ * (Task 8.) Whether an error a Store method threw is a failure of the database as a whole —
+ * node:sqlite's `ERR_SQLITE_ERROR` with a primary result code (`errcode & 0xff`) of BUSY, LOCKED,
+ * READONLY, IOERR, CORRUPT, FULL, CANTOPEN or NOTADB — rather than of the one row being written.
+ * Code that records and skips the errors of one item rethrows these at once.
+ */
+export function isDatabaseFailure(error: unknown): boolean;
 ```
 
 ### 2.5 `src/claude/`
@@ -1483,8 +1490,9 @@ export interface IngestResult { ingested: number; duplicates: number; bad: numbe
  * older than one hour (age = modification time against the platform clock; a younger temporary
  * file may belong to a running hook). The removals are not counted in the result.
  * Never throws for one file: one that cannot be read or parsed for any reason goes to bad/; one
- * whose row cannot be saved (any error, the store's included) stays in the spool; every problem is
- * recorded in kv `ingest_problems`.
+ * whose row cannot be saved (any error the row causes, the store's included) stays in the spool;
+ * every problem is recorded in kv `ingest_problems`. A failure of the database as a whole
+ * (`isDatabaseFailure`) is thrown at once.
  */
 export function ingestSpool(deck: Deck): IngestResult;
 
@@ -1512,7 +1520,7 @@ export interface RefreshResult { ingest: IngestResult; observed: number; scan: S
 /**
  * ingestSpool, reconcile, scanTranscripts — in this order (5.3). Task 16 adds sweepLocks at the end.
  * Never throws for one spool file, process or transcript, whatever fails (reading, deriving or
- * saving it); only the steps' own reads and kv writes around the items can still throw.
+ * saving it); a failure of the database itself (`isDatabaseFailure`) ends the command.
  */
 export function refresh(deck: Deck, progress?: (done: number, total: number) => void): RefreshResult;
 ```
@@ -2668,6 +2676,7 @@ export interface Store {
   addToKv(key: KvKey, delta: number): void;
 }
 export function openStore(path: string): Store;   // throws SkydeckError (exit 1) for a newer schema
+export function isDatabaseFailure(error: unknown): boolean;   // added by task 8
 ```
 
 Implementation notes that are part of the contract: open with `new DatabaseSync(path, { readBigInts: true })`
@@ -3063,7 +3072,8 @@ handoff file outlives the launcher.
   `src/sessions/scan.ts`, `src/sessions/refresh.ts`, `src/sessions/problems.ts` (private: the kv
   problem lines)
 - Create: `test/helpers/deck.ts`
-- Modify: `src/store/types.ts` (`KvKey`: the three problem keys)
+- Modify: `src/store/types.ts` (`KvKey`: the three problem keys), `src/store/store.ts`
+  (`isDatabaseFailure`, ruled at review), `test/store/store.test.ts` (its tests)
 - Modify: `docs/design.md` 5.4 (D21) and the `src/sessions/` row of 11 (D25)
 - Test: `test/sessions/deck.test.ts`, `test/sessions/ingest.test.ts`, `test/sessions/reconcile.test.ts`, `test/sessions/scan.test.ts`, `test/sessions/refresh.test.ts`
 
@@ -3116,14 +3126,18 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 - **One item never stops a refresh.** A refresh that throws makes every command fail, so nothing
   that comes from one spool file, one live process, one folder or one transcript escapes as an
   exception. The whole handling of one item — reading, deriving AND saving it — is guarded, so an
-  error the store throws for one item counts as that item's error. The item is skipped (a spool
+  error the store throws for one item counts as that item's error — except a failure of the
+  database as a whole (`isDatabaseFailure` from `src/store/store.ts`: locked, read-only, I/O,
+  corrupt, full, cannot open, not a database), which is rethrown at once: caught per item, every
+  item would wait out the 5 s busy timeout and fail the same way. The item is skipped (a spool
   file that cannot be read or parsed is moved to `badDir`; one whose row cannot be saved, moved or
   removed stays in the spool; a transcript keeps its row as it was) and one line naming it and the
-  reason (an error code, or the error's name and message; never content) is recorded. Each step replaces its own kv key at its end:
+  reason (an errno code such as `EACCES`, else the error's name and message; never content) is
+  recorded. Each step replaces its own kv key at its end:
   `ingest_problems`, `reconcile_problems`, `scan_problems` (a JSON array of at most 20 strings —
   past 20, the first 19 and `… and <n> more`; a reason is cut at 200 characters; deleted when there
-  is none; written only when it changes). `doctor` (task 17) shows them. Only what each step does
-  around the items (listing the rows at its start, its kv writes at its end) can still throw. A
+  is none; written only when it changes). `doctor` (task 17) shows them. What each step does
+  around the items (listing the rows at its start, its kv writes at its end) is not guarded. A
   `null` boot id is recorded as `cannot read the boot id: reconcile skipped`. A bad file moved in
   this run is kept until the next run whatever its age; a scripted run is counted once its file is
   removed.
@@ -3209,7 +3223,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
     cmdline `['claude','--prefill-b64=Zml4','--model','opus']` → `['claude','--model','opus']`.
 11. `proc.cmdline` throws for 4242 while 4343 (S2) is fine → `{ observed: 1 }` for 4343,
     `reconcile_problems` `['process 4242: TypeError: …']`; the next clean run deletes it. The same
-    when `insertEvent` throws for 4242. Another refresh commits the observed event (1 ms later by
+    when `insertEvent` throws for 4242; one that throws "database is locked" (`errcode` 5) ends
+    `reconcile`, `ingestSpool` (the file stays) and `scanTranscripts` at the first item. Another refresh commits the observed event (1 ms later by
     the clock) just before the transaction → no second row. A `null` boot id is recorded. A file
     modified exactly 2 s ago is not taken.
 

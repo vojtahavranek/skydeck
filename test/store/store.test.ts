@@ -9,7 +9,7 @@ import type { TestContext } from 'node:test';
 import { SkydeckError } from '../../src/platform/errors.ts';
 import { NS_PER_SECOND as SEC } from '../../src/platform/time.ts';
 import { MIGRATIONS, SCHEMA_VERSION } from '../../src/store/migrations.ts';
-import { openStore } from '../../src/store/store.ts';
+import { isDatabaseFailure, openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import type {
   EventRow,
@@ -996,5 +996,54 @@ describe('kv', () => {
     store.deleteKv('doctor_probe');
 
     assert.equal(store.getKv('doctor_probe'), null);
+  });
+});
+
+describe('isDatabaseFailure', () => {
+  test('a locked database is a failure of the database as a whole', (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'locked.db');
+    const store = openStore(path);
+    t.after(() => {
+      store.close();
+    });
+    const other = new DatabaseSync(path);
+    t.after(() => {
+      other.close();
+    });
+    other.exec('PRAGMA busy_timeout = 0');
+    store.transaction(() => {
+      assert.throws(
+        () => other.exec('INSERT INTO kv (key, value) VALUES (1, 2)'),
+        (error: unknown) => isDatabaseFailure(error),
+      );
+    });
+  });
+
+  test('busy, locked, read-only, I/O, corrupt, full, cannot open and not a database count; extended codes too', () => {
+    const sqlite = (errcode: number) =>
+      Object.assign(new Error('x'), { code: 'ERR_SQLITE_ERROR', errcode });
+    for (const errcode of [5, 6, 8, 10, 11, 13, 14, 26, 517, 1546]) {
+      assert.equal(isDatabaseFailure(sqlite(errcode)), true, String(errcode));
+    }
+    for (const errcode of [1, 19, 20, 25, 2067]) {
+      assert.equal(isDatabaseFailure(sqlite(errcode)), false, String(errcode));
+    }
+  });
+
+  test('an error one row causes, or one that is not from SQLite, does not count', (t) => {
+    const s = sandbox(t);
+    const store = openStore(join(s.root, 'skydeck.db'));
+    t.after(() => {
+      store.close();
+    });
+    assert.throws(
+      () => store.insertEvent(ev({ timeNs: 2n ** 64n })),
+      (error: unknown) => !isDatabaseFailure(error),
+    );
+    assert.equal(isDatabaseFailure(Object.assign(new Error('x'), { errcode: 5 })), false);
+    assert.equal(isDatabaseFailure(Object.assign(new Error('x'), { code: 'EACCES' })), false);
+    assert.equal(isDatabaseFailure('database is locked'), false);
+    assert.equal(isDatabaseFailure(null), false);
   });
 });

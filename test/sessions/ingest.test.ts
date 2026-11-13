@@ -516,3 +516,25 @@ test('a bad file moved in this run stays in spool/bad until the next run, howeve
   ingestSpool(d.deck);
   assert.deepEqual(bad(d), []);
 });
+
+/** What node:sqlite throws while another connection holds the write lock. */
+const locked = (): Error =>
+  Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });
+
+test('a failure of the database itself ends the ingest at once, and the file stays', (t) => {
+  const d = testDeck(t);
+  const first = put(d, start(S1, 'startup', T0), 1);
+  const second = put(d, start(S2, 'startup', T0 + SEC), 2);
+  let attempts = 0;
+  const deck = deckWith(d.deck, {
+    store: {
+      insertEvent: () => {
+        attempts++;
+        throw locked();
+      },
+    },
+  });
+  assert.throws(() => ingestSpool(deck), /database is locked/);
+  assert.equal(attempts, 1);
+  assert.deepEqual(spool(d).sort(), [first, second].sort());
+});

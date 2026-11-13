@@ -2,11 +2,13 @@
 // they name are attached (7.3 "Automatic"). Nothing that comes from one folder or one transcript
 // stops the scan: the whole handling of one file (reading it and saving it) is guarded, what fails
 // is recorded for doctor (problems.ts) and skipped, and nothing at or under what could not be read
-// is taken for deleted.
+// is taken for deleted. A failure of the database as a whole (isDatabaseFailure) ends the command
+// at once.
 import { listTranscriptFiles, readTranscript } from '../claude/transcripts.ts';
 import type { TranscriptFacts, TranscriptFile, TranscriptRead } from '../claude/transcripts.ts';
 import { prKey } from '../github.ts';
 import type { Files, Ns } from '../platform/types.ts';
+import { isDatabaseFailure } from '../store/store.ts';
 import type { TranscriptRow } from '../store/types.ts';
 import type { Deck } from './deck.ts';
 import { describeError, recordProblems } from './problems.ts';
@@ -33,8 +35,9 @@ const INT64_MAX = 2n ** 63n - 1n;
  * transaction. A row whose file was not listed is marked missing, unless its path is at or under a
  * path that could not be read (the listing is partial there); a file that disappears between
  * listing and reading is missing too. Never throws for one folder or file: one that cannot be read
- * or saved (any error, the store's included) is recorded in kv `scan_problems` (replaced on every
- * run) and keeps its row as it was.
+ * or saved (any error the file causes, the store's included) is recorded in kv `scan_problems`
+ * (replaced on every run) and keeps its row as it was. A failure of the database as a whole is
+ * thrown at once.
  */
 export function scanTranscripts(
   deck: Deck,
@@ -84,6 +87,9 @@ export function scanTranscripts(
           result.prsAttached += saveFile(deck, file, read, now, attached);
           result.read++;
         } catch (error) {
+          if (isDatabaseFailure(error)) {
+            throw error; // not about this file: every other one would wait and fail the same way
+          }
           problems.push(`cannot record ${file.path} (${describeError(error)})`);
         }
       }
@@ -105,6 +111,9 @@ export function scanTranscripts(
           store.saveTranscript({ ...row, missingSinceNs: now });
           result.missing++;
         } catch (error) {
+          if (isDatabaseFailure(error)) {
+            throw error;
+          }
           problems.push(`cannot mark ${row.path} missing (${describeError(error)})`);
         }
       }

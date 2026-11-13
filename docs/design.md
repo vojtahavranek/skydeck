@@ -147,7 +147,8 @@ A refresh that failed would make every command fail, so no single spool file, li
 folder or transcript can stop it, whatever fails while it is read or saved: that one is skipped
 (a spool file whose event cannot be saved stays in the spool for the next refresh), and a line
 naming it and why (never its content) is kept in the database for `skydeck doctor` (8) until the
-next refresh.
+next refresh. Only a failure of the database itself (locked, read-only, full, corrupt) ends the
+command.
 
 Parsing (in `src/claude/hookinput.ts`) normalises each event:
 

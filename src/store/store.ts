@@ -369,6 +369,31 @@ export function openStore(path: string): Store {
   return new SqliteStore(db, path);
 }
 
+/**
+ * The primary result codes of a failure of the database as a whole, never of one row: BUSY,
+ * LOCKED, READONLY, IOERR, CORRUPT, FULL, CANTOPEN, NOTADB.
+ */
+const DATABASE_FAILURES: ReadonlySet<number> = new Set([5, 6, 8, 10, 11, 13, 14, 26]);
+
+/**
+ * Whether `error`, thrown by a Store method, is a failure of the database as a whole (locked,
+ * read-only, I/O, corrupt, full, cannot open, not a database) rather than of the one row being
+ * written. A caller that records and skips the errors of one item must rethrow these at once:
+ * caught per item, every item would wait out the busy timeout, and none could be saved anyway.
+ */
+export function isDatabaseFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const { code, errcode } = error as { code?: unknown; errcode?: unknown };
+  // An extended result code keeps the primary one in its low byte (SQLITE_BUSY_SNAPSHOT = 517).
+  return (
+    code === 'ERR_SQLITE_ERROR' &&
+    typeof errcode === 'number' &&
+    DATABASE_FAILURES.has(errcode & 0xff)
+  );
+}
+
 /** One value out of a PRAGMA's single result row. */
 function pragma(db: DatabaseSync, name: string): SQLOutputValue {
   const row = db.prepare(`PRAGMA ${name}`).get();

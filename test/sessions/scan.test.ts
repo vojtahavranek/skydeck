@@ -458,3 +458,40 @@ test('a deleted transcript that cannot be marked missing is recorded; the others
   assert.equal(rowOf(d, p2)?.missingSinceNs, T0);
   assert.deepEqual(problems(d), [`cannot mark ${p1} missing (RangeError: cannot bind)`]);
 });
+
+/** What node:sqlite throws while another connection holds the write lock. */
+const locked = (): Error =>
+  Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });
+
+test('a failure of the database itself ends the scan at once', (t) => {
+  const d = testDeck(t);
+  two(d);
+  let attempts = 0;
+  const deck = deckWith(d.deck, {
+    store: {
+      saveTranscript: () => {
+        attempts++;
+        throw locked();
+      },
+    },
+  });
+  assert.throws(() => scanTranscripts(deck), /database is locked/);
+  assert.equal(attempts, 1);
+});
+
+test('a failure of the database itself while marking rows missing ends the scan', (t) => {
+  const d = testDeck(t);
+  const { p1, p2 } = two(d);
+  scanTranscripts(d.deck);
+  unlinkSync(p1);
+  unlinkSync(p2);
+  const deck = deckWith(d.deck, {
+    store: {
+      saveTranscript: () => {
+        throw locked();
+      },
+    },
+  });
+  assert.throws(() => scanTranscripts(deck), /database is locked/);
+  assert.equal(rowOf(d, p1)?.missingSinceNs, null);
+});

@@ -2,13 +2,15 @@
 // cleaned up. Nothing that comes from one spool file stops the ingest — reading, parsing and
 // saving it are all guarded: a file that cannot be read or parsed is moved to spool/bad/, one
 // whose row cannot be saved stays in the spool for the next refresh, and the reason is recorded
-// for doctor (problems.ts).
+// for doctor (problems.ts). A failure of the database as a whole (isDatabaseFailure) is not about
+// one file and ends the command at once.
 import { join } from 'node:path';
 
 import { SpoolParseError, parseSpoolFile } from '../claude/hookinput.ts';
 import type { SpoolEvent } from '../claude/hookinput.ts';
 import { NS_PER_DAY, NS_PER_MINUTE } from '../platform/time.ts';
 import type { Files, Ns } from '../platform/types.ts';
+import { isDatabaseFailure } from '../store/store.ts';
 import type { LinkKind } from '../store/types.ts';
 import type { Deck } from './deck.ts';
 import { describeError, recordProblems } from './problems.ts';
@@ -39,8 +41,9 @@ const LINK_KINDS: Readonly<Partial<Record<SpoolEvent['detail'], LinkKind>>> = {
  * file may belong to a running hook). The removals are not counted in the result.
  *
  * Never throws for one file: a spool file that is not a regular file, cannot be read, or does not
- * parse (for any reason) is moved to spool/bad/; one whose row cannot be saved (any error, the
- * store's included), or that cannot be moved or removed, stays where it is. A scripted run is
+ * parse (for any reason) is moved to spool/bad/; one whose row cannot be saved (any error the row
+ * causes, the store's included), or that cannot be moved or removed, stays where it is. A failure
+ * of the database as a whole is thrown at once, and the file stays. A scripted run is
  * counted once its file is removed. Each such problem is recorded in kv `ingest_problems` (replaced
  * on every run).
  */
@@ -86,6 +89,9 @@ export function ingestSpool(deck: Deck): IngestResult {
         result.ingested++;
       }
     } catch (error) {
+      if (isDatabaseFailure(error)) {
+        throw error; // not about this file: every other one would wait and fail the same way
+      }
       problems.push(`spool file ${name} could not be recorded (${describeError(error)})`);
       continue;
     }
