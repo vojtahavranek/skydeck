@@ -4886,16 +4886,18 @@ kept, the selection follows its session id, a new session goes to the end of its
 only when it differs from the one on screen; then, unless a fetch of any kind is running, the automatic `refreshPrs`
 of the opening (`force: false`). Loading the rows costs time in proportion to everything recorded, so a tick loads
 them only when they can have changed: the refresh saved something (events ingested or observed, transcripts read or
-marked missing, pull requests attached), the live-session files or whether each is trusted changed, or
-`store.dataVersion()` moved (another skydeck saved something: it may have ingested the spool first); and at least
-once a minute (`FULL_RELOAD_NS`, for what that check does not see: expiry, a holder without a live file, Claude
+marked missing, pull requests attached), a live-session file (any of its fields, its modification time included:
+derive takes it as the last sign of a process that is gone) or whether it is trusted changed, `store.dataVersion()`
+moved (another skydeck saved something: it may have ingested the spool first), or the previous tick failed (its
+refresh may have saved something before it failed); and at least once a minute (`FULL_RELOAD_NS`, for what that check does not see: expiry, a holder without a live file, Claude
 Code's settings). Otherwise only the time moves on (`withRows` with the rows in hand), so the times shown stay right.
 When the selected session leaves the list at any reload (a tick, `r`, a fetch, the editor's return), the cursor goes
 to the row that takes its place (2.9.5) and the message line says `session "<label>" left the list` (the short id
 when it has no label); after `r` that comes first, followed by `refreshing pull requests…`, and stays when the fetch
 has ended. A background failure message is taken away when that work next succeeds, if it is still shown. The title
 line counts the visible sessions in each state (`2 waiting · 3 working · 11 not-running`), in the list's order of the
-states, so that a session that starts waiting out of view is still seen. The deck part is synchronous, so two can never overlap; a fetch still running at
+states, so that a session that starts waiting out of view is still seen; the counts come after the filter and
+`(all)`, so that a narrow terminal cuts them and not those. The deck part is synchronous, so two can never overlap; a fetch still running at
 the next tick is not joined by another one, and an automatic fetch never starts while the fetch of `r` runs. A tick
 does nothing while a key's effect is carried out (a tab being opened), while the list is off screen (the editor, a
 hand-off, after the end) and while an input is open (a reload could close it; the next tick after it refreshes); in
@@ -4904,7 +4906,9 @@ line once: the same failure again says nothing more until that work has succeede
 with the real files and `/proc` and 4 live processes: at 300 sessions (246 MB of transcripts) a tick that always
 loaded the rows cost 18 ms (median; p95 35 ms); at 3,000 sessions it cost 70 ms (loading the 7,243 events 30 ms,
 deriving 14 ms, the scan 11 ms), and with the change check a tick of the real list costs 15 ms (median; the
-once-a-minute reload 81 ms; mean of all ticks 21 ms), flat over 1,200 ticks. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
+once-a-minute reload 81 ms; mean of all ticks 21 ms), flat over 1,200 ticks. Known cost: with 3,000 transcripts on
+disk and all of them listed, an idle tick is about 60 ms, 40 of it the transcript scan (one `stat` per file); the
+follow-up, when it matters, is to scan less often than every tick. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
 resize (`io.onResize`, which also repaints at once). Nothing is painted while the alternate screen is left.
 
 Effects: `label`/`group` → `cleanLabel`/`cleanGroup` (empty text clears) + `setLabel`/`setGroup`; `note` → leave the
@@ -5006,7 +5010,13 @@ parts beyond the first version of this paragraph were ruled by the plan owner af
     no rows (counted by the reads of Claude Code's settings file) while the times shown move on; what another skydeck
     saved, a live file that changed status and a process that ended without removing its file each show at the next
     tick, and so does a new transcript; the rows are loaded again after a minute of ticks that found nothing; the
-    title line's counts follow a tick.
+    title line's counts follow a tick. (After the re-check, ruled.) Each reload condition is the only trigger in a
+    case of its own: an end event alone turns `working` into `not-running`; a session only its live file shows appears
+    at the tick after reconcile observed it; a deleted transcript takes its row away; a leftover live file whose
+    modification time alone changed gives `ended-unexpectedly`; after a tick that failed having ingested an event, the
+    next tick loads the rows. Over two minutes: one load for a change, none for the ticks that find nothing, one a
+    minute after the last loading. The notice of a session that left while the editor ran follows the outcome. On a
+    narrow title line the counts are cut, not the filter or `(all)`.
 
 **Steps**
 - [ ] Write both test files; replace the bare-`skydeck` test in `test/cli/main.test.ts`. `npm test` → fails.
