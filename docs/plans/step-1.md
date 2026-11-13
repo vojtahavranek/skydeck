@@ -4277,8 +4277,10 @@ export interface SawEvents { latestEventId: number | null }
 export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void; // throws ResumeRefusedError
 export function sweepLocks(deck: Deck): number;
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }
-export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;          // throws ResumeRefusedError
+export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;          // throws ResumeRefusedError; the row must come from rows loaded right after a refresh
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;  // throws UsageError
+// src/sessions/resume-by-id.ts
+export function prepareResumeById(deck: Deck, sessionId: string): PreparedLaunch;  // throws RefError, ResumeRefusedError; the entry point of the command, the list and restore
 // src/cli/launching.ts
 export interface LaunchOutcome { code: number; lines: string[] }
 export function launchPrepared(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
@@ -4478,16 +4480,15 @@ export const command: Command;
   `endedAtNs >= <last event time of that boot> − 2 min` (D17). Order = order of `rows`.
 - **Run with tabs** (`terminal.opensTabs`): batches of `config.restoreBatch`. Before each batch:
   `memAvailableMb() < restoreMinFreeMb` (null counts as enough) → `stoppedForMemory`, the rest go
-  to `notStarted`, stop. Then `refresh(deck)` and `loadRows(deck)` once (design 7.6: the guard
-  works on fresh state), and for each entry of the batch: its fresh row (gone → `failed`
-  "no longer known") → `prepareResume` (refusal → `failed`), then `terminal.open` (error →
-  `failed`). Then, from the clock time taken before opening the batch,
+  to `notStarted`, stop. Then, for each entry of the batch: `prepareResumeById(deck, entry id)`
+  (it refreshes and loads the rows by itself, design 7.6; a `RefError` → `failed` "no longer
+  known"; a refusal → `failed`), then `terminal.open` (error → `failed`). Then, from the clock time taken before opening the batch,
   loop: `ingestSpool(deck)`; entries with `store.hasStartSince(id, batchStartNs)` → `started`;
   until all started or `restoreStartTimeoutSeconds` elapsed, `clock.sleep(1000)` between checks;
   the rest → `timedOut` (reported, skipped). `report` gets one line per outcome
   (`started <short> <title>`, `timed out <short> <title>`, `failed <short>: <reason>`).
-- **Run without tabs:** the first entry → `prepareResume` + `terminal.open` (here) → `handedOff`;
-  every other entry → `prepareResume` is NOT called (no lock); its command
+- **Run without tabs:** the first entry → `prepareResumeById` + `terminal.open` (here) → `handedOff`;
+  every other entry → `prepareResumeById` is NOT called (no lock); its command
   (`cd -- <shellQuote(dir)> && <shellJoin(buildResumeCommand …)>`) goes to `printed` and to `report`.
 - **Command.** Without `--yes`, stdin must be a terminal (else `UsageError`). The list shows per
   entry `<n>. [x| ] <shortId>  <title>  <how it ended>[  was working]` with how it ended =
@@ -4583,12 +4584,12 @@ the first frame (`\x1b[H\x1b[2J` + `render(...).join('\r\n')`), then start a bac
 (empty text clears) + `setLabel`/`setGroup`, `withMessage('saved')` or the error message;
 `note` → leave the alternate screen, `editNote(ctx, deck, id)` (task 15), re-enter;
 `done` → `markDone`/`markUndone`; `pr-add`/`pr-rm` → `attachManualPr`/`detachSessionPr`; any of
-these then `loadRows` + `withRows(reorder false)`. `resume` → `refresh(deck)` + `loadRows` (the
-guard works on fresh state, design 7.6) → `prepareResume` on the fresh row; with a tab adapter
+these then `loadRows` + `withRows(reorder false)`. `resume` → `prepareResumeById(deck, row.id)` (it
+refreshes and loads the rows by itself: the guard works on fresh state, design 7.6); with a tab adapter
 `launchPrepared(deck, p, 'tab')` and stay, message `opened <short> in a new tab` (or its returned
 lines, warnings included, when there are any); without one, leave the screen and
 `launchPrepared(deck, p, 'here')`, print its lines on stderr, then return its code. A
-`ResumeRefusedError` becomes the message. `refresh` → `refreshWithProgress(ctx, deck)`, then an explicit
+`ResumeRefusedError`, or a `RefError` (the session is gone), becomes the message. `refresh` → `refreshWithProgress(ctx, deck)`, then an explicit
 `refreshPrs` (`{ force: true, refreshMinutes }`, deps with `env`; design 7.3: the refresh key asks about every pull request that the sessions the list lists have attached
 and that is not merged or closed — `sessionIds`: the listed rows; a failure is saved on the pull request) + `loadRows` + `withRows(reorder true)`. `quit` or the end of `io.keys()` → write `\x1b[?25h\x1b[?1049l`,
 call `return()` on the key iterator, return 0. Errors from an effect never leave the terminal in
