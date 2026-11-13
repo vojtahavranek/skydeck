@@ -89,7 +89,7 @@ export interface TranscriptFacts {
   customTitle: string | null; // latest 'custom-title' record's customTitle
   firstRecordNs: Ns | null; // smallest parseable timestamp
   lastRecordNs: Ns | null; // largest parseable timestamp
-  lastUserNs: Ns | null; // largest timestamp of a 'user' record that is a turn (see isTurnRecord)
+  lastUserNs: Ns | null; // largest timestamp of a 'user' record that is the user's own input (see classifyUser)
   lastTurnRole: 'user' | 'assistant' | null; // type of the last (in file order) 'assistant' record or 'user' record that is a turn
 }
 
@@ -151,20 +151,55 @@ function leadingText(message: unknown): string | null {
   return null;
 }
 
+/** A tool result: the model's own tool call answered, not something the user wrote. */
+function isToolResult(record: Record<string, unknown>): boolean {
+  if (record.toolUseResult !== undefined) {
+    return true;
+  }
+  const content = (record.message as { content?: unknown } | null | undefined)?.content;
+  return (
+    Array.isArray(content) &&
+    (content as unknown[]).some(
+      (block) => (block as { type?: unknown } | null)?.type === 'tool_result',
+    )
+  );
+}
+
 /**
- * Whether a `user` record is a turn: something the model answers or is working on (a prompt, a
- * task notification, a tool result). Not a turn: a record marked meta, a compaction summary, a
- * sidechain record, and the records a command typed at the prompt leaves (a slash command, a `!`
- * command, their output, an interrupt marker). The text is compared with the markers above and
- * dropped (principle 4). What is not recognised is a turn, so that a session is never taken
- * for idle when it may be working.
+ * The exclusions that apply to a `user` record without a `turnOrigin`: a record marked meta, a
+ * compaction summary, a sidechain record, and what a command typed at the prompt leaves (a slash
+ * command, a `!` command, their output, an interrupt marker). The text is compared with the markers
+ * above and dropped (principle 4).
  */
-function isTurnRecord(record: Record<string, unknown>): boolean {
+function passesTurnExclusions(record: Record<string, unknown>): boolean {
   if (record.isMeta === true || record.isCompactSummary === true || record.isSidechain === true) {
     return false;
   }
   const text = leadingText(record.message);
   return text === null || !NON_TURN_TEXT_STARTS.some((start) => text.startsWith(start));
+}
+
+/**
+ * What a `user` record is, for two different questions (design 5.6).
+ *
+ * `turn`: the model answers it or is working on it (a prompt, a message from another agent, a
+ * scheduled wakeup, a tool result). A record that carries a `turnOrigin` of any value is a turn:
+ * Claude Code writes one for every record it sends to the model, and the meta flag alone would hide
+ * the messages of other agents and the wakeups. A record without one (an older version) is a turn
+ * unless an exclusion above applies. What is not recognised is a turn, so that a session is never
+ * taken for idle when it may be working.
+ *
+ * `input`: the user did it themselves, which is what brings a done session back. A `turnOrigin` of
+ * `human` is; any other origin (peer, scheduled, task notification, ...) is not. Without one, a
+ * turn is input unless it is a tool result.
+ */
+function classifyUser(record: Record<string, unknown>): { turn: boolean; input: boolean } {
+  const origin = record.turnOrigin;
+  if (typeof origin === 'string') {
+    return { turn: true, input: origin === 'human' };
+  }
+  const turn = passesTurnExclusions(record);
+  return { turn, input: turn && !isToolResult(record) };
 }
 
 /**
@@ -175,8 +210,9 @@ function isTurnRecord(record: Record<string, unknown>): boolean {
  * A first cwd or entrypoint must be a non-empty string; a title is kept as found, an empty one
  * included (a cleared name replaces the one before it) and unsanitised (that is the list's job).
  * The last turn follows file order; the times follow the timestamps, which are not in order. A
- * `user` record that is not a turn (`isTurnRecord`) counts for the record times, the cwd and the
- * entrypoint, but neither for `lastTurnRole` nor for `lastUserNs`.
+ * `user` record counts for `lastTurnRole` when it is a turn and for `lastUserNs` when it is the
+ * user's own input (`classifyUser`); either way it counts for the record times, the cwd and the
+ * entrypoint.
  */
 export function foldLines(
   facts: TranscriptFacts,
@@ -200,9 +236,12 @@ export function foldLines(
         lastRecordNs = ns;
       }
     }
-    if (type === 'user' && isTurnRecord(record)) {
-      lastTurnRole = 'user';
-      if (ns !== null && (lastUserNs === null || ns > lastUserNs)) {
+    if (type === 'user') {
+      const { turn, input } = classifyUser(record);
+      if (turn) {
+        lastTurnRole = 'user';
+      }
+      if (input && ns !== null && (lastUserNs === null || ns > lastUserNs)) {
         lastUserNs = ns;
       }
     } else if (type === 'assistant') {

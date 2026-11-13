@@ -1149,7 +1149,8 @@ export interface TranscriptFile { path: string; sessionId: string; size: number;
  * listed (a symbolic link loop, permissions), or an unreadable `projects` directory, goes into
  * `unreadable` (sorted by path, with the error code) and the rest is listed. A listing with
  * anything in `unreadable` is partial, and what is missing from it must not be taken for deleted:
- * task 8 marks no transcript missing then, and `doctor` (task 17) reports the entries. A path that
+ * task 8 marks no transcript missing at or under an unreadable path, and `doctor` (task 17) reports
+ * the entries. A path that
  * is simply not there (ENOENT) is not unreadable.
  */
 export function listTranscriptFiles(files: Files, claudeHome: string): { files: TranscriptFile[]; unreadable: UnreadableEntry[] };
@@ -1164,7 +1165,7 @@ export interface TranscriptFacts {
   customTitle: string | null;     // latest 'custom-title' record's customTitle
   firstRecordNs: Ns | null;       // smallest parseable timestamp
   lastRecordNs: Ns | null;        // largest parseable timestamp
-  lastUserNs: Ns | null;          // largest timestamp of a 'user' record that is a turn (ruled at review, below)
+  lastUserNs: Ns | null;          // largest timestamp of a 'user' record that is the user's own input (ruled at review, below)
   lastTurnRole: 'user' | 'assistant' | null;   // type of the last (in file order) 'assistant' record or 'user' record that is a turn
 }
 export const EMPTY_FACTS: TranscriptFacts;   // all null
@@ -1173,14 +1174,19 @@ export const EMPTY_FACTS: TranscriptFacts;   // all null
  * Folds complete JSONL lines into facts. Lines that are not JSON objects are skipped. Returns the
  * prUrl of every 'pr-link' record with a string prUrl, in order. Keeps no message text.
  *
- * Ruled at review: not every 'user' record is a turn. For `lastTurnRole` and `lastUserNs` a 'user'
- * record counts only when it is a prompt, a task notification or a tool result: NOT when it has
- * `isMeta`, `isCompactSummary` or `isSidechain` equal to true, nor when its text (the message
- * content when a string, else the first text block) starts with `<command-name>`,
+ * Ruled at review: not every 'user' record is a turn, and not every turn is the user's input.
+ * A 'user' record is a TURN (`lastTurnRole` becomes 'user') when it carries a string `turnOrigin`
+ * of any value (check this first: Claude Code writes one for every record it sends to the model,
+ * and `isMeta` alone would hide messages of other agents and scheduled wakeups); a record without
+ * one is a turn unless `isMeta`, `isCompactSummary` or `isSidechain` is true, or its text (the
+ * message content when a string, else the first text block) starts with `<command-name>`,
  * `<command-message>`, `<local-command-stdout>`, `<local-command-stderr>`, `<local-command-caveat>`,
- * `<bash-input>`, `<bash-stdout>`, `<bash-stderr>` or `[Request interrupted`. The text is compared
- * and dropped. A shape that is not recognised is a turn. A user record that is not a turn still
- * counts for the cwd, the entrypoint and the record times.
+ * `<bash-input>`, `<bash-stdout>`, `<bash-stderr>` or `[Request interrupted`. A 'user' record is
+ * INPUT (`lastUserNs`, which decides whether a done session comes back) when its `turnOrigin` is
+ * `human`; with any other `turnOrigin` (peer, scheduled, task_notification, sdk, ...) it is not;
+ * without one it is input when it is a turn and not a tool result (`toolUseResult` present, or a
+ * `tool_result` content block). The text is compared and dropped. A shape that is not recognised
+ * is a turn. A user record always counts for the cwd, the entrypoint and the record times.
  */
 export function foldLines(facts: TranscriptFacts, lines: readonly string[]): { facts: TranscriptFacts; prUrls: string[] };
 
@@ -3057,9 +3063,10 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   the row's facts and `sizeRead`, or null) → `saveTranscript` with `missingSinceNs null`, then
   for each `prKey(url)` that is non-null: `ensurePr`, `attachPr(sessionId, url, 'auto', now)`
   (counting distinct new attachments). Rows whose path was not listed and `missingSinceNs` null
-  get `missingSinceNs = now` — except when `listTranscriptFiles` reported any `unreadable` entry:
-  the listing is partial, so in that refresh no row is marked missing (the scan still reads what it
-  can; `missing` is 0). At the end `setKv('first_scan_done', '1')`.
+  get `missingSinceNs = now` — except a row whose path equals an `unreadable` path reported by
+  `listTranscriptFiles` or lies under `<unreadable path>/` (an unreadable `projects` covers every
+  row): what is missing from a partial listing must not be taken for deleted. Other rows are marked
+  as usual, and the scan still reads what it can. At the end `setKv('first_scan_done', '1')`.
 
 **Test cases** (`testDeck(t)`; `put(fields, seq)` writes `spoolText(fields)` as `spoolName(fields, seq)` into `spoolDir`; `P` = pid 4242 / procStart 51234567 / `BOOT_A`)
 
@@ -3116,7 +3123,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 6. Delete S2's file → its row `missingSinceNs` = clock now, `missing 1`; scan again at a later clock → `missingSinceNs` unchanged;
    file restored → `missingSinceNs null`.
 6a. A project folder that cannot be read (a failing `list` through a wrapped `Files`) holding S2's transcript → S2's row is NOT marked
-   missing, `missing 0`; the other transcripts are still read.
+   missing; the other transcripts are still read, and a transcript deleted from another folder IS marked missing. With `projects`
+   itself unreadable nothing is marked missing.
 7. `pr-link` urls `https://github.com/O/R/pull/7/files`, `https://github.com/o/r/pull/8`, `https://github.com/o/r/pull/7`, `https://example.com/x` →
    `prs()` urls `['https://github.com/o/r/pull/7', 'https://github.com/o/r/pull/8']`; both attached to S1 with origin `auto`; `prsAttached 2`.
 8. `detachPr(S1, …/pull/7)`, then rewrite the file shorter with the same `pr-link` (full re-read) → still detached.

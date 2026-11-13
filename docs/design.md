@@ -212,19 +212,22 @@ modification time changed are opened. A last line without a newline is left for 
 file that shrank, or was replaced (the byte before the stored offset is not a newline), is read
 again from the start. From the records it keeps, per file: the session
 id, the first `cwd` (the project directory), the `entrypoint`, the latest `ai-title` and
-`custom-title`, the times of the first record, the last record and the last `user` record that is
-a turn, the type of the last record that is an `assistant` record or a `user` record that is a turn,
-and the pull requests named in `pr-link` records. A `user` record is a turn when it is a prompt, a
-task notification or a tool result: not when it is marked meta, is a compaction summary or a
-sidechain record, or is what a command typed at the prompt leaves (a slash command or a `!` command,
-its output, an interrupt marker). The text of a record is compared with those markers and dropped.
-It keeps no text of any message.
+`custom-title`, the times of the first record, the last record and the last `user` input, the type
+of the last record that is an `assistant` record or a `user` turn, and the pull requests named in
+`pr-link` records. A `user` record is a **turn** (the model answers it or is working on it: a
+prompt, a message from another agent, a scheduled wakeup, a tool result) when it carries a
+`turnOrigin`, whatever its value; one without a `turnOrigin` (an older version) is a turn unless it
+is marked meta, is a compaction summary or a sidechain record, or is what a command typed at the
+prompt leaves (a slash command or a `!` command, its output, an interrupt marker). A `user`
+record is **input** (the user did it themselves) when its `turnOrigin` is `human`; one without a
+`turnOrigin` is input when it is a turn and not a tool result. The text of a record is compared
+with those markers and dropped. It keeps no text of any message.
 
 A transcript whose `entrypoint` is not `cli` is recorded but its session is never listed.
 A known transcript whose file has disappeared is marked missing with the time it was noticed.
-A folder or file that cannot be read does not stop the scan: the rest is read, and the listing is
-then partial, so that refresh marks no transcript missing; `skydeck doctor` names what could not
-be read (8).
+A folder or file that cannot be read does not stop the scan: the rest is read, and a transcript at
+or under what could not be read is not marked missing; `skydeck doctor` names what could not be
+read (8).
 
 The first scan on a machine reads everything once (hundreds of megabytes take some seconds); on a
 terminal it shows a one-line progress indicator on stderr.
@@ -286,7 +289,7 @@ Marks are shown next to the state.
   (configuration `groupPattern`, default `^[A-Z][A-Z0-9]+-[0-9]+`), that key is the group.
 - **Note.** Free text of any length, edited in `$EDITOR`.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
-  has activity after the done time: a `user` turn (5.6) in its transcript, or a `start` event with
+  has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
   transcript is not activity.
 - **First run.** `skydeck install` offers to mark as done every listed session whose last

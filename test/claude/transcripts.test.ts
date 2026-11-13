@@ -367,11 +367,11 @@ test('foldLines: an assistant line moves the last record and the last turn, not 
   assert.equal(facts.lastTurnRole, 'assistant');
 });
 
-test('foldLines: a later user line (a tool result) makes the last turn a user turn again', () => {
+test('foldLines: a later user line (a tool result) makes the last turn a user turn again, but is not user input', () => {
   let facts = fold(user(T0), assistant(T0 + 5n * SEC)).facts;
   facts = foldMore(facts, user(T0 + 6n * SEC, { toolUseResult: { content: '<redacted>' } }));
   assert.equal(facts.lastTurnRole, 'user');
-  assert.equal(facts.lastUserNs, T0 + 6n * SEC);
+  assert.equal(facts.lastUserNs, T0);
 });
 
 test('foldLines: system, ai-title and pr-link lines leave the last turn alone', () => {
@@ -630,39 +630,119 @@ test('foldLines: a user record that is not a turn still gives cwd, entrypoint an
   assert.equal(facts.lastUserNs, null);
 });
 
-test('foldLines: a prompt, a prompt with an image, a task notification and a tool result are turns', () => {
-  const turns: Record<string, unknown>[] = [
-    { message: { role: 'user', content: '<redacted>' } },
-    {
-      message: {
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', data: '<redacted>' } },
-          { type: 'text', text: '<redacted>' },
-        ],
-      },
+const toolResult = {
+  message: { role: 'user', content: [{ type: 'tool_result', content: '<redacted>' }] },
+  toolUseResult: { stdout: '<redacted>' },
+};
+
+/** `user` records that are turns and the user's own input (no turnOrigin: the fallback rules). */
+const PROMPTS: Record<string, unknown>[] = [
+  { message: { role: 'user', content: '<redacted>' } },
+  {
+    message: {
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', data: '<redacted>' } },
+        { type: 'text', text: '<redacted>' },
+      ],
     },
-    { message: { role: 'user', content: '<task-notification>invented</task-notification>' } },
-    {
-      message: { role: 'user', content: [{ type: 'tool_result', content: '<redacted>' }] },
-      toolUseResult: { stdout: '<redacted>' },
-    },
-    // A marker counts only at the start; flags count only when exactly true.
-    { message: { role: 'user', content: 'a prompt that mentions <command-name> in passing' } },
-    { message: { role: 'user', content: 'x' }, isMeta: false, isSidechain: false },
-    { message: { role: 'user', content: 'x' }, isMeta: 'true', isCompactSummary: 1 },
-    // A shape that is not known is a turn: the safe reading of an unknown record is "in progress".
-    {},
-    { message: null },
-    { message: { role: 'user' } },
-    { message: { role: 'user', content: [] } },
-    { message: { role: 'user', content: [{ type: 'image' }] } },
-  ];
-  for (const fields of turns) {
+  },
+  // A marker counts only at the start; flags count only when exactly true.
+  { message: { role: 'user', content: 'a prompt that mentions <command-name> in passing' } },
+  { message: { role: 'user', content: 'x' }, isMeta: false, isSidechain: false },
+  { message: { role: 'user', content: 'x' }, isMeta: 'true', isCompactSummary: 1 },
+  // A shape that is not known is a turn: the safe reading of an unknown record is "in progress".
+  { message: null },
+  { message: { role: 'user' } },
+  { message: { role: 'user', content: [] } },
+  { message: { role: 'user', content: [{ type: 'image' }] } },
+  // Claude Code 2.1.323 marks the origin of every prompt typed by the user.
+  { turnOrigin: 'human' },
+];
+
+test('foldLines: a prompt and an unknown shape are turns and user input', () => {
+  for (const fields of PROMPTS) {
     const { facts } = fold(assistant(T0), user(T0 + SEC, fields));
     assert.equal(facts.lastTurnRole, 'user', JSON.stringify(fields));
     assert.equal(facts.lastUserNs, T0 + SEC, JSON.stringify(fields));
   }
+});
+
+/** Turns that are not the user's own input. */
+const TURNS_NOT_INPUT: Record<string, unknown>[] = [
+  toolResult,
+  {
+    message: { role: 'user', content: '<task-notification>invented</task-notification>' },
+    turnOrigin: 'task_notification',
+  },
+  { turnOrigin: 'sdk' },
+  { turnOrigin: 'peer' },
+  { turnOrigin: 'scheduled' },
+  { turnOrigin: 'an origin this version does not know' },
+  // An origin is a turn whatever else the record says: the model answers it.
+  { isMeta: true, turnOrigin: 'peer' },
+  { isMeta: true, isSidechain: true, isCompactSummary: true, turnOrigin: 'scheduled' },
+  { message: { role: 'user', content: '<command-name>/demo</command-name>' }, turnOrigin: 'peer' },
+];
+
+test('foldLines: a tool result, and a record whose turnOrigin is not human, are turns but not user input', () => {
+  for (const fields of TURNS_NOT_INPUT) {
+    const { facts } = fold(assistant(T0), user(T0 + SEC, fields));
+    assert.equal(facts.lastTurnRole, 'user', JSON.stringify(fields));
+    assert.equal(facts.lastUserNs, null, JSON.stringify(fields));
+    // After a real prompt, the prompt stays the last user input.
+    assert.equal(foldMore(fold(user(T0)).facts, user(T0 + SEC, fields)).lastUserNs, T0);
+  }
+});
+
+test('foldLines: a tool result is recognised by its content block as well as by toolUseResult', () => {
+  const byBlock = { message: toolResult.message };
+  const byKey = { toolUseResult: { stdout: '<redacted>' } };
+  for (const fields of [byBlock, byKey]) {
+    const { facts } = fold(assistant(T0), user(T0 + SEC, fields));
+    assert.equal(facts.lastTurnRole, 'user');
+    assert.equal(facts.lastUserNs, null);
+  }
+});
+
+const originFixture = (): string[] =>
+  readFileSync(
+    fileURLToPath(
+      new URL('../fixtures/claude/transcripts/turn-origin-user-records.jsonl', import.meta.url),
+    ),
+    'utf8',
+  )
+    .split('\n')
+    .filter((line) => line !== '');
+
+/** One per line of turn-origin-user-records.jsonl: what the model answers, and whether the user did it. */
+const ORIGIN_KINDS = [
+  ['a message from another agent (meta, peer)', false],
+  ['a scheduled wakeup (meta, scheduled)', false],
+  ['a command typed by the user, with its output (bash output, human)', true],
+] as const;
+
+test('the turn-origin fixture has one user line for each kind, with invented content only', () => {
+  const lines = originFixture();
+  assert.equal(lines.length, ORIGIN_KINDS.length);
+  for (const line of lines) {
+    assert.equal((JSON.parse(line) as { type: string }).type, 'user');
+  }
+});
+
+ORIGIN_KINDS.forEach(([kind, isInput], i) => {
+  test(`foldLines: ${kind} is a turn${isInput ? ' and user input' : ', not user input'}`, () => {
+    const line = originFixture()[i] ?? '';
+    const at = nsFromIso((JSON.parse(line) as { timestamp: string }).timestamp);
+    const { facts } = fold(user(T0), assistant(T0 + 5n * SEC), line);
+    assert.equal(facts.lastTurnRole, 'user');
+    assert.equal(facts.lastUserNs, isInput ? at : T0);
+    // The same record without its turnOrigin falls back to the exclusions: meta and command output are no turn.
+    const stripped = JSON.stringify({ ...(JSON.parse(line) as object), turnOrigin: undefined });
+    const without = fold(user(T0), assistant(T0 + 5n * SEC), stripped).facts;
+    assert.equal(without.lastTurnRole, 'assistant');
+    assert.equal(without.lastUserNs, T0);
+  });
 });
 
 test('foldLines keeps a hostile title raw (sanitising is the list model’s job)', () => {
