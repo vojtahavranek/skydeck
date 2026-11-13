@@ -971,7 +971,9 @@ export function parseLaunchArgs(args: readonly string[]): ParsedArg[];
  * relative is replaced by resolve(cwd, value) when `exists(resolved)` is true. For the `=` form the
  * token becomes `--flag=<absolute>`. Other tokens are returned unchanged. cwd null → unchanged;
  * so is a cwd that is not absolute, and an empty value (resolving against either would give the
- * directory of the running process).
+ * directory of the running process). An `exists` that throws counts as false, so the value stays
+ * as written: a path-flag value can be inline JSON, longer than a file name may be, or hold a NUL,
+ * and a stat then fails with something other than "not found".
  */
 export function absolutizePathFlags(argv: readonly string[], cwd: string | null, exists: (path: string) => boolean): string[];
 
@@ -1009,13 +1011,17 @@ export interface ResumeCommand { argv: string[]; flagsKnown: boolean }
  *          ...every kept token of launch.slice(1) in order].
  * Removed: flags with remove: true (with their values), positionals, and flags that are in no table
  * (with what follows them; unknownFlags names them). flagsKnown is false when launch is null. No
- * permission flag is ever added.
+ * permission flag is ever added. Throws RangeError when sessionId is not a lowercase UUID: it goes
+ * onto a command line, where `--dangerously-skip-permissions` would be read as a flag.
  */
 export function buildResumeCommand(input: {
   claudeCommand: string; launch: readonly string[] | null; sessionId: string; label: string | null;
 }): ResumeCommand;
 
-/** 7.7: [claudeCommand, '--session-id', sessionId, ...(label ? ['-n', label] : []), ...extra]. */
+/**
+ * 7.7: [claudeCommand, '--session-id', sessionId, ...(label ? ['-n', label] : []), ...extra].
+ * Throws RangeError when sessionId is not a lowercase UUID (as buildResumeCommand).
+ */
 export function buildNewCommand(input: {
   claudeCommand: string; sessionId: string; label: string | null; extra: readonly string[];
 }): string[];
@@ -1067,11 +1073,15 @@ export class SpoolParseError extends Error {}
 
 /**
  * Parses one spool file (format: section 2.10.1). Throws SpoolParseError when: the name does not
- * match ^[0-9]+-[0-9]+-[0-9]+\.ev$; there is no line '--'; a key appears twice before it; v is not
- * 1; event is not SessionStart or SessionEnd; time_ns is not digits; boot_id is empty; claude_pid
- * is neither empty nor digits; the hook input is not a JSON object; no session id (input
- * session_id, else session_env) is a UUID. The hook writes a value that contained a newline or a
- * carriage return as empty, and a claude_pid that is not all digits as empty (name part 0), so pwd,
+ * match ^[0-9]+-[0-9]+-[0-9]+\.ev$; there is no line '--'; a line before it has no '='; a key
+ * appears twice before it; v is not 1; event is not SessionStart or SessionEnd; time_ns is not
+ * digits, or is larger than a signed 64-bit integer (the database column); boot_id is missing or
+ * empty; claude_pid is neither empty nor digits, or is digits that are not a safe integer; the
+ * argv_b64 of a SessionStart is not base64; the hook input is not a JSON object; no session id
+ * (input session_id, else session_env) is a UUID. The session id of the event is always a lowercase
+ * UUID (a UUID in either case is written in lower case; a value of any other shape is no session
+ * id), because it ends up after `--resume` on a command line. The hook writes a value that
+ * contained a newline or a carriage return as empty, and a claude_pid that is not all digits as empty (name part 0), so pwd,
  * session_env and entrypoint_env may be empty: empty means "unknown", never a valid value. The
  * launch command is normalised: `argv` is storableArgv(absolutizePathFlags(recorded, cwd, exists)),
  * so no positional argument, no removed flag (with its values) and no value of an unknown flag is
@@ -2317,6 +2327,7 @@ same, exists {}                                                             → 
 ['claude','--system-prompt-file','s.md','--append-system-prompt-file=a.md','--plugin-dir-no-mcp','p','--append-subagent-system-prompt-file','x.md'], cwd '/p', exists always → every value absolute under /p
 ['claude','--add-dir','a'], cwd 'p' (not absolute), exists always           → unchanged
 ['claude','--add-dir',''], cwd '/p', exists always                          → unchanged   (an empty value; also '--add-dir=')
+['claude','--add-dir','bad','ok'], cwd '/p', exists throws for '/p/bad', true for '/p/ok' → ['claude','--add-dir','bad','/p/ok']
 ```
 
 `buildResumeCommand` (`claudeCommand 'claude'`, `sessionId S1`; `R = ['claude','--resume',S1]`;
@@ -2419,6 +2430,9 @@ removed flag and no value of an unknown flag survives in the stored command.
 `buildNewCommand`: `{ claudeCommand: 'claude', sessionId: S1, label: null, extra: [] }` →
 `['claude','--session-id',S1]`; `label 'x y', extra ['--model','opus']` →
 `['claude','--session-id',S1,'-n','x y','--model','opus']`.
+
+Both builders throw `RangeError` for a `sessionId` that is not a lowercase UUID (`''`,
+`'--dangerously-skip-permissions'`, an upper-case UUID, a UUID with anything around it).
 
 **Steps**
 - [ ] Write the three test files and the fixture. `npm test` → new tests fail ("Cannot find module").

@@ -628,6 +628,24 @@ test('absolutizePathFlags asks about the resolved path and returns a new array',
   assert.notEqual(result, argv);
 });
 
+test('absolutizePathFlags treats an existence check that throws as "does not exist"', () => {
+  // A path-flag value can be inline JSON, longer than a file name may be, or hold a NUL: the
+  // check of the caller (a stat) throws then, and the value must stay as written.
+  const exists = (path: string): boolean => {
+    if (path === '/p/bad') throw new Error('ENAMETOOLONG');
+    if (path === '/p/worse') throw new TypeError('a path with a NUL');
+    return path === '/p/ok';
+  };
+  assert.deepEqual(
+    absolutizePathFlags(['claude', '--add-dir', 'bad', 'ok', 'worse'], '/p', exists),
+    ['claude', '--add-dir', 'bad', '/p/ok', 'worse'],
+  );
+  assert.deepEqual(absolutizePathFlags(['claude', '--settings=bad'], '/p', exists), [
+    'claude',
+    '--settings=bad',
+  ]);
+});
+
 // --- buildResumeCommand --------------------------------------------------------------------------
 
 const S1 = '11111111-2222-3333-4444-555555555555';
@@ -1409,5 +1427,53 @@ test('buildNewCommand passes the extra arguments through untouched, even ones th
       extra: ['-c', 'hi'],
     }),
     ['/opt/claude', '--session-id', S1, '-c', 'hi'],
+  );
+});
+
+// --- the session id is a lowercase UUID, or nothing is built -------------------------------------
+
+// The id ends up on a command line after --resume or --session-id, where a value such as
+// `--dangerously-skip-permissions` would be read as a flag. The builders are the last line of
+// defence: whatever the caller checked, they check again.
+const NOT_SESSION_IDS = [
+  '',
+  '--dangerously-skip-permissions',
+  '-r',
+  'abc',
+  '0B5F3C1E-8D2A-4F6B-9C3D-2E1F0A9B8C7D',
+  `${S1}\n`,
+  ` ${S1}`,
+  `${S1}x`,
+  `-${S1}`,
+  S1.slice(1),
+  S1.replaceAll('-', ''),
+  '1111111g-2222-3333-4444-555555555555',
+];
+
+for (const sessionId of NOT_SESSION_IDS) {
+  test(`buildResumeCommand throws a RangeError for the session id ${JSON.stringify(sessionId)}`, () => {
+    assert.throws(
+      () => buildResumeCommand({ claudeCommand: 'claude', launch: null, sessionId, label: null }),
+      RangeError,
+    );
+  });
+
+  test(`buildNewCommand throws a RangeError for the session id ${JSON.stringify(sessionId)}`, () => {
+    assert.throws(
+      () => buildNewCommand({ claudeCommand: 'claude', sessionId, label: null, extra: [] }),
+      RangeError,
+    );
+  });
+}
+
+test('the builders take a lowercase UUID with letters in it', () => {
+  const id = '0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d';
+  assert.deepEqual(
+    buildResumeCommand({ claudeCommand: 'claude', launch: null, sessionId: id, label: null }).argv,
+    ['claude', '--resume', id],
+  );
+  assert.deepEqual(
+    buildNewCommand({ claudeCommand: 'claude', sessionId: id, label: null, extra: [] }),
+    ['claude', '--session-id', id],
   );
 });

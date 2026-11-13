@@ -147,6 +147,8 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
 
 - `session_id` comes from the hook input; `session_env` is the fallback.
 - Process start is field 22 of `stat`, taken after the **last** `)` in the line.
+- An event without `claude_pid` (the value is empty) is stored with `pid` 0 and `proc_start` NULL; it
+  belongs to no live process.
 - The launch command is the base64-decoded `cmdline` split on NUL, last empty element dropped,
   and then reduced to what a resume keeps of it (7.6): positional arguments and the flags that
   carry prompt text or choose the session are dropped, because an initial prompt on the command
