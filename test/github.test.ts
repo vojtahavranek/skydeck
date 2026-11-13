@@ -102,6 +102,27 @@ function answerAll(pullRequest: unknown = OK_JSON): (call: RunCall) => RunResult
 
 const NUM = (n: number): string => `https://github.com/o/r/pull/${n}`;
 
+/** The environment of the "calling process" in these tests: with the two variables `gh` must not see. */
+const ENV: Env = {
+  PATH: '/usr/bin',
+  HOME: '/home/dev',
+  GH_TOKEN: 'token',
+  GH_HOST: 'ghe.example.com',
+  GH_FORCE_TTY: '1',
+  GH_PROMPT_DISABLED: '0',
+  NO_COLOR: undefined,
+  TERM: undefined,
+};
+
+/** What `gh` gets of ENV: GH_HOST and GH_FORCE_TTY gone, the two settings made, the rest passed. */
+const GH_ENV = {
+  PATH: '/usr/bin',
+  HOME: '/home/dev',
+  GH_TOKEN: 'token',
+  GH_PROMPT_DISABLED: '1',
+  NO_COLOR: '1',
+};
+
 interface Deck {
   store: Store;
   runner: ReturnType<typeof fakeRunner>;
@@ -110,7 +131,7 @@ interface Deck {
     runner: ReturnType<typeof fakeRunner>;
     clock: ReturnType<typeof fakeClock>;
     store: Store;
-    env?: Env;
+    env: Env;
   };
 }
 
@@ -122,7 +143,7 @@ function deck(t: TestContext, handler?: (call: RunCall) => RunResult | Promise<R
   });
   const runner = fakeRunner(handler);
   const clock = fakeClock(T0);
-  return { store, runner, clock, deps: { runner, clock, store } };
+  return { store, runner, clock, deps: { runner, clock, store, env: ENV } };
 }
 
 /** Adds pull requests o/r#from..to; `seen` gives them a successful fetch `ageMin` minutes ago. */
@@ -542,7 +563,7 @@ describe('fetchPrs and refreshPrs', () => {
     assert.deepEqual(runner.calls.map(aliasesOf), [50, 50, 20]);
     for (const call of runner.calls) {
       assert.equal(call.command, 'gh');
-      assert.deepEqual(call.options, { timeoutMs: 10000 });
+      assert.deepEqual(call.options, { timeoutMs: 10000, env: GH_ENV });
     }
     for (const p of store.prs()) {
       assert.equal(p.okAtNs, T0);
@@ -743,43 +764,33 @@ describe('the call to gh', () => {
     ]);
   });
 
-  test('without an environment in the deps, gh inherits the one of this process', async (t) => {
-    const { store, runner, deps } = deck(t, answerAll());
-    seed(store, 1, 1);
-    await fetchPrs(deps, [NUM(1)]);
-    assert.deepEqual(runner.calls[0]?.options, { timeoutMs: 10000 });
-  });
-
-  test('with one, GH_HOST and GH_FORCE_TTY are removed, GH_PROMPT_DISABLED and NO_COLOR are set, the rest passes', async (t) => {
+  test('GH_HOST and GH_FORCE_TTY are removed, GH_PROMPT_DISABLED and NO_COLOR are set, the rest passes', async (t) => {
     const { store, runner, deps } = deck(t, answerAll());
     seed(store, 1, 2, { state: 'open', ageMin: 10 });
-    const env: Env = {
-      PATH: '/usr/bin',
-      HOME: '/home/dev',
-      GH_TOKEN: 'token',
-      GH_HOST: 'ghe.example.com',
-      GH_FORCE_TTY: '1',
-      GH_PROMPT_DISABLED: '0',
-      NO_COLOR: undefined,
-      TERM: undefined,
-    };
-    const expected = {
-      timeoutMs: 10000,
-      env: {
-        PATH: '/usr/bin',
-        HOME: '/home/dev',
-        GH_TOKEN: 'token',
-        GH_PROMPT_DISABLED: '1',
-        NO_COLOR: '1',
-      },
-    };
-    await fetchPrs({ ...deps, env }, [NUM(1)]);
-    await refreshPrs({ ...deps, env }, { force: true, refreshMinutes: 5 });
+    await fetchPrs(deps, [NUM(1)]);
+    await refreshPrs(deps, { force: true, refreshMinutes: 5 });
     assert.equal(runner.calls.length, 2);
     for (const call of runner.calls) {
-      assert.deepEqual(call.options, expected);
+      assert.deepEqual(call.options, { timeoutMs: 10000, env: GH_ENV });
     }
-    assert.equal(env['GH_HOST'], 'ghe.example.com', "the caller's environment is not changed");
+    assert.equal(ENV['GH_HOST'], 'ghe.example.com', "the caller's environment is not changed");
+  });
+
+  test('an empty environment still gets the two settings', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1);
+    await fetchPrs({ ...deps, env: {} }, [NUM(1)]);
+    assert.deepEqual(runner.calls[0]?.options, {
+      timeoutMs: 10000,
+      env: { GH_PROMPT_DISABLED: '1', NO_COLOR: '1' },
+    });
+  });
+
+  test('the environment is not optional: deps without it do not compile', () => {
+    const compileOnly = (store: Store): unknown =>
+      // @ts-expect-error `env` is required in the deps of fetchPrs
+      fetchPrs({ runner: fakeRunner(), clock: fakeClock(T0), store }, []);
+    assert.equal(typeof compileOnly, 'function');
   });
 });
 

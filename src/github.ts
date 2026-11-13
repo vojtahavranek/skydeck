@@ -288,10 +288,12 @@ interface Deps {
   clock: Clock;
   store: Store;
   /**
-   * The environment of the calling process (`platform.env`). `gh` runs in it with a few variables
-   * changed (see `ghEnvironment`); without it `gh` inherits the environment of this process as it is.
+   * The environment of the calling process (`platform.env`). `gh` always runs in it with a few
+   * variables changed (see `ghEnvironment`). Required, so that a caller cannot skip that by
+   * forgetting it: this file may not read `process.env`, and `RunOptions.env` replaces the child's
+   * whole environment.
    */
-  env?: Env;
+  env: Env;
 }
 
 /**
@@ -316,13 +318,10 @@ async function fetchBatch(deps: Deps, keys: readonly PrKey[]): Promise<Map<strin
   const args = batchArgs(keys);
   let result: RunResult;
   try {
-    result = await deps.runner.run(
-      'gh',
-      args,
-      deps.env === undefined
-        ? { timeoutMs: GH_TIMEOUT_MS }
-        : { timeoutMs: GH_TIMEOUT_MS, env: ghEnvironment(deps.env) },
-    );
+    result = await deps.runner.run('gh', args, {
+      timeoutMs: GH_TIMEOUT_MS,
+      env: ghEnvironment(deps.env),
+    });
   } catch (error) {
     const reason = firstLine(error instanceof Error ? error.message : String(error));
     return failAll(keys, deps.clock.nowNs(), `gh could not be run: ${reason ?? 'unknown error'}`);
