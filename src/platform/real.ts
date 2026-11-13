@@ -23,6 +23,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { SkydeckError } from './errors.ts';
 import { NS_PER_MS } from './time.ts';
 import type {
   Clock,
@@ -45,7 +46,14 @@ export function realPlatform(): Platform {
     runner: realRunner(),
     env: { ...process.env },
     homeDir: homedir(),
-    cwd: process.cwd(),
+    // Read when asked: a shell may sit in a directory that was removed, and `--version` must still work.
+    get cwd(): string {
+      try {
+        return process.cwd();
+      } catch {
+        throw new SkydeckError('the current directory no longer exists');
+      }
+    },
     uuid: () => randomUUID(),
     nodePath: process.execPath,
     nodeVersion: process.versions.node,
@@ -138,13 +146,20 @@ function realFiles(): Files {
     },
     list: (dir) => orIfMissing(() => readdirSync(dir).sort(), []),
     writeText(path, text, mode) {
-      const temp = siblingTemp(path);
+      // Through a symlink the file it points to is replaced and the link stays (a settings file is
+      // often one); a dangling link is replaced by the file.
+      const target = orIfMissing(
+        () => (lstatSync(path).isSymbolicLink() ? realpathSync(path) : path),
+        path,
+      );
+      const newMode = mode ?? orIfMissing(() => statSync(target).mode & 0o7777, undefined);
+      const temp = siblingTemp(target);
       try {
-        writeFileSync(temp, text, { flag: 'wx', mode });
-        if (mode !== undefined) {
-          chmodSync(temp, mode); // exact, whatever the umask
+        writeFileSync(temp, text, { flag: 'wx', mode: newMode });
+        if (newMode !== undefined) {
+          chmodSync(temp, newMode); // exact, whatever the umask
         }
-        renameSync(temp, path);
+        renameSync(temp, target);
       } catch (error) {
         rmSync(temp, { force: true });
         throw error;
@@ -262,6 +277,11 @@ function realRunner(): Runner {
                 if (child.exitCode === null && child.signalCode === null) {
                   timedOut = true;
                   child.kill('SIGKILL');
+                } else {
+                  // The child is gone but something it started still holds the pipes.
+                  child.stdout?.destroy();
+                  child.stderr?.destroy();
+                  settle(child.exitCode);
                 }
               }, options.timeoutMs);
         const settle = (code: number | null, notFound = false): void => {

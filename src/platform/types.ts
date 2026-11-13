@@ -25,9 +25,16 @@ export interface Files {
   readBytes(path: string, start: number, end: number): Uint8Array;
   /** Entry names (not paths) sorted by UTF-16 code unit; [] when the directory does not exist. */
   list(dir: string): string[];
-  /** Replaces the file atomically: writes `.<name>.<random>.tmp` beside it, then renames. */
+  /**
+   * Replaces the file atomically: writes `.<name>.<random>.tmp` beside it, then renames. A symlink
+   * is followed (the file it points to is replaced, the link stays; a dangling one is replaced).
+   * Without `mode` an existing file keeps its mode, a new one gets the umask default.
+   */
   writeText(path: string, text: string, mode?: number): void;
-  /** Creates the file only if it does not exist (O_EXCL). false when it already exists. */
+  /**
+   * Creates the file only if it does not exist (O_EXCL). false when it already exists. The file is
+   * created, then written: a reader may briefly see it empty.
+   */
   createExclusive(path: string, text: string): boolean;
   /** mkdir -p; `mode` applies to directories it creates. */
   mkdirp(path: string, mode?: number): void;
@@ -74,14 +81,17 @@ export interface RunResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
-  /** The program does not exist (ENOENT). */
+  /** The program does not exist (ENOENT). So does a `cwd` that does not exist: check it first. */
   notFound: boolean;
 }
 
 /** Starts programs as argument lists, never through a shell. */
 export interface Runner {
   run(command: string, args: readonly string[], options?: RunOptions): Promise<RunResult>;
-  /** Inherits stdin/stdout/stderr (for $EDITOR). Resolves with the exit code, null on signal or ENOENT. */
+  /**
+   * Inherits stdin/stdout/stderr (for $EDITOR). Resolves with the exit code, null on signal or
+   * ENOENT (the program, or a `cwd`, does not exist).
+   */
   runInteractive(
     command: string,
     args: readonly string[],
@@ -99,6 +109,7 @@ export interface Platform {
   runner: Runner;
   env: Env;
   homeDir: string;
+  /** The real platform reads it when asked and throws a SkydeckError if the directory is gone. */
   cwd: string;
   /** A new random lowercase UUID (crypto.randomUUID in the real platform). */
   uuid(): string;

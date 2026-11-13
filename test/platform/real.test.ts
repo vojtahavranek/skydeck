@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,9 +13,12 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { realPlatform } from '../../src/platform/real.ts';
+import type { RunResult } from '../../src/platform/types.ts';
 import { sandbox } from '../helpers/sandbox.ts';
+import type { Sandbox } from '../helpers/sandbox.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -25,6 +29,20 @@ function tmp(t: TestContext): string {
     rmSync(dir, { recursive: true, force: true });
   });
   return dir;
+}
+
+const REAL_MODULE = pathToFileURL(
+  new URL('../../src/platform/real.ts', import.meta.url).pathname,
+).href;
+
+/** Runs this Node.js with `nodeArgs` in a directory that was removed after the shell entered it. */
+function inRemovedDirectory(s: Sandbox, nodeArgs: string[]): Promise<RunResult> {
+  s.link('sh', 'mkdir', 'rmdir');
+  return realPlatform().runner.run(
+    'sh',
+    ['-c', 'mkdir gone && cd gone && rmdir ../gone && exec "$NODE" "$@"', 'sh', ...nodeArgs],
+    { cwd: s.root, env: s.env({ NODE: process.execPath }), timeoutMs: 20_000 },
+  );
 }
 
 const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
@@ -80,6 +98,96 @@ describe('real files', () => {
     files.writeText(p, 'b');
 
     assert.equal(files.readText(p), 'b');
+  });
+
+  test('writeText leaves a hard link to the old file with the old content', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    const [p, h] = [join(dir, 'p'), join(dir, 'h')];
+    writeFileSync(p, 'a');
+    linkSync(p, h);
+
+    files.writeText(p, 'b');
+
+    assert.equal(files.readText(p), 'b');
+    assert.equal(files.readText(h), 'a');
+  });
+
+  test('writeText onto a directory throws and leaves no temporary file', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'p'));
+
+    assert.throws(() => {
+      files.writeText(join(dir, 'p'), 'x');
+    });
+
+    assert.deepEqual(files.list(dir), ['p']);
+  });
+
+  test('writeText without a mode keeps the mode of the file it replaces', (t) => {
+    const { files } = realPlatform();
+    const p = join(tmp(t), 'f');
+    writeFileSync(p, 'a', { mode: 0o600 });
+
+    files.writeText(p, 'b');
+
+    assert.equal(files.readText(p), 'b');
+    assert.equal(mode(p), 0o600);
+  });
+
+  test('writeText with a mode overrides the mode of the file it replaces', (t) => {
+    const { files } = realPlatform();
+    const p = join(tmp(t), 'f');
+    writeFileSync(p, 'a', { mode: 0o600 });
+
+    files.writeText(p, 'b', 0o640);
+
+    assert.equal(mode(p), 0o640);
+  });
+
+  test('writeText through a symlink replaces the file it points to and keeps the link', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'dotfiles'));
+    const [real, l] = [join(dir, 'dotfiles', 'settings.json'), join(dir, 'settings.json')];
+    writeFileSync(real, 'a', { mode: 0o600 });
+    symlinkSync(real, l);
+
+    files.writeText(l, 'b');
+
+    assert.equal(files.lstat(l)?.kind, 'symlink');
+    assert.equal(files.readlink(l), real);
+    assert.equal(files.readText(real), 'b');
+    assert.equal(mode(real), 0o600);
+    assert.deepEqual(files.list(dir), ['dotfiles', 'settings.json']);
+    assert.deepEqual(files.list(join(dir, 'dotfiles')), ['settings.json']);
+  });
+
+  test('writeText through a relative symlink in another directory follows it', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'a'));
+    mkdirSync(join(dir, 'b'));
+    writeFileSync(join(dir, 'b', 'real'), 'old');
+    symlinkSync('../b/real', join(dir, 'a', 'l'));
+
+    files.writeText(join(dir, 'a', 'l'), 'new');
+
+    assert.equal(files.readText(join(dir, 'b', 'real')), 'new');
+    assert.equal(files.readlink(join(dir, 'a', 'l')), '../b/real');
+  });
+
+  test('writeText onto a dangling symlink replaces the link with a regular file', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    symlinkSync(join(dir, 'missing'), join(dir, 'l'));
+
+    files.writeText(join(dir, 'l'), 'x');
+
+    assert.equal(files.lstat(join(dir, 'l'))?.kind, 'file');
+    assert.equal(files.readText(join(dir, 'l')), 'x');
+    assert.equal(files.stat(join(dir, 'missing')), null);
   });
 
   test('writeText with a mode sets exactly that mode', (t) => {
@@ -395,6 +503,22 @@ describe('real runner', () => {
     assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
   });
 
+  test('a grandchild that keeps the pipes open does not hold run past timeoutMs', async (t) => {
+    const s = sandbox(t);
+    s.link('sh', 'sleep');
+    const started = Date.now();
+
+    const result = await realPlatform().runner.run('sh', ['-c', 'sleep 3 & printf x'], {
+      timeoutMs: 200,
+      env: s.env(),
+    });
+
+    assert.equal(result.stdout, 'x');
+    assert.equal(result.code, 0);
+    assert.equal(result.notFound, false);
+    assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+  });
+
   test('a child that finishes before timeoutMs is not timed out', async (t) => {
     const s = sandbox(t);
     s.link('sh');
@@ -520,6 +644,41 @@ describe('real platform', () => {
     assert.equal(platform.cwd, process.cwd());
     assert.equal(platform.nodePath, process.execPath);
     assert.equal(platform.nodeVersion, process.versions.node);
+  });
+
+  test('a working directory that no longer exists does not stop the platform being built', async (t) => {
+    const s = sandbox(t);
+    const script = join(s.root, 'check.mjs');
+    writeFileSync(
+      script,
+      `
+      import { realPlatform } from ${JSON.stringify(REAL_MODULE)};
+      const platform = realPlatform();
+      let cwd;
+      try { cwd = platform.cwd; } catch (error) { cwd = error.message; }
+      process.stdout.write(JSON.stringify({ home: typeof platform.homeDir, cwd }));
+      `,
+    );
+
+    const result = await inRemovedDirectory(s, [script]);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      home: 'string',
+      cwd: 'the current directory no longer exists',
+    });
+  });
+
+  test('the CLI still prints its version from a directory that no longer exists', async (t) => {
+    const { appRoot } = realPlatform();
+
+    const result = await inRemovedDirectory(sandbox(t), [
+      `${appRoot}/bin/bootstrap.mjs`,
+      '--version',
+    ]);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /^\d+\.\d+\.\d+\n$/);
   });
 
   test('appRoot is the checkout: no trailing slash, with bin/skydeck inside', () => {
