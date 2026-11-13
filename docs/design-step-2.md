@@ -787,7 +787,8 @@ attach is `seq`: the snapshot covers records up to `snapSeq` and the tail brings
 #### 8.2.1 HTTP
 
 The server listens on `127.0.0.1:<port>` only. Every request must have the `Host` header exactly
-`127.0.0.1:<port>` (15.1), else 421.
+`127.0.0.1:<port>` (15.1), else 421; for port 80 also `127.0.0.1`, which is what a browser sends
+for its default port (and the upgrade's `Origin` is then `http://127.0.0.1`).
 
 | Request | Answer |
 |---|---|

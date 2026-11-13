@@ -121,9 +121,15 @@ export function securityHeaders(port: number): Record<string, string> {
   };
 }
 
-/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17). */
+/**
+ * S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade
+ * (task 17). For port 80 also `127.0.0.1`, as a browser leaves out its default port (ruled).
+ */
 export function hostOk(host: string | undefined, port: number): boolean {
-  return Number.isInteger(port) && port >= 1 && port <= 65535 && host === `127.0.0.1:${port}`;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return false;
+  }
+  return host === `127.0.0.1:${port}` || (port === 80 && host === '127.0.0.1');
 }
 
 /**

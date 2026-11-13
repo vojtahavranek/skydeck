@@ -360,6 +360,15 @@ test('hostOk: no port that cannot be bound', () => {
   assert.equal(hostOk('127.0.0.1:1', 1), true);
 });
 
+test('hostOk at port 80: 127.0.0.1 with and without :80, as a browser sends it; never localhost', () => {
+  assert.equal(hostOk('127.0.0.1:80', 80), true);
+  assert.equal(hostOk('127.0.0.1', 80), true);
+  for (const host of ['localhost', 'localhost:80', '127.0.0.1:080', '127.0.0.1:8080', undefined]) {
+    assert.equal(hostOk(host, 80), false, String(host));
+  }
+  assert.equal(hostOk('127.0.0.1', 8080), false); // without a port only for 80
+});
+
 test('securityHeaders: the policy of S2 8.2.1 with the port, nosniff, DENY, no-referrer', () => {
   assert.deepEqual(securityHeaders(8123), {
     'Content-Security-Policy':

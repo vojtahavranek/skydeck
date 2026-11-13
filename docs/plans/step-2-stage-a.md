@@ -1961,7 +1961,10 @@ export function loadAssets(files: Files, appRoot: string): Assets;
 /** `port()` is the bound port, read at each request: with port 0 it is known only after
  *  listenHttp has resolved (tasks 20, 23 pass a function that returns it then). */
 export function httpHandler(assets: Assets, port: () => number): (req: IncomingMessage, res: ServerResponse) => void;
-/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17). */
+/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17).
+ *  For port 80 also `127.0.0.1` (a browser leaves out its default port), never `localhost`; task
+ *  17's Origin check needs the same rule for 80 (`http://127.0.0.1`) (ruled by the plan owner,
+ *  task 14). */
 export function hostOk(host: string | undefined, port: number): boolean;
 /** The headers every answer carries (the policy with the port, nosniff, DENY, no-referrer). */
 export function securityHeaders(port: number): Record<string, string>;
@@ -1986,7 +1989,8 @@ export function securityHeaders(port: number): Record<string, string>;
 - Every answer (also 404, 421, 403, 405) carries the CSP of S2 8.2.1 with the port,
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and no `Access-Control-*` header.
 - `Host: localhost:<port>`, `Host: 127.0.0.1` (no port), another port, no `Host` (HTTP/1.0) →
-  421; `OPTIONS` → 403;
+  421; at port 80 `127.0.0.1` and `127.0.0.1:80` are accepted, `localhost` and `localhost:80`
+  not; `OPTIONS` → 403;
   `HEAD`, `POST` and any other method → 405 with `Allow: GET` (a wrong Host is 421 first);
   `GET /manifest.webmanifest` and `/favicon.ico` → 404 in stage A (the icon is stage E).
 - `computeBuild`: changes when a file under `bin/`, `src/`, `web/` or `vendor/` changes (one
