@@ -98,7 +98,7 @@ test('render fits any size: exactly `rows` lines of at most `columns`, in every 
 // --- title line ------------------------------------------------------------------------------------
 
 test('line 0 names the program and counts the visible rows, and how many are in each state', () => {
-  assert.equal(render(open(), SIZE)[0], 'skydeck  2 sessions: 1 waiting · 1 not-running');
+  assert.equal(render(open(), SIZE)[0], 'skydeck  2 sessions  1 waiting · 1 not-running');
 });
 
 test('line 0 counts the states in the order of the list, leaving out the states no row is in', () => {
@@ -113,20 +113,28 @@ test('line 0 counts the states in the order of the list, leaving out the states 
   ];
   assert.equal(
     render(initModel(rows, T0), SIZE)[0],
-    'skydeck  5 sessions: 1 waiting · 2 working · 1 running · 1 not-running',
+    'skydeck  5 sessions  1 waiting · 2 working · 1 running · 1 not-running',
   );
-  assert.equal(render(initModel(rows.slice(2, 4), T0), SIZE)[0], 'skydeck  2 sessions: 2 working');
+  assert.equal(render(initModel(rows.slice(2, 4), T0), SIZE)[0], 'skydeck  2 sessions  2 working');
 });
 
-test('line 0 shows the filter and "(all)"; the counts are of the visible rows', () => {
+test('line 0 shows the filter and "(all)" before the counts; the counts are of the visible rows', () => {
   const model = press(open(), '/', 'b', 'e', 'enter', 'a');
-  assert.equal(render(model, SIZE)[0], 'skydeck  1 sessions: 1 not-running  filter: be  (all)');
+  assert.equal(render(model, SIZE)[0], 'skydeck  1 sessions  filter: be  (all)  1 not-running');
+});
+
+test('on a narrow line the counts are cut, not the filter or "(all)"', () => {
+  const model = press(open(), '/', 'b', 'e', 'enter', 'a');
+  assert.equal(
+    render(model, { columns: 40, rows: 10 })[0],
+    'skydeck  1 sessions  filter: be  (all)  ',
+  );
 });
 
 test('line 0 shows "(all)" without a filter', () => {
   assert.equal(
     render(press(open(), 'a'), SIZE)[0],
-    'skydeck  3 sessions: 1 waiting · 2 not-running  (all)',
+    'skydeck  3 sessions  (all)  1 waiting · 2 not-running',
   );
 });
 
@@ -236,7 +244,7 @@ test('a message is one line without escape sequences or control characters', () 
 test('with one row there is only the last line; with two, the title line and the last line', () => {
   assert.deepEqual(render(open(), { columns: 80, rows: 1 }), [HELP.slice(0, 80)]);
   const two = render(open(), { columns: 80, rows: 2 });
-  assert.equal(two[0], 'skydeck  2 sessions: 1 waiting · 1 not-running');
+  assert.equal(two[0], 'skydeck  2 sessions  1 waiting · 1 not-running');
   assert.equal(two[1], HELP.slice(0, 80));
 });
 
