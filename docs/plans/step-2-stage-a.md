@@ -869,58 +869,144 @@ Two additions to S2 8.2.3 and 8.3 that task 1 records in the design: `result` ca
 ### 2.8 Server modules other tasks call
 
 ```ts
-// src/window/auth.ts (task 11)
-export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array; // one transaction
-export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm
+// src/window/auth.ts (task 11). Thrown errors below were ruled by the plan owner (task 11); their
+// messages name sizes, never values. Callers (tasks 17 and 18) run isNonce on every nonce a peer
+// sent before they call pageProof, serverProof or wrapSecret, so a page's bad nonce closes the
+// connection (4001) and never reaches a throw.
+/** One transaction. A stored value that is not 32 bytes in isNonce's form is replaced as if absent
+ *  (ruled): it could prove nothing, and a page holding a key from it gets 4003 and asks for a new launch.
+ *  Both: RangeError, and nothing stored, when the random source gives another number of bytes. */
+export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array;
+export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm; one transaction
+/** RangeError for a key that is not 32 bytes, a mode other than 'key' | 'launch', or an sN or cN that is not isNonce. */
 export function pageProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string;
-export function serverProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string;
+export function serverProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string; // as pageProof
+/** RangeError for a secret or token that is not 32 bytes, an IV that is not 12, or an sN or cN that is not isNonce. */
 export function wrapSecret(secret: Uint8Array, token: Uint8Array, sN: string, cN: string, iv: Uint8Array): string;
-export function isNonce(text: string): boolean; // 43 characters of base64url, 32 bytes
+/** 43 characters of base64url, 32 bytes, in the canonical form (ruled): the two bits the last
+ *  character has to spare are zero, as an encoder writes them, so one value has one text. */
+export function isNonce(text: string): boolean;
+/** Mode `key` (ruled, review 2 of task 11): whether `proof` is the page's proof made with the
+ *  secret, by check's rules — timingSafeEqual on two 43-byte buffers; false without comparing for a
+ *  proof that is not a string of 43 bytes, an sN or cN that is not isNonce, an origin that is not a
+ *  string or a secret that is not 32 bytes. Never throws. Task 17 uses it for mode `key` and never
+ *  compares proofs itself. */
+export function keyProofMatches(secret: Uint8Array, proof: string, sN: string, cN: string, origin: string): boolean;
 export interface Tokens {
+  /** `id`: 32 lower-case hex characters (16 random bytes, the control parser's form). RangeError for
+   *  seconds other than 30 and 600, or a random source that gives another number of bytes; Error
+   *  when it repeats an id. How a token ends (ruled): it expires when its `clock.after` timer of
+   *  `seconds` runs out (a timer counts on a clock that does not jump, so WSL's wall clock stepping
+   *  back cannot stretch it) or when it is looked at (`state`, `check`) with the wall clock at or past
+   *  `expiresAtNs` (a PC that slept), whichever comes first. It holds its timer only while it waits:
+   *  a use, a drop and forgetAll stop it. */
   mint(seconds: 30 | 600): { id: string; token: Uint8Array; expiresAtNs: Ns };
+  /** null for an id never minted (or forgotten). A used token stays 'used' (or 'reused') whatever
+   *  comes later; an unused one is 'dropped' once given up, else 'expired', else 'waiting'. */
   state(id: string): TokenState | null;
-  drop(id: string): boolean;
-  /** Constant-time check of `proof` against every token; a match marks it used (or reused: the alarm). */
-  check(proof: string, sN: string, cN: string, origin: string): { kind: 'match'; token: Uint8Array } | { kind: 'reused' } | { kind: 'none' };
-  forgetAll(): void;
+  drop(id: string): boolean; // false for an unknown id
+  /** Constant-time check of `proof` against every token a proof can still reach — waiting, used or
+   *  reused; one dropped or expired before its use can only give 'none' and is skipped: timingSafeEqual
+   *  on equal-length buffers, not stopping at a match. A proof that is not a string of 43 bytes, an
+   *  sN or cN that is not isNonce, or an origin that is not a string is 'none' without comparing.
+   *  A match marks the token used. The alarm (ruled, review 2 of task 11): a proof with a used token
+   *  marks it reused FIRST, then calls onAlarm on that token's first reuse only (again on a later
+   *  reuse only while every earlier call failed), so a used token presented in a loop costs no store
+   *  write. check NEVER throws, whatever onAlarm does: the verdict stays 'reused', and a failing
+   *  onAlarm (a refused store write, a locked database) comes back as `alarmFailure` — the error's
+   *  name and string code, never its message — for the caller to log; else null. */
+  check(proof: string, sN: string, cN: string, origin: string): { kind: 'match'; token: Uint8Array } | { kind: 'reused'; alarmFailure: string | null } | { kind: 'none' };
+  forgetAll(): void; // empties everything, stops every timer
 }
 export function createTokens(clock: Clock, random: (n: number) => Uint8Array, onAlarm: () => void): Tokens;
-export function raiseAlarm(store: Store, nowNs: Ns): void; // kv window_alarm
+/** kv window_alarm, in one transaction: the time of the FIRST second use is kept (ruled, review 2
+ *  of task 11) — a recorded time is never overwritten; a value that is not a decimal time is. */
+export function raiseAlarm(store: Store, nowNs: Ns): void;
 
 // src/window/runtime.ts (task 15)
+/** S2 5.2: `serve` exits 12. message `the runtime directory <dir> cannot be used: <reason>`. */
+export class RuntimeDirError extends SkydeckError { readonly dir: string; readonly reason: string }
 export interface RuntimeFiles { dir: string; serverJson: string; serverSock: string; serverPid: string; keepalivePid: string; keepaliveInterop: string; interop: string; termsDir: string; keeperFile(build: string): string; termSock(id: string): string; termPid(id: string): string }
+/** keeperFile throws for a build that is not [A-Za-z0-9_-]+, termSock and termPid for an id that
+ *  is not a terminal id (12 lowercase hex, 2.3): no name leads outside the directory. */
 export function runtimeFiles(dir: string): RuntimeFiles;
 /** S2 4.2. 'follow' (commands): the store's record whenever there is one, whatever it holds;
  *  runtimeDirByRule only without a record. 'take' (a starting server): the record only when its
  *  directory exists and holds a keeper alive by its .pid line, else runtimeDirByRule; then writes
- *  kv window_runtime_dir. */
+ *  kv window_runtime_dir. In both modes a record that is empty or not an absolute path counts as
+ *  no record (skydeck never writes one; ruled, task 15). 'take' gives a record up only when every
+ *  keeper line in it is 'dead' (an 'unknown' one keeps it). The rule's XDG_RUNTIME_DIR check: a
+ *  directory owned by `platform.uid`, mode without group or other bits, and
+ *  /var/lib/systemd/linger/<userName> exists; a check that throws passes it over. */
 export function resolveRuntimeDir(deck: Deck, mode: 'follow' | 'take'): { dir: string; rule: RuntimeRule | 'record' };
 /** Creates the directory (0o700) and terms/ (0o700); refuses (RuntimeDirError, reason) when it is
- *  not the user's, not 0o700, or a socket path would be 108 bytes or more. */
+ *  not the user's, not 0o700, or a socket path would be 108 bytes or more. The socket path
+ *  checked is the longest one, a keeper's terms/<id>.sock (the directory + 24 bytes), before
+ *  anything is created: `serve` refuses to start (12) rather than run without terminals (ruled,
+ *  task 15; S2 4.2). A directory it creates gets exactly 0o700 whatever the umask; an existing one
+ *  that is a symbolic link, not a directory, another uid's or of another mode is refused, never
+ *  changed. */
 export function prepareRuntimeDir(platform: Platform, files: RuntimeFiles): void;
 /** S2 16.5: writes <dir>/keeper-<build>.py (0o600, through a temporary name) and removes the
- *  keeper files of other builds. */
+ *  keeper files of other builds and the temporaries a cut-short write of one left behind (ruled,
+ *  task 15): only regular files directly in <dir> named `keeper-<build>.py` or
+ *  `.keeper-<build>.py.<12 lowercase hex>.tmp` (Files.writeText's temporary), the forms this
+ *  function creates; anything else stays. */
 export function writeKeeperFile(files: Files, runtime: RuntimeFiles, build: string, code: string): void;
 /** S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
- *  whose socket refuses connections; a line that is 'unknown' never removes anything by itself. */
+ *  whose socket refuses connections (a socket without a .pid line, or beside one that is not a pid
+ *  line, too); a line that is 'unknown' never removes anything by itself. Only ECONNREFUSED is a
+ *  refusal: a full accept queue (EAGAIN) or any other error belongs to a keeper that may live
+ *  (ruled, task 15). Nothing is removed for a keeper whose .pid file cannot be read (`line` null
+ *  in listKeeperLines), whatever its socket says; a directory with such a name is neither tried
+ *  nor removed. Resolves to the terminal ids whose files it removed, in order. */
 export function removeDeadKeeperFiles(platform: Platform, runtime: RuntimeFiles): Promise<string[]>;
 export interface ServerJson { pid: number; procStart: number; bootId: string; port: number; serverId: string; build: string; checkout: string; startedAt: NsText; envOrigin: { dir: string; atNs: NsText } }
+/** null when the file is missing or does not hold a valid value; a field a newer skydeck adds is
+ *  ignored; a read error other than "missing" is thrown. Valid (ruled, task 15; tasks 18, 22, 23 and
+ *  24 write their fixtures through writeServerJson with such values): pid a safe integer ≥ 1;
+ *  procStart a safe integer ≥ 0; bootId, serverId and build non-empty strings without whitespace;
+ *  port a whole number 1–65535 (the bound port, never 0: A6); checkout and envOrigin.dir absolute
+ *  paths without NUL; startedAt and envOrigin.atNs canonical decimal ns text (no sign, no leading
+ *  zero, ≤ 2^63 − 1). */
 export function readServerJson(files: Files, path: string): ServerJson | null;
-export function writeServerJson(files: Files, path: string, value: ServerJson): void; // 0o600, atomic
-/** S2 5.2: kv window_server in one transaction, taken when the server it names is dead by design
- *  5.5's rule. */
+/** 0o600, atomic. Throws for a value readServerJson would read as null. */
+export function writeServerJson(files: Files, path: string, value: ServerJson): void;
+/** S2 5.2: kv window_server `<pid>:<process start>:<boot id>:<checkout>` in one transaction, taken
+ *  when free or when the server it names is 'dead' by design 5.5's rule (pidLineState), never on
+ *  'unknown'; a stored value that does not parse names no server and is taken. Throws (ruled, task
+ *  15) for a `value` that is not a lock: pid not a safe integer ≥ 1, procStart not one ≥ 0, a boot
+ *  id that is empty or holds ':' or whitespace, a checkout that is not an absolute path or holds NUL. */
 export function takeServerLock(deck: Deck, value: { pid: number; procStart: number; bootId: string; checkout: string }): { taken: true } | { taken: false; holder: { pid: number; checkout: string } };
+/** Removes the lock only when it names this process's pid (`platform.pid`). */
 export function releaseServerLock(deck: Deck): void;
 /** Keepers by their .pid lines (S2 4.2), whatever their state (pidLineState, 2.8), for doctor,
  *  uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
  *  server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
- *  is 'alive' or 'unknown'). */
-export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; state: PidLineState }[];
+ *  is 'alive' or 'unknown'). Reads only regular files terms/<terminal id>.pid (a keeper's
+ *  temporary must not have that name); one that holds no pid line, or was removed meanwhile, is
+ *  skipped. A file that cannot be read (EACCES, EIO …) gives `line: null` with state 'unknown'
+ *  (ruled, task 15: never removed, counted as alive wherever something would be given up — the
+ *  runtime directory's record, the keep-alive, `uninstall --purge`, which refuses on it) and the
+ *  others are still read; tasks 16 and 24 handle a null `line`, and doctor reports such an entry
+ *  on its own, as a keeper file that cannot be read (task 24 decides the text). The boot id is read once, and
+ *  every line is 'unknown' when it cannot be read. */
+export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine | null; state: PidLineState }[];
 
 // src/window/log.ts (task 15)
-/** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1. */
+/** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1
+ *  (rotateLog, before the line is appended). The line is passed through `sanitize` (one line:
+ *  breaks become spaces, escapes removed). The file is only appended to (other writers' lines, the
+ *  launcher's and Node.js's, stay). The function never throws and never ends the process (ruled,
+ *  task 15): a rotation that fails does not stop the line, a time that cannot be shown is `-`, a
+ *  line it cannot append goes to fd 2 by a synchronous write, and one that cannot be written there
+ *  either is lost. */
 export function serverLog(platform: Platform, path: string, foreground: boolean): (line: string) => void;
-/** Renames `path` to `<path>.1` when it is 1 MiB or more (keepers.log, which keepers append to). */
+/** When `path` is 1 MiB or more: copies it to `<path>.1` (through `.<name>.1.tmp`, renamed over an
+ *  older .1; mode 0o600) and truncates `path` in place (ruled, task 15): a writer holding the file
+ *  open in append mode (the server's own stdout and stderr in server.log, each keeper's stderr in
+ *  keepers.log) goes on writing into it; a line appended between the copy and the truncate can be
+ *  lost. A failure is thrown and leaves `path` as it was. */
 export function rotateLog(files: Files, path: string): void;
 
 // src/window/pidline.ts (task 8). The line, exactly, with one '\n' at the end:
@@ -1810,20 +1896,36 @@ and a random source; no socket.
 - `wrapSecret`'s output opens with Node's AES-256-GCM under the HKDF key of the token and both
   nonces, and not with another token or with the nonces swapped.
 - `ensureSecret` creates 32 bytes once (two calls return the same; a second connection's call in
-  between returns the first's), stored base64url without padding; `replaceSecret` changes it and
-  clears `window_alarm`.
+  between returns the first's), stored base64url without padding; a stored value that is not a
+  secret in that form is replaced (ruled); `replaceSecret` changes it and clears `window_alarm`.
 - Tokens (fake clock): `mint(30)` → `state` `waiting`; a proof made with it → `match` and
   `used`; the same proof again → `reused`, `onAlarm` called once; after 30 s an unused token →
   `none` and `state` `expired`; `drop` → `dropped`, and a later proof with it → `none` (`reused`
   when it had been used); `mint(600)` lives 10 minutes; a used token stays known after `forgetAll`
-  is not called (the server's life); `forgetAll` empties everything.
+  is not called (the server's life); `forgetAll` empties everything. A token lives no longer than
+  its seconds when the wall clock steps back, expires at once when it jumps past `expiresAtNs`,
+  and holds a timer only while it waits (ruled).
 - `check` compares in constant time (`crypto.timingSafeEqual` on equal-length buffers; a proof
   of another length is `none` without comparing); a proof made with the server's label never
   matches a page proof.
-- `isNonce`: 43 base64url characters of 32 bytes → true; 42, 44, `+`, `/`, `=` → false.
-- `raiseAlarm` writes the time; the secret's bytes never appear in any string the module returns
-  except `wrapSecret`'s ciphertext (checked by searching every returned string for the
-  base64url of the secret).
+- `isNonce`: 43 base64url characters of 32 bytes → true; 42, 44, `+`, `/`, `=`, a last character
+  whose two spare bits are not zero → false.
+- The thrown cases of 2.8 (ruled): a key, nonce, mode or IV of the wrong kind, seconds other than
+  30 and 600, a random source that gives the wrong number of bytes or repeats an id.
+- The alarm (ruled, review 2): a used token presented again and again is `reused` each time and
+  calls `onAlarm` on its first reuse only; each token raises it on its own first reuse; the
+  callback sees the token already `reused` (the order is pinned); a throwing callback leaves the
+  verdict `reused` with `alarmFailure` naming the error's name and code (never its message), and
+  the next reuse calls it again.
+- `keyProofMatches` (ruled, review 2): the vector's mode `key` proof → true; the server's label,
+  mode `launch`, another origin, other nonces or key, one character changed anywhere → false; one
+  `timingSafeEqual` on two 43-byte buffers; no comparison and no throw for a proof that is not a
+  string of 43 bytes, a nonce that is not one, an origin that is not a string, a secret of another
+  size.
+- `raiseAlarm` writes the time and keeps the first one (one transaction; ruled); the secret's bytes never appear in any string the module returns
+  except `wrapSecret`'s ciphertext (checked by searching every returned string, and every error
+  of each thrown case provoked with the secret or a token as an argument, for the secret's and the
+  token's base64url, base64, hex and decimal forms; ruled, review 2).
 
 **Done when:** the vector is pinned and every token state of S2 8.3's `GET /token/<id>` is reachable.
 
@@ -2079,6 +2181,10 @@ their files, how the server and the commands find that place (the store's record
 
 **Files**
 - Create: `src/window/runtime.ts`, `src/window/log.ts`
+- Create: `test/fixtures/server-lock-child.ts` (one would-be server for the lock race test, as
+  step 1's `resume-lock-child.ts`; ruled, task 15)
+- Modify: `docs/design-step-2.md` 4.2 (a socket path that does not fit: `serve` refuses to start;
+  ruled, task 15)
 - Test: `test/window/runtime.test.ts`, `test/window/log.test.ts`
 
 **Behaviour** (besides 2.8): `runtime.ts` exports the runtime directory, its files, the keeper
@@ -2086,7 +2192,8 @@ file (`writeKeeperFile`: mode 0o600, through a temporary name, other builds' fil
 removal of dead keepers' files (`removeDeadKeeperFiles`, S2 7.8), `server.json` and the lock;
 `log.ts` exports `serverLog` and `rotateLog`. `xdgUsable` for the rule checks owner, mode (no group
 or other bits) and `/var/lib/systemd/linger/<userName>`. `serverLog` writes one line per call with
-an ISO time and renames the file to `.1` at 1 MiB (one older file kept); `rotateLog` does the same
+an ISO time and, at 1 MiB, copies the file to `.1` and empties it in place (one older file kept;
+ruled: not a rename, so that writers holding the file open stay in it); `rotateLog` does the same
 for `keepers.log`, which the keepers append to.
 
 **Tests** (platform: `testDeck(t, { real: true })` where a live process holds the lock or a keeper line; `testPlatform` for the rule)
@@ -2110,8 +2217,9 @@ for `keepers.log`, which the keepers append to.
   child processes).
 - `server.json` round trip, mode 0o600; `readServerJson` of garbage → null.
 - `listKeeperLines` reads every `terms/*.pid`, ignores other files and temporaries.
-- Logs: lines appended; at 1 MiB the file becomes `.1` and a new one starts; an older `.1` is
-  replaced.
+- Logs: lines appended; at 1 MiB the file is copied to `.1` and emptied in place, and a writer
+  holding it open goes on writing into it; an older `.1` is replaced; a full disk on the file and
+  on stderr does not end the process (a child process whose stderr is `/dev/full`).
 
 **Done when:** every place of S2 4.2 has one function that names or prepares it, and the commands
 and the server find the same directory whatever their environment.
@@ -2233,6 +2341,10 @@ lock release on exit (task 21); size ownership (task 17).
 
 **Goal.** `src/window/pages.ts` and `src/window/size.ts`: every page's connection from the upgrade
 to `bye`, against `TerminalHub` and `ActionHandler` (fakes in the tests).
+
+The handshake checks a proof only through 2.8 (ruled, task 11): mode `key` with `keyProofMatches`,
+mode `launch` with `tokens.check`, never by a comparison of its own; `reused` closes with 4004
+whatever `alarmFailure` says, and a non-null `alarmFailure` is logged by that kind.
 
 **Exported API**
 
@@ -2859,7 +2971,9 @@ session into a terminal pane that says "terminal view comes with task 28".
 - Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`
 
 **Behaviour.** `auth.js`: S2 8.2.2 steps 3–6 and "where the page keeps its key" — HMAC proofs,
-HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. `connection.js`:
+HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. The page
+encodes its nonce `cN` from its 32 random bytes in canonical base64url without padding, and takes
+the server's `sN` only in that form (the rule of 2.8's `isNonce`; ruled, task 11). `connection.js`:
 S2 6.3, 8.2.5 and the reload keys of S2 12.9 and 15.3 (a new connection, the server's proof, only
 then `location.reload()`); `input` split into messages of at most 64 KiB. `app.js`: `start`,
 `view` and `focus` messages; selection, zones (the terminal by default; a coloured top edge and
