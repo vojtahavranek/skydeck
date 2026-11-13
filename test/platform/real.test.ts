@@ -87,7 +87,11 @@ describe('real clock', () => {
     const stop = clock.every(10, () => {
       calls++;
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Until it was called twice; a loaded machine may take its time, so the deadline is generous.
+    const deadline = Date.now() + 10_000;
+    while (calls < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     stop();
     const atStop = calls;
     await new Promise((resolve) => setTimeout(resolve, 50));

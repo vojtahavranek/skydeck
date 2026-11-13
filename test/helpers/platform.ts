@@ -26,7 +26,10 @@ export const BOOT_A = '6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f';
 export const BOOT_B = '7d2e3f4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a';
 
 export interface FakeClock extends Clock {
-  /** Jumps to `ns`; no timer of `every` is called. */
+  /**
+   * Jumps to `ns`. No timer of `every` is called; each running one is next due one period after
+   * `ns`, as a real interval is after the wall clock jumped.
+   */
   setNs(ns: Ns): void;
   /**
    * Moves the time on by `ms`. Every timer of `every` that falls due on the way is called at its
@@ -88,6 +91,9 @@ export function fakeClock(startNs: Ns): FakeClock {
     },
     setNs: (ns) => {
       now = ns;
+      for (const timer of running) {
+        timer.dueNs = ns + timer.periodNs;
+      }
     },
     advanceMs,
     timers: () => running.size,

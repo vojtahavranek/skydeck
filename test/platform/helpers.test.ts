@@ -111,6 +111,22 @@ describe('fakeClock', () => {
     assert.equal(clock.timers(), 2);
   });
 
+  test('setNs moves every running timer to one period after the new time, as a real interval after a jump', () => {
+    const clock = fakeClock(T0);
+    let calls = 0;
+    clock.every(5000, () => {
+      calls++;
+    });
+
+    clock.setNs(T0 + 300n * SEC);
+    clock.advanceMs(4999);
+    const before = calls;
+    clock.advanceMs(1);
+
+    assert.equal(before, 0, 'not 60 calls for the periods jumped over');
+    assert.equal(calls, 1);
+  });
+
   test('a timer stopped by another one in the same advance is not called again', () => {
     const clock = fakeClock(T0);
     let calls = 0;
