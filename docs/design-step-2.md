@@ -177,6 +177,25 @@ starting a detached process with a given environment, a long-lived child with pi
 TCP, connecting to and listening on unix sockets, and reading `/proc/<pid>/stat` for a parent
 pid. Design 11's rule stands: nothing outside `src/platform/` starts a program or opens a socket.
 
+### 4.4 Changes to step 1's code
+
+Every change step 2 makes to code that step 1 built, and the stage (19) that brings it. Nothing
+else of step 1 changes; a command not named here behaves exactly as in step 1.
+
+| Where | Change | Stage |
+|---|---|---|
+| `bin/skydeck` (launcher) | For `serve`: `ulimit -c 0` before Node.js starts (2). For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside `NODE_COMPILE_CACHE`, so the server can drop the launcher's cache variable from the programs' environment (5.2, 7.4). | A |
+| `src/platform/` | New interfaces: detached processes with a given environment, long-lived children, TCP and unix sockets, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
+| `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
+| `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value and the start deadline; the `Terminal` names gain `window` (11.1, 11.2). | A |
+| `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). | A |
+| `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). | C |
+| `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
+| `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
+| the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
+| `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
+| `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the page suite on one leg, the time limit. | A |
+
 ## 5. Starting the window
 
 ### 5.1 `skydeck window`
@@ -236,9 +255,30 @@ Exit codes as design 7.5: 0, 1 (failure), 2 (usage).
 
 Only `skydeck window` starts a server (the commands of 11.4 use a running one). It starts
 `bin/skydeck serve` through the launcher (so the Node.js binary is chosen as for every command,
-design 10; for `serve` the launcher first sets `ulimit -c 0`, 2), detached in a new session (it
-gets no SIGHUP when the terminal it was started from closes), with stdin `/dev/null`, stdout and
-stderr appended to `<stateDir>/server.log`, and working directory `/`.
+design 10), detached in a new session (it gets no SIGHUP when the terminal it was started from
+closes), with stdin `/dev/null`, stdout and stderr appended to `<stateDir>/server.log`, and working
+directory `/`. Whoever starts `serve` — `skydeck window`, or a person typing `skydeck serve
+--foreground` — the same two rules hold, because they live in `serve` and in the launcher, not in
+`skydeck window`: the launcher sets `ulimit -c 0` before it runs Node.js for `serve` (2), and
+`serve` refuses, as `skydeck window` does (5.1), when `CLAUDECODE` is set. Tests that start a
+server remove `CLAUDECODE` (and the other names of 7.4) from its environment first, since the
+tests may themselves run under Claude Code.
+
+**How `skydeck window` learns what happened.** It keeps the handle of the `serve` process it
+started and waits, at most 10 seconds, for the first of: `server.sock` answering `GET /ping` with
+the current boot id and build — started; or the process exiting, whose code says why, and which
+it turns into one fixed line:
+
+| `serve` exits | `skydeck window` says (exit 1) |
+|---|---|
+| 0 | nothing: a server of this checkout holds the lock — another `skydeck window` started it at the same moment — and that one is used (it is waited for within the same 10 seconds) |
+| 10 | `port <n> on 127.0.0.1 is used by another program; set window.port in <config path>` |
+| 11 | `a window server already runs (pid <n>, from <checkout>)` (from `server.json`): a server of another checkout, or of another store in the same runtime directory |
+| 12 | `the runtime directory <dir> cannot be used: <reason>; see skydeck doctor` (mode, owner, or a socket path of 108 bytes or more) |
+| 13 | `the window's server is not started from inside a Claude Code session` |
+| anything else, or no answer in 10 seconds | `the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log`; after a timeout the process is left running, and the next `skydeck window` finds it or reports it as not answering (5.1) |
+
+These codes are `serve`'s own; they never reach a user through another command.
 
 **Its environment** is that of the `skydeck window` command that started it, without
 `SKYDECK_HANDOFF` and without the compile-cache variable the launcher sets for Node.js alone (the
@@ -253,13 +293,14 @@ run in <directory> at <time>`), and a change reaches new terminals only after `s
 **One server per installation.** The lock is the `kv` entry `window_server`
 (`<pid>:<process start>:<boot id>:<checkout>`), taken in one store transaction when the server it
 names is not alive by design 5.5's rule; so a second server of the same installation — another
-port, `serve --foreground`, another checkout — refuses to start (`a window server already runs
-(pid <n>, from <checkout>)`), and only one server ever talks to the keepers of one runtime
-directory. A server that also finds `server.json` in its runtime directory naming a live server
-of another store refuses too. Holding the lock, it binds the port, removes a `server.sock` that
-refuses connections (left by a dead server) and listens there, writes `server.json`, and removes
-the lock when it stops. A port held by anything else makes it exit 1 with `port <n> on 127.0.0.1
-is used by another program; set window.port in <config path>`, which `skydeck window` prints.
+port, `serve --foreground`, another checkout — does not start (`a window server already runs (pid
+<n>, from <checkout>)` on stderr; exit 0 when the running one is of the same checkout, 11
+otherwise), and only one server ever talks to the keepers of one runtime directory. A server that
+also finds `server.json` in its runtime directory naming a live server of another store does not
+start either (exit 11). Holding the lock, it binds the port, removes a
+`server.sock` that refuses connections (left by a dead server) and listens there, writes
+`server.json`, and removes the lock when it stops. A port held by anything else makes it release
+the lock and exit 10.
 
 The port (configuration `window.port`, default 47613) is fixed because what a page keeps is kept
 per origin, and the origin includes the port: the notification permission (13) and the
@@ -457,7 +498,8 @@ The keeper:
 1. makes itself non-dumpable (2), creates its socket (mode 600; the directory is 700) and writes
    its `<id>.pid` line (4.2) with `started` 0. It does **not** start the program. A connection alone never starts it either: only the start message `G` of a
    screen side does (8.1), and only while the clock (`time.time_ns()`) is before `startBy`. Then it
-   forks the program with `pty.fork()` at the current size, and rewrites its `<id>.pid` line with
+   forks the program with `pty.fork()` at the current size, sends `T` with the program's pid and
+   process start (8.1), and rewrites its `<id>.pid` line with
    `started` 1; the child changes to `cwd`, replaces its environment with `env` (in which `PWD` is
    `cwd`, 7.4) and `exec`s `argv`. The server that spawned the keeper sends `G`
    right after the first `hello` (one that finds it later checks first, 7.3); the start waits for a
@@ -571,9 +613,13 @@ The server's environment (5.2), with:
 A terminal is opened for a session (resume) or for a new session id (`new`), and the server keeps
 both in memory: the **expected session**. Which session it shows is decided again at every tick:
 
+- the terminal's program is the process the keeper reported in `T` or `hello` (8.1): pid and
+  process start, on the current boot. A terminal whose keeper has not reported a start has no
+  program yet;
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
   terminal's program or a descendant of it (parent pids read from `/proc/<pid>/stat`, at most 8
-  steps up), on the current boot. The descendant rule covers a `claudeCommand` that is a wrapper;
+  steps up, each judged alive by design 5.5's rule). The descendant rule covers a `claudeCommand`
+  that is a wrapper;
 - a terminal shows the session one of its holders holds. After `/clear` or an in-session `/resume`
   that is the new session; the old one becomes `not-running` (with no mark, design 6.3), and the
   terminal moves to the new session's row with its slot;
@@ -648,8 +694,9 @@ keeper). Protocol version 1:
 | Type | Direction | Payload |
 |---|---|---|
 | `C` claim | server → keeper | Empty. The connection becomes the screen side (7.1, step 3). The first frame of every connection. |
-| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` (the program's; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers, 0 for none), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
+| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers, 0 for none), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
 | `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
+| `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output; a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
 | `N` do not start | server → keeper | UTF-8 reason. The program is never started (7.1, step 2). |
 | `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. |
 | `D` output | keeper → server | One record: bytes as read from the pty. After `H` (and `S`) come the tail's records, then live ones. |
@@ -800,9 +847,9 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `open-link` | `url` | 9.6. |
 | `dismiss-restore` | `bootId` | 12.7. |
 
-An unknown kind or field is refused. No action carries a program, a directory to run in or an
-argument list, except `new`: a directory, a label, a group and `claude` flags, which the server
-checks as `skydeck new` checks them.
+An unknown kind or field is refused. No action carries a program or an argument list to run (8.3):
+`resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
+fields that become part of a launch, checked as `skydeck new` checks them.
 
 Server → page:
 
@@ -880,10 +927,13 @@ The command line talks to the server over `<runtimeDir>/server.sock`, a unix soc
 a directory of mode 700: only the user's own processes can connect, and no secret is needed or
 sent. HTTP/1.1 over that socket, JSON bodies with fixed fields (an unknown field is 400).
 
-**No request carries a program, a working directory to run in or an argument list.** The server
-prepares every launch itself, through the guard and the lock (11.1): from a session id, or, for a
-new session, from a directory, a label, a group and `claude` flags that it checks as `skydeck new`
-checks them (design 7.7).
+**No request carries a program or an argument list to run.** The server prepares every launch
+itself, through the guard and the lock (11.1): for a resume from a session id alone; for a new
+session from a directory, a label, a group and `claude` flags, the only request fields that become
+part of a launch, which the server checks as `skydeck new` checks them (design 7.7: the directory
+absolute and existing, no flag that picks a session or names it). The program is always
+`claudeCommand`, and the argument list is always built by `buildResumeCommand` or
+`buildNewCommand`.
 
 | Request | Answer |
 |---|---|
@@ -1116,11 +1166,17 @@ Four changes to step 1's code make that possible, with no change of behaviour fo
 in `src/window/` (4.3) and exists **only inside the server**: no other process opens a terminal of
 the window, and nothing hands the server a launch to run (8.3); the `Terminal` type's names gain
 `window`. Its `open(spec)` spawns a keeper (7.1) with the spec's launch, session id, kind, lock
-value and start deadline (11.1), the first size (8.2.6) and the next free slot; claims it, sends `G` on its `hello`, and resolves `{ ok: true }` once the keeper
-says it started. A keeper that cannot be started (python3 missing, a socket path too long, a spawn
-error) is `{ ok: false, timedOut: false }` with the reason; no `hello` within 5 seconds is
-`{ ok: false, timedOut: true }` (the keeper may yet be found by a later server, which then runs the
-guard before it starts anything, 7.3).
+value and start deadline (11.1), the first size (8.2.6) and the next free slot; claims it, sends
+`G` on its `hello`, and resolves on what comes back:
+
+- `T` (8.1): `{ ok: true }`; the program runs, and the terminal is tied to its pid and process start
+  (7.5);
+- `X` with `notStarted`, a keeper that cannot be started at all (python3 missing, a socket path
+  too long, a spawn error), or a keeper that ends before `T`: `{ ok: false, timedOut: false }` with
+  the reason — nothing was started;
+- no `hello`, or no `T` after `G`, within 5 seconds: `{ ok: false, timedOut: true }`. The keeper
+  may still start the program before its deadline; a later server that finds it runs the guard
+  first (7.3), and this server keeps the terminal and shows it when `T` comes.
 
 So a failure behaves as a failed tab does in step 1 (`settleFailedLaunch`): the lines end with the
 command line to run by hand when that is safe, and none after a timeout.
@@ -1479,10 +1535,12 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
 - **Programs pretending to be the server.** A page trusts a server only after the server's proof
   (8.2.2): an open window sends nothing — no proof it could reuse, no keys, no view state — to a
   program that answers on the port and cannot prove itself, and says so (15.3).
-- **Requests that start programs.** No request carries a program, a directory to run in or an
-  argument list (8.2.3, 8.3): the server builds every launch itself, through the guard and the lock,
-  from a session id or from `new`'s checked fields. The only argument skydeck passes to a program
-  from a page is a link, and only as 9.6 allows.
+- **Requests that start programs.** No request carries a program or an argument list to run (8.2.3,
+  8.3): the server builds every launch itself, through the guard and the lock, with `claudeCommand`
+  as the program — from a session id, or from `new`'s directory, label, group and `claude` flags
+  after design 7.7's checks. Whoever can send requests can therefore start `claude` in a directory
+  that exists, with flags `skydeck new` would accept, and nothing else. The only other argument
+  skydeck passes to a program from a page is a link, and only as 9.6 allows.
 - **Browser extensions.** An extension that may read `127.0.0.1` pages could read the terminals and
   the secret. The window runs in its own profile folder, so the user's extensions are not there.
   Extensions that company policy forces into every profile still are: check W13 lists them
@@ -1702,8 +1760,11 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
 - updating: after the checkout's `web/` and keeper file change on disk, a running server still
   serves and starts what it hashed; a migration made by a command makes the server write nothing
   more and stop;
-- the unix socket: mode 600 in a directory of mode 700; a body with an unknown field, or with a
-  program, directory or argument list in any form, is refused and starts nothing;
+- the unix socket: mode 600 in a directory of mode 700; a body with an unknown field is refused
+  and starts nothing; a field that tries to name the program or a whole argument list (`argv`,
+  `cwd`, `command` on `/resume`; `--resume`, `-c`, `-n`, `--session-id` among `/new`'s flags; a
+  relative or missing directory) is refused and starts nothing; a valid `/new` starts
+  `claudeCommand` with exactly `buildNewCommand`'s arguments (the stand-in records them);
 - places: with `SKYDECK_HOME` set, the runtime directory is `$SKYDECK_HOME/run` whatever
   `XDG_RUNTIME_DIR` says, and the server, the keepers and the keep-alive script create and open
   nothing outside `SKYDECK_HOME` and the test's temporary directories;
