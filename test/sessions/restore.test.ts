@@ -870,7 +870,10 @@ test('without tabs a handoff that fails prints that session’s command too and 
   assert.equal(outcome.handedOff, null);
   assert.deepEqual(outcome.failed, [{ id: sid(1), reason: 'not started through bin/skydeck' }]);
   // As `resume` does after a failed launch: its own command, under the lock restore took for it.
-  assert.deepEqual(outcome.printed, [`cd -- ${dir} && claude --resume ${sid(1)}`, resumeLine(sid(2))]);
+  assert.deepEqual(outcome.printed, [
+    `cd -- ${dir} && claude --resume ${sid(1)}`,
+    resumeLine(sid(2)),
+  ]);
   // The user may run sid(1)'s printed command now: its lock keeps other skydecks off it.
   assert.deepEqual(
     d.deck.store.kvEntries('resume_lock:').map((entry) => entry.key),

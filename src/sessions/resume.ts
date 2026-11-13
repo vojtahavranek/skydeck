@@ -141,17 +141,19 @@ export interface SawEvents {
 /**
  * D16. In one store transaction (BEGIN IMMEDIATE, which no two skydecks hold at once): reads the
  * session's lock; when it holds — younger than LOCK_TTL_NS (a time less than LOCK_TTL_NS in the
- * future counts as now), and no start event for the session at or after it that names a real
- * process (hasProcessStartSince: a pid that is not 0 and a process start time) — throws
+ * future counts as now), and no start event for the session that names a real process
+ * (hasProcessStartSince: a pid that is not 0 and a process start time), is dated at or after the
+ * lock and was stored after it (an id greater than the one the lock records) — throws
  * ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s" (n rounded down, m
- * rounded up). A value that is not a time is stale.
+ * rounded up). A value that is not a lock skydeck writes is stale.
  *
  * `saw` is what the decision to resume was made on, and is required so that no caller can skip the
  * check. Still inside the transaction and before the lock is written, the session's latest event id
  * is read again; when it is not the one `saw` names, another skydeck acted on the session since (it
  * may have resumed it, and a sweep may have removed its lock as stale once its start event was
  * ingested), and the call throws ResumeRefusedError "the session's state changed while preparing;
- * run the command again". Otherwise writes the lock with the clock's time.
+ * run the command again". Otherwise writes the lock: the clock's time and `saw.latestEventId`
+ * (`<time>:<id>`, the time alone when it is null), so that only a start stored after it releases it.
  */
 export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void {
   const key = lockKey(sessionId);
@@ -257,8 +259,7 @@ export function releaseLock(deck: Deck, sessionId: string, ours: string): boolea
 export function isLockHeld(deck: Deck, sessionId: string): boolean {
   const value = readLock(deck, sessionId);
   return (
-    value !== null &&
-    freshAge(deck.store, sessionId, value, deck.platform.clock.nowNs()) !== null
+    value !== null && freshAge(deck.store, sessionId, value, deck.platform.clock.nowNs()) !== null
   );
 }
 

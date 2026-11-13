@@ -63,7 +63,8 @@ test('prepareResumeById resumes a session that is not running, and takes the loc
   assert.equal(prepared.kind, 'resume');
   assert.equal(prepared.sessionId, S1);
   assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '--model', 'opus']);
-  assert.equal(lockOf(d, S1), `${T0}`);
+  // The time it was taken, and the latest event of S1 the decision was made on.
+  assert.equal(lockOf(d, S1), `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`);
 });
 
 test('prepareResumeById refreshes first: a start event still in the spool is seen, and the session refused', (t) => {

@@ -11,7 +11,15 @@ import { acquireLock } from '../../../src/sessions/resume.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
 import { testContext } from '../../helpers/context.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
-import { BOOT_A, BOOT_B, SEC, T0, fakeRunner, runResult, statLine } from '../../helpers/platform.ts';
+import {
+  BOOT_A,
+  BOOT_B,
+  SEC,
+  T0,
+  fakeRunner,
+  runResult,
+  statLine,
+} from '../../helpers/platform.ts';
 import {
   BOOT_C,
   DAY,

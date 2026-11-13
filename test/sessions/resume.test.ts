@@ -433,7 +433,7 @@ test('a lock whose event id is not a number is stale like any value skydeck did 
   }
 });
 
-test("lockEventId is the event id a lock records; null when it records none or is no lock", () => {
+test('lockEventId is the event id a lock records; null when it records none or is no lock', () => {
   assert.equal(lockEventId(`${T0}:42`), 42);
   assert.equal(lockEventId(`${T0}`), null);
   assert.equal(lockEventId('soon'), null);

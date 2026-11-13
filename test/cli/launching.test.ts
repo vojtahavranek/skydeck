@@ -149,7 +149,11 @@ test('launchPrepared of a new session removes its label and group when it defini
     d.platform.runner = fakeRunner(() => answer);
     const p = prepared('/w', { kind: 'new', argv });
     assert.equal((await launchPrepared(d.deck, p, null)).code, 1);
-    assert.equal(d.deck.store.meta(S1)?.label ?? null, kept ? 'fix it' : null, JSON.stringify(argv));
+    assert.equal(
+      d.deck.store.meta(S1)?.label ?? null,
+      kept ? 'fix it' : null,
+      JSON.stringify(argv),
+    );
   }
 });
 

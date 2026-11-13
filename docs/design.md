@@ -413,7 +413,9 @@ compared in lower case, labels exactly as typed. The first step that finds anyth
 match or more than one match is an error that lists the candidates.
 
 **Exit codes:** 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not
-found or ambiguous; 4 resume refused; 5 restore stopped before finishing.
+found or ambiguous; 4 resume refused; 5 restore stopped before finishing. After a hand-off (`resume
+--here`, `new --here`, or `restore` without a tab adapter) the exit status is `claude`'s own: the
+launcher has become `claude` (7.6 "Where"), so skydeck's status never reaches the caller.
 
 **`--json`** output of `ls` is stable and versioned:
 
@@ -493,8 +495,11 @@ which sessions are running: the boot id could not be read"). The boot id is read
 and the rows carry it, so a failed read and a later successful one are never mixed; `new` resumes
 nothing and does not need it. It refuses when the session is running, naming the holder. It then takes a lock for the session; if the lock exists and is younger than 60 seconds,
 resume is refused and says how long to wait.
-The lock is removed when a `start` event of a real process for the session appears (a start
-without a pid or a process start time names no `claude` and releases nobody) or after 60 seconds — or at once when starting the session definitely failed and skydeck
+The lock is removed when a `start` event of a real process for the session appears that was
+recorded after the lock was taken and is dated at or after it (a start without a pid or a process
+start time names no `claude` and releases nobody; a start recorded before the lock but dated after
+it — the clock was ahead when it was written, then stepped back — is not the resume's own, and
+would otherwise make every lock of the session stale at once) or after 60 seconds — or at once when starting the session definitely failed and skydeck
 printed no command for it (the command holds a control character, or restore only reports the
 failure): nothing was started and nothing is left to run by hand, so the lock would only make the
 user wait. Where skydeck prints the command for the user to run, and after a timeout (the program
@@ -502,7 +507,9 @@ may have started), the lock stays for its 60 seconds. Whoever took a lock may re
 waits longer than that for the session to start (restore, 7.8), and renews or releases only the
 lock it wrote: one another skydeck took over is left alone. The lock
 is an entry `resume_lock:<session id>` in the database's `kv` table, holding the time it was
-taken in nanoseconds (so its age does not depend on any file's modification time). Reading the
+taken in nanoseconds (so its age does not depend on any file's modification time) and the id of
+the session's latest event at that moment, which tells a start recorded after the lock from one
+recorded before it (event ids grow in the order events are recorded, whatever their times). Reading the
 lock and writing it happen in one database transaction, which no two skydecks hold at once, so
 of several resumes started together exactly one gets the lock. Inside that transaction the
 session's latest event is read again, and resume is refused ("the session's state changed while
@@ -549,6 +556,10 @@ session that already exists must not start in a new worktree or in the cloud a s
 prompt after `--` is passed on; it is the user's own and is never stored.
 When opening its tab times out, `new` prints no command but the new session's id, and says that
 running `skydeck` shows whether it started: a session that never started has nothing to resume.
+When starting it definitely failed and no command was printed (the case in which a resume releases
+its lock, 7.6), `new` removes the label and group it stored for the id: that session will never
+exist, and the row is skydeck's own, just written. After a timeout, or where a command is printed,
+they stay.
 
 ### 7.8 Restore
 
@@ -558,7 +569,8 @@ boots other than the current one that have a `start` or `observed` event, the on
 event is the latest. `--all` adds every other session marked `ended-unexpectedly`, from any boot
 including the current one. The set is in list order (as `ls --all` shows it). When the current
 boot id cannot be read, restore refuses (exit 1): every process would look dead, so the sessions
-running now would be offered, and the guard could not see that they run (principle 7).
+running now would be offered, and the guard could not see that they run (principle 7). As for the
+guard, the boot id is the one read when the sessions were loaded, never a second read.
 
 **The selection.** Each entry shows how it ended (no exit recorded, or ended at a time) and
 `was-working`. Preselected are the entries with no exit recorded and those that ended within two
@@ -574,7 +586,9 @@ nothing, so it needs neither `--yes` nor a terminal.
 **Running it.** Sessions are resumed in tabs, `restoreBatch` at a time (default 3). Each one goes
 through the guard of 7.6 and takes its lock, on state refreshed just before it: opening a tab
 takes time, and another skydeck may have resumed the session meanwhile. After starting a batch,
-restore waits until each of its sessions has a `start` event, checking once a second, for at most
+restore waits until each of its sessions has a `start` event of a real process that counts by the
+lock's rule (7.6: recorded after restore took the lock, and dated at or after the batch started),
+checking once a second, for at most
 `restoreStartTimeoutSeconds` (default 120) counted from the start of the batch. Before each batch
 it reads `MemAvailable` from `/proc/meminfo` and stops (exit 5) when it is below
 `restoreMinFreeMb` (default 4096; a value that cannot be read counts as enough), listing what was
@@ -591,16 +605,24 @@ guard refuses, or whose tab cannot be opened, is reported and skipped; restore p
 for it. When the tab definitely did not open (the terminal refused, or is not installed), nothing was
 started and restore prints no command for it, so its lock is released at once.
 
-Without a tab adapter, restore resumes the first selected session the guard accepts `--here` and
-prints the commands for the others, each only after the guard let it through — restore takes no
-lock for them, but one another skydeck holds refuses the command — and only when it holds no
-control character. If the handoff itself fails, that session's command is printed too and, as with `resume`, its
+Without a tab adapter, restore resumes the first selected session the guard accepts `--here` and,
+for each of the others the guard lets through now (restore takes no lock for them, but one another
+skydeck holds refuses the session), prints `skydeck resume <session id> --here` for the user to run
+in other terminals — not the session's own `claude` command. The user may paste the line minutes
+later, and the session may have been resumed elsewhere meanwhile: `skydeck resume` runs the guard
+and takes the lock at the moment it is run, where a raw command would start a second process on one
+transcript (principle 7). The line is always printable: a session id holds no control character.
+If the handoff itself fails, that session's own command is printed too and, as with `resume`, its
 lock stays for its 60 seconds, so that no other skydeck starts the session while the user runs the
-command; when that command cannot be printed, the lock is released.
+command; when that command cannot be printed, the lock is released. `--dry-run` shows each
+session's own command line: it is information, not something to paste.
 
 **Exit codes.** 0 when every selected session started, was handed off or had its command
 printed; 1 when any was refused, failed to open or did not start in time; 5 when restore was
-stopped by the memory check or cancelled at the prompt.
+stopped by the memory check or cancelled at the prompt. After a hand-off the exit status is
+`claude`'s own (7.5): when any selected session was refused, failed or did not start in time,
+restore says so in one line on stderr just before the hand-off (`skydeck: 1 of 3 selected sessions
+could not be resumed; see above`).
 
 ## 8. Install, uninstall, doctor
 

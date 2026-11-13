@@ -138,14 +138,14 @@ Each is binding for the implementer. The last column names the task that records
 | D13 | `Context` gains `platform`; `Io` gains `isTTY`, `size`, `readLine`, `keys` (task 1, once). Commands open the database through `withDeck` (task 12). | Brief 18: the platform task extends `Context` once. | — |
 | D14 | `$VISUAL`, else `$EDITOR`, else `vi`; the value is split on spaces; the note file path is appended. | 7.1 only says `$EDITOR`. | 15 (7.1) |
 | D15 | The WezTerm adapter runs `wezterm cli --no-auto-start spawn`; when `wezterm` is not found and `$WSL_DISTRO_NAME` is set, it retries with `wezterm.exe`. | 13 "Open": tabs from WSL. | 7 (7.6) |
-| D16 | A resume lock is the `kv` entry `resume_lock:<session id>`, its value the creation time in ns (decimal). `acquireLock` reads it and, unless it holds, writes it inside one `store.transaction()` (BEGIN IMMEDIATE: one skydeck at a time); `sweepLocks` deletes the stale ones in one transaction at the end of every refresh (only when a first look without a transaction found some). Stale: 60 s old or older, dated 60 s or more in the future, a value that is not a time, or a `start` event of the session at or after it that names a real process (pid not 0, with a process start time: `hasProcessStartSince`). `locksDir` stays in `Places` but holds no lock. `prepareResume` hands `acquireLock` the id of the latest event of the session that its row was derived from (`DerivedSession.lastEventId`, null for none); inside the transaction, before it writes, `acquireLock` reads that id again and refuses (exit 4) when it differs. `prepareResume` refuses first when the row's own boot id (`DerivedSession.bootId`, the one the rows were derived with) is null. `prepareResumeById` refreshes and loads the rows itself right before it calls `prepareResume`, and is the entry point of every caller. *Ruled in task 18:* whoever took a lock may renew it (`renewLock`: set to now, in one transaction, only while it still holds the value that process wrote) while it waits longer than 60 s for the session to start, and releases it the same way (`releaseLock`) when the launch definitely started nothing (not a timeout) and no command is printed for the user to run (restore's tab path; a command with control characters) — where a command is printed, the lock stays for its 60 s. `isLockHeld` reads whether a lock holds, taking none. | The database already serialises skydecks across processes; a lock file taken over without an atomic step would let two resumes both succeed (principle 7). Without the re-check, a skydeck that looked at the session (not running), then lost a few seconds, could take a lock that a sweep had just removed for another skydeck's resume (its start event had been ingested) and resume the session a second time. Without the boot id every recorded process looks dead and a running session cannot be seen; the row's value is used so that a failed read and a later successful one are never mixed. A start event without a process (pid 0, or no start time) cannot be the claude that a resume started, so it must not release a lock. A start event still in the spool is invisible to a row loaded before it and to the store check of the lock, so the guard refreshes and loads by itself. Fake clock in tests. | 16 (7.6) |
+| D16 | A resume lock is the `kv` entry `resume_lock:<session id>`, its value the creation time in ns (decimal), then — *fix-2, ruled by the plan owner* — `:` and the session's latest event id at that moment (`saw.latestEventId`; the time alone when the session had no event, as in a lock an earlier version wrote, which keeps working). `acquireLock` reads it and, unless it holds, writes it inside one `store.transaction()` (BEGIN IMMEDIATE: one skydeck at a time); `sweepLocks` deletes the stale ones in one transaction at the end of every refresh (only when a first look without a transaction found some). Stale: 60 s old or older, dated 60 s or more in the future, a value that is not a lock skydeck writes, or a `start` event of the session that names a real process (pid not 0, with a process start time), is dated at or after the lock AND was stored after it (an event id greater than the one the lock records: `hasProcessStartSince(id, time, afterEventId)`) — a start stored earlier but dated later, because the clock was ahead when it was written, is not the resume's own and would otherwise make every lock of the session stale at once. `locksDir` stays in `Places` but holds no lock. `prepareResume` hands `acquireLock` the id of the latest event of the session that its row was derived from (`DerivedSession.lastEventId`, null for none); inside the transaction, before it writes, `acquireLock` reads that id again and refuses (exit 4) when it differs. `prepareResume` refuses first when the row's own boot id (`DerivedSession.bootId`, the one the rows were derived with) is null. `prepareResumeById` refreshes and loads the rows itself right before it calls `prepareResume`, and is the entry point of every caller. *Ruled in task 18:* whoever took a lock may renew it (`renewLock`: set to now, keeping the event id it records, in one transaction, only while it still holds the value that process wrote) while it waits longer than 60 s for the session to start, and releases it the same way (`releaseLock`) when the launch definitely started nothing (not a timeout) and no command is printed for the user to run (restore's tab path; a command with control characters) — where a command is printed, the lock stays for its 60 s. `isLockHeld` reads whether a lock holds, taking none. | The database already serialises skydecks across processes; a lock file taken over without an atomic step would let two resumes both succeed (principle 7). Without the re-check, a skydeck that looked at the session (not running), then lost a few seconds, could take a lock that a sweep had just removed for another skydeck's resume (its start event had been ingested) and resume the session a second time. Without the boot id every recorded process looks dead and a running session cannot be seen; the row's value is used so that a failed read and a later successful one are never mixed. A start event without a process (pid 0, or no start time) cannot be the claude that a resume started, so it must not release a lock. A start event still in the spool is invisible to a row loaded before it and to the store check of the lock, so the guard refreshes and loads by itself. Fake clock in tests. | 16 (7.6) |
 | D17 | `--all` restore entries are preselected relative to the last event of *their own* boot. | 7.8 defines it for the default set only. | 18 (7.8) |
 | D18 | Arguments are read as Claude Code's own parser reads them: a several-value flag takes the next argument whatever it is and then the following ones up to the next flag-like one (starts with `-`, more than one character, so a lone `-` is a value); `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value (`-rabc`), and a token of no-value short flags (`-cp`) is one flag; `--` ends the flags and everything after it is positional. A flag that is in no table is stored as its bare name and not passed on at resume: what follows it cannot be classified. | 7.6 "several values"; principle 4. | 2 (7.6, 5.3, principle 4) |
 | D19 | Restore's selection prompt: a numbered list, the user types numbers to toggle, an empty line confirms, `q` or the end of input cancels (exit 5); a line with anything that is not a number of the list is refused whole and asked again; confirming with nothing selected starts nothing (exit 0). | 7.8 says only "confirms or changes". | 18 (7.8) |
 | D20 | Install offers the first-run "mark as done" only once (kv `first_run_offered`). | 8 "Running it again changes nothing". | 17 (8) |
 | D21 | An `observed` event's time is the clock at reconcile; its launch command gets the same path-flag rewrite as a spooled one. | 5.4 is silent. | 8 (5.4) |
 | D22 | `<ref>` by label searches the sessions `ls --all` would show (done ones included), not only the default list. | Otherwise `skydeck undone <label>` could never work. | 11 (7.5) |
-| D23 | Exit codes of `restore`: 0 when every selected session started (or was handed off, or had its command printed), 1 when any was refused, failed to open or timed out (and when the boot id cannot be read), 5 when stopped by the memory check or cancelled at the prompt. | 7.5 names 5 only. | 18 (7.8) |
+| D23 | Exit codes of `restore`: 0 when every selected session started (or was handed off, or had its command printed), 1 when any was refused, failed to open or timed out (and when the boot id cannot be read), 5 when stopped by the memory check or cancelled at the prompt. *Fix-2, ruled by the plan owner:* after a hand-off the launcher execs `claude`, so the caller sees `claude`'s exit status, never these; when any selected session was refused, failed or timed out, restore prints `skydeck: <n> of <m> selected sessions could not be resumed; see above` on stderr just before the hand-off (the hand-off is not skipped). | 7.5 names 5 only. | 18 (7.8) |
 | D24 | `resume --tab` (or a `tab` default) without a tab adapter configured prints the command and exits 1; `label`/`group` take the remaining positionals joined by one space. | 7.5/7.6 are silent. | 15 (7.5: joined text), 16 (7.6: no tab adapter) |
 | D25 | `src/sessions/` may import `src/github.ts` (`prKey`, `prLevel`, `chipFor` — pure functions): the scan attaches pull requests by key, the list model computes the chip. | Design 11 leaves `github` out of the sessions row. | 8 (11) |
 | D26 | `SKYDECK_HOME`, `XDG_*_HOME` and `CLAUDE_CONFIG_DIR` count only when non-empty and absolute — in `resolvePlaces`, in the hook and in the launcher alike. | 9.1 "the hook resolves stateDir by the same rule". | 1 (9.1) |
@@ -680,7 +680,8 @@ export type KvKey =
   | 'ingest_problems'
   | 'reconcile_problems'
   | 'scan_problems'
-  // (Task 16, D16.) A resume lock: the decimal time in ns it was taken; one per session id.
+  // (Task 16, D16.) A resume lock: the decimal time in ns it was taken, then `:<id>` of the
+  // session's latest event at that moment (fix-2; the time alone without one); one per session id.
   | `resume_lock:${string}`;
 ```
 
@@ -722,8 +723,8 @@ export interface Store {
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
   /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
   hasStartSince(sessionId: string, sinceNs: Ns): boolean;
-  /** As hasStartSince, but only a start of a real process counts: pid not 0 and a process start time (proc_start not NULL). A start the hook wrote without them names no process that could hold the session. */
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
+  /** As hasStartSince, but only a start of a real process counts: pid not 0 and a process start time (proc_start not NULL). A start the hook wrote without them names no process that could hold the session. (Fix-2.) Only a start with an id greater than `afterEventId` counts (null: any): ids grow in the order events are stored, so a start stored before a given event is left out even when it is dated later. */
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;
   /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
   latestEventIdOfSession(sessionId: string): number | null;
   /** All links ordered by time_ns. */
@@ -734,6 +735,8 @@ export interface Store {
   allMeta(): SessionMeta[];
   /** Creates the row (created_ns = updated_ns = nowNs) when absent; applies the patch; returns the row. */
   updateMeta(sessionId: string, patch: MetaPatch, nowNs: Ns): SessionMeta;
+  /** (Fix-2.) Deletes the session's row; whether there was one. Only for the row `new` has just written for a session that never started (7.7). */
+  deleteMeta(sessionId: string): boolean;
 
   // transcripts (5.6)
   transcripts(): TranscriptRow[];
@@ -1768,7 +1771,11 @@ export function checkResumable(row: ListRow, files: Files): void;
  * the session's latest event id is read again
  * (store.latestEventIdOfSession), and when it is not `saw.latestEventId` the call throws
  * ResumeRefusedError "the session's state changed while preparing; run the command again" and writes
- * nothing. Otherwise it writes the lock with the clock's time.
+ * nothing. Otherwise it writes the lock: the clock's time, then `:<saw.latestEventId>` when that is
+ * not null (fix-2). Only a start event with a greater id releases it (hasProcessStartSince with the
+ * lock's time and that id): a start stored before the lock but dated after it (the clock was ahead
+ * then) is not this resume's. A value without the id (an earlier version wrote it) is released by
+ * any such start at or after its time, as before.
  */
 export interface SawEvents { latestEventId: number | null }
 export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void;
@@ -1777,8 +1784,10 @@ export function sweepLocks(deck: Deck): number;
 // Task 18 (ruled): the lock's owner renews or releases its own lock; anyone may ask whether one holds.
 /** The value of the session's lock, null without one; a caller that just took the lock keeps it as "ours". */
 export function readLock(deck: Deck, sessionId: string): string | null;
-/** In one store.transaction(): when the lock still holds `ours`, sets it to the clock's time and returns the new value; else changes nothing and returns null. */
+/** In one store.transaction(): when the lock still holds `ours`, sets it to the clock's time (keeping the event id it records) and returns the new value; else changes nothing and returns null. */
 export function renewLock(deck: Deck, sessionId: string, ours: string): string | null;
+/** (Fix-2.) The event id a lock value records; null when it records none (the session had no event, or an earlier version wrote it) or is not a lock. Restore counts a session as started by the lock's rule with it. */
+export function lockEventId(value: string): number | null;
 /** In one store.transaction(): deletes the lock when it still holds `ours`; whether it did. */
 export function releaseLock(deck: Deck, sessionId: string, ours: string): boolean;
 /** Whether a lock that holds by the rules of acquireLock exists for the session. Reads only. */
@@ -1830,7 +1839,7 @@ export interface RestoreOutcome {
   failed: { id: string; reason: string }[];   // refused by the guard or the terminal failed
   notStarted: string[];           // left out by the memory stop
   handedOff: string | null;       // resumed --here (no tab adapter)
-  printed: string[];              // command lines printed instead (no tab adapter)
+  printed: string[];              // lines printed for the user to run (no tab adapter): `skydeck resume <id> --here` per session restore does not start (fix-2); a failed hand-off's own command
   stoppedForMemory: boolean;
 }
 export function runRestore(
@@ -2039,7 +2048,9 @@ export interface LaunchOutcome { code: number; lines: string[] }   // lines as p
  * control characters and cannot be printed safely". An open() that rejects is a failed open.
  * (Task 18, ruled.) The lock prepareResume took stays after a failure, except a failure other than
  * a timeout whose command cannot be printed (control characters): nothing started and nothing to run
- * by hand, so it is released (releaseLock with the value read before opening). The command
+ * by hand, so it is released (releaseLock with the value read before opening). (Fix-2, ruled.) In
+ * that same case, for kind 'new', the label and group prepareNew stored are removed
+ * (store.deleteMeta); after a timeout, or where the command is printed, they stay. The command
  * line is printableCommand(prepared.cwd, prepared.argv).
  */
 export function launchPrepared(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
@@ -2198,8 +2209,9 @@ command substitutions that `cd`, never for the program.
 
 #### 2.10.4 Resume lock
 
-The `kv` entry `resume_lock:<sessionId>`, its value the time it was taken in ns as decimal digits
-(D16). No lock file: `<stateDir>/locks/` is created but holds nothing.
+The `kv` entry `resume_lock:<sessionId>`, its value the time it was taken in ns as decimal digits,
+then (fix-2) `:` and the session's latest event id at that moment in decimal; the time alone when the
+session had no event (D16). No lock file: `<stateDir>/locks/` is created but holds nothing.
 
 #### 2.10.5 JSON output (`src/cli/output.ts`; key order as written)
 
@@ -2896,12 +2908,13 @@ export interface Store {
   latestEventOfProcess(bootId: string, pid: number, procStart: number | null, beforeNs: Ns): EventRow | null;
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
   hasStartSince(sessionId: string, sinceNs: Ns): boolean;
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;  // afterEventId: fix-2
   latestEventIdOfSession(sessionId: string): number | null;
   links(): LinkRow[];
   meta(sessionId: string): SessionMeta | null;
   allMeta(): SessionMeta[];
   updateMeta(sessionId: string, patch: MetaPatch, nowNs: Ns): SessionMeta;
+  deleteMeta(sessionId: string): boolean;  // fix-2
   transcripts(): TranscriptRow[];
   saveTranscript(row: TranscriptRow): void;
   ensurePr(key: { url: string; owner: string; repo: string; number: number }): void;
@@ -2944,7 +2957,9 @@ do not exist in the schema. Events are bound with `bigint` for every `*_ns` colu
 - `processHasLaunch`: a process whose only event has `argv null` → `false`; add one with argv → `true`.
 - With a start event at `T0`: `hasStartSince(S1, T0)` → `true`; `hasStartSince(S1, T0 + 1n)` → `false`; an `end` row does not count.
 - `hasProcessStartSince`: as `hasStartSince` (the same three cases), and a start with `pid 0`, one with `procStart null` and one with both → `false`
-  until a start with a pid and a `procStart` exists → `true` (`hasStartSince` counts all of them).
+  until a start with a pid and a `procStart` exists → `true` (`hasStartSince` counts all of them). (Fix-2.) With `afterEventId`: a start dated
+  `T0+600s` stored first (id `a`) → `false` after `a`, `true` after `a − 1` and for `null`; a start stored next at `T0+1s` → `true` after `a`
+  (and `false` from `T0+2s`, or after its own id).
 - `latestEventIdOfSession`: `null` for a session without events (another session's events do not count); otherwise the highest id of
   its events whatever their times and kinds (an `end` or an `observed` event counts, a later id with an earlier time wins).
 - `insertLink({ eventId: 1, fromSession: S1, toSession: S2, kind: 'clear', timeNs: T0 })` → `links()` returns it;
@@ -2952,6 +2967,7 @@ do not exist in the schema. Events are bound with `bigint` for every `*_ns` colu
 - `updateMeta(S1, { label: 'x' }, T0)` creates `{ label 'x', group null, note null, doneAtNs null, createdNs T0, updatedNs T0 }`;
   then `updateMeta(S1, { group: 'G' }, T0 + SEC)` keeps the label, sets group, `updatedNs T0+SEC`, `createdNs T0`;
   `updateMeta(S1, { label: null }, …)` clears only the label; `meta(S2)` → `null`; `allMeta()` lists one.
+  (Fix-2.) `deleteMeta(S1)` → `true`, the row is gone and S2's stays; again → `false`.
 - `saveTranscript(row)` with `lastTurnRole 'user'` then `transcripts()` → deep equal (the column `last_turn_role` holds `'user'`);
   saving the same path again replaces it; `lastTurnRole null` round-trips as `null`.
 - `ensurePr({ url: 'https://github.com/o/r/pull/1', owner: 'o', repo: 'r', number: 1 })` twice → one row with
@@ -4374,6 +4390,10 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
   events of other sessions do not count; the argument is required (a test with `// @ts-expect-error` makes `npm run typecheck` fail when it becomes optional);
   the latest event is read inside the one transaction, before the write.
 - `acquireLock`: a start event with `pid 0` and/or no `procStart` after a fresh lock does not release it (still "is being resumed"); `sweepLocks` keeps such a lock.
+- (Fix-2.) With events, the lock is `` `${T0}:${id}` `` (`id` = `saw.latestEventId`). A start of a real process stored before the lock but dated
+  `T0+600s` does not release it (`acquireLock` refuses, `isLockHeld` true, `sweepLocks` keeps it); a start stored after it and dated at or after
+  it does; one stored after it but dated before it does not. A lock that records no id (an earlier version wrote it) is released as before; a
+  value with a malformed id part is stale. `renewLock` keeps the id. `lockEventId` reads it back.
 - `prepareResume`: with a row whose `session.bootId` is null (also when `proc.bootId()` works now) → `ResumeRefusedError` `'cannot tell which sessions are running: the boot id could not be read'` before every other
   refusal, no lock; a row whose `bootId` is set resumes whatever `proc.bootId()` says now; with a row whose `lastEventId` is behind the store's (a start event inserted after the row was read, also from inside `files.stat`, which
   `checkResumable` calls between the read and the lock) → the "state changed" refusal and no lock — also when A took the lock, its start event was ingested and `sweepLocks`
@@ -4406,6 +4426,10 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `new --label -x` → 2. `new -- -r <id>` → 2. `new -- -n x` → 2 and stderr names `--label`. `new -- --worktree` → 0 and the handoff is
   `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> --worktree\n`; `new -- -w feat --model x 'fix the bug'` → 0, the flags reach the command.
 - After a failed open and after a WezTerm timeout the lock still holds (a second resume → 4); after a timeout no command is printed. `new --tab` timing out → `'skydeck: the new session\'s id is <uuid1>; running skydeck shows whether it started'`.
+- (Fix-2.) A start of S1 in the spool dated `T0+600s` by a dead pid: three `resume 0b5f --here` in a row → 0, 4, 4. `launchPrepared` after a timeout
+  whose command holds a control character keeps the lock. `new --tab --label … --group …` whose tab definitely did not open (refused, not
+  installed) and whose command holds a control character → 1 and no `session_meta` row for the id; after a timeout, or without a tab adapter
+  (the command is printed), the label and group stay.
 
 **Steps**
 - [ ] Write the three test files. `npm test` → fails.
@@ -4599,8 +4623,10 @@ export const command: Command;
   nothing was started, and no command is printed for it; *ruled:* a failure with `timedOut` may have opened the tab, so
   that entry is waited for like an opened one, its lock kept, and no command is printed).
   Then, from the clock time taken before opening the batch,
-  loop: `ingestSpool(deck)`; entries with `store.hasProcessStartSince(id, batchStartNs)` →
-  `started` (a start of a real process, as for the lock);
+  loop: `ingestSpool(deck)`; entries with `store.hasProcessStartSince(id, batchStartNs, afterEventId)` →
+  `started` (a start of a real process, as for the lock; *fix-2:* `afterEventId` is `lockEventId` of
+  the lock value read right after `prepareResumeById`, so only a start stored after restore took the
+  lock counts — one stored before but dated later, the clock having been ahead, does not);
   until all started or `restoreStartTimeoutSeconds` elapsed, `clock.sleep(1000)` between checks;
   the rest → `timedOut` (reported, skipped). *Ruled:* the resume lock of each entry whose tab was
   opened is renewed (`renewLock` with the value read after `prepareResumeById`) before each further
@@ -4623,13 +4649,19 @@ export const command: Command;
   only when the command cannot be printed; after a timeout nothing is printed and the lock stays), and no other handoff is tried. Every other entry: `refresh` and
   `loadRows`, its fresh row and `checkResumable` (no `prepareResumeById`, so no lock; refusal →
   `failed`), and when `isLockHeld` →
-  `failed` "<short> is being resumed by another skydeck"; then its command
-  (`printableCommand(dir, buildResumeCommand(…).argv)`) goes to `printed` and to `report` — except
-  when that is null (a control character): never printed, → `failed` "the command contains control
-  characters and cannot be printed safely".
+  `failed` "<short> is being resumed by another skydeck"; then — *fix-2, ruled by the plan owner* —
+  the line `skydeck resume <full session id> --here` goes to `printed` and to `report` (after the
+  flag lines below), not the session's own command: the user may paste it minutes later, and it runs
+  the guard and takes the lock at that moment, where a raw `claude --resume` line would start a
+  second process on a session resumed meanwhile (principle 7). It is always printable, so a session
+  whose own command holds a control character is no failure here. The failed hand-off above keeps
+  printing its own command (restore holds its lock, as `resume` does after a failed launch), and
+  `--dry-run` keeps showing the real command lines (information, not something to paste).
 - **Command.** *Ruled:* when the boot id cannot be read the command refuses (`SkydeckError`,
   exit 1): every process would look dead, so this boot's running sessions would be offered and the
-  guard could not see them. Rows are passed to `planRestore` in list order (`ls --all`).
+  guard could not see them. *Fix-2:* the boot id is the one the loaded rows carry
+  (`DerivedSession.bootId`), never a second read (design 7.6); with no rows there is nothing to
+  restore. Rows are passed to `planRestore` in list order (`ls --all`).
   Without `--yes` or `--dry-run` (*ruled:* a dry run starts nothing, so it needs no
   confirmation), stdin must be a terminal (else `UsageError`). The list shows per
   entry `<n>. [x| ] <shortId>  <title>  <how it ended>[  was working]` with how it ended =
@@ -4642,7 +4674,9 @@ export const command: Command;
   spaces; a command holding control characters is replaced by a note) and returns 0 without
   opening anything. Empty set → `nothing to restore`, 0. The list and the report lines go to
   stdout, the prompt to stderr. Exit code per D23; the memory stop throws `RestoreStoppedError`
-  after the report lines.
+  after the report lines. *Fix-2, ruled:* after a hand-off the caller sees `claude`'s exit status, so
+  when any selected session was refused, failed or timed out the command prints
+  `skydeck: <n> of <m> selected sessions could not be resumed; see above` on stderr before it returns.
 
 **Test cases**
 
@@ -4675,7 +4709,8 @@ export const command: Command;
 4. A selected session became running → `failed` with `'… is running (pid …)'`; no `open` for it.
 5. `open` returns `{ ok: false, error: 'boom', timedOut: false }` → `failed` with `'boom'`.
 6. Without tabs (`hereTerminal` with `SKYDECK_HANDOFF`) and three entries → first `handedOff` (handoff file
-   written), two lines in `printed`, each `cd -- <dir> && claude --resume <id> …`; only one resume lock exists.
+   written), two lines in `printed`, each `skydeck resume <id> --here` (fix-2; before it, the raw
+   `cd -- <dir> && claude --resume <id> …`); only one resume lock exists.
 7. (Ruled.) `open` returns `{ ok: false, …, timedOut: true }` and the session starts → `started`, and the
    next batch waited for it; it never starts → `timedOut` after 3 sleeps, lock kept, no command printed.
 8. (Ruled.) A second restore run from inside the first one's `open()` on the same entries: every session is
@@ -4690,14 +4725,22 @@ export const command: Command;
    the user quits the first one is accepted.
    Without tabs, a session whose lock another skydeck holds gets no printed command.
 9. (Ruled.) Without tabs: a first entry that became running → `failed`, the second handed off; a handoff
-   that fails → `failed` and its command printed; a later entry that became running, or whose command holds
-   control characters → `failed`, not printed; memory below the minimum → nothing started.
+   that fails → `failed` and its own command printed; a later entry that became running → `failed`, not
+   printed; (fix-2) a later entry whose own command holds control characters → its `skydeck resume <id>
+   --here` line, no failure; a handoff that times out (a fake non-tab terminal) → `failed`, nothing printed,
+   the lock kept, whether its command is printable or not; memory below the minimum → nothing started.
+11. (Fix-2.) A start of a real process stored before restore took the lock but dated ten minutes later → not
+   `started`: the session times out and keeps its lock.
 
 `commands/restore.test.ts` (`d = testDeck(t, { lines: [...], stdinTTY: … })`; `await main(['restore', …], d.ctx)`)
 - `restore --help` → 0; `restore extra` → 2.
 - `restore --dry-run` → 0, prints the default entries with `[x]`/`[ ]` and their commands, opens nothing.
 - `restore` with stdin not a TTY and no `--yes` → 2.
-- `restore --yes` (here terminal) with S1 and S2 preselected → hands off S1, prints S2's command, exit 0.
+- `restore --yes` (here terminal) with S1 and S2 preselected → hands off S1, prints `skydeck resume <S2> --here`
+  (fix-2), exit 0, nothing on stderr. Running that line after S2 was resumed elsewhere → 4, "is running".
+- (Fix-2.) A hand-off with one of three selected sessions refused → exit 1 and, last on stderr,
+  `skydeck: 1 of 3 selected sessions could not be resumed; see above`; no such line without a hand-off.
+- (Fix-2.) Whichever read of the boot id fails, `restore --all --dry-run` never lists a session running now.
 - Interactive: `lines ['3', '']` → entry 3 toggled on, run starts with it included; `lines ['q']` → 5.
 - Empty set → `'nothing to restore\n'`, 0.
 - `restore --all --dry-run` lists S5 and S6 as well.

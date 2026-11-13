@@ -118,5 +118,6 @@ export type KvKey =
   | 'ingest_problems'
   | 'reconcile_problems'
   | 'scan_problems'
-  // A resume lock (design 7.6, D16): the decimal time in ns it was taken; one per session id.
+  // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
+  // session's latest event at that moment (the time alone when it had none); one per session id.
   | `resume_lock:${string}`;
