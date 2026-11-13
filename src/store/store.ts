@@ -124,6 +124,16 @@ export interface Store {
   kvEntries(prefix: string): { key: KvKey; value: string }[];
 }
 
+/**
+ * A guarded connection (openStore's `guardSchema`) refused a write: the store's schema is newer than
+ * this skydeck knows — a command of an updated checkout migrated it (S2 10.1, 16.5).
+ */
+export class StoreNewerError extends SkydeckError {
+  constructor() {
+    super('skydeck was updated; run skydeck window', 1);
+  }
+}
+
 type Row = Record<string, SQLOutputValue>;
 
 // The connection reads every INTEGER as a bigint (D1): a nanosecond time is ~1.8e18, which
@@ -367,8 +377,16 @@ function migrate(db: DatabaseSync, path: string): void {
  * file that is not a database, a lock held for more than the busy timeout, a missing directory,
  * a failed migration) is a SkydeckError (exit 1) naming the path: it is a fact of the machine,
  * not a bug in skydeck.
+ *
+ * `guardSchema` (the server's connection only, S2 10.1): the server outlives the commands, and a
+ * command of an updated checkout may migrate the store under it. With it, every write transaction
+ * and every single-statement write outside a transaction reads kv schema_version first, holding
+ * the write lock (BEGIN IMMEDIATE, so no migration commits between the check and the write), and
+ * throws StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION. A single-statement
+ * write therefore runs in a transaction of its own on such a connection. Reads are never refused.
+ * Commands do not pass it: a command that migrates is the newer one.
  */
-export function openStore(path: string): Store {
+export function openStore(path: string, options: { guardSchema?: boolean } = {}): Store {
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { readBigInts: true });
@@ -389,7 +407,7 @@ export function openStore(path: string): Store {
     refusal.cause = error; // SkydeckError has no options argument; the stack of the SQLite error stays
     throw refusal;
   }
-  return new SqliteStore(db, path);
+  return new SqliteStore(db, path, options.guardSchema === true);
 }
 
 /**
@@ -400,11 +418,15 @@ const DATABASE_FAILURES: ReadonlySet<number> = new Set([5, 6, 8, 10, 11, 13, 14,
 
 /**
  * Whether `error`, thrown by a Store method, is a failure of the database as a whole (locked,
- * read-only, I/O, corrupt, full, cannot open, not a database) rather than of the one row being
- * written. A caller that records and skips the errors of one item must rethrow these at once:
- * caught per item, every item would wait out the busy timeout, and none could be saved anyway.
+ * read-only, I/O, corrupt, full, cannot open, not a database, or a store newer than a guarded
+ * connection may write: StoreNewerError) rather than of the one row being written. A caller that
+ * records and skips the errors of one item must rethrow these at once: caught per item, every item
+ * would wait out the busy timeout or be refused the same way, and none could be saved anyway.
  */
 export function isDatabaseFailure(error: unknown): boolean {
+  if (error instanceof StoreNewerError) {
+    return true;
+  }
   if (typeof error !== 'object' || error === null) {
     return false;
   }
@@ -430,11 +452,16 @@ function pragma(db: DatabaseSync, name: string): SQLOutputValue {
 class SqliteStore implements Store {
   readonly path: string;
   readonly #db: DatabaseSync;
+  readonly #guardSchema: boolean;
 
-  constructor(db: DatabaseSync, path: string) {
+  constructor(db: DatabaseSync, path: string, guardSchema: boolean) {
     this.#db = db;
     this.path = path;
+    this.#guardSchema = guardSchema;
   }
+
+  // Reads go through #all and #get, writes through #run and #runReturning and nothing else: those
+  // two are where a guarded connection checks the schema version (#write).
 
   #all(sql: string, ...params: SQLInputValue[]): Row[] {
     return this.#db.prepare(sql).all(...params);
@@ -444,8 +471,27 @@ class SqliteStore implements Store {
     return this.#db.prepare(sql).get(...params);
   }
 
+  /** A write statement: the number of rows it changed. */
   #run(sql: string, ...params: SQLInputValue[]): number {
-    return Number(this.#db.prepare(sql).run(...params).changes);
+    return this.#write(() => Number(this.#db.prepare(sql).run(...params).changes));
+  }
+
+  /**
+   * A write statement with RETURNING: its rows. .all(), not .get(): outside a transaction the
+   * statement commits when it is finished, and .get() stops after the first row and ignores a
+   * failure of that commit (a full disk), so a row would be returned that was rolled back.
+   */
+  #runReturning(sql: string, ...params: SQLInputValue[]): Row[] {
+    return this.#write(() => this.#db.prepare(sql).all(...params));
+  }
+
+  /**
+   * A write of one statement. On a guarded connection outside a transaction it runs in a
+   * transaction of its own, which checks the schema version first (transaction()); inside one the
+   * check was made when it began. Otherwise it runs as it is.
+   */
+  #write<T>(fn: () => T): T {
+    return this.#guardSchema && !this.#db.isTransaction ? this.transaction(fn) : fn();
   }
 
   close(): void {
@@ -473,14 +519,17 @@ class SqliteStore implements Store {
   }
 
   transaction<T>(fn: () => T): T {
-    return inTransaction(this.#db, fn);
+    return inTransaction(this.#db, () => {
+      // Inside BEGIN IMMEDIATE: a migration either committed before this or waits until it ends.
+      if (this.#guardSchema && schemaVersion(this.#db, this.path) > SCHEMA_VERSION) {
+        throw new StoreNewerError();
+      }
+      return fn();
+    });
   }
 
   insertEvent(event: NewEvent): number | null {
-    // Not #get: outside transaction() this INSERT commits when its statement is finished, and
-    // .get() stops after the first row and ignores a failure of that commit (a full disk), so an
-    // id would be returned for a row that was rolled back. .all() runs the statement to the end.
-    const [row] = this.#all(
+    const [row] = this.#runReturning(
       `INSERT INTO events (spool_name, time_ns, kind, detail, raw_detail, session_id, boot_id,
                            pid, proc_start, cwd, argv, name, payload)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

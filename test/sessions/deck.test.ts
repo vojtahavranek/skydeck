@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 
 import { ConfigError, SkydeckError } from '../../src/platform/errors.ts';
 import { DEFAULT_CONFIG } from '../../src/platform/config.ts';
 import { openDeck, resolveDeckPlaces } from '../../src/sessions/deck.ts';
+import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
+import { StoreNewerError } from '../../src/store/store.ts';
 import { testContext } from '../helpers/context.ts';
 import { testDeck } from '../helpers/deck.ts';
 
@@ -39,6 +42,24 @@ test('openDeck takes claudeHome from config.json', (t) => {
     deck.store.close();
   });
   assert.equal(deck.places.claudeHome, other);
+});
+
+test("openDeck with guardSchema opens the server's guarded connection; without it, a command's", (t) => {
+  const { platform, places } = testContext(t);
+  const server = openDeck(platform, { guardSchema: true });
+  const command = openDeck(platform);
+  t.after(() => {
+    server.store.close();
+    command.store.close();
+  });
+  const db = new DatabaseSync(places.dbPath);
+  db.prepare("UPDATE kv SET value = ? WHERE key = 'schema_version'").run(
+    String(SCHEMA_VERSION + 1),
+  );
+  db.close();
+  assert.throws(() => server.store.setKv('window_server', 'x'), StoreNewerError);
+  command.store.setKv('window_server', 'x');
+  assert.equal(server.store.getKv('window_server'), 'x');
 });
 
 test('testDeck writes its config and creates projects and sessions in the Claude home', (t) => {
