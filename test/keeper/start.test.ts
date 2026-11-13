@@ -131,12 +131,15 @@ describe('keeper: what starts the program', { concurrency: true }, () => {
   test('G after the deadline starts nothing', async (t) => {
     const box = keeperSandbox(t);
     const now = box.tp.platform.clock.nowNs();
-    const k = await box.start({ spec: { startBy: String(now + 1_000_000_000n) } });
+    const startBy = now + 1_000_000_000n;
+    const k = await box.start({ spec: { startBy: String(startBy) } });
     const { client } = await k.claim();
-    // Stopped across the deadline, so that the G is read after it, before any timer fires.
+    // Stopped across the deadline, so that the G is read after it, before any timer fires. The
+    // deadline is wall-clock time, which steps on this machine: wait on that clock itself.
     k.pause(true);
     try {
-      await sleep(1500);
+      const clock = box.tp.platform.clock;
+      await until(() => clock.nowNs() > startBy + 1_000_000_000n, 'the deadline long past', 10_000);
       client.send('G');
       await sleep(100);
     } finally {

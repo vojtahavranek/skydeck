@@ -138,12 +138,14 @@ describe('keeper: ending', { concurrency: true }, () => {
 
   test('never started and never connected to: it ends after the linger from the deadline', async (t) => {
     const box = keeperSandbox(t);
-    const now = box.tp.platform.clock.nowNs();
+    const clock = box.tp.platform.clock;
+    const startBy = clock.nowNs() + 1_000_000_000n;
     const k = await box.start({
-      spec: { startBy: String(now + 1_000_000_000n) },
-      env: { SKYDECK_TEST_KEEPER_LINGER_SECONDS: '1' },
+      spec: { startBy: String(startBy) },
+      env: { SKYDECK_TEST_KEEPER_LINGER_SECONDS: '2' },
     });
-    await sleep(1500);
+    // The deadline is wall-clock time, which steps on this machine: wait on that clock itself.
+    await until(() => clock.nowNs() > startBy + 300_000_000n, 'the deadline passed', 10_000);
     assert.equal(k.hasExited(), false, 'the linger starts at the deadline');
     await gone(k);
   });

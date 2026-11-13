@@ -52,12 +52,16 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Polls `check` every 10 ms until it is true; throws `what` after `timeoutMs`. */
-export async function until(check: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
+/** Polls `check` every 10 ms until it is true; throws `what` (described when it throws) after `timeoutMs`. */
+export async function until(
+  check: () => boolean,
+  what: string | (() => string),
+  timeoutMs = 5000,
+): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   while (!check()) {
     if (performance.now() > deadline) {
-      throw new Error(`${what}: not within ${timeoutMs} ms`);
+      throw new Error(`${typeof what === 'string' ? what : what()}: not within ${timeoutMs} ms`);
     }
     await sleep(10);
   }
@@ -221,7 +225,8 @@ function keeperClient(socket: Socket, onFrame: (frame: Frame) => void): KeeperCl
           }
           return false;
         },
-        `frame ${typeof match === 'string' ? match : 'matching'} (have ${frames.map((f) => f.type).join('')}${closed ? ', closed' : ''})`,
+        () =>
+          `frame ${typeof match === 'string' ? match : 'matching'} (have ${frames.map((f) => f.type).join('')}${closed ? ', closed' : ''})`,
         timeoutMs,
       );
       taken = found + 1;
@@ -235,7 +240,7 @@ function keeperClient(socket: Socket, onFrame: (frame: Frame) => void): KeeperCl
           at = output().indexOf(needle, from);
           return at !== -1;
         },
-        `${JSON.stringify(needle)} in the output ${JSON.stringify(output().slice(-300))}`,
+        () => `${JSON.stringify(needle)} in the output ${JSON.stringify(output().slice(-300))}`,
         timeoutMs,
       );
       return at + needle.length;
