@@ -133,7 +133,10 @@ The inputs of these two events contain no conversation content.
 
 ### 5.3 Ingest
 
-Every skydeck command except `hook` starts with the same three steps, in this order:
+Every skydeck command that works on sessions (`ls`, `show`, `label`, `group`, `note`, `done`,
+`undone`, `pr`, `new`, `resume`, `restore` and the interactive list) starts with the same three
+steps, in this order. `install` runs them after it has made its links (8); `doctor` and
+`uninstall` do not run them (8); the hook is a script, not a command, and does none of this:
 
 1. **Ingest the spool.** Files are read in name order. Each becomes at most one row in `events`,
    keyed by the spool file name so that reading a file twice changes nothing; the file is deleted
@@ -267,7 +270,7 @@ There are three states, plus one fallback.
 | State | Rule |
 |---|---|
 | `working` | Running, and the holder's live-session file has `status` `busy`. |
-| `waiting` | Running, and that `status` is `idle` or `waiting`. Shown as "waiting for you". `waitingFor`, when present, is shown as detail. |
+| `waiting` | Running, and that `status` is `idle` or `waiting`. Shown as `waiting`. `waitingFor`, when present, is the state's detail: `show` and the list's detail view print it in parentheses after the state, and `--json` carries it as `stateDetail`. |
 | `running` | Running, but no live-session file can be read for the holder, or its `status` is another value. |
 | `not-running` | Not running. |
 
