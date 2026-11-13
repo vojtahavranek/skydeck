@@ -158,8 +158,10 @@ function detailBody(row: ListRow): string[] {
     `marks: ${row.marks.length === 0 ? '-' : row.marks.join(',')}`,
     ...row.prs.map((pr) => `pr: ${formatPrLine(pr)}`),
   ];
-  if (row.note !== null) {
-    lines.push('note:', ...formatNoteLines(row.note));
+  // A note that has nothing to show gets no heading, as in `show`.
+  const note = row.note === null ? [] : formatNoteLines(row.note);
+  if (note.length > 0) {
+    lines.push('note:', ...note);
   }
   return lines;
 }

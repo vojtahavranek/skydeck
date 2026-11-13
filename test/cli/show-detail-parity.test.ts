@@ -36,10 +36,10 @@ function detail(row: ListRow): string[] {
   return lines;
 }
 
-/** The lines after the `note:` heading, none when there is no heading. */
+/** The `note:` heading and the lines after it, none when there is no heading. */
 function noteOf(lines: string[]): string[] {
   const at = lines.indexOf('note:');
-  const note = at < 0 ? [] : lines.slice(at + 1);
+  const note = at < 0 ? [] : lines.slice(at);
   while (note.at(-1) === '') {
     note.pop(); // the screen is padded below the body
   }
