@@ -4,8 +4,8 @@ skydeck is one developer's tool for working with many Claude Code sessions at on
 sessions that matter, says what each one is doing, carries a label, a group, a note and its pull
 requests, and brings a session back with one action, also after a PC restart or a WSL shutdown.
 
-It is a command line tool for the terminal (step 1). The window that step 2 adds is outlined in
-design section 13.
+It is a command line tool for the terminal (step 1). The window that step 2 adds is designed in
+[docs/design-step-2.md](docs/design-step-2.md).
 
 ```
 ABC-123
@@ -80,6 +80,7 @@ pull requests again.
 
 - [docs/install.md](docs/install.md): setting skydeck up on another machine.
 - [docs/design.md](docs/design.md): the design, the source of truth for the behaviour.
+- [docs/design-step-2.md](docs/design-step-2.md): the design of step 2, the window.
 - [docs/manual-checks.md](docs/manual-checks.md): the checks that need a real Claude Code session,
   run by hand.
 

@@ -1,7 +1,8 @@
 # skydeck — design
 
-Status: agreed design for step 1, outline for step 2. This document is the source of truth for
-implementation; when the code and this document disagree, one of them has a bug.
+Status: agreed design for step 1; step 2 is designed in [design-step-2.md](design-step-2.md).
+This document is the source of truth for implementation; when the code and this document disagree,
+one of them has a bug.
 
 ## 1. Purpose
 
@@ -70,9 +71,9 @@ section first.
 
 - **Step 1 — skydeck in the terminal.** Recording, the list, labels/groups/notes/done, pull
   requests, resume and restore. Specified in full in sections 5–12.
-- **Step 2 — the window.** A native Windows window with the session list on the left and the real
-  terminal on the right, on top of the same data. Outlined in section 13; it gets its own
-  detailed design before it is built.
+- **Step 2 — the window.** A window on the Windows desktop with the session list on the left and
+  the real terminal on the right, on top of the same data. Summarised in section 13 and specified
+  in [design-step-2.md](design-step-2.md).
 
 ## 5. Recording
 
@@ -958,33 +959,35 @@ module takes those as parameters, so tests pass fakes.
   - **Commands:** exit codes; `ls --json` against a recorded day of events (end to end).
 - Continuous integration runs type checking, all tests and `shellcheck` on every pull request.
 
-## 13. Step 2 outline: the window
+## 13. Step 2: the window
 
-Not specified in detail yet. What is already decided or known:
+Specified in [design-step-2.md](design-step-2.md), which also says how step 2 amends section 2
+(principles) and section 10 (dependencies). In short:
 
 - **Shape.** Session list on the left; the real terminal of the selected session on the right
   (xterm.js); a header with title, group, pull requests, note and done.
-- **Window.** A native Windows window, with all logic staying inside WSL. A Linux window shown
-  through WSLg is not an option for the product: it disappears together with WSL, it scales
-  badly on mixed-DPI screens and has a known input freeze after sleep. Fallback when a native
-  window program is not allowed on the PC: an Edge app window, accepting that the browser keeps
-  some Ctrl shortcuts.
-- **Terminals are held by a small process separate from the app**, so that restarting or
-  updating the app never ends a session. It also keeps each session's screen state, so that a
-  reconnect shows the exact screen.
-- **WSL lifetime.** The window keeps a helper process inside WSL alive. That keeps WSL up while
-  the window is hidden and tells the window at once when WSL has stopped, so it can offer
-  "restart and restore".
+- **Window.** An Edge app window (`msedge.exe --app=<url>` with a profile folder of its own)
+  showing a page that skydeck serves from inside WSL; all logic stays inside WSL. Step 2 builds no
+  native Windows program (one stays a later option). A Linux window shown through WSLg is not an
+  option: it disappears together with WSL, scales badly on mixed-DPI screens and has a known input
+  freeze after sleep. An app window reserves no keys for the browser, so the page gets every
+  chord it uses; in a normal browser tab the browser keeps some Ctrl shortcuts (Ctrl+W, Ctrl+T,
+  Ctrl+N, Ctrl+Tab and their Shift forms).
+- **Terminals are held by a small process separate from the app**: one python3 keeper per
+  terminal owns the pty, and one Node.js server keeps each terminal's screen state, so that
+  restarting or updating the server never ends a session and a reconnect shows the exact screen.
+- **WSL lifetime.** While the window has terminals, skydeck keeps a `wsl.exe` running so that WSL
+  does not stop by itself (or the user's `.wslconfig` does); the page notices when WSL has stopped
+  anyway and offers restore.
 - **Keys follow the developer's terminal:** Ctrl+V pastes text, Ctrl+Shift+V sends the raw key
   (Claude Code's image paste), Shift+Enter inserts a newline, Ctrl+Click opens links; scrollback
   search; scrollback kept when switching sessions; non-US keyboard layouts.
 - **Attention.** A "finished, not yet seen" mark, a key to jump to the next session that needs
-  the user, and a desktop notification when the window is not focused.
+  the user, and a desktop notification when the window is not focused. The end of a turn comes
+  from the live-session file, not from a new hook.
 - **Safety.** Foreign text is rendered as text, never as markup. Programs in a terminal can
   write to the clipboard but not read it. The local server listens on the loopback interface
-  only and requires a secret and an exact origin.
-- **Open.** Whether the PC allows the window program; whether WSL stays up with only a
-  background process; whether opening terminal tabs from WSL works (also relevant to 7.6).
+  only and requires a secret, an exact origin and an exact host.
 
 ## 14. Claude Code behaviour this design relies on
 
@@ -1022,8 +1025,10 @@ inspecting local files, unless marked otherwise.
 
 ## 16. Left out of step 1 on purpose
 
-- Hooks for turn events (`Stop`, `UserPromptSubmit`, `Notification`) and notifications — step 2.
+- Hooks for turn events (`Stop`, `UserPromptSubmit`, `Notification`). Planned here for step 2,
+  then decided against there: the live-session file already says when a turn ends, and the input
+  of `Stop` carries the assistant's text (design-step-2.md 10.3). Notifications are in step 2.
 - Suggesting pull requests from URLs mentioned in a session.
 - Inheriting labels or groups across `/clear` (Claude Code keeps the session name itself).
-- Jumping to a terminal tab that is already open.
+- Jumping to a terminal tab that is already open (step 2 leaves it out too).
 - macOS (no `/proc`); the process facts sit behind `src/platform/` for that reason.
