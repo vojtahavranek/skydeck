@@ -13,6 +13,7 @@ import {
 } from '../../src/claude/hookinput.ts';
 import type { SpoolEvent } from '../../src/claude/hookinput.ts';
 import { procStartFromStat } from '../../src/claude/procstat.ts';
+import { realPlatform } from '../../src/platform/real.ts';
 import { BOOT_A, S1, S2, T0, statLine } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
@@ -376,6 +377,11 @@ describe('parseSpoolFile: cwd, process and entry point', () => {
     assert.equal(parse(start({ input: noCwd, pwd: '' })).cwd, null);
   });
 
+  test('the cwd of the input wins over pwd', () => {
+    const input = hookInput('SessionStart', S1, { source: 'startup', cwd: '/w' });
+    assert.equal(parse(start({ input, pwd: '/p' })).cwd, '/w');
+  });
+
   test('a cwd of the input that is empty or not a string is passed over', () => {
     assert.equal(parse(startWith({ cwd: '' })).cwd, '/home/dev/projects/demo');
     assert.equal(parse(startWith({ cwd: 5 })).cwd, '/home/dev/projects/demo');
@@ -486,6 +492,44 @@ describe('parseSpoolFile: the launch command', () => {
     const argv = ['claude', '--mcp-config', 'mcp.json'];
     const input = hookInput('SessionStart', S1, { source: 'startup', cwd: '/w' });
     assert.deepEqual(parse(start({ argv, input })).argv, argv);
+  });
+
+  test('a path-flag value that makes the existence check throw is kept as written', () => {
+    // Claude Code takes inline JSON for --settings and --mcp-config. Resolved against a directory
+    // it is a path with a component longer than a file name may be, and stat fails with
+    // ENAMETOOLONG instead of "not found".
+    const json = JSON.stringify({ permissions: { allow: ['Bash(npm run lint)'.repeat(15)] } });
+    assert.ok(json.length > 255 && !json.includes('/'));
+    const argv = ['claude', '--settings', json, '--mcp-config', 'mcp.json'];
+    const input = hookInput('SessionStart', S1, { source: 'startup', cwd: '/w' });
+    const throwing = (path: string): boolean => {
+      if (path === `/w/${json}`) throw new Error('ENAMETOOLONG');
+      return path === '/w/mcp.json';
+    };
+    assert.deepEqual(parse(start({ argv, input }), throwing).argv, [
+      'claude',
+      '--settings',
+      json,
+      '--mcp-config',
+      '/w/mcp.json',
+    ]);
+  });
+
+  test('with the real stat as the existence check, inline JSON and a NUL in the cwd cannot throw', (t) => {
+    const s = sandbox(t);
+    const { files } = realPlatform();
+    const exists = (path: string): boolean => files.stat(path) !== null;
+    const json = JSON.stringify({ permissions: { allow: ['Bash(npm run lint)'.repeat(15)] } });
+    const long = hookInput('SessionStart', S1, { source: 'startup', cwd: s.root });
+    assert.deepEqual(
+      parse(start({ argv: ['claude', '--settings', json], input: long }), exists).argv,
+      ['claude', '--settings', json],
+    );
+    const nul = hookInput('SessionStart', S1, { source: 'startup', cwd: `${s.root}/a\u0000b` });
+    assert.deepEqual(
+      parse(start({ argv: ['claude', '--mcp-config', 'm.json'], input: nul }), exists).argv,
+      ['claude', '--mcp-config', 'm.json'],
+    );
   });
 
   test('without a cwd in the input the pwd key is the base for relative paths', () => {

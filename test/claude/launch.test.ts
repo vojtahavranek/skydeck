@@ -628,6 +628,24 @@ test('absolutizePathFlags asks about the resolved path and returns a new array',
   assert.notEqual(result, argv);
 });
 
+test('absolutizePathFlags treats an existence check that throws as "does not exist"', () => {
+  // A path-flag value can be inline JSON, longer than a file name may be, or hold a NUL: the
+  // check of the caller (a stat) throws then, and the value must stay as written.
+  const exists = (path: string): boolean => {
+    if (path === '/p/bad') throw new Error('ENAMETOOLONG');
+    if (path === '/p/worse') throw new TypeError('a path with a NUL');
+    return path === '/p/ok';
+  };
+  assert.deepEqual(
+    absolutizePathFlags(['claude', '--add-dir', 'bad', 'ok', 'worse'], '/p', exists),
+    ['claude', '--add-dir', 'bad', '/p/ok', 'worse'],
+  );
+  assert.deepEqual(absolutizePathFlags(['claude', '--settings=bad'], '/p', exists), [
+    'claude',
+    '--settings=bad',
+  ]);
+});
+
 // --- buildResumeCommand --------------------------------------------------------------------------
 
 const S1 = '11111111-2222-3333-4444-555555555555';

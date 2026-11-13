@@ -971,7 +971,9 @@ export function parseLaunchArgs(args: readonly string[]): ParsedArg[];
  * relative is replaced by resolve(cwd, value) when `exists(resolved)` is true. For the `=` form the
  * token becomes `--flag=<absolute>`. Other tokens are returned unchanged. cwd null → unchanged;
  * so is a cwd that is not absolute, and an empty value (resolving against either would give the
- * directory of the running process).
+ * directory of the running process). An `exists` that throws counts as false, so the value stays
+ * as written: a path-flag value can be inline JSON, longer than a file name may be, or hold a NUL,
+ * and a stat then fails with something other than "not found".
  */
 export function absolutizePathFlags(argv: readonly string[], cwd: string | null, exists: (path: string) => boolean): string[];
 
@@ -2267,6 +2269,7 @@ same, exists {}                                                             → 
 ['claude','--system-prompt-file','s.md','--append-system-prompt-file=a.md','--plugin-dir-no-mcp','p','--append-subagent-system-prompt-file','x.md'], cwd '/p', exists always → every value absolute under /p
 ['claude','--add-dir','a'], cwd 'p' (not absolute), exists always           → unchanged
 ['claude','--add-dir',''], cwd '/p', exists always                          → unchanged   (an empty value; also '--add-dir=')
+['claude','--add-dir','bad','ok'], cwd '/p', exists throws for '/p/bad', true for '/p/ok' → ['claude','--add-dir','bad','/p/ok']
 ```
 
 `buildResumeCommand` (`claudeCommand 'claude'`, `sessionId S1`; `R = ['claude','--resume',S1]`;

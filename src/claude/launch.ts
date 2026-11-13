@@ -395,7 +395,9 @@ export function parseLaunchArgs(args: readonly string[]): ParsedArg[] {
  * relative is replaced by resolve(cwd, value) when `exists(resolved)` is true. For the `=` form the
  * token becomes `--flag=<absolute>`. Other tokens are returned unchanged. cwd null → unchanged.
  * An empty value and a cwd that is not absolute are left alone too: resolving against them would
- * give the directory of the running process, not the session's.
+ * give the directory of the running process, not the session's. An `exists` that throws counts as
+ * false and the value stays as written: a path-flag value can be inline JSON, longer than a file
+ * name may be, or hold a NUL, and a stat then fails with something other than "not found".
  */
 export function absolutizePathFlags(
   argv: readonly string[],
@@ -406,7 +408,11 @@ export function absolutizePathFlags(
   const absolute = (value: string): string => {
     if (value === '' || posix.isAbsolute(value)) return value;
     const resolved = posix.resolve(cwd, value);
-    return exists(resolved) ? resolved : value;
+    try {
+      return exists(resolved) ? resolved : value;
+    } catch {
+      return value;
+    }
   };
 
   const out = argv.slice(0, 1);
