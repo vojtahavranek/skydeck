@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import type { Context } from '../../../src/cli/context.ts';
 import { main } from '../../../src/cli/main.ts';
 import { isoFromNs } from '../../../src/platform/time.ts';
+import { lockKey } from '../../../src/sessions/resume.ts';
 import type { RunResult } from '../../../src/platform/types.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
 import { shellQuote } from '../../../src/text/shell.ts';
@@ -182,6 +183,10 @@ test('resume --tab that WezTerm refuses prints the reason and the quoted command
   const dir = session(d, { argv: ['claude', '--append-system-prompt', "it's"] });
   const { ctx } = withRunner(d, () => runResult({ code: 1, stderr: 'no window\n' }));
   assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 1);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`); // the printed command may be run now
+  d.clock.setNs(T0 + 5n * SEC);
+  assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 4);
+  d.clock.setNs(T0);
   assert.ok(d.stderr().includes('no window'), d.stderr());
   assert.ok(
     d
@@ -200,16 +205,31 @@ test('resume --tab when WezTerm is not installed prints the command', async (t) 
   assert.ok(d.stderr().includes(`${fallback(dir, ['claude', '--resume', S1])}\n`), d.stderr());
 });
 
-test('resume --tab that timed out prints no command: the tab may have opened', async (t) => {
+test('resume --tab that timed out prints no command and keeps the lock: the tab may have opened', async (t) => {
   const d = deck(t, { config: { terminal: 'wezterm' } });
   session(d, { argv: ['claude'] });
   const { ctx } = withRunner(d, () => runResult({ code: null, timedOut: true }));
   assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 1);
   const err = d.stderr();
-  assert.ok(err.includes('a tab may have opened'), err);
-  assert.ok(err.includes('run skydeck again to see whether the session is running'), err);
-  assert.equal(err.includes('cd --'), false, err);
-  assert.equal(err.includes('--resume'), false, err);
+  assert.equal(
+    err,
+    'skydeck: wezterm timed out; a tab may have opened\n' +
+      `skydeck: run skydeck again to see whether session ${S1} is running\n`,
+  );
+  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+  d.clock.setNs(T0 + 5n * SEC);
+  assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 4);
+});
+
+test('a timeout is told apart by the terminal, not by the words of its message', async (t) => {
+  const d = deck(t, { config: { terminal: 'wezterm' } });
+  session(d, { argv: ['claude'] });
+  // Not a timeout, though its first stderr line reads like the adapter's timeout message.
+  const { ctx } = withRunner(d, () =>
+    runResult({ code: 1, stderr: 'wezterm timed out; a tab may have opened\n' }),
+  );
+  assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 1);
+  assert.ok(d.stderr().includes(`--resume ${S1}\n`), d.stderr());
 });
 
 test('resume whose terminal fails to open (a rejected open) prints the command', async (t) => {
@@ -283,29 +303,30 @@ test('resume of a session without a recorded launch command says the flags are u
   assert.equal(handoff(d), handoffScript({ cwd: dir, argv: ['claude', '--resume', S1] }));
 });
 
-test('resume names flags skydeck does not know, before it writes the handoff', async (t) => {
+test('resume names flags skydeck does not know, and passes neither them nor what follows', async (t) => {
   const d = deck(t);
   const dir = session(d, { argv: ['claude', '--frob', 'x', '--model', 'opus'] });
-  const seen: boolean[] = [];
-  const ctx: Context = {
-    ...d.ctx,
-    io: {
-      ...d.ctx.io,
-      stderr: (text) => {
-        seen.push(existsSync(handoffPath(d)));
-        d.ctx.io.stderr(text);
-      },
-    },
-  };
-  assert.equal(await main(['resume', '0b5f'], ctx), 0);
+  assert.equal(await main(['resume', '0b5f'], d.ctx), 0);
   assert.equal(
     d.stderr(),
     'skydeck: started with flags skydeck does not know, not passed on resume: --frob\n',
   );
-  assert.deepEqual(seen, [false]);
   assert.equal(
     handoff(d),
     handoffScript({ cwd: dir, argv: ['claude', '--resume', S1, '--model', 'opus'] }),
+  );
+});
+
+test('resume names unknown flags before the reason a launch failed', async (t) => {
+  const d = deck(t, { env: { SKYDECK_HANDOFF: undefined } });
+  const dir = session(d, { argv: ['claude', '--frob'] });
+  assert.equal(await main(['resume', '0b5f'], d.ctx), 1);
+  assert.equal(
+    d.stderr(),
+    'skydeck: started with flags skydeck does not know, not passed on resume: --frob\n' +
+      'skydeck: not started through bin/skydeck\n' +
+      'skydeck: to start it yourself, run:\n' +
+      `${fallback(dir, ['claude', '--resume', S1])}\n`,
   );
 });
 

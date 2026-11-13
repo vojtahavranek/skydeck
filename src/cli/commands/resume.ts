@@ -48,7 +48,11 @@ export const command: Command = {
     const [ref = ''] = parsed.positionals;
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const row = resolveRef(ref, loadRows(deck));
-      return launchPrepared(ctx, deck, prepareResume(deck, row), where);
+      const outcome = await launchPrepared(deck, prepareResume(deck, row), where);
+      for (const line of outcome.lines) {
+        ctx.io.stderr(`${line}\n`);
+      }
+      return outcome.code;
     });
   },
 };

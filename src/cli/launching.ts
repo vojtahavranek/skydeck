@@ -8,15 +8,14 @@ import { terminalFor } from '../terminals/index.ts';
 import type { OpenResult, Terminal } from '../terminals/index.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { shellJoin, shellQuote } from '../text/shell.ts';
-import type { Context } from './context.ts';
 import { EXIT } from './exit.ts';
 
-/**
- * The WezTerm adapter's reason when its call timed out (src/terminals/wezterm.ts). The request may
- * have reached WezTerm before the call was killed, so a tab running the session may exist: a
- * printed command pasted now could resume the session a second time (principle 7).
- */
-const TAB_MAY_HAVE_OPENED = 'wezterm timed out; a tab may have opened';
+/** What launchPrepared did: the exit code, and the lines to show the user, in order. */
+export interface LaunchOutcome {
+  code: number;
+  /** Each line as it is printed (without its newline); every foreign string in it sanitised. */
+  lines: string[];
+}
 
 /** The command as a POSIX shell line: "cd -- <q dir> && <q argv…>". */
 function commandLine(prepared: PreparedLaunch): string {
@@ -37,73 +36,81 @@ function unprintable(word: string): boolean {
  * The reason a launch failed, then what the user can do about it. The command is printed only when
  * running it cannot start the session a second time and it holds nothing a terminal would act on.
  */
-function reportFailure(ctx: Context, prepared: PreparedLaunch, reason: string): number {
+function failure(prepared: PreparedLaunch, reason: string, timedOut: boolean): string[] {
   const lines = [`skydeck: ${sanitize(reason)}`];
-  if (reason === TAB_MAY_HAVE_OPENED) {
-    lines.push('skydeck: run skydeck again to see whether the session is running');
+  if (timedOut) {
+    // The program may have started: a command run by hand now could resume the session twice.
+    lines.push(
+      `skydeck: run skydeck again to see whether session ${prepared.sessionId} is running`,
+    );
   } else if ([prepared.cwd, ...prepared.argv].some(unprintable)) {
     lines.push('skydeck: the command contains control characters and cannot be printed safely');
   } else {
     lines.push('skydeck: to start it yourself, run:', commandLine(prepared));
   }
-  ctx.io.stderr(`${lines.join('\n')}\n`);
-  return EXIT.failure;
+  return lines;
 }
 
 /** The terminal for `where`, or null when a tab was asked for and no adapter opens tabs (D24). */
 function chooseTerminal(deck: Deck, where: 'here' | 'tab' | null): Terminal | null {
-  const configured = terminalFor(deck.config.terminal, deck.platform, deck.config);
   if (where === 'here') {
     return terminalFor('here', deck.platform, deck.config);
   }
-  if (where === 'tab' && !configured.opensTabs) {
-    return null;
-  }
-  return configured;
+  const configured = terminalFor(deck.config.terminal, deck.platform, deck.config);
+  return where === 'tab' && !configured.opensTabs ? null : configured;
 }
 
 /**
  * Opens a prepared command. where 'here' → hereTerminal; 'tab' → the configured adapter if it
- * opens tabs; null → config.terminal. On success returns EXIT.ok (for 'here', the caller must
- * return at once so the launcher can exec). On failure, or 'tab' without a tab adapter (D24),
- * prints the reason and the command ("cd -- <q dir> && <shellJoin argv>") on stderr and returns
- * EXIT.failure. Prints "skydeck: original flags unknown; resuming with defaults" first when
- * !prepared.flagsKnown, and, when prepared.unknownFlags is not empty, "skydeck: started with flags
- * skydeck does not know, not passed on resume: <names>" (names sanitised, joined by one space), both
- * on stderr and before it starts anything.
+ * opens tabs; null → config.terminal. It prints nothing: it returns the exit code and the lines for
+ * the caller to show (the commands print them on stderr; the interactive list shows them in its
+ * message line). The lines are, in order: "skydeck: original flags unknown; resuming with
+ * defaults" when !prepared.flagsKnown; "skydeck: started with flags skydeck does not know, not
+ * passed on resume: <names>" (sanitised, joined by one space) when prepared.unknownFlags is not
+ * empty; and, when the launch failed, the reason and what to do instead.
  *
- * Two failures print no command: a WezTerm call that timed out (a tab may have opened, and the
- * command would resume the session twice) and a command with control characters in it.
- * An open() that rejects is a failed open like any other.
+ * On success the code is EXIT.ok (for 'here', the caller must return at once so the launcher can
+ * exec). On failure, or 'tab' without a tab adapter (D24), it is EXIT.failure and the lines end
+ * with "skydeck: to start it yourself, run:" and the command ("cd -- <q dir> && <shellJoin argv>"),
+ * except in two cases: after an open() that timed out (the program may have started) they end with
+ * "skydeck: run skydeck again to see whether session <id> is running", and when the directory or a
+ * word of the command holds anything sanitize() would change, with "skydeck: the command contains
+ * control characters and cannot be printed safely". An open() that rejects is a failed open.
  */
 export async function launchPrepared(
-  ctx: Context,
   deck: Deck,
   prepared: PreparedLaunch,
   where: 'here' | 'tab' | null,
-): Promise<number> {
+): Promise<LaunchOutcome> {
+  const lines: string[] = [];
   if (!prepared.flagsKnown) {
-    ctx.io.stderr('skydeck: original flags unknown; resuming with defaults\n');
+    lines.push('skydeck: original flags unknown; resuming with defaults');
   }
   if (prepared.unknownFlags.length > 0) {
     const names = prepared.unknownFlags.map(sanitize).join(' ');
-    ctx.io.stderr(
-      `skydeck: started with flags skydeck does not know, not passed on resume: ${names}\n`,
-    );
+    lines.push(`skydeck: started with flags skydeck does not know, not passed on resume: ${names}`);
   }
   const terminal = chooseTerminal(deck, where);
-  if (terminal === null) {
-    return reportFailure(
-      ctx,
-      prepared,
-      `no terminal adapter that opens tabs is configured (set "terminal" in ${deck.places.configPath})`,
-    );
-  }
   let result: OpenResult;
-  try {
-    result = await terminal.open({ cwd: prepared.cwd, argv: prepared.argv });
-  } catch (error) {
-    result = { ok: false, error: `cannot open the terminal (${describeError(error)})` };
+  if (terminal === null) {
+    const error = `no terminal adapter that opens tabs is configured (set "terminal" in ${deck.places.configPath})`;
+    result = { ok: false, error, timedOut: false };
+  } else {
+    try {
+      result = await terminal.open({ cwd: prepared.cwd, argv: prepared.argv });
+    } catch (error) {
+      result = {
+        ok: false,
+        error: `cannot open the terminal (${describeError(error)})`,
+        timedOut: false,
+      };
+    }
   }
-  return result.ok ? EXIT.ok : reportFailure(ctx, prepared, result.error);
+  if (result.ok) {
+    return { code: EXIT.ok, lines };
+  }
+  return {
+    code: EXIT.failure,
+    lines: [...lines, ...failure(prepared, result.error, result.timedOut)],
+  };
 }

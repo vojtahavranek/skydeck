@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { main } from '../../../src/cli/main.ts';
+import { fakeRunner, runResult } from '../../helpers/platform.ts';
 import { shellQuote } from '../../../src/text/shell.ts';
 import { testDeck } from '../../helpers/deck.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
@@ -116,4 +117,42 @@ test('new --tab without a tab adapter prints the command and exits 1', async (t)
       ),
     d.stderr(),
   );
+});
+
+test('new -- -r <id> is refused: it would resume a session past the guard', async (t) => {
+  const d = deck(t);
+  const id = '0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d';
+  assert.equal(await main(['new', '--label', 'x', '--', '-r', id], d.ctx), 2);
+  assert.ok(d.stderr().startsWith('skydeck: cannot pass -r to claude:'), d.stderr());
+  assert.deepEqual(d.deck.store.allMeta(), []);
+  assert.equal(existsSync(handoffPath(d)), false);
+});
+
+test('new -- -c, a cluster with -c, and --session-id=<uuid> are refused', async (t) => {
+  const d = deck(t);
+  for (const extra of [['-c'], ['-pc'], [`--session-id=${UUID1}`]]) {
+    assert.equal(await main(['new', '--', ...extra], d.ctx), 2, extra.join(' '));
+  }
+  assert.equal(existsSync(handoffPath(d)), false);
+});
+
+test('new -- --model x "prompt" passes the flags and the prompt on', async (t) => {
+  const d = deck(t);
+  assert.equal(await main(['new', '--', '--model', 'x', 'fix the bug'], d.ctx), 0);
+  assert.equal(
+    handoff(d),
+    `cd -- ${shellQuote(d.platform.cwd)} || exit 1\nexec claude --session-id ${UUID1} --model x 'fix the bug'\n`,
+  );
+});
+
+test('new --tab that timed out names the new session and prints no command', async (t) => {
+  const d = deck(t, { config: { terminal: 'wezterm' } });
+  d.platform.runner = fakeRunner(() => runResult({ code: null, timedOut: true }));
+  assert.equal(await main(['new', '--tab', '--label', 'fix it'], d.ctx), 1);
+  assert.equal(
+    d.stderr(),
+    'skydeck: wezterm timed out; a tab may have opened\n' +
+      `skydeck: run skydeck again to see whether session ${UUID1} is running\n`,
+  );
+  assert.equal(d.deck.store.meta(UUID1)?.label, 'fix it');
 });

@@ -62,7 +62,11 @@ export const command: Command = {
         group: text(parsed.flags['group']),
         extra: parsed.rest,
       });
-      return launchPrepared(ctx, deck, prepared, where);
+      const outcome = await launchPrepared(deck, prepared, where);
+      for (const line of outcome.lines) {
+        ctx.io.stderr(`${line}\n`);
+      }
+      return outcome.code;
     });
   },
 };

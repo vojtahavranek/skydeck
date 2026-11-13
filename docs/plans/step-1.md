@@ -138,7 +138,7 @@ Each is binding for the implementer. The last column names the task that records
 | D13 | `Context` gains `platform`; `Io` gains `isTTY`, `size`, `readLine`, `keys` (task 1, once). Commands open the database through `withDeck` (task 12). | Brief 18: the platform task extends `Context` once. | — |
 | D14 | `$VISUAL`, else `$EDITOR`, else `vi`; the value is split on spaces; the note file path is appended. | 7.1 only says `$EDITOR`. | 15 (7.1) |
 | D15 | The WezTerm adapter runs `wezterm cli --no-auto-start spawn`; when `wezterm` is not found and `$WSL_DISTRO_NAME` is set, it retries with `wezterm.exe`. | 13 "Open": tabs from WSL. | 7 (7.6) |
-| D16 | The resume lock stores its creation time (ns, decimal) as content; age is computed from that, not from mtime (only content that is not a time is dated by the file's mtime, as a fallback). A lock dated 60 s or more in the future is stale too. Locks are swept at the end of every refresh. A stale lock is replaced or swept only after it is moved aside atomically and found unchanged; someone else's fresh lock is put back. | Fake clock in tests; a stale lock taken over without an atomic step would let two resumes both succeed (principle 7). | 16 (7.6) |
+| D16 | A resume lock is the `kv` entry `resume_lock:<session id>`, its value the creation time in ns (decimal). `acquireLock` reads it and, unless it holds, writes it inside one `store.transaction()` (BEGIN IMMEDIATE: one skydeck at a time); `sweepLocks` deletes the stale ones in one transaction at the end of every refresh (only when a first look without a transaction found some). Stale: 60 s old or older, dated 60 s or more in the future, a value that is not a time, or a `start` event of the session at or after it. `locksDir` stays in `Places` but holds no lock. | The database already serialises skydecks across processes; a lock file taken over without an atomic step would let two resumes both succeed (principle 7). Fake clock in tests. | 16 (7.6) |
 | D17 | `--all` restore entries are preselected relative to the last event of *their own* boot. | 7.8 defines it for the default set only. | 18 (7.8) |
 | D18 | Arguments are read as Claude Code's own parser reads them: a several-value flag takes the next argument whatever it is and then the following ones up to the next flag-like one (starts with `-`, more than one character, so a lone `-` is a value); `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value (`-rabc`), and a token of no-value short flags (`-cp`) is one flag; `--` ends the flags and everything after it is positional. A flag that is in no table is stored as its bare name and not passed on at resume: what follows it cannot be classified. | 7.6 "several values"; principle 4. | 2 (7.6, 5.3, principle 4) |
 | D19 | Restore's selection prompt: a numbered list, the user types numbers to toggle, an empty line confirms, `q` cancels (exit 5). | 7.8 says only "confirms or changes". | 18 (7.8) |
@@ -337,7 +337,7 @@ export interface Places {
   nodeLink: string;     // <dataDir>/node
   spoolDir: string;     // <stateDir>/spool
   badDir: string;       // <stateDir>/spool/bad
-  locksDir: string;     // <stateDir>/locks
+  locksDir: string;     // <stateDir>/locks (created; unused since task 16: resume locks are kv entries, D16)
   hookLog: string;      // <stateDir>/hook.log
   configPath: string;   // <configDir>/config.json
   binLink: string;      // <homeDir>/.local/bin/skydeck
@@ -666,7 +666,9 @@ export type KvKey =
   // one-line strings naming files, folders or processes (never their content); absent when none.
   | 'ingest_problems'
   | 'reconcile_problems'
-  | 'scan_problems';
+  | 'scan_problems'
+  // (Task 16, D16.) A resume lock: the decimal time in ns it was taken; one per session id.
+  | `resume_lock:${string}`;
 ```
 
 #### 2.4.2 `src/store/migrations.ts`
@@ -745,6 +747,8 @@ export interface Store {
   deleteKv(key: KvKey): void;
   /** Treats a missing value as 0. */
   addToKv(key: KvKey, delta: number): void;
+  /** (Task 16.) Every entry whose key starts with `prefix` (compared literally, case included: no LIKE), ordered by key. */
+  kvEntries(prefix: string): { key: KvKey; value: string }[];
 }
 
 /**
@@ -1376,7 +1380,8 @@ export function chipFor(prs: readonly PrRow[]): { level: ChipLevel; count: numbe
 
 ```ts
 export interface LaunchSpec { cwd: string; argv: readonly string[] }
-export type OpenResult = { ok: true } | { ok: false; error: string };
+/** (Task 16.) timedOut: the adapter's call was killed for taking too long, so the program may have started anyway. */
+export type OpenResult = { ok: true } | { ok: false; error: string; timedOut: boolean };
 export interface Terminal {
   readonly name: 'here' | 'wezterm';
   /** true when open() starts the program in a new tab and returns; false for 'here'. */
@@ -1395,7 +1400,7 @@ export function handoffScript(spec: LaunchSpec): string;
 
 /**
  * open() writes handoffScript to the file named by env SKYDECK_HANDOFF (Files.writeText).
- * Without that variable: { ok: false, error: 'not started through bin/skydeck' }.
+ * Without that variable: { ok: false, error: 'not started through bin/skydeck', timedOut: false }.
  * open() is async: a file that cannot be written, or an empty argv (a caller bug: `exec` with
  * nothing after it does nothing), is a rejected promise, not a returned error.
  * The caller must exit right after a successful open(); the launcher then execs the command.
@@ -1413,7 +1418,8 @@ export function hereTerminal(deps: { files: Files; env: Env }): Terminal;
  * with env WSL_DISTRO_NAME set it retries once with `wezterm.exe` (D15).
  * ok when the exit code is 0; otherwise error = first line of stderr, or "wezterm exited <code>",
  * "wezterm timed out; a tab may have opened" (the request can reach WezTerm before the call is
- * killed, so a caller must not print a paste-able fallback after it), "wezterm is not installed".
+ * killed, so a caller must not print a paste-able fallback after it), "wezterm is not installed";
+ * timedOut = the call was killed for taking too long (callers decide on it, not on the message).
  */
 export function weztermTerminal(deps: { runner: Runner; env: Env }, domain: string | null): Terminal;
 ```
@@ -1666,8 +1672,8 @@ export function detachSessionPr(deck: Deck, sessionId: string, url: string): PrK
 
 ```ts
 export const LOCK_TTL_NS: Ns;   // 60 s
-/** <locksDir>/<sessionId>.lock. RangeError when sessionId is not a lowercase UUID (it becomes a file name). */
-export function lockPath(places: Places, sessionId: string): string;
+/** The kv key of the session's resume lock, `resume_lock:<sessionId>` (D16). RangeError when sessionId is not a lowercase UUID. */
+export function lockKey(sessionId: string): `resume_lock:${string}`;
 /**
  * 7.6 refusals (ResumeRefusedError), in this order: running → "<short> is running (pid <p>[, pid <p>…])"
  * (holders latest first); no transcript → "<short> has no transcript"; expired → "<short> has expired:
@@ -1679,27 +1685,20 @@ export function lockPath(places: Places, sessionId: string): string;
  */
 export function checkResumable(row: ListRow, files: Files): void;
 /**
- * Creates the lock exclusively (content: now ns + "\n"). If it exists and is stale — older than
- * LOCK_TTL_NS, dated LOCK_TTL_NS or more in the future, or the session has a start event at or after
- * its time (hasStartSince) — it is replaced: moved aside to a hidden `.<uuid>.lock.stale` (atomic),
- * compared with what was read, someone else's fresh lock put back with createExclusive, then the new
- * lock created; at most 5 rounds, then ResumeRefusedError "<short>: its resume lock keeps changing;
- * try again". A fresh lock: ResumeRefusedError "<short> is being resumed (<n> s ago); try again in
- * <m> s" (n rounded down, m rounded up). Content that is not a time is dated by the file's mtime.
+ * D16. In one store.transaction(): reads the lock; when it holds — younger than LOCK_TTL_NS (a time
+ * less than LOCK_TTL_NS in the future counts as now) and no start event for the session at or after
+ * it (hasStartSince) — ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s"
+ * (n rounded down, m rounded up); otherwise it writes the lock with the clock's time. A value that
+ * is not a time is stale.
  */
 export function acquireLock(deck: Deck, sessionId: string): void;
-/**
- * Removes locks that are stale by the same rules, the same atomic way. Returns how many. Only names
- * `<lowercase uuid>.lock` are locks (the directory also holds hidden temporary files). A directory
- * that cannot be listed gives 0; a lock that cannot be read or removed is skipped; a failure of the
- * database as a whole (isDatabaseFailure) is thrown.
- */
+/** Deletes the locks that are stale by the same rules; returns how many. Looks first without a transaction (no stale lock: no write transaction, so a refresh with nothing to sweep takes no write lock), then reads again and deletes inside one store.transaction(). */
 export function sweepLocks(deck: Deck): number;
 
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[] }
 /** checkResumable, acquireLock, buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command). */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;
-/** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` []. UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse. */
+/** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` []. UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse, and for an `extra` flag on the flag table's removed list, read with parseLaunchArgs (also inside a short-flag cluster such as `-cp`): "cannot pass <flag>[ (<long name>)] to claude: it chooses the session, its name or where it runs". A prompt (a positional argument) is allowed. */
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;
 ```
 
@@ -1897,21 +1896,23 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
 export function editNote(ctx: Context, deck: Deck, sessionId: string): Promise<void>;
 
 // src/cli/launching.ts (task 16)
+export interface LaunchOutcome { code: number; lines: string[] }   // lines as printed, without newlines, foreign text sanitised
 /**
  * Opens a prepared command. where 'here' → hereTerminal; 'tab' → the configured adapter if it
- * opens tabs; null → config.terminal. On success returns EXIT.ok (for 'here', the caller must
- * return at once so the launcher can exec). On failure, or 'tab' without a tab adapter (D24),
- * prints the reason and the command ("cd -- <q dir> && <shellJoin argv>") on stderr and returns
- * EXIT.failure. Prints "skydeck: original flags unknown; resuming with defaults" first when
- * !prepared.flagsKnown, and, when prepared.unknownFlags is not empty, "skydeck: started with flags
- * skydeck does not know, not passed on resume: <names>" (names sanitised, joined by one space), both
- * on stderr and before it starts anything. An open() that rejects is a failed open. Two failures
- * print no command: after "wezterm timed out; a tab may have opened" it adds "skydeck: run skydeck
- * again to see whether the session is running" (pasting the command could resume the session a
- * second time); when the directory or a word of argv holds anything sanitize() would change, it adds
- * "skydeck: the command contains control characters and cannot be printed safely".
+ * opens tabs; null → config.terminal. It prints nothing: it returns the exit code and the lines for
+ * the caller to show (the commands print them on stderr, the interactive list in its message line),
+ * in order: "skydeck: original flags unknown; resuming with defaults" when !prepared.flagsKnown;
+ * "skydeck: started with flags skydeck does not know, not passed on resume: <names>" (sanitised,
+ * joined by one space) when prepared.unknownFlags is not empty; then, when the launch failed,
+ * "skydeck: <reason>" and what to do instead. Success → EXIT.ok (for 'here', the caller must return
+ * at once so the launcher can exec). Failure, or 'tab' without a tab adapter (D24) → EXIT.failure,
+ * the lines ending with "skydeck: to start it yourself, run:" and the command ("cd -- <q dir> &&
+ * <shellJoin argv>") — except after an open() whose result has timedOut (the program may have
+ * started): "skydeck: run skydeck again to see whether session <id> is running"; and when the
+ * directory or a word of argv holds anything sanitize() would change: "skydeck: the command contains
+ * control characters and cannot be printed safely". An open() that rejects is a failed open.
  */
-export function launchPrepared(ctx: Context, deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<number>;
+export function launchPrepared(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
 ```
 
 #### 2.9.5 The interactive list (task 13: pure; task 19: the terminal wrapper)
@@ -2065,9 +2066,10 @@ caller's environment except `SKYDECK_HANDOFF`, and an assignment to a plain name
 exported (`status`, `cache`) would change what it inherits. `CDPATH` is unset only inside the
 command substitutions that `cd`, never for the program.
 
-#### 2.10.4 Lock file
+#### 2.10.4 Resume lock
 
-`<stateDir>/locks/<sessionId>.lock`, content the creation time in ns as decimal digits and `\n`.
+The `kv` entry `resume_lock:<sessionId>`, its value the time it was taken in ns as decimal digits
+(D16). No lock file: `<stateDir>/locks/` is created but holds nothing.
 
 #### 2.10.5 JSON output (`src/cli/output.ts`; key order as written)
 
@@ -3045,7 +3047,7 @@ export function shellJoin(argv: readonly string[]): string;
 export function formatAge(durationNs: bigint): string;
 // src/terminals/types.ts
 export interface LaunchSpec { cwd: string; argv: readonly string[] }
-export type OpenResult = { ok: true } | { ok: false; error: string };
+export type OpenResult = { ok: true } | { ok: false; error: string; timedOut: boolean };   // timedOut: task 16
 export interface Terminal { readonly name: 'here' | 'wezterm'; readonly opensTabs: boolean; open(spec: LaunchSpec): Promise<OpenResult> }
 // here.ts
 export const HANDOFF_ENV = 'SKYDECK_HANDOFF';
@@ -4132,16 +4134,17 @@ results are checked in the store (`d.deck.store.meta`, `sessionPrs`, `prs`) or w
 **Files**
 - Create: `src/sessions/resume.ts`, `src/cli/launching.ts`
 - Modify: `src/sessions/refresh.ts` — call `sweepLocks(deck)` at the end of `refresh` (one line)
+- Modify (ruled in review): `src/store/types.ts` and `src/store/store.ts` (`KvKey` `resume_lock:<id>`, `kvEntries`), `src/terminals/{types,here,wezterm}.ts` (`timedOut` in `OpenResult`), with their tests
 - Create: `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` (each `export const command: Command`)
 - Modify: `docs/design.md` 7.6 (D16; D24: `--tab` without an adapter; the two failures that print no command)
-- Test: `test/sessions/resume.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`
+- Test: `test/sessions/resume.test.ts`, `test/sessions/resume-lock-concurrency.test.ts` (with `test/fixtures/resume-lock-child.ts`), `test/cli/launching.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`
 
 **Exported API**
 
 ```ts
 // src/sessions/resume.ts
 export const LOCK_TTL_NS: Ns;                                                    // 60n * NS_PER_SECOND
-export function lockPath(places: Places, sessionId: string): string;
+export function lockKey(sessionId: string): `resume_lock:${string}`;            // throws RangeError
 export function checkResumable(row: ListRow, files: Files): void;               // throws ResumeRefusedError
 export function acquireLock(deck: Deck, sessionId: string): void;                 // throws ResumeRefusedError
 export function sweepLocks(deck: Deck): number;
@@ -4149,7 +4152,8 @@ export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;          // throws ResumeRefusedError
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;  // throws UsageError
 // src/cli/launching.ts
-export function launchPrepared(ctx: Context, deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<number>;
+export interface LaunchOutcome { code: number; lines: string[] }
+export function launchPrepared(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
 // src/cli/commands/resume.ts, src/cli/commands/new.ts — names, summaries and usage lines of 2.9.4
 export const command: Command;
 ```
@@ -4164,7 +4168,7 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `checkResumable`: a running row (P1 alive) → `ResumeRefusedError` (exit 4) `'0b5f3c1e is running (pid 4242)'`;
   two holders → `'(pid 4343, pid 4242)'`; no transcript → `'0b5f3c1e has no transcript'`; expired → `'0b5f3c1e has expired: its transcript is gone'`;
   dir `/gone` → `'0b5f3c1e: directory /gone no longer exists'`; a dead session with an existing dir → no throw.
-- `acquireLock(S1)` → file `<locksDir>/<S1>.lock` with content `` `${T0}\n` ``. Second call at `T0+10s` →
+- `acquireLock(S1)` → kv `resume_lock:<S1>` = `` `${T0}` ``. Second call at `T0+10s` →
   `ResumeRefusedError` `'0b5f3c1e is being resumed (10 s ago); try again in 50 s'`. At `T0+61s` → succeeds, content `T0+61s`.
 - Lock at `T0`, a start event for S1 at `T0` or later ingested, call at `T0+5s` → succeeds (replaced).
 - `sweepLocks` removes a lock older than 60 s and a lock followed by a start event; keeps a fresh one; returns the count.
@@ -4172,10 +4176,11 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `prepareResume` on a dead S1 with launch `['claude','--model','opus']` and label `'fix'` →
   `{ sessionId: S1, cwd: <dir>, argv: buildResumeCommand(...).argv, flagsKnown: true, unknownFlags: [] }`, lock created; on a running row → refused, no lock.
 - `prepareResume` on a dead S1 with launch `['claude','--frob','x','--model','opus']` → `argv [...R,'--model','opus']`, `unknownFlags ['--frob']`.
-- Guard before lock: a running row with a stale lock → refused for running; the lock file is unchanged.
+- Guard before lock: a running row with a stale lock → refused for running; the lock is unchanged.
+- `acquireLock` and `sweepLocks` each read and write inside one transaction; several child processes taking one session's lock at once against one database file: exactly one succeeds, every round, with and without a stale lock and a sweep first.
 - `prepareNew({ label: ' x ', group: 'G', extra: ['--model','opus'] })` → `sessionId '00000000-0000-4000-8000-000000000001'`,
   `cwd` = `platform.cwd`, `argv ['claude','--session-id',<id>,'-n','x','--model','opus']`, `flagsKnown true`, `unknownFlags []`, meta label `'x'` and group `'G'` stored;
-  label `'-x'` → `UsageError` and no meta stored.
+  label `'-x'` → `UsageError` and no meta stored; extra `-r <id>`, `-c`, `-cp`, `--session-id=<uuid>` → `UsageError` naming the flag, no meta stored; `--model x 'prompt'` passes.
 
 `commands/resume.test.ts`, `commands/new.test.ts` (`d = testDeck(t, { env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'handoff') }) })`; `await main([...], d.ctx)`)
 - `resume --help`, `new --help` → 0 with the usage.
@@ -4187,12 +4192,13 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `resume 0b5f --here --tab` → 2. `resume nope1234` → 3. A running S1 → 4 naming the pid. Twice within 60 s → second 4.
 - A session without a recorded launch command → 0 and stderr `'skydeck: original flags unknown; resuming with defaults\n'`.
 - A session whose recorded launch command has `--frob x` → 0, stderr `'skydeck: started with flags skydeck does not know, not passed on resume: --frob\n'`
-  (printed before the handoff is written), and the handoff argv has neither `--frob` nor `x`; two unknown flags are named in order,
+  (before any failure lines), and the handoff argv has neither `--frob` nor `x`; two unknown flags are named in order,
   separated by a space; a name with a control character is printed sanitised; a session whose flags are all known prints no such line.
 - Never a permission flag: the handoff of a session launched without one contains no `--dangerously-skip-permissions` and no `--permission-mode`.
 - `new --label 'fix it' --group ABC-1 -- --model opus` → 0; handoff
   `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> -n 'fix it' --model opus\n`; `meta(<uuid1>)` label `'fix it'`, group `'ABC-1'`.
-- `new --label -x` → 2.
+- `new --label -x` → 2. `new -- -r <id>` → 2.
+- After a failed open and after a WezTerm timeout the lock still holds (a second resume → 4); after a timeout no command is printed, only the session id.
 
 **Steps**
 - [ ] Write the three test files. `npm test` → fails.
@@ -4376,9 +4382,9 @@ export const command: Command;
 3. Memory 3000 before the first batch → `stoppedForMemory`, `notStarted` all five, no `open`.
    Memory drops to 3000 after the first batch → first two `started`, other three `notStarted`.
 4. A selected session became running → `failed` with `'… is running (pid …)'`; no `open` for it.
-5. `open` returns `{ ok: false, error: 'boom' }` → `failed` with `'boom'`.
+5. `open` returns `{ ok: false, error: 'boom', timedOut: false }` → `failed` with `'boom'`.
 6. Without tabs (`hereTerminal` with `SKYDECK_HANDOFF`) and three entries → first `handedOff` (handoff file
-   written), two lines in `printed`, each `cd -- <dir> && claude --resume <id> …`; only one lock file exists.
+   written), two lines in `printed`, each `cd -- <dir> && claude --resume <id> …`; only one resume lock exists.
 
 `commands/restore.test.ts` (`d = testDeck(t, { lines: [...], stdinTTY: … })`; `await main(['restore', …], d.ctx)`)
 - `restore --help` → 0; `restore extra` → 2.
@@ -4435,8 +4441,9 @@ the first frame (`\x1b[H\x1b[2J` + `render(...).join('\r\n')`), then start a bac
 `done` → `markDone`/`markUndone`; `pr-add`/`pr-rm` → `attachManualPr`/`detachSessionPr`; any of
 these then `loadRows` + `withRows(reorder false)`. `resume` → `refresh(deck)` + `loadRows` (the
 guard works on fresh state, design 7.6) → `prepareResume` on the fresh row; with a tab adapter
-`launchPrepared(ctx, deck, p, 'tab')` and stay, message `opened <short> in a new tab`; without one,
-leave the screen and `launchPrepared(ctx, deck, p, 'here')`, then return its code. A
+`launchPrepared(deck, p, 'tab')` and stay, message `opened <short> in a new tab` (or its returned
+lines, warnings included, when there are any); without one, leave the screen and
+`launchPrepared(deck, p, 'here')`, print its lines on stderr, then return its code. A
 `ResumeRefusedError` becomes the message. `refresh` → `refreshWithProgress(ctx, deck)` + `loadRows` +
 `withRows(reorder true)`. `quit` or the end of `io.keys()` → write `\x1b[?25h\x1b[?1049l`,
 call `return()` on the key iterator, return 0. Errors from an effect never leave the terminal in
