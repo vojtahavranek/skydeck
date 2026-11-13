@@ -1302,6 +1302,22 @@ export function hookStatus(settingsText: string | null, hookPath: string): Recor
 export function cleanupPeriodDays(settingsText: string | null): number;
 ```
 
+#### 2.5.7 `src/claude/folders.ts` (task 17; ruled by the plan owner in pull request #20)
+
+```ts
+export interface FolderLook {
+  path: string;
+  missing: boolean;               // does not exist (yet)
+  unreadable: UnreadableEntry[];  // the folder itself, or (projects) anything under it, with the error code
+}
+/**
+ * For doctor (design 8, 5.6, 11). Never throws for what it cannot read. sessions: missing, or
+ * unreadable when it cannot be looked at or listed, or is not a folder (ENOTDIR). projects:
+ * missing, or listTranscriptFiles(files, claudeHome).unreadable, with the number of transcripts found.
+ */
+export function lookAtClaudeFolders(files: Files, claudeHome: string): { sessions: FolderLook; projects: FolderLook & { transcripts: number } };
+```
+
 ### 2.6 `src/github.ts` (`PrKey`, `prKey`: task 2; the rest: task 9)
 
 ```ts
@@ -4358,12 +4374,26 @@ permission flag is ever added.
 
 ### Task 17: `install`, `uninstall`, `doctor`
 
-**Depends on:** 3, 11, 12 · **Wave:** 5 · **Design:** 5.1, 7.1 (first-run offer), 8, 12 (settings) · **Contracts:** 2.5.6, 2.4.1 (`KvKey`) · **Decisions:** D20 (update design 8)
+**Depends on:** 3, 11, 12 · **Wave:** 5 · **Design:** 5.1, 7.1 (first-run offer), 8, 12 (settings) · **Contracts:** 2.5.6, 2.5.7, 2.4.1 (`KvKey`) · **Decisions:** D20 (update design 8)
 
 **Files**
-- Create: `src/cli/commands/install.ts`, `src/cli/commands/uninstall.ts`, `src/cli/commands/doctor.ts` (each `export const command: Command`)
-- Modify: `docs/design.md` 8 (D20)
-- Test: `test/cli/commands/install.test.ts`, `test/cli/commands/uninstall.test.ts`, `test/cli/commands/doctor.test.ts`
+- Create: `src/cli/commands/install.ts`, `src/cli/commands/uninstall.ts`, `src/cli/commands/doctor.ts` (each `export const command: Command`), `src/claude/folders.ts` (2.5.7)
+- Modify: `docs/design.md` 8 (D20 and the rulings below), this task's text
+- Test: `test/cli/commands/install.test.ts`, `test/cli/commands/uninstall.test.ts`, `test/cli/commands/doctor.test.ts`, `test/claude/folders.test.ts`; helpers `test/helpers/install.ts`, `test/fixtures/hold-write-lock.ts` (a worker thread holding the store's write lock, so doctor's probe fails without opening the database directly)
+
+**Ruled by the plan owner in pull request #20** (binding, in addition to the text below): install
+stops before making any link when a link path holds something that is not a symbolic link, and
+stops when there is no settings file and `<claudeHome>` is not a directory (it never creates
+Claude Code's home); a link that already points at its target is not touched; the first-run
+question uses the singular for 1 (`Mark 1 session older than 1 day as done? [y/N] `). Doctor wraps
+each check, so that whatever one throws is one `problem` line (`<check>: could not be checked
+(<reason>)`) and the next check runs; a non-zero `gh --version` is a problem; the terminal check
+runs `wezterm cli --no-auto-start list`, retried as `wezterm.exe` from WSL when `wezterm` is not
+found (D15); the `spool/bad/` problem gives the number of files, their age range and that they are
+removed after seven days; the lines in kv `ingest_problems`, `reconcile_problems`,
+`scan_problems` are each a `problem` (`last refresh: <step>: <line>`, sanitised); the readability of
+`<claudeHome>/sessions` and `<claudeHome>/projects` comes from `lookAtClaudeFolders` (2.5.7): a
+missing folder is `info` (`does not exist yet`), an unreadable one a `problem`.
 
 **Exported API**
 
@@ -4406,9 +4436,11 @@ export const command: Command;   // in each of the three files
   (`hookStatus`); `hookPath` not resolving to a regular file (`files.stat` kind `file`); `checkNodeVersion(platform.nodeVersion)`
   (from `bin/node-version.mjs`) returns a message; the database not writable (`setKv('doctor_probe', <now>)`
   throws); files in `spool/bad/`; more than 1000 files in the spool; `gh --version` not found;
-  `gh auth status` exit code ≠ 0; terminal `wezterm` and `wezterm cli list` fails; an entry of
-  `<claudeHome>/projects` that cannot be read (`listTranscriptFiles(platform.files, deck.places.claudeHome).unreadable`, one
-  line each: `transcripts: cannot read <path> (<reason>)`, the path through the sanitiser). Info: spool
+  `gh auth status` exit code ≠ 0; terminal `wezterm` and `wezterm cli --no-auto-start list` fails; an entry of
+  `<claudeHome>/projects` that cannot be read (`lookAtClaudeFolders(platform.files, deck.places.claudeHome).projects.unreadable`, one
+  line each: `transcripts: cannot read <path> (<reason>)`, the path through the sanitiser), and
+  likewise `<claudeHome>/sessions` (`cannot read <path> (<reason>)`); each line of what the last
+  refresh recorded. Info: spool
   count, age of the last event (`last event <formatAge> ago` or `no events yet`), the last 5 lines
   of `hook.log` (or `hook.log is empty`), `scripted runs dropped: <n>`.
 
@@ -4436,11 +4468,11 @@ export const command: Command;   // in each of the three files
 5. `uninstall --purge` → dataDir, stateDir, configDir gone; the backups stay.
 6. `uninstall` with nothing installed → 0; no directory, database or file is created (`sandbox.skydeckHome` stays empty).
 
-`doctor.test.ts` (fake runner answers `gh --version` 0, `gh auth status` 0, `wezterm cli list` 0 unless stated)
+`doctor.test.ts` (fake runner answers `gh --version` 0, `gh auth status` 0, `wezterm cli --no-auto-start list` 0 unless stated)
 1. After a complete install with one event → 0; every line starts with `ok` or `info`; contains `info     last event`.
 2. Each problem alone → 1 with a `problem` line: no hook entries; `H` dangling (re-point `H` at a temporary file, then delete that file — never touch the repository's `bin/skydeck-hook`);
    `nodeVersion '24.11.0'`; a file in `spool/bad/`; 1001 files in the spool; `gh` not found; `gh auth status` code 1;
-   config terminal `wezterm` with `wezterm cli list` code 1; a symbolic link loop in `<claudeHome>/projects` (`transcripts: cannot read … (ELOOP)`).
+   config terminal `wezterm` with `wezterm cli --no-auto-start list` code 1; a symbolic link loop in `<claudeHome>/projects` (`transcripts: cannot read … (ELOOP)`).
 3. `hook.log` with 7 lines → output contains its last 5 lines, not the first 2.
 4. `dropped_scripted 3` → `info     scripted runs dropped: 3`.
 
