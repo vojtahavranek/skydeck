@@ -42,6 +42,9 @@ body is the contract (the frame layout, the message fields, the stand-in's comma
 file list), copy it. Private helpers are yours. A contract that looks wrong is implemented as
 written and named in the pull request; the lead rules.
 
+Tasks 31 and 32 were split out of tasks 26 and 23 in review; their numbers do not follow their
+waves (step 1's plan did the same with task 14).
+
 **Per-task workflow** (every task, in this order):
 
 - [ ] Worktree and branch `s2a-task-<N>-<slug>` from the latest `origin/main`.
@@ -57,14 +60,26 @@ written and named in the pull request; the lead rules.
 **Test rules (design 12, S2 17).** `node:test` and `node:assert/strict`. Never start the real
 `claude` (the stand-in of task 3 is `claudeCommand` in every test that starts a program), never
 read or write the real `~/.claude` or `~/.local/...`, never use the network, never start a Windows
-program (`msedge.exe` and `wsl.exe` are replaced by fake runners or by running the inner script
-directly). Every test runs under the sandbox of `test/helpers/sandbox.ts`. A server under test
-listens on a port the system picks (A6). A test that starts keepers kills them in `t.after`
+program. The last is enforced, not only asked for (A32): the sandbox's environment carries
+`SKYDECK_TEST_NO_WINDOWS=1`, under which the real platform refuses to start any program under
+`/mnt/` or whose name ends in `.exe`; the test platform refuses them always; every server a test
+starts gets a sandbox `config.json` whose `window.edge` is a recording stub and whose `keepAlive`
+is `off`, unless the test is about them; and no test links the real `/run/WSL/1_interop`. Every
+test runs under the sandbox of `test/helpers/sandbox.ts`. A server under test listens on a port
+the system picks (A6). **Two test platforms** (task 5, 2.2): `testPlatform` (fake clock, fake
+`/proc`, fake processes) for logic, and `realTestPlatform` (real clock, real `/proc` and boot id,
+`process.pid`, real processes behind the Windows guard, the programs a keeper and the stand-in
+need linked into the sandbox's `bin`) for every test that starts a keeper, the stand-in or a
+server, or judges a real process alive: the tests of tasks 9, 15 (the lock with live processes),
+16, 21, 22, 23, 24 (keepers), 25 and 26–29. With the fake clock a keeper's `startBy` lies in its
+real past and its pid lines count as dead. A test that starts keepers kills them in `t.after` through
+`killKeepersIn` (task 5), which first asserts that the directory lies under the sandbox's root
 (skydeck itself never stops a keeper; the test owns its own).
 
 **Local prerequisites.** Node 24 first on `PATH`; python3 ≥ 3.9 (3.12 on the development machine);
-after task 20, a Chromium for Playwright in `~/.cache/ms-playwright` (`npx playwright install
-chromium`, no `--with-deps`, no `sudo`; see question 6).
+after task 20, a Chromium for Playwright in `~/.cache/ms-playwright`: Playwright 1.60.0 uses
+Chromium build 1223, which the development machine already has; elsewhere run `npx playwright
+install chromium` (no `--with-deps`, no `sudo`; ruling 6).
 
 ## 1. Tasks and waves
 
@@ -80,34 +95,36 @@ Task 0 is `main` at 394d3e6: step 1 complete, the design of step 2 merged.
 | 6 | Step 1 changes: the launcher — core limit for `serve`, the cache marker | 0 | 1 | ~250 |
 | 7 | The keep-alive script | 0 | 1 | ~250 |
 | 8 | Pure helpers: program environment, pid lines, Edge arguments, profile folder, links, flags | 0 | 1 | ~550 |
-| 9 | The keeper | 1, 3, 7 | 2 | ~800 (one file of python and its tests) |
-| 10 | WebSocket | 2 | 2 | ~450 |
+| 31 | The page's key table and age format (`web/keys.js`, `web/format.js`) | 0 | 1 | ~450 |
+| 9 | The keeper | 1, 3, 5, 7 | 2 | ~800 (one file of python and its tests) |
+| 10 | WebSocket | 2, 5 | 2 | ~450 |
 | 11 | Authentication: secret, launch tokens, proofs | 1, 4, 5 | 2 | ~500 |
 | 12 | Screen side | 1, 2 | 2 | ~550 |
 | 13 | View model | 1 | 2 | ~550 |
 | 14 | Static files, HTTP answers and the build | 2, 5 | 2 | ~450 |
 | 15 | Runtime directory, server files, the lock, the logs | 4, 5, 8 | 2 | ~550 |
 | 16 | Terminal core: keeper connections and the registry | 9, 12, 15 | 3 | ~650 |
-| 17 | Pages: handshake, streams, sizes, backpressure | 10, 11 | 3 | ~650 |
+| 17 | Pages: handshake, streams, sizes, backpressure | 10, 11, 14 | 3 | ~650 |
 | 18 | Control socket and its client | 11, 15 | 3 | ~450 |
 | 19 | Edge, the keep-alive and the interop link | 5, 7, 8, 15 | 3 | ~500 |
-| 20 | CI and the page-test leg | 2, 9 | 3 | ~250 |
+| 20 | CI and the page-test leg | 2, 9, 14 | 3 | ~300 |
 | 21 | The window terminal; sessions in terminals | 4, 16 | 4 | ~600 |
 | 22 | Server lifecycle for commands: start, find, stop | 15, 18 | 4 | ~500 |
-| 23 | The server: assembly, tick, actions, `skydeck serve` | 13, 14, 16, 17, 18, 19, 21 | 5 | ~650 |
-| 24 | `doctor`, `install`, `uninstall` | 2, 15, 18, 19, 22 | 5 | ~600 |
+| 32 | Actions: resume, new, close, open link; the resume card's payload | 1, 4, 8 | 4 | ~450 |
+| 23 | The server: assembly, tick, `skydeck serve` | 4, 5, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 32 | 5 | ~550 |
+| 24 | `doctor`, `install`, `uninstall` | 2, 5, 15, 18, 19, 22 | 5 | ~600 |
 | 25 | `skydeck window` | 22, 23 | 6 | ~550 |
-| 26 | The page shell: connection, key, keys, app state | 20, 23 | 6 | ~650 |
+| 26 | The page shell: connection, key, app state | 20, 23, 31 | 6 | ~550 |
 | 27 | The list | 26 | 7 | ~550 |
 | 28 | The terminal view | 26 | 7 | ~650 |
 | 29 | The right side: header, cards, the new form, the key help | 26 | 7 | ~600 |
 | 30 | Documentation of stage A | all | 8 | docs only |
 
 ```
-wave 1:  1  2  3  4  5  6  7  8
+wave 1:  1  2  3  4  5  6  7  8  31
 wave 2:  9  10  11  12  13  14  15
 wave 3:  16  17  18  19  20
-wave 4:  21  22
+wave 4:  21  22  32
 wave 5:  23  24
 wave 6:  25  26
 wave 7:  27  28  29
@@ -116,7 +133,9 @@ wave 8:  30
 
 The critical path is stand-in → keeper → terminal core → window terminal → server → page shell →
 terminal view. Waves 4 and 5 are narrow because the server's assembly needs every server part;
-the page is split so that wave 7 runs three tasks at once (A16).
+the page is split so that wave 7 runs three tasks at once (A16). The actions (32) and the pure
+key table (31) were taken out of the server's assembly and the page shell so that both stay one
+review long.
 
 **Disjoint files in a wave.** Every new module is its own file with its own test file. The files
 more than one task edits, and who edits them, never two tasks of one wave:
@@ -128,7 +147,7 @@ more than one task edits, and who edits them, never two tasks of one wave:
 | `.github/workflows/ci.yml` | 9 (2: shellcheck by name, `py_compile`, A14), 20 (3: the page leg) |
 | `.prettierignore` | 2 (1) |
 | `.gitignore` | 9 (2) |
-| `test/helpers/platform.ts` | 5 (1) |
+| `test/helpers/platform.ts`, `test/helpers/sandbox.ts` (A32), `test/helpers/deck.ts` | 5 (1) |
 | `src/claude/procstat.ts` | 8 (1) |
 | `src/sessions/resume.ts`, `src/sessions/restore.ts`, `src/cli/launching.ts` | 4 (1) |
 | `src/window/terminals.ts` | 16 (3) creates it; 21 (4) uses only the `Registry` API task 16 exports |
@@ -145,22 +164,22 @@ Each is binding for the implementer. The last column names the task that records
 |---|---|---|---|
 | A1 | The server's parts meet at interfaces fixed in section 2.5 (`TerminalHub`, `ActionHandler`, `PageSink`) and defined as code by task 1: pages (17) code against `TerminalHub` and `ActionHandler`, the registry (16) and the actions (23) implement them. | Pages and terminals are built in the same wave; neither may wait for the other. | — |
 | A2 | The keeper frame codec is TypeScript, `src/window/frames.ts` (task 1, 2.3). The python keeper implements the same byte layout; task 9's tests drive the keeper through this codec, so both sides are tested against each other. | One definition of S2 8.1 that the server and the keeper's tests share. | — |
-| A3 | Vendored layout: `vendor/xterm/<directory name of the package>/<path inside the package>` (`vendor/xterm/xterm/lib/xterm.mjs`, `vendor/xterm/headless/lib-headless/xterm-headless.mjs`). Only what is used is vendored: each package's `.mjs` bundle, its `typings/*.d.ts`, `@xterm/xterm`'s `css/xterm.css`, and its `LICENSE`. No `.js` (UMD), no `.map`, no `src/`. `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0 ship **no LICENSE file** (checked with `npm pack --dry-run` while writing this plan): for them `npm run vendor` writes `@xterm/xterm`'s `LICENSE` (same repository, same MIT text) and the manifest records `"licenseFrom": "@xterm/xterm"`. Beside each vendored `.mjs` the script writes a declaration file `<name>.d.mts` that re-exports the package's typings, recorded in the manifest with package `skydeck`, so that `tsc` for `web/` never reads a bundle. | S2 16.6 asks for each package's licence file; two packages have none. Type-checking a 400 KB bundle with `checkJs` would be slow and fail. | 2 (16.6) |
+| A3 | Vendored layout: `vendor/xterm/<directory name of the package>/<path inside the package>` (`vendor/xterm/xterm/lib/xterm.mjs`, `vendor/xterm/headless/lib-headless/xterm-headless.mjs`). Only what is used is vendored: each package's `.mjs` bundle, its `typings/*.d.ts`, `@xterm/xterm`'s `css/xterm.css`, and its `LICENSE`. No `.js` (UMD), no `.map`, no `src/`. `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0 ship **no LICENSE file** (checked with `npm pack --dry-run` while writing this plan): for them `npm run vendor` writes `@xterm/xterm`'s `LICENSE`, only after checking that the package's `package.json` declares `"license": "MIT"` and the same repository as `@xterm/xterm` (`github.com/xtermjs/xterm.js`, ignoring a `#branch` suffix; both hold at these versions, checked with `npm view`), and fails otherwise; the manifest records `"licenseFrom": "@xterm/xterm"` and `"licenseReason": "no LICENSE in the package; its package.json declares MIT and the repository of @xterm/xterm"` (ruling 1). Beside each vendored `.mjs` the script writes a declaration file `<name>.d.mts` that re-exports the package's typings, recorded in the manifest with package `skydeck`, so that `tsc` for `web/` never reads a bundle. | S2 16.6 asks for each package's licence file; two packages have none. Type-checking a 400 KB bundle with `checkJs` would be slow and fail. | 2 (16.6) |
 | A4 | The server loads `@xterm/headless` and its addons from `vendor/xterm/` with a dynamic `import()` of a `file:` URL computed from `appRoot` (`src/window/xterm.ts`), typed with `import type` from the development dependencies. Nothing under `src/` imports a vendored file statically, and nothing imports from `node_modules` at run time. | Users never run `npm ci` (docs/install.md): only `vendor/` exists on their machine. | — |
-| A5 | Exact development dependencies: `@xterm/xterm` 6.0.0, `@xterm/headless` 6.0.0, `@xterm/addon-serialize` 0.14.0, `@xterm/addon-fit` 0.11.0, `@xterm/addon-search` 0.16.0, `@xterm/addon-unicode-graphemes` 0.4.0, `ws` 8.23.0, `@types/ws` 8.18.2 (task 2); `playwright` 1.64.1 (task 20; the newest release older than two weeks on 2026-11-13 — 1.65.0 is from 2026-11-05). All verified to exist in the npm registry while writing this plan. | S2 16.6 and 17.4: exact versions. | 2, 20 (16.6, 17.4) |
+| A5 | Exact development dependencies: `@xterm/xterm` 6.0.0, `@xterm/headless` 6.0.0, `@xterm/addon-serialize` 0.14.0, `@xterm/addon-fit` 0.11.0, `@xterm/addon-search` 0.16.0, `@xterm/addon-unicode-graphemes` 0.4.0, `ws` 8.23.0, `@types/ws` 8.18.2 (task 2); `playwright` 1.60.0 (task 20; released 2026-05-11, the one version whose Chromium is build 1223, which is already installed on the development machine — 1.59.0 uses 1217, 1.61.x 1228, 1.64.1 1248; checked in each version's `browsers.json`; ruling 6). All verified to exist in the npm registry while writing this plan. | S2 16.6 and 17.4: exact versions. | 2 (16.6), 20 (17.4, 17.5) |
 | A6 | `window.port` in `config.json` accepts 1–65535 only. Tests pass `port: 0` to `runServer` (2.5.4) directly, never through the configuration. | S2 17: "`window.port` 0 in tests only" without making 0 a valid user setting. | 5 (16.4) |
 | A7 | `notice` gains the kind `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again"), sent once when a tick fails and not again until a tick has succeeded. | S2 10.1 says a failed tick is "shown once to the pages" but 8.2.3 has no kind for it. | 1 (8.2.3) |
 | A8 | `src/window/view/` may import the pure functions `isListed` and `matchesFilter` of `src/sessions/list.ts`, besides its types. | Stage A's filter is design 7.4's (S2 19); one implementation. | 13 (4.3) |
 | A9 | The "long-lived child with pipes" of S2 4.3 is not built in stage A: no stage A part needs it (the keeper, `serve`, Edge and `wsl.exe` are all detached). | YAGNI; the stage that needs it adds it. | 5 (4.3) |
-| A10 | Platform additions (2.2): `Clock.after`, `Platform.randomBytes`, `Platform.pid`, `Platform.uid`, `Platform.userName`, `Platform.processes` (`startDetached`, `signal`), `Platform.net` (`listenHttp`, `connectUnix`, `requestUnix`); `FileInfo` gains `mode` and `uid`; `Proc` gains `fdTarget`. A parent pid is parsed from `Proc.stat` by a pure helper in `src/claude/procstat.ts` (task 8). | S2 4.3: nothing outside `src/platform/` opens a socket, starts a program, reads `/proc` or draws randomness. | 5 (4.3) |
-| A11 | Stage A's page handles exactly the keys stage A uses (S2 19): Ctrl+Shift+P and Ctrl+Shift+J are not the page's until stages E and B, so Edge keeps its default for them. | S2 12.9: "the page cancels exactly the keys it handles itself". See question 2. | — |
+| A10 | Platform additions (2.2): `Clock.after`, `Platform.randomBytes`, `Platform.pid`, `Platform.uid`, `Platform.userName`, `Platform.processes` (`startDetached`, `signal`), `Platform.net` (`listenHttp`, `connectUnix`, `requestUnix`); `FileInfo` gains `mode` and `uid`; `Proc` gains `fdTarget` and `tcpListening`. A parent pid is parsed from `Proc.stat` by a pure helper in `src/claude/procstat.ts` (task 8). | S2 4.3: nothing outside `src/platform/` opens a socket, starts a program, reads `/proc` or draws randomness. | 5 (4.3) |
+| A11 | From stage A on, the page owns every key of S2 12.9's table and list keys, also those whose action comes in a later stage — Ctrl+Shift+P (E), Ctrl+Shift+J (B), and in the list zone `l`, `g`, `n`, `p`, `d`, F2 (D): it cancels them and shows `<key>: comes in a later stage` in the key bar, and the key help lists them as coming later. | A key must not mean Edge's action in one stage and the window's in the next (ruling 2). | 31 (19, stage A) |
 | A12 | The build hash (S2 16.5) skips `__pycache__` directories and names starting with `.`; `.gitignore` gains `__pycache__/`. | `python3 -m py_compile` writes `bin/__pycache__/`, which would change the build and restart the server for nothing. | 14 (16.5) |
 | A13 | The vendored-files check of S2 17.5 is a test in `npm test` (`test/vendor/vendor.test.ts`), so both CI legs run it with no step of its own. | It needs the installed packages, which `npm ci` gives CI. | 2 (17.5) |
 | A14 | The keeper task (9) makes the two CI changes its own pull request needs to pass: `shellcheck bin/skydeck*` would read the python keeper and fail, so it becomes `shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive`, and `python3 -m py_compile bin/skydeck-keeper` is added. Task 20 does the rest of S2 17.5 (page leg, cache, time limit). | A pull request that adds the keeper cannot pass CI otherwise, and the CI task cannot compile a keeper that does not exist yet. | — |
 | A15 | The page suite uses the `playwright` library from `node:test` files under `test-page/` (`chromium.launch()`), not `@playwright/test`. | One test runner in the repository. | — |
 | A16 | The page is built as a walking skeleton: task 26 creates every module of `web/` the shell imports, with `list.js`, `terminal-view.js`, `cards.js` and `help.js` as the smallest working versions; tasks 27, 28 and 29 replace them, each owning its module and its stylesheet (`web/list.css`, `web/terminal-view.css`, `web/cards.css`). The interfaces between `app.js` and those modules are fixed in 2.9. | Three page tasks in parallel instead of three waves in a row. | — |
 | A17 | The stand-in's commands, record file and environment are fixed in 2.4. | Tasks of four waves drive it. | — |
-| A18 | The page formats ages itself with `web/format.js`, a copy of `formatAge`'s rule (design 7.4); a test runs both over the same table of durations. | The server sends times (S2 8.2.3: "times are nanoseconds"); ages change every second, `list` is sent only on change. | — |
+| A18 | The page formats ages itself with `web/format.js` (task 31), a copy of `formatAge`'s rule (design 7.4); a test runs both over the same table of durations. | The server sends times (S2 8.2.3: "times are nanoseconds"); ages change every second, `list` is sent only on change. | — |
 | A19 | Server tests run the server in the test process through `runServer` (2.5.4) with the real platform's sockets and real keepers; only `serve`'s exit codes, its core limit and its `CLAUDECODE` refusal are tested through `bin/skydeck serve` as a child process. | Speed and direct access to the server's state; the launcher is tested where it matters. | — |
 | A20 | The start deadline (S2 7.1 `startBy`) is computed by `startDeadline` in `src/sessions/launch.ts` (2.7): for a resume, the time in the lock's value plus `LOCK_TTL_NS − LOCK_START_TOLERANCE_NS`; for `new`, the clock at `prepareNew` plus the same. `PreparedLaunch` gains `preparedAtNs`. | S2 7.1 defines the value; one function computes it for `launchPrepared` and `runRestore`. | 4 (11.1) |
 | A21 | Terminal ids are 12 lowercase hex characters from `platform.randomBytes(6)`; server ids and window ids 16 hex characters from 8 bytes. | S2 3 fixes the terminal id only. | — |
@@ -172,8 +191,12 @@ Each is binding for the implementer. The last column names the task that records
 | A27 | `list` carries two more fields: `selected` — for the session the page's `view` names, what the resume card shows (the exact command, the flags not passed on, how it ended, expiring/expired; 2.7) — and `dirs`, the known project directories, most recent first, for the new form. | S2 12.6 needs both on the page, and the page decides no rule (S2 4.3); the command is built only by `buildResumeCommand` on the server. | 1 (8.2.3) |
 | A28 | A terminal opened for `new` shows as a row of its own whose `id` is the new session's id (known from `prepareNew`), `starting: true`, titled with the label or `new session in <dir>`; when the session reports a start it becomes that session's ordinary row. Keeper `meta` carries `label` and `dir` so that this survives a server restart. | S2 7.5 says such a row exists; an id is needed for selection. | 13 (7.5) |
 | A29 | `skydeck window` passes its working directory to `serve` in `SKYDECK_ENV_ORIGIN`; `serve` takes it out of its environment (task 8's `serverEnvironment`) and records it with its start time as "where the environment came from" (S2 5.2); a `serve` started by hand records its own working directory. | `serve` runs in `/` (S2 5.2), so it cannot see where its environment came from. | 23 (5.2) |
-| A30 | `doctor`'s port check binds `127.0.0.1:<window.port>` for an instant when no server of this installation answers: `EADDRINUSE` means something else holds the port. | No request is sent to a foreign program, and no TCP client is added to the platform. | 24 (16.3) |
-| A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` or the ones task 9 names. | A test suite that waits 30 s per case is not run. | — |
+| A30 | `doctor`'s port check reads `/proc/net/tcp` and `/proc/net/tcp6` (`Proc.tcpListening`, task 5) for a listener on `<window.port>`; when one exists and no server of this installation answers, something else holds the port. | No side effect: binding the port, even for an instant, could make a server that starts at that moment exit 10; no request is sent to a foreign program. | 24 (16.3) |
+| A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
+| A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); `testPlatform`'s processes refuse them whatever the environment. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
+| A33 | The stand-in refuses to run outside a sandbox (review A, must-fix): it exits 2 before doing anything — no hook, no live file, no record — unless `STANDIN_RECORD`, `SKYDECK_HOME` and `CLAUDE_CONFIG_DIR` are all set to absolute paths; there are no defaults. It ends itself (as on `/exit`, but with `SessionEnd` reason `other` and exit 0) when the directory of its record file is gone (checked every second) or 10 minutes after it started. | Implementers run tests inside Claude Code sessions on a machine with the hook installed: a stand-in with an inherited environment would write into the user's real spool and `~/.claude/sessions`, and a crashed test would leave keepers and stand-ins running. | — |
+| A34 | Test helpers signal only through `killKeepersIn(s, runtimeDir)` (task 5, `test/helpers/kill.ts`), which asserts that the real path of `runtimeDir` lies under `s.root` before it reads a single `.pid` line, and signals only pids whose lines are alive by design 5.5's rule; a test signals other processes only through the child handles it started itself. | If a runtime directory were ever resolved wrongly, a cleanup would kill the user's real keepers and their sessions. | — |
+| A35 | Every module the server uses is loaded before it listens, the vendored xterm modules (`loadXterm`) included; no `import()` runs after start. | S2 16.5: the server must never read new code from a checkout that `git pull` changed under it. | — |
 
 ## 2. Contracts
 
@@ -194,8 +217,19 @@ the contract.
 - **Only `src/platform/real.ts`** opens a socket, starts a program, sends a signal, reads `/proc`,
   reads `process.env`, draws randomness or calls `Date.now`. `node:crypto` hashes, HMAC, HKDF and
   AES-GCM with keys and IVs that came from `platform.randomBytes` are allowed everywhere in
-  `src/window/`. Check with `rg -n "node:net|node:http|node:child_process|randomBytes|randomUUID|process\.(env|kill|pid)|Date\.now|'/proc" src --glob '!src/platform/real.ts'`
-  (the only hits allowed: `randomBytes` as a property access on `platform`).
+  `src/window/`. Type imports (`import type`, and `import('node:http').IncomingMessage` in a type
+  position) are allowed everywhere. Check with these two commands, which print nothing on `main`
+  at 394d3e6 and must print nothing after every task:
+  ```sh
+  # value imports of the network, child processes or randomness
+  rg -nUP "^import (?!type )[^;]*'node:(net|http|https|child_process|dgram|tls)'|^import (?!type )[^;]*\brandom(Bytes|UUID)\b[^;]*'node:crypto'" src --glob '!src/platform/real.ts'
+  # the process's globals, randomness, the clock and /proc, outside comments
+  rg -nP "^(?!\s*(\*|//)).*((?<![\w.])process\.(env|pid|kill)\b|(?<![\w.])random(Bytes|UUID)\(|Date\.now\(|'/proc)" src --glob '!src/platform/real.ts' --glob '!src/cli/context.ts' --glob '!src/sessions/derive.ts'
+  ```
+  Named exemptions: `src/cli/context.ts` (step 1's terminal handling re-raises a signal with
+  `process.kill(process.pid, …)`), `src/sessions/derive.ts` (its `process` is a local
+  `ProcessKey`, not the global).
+- **The server loads everything at start** (A35): no `import()` after it listens.
 - **In messages** (2.8) times are nanoseconds as decimal strings, never `bigint`; ids are strings.
   Inside the server they are `Ns`.
 - **Foreign input** (a page's message, a control request's body, a keeper's `hello`) is parsed
@@ -221,6 +255,9 @@ export interface FileInfo {
 export interface Proc {
   /** The target of the symbolic link /proc/<pid>/fd/<fd>; null when it cannot be read. */
   fdTarget(pid: number, fd: number): string | null;
+  /** Whether /proc/net/tcp or /proc/net/tcp6 lists a socket in state LISTEN (0A) on `port`; null
+   *  when neither can be read (A30). */
+  tcpListening(port: number): boolean | null;
 }
 export interface DetachedOptions {
   cwd: string;
@@ -306,7 +343,25 @@ Test helpers (`test/helpers/platform.ts`, extended): `FakeClock` gains `after` (
 handler, `signal` calls with a set of live pids; `testPlatform` gives a deterministic
 `randomBytes`, `pid` 4000, `uid` the real uid, `userName` `'tester'`, the real `net` (tests use
 real loopback and unix sockets) and the fake processes, unless options ask for real ones
-(`TestPlatformOptions.realProcesses: true`).
+(`TestPlatformOptions.realProcesses: true`); real or fake, its processes refuse a command under
+`/mnt/` or ending in `.exe` (A32).
+
+`realTestPlatform(t, options?)` (same file) returns a `TestPlatform` whose `platform` has the real
+clock, the real `/proc` (so the real boot id), `pid` = `process.pid`, the real `uid` and
+`userName`, real processes behind the Windows guard (A32), the real `net`, real `randomBytes`,
+`homeDir` and `cwd` = the sandbox's home, `appRoot` = the repository, and the sandbox's
+environment; it links `python3`, `sh`, `sleep`, `date`, `cat`, `base64`, `mkdir`, `mv`, `rm`,
+`dirname` and `readlink` into the sandbox's `bin` (the keeper, the stand-in, the hook and the
+launcher need them). Its `clock`, `proc` and `runner` members are the real ones (no `setNs`).
+`test/helpers/deck.ts`'s `testDeck(t, options)` gains `real: true`, which builds the deck on
+`realTestPlatform`. Which tests use it: section 0.
+
+Also task 5's, for every later test: `test/helpers/sandbox.ts`'s `env()` gains
+`SKYDECK_TEST_NO_WINDOWS: '1'` (A32); `test/helpers/window-config.ts` exports
+`writeWindowConfig(s: Sandbox, window?: Partial<WindowConfig> & Record<string, unknown>): { edgeStub: string; edgeCalls(): string[][] }`,
+which writes `<s.skydeckHome>/config/config.json` with `window.edge` = a stub script in the
+sandbox that appends its arguments to a file, and `keepAlive: 'off'`, merged with what the test
+passes; `test/helpers/kill.ts` exports `killKeepersIn(s: Sandbox, runtimeDir: string): void` (A34).
 
 ### 2.3 Keeper frames: `src/window/frames.ts` (task 1)
 
@@ -364,8 +419,10 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
   and returns the script's path, which the test puts into `claudeCommand`. It also exports
   `readRecords(path): StandinRecord[]` and `waitForRecord(path, predicate, timeoutMs)`.
 - **Its environment.** `STANDIN_RECORD`: the JSON-lines file it appends to (each record
-  `{ pid, ms, ev, … }`). `CLAUDE_CONFIG_DIR`: where it writes its live-session file. It runs the
-  hook at `<repo>/bin/skydeck-hook` (or `$STANDIN_HOOK`).
+  `{ pid, ms, ev, … }`). `CLAUDE_CONFIG_DIR`: where it writes its live-session file.
+  `SKYDECK_HOME`: where the hook it runs writes. **All three must be absolute paths, or it exits 2
+  before doing anything** (A33); there are no defaults. It runs the hook at
+  `<repo>/bin/skydeck-hook` (or `$STANDIN_HOOK`).
 - **Arguments.** `--session-id <id>`, `--resume <id>` or `-r <id>`, `-n <name>`; everything else is
   recorded and ignored.
 - **At start** it records `{ ev: 'start', argv, cwd, envNames, env: { TERM, COLORTERM, PWD,
@@ -392,6 +449,9 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
   — OSC 2. `/wide` — a row with 🙂, a ZWJ sequence and a skin-tone emoji.
 - **Signals.** `SIGWINCH` — records `{ ev: 'resize', cols, rows }` and redraws. `SIGHUP` — records
   `{ ev: 'hup' }`, `SessionEnd` reason `other`, exit 129. It records `{ ev: 'exit', code }` last.
+- **It ends itself** (A33) when the directory of `STANDIN_RECORD` is gone (checked every second)
+  or 10 minutes after it started (`STANDIN_MAX_SECONDS` shortens it, for its own test): `SessionEnd`
+  reason `other`, live file removed, exit 0.
 
 ### 2.5 The server's internal interfaces: `src/window/hub.ts` (task 1)
 
@@ -458,6 +518,9 @@ export interface ServerOptions {
   port?: number;
   /** --foreground: log lines go to stderr instead of server.log. */
   foreground: boolean;
+  /** The first interop candidate of S2 6.4 (A32); default '/run/WSL/1_interop', or
+   *  SKYDECK_TEST_INTEROP_FIRST when set. Tests always point it into the sandbox. */
+  interopFirst?: string;
 }
 export interface RunningServer {
   port: number;
@@ -478,9 +541,10 @@ export class ServeExit extends Error { readonly code: 0 | 10 | 11 | 12 | 13 }
 
 `test/helpers/window.ts` (task 23): `startTestServer(t, options?)` → `{ server, d (a TestDeck-like
 context with the sandbox), page(): Promise<TestPage> }`, where `TestPage` is a `ws` client that has
-done the handshake in mode `key` and offers `send`, `next(t)`, `nextBinary()`, `close()`; at `t.after`
-it stops the server and SIGKILLs every keeper whose `.pid` line is in the sandbox's runtime
-directory.
+done the handshake in mode `key` and offers `send`, `next(t)`, `nextBinary()`, `close()`. It always
+calls `writeWindowConfig` first (the Edge stub, keep-alive off, A32) and passes `interopFirst`
+inside the sandbox; at `t.after` it stops the server and calls `killKeepersIn` for the sandbox's
+runtime directory (A34).
 
 ### 2.6 Step 1 changes: `src/terminals/`, `src/sessions/`, `src/store/` (task 4)
 
@@ -580,7 +644,8 @@ export interface RowPayload {
   stack: null; // stage E
 }
 export interface SectionPayload { name: 'open' | 'week' | 'earlier'; folded: boolean; firstNs: NsText | null; lastNs: NsText | null; count: number; rows: RowPayload[] }
-export interface TerminalPayload { id: string; slot: number | null; sessionId: string | null; state: string; cols: number; rows: number; ownsSize: boolean }
+/** `state`: a TerminalState of 2.5 (`reconnecting` shows S2 7.8's bar); `notReported`: S2 7.5's "started, not reported". */
+export interface TerminalPayload { id: string; slot: number | null; sessionId: string | null; state: string; notReported: boolean; cols: number; rows: number; ownsSize: boolean }
 /** For the selected session only: what the resume card shows (S2 12.6). */
 export interface SelectedPayload {
   sessionId: string;
@@ -660,13 +725,19 @@ export function raiseAlarm(store: Store, nowNs: Ns): void; // kv window_alarm
 // src/window/runtime.ts (task 15)
 export interface RuntimeFiles { dir: string; serverJson: string; serverSock: string; serverPid: string; keepalivePid: string; keepaliveInterop: string; interop: string; termsDir: string; keeperFile(build: string): string; termSock(id: string): string; termPid(id: string): string }
 export function runtimeFiles(dir: string): RuntimeFiles;
-/** S2 4.2: the store's record first (a directory that exists and holds a keeper alive by its .pid
- *  line), else runtimeDirByRule. For commands (`record: 'follow'`) and the server (`record: 'take'`,
- *  which also writes kv window_runtime_dir). */
+/** S2 4.2. 'follow' (commands): the store's record whenever there is one, whatever it holds;
+ *  runtimeDirByRule only without a record. 'take' (a starting server): the record only when its
+ *  directory exists and holds a keeper alive by its .pid line, else runtimeDirByRule; then writes
+ *  kv window_runtime_dir. */
 export function resolveRuntimeDir(deck: Deck, mode: 'follow' | 'take'): { dir: string; rule: RuntimeRule | 'record' };
 /** Creates the directory (0o700) and terms/ (0o700); refuses (RuntimeDirError, reason) when it is
  *  not the user's, not 0o700, or a socket path would be 108 bytes or more. */
 export function prepareRuntimeDir(platform: Platform, files: RuntimeFiles): void;
+/** S2 16.5: writes <dir>/keeper-<build>.py (0o600, through a temporary name) and removes the
+ *  keeper files of other builds. */
+export function writeKeeperFile(files: Files, runtime: RuntimeFiles, build: string, code: string): void;
+/** S2 7.8: removes terms/<id>.sock and .pid of keepers dead by their line or whose socket refuses. */
+export function removeDeadKeeperFiles(platform: Platform, runtime: RuntimeFiles): Promise<string[]>;
 export interface ServerJson { pid: number; procStart: number; bootId: string; port: number; serverId: string; build: string; checkout: string; startedAt: NsText; envOrigin: { dir: string; atNs: NsText } }
 export function readServerJson(files: Files, path: string): ServerJson | null;
 export function writeServerJson(files: Files, path: string, value: ServerJson): void; // 0o600, atomic
@@ -676,9 +747,18 @@ export function takeServerLock(deck: Deck, value: { pid: number; procStart: numb
 export function releaseServerLock(deck: Deck): void;
 /** Keepers by their .pid lines (S2 4.2), alive or not, for doctor, uninstall and the server's rediscovery. */
 export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; alive: boolean }[];
-export function serverLog(platform: Platform, path: string, foreground: boolean): (line: string) => void; // 1 MiB rotation to .1
 
-// src/window/pidline.ts (task 8)
+// src/window/log.ts (task 15)
+/** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1. */
+export function serverLog(platform: Platform, path: string, foreground: boolean): (line: string) => void;
+/** Renames `path` to `<path>.1` when it is 1 MiB or more (keepers.log, which keepers append to). */
+export function rotateLog(files: Files, path: string): void;
+
+// src/window/pidline.ts (task 8). The line, exactly, with one '\n' at the end:
+//   server.pid, keepalive.pid:  "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+//   terms/<id>.pid (a keeper): "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f 1 0"
+//   — pid, process start (field 22), boot id, and for a keeper its KEEPER_VERSION and started 0|1,
+//   separated by one space. Tasks 7 (sh), 8 (TypeScript) and 9 (python) write and read this form.
 export interface PidLine { pid: number; procStart: number; bootId: string; keeper?: { version: string; started: boolean } }
 export function formatPidLine(line: PidLine): string;
 export function parsePidLine(text: string): PidLine | null;
@@ -702,38 +782,42 @@ export type FoundServer =
   | { kind: 'other-build'; ping: PingAnswer }
   | { kind: 'other-checkout'; ping: PingAnswer }
   | { kind: 'hung'; pid: number };
-export function findServer(deck: Deck, checkout: string, build: string): Promise<FoundServer>;
+/** Timeouts in ms, the design's values by default (A31): ping 5000, start 10000, stop 10000, kill 5000. */
+export interface LifecycleTimes { pingMs?: number; startMs?: number; stopMs?: number; killMs?: number }
+export function findServer(deck: Deck, checkout: string, build: string, times?: LifecycleTimes): Promise<FoundServer>;
 /** Starts `<appRoot>/bin/skydeck serve` detached (S2 5.2) and waits at most 10 s; one fixed line per exit code. */
-export function startServe(deck: Deck): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }>;
+export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }>;
 /** POST /shutdown, wait 10 s, then SIGTERM and after 5 s SIGKILL — each only after server.json's
  *  pid, process start and boot id are confirmed alive (S2 5.1 --restart). Never signals a keeper. */
-export function stopServer(deck: Deck): Promise<{ stopped: boolean; terminals: number }>;
+export function stopServer(deck: Deck, times?: LifecycleTimes): Promise<{ stopped: boolean; terminals: number }>;
 
 // src/window/build.ts (task 14)
 /** sha256 over the sorted paths and contents of every file under bin/, src/, web/, vendor/ (A12), first 16 hex. */
 export function computeBuild(files: Files, appRoot: string): string;
 ```
 
-### 2.9 The page's modules (task 26)
+### 2.9 The page's modules (tasks 26 and 31)
 
 `web/app.js` owns the connection, the state (the last `list`, the selection, the focus zone, the
 most-recently-used order of sessions for Ctrl+Tab, which terminals are attached) and the key
 dispatch. It calls the other modules only through these functions:
 
 ```js
-// web/keys.js — pure; tested with node:test (test/web/keys.test.ts)
+// web/keys.js — task 31; pure, no DOM; tested with node:test (test/web/keys.test.ts)
 /** @typedef {{ key: string, code: string, ctrlKey: boolean, shiftKey: boolean, altKey: boolean, metaKey: boolean }} KeyLike */
 /** @typedef {'list' | 'terminal'} Zone */
 /** The window's own chord (S2 12.9, stage A): { kind: 'slot', slot } | { kind: 'previous' } |
  *  { kind: 'toggle-zone' } | { kind: 'new' } | { kind: 'find' } | { kind: 'copy' } |
- *  { kind: 'paste-raw' } | { kind: 'help' } | { kind: 'reload' } | null */
+ *  { kind: 'paste-raw' } | { kind: 'help' } | { kind: 'reload' } |
+ *  { kind: 'later', stage: 'B' | 'E' } (A11: Ctrl+Shift+J, Ctrl+Shift+P) | null */
 export function windowChord(e, zone) {}
 /** The terminal's mapping (S2 9.1): { send: string } (cancel the key) | 'browser' (neither send
  *  nor cancel) | null (xterm.js handles it). */
 export function terminalKey(e) {}
 /** List-zone keys (S2 12.9): { kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' } |
  *  { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' } |
- *  { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' } | null */
+ *  { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' } |
+ *  { kind: 'later', stage: 'D' } (A11: `l`, `g`, `n`, `p`, `d`, F2) | null */
 export function listKey(e) {}
 /** Whether the page cancels the key (preventDefault): exactly the keys it handles (Alt+F4 never). */
 export function cancels(e, zone, handled) {}
@@ -749,7 +833,10 @@ export function createList(root, hooks) {} // → { render(list, selected, zone)
  *  @param {{ send(message: object): void, chord(e: KeyboardEvent): boolean, openLink(url: string): void }} deps */
 export function createTerminalView(root, deps) {}
 // → { show(term: TerminalPayload | null), snap(msg), output(channel, bytes), size(msg), exit(msg),
+//     notice(term: string, kind: 'gap' | 'input-full' | 'newer-keeper', text: string),
 //     find(), copy(), pasteRaw(), focus(), setHidden(hidden), attached(): string[] }
+// The terminal view also shows, from `show(term)`: the `reconnecting` bar (S2 7.8) and "sized by
+// another window" (S2 8.2.6).
 
 // web/cards.js — replaced by task 29
 /** @param {HTMLElement} root @param {{ act(action: object): Promise<ResultMessage>, select(id: string): void }} deps */
@@ -760,6 +847,11 @@ export function createCards(root, deps) {}
 // web/help.js — replaced by task 29
 export function createHelp(root) {} // → { toggle(), hide(), shown(): boolean }
 ```
+
+`web/app.js` (task 26) also shows, in the title bar: the keep-alive's state from
+`welcome.keepAlive` and the `keepalive-lost` / `keepalive-back` notices ("WSL is not kept
+running", S2 6.2), and a `tick-failed` notice until the next `list` arrives (A7). The list (task
+27) shows "started, not reported" from `TerminalPayload.notReported`.
 
 `web/pane.js` (task 26, final) chooses what the right side shows for the selection: the terminal
 view for a row with a terminal (with the ended bar when it ended), the elsewhere card, the resume
@@ -830,7 +922,7 @@ development dependencies the server's tests need (`ws`).
 versions (A5); `npm ci` fetches them from the registry and checks each tarball against the
 `integrity` (sha512) in `package-lock.json`. `npm run vendor` (`node scripts/vendor.ts`) copies the
 files of A3 from `node_modules/@xterm/*` into `vendor/xterm/`, writes the `.d.mts` shims and
-`vendor/MANIFEST.json` (`{ files: [{ path, package, version, sha256, licenseFrom? }] }`, sorted by
+`vendor/MANIFEST.json` (`{ files: [{ path, package, version, sha256, licenseFrom?, licenseReason? }] }`, sorted by
 path). The committed `vendor/` is what users run; **nothing is fetched at install time**: users do
 not run `npm ci` (docs/install.md), and `install` runs no package manager. `doctor` (task 24) and
 the server (task 14) check the files against the manifest.
@@ -850,7 +942,7 @@ The implementer checks the bundles for third-party notices (`addon-unicode-graph
 
 ```ts
 // src/window/vendor.ts
-export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string }
+export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string; licenseReason?: string }
 export function readManifest(files: Files, appRoot: string): ManifestEntry[] | null;
 /** One line per problem: a listed file missing, or its sha256 different; [] when all match. */
 export function verifyVendored(files: Files, appRoot: string): string[];
@@ -859,9 +951,13 @@ export function verifyVendored(files: Files, appRoot: string): string[];
 **Tests**
 - `vendor.test.ts`: running the copy of `scripts/vendor.ts` into a temporary directory from the
   installed `node_modules` gives exactly the committed `vendor/` (same file list, same bytes);
-  every manifest entry's version equals the installed package's version and `package.json`'s exact
+  every manifest entry's version but the `.d.mts` shims' (package `skydeck`, version `-`) equals the installed package's version and `package.json`'s exact
   version (no `^` or `~`); every package directory has a `LICENSE`; `headless` and
-  `addon-serialize` record `licenseFrom: "@xterm/xterm"`.
+  `addon-serialize` record `licenseFrom: "@xterm/xterm"` and the `licenseReason` of A3; the script
+  refuses to copy a licence into a package whose `package.json` declares another licence or another
+  repository (a fixture `node_modules` with an altered `package.json`).
+- every vendored `.mjs` imports nothing by a bare name (no `import … from 'x'` or `import('x')`
+  whose specifier does not start with `./`, `../` or `/`): the browser could not resolve it.
 - `test/window/vendor.test.ts`: `verifyVendored` on the checkout → `[]`; on a copy with one file
   changed → one line naming it; one file removed → one line; no manifest → one line.
 
@@ -906,6 +1002,10 @@ test, never the keeper, which is task 9)
   `other`, exit 129.
 - `/query` → one `answer` record per query when the test answers, none when it does not.
 - `standinCommand(s, { wrapper: true })`: the stand-in's parent is the wrapper script.
+- Refusal (A33): with `STANDIN_RECORD`, `SKYDECK_HOME` or `CLAUDE_CONFIG_DIR` unset, empty or
+  relative (each alone) → exit 2, no spool file anywhere in the sandbox, no live file, no record.
+- Ending itself: the record file's directory removed → exit 0 within 2 s, `SessionEnd` `other`
+  in the spool; `STANDIN_MAX_SECONDS=2` → exit 0 after about 2 s.
 
 **Done when:** every command and record of 2.4 works and is covered; the stand-in never needs the
 network or anything outside the sandbox.
@@ -971,7 +1071,9 @@ part of the runtime-directory rule; the `window` configuration keys.
 **Files**
 - Modify: `src/platform/types.ts`, `src/platform/real.ts`, `src/platform/paths.ts`,
   `src/platform/config.ts`, `test/helpers/platform.ts`, `test/helpers/context.ts` if the stub
-  platform lists members
+  platform lists members, `test/helpers/sandbox.ts` (`SKYDECK_TEST_NO_WINDOWS`, A32)
+- Create: `test/helpers/window-config.ts`, `test/helpers/kill.ts` (A32, A34)
+- Modify: `test/helpers/deck.ts` (`testDeck(t, { real: true })`)
 - Modify: `docs/design-step-2.md` 4.3 (A9, A10), 16.4 (A6)
 - Test: `test/platform/real.test.ts`, `test/platform/paths.test.ts`, `test/platform/config.test.ts`,
   `test/platform/helpers.test.ts` (extended)
@@ -990,7 +1092,24 @@ part of the runtime-directory rule; the `window` configuration keys.
   line of a streamed body.
 - `Clock.after` (real: fires once, cancel prevents it; fake: fires from `advanceMs` in time order
   with `every`). `randomBytes(4)` real: 4 bytes, two calls differ; fake: `0,1,2,3` then `4,5,6,7`.
-- `FileInfo.mode` and `uid` of a file made with mode 0o640; `fdTarget(process.pid, 0)` is a string.
+- `FileInfo.mode` and `uid` of a file made with mode 0o640; `fdTarget(process.pid, 0)` is a string;
+  `tcpListening(port)` is true for a port the test listens on and false after it closed.
+- A32: with `SKYDECK_TEST_NO_WINDOWS=1`, `startDetached` and `runner.run` of
+  `/mnt/c/Windows/System32/wsl.exe`, `/mnt/c/x/msedge.exe`, `cmd.exe`, `X.EXE` and a path under
+  `/mnt/` reject with `code` `'EWINDOWS'` and start nothing (a `PATH` stub named `cmd.exe` that
+  would write a file writes none); without the variable the real platform starts a sandbox
+  script named `stub.exe` (the rule is the variable's, not a ban in production); the test
+  platform refuses them always. `sandbox(t).env()` contains the variable.
+- `writeWindowConfig`: the file it writes parses with `parseConfig`; running its Edge stub
+  records the arguments; `keepAlive` is `off` unless given.
+- `realTestPlatform`: `clock.nowNs()` within 5 s of `Date.now()`; `proc.bootId()` equals
+  `/proc/sys/kernel/random/boot_id`; `pid` is `process.pid` and `isAlive` judges it alive;
+  `python3` and `sh` resolve on the sandbox's `PATH`; a keeper-like `python3 -c` started through
+  `processes.startDetached` with the sandbox environment runs; `testDeck(t, { real: true })`
+  opens a deck on it.
+- `killKeepersIn`: a directory outside the sandbox root (also through a symlink inside it that
+  points out) → the assertion fails and nothing is signalled; inside, a live `sleep` named by a
+  `.pid` line is killed, a dead line and a line of another process start are skipped.
 - `paths.test.ts`: `storeId('/h/.local/share/skydeck/skydeck.db')` is the first 8 hex of its sha256;
   `runtimeDirByRule`: `SKYDECK_HOME=/s` with `XDG_RUNTIME_DIR=/run/user/1` → `/s/run`,
   `skydeck-home`; no `SKYDECK_HOME`, usable XDG → `/run/user/1/skydeck-<id>`; XDG relative, empty,
@@ -1061,7 +1180,7 @@ pid line and `$WSL_INTEROP`, then stays while the server or any keeper is alive,
 **Behaviour.** S2 6.1: `sh` builtins, `sleep` and `mv` only. It writes `keepalive.pid` (`<pid>
 <process start> <boot id>`, the format of 2.8, process start from field 22 of `/proc/$$/stat`
 after the last `)`) and `keepalive.interop` (`$WSL_INTEROP`, empty when unset), each through a
-temporary name and `mv`. Every 10 seconds (`SKYDECK_KEEPALIVE_SECONDS` overrides, for tests only)
+temporary name and `mv`. Every 10 seconds (`SKYDECK_TEST_KEEPALIVE_SECONDS` overrides, for tests only)
 it reads `server.pid` and `terms/*.pid` and exits 0 when none names a process alive on the current
 boot with the same process start. It removes `keepalive.pid` when it exits.
 
@@ -1149,9 +1268,54 @@ already in `prepareNew`).
 
 ---
 
+### Task 31: The page's key table and age format
+
+**Depends on:** 0 · **Wave:** 1 · **Design:** S2 9.1, 12.9 (the key table, the list keys, what the page cancels, matching by character and by physical key), design 7.4 (ages) · **Contracts:** 2.9 (`keys.js`) · **Decisions:** A11, A18 (update S2 19, stage A, for A11)
+
+**Goal.** The two pure modules of the page, split out of the page shell so that the key table —
+the part of the page most likely to be wrong on the user's Czech layout — is reviewed in the first
+wave: `web/keys.js` (S2 12.9's table and list keys, S2 9.1's terminal mapping, what the page
+cancels) and `web/format.js` (the age format of design 7.4). No DOM, no state: functions of a
+`KeyboardEvent`-like object and of times.
+
+**Files**
+- Create: `web/keys.js`, `web/format.js` (plain JavaScript with JSDoc, no DOM: the root `tsc`
+  checks them through the tests that import them)
+- Modify: `docs/design-step-2.md` 19, stage A (A11: the keys of later stages are the window's from
+  stage A on)
+- Test: `test/web/keys.test.ts`, `test/web/format.test.ts`
+
+```js
+// web/format.js
+/** design 7.4's compact age: < 60 s "<n>s", < 60 min "<n>m", < 48 h "<n>h", else "<n>d"; negative counts as 0. */
+export function formatAge(durationNs) {} // bigint → string
+/** The age between two decimal-string nanosecond times of the protocol. */
+export function ageBetween(nowNs, thenNs) {} // (string, string) → string
+```
+
+**Tests**
+- `keys.test.ts` (`KeyboardEvent`-like objects): every chord of S2 12.9 on a US layout and on a
+  Czech one (Shift on the number row types the digits; `Digit1` … `Digit9` as the fallback when the
+  character is not a digit; letters, Ctrl+Shift+H included, by the character typed), in both zones;
+  Ctrl+Shift+- is not the window's; `terminalKey`: Shift+Enter → `\n`, Ctrl+V → `'browser'`,
+  Ctrl+Shift+V → `\x16`, Alt+F4 → `'browser'`, a plain letter → null; `listKey`: ↑ ↓ `j` `k` Home
+  End PgUp PgDn ← → Enter `/` `a` Esc, F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5; A11: Ctrl+Shift+P and
+  Ctrl+Shift+J → `later` (E, B) in both zones, `l` `g` `n` `p` `d` F2 → `later` (D) in the list zone
+  and null in the terminal zone; `cancels`: Alt+F4 never, a key neither zone uses never, F5 and
+  Ctrl+R in the list zone yes and in the terminal zone no, Ctrl+Shift+R in both, every `later` key
+  yes.
+- `format.test.ts`: `formatAge` equals `src/text/age.ts`'s for 0, 59 s, 60 s, 59 min, 47 h, 48 h,
+  400 days and a negative duration (A18); `ageBetween` on decimal strings above 2^53.
+
+**Done when:** the whole key policy of S2 12.9 and 9.1 is a tested pure function, on both layouts.
+
+**Not in it:** applying the actions (task 26), the terminal's own key handler (task 28).
+
+---
+
 ### Task 9: The keeper
 
-**Depends on:** 1, 3, 7 · **Wave:** 2 · **Design:** S2 2 (principle 3, crash dumps), 4.2 (pid lines, sockets), 7.1, 7.7, 7.8, 8.1, 17.2 · **Contracts:** 2.3, 2.4 · **Decisions:** A2, A12, A14
+**Depends on:** 1, 3, 5, 7 · **Wave:** 2 · **Design:** S2 2 (principle 3, crash dumps), 4.2 (pid lines, sockets), 7.1, 7.7, 7.8, 8.1, 17.2 · **Contracts:** 2.3, 2.4 · **Decisions:** A2, A12, A14
 
 **Goal.** `bin/skydeck-keeper`: one python3 file, standard library only, about 250–300 lines,
 that owns one terminal's pty and program, as S2 7.1 specifies step by step, speaking S2 8.1.
@@ -1163,16 +1327,20 @@ input queue, no caps — all of which S2 7.1 requires).
 - Create: `bin/skydeck-keeper` (mode 755, `#!/usr/bin/env python3`, first lines name its keeper
   version `KEEPER_VERSION = "1"` and `PROTOCOL = 1`)
 - Create: `test/helpers/keeper.ts` (spawn a keeper with a spec in the sandbox's runtime directory;
-  a frame client over `node:net` using task 1's codec; helpers to wait for frames)
+  a frame client over `node:net` using task 1's codec; helpers to wait for frames; cleanup through
+  `killKeepersIn`, A34)
 - Modify: `.github/workflows/ci.yml` (A14: `shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive`;
   a step `python3 -m py_compile bin/skydeck-keeper`), `.gitignore` (`__pycache__/`)
 - Test: `test/keeper/start.test.ts`, `test/keeper/stream.test.ts`, `test/keeper/limits.test.ts`,
   `test/keeper/exit.test.ts`
 
-**Behaviour.** S2 7.1 steps 1–8, 7.8 and 8.1, exactly. Additions the design leaves to the code:
-the 10-minute linger after exit is `SKYDECK_KEEPER_LINGER_SECONDS` when set (tests only); the
+**Behaviour.** S2 7.1 steps 1–8, 7.8 and 8.1, exactly. The keeper installs `sys.excepthook`
+before anything else: an uncaught exception is written to stderr (`keepers.log`) as one line
+`keeper <id>: <exception class name>` and nothing else — no message, no traceback, which could
+quote a frame's data (S2 2). Additions the design leaves to the code:
+the 10-minute linger after exit is `SKYDECK_TEST_KEEPER_LINGER_SECONDS` when set (tests only); the
 keeper writes its errors to stderr as one line each (`keeper <id>: <kind>`), never output or
-input; the tail and send caps are `SKYDECK_KEEPER_TAIL_BYTES` / `SKYDECK_KEEPER_SEND_BYTES` when
+input; the tail and send caps are `SKYDECK_TEST_KEEPER_TAIL_BYTES` / `SKYDECK_TEST_KEEPER_SEND_BYTES` when
 set (tests only, so the cap tests need not move 8 MiB).
 
 **Tests** (real python3, the stand-in of 2.4 as the program; the client claims with `C`)
@@ -1181,7 +1349,9 @@ set (tests only, so the cap tests need not move 8 MiB).
   process start, before any `D`; pid line rewritten with `started` 1; a second `G` does nothing; `G`
   after `startBy`, a deadline with no `G`, and `N reason` each → `X` with `notStarted` and the
   stand-in never started (its record file stays empty); `hello` says `started` truly before and
-  after; `/proc/<pid>/status` of the keeper shows `Dumpable: 0` and the stand-in's
+  after; the keeper is not dumpable — its `/proc/<pid>/status` is owned by uid 0 and the test
+  cannot open its `/proc/<pid>/environ` (`EACCES`), while the stand-in's are the user's (there is
+  no `Dumpable` line in `status`; checked on this kernel) — and the stand-in's
   `coreSoft` record equals the spec's `coreSoft`; the stand-in's `cwd` and environment are the
   spec's (`PWD` included); `exec` of a missing program → `T`, then `X` with code 127 and a line
   naming the reason on the pty.
@@ -1200,7 +1370,10 @@ set (tests only, so the cap tests need not move 8 MiB).
   claim; the send-queue cap with a client that does not read → the connection is closed, the
   keeper keeps reading the pty, and a new claim gets snapshot and tail.
 - `exit.test.ts`: `/exit` → `X` `{ code: 0 }` after the last `D`; `/fail 3` → 3; `SIGKILL` of the
-  stand-in → `signal` 9; `A` → the keeper ends and removes its socket and pid line; no `A` and no
+  stand-in → `signal` 9; a spec and a frame carrying a marker string that make the keeper fail
+  (a spec with a wrong type, a `P` payload that cannot be decoded) leave the marker in no line of
+  its stderr, which holds only `keeper <id>: <kind>`; `A` → the keeper ends and removes its socket
+  and pid line; no `A` and no
   connection → it ends after the linger; killing the keeper (`SIGKILL`) → the stand-in records
   `hup` and its `SessionEnd` with reason `other` is in the spool; `I` after the exit is dropped.
 
@@ -1214,7 +1387,7 @@ newest); `python3 -m py_compile` and the new shellcheck line run in CI.
 
 ### Task 10: WebSocket
 
-**Depends on:** 2 · **Wave:** 2 · **Design:** S2 8.2.1 (the WebSocket paragraph), 15.1 · **Contracts:** — · **Decisions:** —
+**Depends on:** 2, 5 · **Wave:** 2 · **Design:** S2 8.2.1 (the WebSocket paragraph), 15.1 · **Contracts:** — · **Decisions:** —
 
 **Goal.** `src/window/websocket.ts`: the server's own RFC 6455 on an upgrade request of
 `node:http`, with no extension and no subprotocol. Adapt `step2-research/terminals/ws-min.mjs`
@@ -1408,6 +1581,7 @@ export function projectDirs(rows: readonly ListRow[]): string[]; // most recent 
   row `starting`; a `new` terminal without a session row gives a row with the new id, `starting`,
   titled with the label or `new session in <dir>` (A28); once the session has a row, that row.
 - Counts: per state of the listed rows, `starting` and `elsewhere` separately.
+- Terminals carry `state` and `notReported` from `TerminalInfo` (`reconnecting` included).
 - `projectDirs`: unique, most recent activity first, sanitised paths excluded when they differ
   from the raw one (a directory with a control character is not offered).
 
@@ -1438,10 +1612,15 @@ export interface Assets {
 }
 /** Reads web/** (but web/tsconfig.json), the vendored files of the manifest that the page loads
  *  (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper. Refuses (Error) when verifyVendored
- *  reports a problem. */
+ *  reports a problem. A missing or empty web/ is no error (task 23's tests run before task 26
+ *  creates it): then `GET /` is 404. */
 export function loadAssets(files: Files, appRoot: string): Assets;
 /** The HTTP request handler of S2 8.2.1 for `port`: Host check, the fixed routes, headers. */
 export function httpHandler(assets: Assets, port: number): (req: IncomingMessage, res: ServerResponse) => void;
+/** S2 8.2.1 and 15.1: the Host header is exactly `127.0.0.1:<port>`; also used for the upgrade (task 17). */
+export function hostOk(host: string | undefined, port: number): boolean;
+/** The headers every answer carries (the policy with the port, nosniff, DENY, no-referrer). */
+export function securityHeaders(port: number): Record<string, string>;
 // src/window/build.ts — computeBuild of 2.8
 ```
 
@@ -1487,25 +1666,29 @@ their files, how the server and the commands find that place (the store's record
 - Create: `src/window/runtime.ts`, `src/window/log.ts`
 - Test: `test/window/runtime.test.ts`, `test/window/log.test.ts`
 
-**Behaviour** (besides 2.8): `prepareRuntimeDir` also writes `keeper-<build>.py` (mode 0o600,
-through a temporary name) given the code, removes other builds' keeper files, and removes
-`terms/<id>.sock` and `.pid` pairs whose keeper is dead by its line or whose socket refuses
-(S2 7.8). `xdgUsable` for the rule checks owner, mode (no group or other bits) and
-`/var/lib/systemd/linger/<userName>`. `serverLog` writes one line per call with an ISO time, and
-renames the file to `.1` at 1 MiB (one older file kept); `rotateKeepersLog` does the same for
-`keepers.log`.
+**Behaviour** (besides 2.8): `runtime.ts` exports the runtime directory, its files, the keeper
+file (`writeKeeperFile`: mode 0o600, through a temporary name, other builds' files removed), the
+removal of dead keepers' files (`removeDeadKeeperFiles`, S2 7.8), `server.json` and the lock;
+`log.ts` exports `serverLog` and `rotateLog`. `xdgUsable` for the rule checks owner, mode (no group
+or other bits) and `/var/lib/systemd/linger/<userName>`. `serverLog` writes one line per call with
+an ISO time and renames the file to `.1` at 1 MiB (one older file kept); `rotateLog` does the same
+for `keepers.log`, which the keepers append to.
 
 **Tests**
 - `resolveRuntimeDir(deck, 'take')`: with `SKYDECK_HOME` → `$SKYDECK_HOME/run` and the record
   written; a record naming a directory with a live keeper `.pid` line (a `sleep` started by the
   test, its line written by the test) wins over the rule even with another `XDG_RUNTIME_DIR`; a
   record whose directory is missing, or holds only dead lines, is replaced. `'follow'` uses the
-  record without writing, and the rule without a record.
+  record whenever there is one — also when its directory holds no live keeper (a server without
+  terminals yet), and also without `XDG_RUNTIME_DIR` in the environment — writing nothing, and the
+  rule only without a record.
 - With `SKYDECK_HOME` set, nothing is created outside it (the test lists the sandbox's root
   before and after, and `XDG_RUNTIME_DIR` points at another temporary directory that stays empty).
 - `prepareRuntimeDir`: mode 0o700 for the directory and `terms/`; an existing directory of mode
   0o755 → `RuntimeDirError` naming the mode; a socket path of 108 bytes (a long `SKYDECK_HOME`)
-  → refused naming the length; dead keepers' files removed, live ones kept.
+  → refused naming the length. `removeDeadKeeperFiles`: dead keepers' files (and those whose
+  socket refuses) removed, live ones kept. `writeKeeperFile`: the file with mode 0o600, another
+  build's file removed, the current one kept.
 - The lock: taken when free; refused with the holder when a live process holds it (another
   connection, the test's `sleep`); taken over when the holder is dead or of another boot; inside
   one transaction (two connections racing: exactly one wins, as step 1's lock test does with
@@ -1556,8 +1739,10 @@ export interface RegistryDeps {
 export interface Registry extends TerminalHub {
   /** S2 7.1: `python3 -I <keeperFile>`, detached, cwd /, stdout /dev/null, stderr appended to
    *  keepers.log, the spec on stdin; then claim and attach. Resolves after `hello`; rejects with
-   *  KeeperStartError(reason) when python3 is missing (S2 14's message), the socket path is too
-   *  long, the spawn fails, or no hello comes within 5 s. Sends no G. */
+   *  KeeperStartError: kind 'python-missing' (S2 14's message), 'path-too-long', 'spawn-failed' —
+   *  nothing was started, the terminal is forgotten — or 'no-hello' (none within 5 s): the keeper
+   *  may still be starting, so the registry KEEPS the terminal, goes on claiming its socket, and
+   *  reports its hello through `events.hello` when it comes. Sends no G. */
   spawn(spec: KeeperSpec): Promise<TerminalInfo>;
   /** S2 7.3: connects to every keeper of terms/ whose .pid line is alive; removes dead ones' files. */
   rediscover(): Promise<TerminalInfo[]>;
@@ -1570,7 +1755,9 @@ export interface Registry extends TerminalHub {
   /** S2 5.5: park every terminal, close every connection; keepers keep running. */
   stopAll(): Promise<void>;
 }
-export class KeeperStartError extends Error {}
+export class KeeperStartError extends Error {
+  readonly kind: 'python-missing' | 'path-too-long' | 'spawn-failed' | 'no-hello';
+}
 export function createRegistry(deps: RegistryDeps): Registry;
 ```
 
@@ -1603,7 +1790,10 @@ and keeps the last screen until `close`.
   `SIGSTOP` for 3 s → `reconnecting`, then running again, never `lost`.
 - `/exit` → `exited` with code 0, `A` sent, the keeper's socket and pid line gone; `close` then
   forgets it; `close` of a running terminal → `'running'`.
-- python3 missing (a `PATH` without it) → `KeeperStartError` with S2 14's message; a runtime
+- A keeper whose hello comes late (python3 replaced by a sandbox script that sleeps 7 s and then
+  runs the real one) → `KeeperStartError` `no-hello` after 5 s, the terminal kept, and its hello
+  reported through `events.hello` when it comes; no `G` is sent by the registry.
+- python3 missing (a `PATH` without it) → `KeeperStartError` `python-missing` with S2 14's message; a runtime
   directory whose socket path would be 108 bytes → refused before spawning.
 - `nextSlot`: 1, 2, 3 in order; after the second ends and is closed, 2 again; ten terminals → the
   tenth gets null.
@@ -1619,7 +1809,7 @@ lock release on exit (task 21); size ownership (task 17).
 
 ### Task 17: Pages — handshake, streams, sizes, backpressure
 
-**Depends on:** 10, 11 · **Wave:** 3 · **Design:** S2 8.2.2, 8.2.3 (the page's messages), 8.2.4–8.2.8, 15.1 · **Contracts:** 2.5, 2.7, 2.8 (`auth.ts`) · **Decisions:** A1, A22
+**Depends on:** 10, 11, 14 · **Wave:** 3 · **Design:** S2 8.2.2, 8.2.3 (the page's messages), 8.2.4–8.2.8, 15.1 · **Contracts:** 2.5, 2.7, 2.8 (`auth.ts`) · **Decisions:** A1, A22
 
 **Goal.** `src/window/pages.ts` and `src/window/size.ts`: every page's connection from the upgrade
 to `bye`, against `TerminalHub` and `ActionHandler` (fakes in the tests).
@@ -1668,8 +1858,8 @@ export function createPages(deps: PagesDeps): Pages;
   → 4003; no `hello` within 5 s → 4001; a nonce of 42 characters → 4001; `protocol` 2 → 4426; a
   proof made with the server's label → 4003; a page proof replayed on a new connection (new server
   nonce) → 4003; any message before `hello`, or another before `start`, closes; `Origin`
-  `http://localhost:<port>` or missing → 403 at the upgrade; `Host` wrong → 421 (from task 14's
-  rule, applied here to the upgrade).
+  `http://localhost:<port>` or missing → 403 at the upgrade; `Host` wrong → 421 (task 14's
+  `hostOk`, applied here to the upgrade).
 - No log line and no frame the tests capture contains the secret's base64url, and a malformed
   `hello`, `start` and `input` carrying a marker string leave the marker in no log line.
 - Streams: `attach` → `snap` with a fresh channel, then binary frames `1, ch, bytes` in order, and
@@ -1785,17 +1975,19 @@ start no Windows program.
 
 ### Task 20: CI and the page-test leg
 
-**Depends on:** 2, 9 · **Wave:** 3 · **Design:** S2 17.4 (the headless browser), 17.5 · **Contracts:** — · **Decisions:** A5, A13, A15 (update S2 17.5)
+**Depends on:** 2, 9, 14 · **Wave:** 3 · **Design:** S2 8.2.1 (the policy), 17.4 (the headless browser), 17.5 · **Contracts:** — · **Decisions:** A5, A13, A15 (update S2 17.5)
 
 **Goal.** The tooling the page tasks need, and the CI of S2 17.5: Playwright as a pinned
 development dependency, `npm run test:page`, `check` running it, and a CI leg that installs
 Chromium with a cache and runs the page suite on Node 24 only, within 20 minutes.
 
 **Files**
-- Modify: `package.json` (devDependency `playwright` 1.64.1; scripts `"test:page": "node --test \"test-page/**/*.test.ts\""`,
+- Modify: `package.json` (devDependency `playwright` 1.60.0 (A5); scripts `"test:page": "node --test \"test-page/**/*.test.ts\""`,
   `"check": "npm run format:check && npm run typecheck && npm test && npm run test:page"`),
   `package-lock.json`, `tsconfig.json` (`include` gains `test-page`), `.github/workflows/ci.yml`
-- Create: `test-page/helpers/browser.ts`, `test-page/smoke.test.ts`
+- Create: `test-page/helpers/browser.ts`, `test-page/smoke.test.ts`, `test-page/fixtures/xterm-smoke/`
+  (an `index.html` and a `main.js` that open an xterm.js terminal from the vendored modules and
+  write `ESC[31mred`)
 - Modify: `docs/design-step-2.md` 17.5 (A13, A15: how the leg is split)
 
 **Workflow.** `timeout-minutes: 20`. Both legs: `npm ci`, `npm run format:check`,
@@ -1812,6 +2004,11 @@ Playwright is not installed; run: npx playwright install chromium`.
 
 **Tests**
 - `smoke.test.ts`: a page from a `data:` URL evaluates `1 + 1` → 2.
+- `smoke.test.ts`: a temporary `appRoot` with the fixture as its `web/`, the repository's
+  `vendor/` and `bin/skydeck-keeper`, served by task 14's `loadAssets` and `httpHandler` on port 0:
+  the page loads under S2 8.2.1's policy with no console error, the vendored `xterm.mjs`, fit,
+  search, unicode-graphemes and serialize modules import, and the cell written red has the computed
+  colour red — so that page, policy and vendored modules meet in wave 3, not wave 7.
 - A local run without Chromium (`PLAYWRIGHT_BROWSERS_PATH` pointing at an empty directory) fails
   with the message above (checked by hand once; say so in the pull request).
 
@@ -1842,10 +2039,12 @@ export interface WindowTerminalDeps {
   build: string;
 }
 /** One adapter per launch: `size` is the first size of S2 8.2.6. open() spawns a keeper with
- *  programEnvironment(...), the next slot and meta (A28), sends G on its hello, and resolves
- *  { ok: true } on T; { ok: false, timedOut: false, error } on X with notStarted, a keeper that
- *  cannot be started (KeeperStartError) or ends before T; { ok: false, timedOut: true } with no
- *  hello or no T within 5 s (the terminal stays and shows when T comes). */
+ *  programEnvironment(...), the next slot and meta (A28), sends G on a hello that arrives within
+ *  its 5-second wait, and resolves { ok: true } on T; { ok: false, timedOut: false, error } on X
+ *  with notStarted, on KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed', or a
+ *  keeper that ends before T; { ok: false, timedOut: true } on KeeperStartError 'no-hello' or no T
+ *  within 5 s after G. After open() has answered, it sends nothing: a hello that comes later is a
+ *  found keeper, and goes through decideFoundKeeper before any G (task 23 wires events.hello). */
 export function windowTerminal(deps: WindowTerminalDeps, size: { cols: number; rows: number }): Terminal;
 
 // src/window/starts.ts
@@ -1870,6 +2069,11 @@ export interface Mapping {
 export function mapTerminals(input: { terminals: readonly TerminalInfo[]; sessions: readonly DerivedSession[]; proc: Proc; bootId: string | null; nowNs: Ns; startTimeoutNs: Ns }): Mapping;
 ```
 
+`open()` follows its own terminal through `registry.onChange` and `registry.list()` (whose
+`program` and `exit` carry `T` and `X`); the registry's single `events` object belongs to task 23,
+which keeps each terminal's latest `hello` so that `settleEndedTerminal` gets its `lock` and
+`meta`, and sends a late hello through `decideFoundKeeper`.
+
 **Files**
 - Create: `src/window/window-terminal.ts`, `src/window/starts.ts`, `src/window/mapping.ts`
 - Test: `test/window/window-terminal.test.ts`, `test/window/starts.test.ts`, `test/window/mapping.test.ts`
@@ -1888,8 +2092,11 @@ export function mapTerminals(input: { terminals: readonly TerminalInfo[]; sessio
   its `SessionStart` was ingested keeps the lock rule of design 7.6 (nothing released).
 - python3 missing → `{ ok: false, timedOut: false }` with S2 14's message, and `launchPrepared`'s
   lines end with the command to run by hand (step 1's rule).
-- A keeper that does not answer within 5 s (python3 replaced by a script that sleeps) →
-  `timedOut: true`, no command printed, the lock kept.
+- A keeper that does not answer within 5 s (python3 replaced by a script that sleeps 7 s, then
+  runs the real one) → `timedOut: true`, no command printed, the lock kept; when its hello comes,
+  `decideFoundKeeper` decides: with guard and lock still holding the program starts; with the lock
+  taken over meanwhile (the test replaces it), or the session started elsewhere, `N` and nothing
+  runs.
 - `decideFoundKeeper` (a keeper spawned without `G`, the registry dropped, a new one
   rediscovering): all well → start, the stand-in runs; the session meanwhile running elsewhere (a
   holder started by the test) → `N` with the guard's message, nothing started; the lock replaced
@@ -1919,22 +2126,26 @@ one safely. Shared by `skydeck window` (task 25), `doctor` and `uninstall` (task
 - Create: `src/window/lifecycle.ts`
 - Test: `test/window/lifecycle.test.ts`, with `test/fixtures/fake-serve/` (a `bin/skydeck` stub in
   a fixture `appRoot` that exits with the code the test asks for, or listens on `server.sock` and
-  answers `/ping` and `/shutdown` like a server, using `node:net` directly — a fixture may)
+  answers `/ping`, `/status` and `/shutdown` like a server, using `node:net` directly — a fixture
+  may; task 24 uses it too)
 
 **Behaviour.** `findServer`: `server.json` read; the process dead by design 5.5's rule → `none`;
 alive → `ping` within 5 s: no answer → `hung`; another `checkout` → `other-checkout`; another
 `build` or boot → `other-build`; else `ours`. `startServe`: `<appRoot>/bin/skydeck serve` through
 `processes.startDetached`, cwd `/`, stdin `/dev/null`, stdout and stderr appended to
 `<stateDir>/server.log`, the environment of the command with `SKYDECK_ENV_ORIGIN` = its working
-directory (A29); waits at most 10 s for `ping` with the current boot id and build, or for the
-exit, and maps the exit code to S2 5.2's lines (0: wait for the other server within the same
+directory (A29); waits at most 10 s for `ping` with the current boot id and build — resolving
+the runtime directory again (`follow`) before each attempt, because a starting server that found
+a stale record chooses and records another directory — or for the exit, and maps the exit code to S2 5.2's lines (0: wait for the other server within the same
 10 s). `stopServer`: as 2.8 says; it returns how many terminals the server had (from `status`)
 for `uninstall`'s line.
 
-**Tests** (fake serve; timeouts shortened through the options argument, A31)
+**Tests** (fake serve; timeouts shortened through `LifecycleTimes`, A31; `realTestPlatform`)
 - `findServer` for each kind; a `server.json` whose pid is alive but whose process start differs
   (a reused pid: the test writes a line naming the test's own pid with another start) → `none`,
   and that process is never signalled.
+- `startServe` while the store records a stale runtime directory and the fake server records
+  and listens in another one → found there, `ok`.
 - `startServe` with the stub exiting 10, 11, 12, 13, 7, and never answering → each fixed line of
   S2 5.2 (with the port, the checkout from `server.json`, the directory); exiting 0 while a fake
   server of this checkout answers → `ok`; the stub records its environment: `SKYDECK_ENV_ORIGIN` is
@@ -1952,37 +2163,104 @@ confirmed server process is ever signalled.
 
 ---
 
-### Task 23: The server — assembly, tick, actions, `skydeck serve`
+### Task 32: Actions — resume, new, close, open link; the resume card's payload
 
-**Depends on:** 13, 14, 16, 17, 18, 19, 21 · **Wave:** 5 · **Design:** S2 4.1, 5.2, 5.5, 6.2, 6.4 (every 30 s), 10.1, 11.3 (resume and new), 12.6 (what `act resume` and `act new` do), 14 (every failure inside Linux), 16.5 · **Contracts:** 2.5 (`runServer`, the test helper), 2.7 · **Decisions:** A19, A24, A27, A29
+**Depends on:** 1, 4, 8 · **Wave:** 4 · **Design:** S2 8.2.3 (`act`), 9.6 (which links), 11.1, 11.3 (resume and new), 12.6 (the resume card, the new form's fields) · **Contracts:** 2.5 (`ActionHandler`), 2.7 (`ActMessage`, `ResultMessage`, `SelectedPayload`) · **Decisions:** A22, A25, A27
+
+**Goal.** Split out of the server's assembly: what each stage A `act` does, as an `ActionHandler`
+over step 1's functions, and what the resume card shows for the selected session — tested with a
+fake terminal and a fake hub, as task 17 tests the pages. The window terminal itself is injected,
+so this task does not wait for task 21.
+
+**Exported API**
+
+```ts
+// src/window/actions.ts
+export interface ActionDeps {
+  deck: Deck;
+  hub: TerminalHub;
+  /** The terminal to open a launch of this size with (task 23 passes task 21's windowTerminal). */
+  terminalFor(size: { cols: number; rows: number }): Terminal;
+  /** Task 19's openLink, bound to the configuration and the interop link. */
+  openLink(url: string): Promise<boolean>;
+  log: (line: string) => void;
+}
+/** Never rejects (2.5): an unexpected error is logged by kind and answered { ok: false }. */
+export function createActions(deps: ActionDeps): ActionHandler;
+// src/window/selected.ts
+/** A27: the resume card's facts, built with buildResumeCommand and printableCommand; takes no lock. */
+export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload;
+```
+
+**Files**
+- Create: `src/window/actions.ts`, `src/window/selected.ts`
+- Test: `test/window/actions.test.ts`, `test/window/selected.test.ts` (`testDeck`, a fake
+  `Terminal` that records its specs and answers as the test says, a fake hub)
+
+**Behaviour.** `resume` → `prepareResumeById` → `launchPrepared(deck, prepared, terminalFor({ cols,
+rows }))` → `{ ok: code === 0, lines, error: null, sessionId }`; a `SkydeckError` (the guard, the
+lock, `RefError`) → `{ ok: false, lines: [message], error: message, sessionId: null }`. `new` →
+`splitFlags` (an error → `ok: false`) → `prepareNew` with the form's directory, label and group
+(empty means none) → `launchPrepared`. `close-terminal` → `hub.close`; `'running'` → `ok: false`
+with "the program still runs; end it inside claude" (principle 6). `open-link` → `linkToOpen`,
+then `openLink`; a refused link → `ok: false`. `selectedPayload`: `ended` is `mid-turn` with the
+mark `was-working`, `unexpectedly` with `ended-unexpectedly`, `exited` after an end event of kind
+exit, else null; `expiring` and `expired` from the marks.
+
+**Tests**
+- `resume` of a session that is not running → the fake terminal got the spec of
+  `buildResumeCommand` with the size given, the lock taken, `ok` with the session id; the
+  terminal failing → `launchPrepared`'s lines (the command to run by hand); a running session →
+  the guard's message, the terminal never called, no lock; an unknown id → the `RefError` message.
+- `new` with a directory, label `fix`, group `ABC-1` and flags `--model opus` → `buildNewCommand`'s
+  arguments, the meta stored, `sessionId` the new id; flags `-r x`, `--name y`, `'unclosed`, a
+  relative or missing directory → `ok: false` with the message, nothing stored, the terminal never
+  called; empty label and group → no meta row.
+- `close-terminal` of a running terminal → refused; of an ended one → `ok`. `open-link` of
+  `https://github.com/a/b/pull/1` → `openLink` with that URL; of `javascript:alert(1)` → not called.
+- An action whose terminal throws something unexpected → `ok: false`, one log line with the kind
+  and no message text.
+- `selectedPayload`: the command for a session with recorded flags; a directory with a control
+  character → `command` null; unknown flags listed; each `ended` case; `expiring`, `expired`.
+
+**Done when:** every stage A `act` kind has its answer, through step 1's guard, lock and command
+builders, and nothing in this task opens a real terminal.
+
+**Not in it:** the window terminal (task 21), wiring it (task 23); the `act` kinds of stages C and
+D.
+
+---
+
+### Task 23: The server — assembly, tick, `skydeck serve`
+
+**Depends on:** 4, 5, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 32 · **Wave:** 5 · **Design:** S2 4.1, 5.2, 5.5, 6.2, 6.4 (every 30 s), 10.1, 11.3 (resume and new, end to end), 14 (every failure inside Linux), 16.5 · **Contracts:** 2.5 (`runServer`, the test helper), 2.7 · **Decisions:** A19, A24, A29, A32, A35
 
 **Goal.** `skydeck serve`: put the parts together into the one server of S2 5.2 — lock, runtime
 directory, assets and build, port, `server.sock`, rediscovered keepers, pages, the keep-alive and
-the interop link — with the tick of S2 10.1, the actions of stage A, the status answers and the
-stop of S2 5.5.
+the interop link — with the tick of S2 10.1, task 32's actions wired to the window terminal, the
+status answers and the stop of S2 5.5.
 
 **Files**
-- Create: `src/window/server.ts`, `src/window/tick.ts`, `src/window/actions.ts`,
-  `src/cli/commands/serve.ts`, `test/helpers/window.ts`
+- Create: `src/window/server.ts`, `src/window/tick.ts`, `src/cli/commands/serve.ts`,
+  `test/helpers/window.ts`
 - Modify: `docs/design-step-2.md` 5.2 (A29)
 - Test: `test/window/server.test.ts`, `test/window/server-failures.test.ts`,
-  `test/window/actions.test.ts`, `test/window/tick.test.ts`, `test/cli/commands/serve.test.ts`
+  `test/window/tick.test.ts`, `test/cli/commands/serve.test.ts`
 
 **Behaviour.** `runServer` in this order: refuse with `CLAUDECODE` set (13); `serverEnvironment`;
 `openDeck(platform, { guardSchema: true })`; take the lock (0 or 11); the runtime directory
 (`take`) and `prepareRuntimeDir` (12); `loadAssets` and the keeper file; `ensureSecret`; bind the
 port (10, releasing the lock); remove a `server.sock` that refuses and listen there; `rediscover`
 and `decideFoundKeeper` for every keeper not started; the interop link and the keep-alive; write
-`server.json` and `server.pid`; start the tick. `actions.ts` implements `ActionHandler`: `resume`
-→ `prepareResumeById` → `launchPrepared` with `windowTerminal(deps, { cols, rows })`; `new` →
-`splitFlags` → `prepareNew` with the form's directory → `launchPrepared`; refusals and
-`UsageError`s become `{ ok: false, lines: [message] }`; `close-terminal` → `hub.close`;
-`open-link` → `openLink`. `tick.ts`: every second the keep-alive; every second tick the refresh,
+`server.json` and `server.pid`; start the tick. The actions are task 32's `createActions`, given
+`windowTerminal(deps, size)` as its terminal factory and `openLink` (task 19). The registry's
+`events` keep each terminal's latest `hello` and send a hello with `started` false that no
+`open()` is waiting for through `decideFoundKeeper` (task 21). `tick.ts`: every second the keep-alive; every second tick the refresh,
 `refreshPrs` automatic for the sessions the pages list, the rows reloaded by A24, `mapTerminals`
 and `setSession`, `settleEndedTerminal` for new exits, and `pages.pushList()`; every 30 s the
 interop link; a failed tick logged by kind and sent once as `notice tick-failed` (A7);
-`StoreNewerError` → stop with `bye "skydeck was updated; run skydeck window"`. `listFor` builds
-the `selected` payload (A27) with `buildResumeCommand` and `printableCommand`. The `serve` command
+`StoreNewerError` → stop with `bye "skydeck was updated; run skydeck window"`. `listFor` is
+`buildListMessage` (task 13) with task 32's `selectedPayload` for the page's selected row. The `serve` command
 installs process handlers: an uncaught error is logged by name and stack frames without the
 message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5).
 
@@ -1998,6 +2276,12 @@ message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5
   → the stand-in's arguments are `buildNewCommand`'s and the row titled `fix` appears (starting,
   then running); `act new` with flags `-r x`, a relative directory, an unclosed quote → `ok: false`
   with the message, nothing started.
+- Two `act resume` of one session sent at the same moment by two pages → one terminal, one
+  `result` ok and one refused with the guard's or the lock's message.
+- A keeper found unstarted (spawned by the test with `G` held back) → `events.hello` goes through
+  `decideFoundKeeper` before any `G`.
+- No Windows program is started: the Edge stub of `writeWindowConfig` records an `open-link`
+  action's URL, and nothing else is run under `/mnt/` (A32).
 - Resume of a session running in a terminal of the test's own → refused with the guard's message
   and the row is `elsewhere`; python3 missing → the result's lines carry S2 14's message.
 - `stop` → every page gets `bye`, keepers keep running, `server.json`, `server.pid`,
@@ -2010,7 +2294,8 @@ message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5
   `notice tick-failed`, not repeated; after the lock is gone the list updates again.
 - Places: with `SKYDECK_HOME` set, the server, its keepers and the keep-alive script create and
   open nothing outside the sandbox (S2 17.3).
-- `serve.test.ts` (through `bin/skydeck serve --foreground` as a child): `CLAUDECODE` set →
+- `serve.test.ts` (through `bin/skydeck serve --foreground` as a child, with `SKYDECK_TEST_PORT=0`
+  and `SKYDECK_TEST_INTEROP_FIRST` in the sandbox, A31, A32): `CLAUDECODE` set →
   exit 13 and the line; the server process's soft core limit is 1 byte with the old hard limit
   (`/proc/<pid>/limits`) and a keeper's program has the soft limit the launcher found; a
   malformed `hello`, `start` and `input` carrying a marker leave the marker in no line of
@@ -2026,7 +2311,7 @@ notifications (B); restore and the commands' `--window` (C).
 
 ### Task 24: `doctor`, `install`, `uninstall`
 
-**Depends on:** 2, 15, 18, 19, 22 · **Wave:** 5 · **Design:** S2 16.1, 16.2, 16.3, 6.1 (`.wslconfig`) · **Contracts:** 2.8 · **Decisions:** A30 (update S2 16.3)
+**Depends on:** 2, 5, 15, 18, 19, 22 · **Wave:** 5 · **Design:** S2 16.1, 16.2, 16.3, 6.1 (`.wslconfig`) · **Contracts:** 2.8 · **Decisions:** A30 (update S2 16.3)
 
 **Goal.** The changes S2 16 makes to step 1's three commands. `doctor` gains the lines of 16.3
 and still starts nothing but `gh`, `wezterm` and `python3 --version`, and nothing on Windows;
@@ -2046,7 +2331,8 @@ and `--purge` refuses while keepers live.
   (3.12), missing, 3.8 (a stub printing `Python 3.8.10`), missing while the window was never used
   (`info`); server not running (`info`), running (`info` with pid, checkout, build, uptime, pages,
   terminals and the environment's origin), another build (`problem` naming `--restart`), another
-  checkout, alive but not answering; port held by a foreign listener (A30) → `problem`; the alarm
+  checkout, alive but not answering; port held by a foreign listener (A30: seen in
+  `/proc/net/tcp`, nothing bound by `doctor`) → `problem`; the alarm
   set → `problem` naming `--new-secret`; keep-alive: `.wslconfig` with `instanceIdleTimeout=-1`
   (in a sandbox folder standing for the Windows profile) → `ok` naming it, the keep-alive running
   → the unverified wording of 16.3, neither while a keeper lives → `problem`; interop link
@@ -2054,8 +2340,11 @@ and `--purge` refuses while keepers live.
   runtime directory of a wrong mode, too long a socket path, `XDG_RUNTIME_DIR` passed over without
   lingering (`info`); a vendored file altered → `problem`; keepers counted from their `.pid` lines
   with versions and `started`, a dead one `info`.
-- `doctor` never connects to a keeper (keeper sockets that record connections, one not started
-  stays not started — S2 17.3) and starts no Windows program (fake processes record nothing).
+- `doctor`, `uninstall` and `uninstall --purge` never connect to a keeper (keeper sockets that
+  record connections, one not started stays not started — S2 17.3); `doctor` starts no Windows
+  program (fake processes record nothing).
+- The server in these tests is task 22's fake serve (it answers `/ping`, `/status` and
+  `/shutdown`), since `startTestServer` arrives in the same wave.
 - `install` without python3 → the `info` line; with python3 → none; nothing else changes.
 - `uninstall` with a running server (a test server) → stopped, the line with the number of
   terminals, keepers still alive; the profile folder line; `--purge` with a live keeper `.pid`
@@ -2089,8 +2378,9 @@ stale after 45 s) around starting Edge and waiting. The 30-second wait and the 2
 wait are parameters (A31). `--new-secret`: `stopServer`, `replaceSecret` (clears the alarm), then
 as without options. Exit codes 0, 1, 2.
 
-**Tests** (a real server through `bin/skydeck serve`, `window.port` set to a free port, `window.edge`
-the fake Edge)
+**Tests** (`realTestPlatform`; a real server through `bin/skydeck serve` with `SKYDECK_TEST_PORT=0`
+and `SKYDECK_TEST_INTEROP_FIRST` in the sandbox, the port read from `server.json`; the config
+written by `writeWindowConfig` with `window.edge` = the fake Edge and `keepAlive` off, A32)
 - No server: one is started, the fake Edge gets S2 5.3's four arguments with a token, plays the
   page → `skydeck window: http://127.0.0.1:<port>/ (server pid <n>)`, exit 0; the token is
   `dropped` afterwards; no key or token in any printed line.
@@ -2116,13 +2406,13 @@ the fake Edge)
 
 ---
 
-### Task 26: The page shell — connection, key, keys, app state
+### Task 26: The page shell — connection, key, app state
 
-**Depends on:** 20, 23 · **Wave:** 6 · **Design:** S2 4.3 (`web/`), 6.3, 8.2.2 (the page's side), 8.2.5, 9.1 (the table, as data), 12.1 (layout), 12.9, 15.3 (reload), 15.4, 17.4 · **Contracts:** 2.7, 2.9 · **Decisions:** A11, A16, A18
+**Depends on:** 20, 23, 31 · **Wave:** 6 · **Design:** S2 4.3 (`web/`), 6.3, 8.2.2 (the page's side), 8.2.5, 12.1 (layout), 12.9 (zones, dispatch), 15.3 (reload), 15.4, 17.4 · **Contracts:** 2.7, 2.9 · **Decisions:** A11, A16
 
 **Goal.** The page as a walking skeleton (A16): the HTML and base styles, the handshake and the
 stored key through Web Crypto, the connection with ping, reconnect and the server-gone bar, the
-app state and the complete key table of stage A, and minimal working versions of the modules
+app state and the key dispatch over task 31's table, and minimal working versions of the modules
 tasks 27–29 replace. After this task a window shows the list as plain lines and can resume a
 session into a terminal pane that says "terminal view comes with task 28".
 
@@ -2131,16 +2421,14 @@ session into a terminal pane that says "terminal view comes with task 28".
   server-gone bar, `<link>`s to `web/style.css`, `web/list.css`, `web/terminal-view.css`,
   `web/cards.css`), `web/style.css`, `web/list.css`, `web/terminal-view.css`, `web/cards.css`
   (the three last ones empty but for a comment naming their task), `web/auth.js`,
-  `web/connection.js`, `web/app.js`, `web/keys.js`, `web/format.js`, `web/pane.js`, and the
-  minimal `web/list.js`, `web/terminal-view.js`, `web/cards.js`, `web/help.js`
-- `web/keys.js`, `web/format.js` (and task 27's `web/list-text.js`) use no DOM, so that
-  node:test and the root `tsc` can load them; every other module of `web/` is checked by
-  `tsc -p web` only.
+  `web/connection.js`, `web/app.js`, `web/pane.js`, and the minimal `web/list.js`,
+  `web/terminal-view.js`, `web/cards.js`, `web/help.js`
+- `web/keys.js`, `web/format.js` (task 31) and task 27's `web/list-text.js` use no DOM, so that
+  node:test and the root `tsc` can load them; every module of `web/` is checked by `tsc -p web`.
 - Create: `web/tsconfig.json` (DOM library, `allowJs`, `checkJs`, `noEmit`, the vendored `.d.mts`
   shims and `src/window/protocol.ts` in reach)
 - Modify: `package.json` (`"typecheck": "tsc --noEmit && tsc --noEmit -p web"`)
-- Test: `test/web/keys.test.ts`, `test/web/format.test.ts`, `test-page/shell.test.ts`,
-  `test-page/auth.test.ts`
+- Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`
 
 **Behaviour.** `auth.js`: S2 8.2.2 steps 3–6 and "where the page keeps its key" — HMAC proofs,
 HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. `connection.js`:
@@ -2148,35 +2436,34 @@ S2 6.3, 8.2.5 and the reload keys of S2 12.9 and 15.3 (a new connection, the ser
 then `location.reload()`); `input` split into messages of at most 64 KiB. `app.js`: `start`,
 `view` and `focus` messages; selection, zones (the terminal by default; a coloured top edge and
 `Focus: list` / `Focus: terminal` in the key bar), the most-recently-used order for Ctrl+Tab and
-Ctrl+Shift+O, slots for Ctrl+Shift+1–9, Ctrl+Shift+L, Ctrl+Shift+N, Ctrl+Shift+H; it cancels a
-key exactly when `keys.cancels` says so. In a normal browser tab (`display-mode` not `standalone`)
-the key bar names Ctrl+Shift+O and `+ New` (S2 5.1 `--print-url`). The first `web/tsconfig.json`
-run settles whether TypeScript 7.0.2 checks the JSDoc used here (question 5); the pull request
-says what had to be written differently.
+Ctrl+Shift+O, slots for Ctrl+Shift+1–9, Ctrl+Shift+L, Ctrl+Shift+N, Ctrl+Shift+H, and the keys of
+later stages (A11), which only show `<key>: comes in a later stage`; it cancels a key exactly when
+`keys.cancels` says so. In a normal browser tab (`display-mode` not `standalone`)
+the key bar names Ctrl+Shift+O and `+ New` (S2 5.1 `--print-url`). `tsc -p web` checks the
+JSDoc of every module with `checkJs` (TypeScript 7.0.2 does: review B ran it on a JSDoc project
+with `@import` and `@typedef`, ruling 5).
 
-**Tests**
-- `keys.test.ts` (node:test, `KeyboardEvent`-like objects): every chord of S2 12.9 that stage A
-  has, on a US layout and on a Czech one (Shift on the number row types the digits; `Digit1` …
-  `Digit9` as the fallback; Ctrl+Shift+H by the character typed), in both zones; Ctrl+Shift+- is
-  not the window's; `terminalKey`: Shift+Enter → `\n`, Ctrl+V → `'browser'`, Ctrl+Shift+V →
-  `\x16`, Alt+F4 → `'browser'`; `cancels`: Alt+F4 never, a key neither zone uses never, F5 and
-  Ctrl+R in the list zone yes and in the terminal zone no, Ctrl+Shift+R in both; Ctrl+Shift+P and
-  Ctrl+Shift+J not handled (A11).
-- `format.test.ts`: `web/format.js`'s age equals `src/text/age.ts`'s `formatAge` for 0, 59 s, 60 s,
-  59 min, 47 h, 48 h, 400 days and a negative duration (A18).
+**Tests** (`realTestPlatform` through `startTestServer`)
+- In the page: a key the table of task 31 handles is cancelled (`defaultPrevented`), Alt+F4 and a
+  key no zone uses are not; Ctrl+Shift+P and Ctrl+Shift+J show `comes in a later stage`.
 - `auth.test.ts` (Chromium, the page loaded from a test server): the vector of S2 8.2.2 through
   Web Crypto — the page's proofs and the unwrapped key's proofs equal the pinned values; after a
   launch the key is in IndexedDB, survives a reload, still signs, and `exportKey` fails; the
   launch token is gone from the address before the first WebSocket is created (an init script
   records `location.href` in the `WebSocket` constructor); a page that failed once with its token
-  never presents it again; against a stand-in server whose proof is wrong the page sends nothing
+  never presents it again; a page that holds a stored key and is given a token uses mode
+  `launch` and ends up with the new key (the old one is gone from IndexedDB); against a stand-in
+  server whose proof is wrong the page sends nothing
   after `hello` and shows the warning with the port.
 - `shell.test.ts`: the CSP lets the page's files load and an inline script injected into the
   served HTML by a stand-in server does not run; F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 in the list
   zone, and Ctrl+Shift+R in the terminal zone, reload only after a server's proof, and not at
   all against a stand-in server without one; a dropped file does not navigate the window; the
   server stopped → the bar of S2 6.3 within 4 s; started again (same boot) → "skydeck's server
-  restarted; your sessions kept running" and the list back; a server with another asset version
+  restarted; your sessions kept running" and the list back; a server started with another boot
+  id (the test server's fake proc) → "WSL restarted at <time>…" (S2 6.3); the keep-alive `failed`
+  in `welcome` and a `keepalive-lost` notice → "WSL is not kept running" in the title bar until
+  `keepalive-back`; a `tick-failed` notice shown until the next `list`; a server with another asset version
   → the page reloads; the service-worker case of S2 17.4 (a stand-in server that registers a
   worker, then the real server answers its script with 404): the result is recorded in the test's
   output and the pull request, whichever it is (it settles W25's second half for Chromium).
@@ -2206,7 +2493,8 @@ rows of two lines (running) and one line (not running) with slot numbers, the ti
 monospaced, the group dim when the title does not start with it, marks in words, design 7.3's
 chip, `✎`, the age; `starting…` and `running in another terminal` second lines; the footer
 `<n> done hidden · show` and `a`; the filter `/` (Esc clears it, then goes back to the terminal);
-list keys ↑ ↓ `j` `k` Home End PgUp PgDn ← → Enter; a click selects (a running row focuses its
+list keys ↑ ↓ `j` `k` Home End PgUp PgDn ← → Enter; "started, not reported" on the row of a
+terminal whose `notReported` is set (S2 7.5); a click selects (a running row focuses its
 terminal, another the list), a double click activates; the title bar's counts per state.
 Everything through `textContent`.
 
@@ -2262,6 +2550,9 @@ the target first; OSC 0 and 2 are ignored; the ended terminal is dimmed (the bar
   it does not; `/link` with differing text → the first Ctrl+click shows the target, the second
   sends `open-link`.
 - Find: Ctrl+Shift+F finds a line printed 3,000 lines up.
+- Notices on the terminal they concern: `input-full` (the stand-in in `/stall` with a large paste),
+  `gap` and `newer-keeper` (sent by a test server through the hub), and the `reconnecting` bar
+  (the keeper stopped with `SIGSTOP` for 3 s) — each shown, and gone when it no longer holds.
 - After a server restart the terminal shows the same screen (a fresh `snap`).
 
 **Done when:** the checks of S2 17.4 about keys, queries and colours pass, and switching between
@@ -2273,7 +2564,7 @@ terminals is instant for attached ones.
 
 ### Task 29: The right side — header, cards, the new form, the key help
 
-**Depends on:** 26 · **Wave:** 7 · **Design:** S2 7.8 (the bar), 7.9 (the card), 12.5 (read-only in stage A), 12.6, 12.9 (the help), 19 · **Contracts:** 2.9 (`cards.js`, `help.js`) · **Decisions:** A27
+**Depends on:** 26 · **Wave:** 7 · **Design:** S2 7.8 (the bar), 7.9 (the card), 12.5 (read-only in stage A), 12.6, 12.9 (the help), 19 · **Contracts:** 2.9 (`cards.js`, `help.js`) · **Decisions:** A11, A27
 
 **Goal.** Replace the minimal `web/cards.js` and `web/help.js`: the read-only header, the resume
 card, the card of a session running elsewhere, the ended bar, the new form and the key help.
@@ -2290,8 +2581,8 @@ cannot be shown here. Ended bar: `claude exited (status <n>) at <time> · Resume
 lost and not-started texts of S2 7.8 and 7.3. New form: the directory (a list of `list.dirs`,
 defaulting to the selected session's, or a typed absolute path), label, group, flags as typed;
 Enter or the button sends `act new` with the size of the terminal area; errors shown in the form.
-Key help (Ctrl+Shift+H): every key of stage A, the browser-tab note, the note on Claude Code
-bindings the window shadows.
+Key help (Ctrl+Shift+H): every key of S2 12.9, those of later stages marked `comes in a later
+stage` (A11), the browser-tab note, the note on Claude Code bindings the window shadows.
 
 **Tests** (a test server with sessions and the stand-in)
 - The resume card of a not-running session shows the command the server sent; "Resume here"
@@ -2301,7 +2592,8 @@ bindings the window shadows.
   0; Resume on the bar starts the session again; Close forgets the terminal (`close-terminal`).
 - Ctrl+Shift+N opens the form; a label `fix` and flags `--model opus` → a row `fix` starts; flags
   `-r x` → the server's message in the form, nothing started.
-- Ctrl+Shift+H shows and hides the help; every chord in the help is one `keys.js` handles.
+- Ctrl+Shift+H shows and hides the help; every key in the help is one `keys.js` handles, and the
+  keys of later stages are marked so.
 
 **Done when:** every right-side view of S2 12.6 that stage A has is shown for its case.
 
@@ -2319,6 +2611,13 @@ only they can make.
 **Files**
 - Modify: `docs/install.md`, `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` only
   where a decision of 1a is still missing from it
+- Create: `docs/check-kit/` — the research's check kit, brought into the repository so that the
+  manual checks can be run from a checkout: from `personal/skydeck-design/step2-research/window/check/`
+  (outside the repository, kept by the lead) `keytest.html`, `keytest.js`, `serve.py`,
+  `edge-app.sh`, `STEPS.txt` and `lifetime/lifetime.ps1`, each read whole before it is committed;
+  not `keylog.jsonl` (a recording of the user's own key presses), not the Alpine tarball (the
+  W14 section says where to download it and how to check its sha256), not `windows/` (the native
+  host is out of step 2). `docs/` is outside the build and outside Prettier.
 
 **Content (contract)**
 - `docs/install.md`: a section "The window (step 2)": python3 ≥ 3.9 (`sudo apt install python3`
@@ -2332,8 +2631,15 @@ only they can make.
   Development section gains `npm run test:page` and `npx playwright install chromium`.
 - `docs/manual-checks.md`: one section per check of stage A — W1–W10, W12–W15, W17, W18, W20,
   W22–W25 — each with what to set up, the commands, what to look at and what to write down;
-  "real claude" checks in a throwaway folder as the existing sections do. W11, W16, W19 and W21
-  are left for their stages.
+  "real claude" checks in a throwaway folder as the existing sections do. W2 uses the window
+  itself (every chord, those of later stages included, is the page's, A11) and, for a normal
+  browser tab, `docs/check-kit/keytest.html` through `serve.py` and `edge-app.sh`. W14 uses
+  `docs/check-kit/lifetime/lifetime.ps1` against a throwaway distribution. W24's procedure: kill a
+  keeper (and a throwaway `node` started through the launcher's `python3 -I -c` line) with SIGSEGV
+  and look in `%Temp%\wsl-crashes` (or `crashDumpFolder` in `.wslconfig`); neither may leave a
+  dump. W25's "small Windows
+  program" is given as a PowerShell `TcpListener` one-liner on `127.0.0.1:<port>`, started before
+  `skydeck window` and stopped with Ctrl+C. W11, W16, W19 and W21 are left for their stages.
 
 **Steps**
 - [ ] Run every command of the new install section on a clean `SKYDECK_HOME` (Edge replaced by
@@ -2375,16 +2681,16 @@ check of S2 18 is in `docs/manual-checks.md`.
 | 8.1 Server and keeper | 1, 9, 16 |
 | 8.2.1 HTTP | 14, 10 |
 | 8.2.2 Handshake | 11, 17, 26 |
-| 8.2.3 Messages | 1, 17, 23 |
+| 8.2.3 Messages | 1, 17, 32 (`act`), 23 |
 | 8.2.4–8.2.8 Streams, reconnect, size, several windows, backpressure | 17, 16, 26, 28 |
 | 8.3 Command line and server | 1, 18 |
-| 9 Typing and reading | 26 (keys), 28 |
+| 9 Typing and reading | 31 (the mapping), 26 (dispatch), 28 |
 | 10.1 What the server keeps; the tick | 23, 4 (guard) |
 | 10.2 Store | `kv` keys in 4; migration 2 is stage B |
 | 10.3 Turn ends | stage B |
 | 11.1 One implementation | 4 |
 | 11.2 Window terminal | 21 |
-| 11.3 In the window | 23 (resume, new), 27–29; restore is stage C |
+| 11.3 In the window | 32 (resume, new), 23 (wiring), 27–29; restore is stage C |
 | 11.4 Commands while the window runs | stage C (stage A leaves the commands as in step 1) |
 | 12.1, 12.2 Layout, rows | 13, 27 |
 | 12.3 The window's chip | stage D (stage A shows design 7.3's) |
@@ -2393,7 +2699,7 @@ check of S2 18 is in `docs/manual-checks.md`.
 | 12.6 Right side | 26 (pane), 28, 29 |
 | 12.7 Restore banner | stage C |
 | 12.8 Search | 13, 27 (design 7.4's filter); the rest stage E |
-| 12.9 Keys and focus | 26, 27, 28, 29 |
+| 12.9 Keys and focus | 31 (the table), 26, 27, 28, 29 |
 | 12.10 Done | 13 (a running done row stays); marking done is stage D |
 | 12.12 Icon | stage E |
 | 13 Notifications | stage B |
@@ -2409,8 +2715,14 @@ check of S2 18 is in `docs/manual-checks.md`.
 
 ## 5. Stage A is ready to try
 
-When task 30 is merged. In a WSL terminal of your own (not a `!` command inside a Claude Code
-session: `skydeck window` refuses there, S2 5.1):
+When task 30 is merged. **First, before real work:** the keep-alive is unverified until W14
+(S2 6.1); if it does not hold, every session in the window ends about 15 seconds after the last
+WSL terminal closes. Until W14 has passed, keep one WSL terminal open (or set
+`instanceIdleTimeout=-1` in `.wslconfig`), and run W1, W20 and W4 with a throwaway session in a
+throwaway folder before resuming real sessions into the window.
+
+In a WSL terminal of your own (not a `!` command inside a Claude Code session: `skydeck window`
+refuses there, S2 5.1):
 
 ```sh
 cd <your skydeck checkout>
@@ -2437,49 +2749,36 @@ server; a session ends only when you end it inside `claude`.
   Ctrl+Shift+C, OSC 52), W22 (a session from a WSL terminal shows "running in another terminal" and
   resumes into the window after `/exit`), W23 (which `CLAUDE*` variables Claude Code sets; `skydeck
   window` refused inside a session), W5, W10, W17, W18.
-- **Keys and fonts in Edge** — W2 (the stage A chords reach the page; Alt+F4 still closes; for
-  Ctrl+Shift+P and J use the research key-test page, see A11), W8 (Czech layout, AltGr, dead keys,
+- **Keys and fonts in Edge** — W2 (in the window: every chord of S2 12.9 reaches the page and Edge
+  does nothing, Ctrl+Shift+P and J included, which say they come in a later stage; Alt+F4 still
+  closes; for a normal browser tab, `docs/check-kit/keytest.html`), W8 (Czech layout, AltGr, dead keys,
   Ctrl+Shift+-), W9 (Claude Code's symbols), W12 (Ctrl+click opens in your own Edge).
 - **WSL** — W14 (the window keeps WSL running with every WSL terminal closed), W7 (image paste
   after closing the terminal that ran `skydeck window`), W15 (sleep), W24 (no crash dumps), W25
   (a Windows program on the port).
 
-## 6. Questions for the lead
+## 6. Questions for the lead, and the rulings
 
-The plan follows the reading given after each question; a ruling the other way changes the task
-named.
+Asked with the first version of this plan; the lead ruled on 2026-11-13, and the plan above
+follows the rulings.
 
-1. **Licence files (A3).** `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0 ship no
-   `LICENSE` (their `package.json` says MIT; checked with `npm pack --dry-run`). The plan copies
-   `@xterm/xterm`'s `LICENSE` (same repository and holders) into their folders and records it in
-   the manifest. Acceptable, or should the text be fetched from the xterm.js repository at the
-   6.0.0 tag instead? (Task 2.)
-2. **Ctrl+Shift+P and Ctrl+Shift+J in stage A (A11).** The design's rule — the page cancels only
-   keys it handles — leaves both to Edge until stages E and B. In Edge, Ctrl+Shift+P may open an
-   InPrivate window from the app window. Reserve them already (cancel, show "comes in a later
-   stage") instead? (Task 26; one line in `keys.js`.)
-3. **CI changes in two tasks (A14).** The brief asks for one CI task with python3; the keeper's own
-   pull request cannot pass CI without replacing `shellcheck bin/skydeck*` and the CI task cannot
-   compile a keeper that does not exist, so the keeper task carries those two lines and task 20
-   the page leg. Fine?
-4. **Task 9's size.** The keeper is one python file with about 300 lines and some 500 lines of
-   tests — above the usual size. Split at the tests of limits and caps (a second task in wave 3
-   editing the same file), or keep it whole as planned?
-5. **TypeScript 7 and JSDoc.** `typescript` is 7.0.2 (the native compiler). Whether it checks the
-   page's JSDoc (`@import`, `@typedef`, typed callbacks) as S2 17.5 expects is unverified; task 26
-   settles it. If it cannot, should `web/` drop `checkJs` (the page suite still runs) or should
-   the page get a different type-checking route?
-6. **Chromium for implementers.** `npm run check` runs the page suite, which needs Chromium in
-   `~/.cache/ms-playwright` (`npx playwright install chromium`, about 150 MB, no `sudo`).
-   `chromium-1223` is there from an earlier Playwright; 1.64.1 may need another build. May the
-   implementer agents of tasks 20 and 26–29 download it?
-7. **Protocol additions (A25–A27, A29).** `result.sessionId`, `checkout` in `/ping`,
-   `list.selected` and `list.dirs`, and `SKYDECK_ENV_ORIGIN` are small additions to S2 8.2.3, 8.3
-   and 5.2 that the design needs but does not name; tasks 1 and 23 record them in the design.
-   Agreed?
-8. **Stage C rows that already exist.** S2 4.4 moves restore planning into `src/sessions/restore.ts`
-   in stage C, but `planRestore` and `runRestore` already live there; only the command's private
-   `plan()` would move. Stage A touches the file only to fill the new `LaunchSpec` fields. And
-   S2 17.3's tests of `resume --window` / `new --window` belong to stage C, not A. No action unless
-   you read it differently.
+1. **Licence files of `@xterm/headless` and `@xterm/addon-serialize`.** Ruled: copy
+   `@xterm/xterm`'s `LICENSE`, on the condition that the package's `package.json` declares MIT and
+   the same repository, and record why in the manifest (A3, task 2).
+2. **Ctrl+Shift+P and Ctrl+Shift+J in stage A.** Ruled: the page cancels every key of the design's
+   table from stage A on, also those whose action comes later; they do nothing yet and the help
+   says so (A11, tasks 26 and 29).
+3. **CI changes in two tasks.** Ruled: the split of A14 stands.
+4. **Task 9's size.** Ruled: keep it whole.
+5. **TypeScript 7 and JSDoc.** Ruled: keep `checkJs` for `web/`; review B ran the repository's
+   TypeScript 7.0.2 on a JSDoc project and it checks it, so no fallback is needed.
+6. **Chromium for implementers.** Ruled: implementers may run `npx playwright install chromium`
+   (no `sudo`, no `--with-deps`); prefer a Playwright at least two weeks old whose Chromium is the
+   build already installed (1223). That is 1.60.0 (A5).
+7. **Protocol additions (A25–A27, A29).** Ruled: agreed; tasks 1 and 23 record them in the design.
+8. **Stage C rows that already exist.** Noted: `planRestore` and `runRestore` already live in
+   `src/sessions/restore.ts`, so stage C moves only the restore command's private planning; S2
+   17.3's tests of `resume --window` and `new --window` belong to stage C.
 
+Rulings on the two reviews (2026-11-13): task 26's pure modules become task 31 (wave 1); task 23's
+actions become task 32 (wave 4); task 9 stays whole; `checkJs` stays for `web/`.
