@@ -254,6 +254,8 @@ class Connection implements WebSocketConnection {
   #fragments: Uint8Array[] | null = null;
   #fragmentOpcode = TEXT;
   #fragmentBytes = 0;
+  /** The latest ping's payload while the socket is backed up; its pong goes out at the drain. */
+  #pendingPong: Uint8Array | null = null;
   readonly #textListeners: ((text: string) => void)[] = [];
   readonly #binaryListeners: ((bytes: Uint8Array) => void)[] = [];
   readonly #drainListeners: (() => void)[] = [];
@@ -279,6 +281,10 @@ class Connection implements WebSocketConnection {
     });
     socket.on('drain', () => {
       if (this.#state !== 'open') return;
+      if (this.#pendingPong !== null) {
+        socket.write(encodeFrame(PONG, this.#pendingPong));
+        this.#pendingPong = null;
+      }
       for (const listener of this.#drainListeners) listener();
     });
     (socket as Partial<Socket>).setNoDelay?.(true);
@@ -411,7 +417,10 @@ class Connection implements WebSocketConnection {
         this.#peerClose(payload);
         return;
       case PING:
-        this.#socket.write(encodeFrame(PONG, payload));
+        // A peer that pings and never reads must not make the queue grow with pongs: while the
+        // socket is backed up only the latest ping is answered (RFC 6455 5.5.3 allows that).
+        if (this.#socket.writableNeedDrain) this.#pendingPong = payload;
+        else this.#socket.write(encodeFrame(PONG, payload));
         return;
       case PONG:
         return;

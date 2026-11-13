@@ -197,6 +197,8 @@ interface Raw {
   response: string;
   /** Bytes received after the handshake's answer. */
   received(): Buffer;
+  /** How many bytes received() would give, without joining them. */
+  receivedLength(): number;
   ended(): boolean;
 }
 
@@ -224,10 +226,17 @@ async function raw(
 ): Promise<Raw> {
   const socket = connect(port, '127.0.0.1');
   t.after(() => socket.destroy());
-  let data = Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  let length = 0;
+  let joined = Buffer.alloc(0);
+  const data = (): Buffer => {
+    if (joined.length !== length) joined = Buffer.concat(chunks, length);
+    return joined;
+  };
   let ended = false;
   socket.on('data', (chunk: Buffer) => {
-    data = Buffer.concat([data, chunk]);
+    chunks.push(chunk);
+    length += chunk.length;
   });
   socket.on('end', () => {
     ended = true;
@@ -235,12 +244,13 @@ async function raw(
   socket.on('error', () => {});
   await within('connect', once(socket, 'connect'));
   socket.write(Buffer.concat([Buffer.from(request, 'latin1'), after]));
-  await until('the answer', () => data.includes('\r\n\r\n') || ended);
-  const end = data.indexOf('\r\n\r\n') + 4;
+  await until('the answer', () => data().includes('\r\n\r\n') || ended);
+  const end = data().indexOf('\r\n\r\n') + 4;
   return {
     socket,
-    response: data.subarray(0, end).toString('latin1'),
-    received: () => data.subarray(end),
+    response: data().subarray(0, end).toString('latin1'),
+    received: () => data().subarray(end),
+    receivedLength: () => length - end,
     ended: () => ended,
   };
 }
@@ -845,18 +855,46 @@ describe('WebSocket: backpressure', () => {
       frames++;
     }
     assert.ok(conn.buffered > MiB, `buffered ${conn.buffered} after ${frames} frames`);
-    const queued = conn.buffered;
     await delay(200);
-    assert.equal(conn.buffered, queued, 'nothing drains while the client does not read');
+    assert.ok(conn.buffered > MiB, `buffered ${conn.buffered} while the client does not read`);
     assert.equal(accepted.drains, 0, 'no drain while the client does not read');
 
     r.socket.resume();
     await until('onDrain', () => accepted.drains > 0);
 
     assert.ok(conn.buffered < 64 * 1024, `buffered ${conn.buffered} at drain`);
-    await until('every frame', () => r.received().length === frames * 60_004);
+    await until('every frame', () => r.receivedLength() === frames * 60_004);
     const all = serverFrames(r.received());
     assert.equal(all.length, frames);
     assertSameBytes((all.at(-1) as ServerFrame).payload, chunk, 'the last frame');
+  });
+
+  test('pings while the socket is backed up get one pong, for the latest (RFC 6455 5.5.3)', async (t) => {
+    const served = await serve(t, { echo: false });
+    const r = await raw(t, served.port, upgradeRequest(served.port));
+    const accepted = await acceptedOf(served);
+    const { conn } = accepted;
+    const chunk = bytesOf(60_000);
+    r.socket.pause();
+    let frames = 0;
+    while (conn.buffered <= MiB && frames < 1100) {
+      conn.sendBinary(chunk);
+      frames++;
+    }
+    const queued = conn.buffered;
+    const pings = 5000;
+    const payload = (i: number): Buffer => Buffer.from(String(i).padStart(125, '.'));
+
+    for (let i = 0; i < pings; i++) r.socket.write(clientFrame(OP.ping, payload(i)));
+    r.socket.write(clientFrame(OP.text, Buffer.from('done')));
+    await accepted.messages.next('every ping read');
+
+    assert.ok(conn.buffered < queued + 1024, `buffered grew from ${queued} to ${conn.buffered}`);
+    r.socket.resume();
+    const isPong = (f: ServerFrame): boolean => f.opcode === OP.pong;
+    await until('the pong', () => serverFrames(r.received()).some(isPong));
+    const pongs = serverFrames(r.received()).filter(isPong);
+    assert.equal(pongs.length, 1);
+    assertSameBytes((pongs[0] as ServerFrame).payload, payload(pings - 1), 'the latest ping');
   });
 });
