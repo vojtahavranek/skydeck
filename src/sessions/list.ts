@@ -67,7 +67,8 @@ export interface ListModel {
   groups: ListGroup[];
 }
 
-const SHORT_ID_LENGTH = 8;
+/** A session's short id is the first 8 characters of its id (design 7.4). */
+export const SHORT_ID_LENGTH = 8;
 
 function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;

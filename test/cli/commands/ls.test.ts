@@ -213,19 +213,70 @@ function askedNumbers(call: RunCall | undefined): string[] {
   return (call?.args ?? []).flatMap((arg) => /^n\d+=(\d+)$/.exec(arg)?.[1] ?? []).sort();
 }
 
-test('ls --refresh asks gh about the unfetched pull requests only, in one call', async (t) => {
+test('ls --refresh asks gh about every attached pull request, the fresh one too, in one call', async (t) => {
   const d = sessionsWithPrs(t);
   const runner = ghOpen();
 
   assert.equal(await main(['ls', '--refresh'], withRunner(d, runner)), 0);
 
-  assert.equal(runner.calls.length, 1, 'one call for both unfetched pull requests');
+  assert.equal(runner.calls.length, 1, 'one call for all three pull requests');
   assert.equal(runner.calls[0]?.command, 'gh');
-  assert.deepEqual(
-    askedNumbers(runner.calls[0]),
-    ['1', '3'],
-    'the fresh pull request (2) is not sent',
-  );
+  assert.deepEqual(askedNumbers(runner.calls[0]), ['1', '2', '3']);
+});
+
+test('ls --refresh asks again about a pull request whose last fetch failed, though it was read a minute before', async (t) => {
+  const d = twoSessions(t);
+  attachManualPr(d.deck, S1, PR1);
+  d.deck.store.savePrResult(PR1, {
+    ok: true,
+    atNs: T0 - 120n * SEC,
+    title: 'Fix',
+    state: 'open',
+    review: null,
+    checks: null,
+  });
+  d.deck.store.savePrResult(PR1, {
+    ok: false,
+    atNs: T0 - 60n * SEC,
+    error: 'gh timed out after 10 s',
+  });
+  const runner = ghOpen();
+
+  assert.equal(await main(['ls', '--refresh', '--json'], withRunner(d, runner)), 0);
+
+  assert.equal(runner.calls.length, 1);
+  assert.deepEqual(listed(d).sessions[0]?.prs[0], {
+    url: PR1,
+    repo: 'o/r',
+    number: 1,
+    state: 'open',
+    review: null,
+    checks: 'passing',
+    okAt: isoFromNs(T0),
+    error: null,
+  });
+});
+
+test('ls --refresh never asks about a merged or a closed pull request', async (t) => {
+  const d = twoSessions(t);
+  attachManualPr(d.deck, S1, PR1);
+  attachManualPr(d.deck, S1, PR2);
+  for (const [url, state] of [
+    [PR1, 'merged'],
+    [PR2, 'closed'],
+  ] as const) {
+    d.deck.store.savePrResult(url, {
+      ok: true,
+      atNs: T0 - 600n * SEC,
+      title: 'Done',
+      state,
+      review: null,
+      checks: null,
+    });
+  }
+  const runner = ghOpen();
+  assert.equal(await main(['ls', '--refresh'], withRunner(d, runner)), 0);
+  assert.deepEqual(runner.calls, []);
 });
 
 test('after ls --refresh, ls --json shows the state of every pull request', async (t) => {

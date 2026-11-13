@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { formatChip, formatPrLine, formatRow } from '../../src/cli/row.ts';
+import { formatChip, formatPrLine, formatPrStatus, formatRow } from '../../src/cli/row.ts';
 import { NS_PER_DAY, NS_PER_MINUTE } from '../../src/platform/time.ts';
 import type { PrView } from '../../src/sessions/list.ts';
 import { S1, T0 } from '../helpers/platform.ts';
@@ -223,4 +223,26 @@ test('formatPrLine: a pull request never fetched is "not fetched" (D11)', () => 
     formatPrLine(pr({ level: 'unfetched', state: null, okAtNs: null })),
     'https://github.com/o/r/pull/1  not fetched',
   );
+});
+
+// --- formatPrStatus --------------------------------------------------------------------------------
+
+test('formatPrStatus: the level, "not fetched", or "can\'t read" with the last read and the error', () => {
+  assert.equal(formatPrStatus(pr({ level: 'checks-failing' })), 'checks-failing');
+  assert.equal(formatPrStatus(pr({ level: 'unfetched', state: null })), 'not fetched');
+  assert.equal(
+    formatPrStatus(pr({ level: 'cant-read', okAtNs: T0, error: 'HTTP 401' })),
+    "can't read, last read 2026-11-12T09:00:00.000Z (HTTP 401)",
+  );
+  assert.equal(
+    formatPrStatus(pr({ level: 'cant-read', okAtNs: null, error: null })),
+    "can't read, last read never",
+  );
+});
+
+test('formatPrLine is the url, two spaces and formatPrStatus', () => {
+  for (const level of ['draft', 'unfetched', 'cant-read', 'merged'] as const) {
+    const view = pr({ level, okAtNs: T0, error: level === 'cant-read' ? 'x' : null });
+    assert.equal(formatPrLine(view), `${view.url}  ${formatPrStatus(view)}`, level);
+  }
 });

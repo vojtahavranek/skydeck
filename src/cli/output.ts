@@ -5,7 +5,7 @@
 import { unknownFlags } from '../claude/launch.ts';
 import { isoFromNs } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
-import { flatRows } from '../sessions/list.ts';
+import { SHORT_ID_LENGTH, flatRows } from '../sessions/list.ts';
 import type { ListModel, ListRow, PrView, TitleSource } from '../sessions/list.ts';
 import type { Holder, Mark, State } from '../sessions/types.ts';
 import type { LinkKind, LinkRow, PrChecks, PrReview, PrState } from '../store/types.ts';
@@ -157,8 +157,6 @@ export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson {
 // --- text -------------------------------------------------------------------------------------------
 
 const INDENT = '  ';
-/** A session's short id: the first 8 characters of its id (design 7.4). */
-const SHORT_ID_LENGTH = 8;
 
 /**
  * Per group a line with its name ("no group" for none), then its rows, each indented by two
@@ -194,6 +192,15 @@ function prField(pr: PrView): string {
   return field('pr:', line);
 }
 
+/** `done:` with the time the user marked the session done; nothing for a session that is not hidden. */
+function doneField(row: ListRow): string[] {
+  if (!row.done) {
+    return [];
+  }
+  const { doneAtNs } = row.session;
+  return [field('done:', doneAtNs === null ? 'yes' : `since ${isoFromNs(doneAtNs)}`)];
+}
+
 /**
  * One session in full (design 7.5): its title, then one line per field. Nothing is left to a
  * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4.
@@ -208,6 +215,7 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
       'state:',
       `${row.state}${row.stateDetail === null ? '' : ` (${row.stateDetail})`} since ${isoFromNs(row.sinceNs)}`,
     ),
+    ...doneField(row),
     field('marks:', row.marks.length === 0 ? '-' : row.marks.join(',')),
     field('label:', row.label ?? '-'),
     field('group:', row.group ?? '-'),

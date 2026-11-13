@@ -143,7 +143,7 @@ test('show without --refresh never starts gh, and shows an unfetched pull reques
   );
 });
 
-test('show --refresh asks gh only about the unfetched pull requests of that session, in one call', async (t) => {
+test('show --refresh asks gh about every pull request of that session, the fresh one too, in one call', async (t) => {
   const d = sessionsWithPrs(t);
   const runner = ghOpen();
 
@@ -151,12 +151,8 @@ test('show --refresh asks gh only about the unfetched pull requests of that sess
 
   assert.equal(runner.calls.length, 1);
   assert.equal(runner.calls[0]?.command, 'gh');
-  const numbers = (runner.calls[0]?.args ?? []).filter((arg) => /^n\d+=/.test(arg));
-  assert.deepEqual(
-    numbers,
-    ['n0=1'],
-    'S1 unfetched pull request only: not the fresh one, not the one of S2',
-  );
+  const numbers = (runner.calls[0]?.args ?? []).filter((arg) => /^n\d+=/.test(arg)).sort();
+  assert.deepEqual(numbers, ['n0=1', 'n1=2'], 'both pull requests of S1, not the one of S2');
   assert.ok(
     d.stdout().includes(`\npr:        ${PR1}  approved-green checks passing\n`),
     d.stdout(),
@@ -166,6 +162,56 @@ test('show --refresh asks gh only about the unfetched pull requests of that sess
     null,
     'the pull request of the other session stays as it was',
   );
+});
+
+test('show --refresh asks again about a pull request whose last fetch failed, though it was read a minute before', async (t) => {
+  const d = twoSessions(t);
+  attachManualPr(d.deck, S1, PR1);
+  d.deck.store.savePrResult(PR1, {
+    ok: true,
+    atNs: T0 - 120n * SEC,
+    title: 'Fix',
+    state: 'open',
+    review: null,
+    checks: null,
+  });
+  d.deck.store.savePrResult(PR1, {
+    ok: false,
+    atNs: T0 - 60n * SEC,
+    error: 'gh timed out after 10 s',
+  });
+  const runner = ghOpen();
+
+  assert.equal(await main(['show', '0b5f', '--refresh'], withRunner(d, runner)), 0);
+
+  assert.equal(runner.calls.length, 1);
+  assert.ok(
+    d.stdout().includes(`\npr:        ${PR1}  approved-green checks passing\n`),
+    d.stdout(),
+  );
+});
+
+test('show --refresh never asks about a merged or a closed pull request', async (t) => {
+  const d = twoSessions(t);
+  attachManualPr(d.deck, S1, PR1);
+  attachManualPr(d.deck, S1, PR2);
+  for (const [url, state] of [
+    [PR1, 'merged'],
+    [PR2, 'closed'],
+  ] as const) {
+    d.deck.store.savePrResult(url, {
+      ok: true,
+      atNs: T0 - 600n * SEC,
+      title: 'Done',
+      state,
+      review: null,
+      checks: null,
+    });
+  }
+  const runner = ghOpen();
+  assert.equal(await main(['show', '0b5f', '--refresh'], withRunner(d, runner)), 0);
+  assert.deepEqual(runner.calls, []);
+  assert.ok(d.stdout().includes(`\npr:        ${PR1}  merged\n`), d.stdout());
 });
 
 test('show --refresh --json prints the status it just read', async (t) => {

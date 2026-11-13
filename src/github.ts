@@ -63,9 +63,12 @@ function isFinal(pr: PrRow): boolean {
 }
 
 /**
- * Non-final (state not merged/closed) rows whose okAtNs is null or older than refreshMinutes; all
- * non-final rows when force. A merged or closed pull request is never fetched again, even when
- * forced (design 7.3).
+ * Two rules (design 7.3). An AUTOMATIC refresh (`force` false) wants the non-final (state not
+ * merged/closed) rows that were never tried (triedAtNs null) or whose last ATTEMPT is older than
+ * refreshMinutes: the last attempt, not the last success, so a pull request that keeps failing is
+ * asked about at that pace and not at every refresh. An EXPLICIT refresh (`force`) wants every
+ * non-final row, whatever its age and its last result. A merged or closed pull request is never
+ * fetched again, even when forced.
  */
 export function prsDue(
   prs: readonly PrRow[],
@@ -75,7 +78,7 @@ export function prsDue(
 ): PrRow[] {
   const staleBefore = nowNs - nsFromMs(Math.round(refreshMinutes * MS_PER_MINUTE));
   return prs.filter(
-    (pr) => !isFinal(pr) && (force || pr.okAtNs === null || pr.okAtNs < staleBefore),
+    (pr) => !isFinal(pr) && (force || pr.triedAtNs === null || pr.triedAtNs < staleBefore),
   );
 }
 
@@ -397,6 +400,8 @@ export async function fetchPrs(
  * fetchPrs of the urls of prsDue(rows, now, refreshMinutes, force), where `rows` are the store's
  * pull requests that at least one session still has attached: one whose every attachment was
  * detached (`pr rm`), or that was never attached, is shown nowhere and is not asked about.
+ * `force: true` is the explicit refresh of the user (`pr refresh`, `ls --refresh`, the list's
+ * refresh key), `force: false` the automatic one (the list when it opens, in the background).
  */
 export function refreshPrs(
   deps: Deps,

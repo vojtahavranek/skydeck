@@ -18,7 +18,7 @@ Prints the sessions skydeck knows, in groups, one row each. It never starts or s
 
   --all       also list the sessions marked done
   --json      print the list as JSON (version 1) instead of text
-  --refresh   first read the status of the pull requests that are stale or were never read (gh);
+  --refresh   first read the status of every pull request that is not merged or closed (gh);
               without it the status printed is the one saved, and nothing touches the network
 `,
   flags: {
@@ -42,10 +42,12 @@ export const command: Command = {
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const { runner, clock, env } = ctx.platform;
       if (parsed.flags['refresh'] === true) {
-        // A failed fetch is saved on the pull request ("can't read"), never thrown.
+        // An explicit refresh (design 7.3): every attached pull request that is not merged or
+        // closed, whatever its age and its last result. A failed fetch is saved on the pull
+        // request ("can't read"), never thrown.
         await refreshPrs(
           { runner, clock, store: deck.store, env },
-          { force: false, refreshMinutes: deck.config.prRefreshMinutes },
+          { force: true, refreshMinutes: deck.config.prRefreshMinutes },
         );
       }
       const rows = loadRows(deck);

@@ -369,6 +369,31 @@ test('formatShow: the state detail is shown in brackets after the state', () => 
   );
 });
 
+test('formatShow: a session that is done says since when, on the line after its state', () => {
+  const row = listRow({
+    id: S1,
+    done: true,
+    session: ds({ id: S1, hidden: true, doneAtNs: T0 - 2n * MIN }),
+  });
+  const lines = showText(row).split('\n');
+  assert.equal(lines[2]?.startsWith('state:'), true);
+  assert.equal(lines[3], 'done:      since 2026-11-12T08:58:00.000Z');
+});
+
+test('formatShow: a done session whose done time is not known says "yes"; one that is not done has no line', () => {
+  assert.ok(showText(listRow({ id: S1, done: true })).includes('\ndone:      yes\n'));
+  assert.ok(!showText(listRow({ id: S1 })).includes('done:'));
+});
+
+test('formatShow: a session marked done and active again is not done, and says nothing about it', () => {
+  const row = listRow({
+    id: S1,
+    done: false,
+    session: ds({ id: S1, hidden: false, doneAtNs: T0 - 2n * MIN }),
+  });
+  assert.ok(!showText(row).includes('done:'));
+});
+
 test('formatShow: several marks are joined by a comma; none, no label and no group show as "-"', () => {
   const some = showText(listRow({ id: S1, marks: ['ended-unexpectedly', 'was-working'] }));
   assert.match(some, /^marks: {5}ended-unexpectedly,was-working$/m);

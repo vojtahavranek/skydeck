@@ -18,20 +18,22 @@ export function formatChip(chip: { level: ChipLevel; count: number }): string {
 }
 
 /**
- * One pull request on one line (design 7.3: never "closed" when unreadable): level cant-read →
- * "<url>  can't read, last read <time or 'never'>" plus " (<error>)" when there is an error; level
- * unfetched → "<url>  not fetched" (D11); otherwise "<url>  <level>".
+ * The status of one pull request as a line prints it after the url (design 7.3: never "closed"
+ * when unreadable): level cant-read → "can't read, last read <time or 'never'>" plus " (<error>)"
+ * when there is an error; level unfetched → "not fetched" (D11); otherwise the level.
  */
-export function formatPrLine(pr: PrView): string {
+export function formatPrStatus(pr: PrView): string {
   if (pr.level === 'cant-read') {
     const lastRead = pr.okAtNs === null ? 'never' : isoFromNs(pr.okAtNs);
     const error = pr.error === null ? '' : ` (${pr.error})`;
-    return `${pr.url}  can't read, last read ${lastRead}${error}`;
+    return `can't read, last read ${lastRead}${error}`;
   }
-  if (pr.level === 'unfetched') {
-    return `${pr.url}  not fetched`;
-  }
-  return `${pr.url}  ${pr.level}`;
+  return pr.level === 'unfetched' ? 'not fetched' : pr.level;
+}
+
+/** One pull request on one line: "<url>  <status>" (`formatPrStatus`). */
+export function formatPrLine(pr: PrView): string {
+  return `${pr.url}  ${formatPrStatus(pr)}`;
 }
 
 /**

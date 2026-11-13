@@ -190,60 +190,84 @@ describe('constants', () => {
 
 describe('prsDue', () => {
   const rows = (over: Partial<PrRow>): PrRow[] => [pr(over)];
+  /** A row whose last attempt, a success, was `ageSec` seconds ago. */
+  const tried = (ageSec: bigint, over: Partial<PrRow> = {}): PrRow[] =>
+    rows({ state: 'open', okAtNs: T0 - ageSec * SEC, triedAtNs: T0 - ageSec * SEC, ...over });
 
   test('merged and closed rows are never due, not even when forced', () => {
     for (const state of ['merged', 'closed'] as const) {
-      assert.deepEqual(prsDue(rows({ state, okAtNs: T0 - 600n * MIN }), T0, 5, false), []);
+      const old = { state, okAtNs: T0 - 600n * MIN, triedAtNs: T0 - 600n * MIN };
+      assert.deepEqual(prsDue(rows(old), T0, 5, false), []);
       assert.deepEqual(prsDue(rows({ state, okAtNs: null }), T0, 5, true), []);
+      assert.deepEqual(prsDue(rows(old), T0, 5, true), []);
     }
   });
 
-  test('an open row last read 10 minutes ago is due with a 5 minute refresh', () => {
-    const due = rows({ state: 'open', okAtNs: T0 - 10n * MIN });
+  test('an open row last tried 10 minutes ago is due with a 5 minute refresh', () => {
+    const due = tried(600n);
     assert.deepEqual(prsDue(due, T0, 5, false), due);
   });
 
-  test('an open row last read 1 minute ago is not due', () => {
-    assert.deepEqual(prsDue(rows({ state: 'open', okAtNs: T0 - MIN }), T0, 5, false), []);
+  test('an open row last tried 1 minute ago is not due', () => {
+    assert.deepEqual(prsDue(tried(60n), T0, 5, false), []);
   });
 
   test('"older than" is strict: exactly the refresh age is not due, one nanosecond more is', () => {
-    assert.deepEqual(prsDue(rows({ state: 'open', okAtNs: T0 - 5n * MIN }), T0, 5, false), []);
-    assert.equal(
-      prsDue(rows({ state: 'open', okAtNs: T0 - 5n * MIN - 1n }), T0, 5, false).length,
-      1,
-    );
+    const at = (triedAtNs: bigint) => rows({ state: 'open', okAtNs: triedAtNs, triedAtNs });
+    assert.deepEqual(prsDue(at(T0 - 5n * MIN), T0, 5, false), []);
+    assert.equal(prsDue(at(T0 - 5n * MIN - 1n), T0, 5, false).length, 1);
   });
 
-  test('a draft row that was never read successfully is due', () => {
-    assert.equal(prsDue(rows({ state: 'draft', okAtNs: null }), T0, 5, false).length, 1);
+  test('a row that was never tried is due, whatever its state', () => {
+    for (const state of ['open', 'draft', null] as const) {
+      assert.equal(prsDue(rows({ state, triedAtNs: null }), T0, 5, false).length, 1, `${state}`);
+    }
   });
 
-  test('a row that was never fetched and failed is due', () => {
-    const failed = rows({ state: null, error: 'x', triedAtNs: T0 });
-    assert.deepEqual(prsDue(failed, T0, 5, false), failed);
+  test('a row that failed, with no success ever, is due only when its last attempt is old enough', () => {
+    const failed = (ageSec: bigint) =>
+      rows({ state: null, error: 'x', okAtNs: null, triedAtNs: T0 - ageSec * SEC });
+    assert.deepEqual(prsDue(failed(60n), T0, 5, false), [], 'tried a minute ago: not again yet');
+    assert.equal(prsDue(failed(6n * 60n), T0, 5, false).length, 1, 'tried 6 minutes ago: due');
   });
 
-  test('a row that failed after a recent success is not due again before the refresh age', () => {
-    const recent = rows({ state: 'open', okAtNs: T0 - MIN, triedAtNs: T0, error: 'x' });
-    assert.deepEqual(prsDue(recent, T0, 5, false), []);
+  test('the last attempt counts, not the last success: a recent failure after an old success is not due', () => {
+    const recentFailure = rows({
+      state: 'open',
+      okAtNs: T0 - 20n * MIN,
+      triedAtNs: T0 - MIN,
+      error: 'x',
+    });
+    assert.deepEqual(prsDue(recentFailure, T0, 5, false), []);
   });
 
-  test('force makes every non-final row due', () => {
+  test('a failure after a recent success is not due before the refresh age, and is due after it', () => {
+    const failedAfterSuccess = (triedAgoMin: bigint) =>
+      rows({
+        state: 'open',
+        okAtNs: T0 - 2n * MIN,
+        triedAtNs: T0 - triedAgoMin * MIN,
+        error: 'x',
+      });
+    assert.deepEqual(prsDue(failedAfterSuccess(1n), T0, 5, false), []);
+    assert.equal(prsDue(failedAfterSuccess(6n), T0, 5, false).length, 1);
+  });
+
+  test('force makes every non-final row due, whatever its age and its last result', () => {
     const all = [
-      pr({ state: 'open', okAtNs: T0 - MIN }),
-      pr({ state: 'draft', okAtNs: T0 }),
+      pr({ state: 'open', okAtNs: T0 - MIN, triedAtNs: T0 - MIN }),
+      pr({ state: 'open', okAtNs: T0 - 2n * MIN, triedAtNs: T0 - MIN, error: 'x' }),
+      pr({ state: 'draft', okAtNs: T0, triedAtNs: T0 }),
       pr({ state: null }),
       pr({ state: 'merged', okAtNs: T0 - 600n * MIN }),
       pr({ state: 'closed' }),
     ];
-    assert.deepEqual(prsDue(all, T0, 5, true), all.slice(0, 3));
+    assert.deepEqual(prsDue(all, T0, 5, true), all.slice(0, 4));
   });
 
   test('a refresh age that is not a whole number of minutes still works', () => {
-    const open = (ageSec: bigint): PrRow[] => rows({ state: 'open', okAtNs: T0 - ageSec * SEC });
-    assert.equal(prsDue(open(29n), T0, 0.5, false).length, 0);
-    assert.equal(prsDue(open(31n), T0, 0.5, false).length, 1);
+    assert.equal(prsDue(tried(29n), T0, 0.5, false).length, 0);
+    assert.equal(prsDue(tried(31n), T0, 0.5, false).length, 1);
   });
 
   test('the order of the rows is kept and the input is not changed', () => {
@@ -801,6 +825,34 @@ describe('fetchPrs and refreshPrs', () => {
     clock.advanceMs(2 * 60_000);
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
     assert.equal(runner.calls.length, 2);
+  });
+});
+
+describe('refreshPrs: the pace of an automatic refresh, and the explicit one', () => {
+  const timedOut = (): RunResult => runResult({ code: null, timedOut: true });
+
+  test('a pull request that keeps failing is asked about at the pace of the refresh age, not at every refresh', async (t) => {
+    const { store, clock, runner, deps } = deck(t, timedOut);
+    seed(store, 1, 1);
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 1, 'never tried: asked');
+    clock.advanceMs(4 * 60_000);
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 1, 'the last attempt was 4 minutes ago');
+    clock.advanceMs(2 * 60_000);
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 2, 'the last attempt was 6 minutes ago');
+  });
+
+  test('an explicit refresh asks about a pull request that failed a minute ago, and one read a minute ago', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 2, { state: 'open', ageMin: 2 });
+    store.savePrResult(NUM(1), { ok: false, atNs: T0 - MIN, error: 'gh timed out after 10 s' });
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 0, 'automatic: both were tried within 5 minutes');
+    await refreshPrs(deps, { force: true, refreshMinutes: 5 });
+    assert.deepEqual(runner.calls.flatMap(numbersOf).sort(), [1, 2]);
+    assert.equal(row(store, 1).error, null);
   });
 });
 

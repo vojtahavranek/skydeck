@@ -1,6 +1,6 @@
 // `skydeck show <ref> [--json] [--refresh]` (design 7.5): one session in full. Without `--refresh`
 // it never touches the network (design 7.3).
-import { fetchPrs, prsDue } from '../../github.ts';
+import { fetchPrs } from '../../github.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { resolveRef } from '../../sessions/refs.ts';
 import { parseCommandArgs } from '../args.ts';
@@ -19,9 +19,8 @@ the flags in it that skydeck does not know, which a resume does not pass on), th
 continues, the processes that hold it, its pull requests and its note.
 
   --json      print it as JSON instead of text
-  --refresh   first read the status of this session's pull requests that are stale or were never
-              read (gh); without it the status printed is the one saved, and nothing touches the
-              network
+  --refresh   first read the status of this session's pull requests that are not merged or closed
+              (gh); without it the status printed is the one saved, and nothing touches the network
 `,
   flags: {
     json: { type: 'boolean' },
@@ -44,23 +43,15 @@ export const command: Command = {
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const { runner, clock, env } = ctx.platform;
       let row = resolveRef(ref, loadRows(deck));
-      if (parsed.flags['refresh'] === true) {
-        // Only this session's pull requests, and only those a refresh would read (design 7.3).
-        const attached = new Set(row.prs.map((pr) => pr.url));
-        const due = prsDue(
-          deck.store.prs(),
-          clock.nowNs(),
-          deck.config.prRefreshMinutes,
-          false,
-        ).filter((pr) => attached.has(pr.url));
-        if (due.length > 0) {
-          await fetchPrs(
-            { runner, clock, store: deck.store, env },
-            due.map((pr) => pr.url),
-          );
-          const id = row.id;
-          row = loadRows(deck).find((candidate) => candidate.id === id) ?? row;
-        }
+      if (parsed.flags['refresh'] === true && row.prs.length > 0) {
+        // An explicit refresh (design 7.3): every pull request of this session that is not merged
+        // or closed (`fetchPrs` leaves those out), whatever its age and its last result.
+        await fetchPrs(
+          { runner, clock, store: deck.store, env },
+          row.prs.map((pr) => pr.url),
+        );
+        const id = row.id;
+        row = loadRows(deck).find((candidate) => candidate.id === id) ?? row;
       }
       const links = deck.store.links();
       ctx.io.stdout(
