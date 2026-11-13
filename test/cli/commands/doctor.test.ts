@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { Worker } from 'node:worker_threads';
 
 import { command } from '../../../src/cli/commands/doctor.ts';
 import { NS_PER_DAY, NS_PER_SECOND } from '../../../src/platform/time.ts';
@@ -213,15 +214,25 @@ describe('doctor: each problem alone', () => {
     onlyProblem(r, /^problem {2}transcripts: cannot read .*\/projects\/loop \(ELOOP\)$/);
   });
 
-  test('a database that cannot be written', async (t) => {
+  test('a database that cannot be written (another skydeck holds the write lock past the busy timeout)', async (t) => {
     const d = await installedMachine(t);
-    const db = new DatabaseSync(d.places.dbPath);
-    db.exec(
-      "CREATE TRIGGER refuse_probe BEFORE INSERT ON kv WHEN NEW.key = 'doctor_probe' BEGIN SELECT RAISE(ABORT, 'refused for the test'); END",
-    );
-    db.close();
-    const r = await doctor(d);
-    onlyProblem(r, /database .* is not writable/);
+    const signal = new SharedArrayBuffer(4);
+    const holder = new Worker(new URL('../../fixtures/hold-write-lock.ts', import.meta.url), {
+      workerData: { path: d.places.dbPath, signal },
+    });
+    const release = async (): Promise<void> => {
+      const flag = new Int32Array(signal);
+      Atomics.store(flag, 0, 1);
+      Atomics.notify(flag, 0);
+      await once(holder, 'exit');
+    };
+    try {
+      await once(holder, 'message'); // locked
+      const r = await doctor(d);
+      onlyProblem(r, /^problem {2}database .* is not writable \(.*locked.*\)$/);
+    } finally {
+      await release();
+    }
   });
 
   test('a sessions folder that cannot be read', async (t) => {
