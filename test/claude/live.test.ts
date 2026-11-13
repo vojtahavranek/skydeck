@@ -318,6 +318,22 @@ test('readLiveFiles follows a symbolic link that is named <digits>.json', (t) =>
   );
 });
 
+test('readLiveFiles gives [] when the sessions directory cannot be listed', (t) => {
+  const { platform, places } = testPlatform(t);
+  putFixture(places.claudeHome, 'busy.json');
+  const denied = new Proxy(platform.files, {
+    get(target, prop, receiver) {
+      if (prop === 'list') {
+        return () => {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        };
+      }
+      return Reflect.get(target, prop, receiver) as unknown;
+    },
+  });
+  assert.deepEqual(readLiveFiles(denied, places.claudeHome), []);
+});
+
 test('readLiveFiles gives [] when the sessions directory is missing', (t) => {
   const { platform, places } = testPlatform(t);
   assert.deepEqual(readLiveFiles(platform.files, places.claudeHome), []);
@@ -351,6 +367,16 @@ test('isAlive is false when the pid does not exist', () => {
 
 test('isAlive is false without a recorded process start', () => {
   assert.equal(isAlive(key({ procStart: null }), running(), BOOT_A), false);
+});
+
+test('isAlive is false without a recorded process start for a pid that does not exist either', () => {
+  // Nothing known on both sides must not count as "equal": a hook event without a readable stat.
+  assert.equal(isAlive(key({ pid: 9999, procStart: null }), running(), BOOT_A), false);
+  const unreadable = fakeProc({
+    bootId: BOOT_A,
+    processes: { 9999: { stat: 'garbage', cmdline: ['claude'] } },
+  });
+  assert.equal(isAlive(key({ pid: 9999, procStart: null }), unreadable, BOOT_A), false);
 });
 
 test('isAlive is false when the current boot id is unknown', () => {
@@ -396,6 +422,17 @@ test('isLiveFileTrusted is true when pid and procStart match a process', (t) => 
 test('isLiveFileTrusted is false without a procStart', (t) => {
   const file = { ...liveFile(t, 'busy.json'), procStart: null };
   assert.equal(isLiveFileTrusted(file, running()), false);
+});
+
+test('isLiveFileTrusted is false without a procStart for a pid that does not exist either', (t) => {
+  // Nothing known on both sides must not count as "equal".
+  const file = { ...liveFile(t, 'busy.json'), pid: 9999, procStart: null };
+  assert.equal(isLiveFileTrusted(file, running()), false);
+  const unreadable = fakeProc({
+    bootId: BOOT_A,
+    processes: { 9999: { stat: 'garbage', cmdline: ['claude'] } },
+  });
+  assert.equal(isLiveFileTrusted(file, unreadable), false);
 });
 
 test('isLiveFileTrusted is false for the stale fixture (the pid belongs to another process now)', (t) => {

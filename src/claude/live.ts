@@ -77,6 +77,15 @@ function readSessionFile(files: Files, path: string): { text: string; mtimeNs: N
   }
 }
 
+/** The names in a directory; none when it cannot be listed, like a file that cannot be read. */
+function listOrEmpty(files: Files, dir: string): string[] {
+  try {
+    return files.list(dir);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Reads <claudeHome>/sessions/ — only names matching ^[0-9]+\.json$ are opened (the directory also
  * holds credential files). Files that do not parse, or lack a numeric pid or a string sessionId,
@@ -85,7 +94,7 @@ function readSessionFile(files: Files, path: string): { text: string; mtimeNs: N
 export function readLiveFiles(files: Files, claudeHome: string): LiveFile[] {
   const dir = join(claudeHome, 'sessions');
   const result: LiveFile[] = [];
-  for (const name of files.list(dir)) {
+  for (const name of listOrEmpty(files, dir)) {
     if (!LIVE_FILE_NAME.test(name)) {
       continue;
     }
