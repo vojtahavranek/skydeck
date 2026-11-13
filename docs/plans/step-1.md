@@ -1183,9 +1183,10 @@ export const EMPTY_FACTS: TranscriptFacts;   // all null
  * `<bash-input>`, `<bash-stdout>`, `<bash-stderr>` or `[Request interrupted`. A 'user' record is
  * INPUT (`lastUserNs`, which decides whether a done session comes back) when its `turnOrigin` is
  * `human`; with any other `turnOrigin` (peer, scheduled, task_notification, sdk, ...) it is not;
- * without one it is input when it is a turn and not a tool result (`toolUseResult` present, or a
- * `tool_result` content block). The text is compared and dropped. A shape that is not recognised
- * is a turn. A user record always counts for the cwd, the entrypoint and the record times.
+ * without one it is input when it is a turn, not a tool result (`toolUseResult` present, or a
+ * `tool_result` content block) and its `promptSource` is not `system` (older versions wrote the
+ * notice of a finished background task so). The text is compared and dropped. A shape that is not
+ * recognised is a turn. A user record always counts for the cwd, the entrypoint and the record times.
  */
 export function foldLines(facts: TranscriptFacts, lines: readonly string[]): { facts: TranscriptFacts; prUrls: string[] };
 

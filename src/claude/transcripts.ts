@@ -190,8 +190,9 @@ function passesTurnExclusions(record: Record<string, unknown>): boolean {
  * taken for idle when it may be working.
  *
  * `input`: the user did it themselves, which is what brings a done session back. A `turnOrigin` of
- * `human` is; any other origin (peer, scheduled, task notification, ...) is not. Without one, a
- * turn is input unless it is a tool result.
+ * `human` is; any other origin (peer, scheduled, task notification, ...) is not. Without one (an
+ * older version), a turn is input unless it is a tool result or its `promptSource` is `system`
+ * (what Claude Code wrote itself, such as the notification of a finished background task).
  */
 function classifyUser(record: Record<string, unknown>): { turn: boolean; input: boolean } {
   const origin = record.turnOrigin;
@@ -199,7 +200,7 @@ function classifyUser(record: Record<string, unknown>): { turn: boolean; input: 
     return { turn: true, input: origin === 'human' };
   }
   const turn = passesTurnExclusions(record);
-  return { turn, input: turn && !isToolResult(record) };
+  return { turn, input: turn && !isToolResult(record) && record.promptSource !== 'system' };
 }
 
 /**

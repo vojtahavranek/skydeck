@@ -220,8 +220,10 @@ prompt, a message from another agent, a scheduled wakeup, a tool result) when it
 is marked meta, is a compaction summary or a sidechain record, or is what a command typed at the
 prompt leaves (a slash command or a `!` command, its output, an interrupt marker). A `user`
 record is **input** (the user did it themselves) when its `turnOrigin` is `human`; one without a
-`turnOrigin` is input when it is a turn and not a tool result. The text of a record is compared
-with those markers and dropped. It keeps no text of any message.
+`turnOrigin` is input when it is a turn, not a tool result and not sourced by the system
+(`promptSource` `system`, which is how older versions wrote the notice of a finished background
+task). The text of a record is compared with those markers and dropped. It keeps no text of any
+message.
 
 A transcript whose `entrypoint` is not `cli` is recorded but its session is never listed.
 A known transcript whose file has disappeared is marked missing with the time it was noticed.

@@ -658,6 +658,10 @@ const PROMPTS: Record<string, unknown>[] = [
   { message: { role: 'user', content: [{ type: 'image' }] } },
   // Claude Code 2.1.323 marks the origin of every prompt typed by the user.
   { turnOrigin: 'human' },
+  // Older versions: a prompt the user typed or queued names its source; only 'system' is not theirs.
+  { promptSource: 'typed' },
+  { promptSource: 'queued' },
+  { promptSource: 'suggestion_accepted' },
 ];
 
 test('foldLines: a prompt and an unknown shape are turns and user input', () => {
@@ -679,6 +683,8 @@ const TURNS_NOT_INPUT: Record<string, unknown>[] = [
   { turnOrigin: 'peer' },
   { turnOrigin: 'scheduled' },
   { turnOrigin: 'an origin this version does not know' },
+  // Without an origin (older versions): a record the system wrote is a turn, not the user's input.
+  { promptSource: 'system' },
   // An origin is a turn whatever else the record says: the model answers it.
   { isMeta: true, turnOrigin: 'peer' },
   { isMeta: true, isSidechain: true, isCompactSummary: true, turnOrigin: 'scheduled' },
@@ -703,6 +709,25 @@ test('foldLines: a tool result is recognised by its content block as well as by 
     assert.equal(facts.lastTurnRole, 'user');
     assert.equal(facts.lastUserNs, null);
   }
+});
+
+test('foldLines: a background-task notification without a turnOrigin (promptSource system) is a turn, not user input', () => {
+  const line = readFileSync(
+    fileURLToPath(
+      new URL('../fixtures/claude/transcripts/system-sourced-user-record.jsonl', import.meta.url),
+    ),
+    'utf8',
+  ).trim();
+  const record = JSON.parse(line) as Record<string, unknown>;
+  assert.equal(record.type, 'user');
+  assert.equal('turnOrigin' in record, false);
+  assert.equal(record.promptSource, 'system');
+  const { facts } = fold(user(T0), assistant(T0 + 5n * SEC), line);
+  assert.equal(facts.lastTurnRole, 'user');
+  assert.equal(facts.lastUserNs, T0);
+  // The record is the last one in the file, and still the typed prompt is the last user input:
+  // a done session must not come back because a background task ended.
+  assert.equal(facts.lastRecordNs, nsFromIso(String(record.timestamp)));
 });
 
 const originFixture = (): string[] =>
