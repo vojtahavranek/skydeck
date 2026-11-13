@@ -203,8 +203,9 @@ interface FlagToken {
 /** An unknown flag takes a following plain token, exactly as an optional-value flag does. */
 const UNKNOWN_SHAPE: FlagShape = 'optional';
 
-function unknownFlag(token: string, name: string = token, glued: string | null = null): FlagToken {
-  return { spec: null, specs: [], name, glued, shape: UNKNOWN_SHAPE };
+/** `name` is as much of the token as is the flag: nothing after an unknown letter is classified. */
+function unknownFlag(token: string, name: string = token): FlagToken {
+  return { spec: null, specs: [], name, glued: null, shape: UNKNOWN_SHAPE };
 }
 
 /**
@@ -212,7 +213,7 @@ function unknownFlag(token: string, name: string = token, glued: string | null =
  * flag's own name is that flag, whatever its length (`-d2e`). Otherwise a short token is read
  * letter by letter as Claude Code's own parser reads it: a no-value flag lets the cluster go on; a
  * value-taking flag ends it and takes the rest of the token, `=` included, as its value when there
- * is a rest. A letter that is not in the table makes the whole token an unknown flag. A cluster is
+ * is a rest. A letter that is not in the table makes the whole token an unknown flag, named up to that letter. A cluster is
  * represented by its first removable flag, else by its last.
  */
 function readFlagToken(token: string): FlagToken {
@@ -236,7 +237,7 @@ function readFlagToken(token: string): FlagToken {
   const specs: FlagSpec[] = [];
   for (let letter = 1; letter < token.length; letter += 1) {
     const spec = SPEC_BY_NAME.get(`-${token[letter]}`);
-    if (spec === undefined) break;
+    if (spec === undefined) return unknownFlag(token, token.slice(0, letter + 1));
     specs.push(spec);
     const represented = specs.find((s) => s.remove) ?? spec;
     if (spec.shape !== 'none') {
@@ -367,8 +368,9 @@ function passedOnTokens(args: readonly string[]): string[] {
  * (an initial prompt), `--` and everything after it, and every flag with `remove: true` (with its
  * values) are dropped, so a prompt reaches the database neither as a positional argument nor inside
  * a removed flag such as `--prefill-b64`. A flag that is in no table is stored as its bare name
- * (`--flag=value` as `--flag`): what follows it cannot be classified, and skydeck never stores text
- * it cannot classify, but the name lets a resume say the flag was not passed on (`unknownFlags`).
+ * (`--flag=value` as `--flag`, `-cZfix` as `-cZ`): what follows it cannot be classified, and skydeck
+ * never stores text it cannot classify, but the name lets a resume say the flag was not passed on
+ * (`unknownFlags`).
  * [] for an empty command. `buildResumeCommand` gives the same result for a command and for
  * `storableArgv` of it.
  */
@@ -384,8 +386,8 @@ export function storableArgv(argv: readonly string[]): string[] {
 
 /**
  * The names of the flags in a recorded or a stored command (program first) that are in no table, in
- * order, each once. A `--flag=value` is named `--flag`; a token with an unknown letter (`-cZ`) is
- * named as written. A resume does not pass these on.
+ * order, each once. A `--flag=value` is named `--flag`; a short token with an unknown letter is
+ * named up to that letter (`-cZfix` is `-cZ`). A resume does not pass these on.
  */
 export function unknownFlags(argv: readonly string[]): string[] {
   const names: string[] = [];

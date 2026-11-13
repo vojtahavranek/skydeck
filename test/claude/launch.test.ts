@@ -264,6 +264,21 @@ test('parseLaunchArgs: a short token with an unknown letter is an unknown flag a
   assert.deepEqual(parse(['-Z']), ['U["-Z"] values []']);
 });
 
+test('parseLaunchArgs: a token with an unknown letter is named up to that letter', () => {
+  const name = (arg: string) => {
+    const [item] = parseLaunchArgs([arg]);
+    assert.ok(item && item.kind === 'flag', arg);
+    assert.equal(item.spec, null, arg);
+    return item.name;
+  };
+  assert.equal(name('-Z'), '-Z');
+  assert.equal(name('-Zabc'), '-Z');
+  assert.equal(name('-cZ'), '-cZ');
+  assert.equal(name('-cZfix it'), '-cZ');
+  assert.equal(name('--frob'), '--frob');
+  assert.equal(name('--frob=x'), '--frob');
+});
+
 test('parseLaunchArgs: a short flag cluster is named without its glued value', () => {
   const name = (arg: string) => {
     const [item] = parseLaunchArgs([arg]);
@@ -876,6 +891,13 @@ test('storableArgv keeps an unknown flag as its bare name and drops what follows
   ]);
 });
 
+test('storableArgv does not store text written after an unknown letter', () => {
+  assert.deepEqual(
+    storableArgv(['claude', '-cZfix the login bug', '--model', 'opus', '-Zsecret']),
+    ['claude', '-cZ', '--model', 'opus', '-Z'],
+  );
+});
+
 test('storableArgv drops the value of an unknown --flag=value', () => {
   assert.deepEqual(storableArgv(['claude', '--frobnicate=fix it', '--model=opus']), [
     'claude',
@@ -884,8 +906,8 @@ test('storableArgv drops the value of an unknown --flag=value', () => {
   ]);
 });
 
-test('storableArgv keeps a token with an unknown letter as it was written, without its value', () => {
-  assert.deepEqual(storableArgv(['claude', '-cZ', 'x', '-Zabc', 'y']), ['claude', '-cZ', '-Zabc']);
+test('storableArgv cuts a token after its first unknown letter, so no text glued to it is stored', () => {
+  assert.deepEqual(storableArgv(['claude', '-cZ', 'x', '-Zabc', 'y']), ['claude', '-cZ', '-Z']);
 });
 
 test('storableArgv drops -- and everything after it', () => {
@@ -1009,8 +1031,9 @@ test('unknownFlags names the flags that are in no table, in order, once each', (
   );
 });
 
-test('unknownFlags names a token with an unknown letter as a whole', () => {
+test('unknownFlags names a token up to its first unknown letter', () => {
   assert.deepEqual(unknownFlags(['claude', '-cZ', 'x']), ['-cZ']);
+  assert.deepEqual(unknownFlags(['claude', '-cZfix the login bug', '-Zabc', '-Z']), ['-cZ', '-Z']);
 });
 
 test('unknownFlags is empty when every flag is known, and for no flags or no command', () => {
@@ -1097,6 +1120,8 @@ const PIECES = [
   '-nfoo',
   '-n=x',
   '-cZ',
+  '-cZfix it',
+  '-Zabc',
   '-Z',
   '-1',
   '--frob',
@@ -1139,6 +1164,17 @@ test('random commands keep the properties storableArgv promises (fixed seed)', (
       assert.equal(item.kind, 'flag', `positional stored: ${text}`);
       if (item.kind === 'flag') {
         assert.ok(item.spec === null ? item.tokens.length === 1 : !item.spec.remove, text);
+        // a flag that is in no table is stored as its bare name, with no text after it
+        if (item.spec === null) {
+          assert.equal(item.tokens[0], item.name, `bare name: ${text}`);
+          const token = item.name;
+          if (token.startsWith('-') && !token.startsWith('--')) {
+            const letters = [...token.slice(1)];
+            const knownLetter = (letter: string) => allNames.includes(`-${letter}`);
+            assert.ok(!knownLetter(letters.at(-1) ?? ''), `ends at the unknown letter: ${text}`);
+            assert.ok(letters.slice(0, -1).every(knownLetter), `known letters before it: ${text}`);
+          }
+        }
       }
     }
   }
