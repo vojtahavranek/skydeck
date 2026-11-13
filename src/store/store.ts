@@ -318,14 +318,20 @@ function migrate(db: DatabaseSync, path: string): void {
       if (version > SCHEMA_VERSION) {
         throw tooNew(version);
       }
-      const sql = MIGRATIONS[version];
-      if (version < SCHEMA_VERSION && sql !== undefined) {
-        db.exec(sql);
-        db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(
-          'schema_version',
-          String(version + 1),
-        );
+      if (version === SCHEMA_VERSION) {
+        return; // another process migrated while this one waited for the lock
       }
+      const sql = MIGRATIONS[version];
+      if (sql === undefined) {
+        // Cannot happen while SCHEMA_VERSION is MIGRATIONS.length; stopping here keeps a mistake
+        // in that from becoming a loop that never ends.
+        throw new Error(`migration ${version + 1} is missing`);
+      }
+      db.exec(sql);
+      db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(
+        'schema_version',
+        String(version + 1),
+      );
     });
   }
 }
@@ -356,7 +362,9 @@ export function openStore(path: string): Store {
       throw error;
     }
     const reason = error instanceof Error ? error.message : String(error);
-    throw new SkydeckError(`cannot open the database ${path}: ${reason}`, 1);
+    const refusal = new SkydeckError(`cannot open the database ${path}: ${reason}`, 1);
+    refusal.cause = error; // SkydeckError has no options argument; the stack of the SQLite error stays
+    throw refusal;
   }
   return new SqliteStore(db, path);
 }

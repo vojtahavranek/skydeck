@@ -280,6 +280,8 @@ describe('openStore', () => {
         assert.equal(error.exitCode, 1);
         assert.ok(error.message.includes(path), error.message);
         assert.match(error.message, /not a database/);
+        assert.ok(error.cause instanceof Error, 'the SQLite error is kept as the cause');
+        assert.match(error.cause.message, /not a database/);
         return true;
       },
     );
@@ -294,6 +296,8 @@ describe('openStore', () => {
         assert.ok(error instanceof SkydeckError);
         assert.equal(error.exitCode, 1);
         assert.ok(error.message.includes(path), error.message);
+        assert.ok(error.cause instanceof Error, 'the SQLite error is kept as the cause');
+        assert.match(error.cause.message, /unable to open/);
         return true;
       },
     );
@@ -351,6 +355,9 @@ describe('events', () => {
     // size limit is hit) must surface; it was once swallowed when the row was read with get().
     const sb = sandbox(t);
     const path = join(sb.root, 'skydeck.db');
+    // The database is made here, outside the limit: only the insert is under test, not the
+    // migration.
+    openStore(path).close();
     const child = `
       const [storeUrl, path, payload] = process.argv.slice(1);
       const { openStore } = await import(storeUrl);
@@ -360,8 +367,8 @@ describe('events', () => {
         argv: null, name: null, payload: 'x'.repeat(Number(payload)) };
       try {
         console.log('returned ' + store.insertEvent(event));
-      } catch {
-        console.log('threw');
+      } catch (error) {
+        console.log('threw: ' + error.message);
       }
     `;
     // `ulimit -f 150` is 75 to 150 KB; the payload is 400 KB. A child that ignores SIGXFSZ gets
@@ -384,7 +391,7 @@ describe('events', () => {
     );
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), 'threw');
+    assert.equal(result.stdout.trim(), 'threw: disk I/O error');
     const store = openStore(path);
     t.after(() => {
       store.close();
