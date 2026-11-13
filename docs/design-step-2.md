@@ -65,10 +65,13 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   and `sh`'s `ulimit -c` counts in blocks and cannot say 1 byte. So the launcher starts `serve`
   through a one-line `python3 -I -c` program (python3 is already required for the window) that
   sets the soft core limit to 1 byte, keeps the hard limit, puts the soft limit it found into
-  `SKYDECK_CORE_SOFT`, and `exec`s Node.js. Keepers inherit the limit; each keeper's child sets the
-  soft limit back to that value before it `exec`s the program, so `claude` keeps the user's own
-  limit (7.1). Without python3 the launcher starts `serve` directly, and the server's dumps are not
-  prevented (it cannot open terminals then anyway, 14). That a limit of 1 aborts the dump on this
+  `SKYDECK_CORE_SOFT` (its number of bytes in decimal, or `unlimited`), and `exec`s Node.js.
+  Keepers inherit the limit; each keeper's child sets the soft limit back to that value before it
+  `exec`s the program, so `claude` keeps the user's own limit (7.1). When the line cannot set the
+  limit (the hard limit is 0, or `setrlimit` fails), it still starts Node.js, without
+  `SKYDECK_CORE_SOFT`, and writes one line saying so to `server.log`. Without python3 the
+  launcher starts `serve` directly, and the server's dumps are not prevented (it cannot open
+  terminals then anyway, 14). That a limit of 1 aborts the dump on this
   machine's kernel (6.18, not read) is **UNVERIFIED** (check W24).
 - **Principle 6 (nothing is destroyed or moved automatically; skydeck never stops a process)** is
   made precise: skydeck never stops a `claude` process or a keeper (stopping a keeper would end
@@ -144,7 +147,7 @@ The places of design 9.1 stay. Step 2 adds:
 
 | Place | Holds |
 |---|---|
-| `<runtimeDir>` | The server chooses it by the first rule that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck-<store id>` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run-<store id>`. `<store id>` is the first 8 hex digits of the sha256 of the store's path, so two installations never share a runtime directory. The server records the directory it chose in the store (`kv` `window_runtime_dir`, 10.2) when it takes its lock, and leaves the record while any keeper lives. **Commands follow the record**, not their own environment — a command run without `XDG_RUNTIME_DIR` (from cron, `wsl.exe --exec`, `sudo -u`) still finds the server and the keepers — and resolve the rule themselves only when there is no record. `uninstall --purge` looks in the recorded directory and in every directory the rule can give (16.2). The keep-alive script is given the directory as an argument (6.1). Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the others are not, so the server treats anything there from another boot as stale (6.3, 7.8). A test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
+| `<runtimeDir>` | The server chooses it by the first rule that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck-<store id>` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run-<store id>`. `<store id>` is the first 8 hex digits of the sha256 of the store's path, so two installations never share a runtime directory. The server records the directory it uses in the store (`kv` `window_runtime_dir`, 10.2) when it takes its lock, and leaves the record while any keeper lives. **A starting server follows the record first**: when it names a directory that exists and holds a keeper alive by its `.pid` line, the server uses that directory, whatever its own environment would give, so that it finds the keepers a server started with another environment left there; a record whose directory is missing or holds nothing alive is ignored, and the server chooses by the rule and replaces the record. **Commands follow the record**, not their own environment — a command run without `XDG_RUNTIME_DIR` (from cron, `wsl.exe --exec`, `sudo -u`) still finds the server and the keepers — and resolve the rule themselves only when there is no record. `uninstall --purge` looks in the recorded directory and in every directory the rule can give (16.2). The keep-alive script is given the directory as an argument (6.1). Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the others are not, so the server treats anything there from another boot as stale (6.3, 7.8). A test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
 | `<runtimeDir>/server.json` | The running server: `pid`, `procStart`, `bootId`, `port`, `serverId` (random per start), `build` (16.5), `checkout` (its `appRoot`), `startedAt`, and where its environment came from (5.2). Mode 600. Written after the server listens, removed when it stops. |
 | `<runtimeDir>/server.sock` | The server's unix socket for the command line (8.3), mode 600. |
 | `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
@@ -228,11 +231,16 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    that does not answer within 5 seconds is reported: `the window's server (pid <n>) does not
    answer; skydeck window --restart stops it` (exit 1). Otherwise a new one is started.
 2. when no page is connected to the server, asks it for a launch token (`POST /token`, 8.3),
-   starts Edge with it (5.3), and waits up to 10 seconds for the token to be used by a page
-   (`GET /token/<id>`). When the wait ends — used, the alarm, or the 10 seconds gone — it gives the
-   token up (`POST /token/drop`), so no unused token is left on Edge's command line. On the alarm it
-   says so and names `--new-secret` (8.2.2) and exits 1. Only one command starts Edge at a time: it
-   holds the `kv` entry `window_launching` (taken in one transaction, stale after 15 seconds) while
+   starts Edge with it (5.3), and waits up to 30 seconds — a cold Edge on a managed PC can take
+   several (W1 records the real time) — for the token to be used by a page (`GET /token/<id>`).
+   Once it is used, the command waits 2 seconds more for a second use (`reused`), so that a window
+   that lost its token to another program is not reported as a success. When the wait ends —
+   used, the alarm, or the 30 seconds gone — it gives the token up (`POST /token/drop`), so no
+   unused token is left on Edge's command line. On the alarm for its own token it says so, names
+   `--new-secret` (8.2.2), and exits 1. An alarm set earlier (`window_alarm`) does not stop it: it
+   goes on as usual and prints one more line, `skydeck's key may be known to another program since
+   <time>; run skydeck window --new-secret`. Only one command starts Edge at a time: it
+   holds the `kv` entry `window_launching` (taken in one transaction, stale after 45 seconds, longer than its wait) while
    it starts Edge and waits; a second `skydeck window` meanwhile waits for that one's page instead
    of starting another window.
 3. prints one line: `skydeck window: http://127.0.0.1:<port>/ (server pid <n>)` — never a key or a
@@ -311,7 +319,7 @@ names is not alive by design 5.5's rule; so a second server of the same installa
 port, `serve --foreground`, another checkout — does not start (`a window server already runs (pid
 <n>, from <checkout>)` on stderr; exit 0 when the running one is of the same checkout, 11
 otherwise), and only one server ever talks to the keepers of one runtime directory, which belongs
-to one store (4.2). Holding the lock, it records its runtime directory, binds the port, removes a
+to one store (4.2). Holding the lock, it takes its runtime directory (the record first, 4.2) and records it, binds the port, removes a
 `server.sock` that refuses connections (left by a dead server) and listens there, writes
 `server.json`, and removes the lock when it stops. A port held by anything else makes it release
 the lock and exit 10.
@@ -777,7 +785,7 @@ close codes; invalid UTF-8 closes with 1007, an unmasked client frame with 1002;
 #### 8.2.2 Handshake, proof and versions
 
 Two keys exist. The **secret** (15.2) is long-lived and stays in WSL and in the page. A **launch
-token** is made for one window: 32 random bytes, valid once and for 60 seconds (10 minutes for
+token** is made for one window: 32 random bytes, valid once and for 30 seconds (10 minutes for
 `--print-url`). The server mints it when a command asks over `server.sock` (`POST /token`, 8.3) and
 keeps it in memory only — never in the store or a file; a server restart forgets every token. Only
 a launch token is ever put on a command line or into an address (5.1, 5.3). The command that asked
@@ -800,8 +808,8 @@ the server's proof.
    characters); anything else closes the connection (4001 from the server).
 4. The server checks `pP` in constant time, against the secret or against each launch token it
    holds. A token that matches is marked **used** at once, in memory (the server is one process,
-   so two pages racing with one token cannot both get it), and is remembered as used until it
-   would have expired. A proof made with a token that is already used closes with **4004** and
+   so two pages racing with one token cannot both get it), and is remembered as used for the
+   server's whole life (a few bytes each), so that a second use is always recognised. A proof made with a token that is already used closes with **4004** and
    raises the **alarm** (below). No match at all closes with 4003 and nothing else. Otherwise it
    answers:
 
@@ -863,6 +871,10 @@ address's fragment (`#t=<launch token>`), keeps the token in memory, and removes
 address with `history.replaceState` (the address becomes `/`). After the first `welcome` it turns
 `key` into a Web Crypto HMAC key with `unwrapKey` (AES-GCM, under the key derived from the token),
 marked **not extractable**, stores that key object in the origin's IndexedDB, and forgets the token.
+A page presents its token **once**: whatever happens after its one `hello` with that token — a
+close, a timeout, a wrong server proof — it never sends a proof with that token again, and, unless
+it received a key, says `run skydeck window again` instead of retrying (a second presentation by
+the page itself would raise a false alarm).
 The secret's bytes never reach the page's code: the page can make proofs with the key but cannot
 read it, and neither can any other page at that origin. A reload, and a window opened later in the
 same profile, find the key there. A page that has neither a token nor a stored key says `this
@@ -1003,7 +1015,7 @@ absolute and existing, no flag that picks a session or names it). The program is
 | `POST /resume` | `{ sessionId }` → `prepareResumeById` and the window terminal (11.2) → `{ code, lines }`: the exit code and the lines `skydeck resume` prints (design 7.6), refusals included. |
 | `POST /new` | `{ dir, label, group, flags }` (`flags` an array of strings) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
 | `POST /restore` | `{ sessionIds, all }` → 11.4. The answer is a stream of JSON lines: one per report line of the run, the last one the outcome. |
-| `POST /token` | `{ minutes }` (1 for a window, 10 for `--print-url`) → `{ id, token, expiresAtNs }`: a launch token, minted and held in memory (8.2.2). |
+| `POST /token` | `{ seconds }` (30 for a window, 600 for `--print-url`) → `{ id, token, expiresAtNs }`: a launch token, minted and held in memory (8.2.2). |
 | `GET /token/<id>` | `{ state }`: `waiting`, `used`, `reused` (a second proof came: the alarm, 8.2.2), `expired` or `dropped`. |
 | `POST /token/drop` | `{ id }` → `{ ok }`: the token is given up; a later proof with it fails with 4003 (or 4004 when it had been used). |
 | `POST /shutdown` | `{ ok: true }`, then 5.5. |
@@ -1156,7 +1168,7 @@ the first time one of them is known and never removed.
 |---|---|
 | `window_secret` | The secret (15.2): 32 random bytes, base64url. Created on first need, inside one transaction (only one server runs, 5.2, but `--print-url` and the first server may race). |
 | `window_server` | The lock of the one server (5.2). |
-| `window_runtime_dir` | The runtime directory the server chose (4.2); kept while any keeper lives, so that commands find it. |
+| `window_runtime_dir` | The runtime directory the server uses (4.2); kept while any keeper lives, so that commands and the next server find it; a record whose directory is missing or holds nothing alive is replaced at the next server start. |
 | `window_alarm` | The time a used launch token was presented a second time (8.2.2); cleared by `--new-secret`. Launch tokens themselves are never stored. |
 | `window_launching` | The lock of the one command that starts Edge (5.1). |
 | `attention_seq` | The counter above. |
@@ -1465,7 +1477,9 @@ other. Alt+F4 is never passed to the terminal and never cancelled, in either foc
 window closes with it as any window does. Alt+Space never reaches the page (Windows keeps it for
 the window menu). The reload keys are the page's own in the list zone: F5, Ctrl+R, Ctrl+Shift+R and
 Ctrl+F5 make the page open a new connection, wait for the server's proof, and only then reload
-(15.3); in the terminal zone they go to the program like any key. A key that neither zone uses
+(15.3); in the terminal zone F5, Ctrl+R and Ctrl+F5 go to the program like any key, while
+Ctrl+Shift+R — for which xterm.js sends nothing and cancels nothing (9.1) — is the page's there
+too, so that Edge never reloads the page by itself. A key that neither zone uses
 keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no session.
 
 | Key | Action |
@@ -1562,7 +1576,7 @@ taskbar button show it is check W3. Low priority: stage E (19).
 | **The server dies** (crash, killed) | Keepers and their programs keep running; output collects in each keeper's tail (up to 8 MiB, 7.1). Terminal queries a program sends meanwhile go unanswered (it times out, as in a terminal that does not support them). Pages show 6.3's bar. `skydeck window` starts a new server, which finds the keepers in `<runtimeDir>/terms/`, rebuilds every screen from snapshot and tail (7.3), and pages reconnect with the same boot id. `server.log` keeps the reason when one was logged. |
 | **A keeper dies** | Its program gets SIGHUP and ends (`SessionEnd` with reason `other`; the session is marked `ended-unexpectedly`, so restore offers it). The server marks the terminal lost (7.8) and the session needs you (12.4, "ended"). Nothing else is affected. |
 | **python3 is missing** (or older than 3.9; tested on 3.12 only) | The server runs and the list works; opening a terminal fails at once with `python3 3.9 or newer is needed to open terminals in the window (sudo apt install python3)` on the resume card, and `doctor` reports a problem. The commands are unaffected. |
-| **The port is taken** | By a skydeck server of this installation: it is used (5.2). By anything else: `skydeck window` and `serve` exit 1 naming the port and `window.port`. A program that holds the same port on the **Windows** side is not visible from WSL: then the window shows that program's answer or an error; check W1 and 15.3. |
+| **The port is taken** | By a skydeck server of this installation: it is used (5.2). By anything else: `serve` exits 10 and `skydeck window` exits 1 with the line that names the port and `window.port` (5.2). A program that holds the same port on the **Windows** side is not visible from WSL: then the window shows that program's answer or an error; check W1 and 15.3. |
 | **Edge is missing** | 5.3: a message naming `window.edge` and `--print-url`; exit 1; the server keeps running. |
 | **`skydeck window` is run twice** | The second run finds the server and, when a page is connected, starts no second window (5.1). Two at the same moment start one server (the lock, 5.2) and one window (`window_launching`, 5.1). |
 | **The server hangs** (alive, not answering) | `skydeck window` says so and names `--restart`, which stops it with signals after checking its identity (5.1). |
@@ -1650,7 +1664,9 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   **gets the secret**, nearly every time it tries. It is not silent: the window's own attempt is
   then the second use of the token, and the alarm (8.2.2) makes the window, the waiting `skydeck
   window` and `doctor` say to run `skydeck window --new-secret`. So it takes an account in the
-  distribution, acting at the moment a window opens, and the user is told. A way to close it, not
+  distribution, acting at the moment a window opens, and the user is told. The other side of the
+  same coin: an account that can read `/proc` can also raise the alarm at will, by presenting a
+  token after the window has used it; the cost to the user is one `--new-secret`. A way to close it, not
   taken in step 2 because it adds unverified Edge behaviour (the taskbar identity, a `file:` address
   on a managed PC): give Edge a `file://wsl.localhost/…` page from the runtime directory that
   forwards to the real address, so that no command line holds a token.
@@ -1663,7 +1679,8 @@ Edge reaches that program instead.
 
 - **A window opened** while that program holds the port runs that program's page, which receives
   the launch token: if the program can reach the real server while the token lives, it gets the
-  secret (the alarm then shows, as in 15.2).
+  secret. No alarm comes in this case: the window's own page is the program's, so nobody presents
+  the token a second time; only the foreign or broken window shows it.
 - **Its page runs at the window's origin.** It can register a service worker, which stays in the
   window's profile after that program is gone, answers later loads of the page itself, and can use
   the stored key in every later window — lasting control of the window's profile. The server
@@ -1879,7 +1896,14 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   `--new-secret` clears the alarm; `key` opens only with the token and both nonces; a nonce that is
   not exactly 32 bytes of base64url closes the connection;
 - the runtime directory: a command run without `XDG_RUNTIME_DIR` finds the server and the keepers
-  through the store's record; `uninstall --purge` sees a live keeper in any candidate directory;
+  through the store's record; a server started without `XDG_RUNTIME_DIR` while keepers live in the
+  recorded directory uses that directory and finds them; a record whose directory is missing or
+  empty of live keepers is replaced; `uninstall --purge` sees a live keeper in any candidate
+  directory;
+- the waiting command: it reports success only after 2 more seconds without a second use, and
+  reports the alarm when the second use comes in that time; with `window_alarm` already set it
+  goes on and prints the `--new-secret` line; a page that failed once with its token never
+  presents it again;
 - the lock (5.2): a second server of the same installation refuses, on another port, from another
   checkout and in the foreground; a stale lock of a dead server is taken over; `--restart` waits for
   the old process, signals only a process whose identity it confirmed, and never a keeper; the
@@ -1952,7 +1976,8 @@ In the browser suite, besides those:
   proof it sends nothing at all and shows the warning;
 - a dropped file does not navigate the window; OSC 52 from a hidden terminal does not reach the
   clipboard;
-- reload: F5 and Ctrl+R in the list zone reload only after a server's proof, and not at all against
+- reload: F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 in the list zone, and Ctrl+Shift+R in the terminal
+  zone, reload only after a server's proof, and not at all against
   a stand-in server without one;
 - a stand-in server holding the port serves a page that registers a service worker; after the real
   server is back, whether the worker still answers the next load (the 404 of 15.3) is recorded, so
@@ -1986,7 +2011,7 @@ folder, as in manual-checks.md.
 
 | # | Check | Stage | Decides |
 |---|---|---|---|
-| W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified by the user on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) | A | 5 |
+| W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified by the user on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) Write down how long Edge took from the command to the page's connection, cold and warm: the token and the command's wait last 30 seconds (5.1). | A | 5, 8.2.2 |
 | W2 | The chords of 12.9 that the key test of 2026-11-13 did not press reach the page and the browser does nothing: Ctrl+Shift+P, J, L, F, C, H and 1–9; and Alt+F4 still closes the window once the page is built (12.9). In a normal tab (`--print-url`), which chords the browser keeps. | A | 12.9 |
 | W3 | The window has its own taskbar button with skydeck's icon (12.12), the same one after `skydeck window --restart` and after a WSL restart, and the title `(n) skydeck`; a second `skydeck window` opens no second window. | A, B, E | 5.1, 12.1, 12.12 |
 | W4 | **Real claude** in a window terminal: status line, subagent display, spinner, redraw on resize. Then `skydeck window --restart`: the screen is exactly what it was. | A | 7.2, 7.3 |
