@@ -32,8 +32,9 @@ export interface Files {
    */
   writeText(path: string, text: string, mode?: number): void;
   /**
-   * Creates the file only if it does not exist (O_EXCL). false when it already exists. The file is
-   * created, then written: a reader may briefly see it empty.
+   * Creates the file only if it does not exist; false when it already exists. The content is
+   * written to a temporary file that is then hard-linked into place, so no reader ever sees the
+   * file empty or half written. Needs a file system with hard links.
    */
   createExclusive(path: string, text: string): boolean;
   /** mkdir -p; `mode` applies to directories it creates. */

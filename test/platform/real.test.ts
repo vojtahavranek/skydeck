@@ -9,11 +9,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { on } from 'node:events';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 
 import { realPlatform } from '../../src/platform/real.ts';
 import type { RunResult } from '../../src/platform/types.ts';
@@ -209,11 +211,71 @@ describe('real files', () => {
 
   test('createExclusive creates once, then says false and keeps the content', (t) => {
     const { files } = realPlatform();
-    const q = join(tmp(t), 'q');
+    const dir = tmp(t);
+    const q = join(dir, 'q');
 
     assert.equal(files.createExclusive(q, 'x'), true);
     assert.equal(files.createExclusive(q, 'y'), false);
     assert.equal(files.readText(q), 'x');
+    assert.deepEqual(files.list(dir), ['q']); // no temporary file, after either call
+  });
+
+  test('createExclusive fails on an existing directory or empty file without touching it', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'd'));
+    writeFileSync(join(dir, 'empty'), '');
+
+    assert.equal(files.createExclusive(join(dir, 'd'), 'x'), false);
+    assert.equal(files.createExclusive(join(dir, 'empty'), 'x'), false);
+    assert.equal(files.readText(join(dir, 'empty')), '');
+    assert.deepEqual(files.list(dir), ['d', 'empty']);
+  });
+
+  test('createExclusive into a directory that does not exist throws and leaves nothing', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+
+    assert.throws(() => files.createExclusive(join(dir, 'no', 'q'), 'x'));
+
+    assert.deepEqual(files.list(dir), []);
+  });
+
+  test('a reader that sees the file created by createExclusive always sees all of it', async (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    const content = 'x'.repeat(2_000_000);
+    const paths = Array.from({ length: 25 }, (_, i) => join(dir, `lock-${i}`));
+    // The reader spins on each path in turn and reports how many bytes it found as soon as it can
+    // see the file; the main thread creates the files while it spins.
+    const reader = new Worker(
+      `
+      const { workerData, parentPort } = require('node:worker_threads');
+      const { readFileSync } = require('node:fs');
+      parentPort.postMessage('ready');
+      for (const path of workerData) {
+        for (;;) {
+          try { parentPort.postMessage(readFileSync(path, 'utf8').length); break; }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+        }
+      }
+      `,
+      { eval: true, workerData: paths },
+    );
+    t.after(() => reader.terminate());
+    const messages = on(reader, 'message');
+    await messages.next(); // ready
+
+    const seen: unknown[] = [];
+    for (const path of paths) {
+      assert.equal(files.createExclusive(path, content), true);
+      seen.push((await messages.next()).value?.[0]);
+    }
+
+    assert.deepEqual(
+      seen,
+      paths.map(() => content.length),
+    );
   });
 
   test('a path that does not exist reads as null, [] and null', (t) => {

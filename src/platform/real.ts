@@ -4,6 +4,7 @@ import {
   chmodSync,
   closeSync,
   fstatSync,
+  linkSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -166,14 +167,22 @@ function realFiles(): Files {
       }
     },
     createExclusive(path, text) {
+      // Written to a temporary file and linked into place: link() fails when the name exists, and
+      // the name never shows a file that is empty or half written.
+      const temp = siblingTemp(path);
       try {
-        writeFileSync(path, text, { flag: 'wx' });
-        return true;
-      } catch (error) {
-        if (errorCode(error) === 'EEXIST') {
-          return false;
+        writeFileSync(temp, text, { flag: 'wx' });
+        try {
+          linkSync(temp, path);
+          return true;
+        } catch (error) {
+          if (errorCode(error) === 'EEXIST') {
+            return false;
+          }
+          throw error;
         }
-        throw error;
+      } finally {
+        rmSync(temp, { force: true });
       }
     },
     mkdirp(path, mode) {
