@@ -901,6 +901,31 @@ test('without tabs a failed handoff whose command cannot be printed releases its
   assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
 });
 
+test('without tabs a handoff that timed out prints no command and keeps its lock, printable or not', async (t) => {
+  // No terminal that runs here times out today; one that did may have started the session.
+  const timingOut: Terminal = {
+    name: 'here',
+    opensTabs: false,
+    open: async () => ({ ok: false, error: 'timed out; it may have started', timedOut: true }),
+  };
+  for (const argv of [['claude'], ['claude', '--model', 'op\x1b]0;x\x07us']]) {
+    const d = restoreDeck(t, { config: TAB_CONFIG });
+    addSession(d, sid(1), { boot: BOOT_A, pid: 101, startNs: T0 - HOUR, argv });
+    const entries = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, false);
+    const { outcome, lines } = await run(d, timingOut, entries);
+    assert.deepEqual(
+      outcome,
+      {
+        ...NOTHING,
+        failed: [{ id: sid(1), reason: 'timed out; it may have started' }],
+      },
+      JSON.stringify(argv),
+    );
+    assert.deepEqual(lines, ['failed 00000001: timed out; it may have started']);
+    assert.notEqual(d.deck.store.getKv(lockKey(sid(1))), null, JSON.stringify(argv));
+  }
+});
+
 test('without tabs a command holding control characters is never printed', async (t) => {
   const d = restoreDeck(t, { config: TAB_CONFIG });
   addSession(d, sid(1), { boot: BOOT_A, pid: 101, startNs: T0 - HOUR, activityNs: T0 - MINUTE });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { launchPrepared } from '../../src/cli/launching.ts';
-import { acquireLock, lockKey } from '../../src/sessions/resume.ts';
+import { acquireLock, lockKey, readLock } from '../../src/sessions/resume.ts';
 import type { PreparedLaunch } from '../../src/sessions/resume.ts';
 import { handoffScript } from '../../src/terminals/here.ts';
 import { testDeck } from '../helpers/deck.ts';
@@ -125,6 +125,15 @@ test('launchPrepared keeps the lock after a timeout: the program may have starte
   d.platform.runner = fakeRunner(() => runResult({ code: null, timedOut: true }));
   assert.equal((await launchPrepared(d.deck, prepared('/w'), null)).code, 1);
   assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+});
+
+test('launchPrepared keeps the lock after a timeout even when the command cannot be printed', async (t) => {
+  const d = testDeck(t, { config: { terminal: 'wezterm' } });
+  acquireLock(d.deck, S1, NO_EVENTS);
+  d.platform.runner = fakeRunner(() => runResult({ code: null, timedOut: true }));
+  const p = prepared('/w', { argv: ['claude', '--resume', S1, '--model', 'op\x1b[31mus'] });
+  assert.equal((await launchPrepared(d.deck, p, null)).code, 1);
+  assert.notEqual(readLock(d.deck, S1), null); // the tab may have opened: no second resume yet
 });
 
 test('launchPrepared leaves a lock alone that is not the one the resume took', async (t) => {
