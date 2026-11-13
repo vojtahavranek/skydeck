@@ -287,7 +287,11 @@ A process **stopped holding** a session when an `end` event for it arrives. An `
 resume a session that a live scripted run holds, and `show` names such a holder as a scripted
 run. While it runs, the session is `running` (a scripted run has no live-session file, 6.2). A
 `scripted-end` stops the holding like an `end`, but is never a deliberate exit or any other end of
-a holding: 6.3 looks only at holdings of processes that are not scripted runs.
+a holding: 6.3 looks only at holdings of processes that are not scripted runs. One case escapes
+this, and is left as it is: a kept `claude -cp` start whose `entrypoint_env` is empty is scripted
+by its launch command, but its end has no launch command and so is not scripted (5.3); it is
+stored as a plain `end`, and that process's holding can then be a session's last holding. Claude
+Code always sets the entry point today, so this does not happen.
 
 A session is **running** when a live process holds it. If two live processes hold the same
 session (which principle 7 exists to prevent), the session is running, `show` lists both, and the
