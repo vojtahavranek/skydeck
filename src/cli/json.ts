@@ -5,7 +5,7 @@
  * (U+009B alone starts a control sequence on a terminal that reads 8-bit controls) and the
  * bidirectional controls. The C0 controls it escapes itself.
  */
-const TERMINAL_ACTIVE = /[\u007f-\u009f‪-‮⁦-⁩]/g;
+const TERMINAL_ACTIVE = /[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 
 /**
  * `JSON.stringify(value, null, 2)` and a newline, with the characters a terminal would act on

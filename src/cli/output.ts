@@ -198,7 +198,7 @@ function prField(pr: PrView): string {
  * One session in full (design 7.5): its title, then one line per field. Nothing is left to a
  * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4.
  */
-export function formatShow(row: ListRow, links: readonly LinkRow[], _nowNs: Ns): string {
+export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): string {
   const launch =
     row.session.launch === null || row.session.launch.length === 0 ? null : row.session.launch;
   const lines = [

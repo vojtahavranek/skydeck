@@ -251,7 +251,7 @@ test('showJson: no note and no launch command are null; unknownFlags is [] witho
 test('showJson: unknownFlags names the flags no table knows', () => {
   const row = listRow({
     id: S1,
-    session: ds({ id: S1, launch: ['claude', '--frob', '--other'] }),
+    session: ds({ id: S1, launch: ['claude', '--frob', 'x', '--other=1'] }),
   });
   assert.deepEqual(showJson(row, []).unknownFlags, ['--frob', '--other']);
 });
