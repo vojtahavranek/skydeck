@@ -954,7 +954,11 @@ test('the line that names a printed session quotes its title and directory: past
   mkdirSync(scratch);
   writeFileSync(join(scratch, 'README.md'), 'notes\n');
   for (const name of names) {
-    spawnSync('sh', ['-s'], { cwd: scratch, input: `${name}\n`, encoding: 'utf8' });
+    const shell = spawnSync('sh', ['-s'], { cwd: scratch, input: `${name}\n`, encoding: 'utf8' });
+    // A shell ran the line, and its only command was not found (127): without these, a missing sh
+    // would let the checks below pass whatever the line holds.
+    assert.equal(shell.error, undefined, name);
+    assert.equal(shell.status, 127, `${name}\n${shell.stderr}`);
   }
   assert.deepEqual(readdirSync(scratch), ['README.md']);
   assert.equal(readFileSync(join(scratch, 'README.md'), 'utf8'), 'notes\n');
