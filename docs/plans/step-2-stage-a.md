@@ -1084,7 +1084,7 @@ write guard; `kv` gets the window's keys.
   the same writes succeed (a command migrates, it does not refuse). The `kv` keys of 2.6 type-check.
 - Store guard under the lock: a migration that commits while a guarded write waits for the write
   lock is seen, and the write is refused (the version is read after BEGIN IMMEDIATE).
-- `isDatabaseFailure(new StoreNewerError())` is true (ruled in #39): otherwise ingest, reconcile and
+- `isDatabaseFailure(new StoreNewerError('<message>'))` is true (ruled in #39): otherwise ingest, reconcile and
   scan, which rethrow only failures of the database as a whole, would record the refusal item by
   item and go on, and the server's tick would not stop at the first refused write.
 
