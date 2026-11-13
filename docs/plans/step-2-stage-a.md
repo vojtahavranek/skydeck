@@ -745,7 +745,8 @@ that the page (tasks 26–29) never sends what the server refuses: strings are m
 bytes — paths (`new.dir`) and URLs (`open-link.url`; the action then opens one only up to 2,048
 characters, S2 9.6) at most 4,096, `input.data` at most 64 KiB (65,536 bytes; with `binary`, at most
 65,536 characters, each U+0000–U+00FF), every other string at most 1,024 — and every string must
-be well formed (no lone surrogate). `cols` and `rows` (also `focus.area`'s) are whole numbers
+be well formed (no lone surrogate). `encodeOutputFrame` throws a `RangeError` for a channel that is
+not a whole number 0–2³²−1. `cols` and `rows` (also `focus.area`'s) are whole numbers
 1–65,535; `ping.n` and `act.id` whole numbers from 0; `term` 12 lower-case hex characters,
 `windowId` 16 (A21); `selected` and `sessionId` pass `isSessionId`; `unfolded` holds section names,
 each once; `binary` is `true` or absent; `hello.protocol` any whole number from 0 (the server
@@ -932,10 +933,13 @@ arrives from a page or a command, the keeper frame codec and payload parsers, an
 between the server's parts. No behaviour beyond encoding, decoding and validation.
 
 **Files**
-- Create: `src/window/protocol.ts`, `src/window/frames.ts`, `src/window/hub.ts`
-- Modify: `docs/design-step-2.md` 8.2.3 (`tick-failed`, `result.sessionId`, `list.selected`,
-  `list.dirs`, `terminals[].notReported`, `notice.term`, stage A's `view` without `chips`), 8.3
-  (`checkout` in `/ping`)
+- Create: `src/window/protocol.ts`, `src/window/frames.ts`, `src/window/hub.ts`,
+  `src/claude/session-id.ts` (`isSessionId` moved there; ruled by the plan owner, see 2.1)
+- Modify: `src/claude/launch.ts` (re-exports `isSessionId`); `docs/design-step-2.md` 4.3
+  (`protocol.ts` may import `session-id.ts`), 8.2.3 (`tick-failed`, `result.sessionId`,
+  `list.selected`, `list.dirs`, `terminals[].notReported`, `notice.term`, stage A's `view` without
+  `chips`, the page messages' limits), 8.3 (`checkout` in `/ping`; `/status`'s `build`,
+  `checkout`, `startedAtNs`, `envOrigin`)
 - Test: `test/window/protocol.test.ts`, `test/window/frames.test.ts`
 
 **Tests** (platform: none — pure)
