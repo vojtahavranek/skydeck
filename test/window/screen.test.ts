@@ -31,14 +31,19 @@ before(async () => {
 /**
  * The modules with a `Terminal` that remembers every instance, so that a test can read the cells
  * of the headless terminal a screen keeps without the screen exporting anything for tests.
+ * `afterWrite` runs right after each `write` was handed to xterm.js, before it parses it.
  */
-function spying(): { modules: XtermModules; terminals: Terminal[] } {
+function spying(afterWrite?: () => void): { modules: XtermModules; terminals: Terminal[] } {
   const terminals: Terminal[] = [];
   const Base = modules.Terminal;
   class Spy extends Base {
     constructor(...args: ConstructorParameters<typeof Base>) {
       super(...args);
       terminals.push(this);
+    }
+    override write(data: string | Uint8Array, callback?: () => void): void {
+      super.write(data, callback);
+      afterWrite?.();
     }
   }
   return { modules: { ...modules, Terminal: Spy }, terminals };
@@ -53,9 +58,9 @@ interface Opened {
 
 function open(
   init: { cols: number; rows: number; snapshot: string | null },
-  options: { live?: boolean } = {},
+  options: { live?: boolean; afterWrite?: () => void } = {},
 ): Opened {
-  const spy = spying();
+  const spy = spying(options.afterWrite);
   const answers: string[] = [];
   const screen = createScreen(spy.modules, init, (bytes) => {
     assert.ok(bytes instanceof Uint8Array);
@@ -543,6 +548,12 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
       bytes: 'ab\r\n\x1b[3;1Hbelow\x1b[2;1H\x1b[1;31m01234567漢',
     },
     {
+      name: 'a full row erased with the cursor left after it',
+      cols: 10,
+      rows: 3,
+      bytes: '\x1b[3;1Hbottom\x1b[1;1H0123456789\x1b[1K',
+    },
+    {
       name: 'origin mode on, the cursor left after a full row',
       cols: 10,
       rows: 3,
@@ -567,6 +578,36 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
       // The next character lands at the same place, with the same pen, on both.
       await a.screen.output(utf8('Z'));
       await b.screen.output(utf8('Z'));
+      assertSameScreen(a.term, b.term);
+      a.screen.dispose();
+      b.screen.dispose();
+    });
+  }
+
+  // A cursor past the last column after a character whose attributes the pen no longer has: the
+  // character is re-printed with its own attributes, so the screen and the cursor are exact. The
+  // pen is then that character's, not the program's (a known limit, S2 7.2).
+  const PEN_CASES: { name: string; last: string }[] = [
+    {
+      name: 'every attribute, RGB and 256-colour',
+      last: '\x1b[1;2;3;4;5;7;8;9;53;38;2;1;2;3;48;5;200mX',
+    },
+    { name: 'bright 16-colour foreground and background', last: '\x1b[95;104mX' },
+    { name: '16-colour foreground, RGB background', last: '\x1b[33;48;2;250;128;0mX' },
+    { name: 'a wide character in 256 colours', last: '\x1b[38;5;27m漢' },
+  ];
+
+  for (const c of PEN_CASES) {
+    test(`the cursor past a last cell whose attributes the pen lost: ${c.name}`, async () => {
+      const a = open({ cols: 10, rows: 3, snapshot: null });
+      const width = c.last.endsWith('漢') ? 2 : 1;
+      await a.screen.output(
+        utf8(`\x1b[3;1Hbelow\x1b[1;1H${'-'.repeat(10 - width)}${c.last}\x1b[0m`),
+      );
+
+      const b = await rebuilt(a.screen);
+
+      assert.equal(a.term.buffer.active.cursorX, 10);
       assertSameScreen(a.term, b.term);
       a.screen.dispose();
       b.screen.dispose();
@@ -658,6 +699,26 @@ describe('createScreen: terminal queries', () => {
     await settled(screen);
 
     assert.deepEqual(answers, []);
+    screen.dispose();
+  });
+
+  test('an answer that throws rejects that record, and the chain goes on', async () => {
+    const failure = new Error('the keeper connection is gone');
+    const answered: string[] = [];
+    const spy = spying();
+    const screen = createScreen(spy.modules, { cols: 20, rows: 3, snapshot: null }, (bytes) => {
+      answered.push(text(bytes));
+      throw failure;
+    });
+    screen.goLive();
+    screen.setTheme({ fg: '#112233', bg: '#ddeeff' });
+
+    await assert.rejects(screen.output(utf8('a\x1b]11;?\x1b\\b\x1b[cc')), failure);
+    await screen.output(utf8('d'));
+
+    assert.deepEqual(answered, ['\x1b]11;rgb:dddd/eeee/ffff\x1b\\', '\x1b[?1;2c']);
+    assert.equal(spy.terminals[0]?.buffer.active.getLine(0)?.translateToString(true), 'abcd');
+    assert.match((await screen.snapshot()).data, /^abcd/);
     screen.dispose();
   });
 
@@ -776,6 +837,28 @@ describe('createScreen: dispose', () => {
     await queued;
     await screen.output(utf8('\x1b[c'));
     await screen.resize(100, 30);
+
+    assert.deepEqual(answers, []);
+  });
+
+  test('a query xterm.js has not parsed yet when the screen is disposed is not answered', async () => {
+    let dispose = (): void => {};
+    const { screen, term, answers } = open(
+      { cols: 80, rows: 24, snapshot: null },
+      { live: true, afterWrite: () => dispose() },
+    );
+    let parsed = false;
+    term.parser.registerCsiHandler({ final: 'c' }, () => {
+      parsed = true;
+      return false;
+    });
+    dispose = () => {
+      assert.equal(parsed, false, 'xterm.js parsed the record inside write');
+      screen.dispose();
+    };
+
+    await screen.output(utf8('\x1b[c\x1b]10;?\x1b\\\x1b]11;?\x07'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     assert.deepEqual(answers, []);
   });

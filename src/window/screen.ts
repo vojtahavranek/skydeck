@@ -182,10 +182,11 @@ function cursorPosition(term: Terminal): string {
     at -= 1;
     cell = line?.getCell(at);
   }
-  if (cell === undefined || cell.getChars() === '') {
+  if (cell === undefined) {
     return `\x1b[${row};${term.cols}H`;
   }
-  return `\x1b[${row};${at + 1}H\x1b[0m${sgrOf(cell)}${cell.getChars()}`;
+  // An erased cell is re-printed as a blank with its attributes: it looks the same.
+  return `\x1b[${row};${at + 1}H\x1b[0m${sgrOf(cell)}${cell.getChars() || ' '}`;
 }
 
 /** S2 7.2's additions to the serialise addon's snapshot. */
@@ -236,11 +237,32 @@ export function createScreen(
     return result;
   }
 
+  // Answers are collected while xterm.js parses a record and handed to `answer` once it is
+  // applied: an `answer` that throws inside the parser would stop the parse (the record's write
+  // would never complete, and the chain with it) and surface as an uncaught exception.
+  let answers: string[] = [];
   const send = (text: string): void => {
-    if (live && !disposed) {
-      answer(encoder.encode(text));
+    if (live) {
+      answers.push(text);
     }
   };
+
+  /** Hands the answers of the record just applied to `answer`; rethrows the first failure. */
+  function deliver(): void {
+    const ready = answers;
+    answers = [];
+    let failure: { error: unknown } | null = null;
+    for (const text of disposed ? [] : ready) {
+      try {
+        answer(encoder.encode(text));
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+    if (failure !== null) {
+      throw failure.error;
+    }
+  }
 
   // The headless terminal answers DA1, DA2, DECRQM, CPR, DSR and DECRQSS through onData.
   term.onData(send);
@@ -272,7 +294,9 @@ export function createScreen(
       // Queued, so applied later: the caller may reuse its buffer at once.
       const record = bytes.slice();
       return enqueue(() =>
-        disposed ? undefined : new Promise<void>((resolve) => term.write(record, resolve)),
+        disposed
+          ? undefined
+          : new Promise<void>((resolve) => term.write(record, resolve)).then(deliver),
       );
     },
     resize(cols, rows) {
