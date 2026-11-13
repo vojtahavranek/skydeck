@@ -470,8 +470,8 @@ set are not part of a launch command and are not restored.
 A session without a transcript cannot be resumed.
 
 **The guard (principle 7).** Resume runs ingest and reconcile and refuses (exit 4) when the
-session is running, naming the holder. It then creates a lock file for the session exclusively;
-if the lock exists and is younger than 60 seconds, resume is refused and says how long to wait.
+session is running, naming the holder. It then takes a lock for the session; if the lock exists
+and is younger than 60 seconds, resume is refused and says how long to wait.
 The lock is removed when a `start` event for the session appears or after 60 seconds. The lock
 is an entry `resume_lock:<session id>` in the database's `kv` table, holding the time it was
 taken in nanoseconds (so its age does not depend on any file's modification time). Reading the
