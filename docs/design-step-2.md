@@ -1988,8 +1988,9 @@ In the browser suite, besides those:
 - a dropped file does not navigate the window; OSC 52 from a hidden terminal does not reach the
   clipboard;
 - reload: F5, Shift+F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 in the list zone, Ctrl+Shift+R in the
-  terminal zone, and BrowserRefresh in both if Playwright can send it, reload only after a
-  server's proof, and not at all against
+  terminal zone, BrowserRefresh in both if Playwright can send it, and F5 and Ctrl+R in the
+  terminal zone while the page, not xterm.js, has the keyboard, reload only after a server's
+  proof, and not at all against
   a stand-in server without one;
 - a stand-in server holding the port serves a page that registers a service worker; after the real
   server is back, whether the worker still answers the next load (the 404 of 15.3) is recorded, so
