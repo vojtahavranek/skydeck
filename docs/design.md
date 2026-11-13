@@ -401,7 +401,7 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
-| `skydeck new [--label <text>] [--group <text>] [-- <claude flags>]` | Start a new session in the current directory (7.7). |
+| `skydeck new [--label <text>] [--group <text>] [--here \| --tab] [-- <claude flags>]` | Start a new session in the current directory (7.7). |
 | `skydeck resume <ref> [--here \| --tab]` | Resume one session (7.6). |
 | `skydeck restore [--all] [--dry-run] [--yes]` | Bring back what was open (7.8). |
 | `skydeck install` / `uninstall [--purge]` / `doctor` | Section 8. |
@@ -630,7 +630,8 @@ stopped by the memory check or cancelled at the prompt.
   `<hookPath>`. Removes the links that still point where install pointed them. It never removes a
   backup, not even with `--purge`, and names each one. It creates nothing: no directory, database
   or file, also none the user removed after install. The database stays unless `--purge` is
-  given.
+  given, which removes the data, state and configuration folders (the database, the spool,
+  `hook.log` and `config.json`).
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
   resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with
   their ages (they are removed after seven days); age of the last event; the last lines of
@@ -656,7 +657,10 @@ stopped by the memory check or cancelled at the prompt.
 | `claudeHome` | the configuration key `claudeHome`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
 
 `SKYDECK_HOME`, when set, replaces the first three with `$SKYDECK_HOME/data`, `/state`,
-`/config`; tests use it. The hook resolves `stateDir` by the same rule.
+`/config`; tests use it. The hook resolves `stateDir` by the same rule. The launcher keeps the
+cache of compiled modules (10) elsewhere: in `$NODE_COMPILE_CACHE`, else
+`$XDG_CACHE_HOME/skydeck/compile-cache`, else `~/.cache/skydeck/compile-cache`; it is not one of
+the places above, and `uninstall --purge` leaves it.
 
 An environment variable (`SKYDECK_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`,
 `CLAUDE_CONFIG_DIR`) counts only when it is non-empty and an absolute path; otherwise it is treated
