@@ -18,7 +18,7 @@ import {
 } from '../src/github.ts';
 import type { PrKey } from '../src/github.ts';
 import { NS_PER_MINUTE } from '../src/platform/time.ts';
-import type { RunResult } from '../src/platform/types.ts';
+import type { Env, RunResult } from '../src/platform/types.ts';
 import { openStore } from '../src/store/store.ts';
 import type { Store } from '../src/store/store.ts';
 import type { PrChecks, PrReview, PrRow, PrState } from '../src/store/types.ts';
@@ -110,11 +110,12 @@ interface Deck {
     runner: ReturnType<typeof fakeRunner>;
     clock: ReturnType<typeof fakeClock>;
     store: Store;
+    env?: Env;
   };
 }
 
 /** A store on a temporary database, a fake clock at T0 and a fake `gh`. */
-function deck(t: TestContext, handler?: (call: RunCall) => RunResult): Deck {
+function deck(t: TestContext, handler?: (call: RunCall) => RunResult | Promise<RunResult>): Deck {
   const store = openStore(join(sandbox(t).root, 'skydeck.db'));
   t.after(() => {
     store.close();
@@ -237,13 +238,13 @@ describe('batchArgs', () => {
   const keys = [key('https://github.com/o/r/pull/1'), key('https://github.com/a/b/pull/22')];
   const args = batchArgs(keys);
 
-  test('starts with api graphql -f query=<query>', () => {
-    assert.deepEqual(args.slice(0, 3), ['api', 'graphql', '-f']);
-    assert.ok(args[3]?.startsWith('query='));
+  test('starts with api graphql, always against github.com, then -f query=<query>', () => {
+    assert.deepEqual(args.slice(0, 5), ['api', 'graphql', '--hostname', 'github.com', '-f']);
+    assert.ok(args[5]?.startsWith('query='));
   });
 
   test('then the owner, repository and number of every key as variables', () => {
-    assert.deepEqual(args.slice(4), [
+    assert.deepEqual(args.slice(6), [
       '-f',
       'o0=o',
       '-f',
@@ -260,7 +261,7 @@ describe('batchArgs', () => {
   });
 
   test('the query declares the variables and asks for the status of each pull request', () => {
-    const query = (args[3] ?? '').slice('query='.length);
+    const query = (args[5] ?? '').slice('query='.length);
     assert.ok(
       query.includes(
         '$o0: String!, $r0: String!, $n0: Int!, $o1: String!, $r1: String!, $n1: Int!',
@@ -280,7 +281,7 @@ describe('batchArgs', () => {
   test('values never appear inside the query text, whatever they contain', () => {
     const hostile: PrKey = { url: 'u', owner: 'a"}) { x', repo: "r'\\n", number: 7 };
     const list = batchArgs([hostile]);
-    const query = list[3] ?? '';
+    const query = list[5] ?? '';
     assert.ok(!query.includes('a"}'));
     assert.ok(!query.includes("r'"));
     assert.ok(list.includes('o0=a"}) { x'));
@@ -289,10 +290,10 @@ describe('batchArgs', () => {
 
   test('a batch holds from 1 to BATCH_SIZE keys', () => {
     const one = key(URL1);
-    assert.equal(batchArgs([one]).length, 4 + 6);
+    assert.equal(batchArgs([one]).length, 6 + 6);
     assert.equal(
       batchArgs(Array.from({ length: BATCH_SIZE }, () => one)).length,
-      4 + 6 * BATCH_SIZE,
+      6 + 6 * BATCH_SIZE,
     );
     assert.throws(() => batchArgs([]), RangeError);
     assert.throws(() => batchArgs(Array.from({ length: BATCH_SIZE + 1 }, () => one)), RangeError);
@@ -408,9 +409,49 @@ describe('parseBatch', () => {
   test('an error entry of another alias, or one without a message, is not borrowed', () => {
     const stdout = JSON.stringify({
       data: { p0: { pullRequest: OK_JSON } },
-      errors: [{ path: ['p0'], message: 'about p0' }, { path: ['p1'] }, { message: 'no path' }],
+      errors: [
+        { path: ['p0'], message: 'about p0' },
+        { path: ['p1'] },
+        { path: ['p1', 'x'], message: 7 },
+      ],
     });
     assert.deepEqual(parse(stdout).get(NUM(2)), { ok: false, atNs: T0, error: 'not found' });
+  });
+
+  test('an error that names no path is the message of every alias that has none of its own', () => {
+    const message =
+      'Something went wrong while executing your query. This may be the result of a timeout.';
+    for (const noPath of [{ message }, { path: [], message }, { path: 'p1', message }]) {
+      const stdout = JSON.stringify({
+        data: { p0: { pullRequest: OK_JSON }, p1: null },
+        errors: [noPath],
+      });
+      const results = parse(stdout, { code: 1 });
+      assert.deepEqual(results.get(NUM(2)), { ok: false, atNs: T0, error: message });
+      assert.equal(results.get(NUM(1))?.ok, true, 'a readable pull request stays readable');
+    }
+  });
+
+  test('the error of the alias itself wins over one with no path, wherever it stands', () => {
+    const stdout = JSON.stringify({
+      data: { p0: null, p1: null },
+      errors: [
+        { message: 'no path' },
+        { path: ['p1', 'pullRequest'], message: 'own error of p1' },
+        { path: ['p0'], message: 'own error of p0' },
+      ],
+    });
+    const results = parse(stdout, { code: 1 });
+    assert.deepEqual(results.get(NUM(1)), { ok: false, atNs: T0, error: 'own error of p0' });
+    assert.deepEqual(results.get(NUM(2)), { ok: false, atNs: T0, error: 'own error of p1' });
+  });
+
+  test('of several errors with no path the first one is used', () => {
+    const stdout = JSON.stringify({
+      data: { p0: { pullRequest: OK_JSON }, p1: null },
+      errors: [{ message: 'first' }, { message: 'second' }],
+    });
+    assert.deepEqual(parse(stdout).get(NUM(2)), { ok: false, atNs: T0, error: 'first' });
   });
 
   test('a state GitHub added that we do not know is an error, never "closed"', () => {
@@ -686,6 +727,138 @@ describe('fetchPrs and refreshPrs', () => {
     clock.advanceMs(2 * 60_000);
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
     assert.equal(runner.calls.length, 2);
+  });
+});
+
+describe('the call to gh', () => {
+  test('always names github.com, so GH_HOST cannot send it elsewhere', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1);
+    await fetchPrs(deps, [NUM(1)]);
+    assert.deepEqual(runner.calls[0]?.args.slice(0, 4), [
+      'api',
+      'graphql',
+      '--hostname',
+      'github.com',
+    ]);
+  });
+
+  test('without an environment in the deps, gh inherits the one of this process', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1);
+    await fetchPrs(deps, [NUM(1)]);
+    assert.deepEqual(runner.calls[0]?.options, { timeoutMs: 10000 });
+  });
+
+  test('with one, GH_HOST and GH_FORCE_TTY are removed, GH_PROMPT_DISABLED and NO_COLOR are set, the rest passes', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 2, { state: 'open', ageMin: 10 });
+    const env: Env = {
+      PATH: '/usr/bin',
+      HOME: '/home/dev',
+      GH_TOKEN: 'token',
+      GH_HOST: 'ghe.example.com',
+      GH_FORCE_TTY: '1',
+      GH_PROMPT_DISABLED: '0',
+      NO_COLOR: undefined,
+      TERM: undefined,
+    };
+    const expected = {
+      timeoutMs: 10000,
+      env: {
+        PATH: '/usr/bin',
+        HOME: '/home/dev',
+        GH_TOKEN: 'token',
+        GH_PROMPT_DISABLED: '1',
+        NO_COLOR: '1',
+      },
+    };
+    await fetchPrs({ ...deps, env }, [NUM(1)]);
+    await refreshPrs({ ...deps, env }, { force: true, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 2);
+    for (const call of runner.calls) {
+      assert.deepEqual(call.options, expected);
+    }
+    assert.equal(env['GH_HOST'], 'ghe.example.com', "the caller's environment is not changed");
+  });
+});
+
+describe('finished pull requests are left as they are', () => {
+  test('fetchPrs of a merged or closed url makes no call, as for `pr add` while gh fails', async (t) => {
+    const { store, runner, deps } = deck(t, () => runResult({ code: null, timedOut: true }));
+    seed(store, 1, 1, { state: 'merged', ageMin: 600 });
+    seed(store, 2, 2, { state: 'closed', ageMin: 600 });
+    const before = store.prs();
+    assert.deepEqual(await fetchPrs(deps, [NUM(1), NUM(2)]), { fetched: 0, failed: 0 });
+    assert.equal(runner.calls.length, 0);
+    assert.deepEqual(store.prs(), before);
+    assert.equal(prLevel(row(store, 1)), 'merged');
+    assert.equal(prLevel(row(store, 2)), 'closed');
+  });
+
+  test('in a mixed list only the pull requests that are not finished are asked about', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1, { state: 'merged', ageMin: 600 });
+    seed(store, 2, 3);
+    assert.deepEqual(await fetchPrs(deps, [NUM(1), NUM(2), NUM(3)]), { fetched: 2, failed: 0 });
+    assert.deepEqual(runner.calls.flatMap(numbersOf), [2, 3]);
+  });
+
+  /** A refresh of o/r#1 whose gh call hangs until `release()`, and a second one answered at once. */
+  function overlap(t: TestContext, slowAnswer: RunResult, fastAnswer: RunResult) {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const made = deck(t, async () => {
+      if (++calls === 1) {
+        await gate;
+        return slowAnswer;
+      }
+      return fastAnswer;
+    });
+    seed(made.store, 1, 1, { state: 'open', ageMin: 10 });
+    return { ...made, release };
+  }
+
+  test('a slow refresh that then fails does not mark what a faster one found merged as unreadable', async (t) => {
+    const merged = runResult({ stdout: ghStdout([prJson('MERGED', false, null, null)]) });
+    const { store, deps, release } = overlap(t, runResult({ code: null, timedOut: true }), merged);
+    const slow = refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.deepEqual(await refreshPrs(deps, { force: true, refreshMinutes: 5 }), {
+      fetched: 1,
+      failed: 0,
+    });
+    assert.equal(row(store, 1).state, 'merged');
+    release();
+    assert.deepEqual(await slow, { fetched: 0, failed: 0 });
+    const after = row(store, 1);
+    assert.equal(after.state, 'merged');
+    assert.equal(after.error, null);
+    assert.equal(after.okAtNs, T0);
+    assert.equal(prLevel(after), 'merged');
+  });
+
+  test('a slow refresh that then answers with an older status does not reopen a merged pull request', async (t) => {
+    const merged = runResult({ stdout: ghStdout([prJson('MERGED', false, null, null)]) });
+    const stale = runResult({ stdout: ghStdout([prJson('OPEN', false, 'APPROVED', 'SUCCESS')]) });
+    const { store, deps, release } = overlap(t, stale, merged);
+    const slow = refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    await refreshPrs(deps, { force: true, refreshMinutes: 5 });
+    release();
+    assert.deepEqual(await slow, { fetched: 0, failed: 0 });
+    assert.equal(row(store, 1).state, 'merged');
+    assert.equal(row(store, 1).review, null);
+  });
+
+  test('a result for a pull request that is still open is saved as before', async (t) => {
+    const open = runResult({ stdout: ghStdout([prJson('OPEN', true, null, 'PENDING')]) });
+    const { store, deps, release } = overlap(t, open, open);
+    const slow = refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    release();
+    assert.deepEqual(await slow, { fetched: 1, failed: 0 });
+    assert.equal(row(store, 1).state, 'draft');
   });
 });
 

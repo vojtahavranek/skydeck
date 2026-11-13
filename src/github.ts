@@ -5,7 +5,7 @@
  */
 
 import { nsFromMs } from './platform/time.ts';
-import type { Clock, Ns, RunResult, Runner } from './platform/types.ts';
+import type { Clock, Env, Ns, RunResult, Runner } from './platform/types.ts';
 import type { Store } from './store/store.ts';
 import type { PrChecks, PrFetchResult, PrReview, PrRow, PrState } from './store/types.ts';
 
@@ -57,6 +57,11 @@ export const GH_TIMEOUT_MS = 10_000;
 
 const MS_PER_MINUTE = 60_000;
 
+/** Merged and closed pull requests are never fetched again (design 7.3). */
+function isFinal(pr: PrRow): boolean {
+  return pr.state === 'merged' || pr.state === 'closed';
+}
+
 /**
  * Non-final (state not merged/closed) rows whose okAtNs is null or older than refreshMinutes; all
  * non-final rows when force. A merged or closed pull request is never fetched again, even when
@@ -70,10 +75,7 @@ export function prsDue(
 ): PrRow[] {
   const staleBefore = nowNs - nsFromMs(Math.round(refreshMinutes * MS_PER_MINUTE));
   return prs.filter(
-    (pr) =>
-      pr.state !== 'merged' &&
-      pr.state !== 'closed' &&
-      (force || pr.okAtNs === null || pr.okAtNs < staleBefore),
+    (pr) => !isFinal(pr) && (force || pr.okAtNs === null || pr.okAtNs < staleBefore),
   );
 }
 
@@ -82,8 +84,9 @@ const PULL_REQUEST_FIELDS =
   'title state isDraft reviewDecision commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }';
 
 /**
- * The `gh` arguments for one batch (1 to BATCH_SIZE keys): `api graphql`, the query, then one
- * owner, repository and number variable per key. Values never appear inside the query text, so
+ * The `gh` arguments for one batch (1 to BATCH_SIZE keys): `api graphql --hostname github.com`
+ * (so `GH_HOST` or a configured enterprise host cannot send the question elsewhere), the query,
+ * then one owner, repository and number variable per key. Values never appear inside the query text, so
  * nothing a key holds can change what is asked. Throws RangeError for an empty or oversized batch
  * (a bug of the caller: the query for no pull request is not valid GraphQL).
  */
@@ -100,7 +103,14 @@ export function batchArgs(keys: readonly PrKey[]): string[] {
         `p${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { ${PULL_REQUEST_FIELDS} } }`,
     )
     .join(' ');
-  const args = ['api', 'graphql', '-f', `query=query(${declarations}) { ${selections} }`];
+  const args = [
+    'api',
+    'graphql',
+    '--hostname',
+    'github.com',
+    '-f',
+    `query=query(${declarations}) { ${selections} }`,
+  ];
   keys.forEach((key, i) => {
     args.push('-f', `o${i}=${key.owner}`, '-f', `r${i}=${key.repo}`, '-F', `n${i}=${key.number}`);
   });
@@ -200,22 +210,32 @@ function readPullRequest(pullRequest: Record<string, unknown>, atNs: Ns): PrFetc
   };
 }
 
-/** The message of the first `errors[]` entry whose path starts with `alias`; null when none has one. */
+/**
+ * The message of the first `errors[]` entry whose path starts with `alias`; failing that, of the
+ * first entry that names no path (GitHub's own "something went wrong ... a timeout" error has
+ * none: it concerns the whole query); null when there is neither. An entry about another alias is
+ * never borrowed.
+ */
 function errorFor(errors: unknown, alias: string): string | null {
   if (!Array.isArray(errors)) {
     return null;
   }
+  let general: string | null = null;
   for (const entry of errors as unknown[]) {
-    if (
-      isRecord(entry) &&
-      Array.isArray(entry['path']) &&
-      entry['path'][0] === alias &&
-      typeof entry['message'] === 'string'
-    ) {
-      return entry['message'];
+    if (!isRecord(entry) || typeof entry['message'] !== 'string') {
+      continue;
+    }
+    const message = entry['message'];
+    const path = entry['path'];
+    if (Array.isArray(path) && path.length > 0) {
+      if (path[0] === alias) {
+        return message;
+      }
+    } else if (general === null) {
+      general = message;
     }
   }
-  return null;
+  return general;
 }
 
 /**
@@ -224,8 +244,8 @@ function errorFor(errors: unknown, alias: string): string | null {
  * - stdout not JSON with a `data` object → every key: the first line of stderr, else
  *   "gh exited <code>" ("gh was killed by a signal" when there is no code).
  * - otherwise per alias p<i>: a `pullRequest` object → ok (see `readPullRequest`); null or
- *   missing → failed with the message of the `errors[]` entry whose path[0] is p<i>, else
- *   "not found".
+ *   missing → failed with the message of the `errors[]` entry whose path[0] is p<i>, else of the
+ *   first entry with no path, else "not found".
  * `gh` exits non-zero when some aliases fail; the per-alias data is still used.
  */
 export function parseBatch(
@@ -267,6 +287,28 @@ interface Deps {
   runner: Runner;
   clock: Clock;
   store: Store;
+  /**
+   * The environment of the calling process (`platform.env`). `gh` runs in it with a few variables
+   * changed (see `ghEnvironment`); without it `gh` inherits the environment of this process as it is.
+   */
+  env?: Env;
+}
+
+/**
+ * The environment `gh` runs in: the caller's, so that `gh` still finds its login, without
+ * `GH_HOST` (another host) and `GH_FORCE_TTY` (colour codes in the JSON), and with
+ * `GH_PROMPT_DISABLED` and `NO_COLOR` set so that it can neither wait for a person nor colour.
+ */
+function ghEnvironment(env: Env): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && name !== 'GH_HOST' && name !== 'GH_FORCE_TTY') {
+      result[name] = value;
+    }
+  }
+  result['GH_PROMPT_DISABLED'] = '1';
+  result['NO_COLOR'] = '1';
+  return result;
 }
 
 /** One `gh` call for one batch. A runner that rejects (gh not executable, say) fails the batch. */
@@ -274,7 +316,13 @@ async function fetchBatch(deps: Deps, keys: readonly PrKey[]): Promise<Map<strin
   const args = batchArgs(keys);
   let result: RunResult;
   try {
-    result = await deps.runner.run('gh', args, { timeoutMs: GH_TIMEOUT_MS });
+    result = await deps.runner.run(
+      'gh',
+      args,
+      deps.env === undefined
+        ? { timeoutMs: GH_TIMEOUT_MS }
+        : { timeoutMs: GH_TIMEOUT_MS, env: ghEnvironment(deps.env) },
+    );
   } catch (error) {
     const reason = firstLine(error instanceof Error ? error.message : String(error));
     return failAll(keys, deps.clock.nowNs(), `gh could not be run: ${reason ?? 'unknown error'}`);
@@ -287,6 +335,11 @@ async function fetchBatch(deps: Deps, keys: readonly PrKey[]): Promise<Map<strin
  * repeated url is fetched once) in batches of BATCH_SIZE through `gh api graphql`, one batch after
  * the other, and saves every result with store.savePrResult. A failure of `gh` is a failed result
  * saved on the rows, never an exception; there is no call at all for an empty list.
+ *
+ * A merged or closed pull request is never fetched again (7.3): it is left out when choosing, and
+ * a result is dropped when its row has become merged or closed in the meantime (another refresh
+ * was faster), so an older or failed answer can never overwrite a final status. Dropped results
+ * count neither as fetched nor as failed.
  */
 export async function fetchPrs(
   deps: Deps,
@@ -296,7 +349,7 @@ export async function fetchPrs(
   const keys: PrKey[] = [];
   for (const url of new Set(urls)) {
     const row = rows.get(url);
-    if (row !== undefined) {
+    if (row !== undefined && !isFinal(row)) {
       keys.push({ url: row.url, owner: row.owner, repo: row.repo, number: row.number });
     }
   }
@@ -306,17 +359,20 @@ export async function fetchPrs(
     const results = await fetchBatch(deps, keys.slice(start, start + BATCH_SIZE));
     // The transaction is synchronous: it holds no lock while `gh` is running.
     deps.store.transaction(() => {
+      const current = new Map(deps.store.prs().map((row) => [row.url, row]));
       for (const [url, result] of results) {
+        const row = current.get(url);
+        if (row === undefined || isFinal(row)) {
+          continue;
+        }
         deps.store.savePrResult(url, result);
+        if (result.ok) {
+          fetched++;
+        } else {
+          failed++;
+        }
       }
     });
-    for (const result of results.values()) {
-      if (result.ok) {
-        fetched++;
-      } else {
-        failed++;
-      }
-    }
   }
   return { fetched, failed };
 }
