@@ -73,7 +73,10 @@ function chooseTerminal(deck: Deck, where: 'here' | 'tab' | null): Terminal | nu
  * The lock prepareResume took stays after a failure — the program may have started (a timeout),
  * or the user may run the printed command now — except after a failure other than a timeout whose
  * command cannot be printed: nothing was started and there is nothing to run by hand, so it is
- * released (releaseLock: only while it is still that lock) and the user is not kept waiting.
+ * released (releaseLock: only while it is still that lock) and the user is not kept waiting. In the
+ * same case, for kind 'new', the label and group prepareNew stored are removed (the session's
+ * session_meta row: skydeck wrote it just now, for a session that will never exist); after a
+ * timeout, or where the command is printed, they stay.
  */
 export async function launchPrepared(
   deck: Deck,
@@ -108,8 +111,15 @@ export async function launchPrepared(
   if (result.ok) {
     return { code: EXIT.ok, lines };
   }
-  if (!result.timedOut && lock !== null && printableCommand(prepared.cwd, prepared.argv) === null) {
-    releaseLock(deck, prepared.sessionId, lock);
+  if (!result.timedOut && printableCommand(prepared.cwd, prepared.argv) === null) {
+    // Nothing was started and there is nothing to run by hand: the lock would only keep the user
+    // waiting, and the label and group `new` stored name a session that will never exist.
+    if (lock !== null) {
+      releaseLock(deck, prepared.sessionId, lock);
+    }
+    if (prepared.kind === 'new') {
+      deck.store.deleteMeta(prepared.sessionId);
+    }
   }
   return {
     code: EXIT.failure,

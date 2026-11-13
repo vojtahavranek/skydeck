@@ -136,6 +136,23 @@ test('launchPrepared keeps the lock after a timeout even when the command cannot
   assert.notEqual(readLock(d.deck, S1), null); // the tab may have opened: no second resume yet
 });
 
+test('launchPrepared of a new session removes its label and group when it definitely started nothing and printed nothing', async (t) => {
+  const unprintable = ['claude', '--session-id', S1, '--model', 'op\x1b[31mus'];
+  const cases = [
+    { answer: runResult({ code: 1, stderr: 'no window\n' }), argv: unprintable, kept: false },
+    { answer: runResult({ code: 1, stderr: 'no window\n' }), argv: ['claude'], kept: true }, // printed
+    { answer: runResult({ code: null, timedOut: true }), argv: unprintable, kept: true }, // may run
+  ];
+  for (const { answer, argv, kept } of cases) {
+    const d = testDeck(t, { config: { terminal: 'wezterm' } });
+    d.deck.store.updateMeta(S1, { label: 'fix it', group: 'ABC-1' }, T0);
+    d.platform.runner = fakeRunner(() => answer);
+    const p = prepared('/w', { kind: 'new', argv });
+    assert.equal((await launchPrepared(d.deck, p, null)).code, 1);
+    assert.equal(d.deck.store.meta(S1)?.label ?? null, kept ? 'fix it' : null, JSON.stringify(argv));
+  }
+});
+
 test('launchPrepared leaves a lock alone that is not the one the resume took', async (t) => {
   const d = testDeck(t, { config: { terminal: 'wezterm' } });
   d.deck.store.setKv(lockKey(S1), `${T0}`);

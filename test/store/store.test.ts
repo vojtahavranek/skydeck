@@ -767,6 +767,17 @@ describe('session_meta', () => {
       ['G'],
     );
   });
+
+  test('deleteMeta removes the row of that session only, and says whether there was one', (t) => {
+    const { store } = fresh(t);
+    store.updateMeta(S1, { label: 'x', group: 'G' }, T0);
+    store.updateMeta(S2, { label: 'y' }, T0);
+
+    assert.equal(store.deleteMeta(S1), true);
+    assert.equal(store.meta(S1), null);
+    assert.equal(store.meta(S2)?.label, 'y');
+    assert.equal(store.deleteMeta(S1), false);
+  });
 });
 
 describe('transcripts', () => {

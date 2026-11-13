@@ -80,6 +80,11 @@ export interface Store {
   allMeta(): SessionMeta[];
   /** Creates the row (created_ns = updated_ns = nowNs) when absent; applies the patch; returns the row. */
   updateMeta(sessionId: string, patch: MetaPatch, nowNs: Ns): SessionMeta;
+  /**
+   * Deletes the session's row; whether there was one. Only for a row skydeck has just written for a
+   * session that never started (`new`, 7.7): principle 6 keeps every other.
+   */
+  deleteMeta(sessionId: string): boolean;
 
   // transcripts (5.6)
   transcripts(): TranscriptRow[];
@@ -608,6 +613,10 @@ class SqliteStore implements Store {
       throw new Error(`session_meta row of ${sessionId} is missing after the update`);
     }
     return row;
+  }
+
+  deleteMeta(sessionId: string): boolean {
+    return this.#run('DELETE FROM session_meta WHERE session_id = ?', sessionId) > 0;
   }
 
   transcripts(): TranscriptRow[] {
