@@ -332,6 +332,36 @@ test('the status time wins over the update time when a file has both', () => {
   assert.equal(s.sinceNs, T0 + 5n * SEC);
 });
 
+test('a session created by /clear is not since the idle time of the session before it', () => {
+  // The same process, idle since T0, clears at T0+10 min: the file still says "idle since T0".
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        end(P1, S1, T0 + 600n * SEC - 200n * NS_PER_MS, 'clear'),
+        start(P1, S2, T0 + 600n * SEC, 'clear'),
+      ],
+      isAlive: alive(P1),
+      liveFiles: [live(P1, S2, 'idle', { statusUpdatedAtNs: T0, updatedAtNs: T0 + 5n * SEC })],
+    },
+    S2,
+  );
+  assert.equal(s.state, 'waiting');
+  assert.equal(s.sinceNs, T0 + 600n * SEC);
+});
+
+test('a status time after the holder’s latest event is kept', () => {
+  const s = session(
+    {
+      events: [start(P1, S1, T0, 'startup')],
+      isAlive: alive(P1),
+      liveFiles: [live(P1, S1, 'busy', { statusUpdatedAtNs: T0 + 5n * SEC })],
+    },
+    S1,
+  );
+  assert.equal(s.sinceNs, T0 + 5n * SEC);
+});
+
 test('a working file without any time falls back to the holder’s latest event', () => {
   const s = session(
     {

@@ -175,7 +175,10 @@ function stateOf(
     return { state: 'not-running', stateDetail: null, sinceNs: lastActivityNs };
   }
   const live = holder.live;
-  const statusSinceNs = live?.statusUpdatedAtNs ?? live?.updatedAtNs ?? holder.sinceNs;
+  // The file keeps its status time when the process changes session (`/clear`): a session the
+  // holder began to hold later than that is not in the state since before it existed.
+  const statusNs = live?.statusUpdatedAtNs ?? live?.updatedAtNs ?? holder.sinceNs;
+  const statusSinceNs = statusNs > holder.sinceNs ? statusNs : holder.sinceNs;
   switch (live?.status) {
     case 'busy':
       return { state: 'working', stateDetail: null, sinceNs: statusSinceNs };

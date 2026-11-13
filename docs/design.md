@@ -263,8 +263,9 @@ There are three states, plus one fallback.
 | `not-running` | Not running. |
 
 The time a session has been in its state ("since") is: for `working` and `waiting`, the file's
-`statusUpdatedAt` (falling back to `updatedAt`); for `running`, the time of the holder's latest
-event; for `not-running`, the latest of its last transcript record and its last event.
+`statusUpdatedAt` (falling back to `updatedAt`), or the time of the holder's latest event when that
+is later (the file keeps its status time when the process changes session with `/clear`); for
+`running`, the time of the holder's latest event; for `not-running`, the latest of its last transcript record and its last event.
 
 ### 6.3 Marks
 

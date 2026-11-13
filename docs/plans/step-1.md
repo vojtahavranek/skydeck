@@ -3314,8 +3314,10 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 - **state**: no holders → `not-running`. Otherwise from `holders[0].live`: status `busy` →
   `working`; `idle` or `waiting` → `waiting` (`stateDetail` = `waitingFor`); no live file or any
   other status → `running`.
-- **sinceNs**: `working`/`waiting` → `statusUpdatedAtNs ?? updatedAtNs ?? holders[0].sinceNs`;
-  `running` → `holders[0].sinceNs`; `not-running` → `lastActivityNs`.
+- **sinceNs**: `working`/`waiting` → the later of `statusUpdatedAtNs ?? updatedAtNs ??
+  holders[0].sinceNs` and `holders[0].sinceNs` (the live file keeps its status time when the process
+  changes session with `/clear`, so a session the holder began to hold later is not in its state
+  since before it existed); `running` → `holders[0].sinceNs`; `not-running` → `lastActivityNs`.
 - **lastActivityNs** = the larger of transcript `lastRecordNs` and the latest event time naming the
   session; falls back to transcript `mtimeNs`. **firstSeenNs** = the smaller of transcript
   `firstRecordNs` and the earliest event time; falls back to `mtimeNs`.
@@ -3375,9 +3377,10 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 | 26 | two transcripts for S1: one missing (mtime later), one present | the present one is used; marks without `expired` |
 | 27 | sessions from events S2 and transcript S1 | output ids `[S1, S2]` (sorted) |
 | 28 | 12 plus a clear link targeting S1 and transcript mtime `now − 26 days` | marks `['ended-unexpectedly','was-working','continued','expiring']` |
+| 29 | P1: `start S1 T0`, `end S1 T0+10min−0.2s 'clear'`, `start S2 T0+10min 'clear'`; alive P1; `live(P1,S2,'idle',{statusUpdatedAtNs: T0, updatedAtNs: T0+5s})` | S2 `waiting`, since `T0+10min` (not `T0`) |
 
 **Steps**
-- [ ] Write `test/sessions/derive.test.ts` with the 32 cases. `npm test` → fails.
+- [ ] Write `test/sessions/derive.test.ts` with the 33 cases. `npm test` → fails.
 - [ ] Implement `types.ts` and `derive.ts` (pure: no I/O, no clock; everything comes in `DeriveInput`).
 - [ ] `npm run check` → pass. Commit `Derive state, holders and marks from events, live files and transcripts`; open the PR.
 
