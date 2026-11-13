@@ -455,6 +455,7 @@ function stderrToAPipeNobodyReads(s: Sandbox): string {
 /** A launcher sandbox with the reporting node on PATH and, when `python` is true, python3. */
 function serveSandbox(t: TestContext, python: boolean): Sandbox {
   const s = launcherSandbox(t);
+  s.link('date'); // the time of the launcher's log line when there is no python3
   writeReportingNode(join(s.bin, 'node'));
   assert.ok(!python || machinePython3, 'no python3 in /usr/bin or /bin');
   // The launcher runs /usr/bin/python3 and nothing else; inside a test sandbox
@@ -490,6 +491,9 @@ function serverLogWithOneLine(dir: string): string {
   writeFileSync(log, '2026-11-13T00:00:00.000Z an earlier line\n');
   return log;
 }
+
+const NO_PYTHON3 =
+  /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ launcher: \/usr\/bin\/python3 cannot be run; core dumps of the server are not prevented$/;
 
 const LIMIT_NOT_SET =
   /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z launcher: the soft core limit could not be set to 1 byte \(.+\); core dumps of the server are not prevented$/;
@@ -620,6 +624,39 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     assert.equal(r.field('limit-hard'), r.field('before-hard'));
   });
 
+  test('without python3: server.log gains one line saying the dumps are not prevented', (t) => {
+    const s = serveSandbox(t, false);
+    const log = serverLogWithOneLine(join(s.skydeckHome, 'state'));
+
+    const r = launchReported('', ['serve'], s.env());
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.field('node'), 'reporting');
+    const lines = readFileSync(log, 'utf8').split('\n');
+    assert.equal(lines.length, 3, lines.join('\n'));
+    assert.match(lines[1] ?? '', NO_PYTHON3);
+    assert.equal(r.stderr, '');
+  });
+
+  test('without python3 and no state directory: the line goes to stderr, nothing is created', (t) => {
+    const s = serveSandbox(t, false);
+
+    const r = launchReported('', ['serve'], s.env());
+
+    assert.equal(r.field('node'), 'reporting');
+    assert.match(r.stderr.trimEnd(), NO_PYTHON3);
+    assert.equal(existsSync(join(s.skydeckHome, 'state')), false);
+  });
+
+  test('without python3, no state directory and stderr a pipe nobody reads: node still runs', (t) => {
+    const s = serveSandbox(t, false);
+
+    const r = launchReported(stderrToAPipeNobodyReads(s), ['serve'], s.env());
+
+    assert.equal(r.status, 0);
+    assert.equal(r.field('node'), 'reporting');
+  });
+
   test('with python3: every argument reaches node untouched', (t) => {
     const s = serveSandbox(t, true);
     const args = ['serve', '--foreground', 'two words', '', '$HOME', '*', '-c', 'x'];
@@ -687,22 +724,6 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     );
 
     assert.equal(r.status, 127);
-  });
-
-  test('with python3: hard limit 0 and a server.log over the file size limit: node still runs, the line goes to stderr', (t) => {
-    const s = serveSandbox(t, true);
-    const log = join(s.skydeckHome, 'state', 'server.log');
-    mkdirSync(dirname(log), { recursive: true });
-    const before = 'x'.repeat(4095) + '\n';
-    writeFileSync(log, before);
-
-    // `ulimit -f 1`: 512 or 1024 bytes, both below what server.log holds already.
-    const r = launchReported('ulimit -S -c 0 && ulimit -H -c 0 && ulimit -f 1', ['serve'], s.env());
-
-    assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.field('node'), 'reporting');
-    assert.match(r.stderr.trimEnd(), LIMIT_NOT_SET);
-    assert.equal(readFileSync(log, 'utf8'), before);
   });
 
   test('with python3: a node that cannot be executed, with stderr closed, still exits 127', (t) => {

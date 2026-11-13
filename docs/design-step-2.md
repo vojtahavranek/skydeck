@@ -80,8 +80,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   the user's own limit (7.1). When the program cannot set the limit (the hard limit is 0, or
   `setrlimit` fails), it still starts Node.js, without `SKYDECK_CORE_SOFT`, and writes one line
   saying so to `server.log` (to stderr when that file cannot be written). Without
-  `/usr/bin/python3` (missing, or not executable) the launcher starts `serve` directly, and the server's dumps are not prevented (it cannot open
-  terminals then anyway, 14). That a limit of 1 aborts the dump on this
+  `/usr/bin/python3` (missing, or not executable) the launcher starts `serve` directly and writes
+  one line saying that the server's dumps are not prevented to `server.log` (to stderr when that
+  file cannot be written); a python3 elsewhere on `PATH` may still run the keepers, so the
+  server can open terminals all the same. That a limit of 1 aborts the dump on this
   machine's kernel (6.18, not read) is **UNVERIFIED** (check W24).
 - **Principle 6 (nothing is destroyed or moved automatically; skydeck never stops a process)** is
   made precise: skydeck never stops a `claude` process or a keeper (stopping a keeper would end

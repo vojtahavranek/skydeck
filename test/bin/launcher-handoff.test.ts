@@ -23,6 +23,22 @@ import type { Sandbox } from '../helpers/sandbox.ts';
 
 const launcher = fileURLToPath(new URL('../../bin/skydeck', import.meta.url));
 
+/**
+ * Where a crashing process's core dump is piped to a collector (WSL keeps it on the Windows side)
+ * a core limit of 0 does not stop it, so a test that would let a process die by a signal whose
+ * default action dumps core, should the code under test be wrong, is skipped (notes-for-tasks).
+ */
+function coreDumpsLeaveTheSandbox(): boolean {
+  try {
+    return readFileSync('/proc/sys/kernel/core_pattern', 'utf8').startsWith('|');
+  } catch {
+    return true;
+  }
+}
+const QUIT_SKIP = coreDumpsLeaveTheSandbox()
+  ? 'core dumps are piped out of the sandbox here; a launcher that lost its QUIT trap would dump'
+  : false;
+
 const STUB = `#!/bin/sh
 echo "$SKYDECK_HANDOFF" > "$STUB_SEEN"
 [ -n "$STUB_SOURCE" ] && cat "$STUB_SOURCE" > "$SKYDECK_HANDOFF"
@@ -281,21 +297,25 @@ describe('bin/skydeck: the handoff', () => {
     ['QUIT', 131],
   ];
   for (const [signal, status] of signals) {
-    test(`${signal} while node runs: exit ${status} and no handoff file left`, (t) => {
-      const r = rig(t);
-      const stub = join(r.s.root, 'signalling-node');
-      writeFileSync(
-        stub,
-        `#!/bin/sh\necho "$SKYDECK_HANDOFF" > "$STUB_SEEN"\nkill -${signal} "$PPID"\nexit 0\n`,
-      );
-      chmodSync(stub, 0o755);
+    test(
+      `${signal} while node runs: exit ${status} and no handoff file left`,
+      { skip: signal === 'QUIT' && QUIT_SKIP },
+      (t) => {
+        const r = rig(t);
+        const stub = join(r.s.root, 'signalling-node');
+        writeFileSync(
+          stub,
+          `#!/bin/sh\necho "$SKYDECK_HANDOFF" > "$STUB_SEEN"\nkill -${signal} "$PPID"\nexit 0\n`,
+        );
+        chmodSync(stub, 0o755);
 
-      const result = run(r, { SKYDECK_NODE: stub });
+        const result = run(r, { SKYDECK_NODE: stub });
 
-      assert.equal(result.status, status);
-      assert.ok(readFileSync(r.seen, 'utf8').trim().startsWith(r.tmp));
-      assert.deepEqual(leftovers(r), []);
-    });
+        assert.equal(result.status, status);
+        assert.ok(readFileSync(r.seen, 'utf8').trim().startsWith(r.tmp));
+        assert.deepEqual(leftovers(r), []);
+      },
+    );
   }
 
   test('an empty handoff file is no handoff', (t) => {

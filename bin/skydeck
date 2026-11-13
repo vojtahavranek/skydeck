@@ -246,8 +246,17 @@ skydeck_status=0
       "${LC_CTYPE+set}" "${LC_CTYPE-}" "$skydeck_ignored" \
       "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
   else
-    # Without /usr/bin/python3 the server's core dumps are not prevented (S2 2); a
-    # SKYDECK_CORE_SOFT the caller had must not pass for a limit that was set.
+    # Without /usr/bin/python3 the server's core dumps are not prevented (S2 2): one line says so
+    # in server.log, or on stderr when that cannot be written. Each write runs in a throwaway
+    # subshell that ignores SIGPIPE and SIGXFSZ, so a pipe nobody reads or a log over the file
+    # size limit is an error there, never a signal that ends this shell (or dumps core), and node
+    # still starts with the caller's dispositions. 3>&2 keeps the real stderr for the second
+    # write while the shell's own complaints go to /dev/null.
+    skydeck_now=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || skydeck_now=
+    skydeck_line="${skydeck_now:+$skydeck_now }launcher: /usr/bin/python3 cannot be run; core dumps of the server are not prevented"
+    (trap '' PIPE XFSZ; printf '%s\n' "$skydeck_line" >>"$skydeck_state/server.log") 2>/dev/null ||
+      (trap '' PIPE XFSZ; printf '%s\n' "$skydeck_line" >&3) 3>&2 2>/dev/null
+    # A SKYDECK_CORE_SOFT the caller had must not pass for a limit that was set.
     unset SKYDECK_CORE_SOFT
     exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
   fi

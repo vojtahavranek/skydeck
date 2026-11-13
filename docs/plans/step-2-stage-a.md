@@ -1313,8 +1313,11 @@ appends one line to `<stateDir>/server.log` (resolved as the launcher resolves `
 the python3 is `/usr/bin/python3` and nothing else — never one found on `PATH`, whose
 version-manager shim would change the environment node gets — run as `-I -S` (no site
 directories); when that file is missing or not executable the launcher behaves as without
-python3: Node.js is started directly, without an inherited `SKYDECK_CORE_SOFT` (ruled, pull
-request #36; tests replace the path with `SKYDECK_TEST_PYTHON3`, A31). A program between the launcher and Node.js hands on the environment and the
+python3: Node.js is started directly, without an inherited `SKYDECK_CORE_SOFT`, after one line
+`<time> launcher: /usr/bin/python3 cannot be run; core dumps of the server are not prevented` in
+`server.log` (stderr when that cannot be written; each write in a throwaway subshell that
+ignores SIGPIPE and SIGXFSZ) (ruled, pull request #36; tests replace the path with
+`SKYDECK_TEST_PYTHON3`, A31). A program between the launcher and Node.js hands on the environment and the
 signal dispositions as it found them, so the python program also (ruled, pull request #36):
 gives back the caller's `LC_CTYPE`, set, empty or unset (python3 sets it to `C.UTF-8` in its own
 environment under a C or POSIX locale, PEP 538); sets SIGPIPE and SIGXFSZ, which python3 ignores
@@ -1347,11 +1350,14 @@ machine's python3 named by `SKYDECK_TEST_PYTHON3` with `SKYDECK_TEST_NO_WINDOWS=
   python3, also when the caller ignores SIGPIPE, SIGXFSZ or another signal; a Node.js that cannot
   be executed gives the one line and exit 127; with stderr closed or a pipe nobody reads, a hard
   limit of 0 and no state directory node still runs, and a Node.js that cannot be executed still
-  gives exit 127; with a hard limit of 0 and a `server.log` over `ulimit -f`, node still runs and
-  the line goes to stderr. Cases that need the limit to be settable skip where the machine's hard
-  limit is 0.
+  gives exit 127. Cases that need the limit to be settable skip where the machine's hard limit is
+  0. No case provokes a signal whose default action dumps core (a `server.log` over `ulimit -f`
+  would, through SIGXFSZ, if the order of the program regressed), and the handoff's QUIT case is
+  skipped where `/proc/sys/kernel/core_pattern` starts with `|` (notes-for-tasks: no core dumps
+  leave the sandbox).
 - `serve` without python3 (`SKYDECK_TEST_PYTHON3` missing, a directory, not executable, not
-  absolute): node runs, no `SKYDECK_CORE_SOFT`.
+  absolute): node runs, no `SKYDECK_CORE_SOFT`; `server.log` gains the one line, or stderr has it
+  without a state directory; with stderr a pipe nobody reads node still runs.
 - which python3: `/usr/bin/python3` runs while `PATH` holds a fake `python3` that must not be run;
   `SKYDECK_TEST_PYTHON3` without `SKYDECK_TEST_NO_WINDOWS=1` is ignored; with it, it is the
   python3 that runs, as `-I -S -c`.
