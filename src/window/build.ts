@@ -68,7 +68,7 @@ export function readBuild(
     }
   };
   for (const dir of BUILD_DIRS) {
-    if (files.stat(join(appRoot, dir))?.kind === 'dir') {
+    if (unlessGone(() => files.stat(join(appRoot, dir)))?.kind === 'dir') {
       walk(dir, []);
     }
   }

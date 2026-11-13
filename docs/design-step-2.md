@@ -1681,7 +1681,8 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
     so no other page can read one. A cross-site WebSocket is refused by the exact `Origin` check
     at the upgrade, and could not give the proof anyway.
   - DNS rebinding (a page whose own host name is made to point at `127.0.0.1`): its requests carry
-    its own host name in `Host`, which is refused (421); only `Host: 127.0.0.1:<port>` is served.
+    its own host name in `Host`, which is refused (421); only `Host: 127.0.0.1:<port>` is served
+    (for port 80 also `127.0.0.1`, 8.2.1).
   - Framing (clickjacking): `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 - **Other local processes.** The WebSocket needs the proof, checked in constant time, and the proof
   shows nothing of the secret, so watching loopback traffic does not reveal it. `server.sock` and

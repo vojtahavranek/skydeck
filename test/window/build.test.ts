@@ -198,6 +198,16 @@ test('computeBuild skips a link to itself', (t) => {
   assert.equal(build(), before);
 });
 
+test('computeBuild: a top-level directory that is a link to itself gives no files', (t) => {
+  const looped = fixture(t);
+  const without = fixture(t);
+  rmSync(join(looped.root, 'web'), { recursive: true });
+  rmSync(join(without.root, 'web'), { recursive: true });
+  symlinkSync('web', join(looped.root, 'web'));
+
+  assert.equal(looped.build(), without.build());
+});
+
 test('readBuild skips a file removed between its stat and its read, as one gone before', (t) => {
   const { platform } = testPlatform(t);
   const racing = fixture(t);
