@@ -397,9 +397,10 @@ The keeper:
    start the program. A connection alone never starts it either: only the start message `G` of a
    screen side does (8.1), and only while the clock (`time.time_ns()`) is before `startBy`. Then it
    forks the program with `pty.fork()` at the current size; the child changes to `cwd`, replaces
-   its environment with `env` and `exec`s `argv`. The server sends `G` right after its first
-   `hello`, because a TUI's first output is terminal queries that only a connected screen side can
-   answer. When `chdir` or `exec` fails, the child writes one line naming the reason to the pty and
+   its environment with `env` and `exec`s `argv`. The server that spawned the keeper sends `G`
+   right after the first `hello` (one that finds it later checks first, 7.3); the start waits for a
+   screen side because a TUI's first output is terminal queries that only a connected screen side
+   can answer. When `chdir` or `exec` fails, the child writes one line naming the reason to the pty and
    exits 127.
 2. never starts after `startBy`: a `G` that comes later, or a deadline that passes with no `G`,
    ends the terminal as **not started**: the keeper sends (now, or to the next screen side that
