@@ -102,19 +102,20 @@ function answerAll(pullRequest: unknown = OK_JSON): (call: RunCall) => RunResult
 
 const NUM = (n: number): string => `https://github.com/o/r/pull/${n}`;
 
-/** The environment of the "calling process" in these tests: with the two variables `gh` must not see. */
+/** The environment of the "calling process" in these tests: with the three variables `gh` must not see. */
 const ENV: Env = {
   PATH: '/usr/bin',
   HOME: '/home/dev',
   GH_TOKEN: 'token',
   GH_HOST: 'ghe.example.com',
   GH_FORCE_TTY: '1',
+  CLICOLOR_FORCE: '1',
   GH_PROMPT_DISABLED: '0',
   NO_COLOR: undefined,
   TERM: undefined,
 };
 
-/** What `gh` gets of ENV: GH_HOST and GH_FORCE_TTY gone, the two settings made, the rest passed. */
+/** What `gh` gets of ENV: GH_HOST, GH_FORCE_TTY and CLICOLOR_FORCE gone, the two settings made, the rest passed. */
 const GH_ENV = {
   PATH: '/usr/bin',
   HOME: '/home/dev',
@@ -515,6 +516,25 @@ describe('parseBatch', () => {
     assert.deepEqual(results.get(NUM(1)), { ok: false, atNs: T0, error: 'gh exited 4' });
   });
 
+  test('exit 0 with output that cannot be read says so, and borrows nothing from stderr', () => {
+    const coloured = '\x1b[1;38m{\x1b[m\x1b[1;34m"data"\x1b[m: {}\x1b[1;38m}\x1b[m';
+    const message = 'gh returned output skydeck could not read';
+    for (const stderr of ['', 'gh: Could not resolve to a PullRequest with the number of 2.']) {
+      for (const stdout of [coloured, '', 'null', '{"data":null}']) {
+        const results = parse(stdout, { code: 0, stderr });
+        for (const url of [NUM(1), NUM(2)]) {
+          assert.deepEqual(results.get(url), { ok: false, atNs: T0, error: message }, stdout);
+        }
+      }
+    }
+  });
+
+  test('a non-zero exit with output that cannot be read still reports the first line of stderr', () => {
+    const coloured = '\x1b[1;38m{\x1b[m}';
+    const results = parse(coloured, { code: 1, stderr: 'gh: HTTP 502' });
+    assert.deepEqual(results.get(NUM(1)), { ok: false, atNs: T0, error: 'gh: HTTP 502' });
+  });
+
   test('blank lines before the message of stderr are skipped', () => {
     const results = parse('', { code: 1, stderr: '\r\n  \n gh: rate limited \r\nmore' });
     assert.deepEqual(results.get(NUM(1)), { ok: false, atNs: T0, error: 'gh: rate limited' });
@@ -764,7 +784,7 @@ describe('the call to gh', () => {
     ]);
   });
 
-  test('GH_HOST and GH_FORCE_TTY are removed, GH_PROMPT_DISABLED and NO_COLOR are set, the rest passes', async (t) => {
+  test('GH_HOST, GH_FORCE_TTY and CLICOLOR_FORCE are removed, GH_PROMPT_DISABLED and NO_COLOR are set, the rest passes', async (t) => {
     const { store, runner, deps } = deck(t, answerAll());
     seed(store, 1, 2, { state: 'open', ageMin: 10 });
     await fetchPrs(deps, [NUM(1)]);

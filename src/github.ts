@@ -241,8 +241,10 @@ function errorFor(errors: unknown, alias: string): string | null {
 /**
  * Maps one `gh` result to a fetch result per key url.
  * - timedOut → every key: "gh timed out after 10 s"; notFound → "gh is not installed".
- * - stdout not JSON with a `data` object → every key: the first line of stderr, else
- *   "gh exited <code>" ("gh was killed by a signal" when there is no code).
+ * - stdout not JSON with a `data` object → every key: with exit code 0 "gh returned output skydeck
+ *   could not read" (stderr is not used: gh succeeded, and a line on it may concern one pull
+ *   request only); otherwise the first line of stderr, else "gh exited <code>" ("gh was killed by a
+ *   signal" when there is no code).
  * - otherwise per alias p<i>: a `pullRequest` object → ok (see `readPullRequest`); null or
  *   missing → failed with the message of the `errors[]` entry whose path[0] is p<i>, else of the
  *   first entry with no path, else "not found".
@@ -267,6 +269,10 @@ export function parseBatch(
   }
   const data = isRecord(answer) ? answer['data'] : undefined;
   if (!isRecord(answer) || !isRecord(data)) {
+    if (result.code === 0) {
+      // gh succeeded, so a line on stderr is no explanation, and may be about one pull request only.
+      return failAll(keys, atNs, 'gh returned output skydeck could not read');
+    }
     const reason = result.code === null ? 'gh was killed by a signal' : `gh exited ${result.code}`;
     return failAll(keys, atNs, firstLine(result.stderr) ?? reason);
   }
@@ -297,14 +303,25 @@ interface Deps {
 }
 
 /**
+ * What `gh` must not inherit: `GH_HOST` (another host) and the two variables that make it colour
+ * its JSON as for a terminal. `CLICOLOR_FORCE` beats `NO_COLOR` in `gh`, so setting `NO_COLOR` is
+ * not enough.
+ */
+const GH_REMOVED_VARIABLES: ReadonlySet<string> = new Set([
+  'GH_HOST',
+  'GH_FORCE_TTY',
+  'CLICOLOR_FORCE',
+]);
+
+/**
  * The environment `gh` runs in: the caller's, so that `gh` still finds its login, without
- * `GH_HOST` (another host) and `GH_FORCE_TTY` (colour codes in the JSON), and with
- * `GH_PROMPT_DISABLED` and `NO_COLOR` set so that it can neither wait for a person nor colour.
+ * `GH_REMOVED_VARIABLES`, and with `GH_PROMPT_DISABLED` and `NO_COLOR` set so that it can neither
+ * wait for a person nor colour.
  */
 function ghEnvironment(env: Env): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
-    if (value !== undefined && name !== 'GH_HOST' && name !== 'GH_FORCE_TTY') {
+    if (value !== undefined && !GH_REMOVED_VARIABLES.has(name)) {
       result[name] = value;
     }
   }
