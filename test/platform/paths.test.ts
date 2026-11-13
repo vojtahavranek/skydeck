@@ -87,6 +87,10 @@ describe('resolvePlaces (home /h)', () => {
     assert.equal(resolvePlaces({}, '/h', '/k').claudeHome, '/k');
   });
 
+  test('a configured claudeHome is used as it is given: validating it is the job of parseConfig', () => {
+    assert.equal(resolvePlaces({ CLAUDE_CONFIG_DIR: '/c' }, '/h', 'rel/k').claudeHome, 'rel/k');
+  });
+
   test('binLink is always under the home directory', () => {
     const places = resolvePlaces({ SKYDECK_HOME: '/s', XDG_DATA_HOME: '/x/d' }, '/h', null);
 

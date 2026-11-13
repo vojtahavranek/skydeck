@@ -45,7 +45,8 @@ export function resolveConfigDir(env: Env, homeDir: string): string {
  * Design 9.1. An env value that is empty or not absolute counts as unset.
  * SKYDECK_HOME → <it>/data, <it>/state, <it>/config. Else XDG_DATA_HOME / XDG_STATE_HOME /
  * XDG_CONFIG_HOME + "/skydeck", defaulting to <homeDir>/.local/share, /.local/state, /.config.
- * claudeHome: `configuredClaudeHome` (from config.json), else CLAUDE_CONFIG_DIR, else <homeDir>/.claude.
+ * claudeHome: `configuredClaudeHome` (from config.json, already checked to be absolute by
+ * parseConfig, so used as given), else CLAUDE_CONFIG_DIR, else <homeDir>/.claude.
  */
 export function resolvePlaces(
   env: Env,
@@ -55,14 +56,13 @@ export function resolvePlaces(
   const dataDir = skydeckDir(env, homeDir, 'data', 'XDG_DATA_HOME', join('.local', 'share'));
   const stateDir = skydeckDir(env, homeDir, 'state', 'XDG_STATE_HOME', join('.local', 'state'));
   const configDir = resolveConfigDir(env, homeDir);
-  const configured =
-    configuredClaudeHome !== null && isAbsolute(configuredClaudeHome) ? configuredClaudeHome : null;
   const spoolDir = join(stateDir, 'spool');
   return {
     dataDir,
     stateDir,
     configDir,
-    claudeHome: configured ?? absoluteEnv(env, 'CLAUDE_CONFIG_DIR') ?? join(homeDir, '.claude'),
+    claudeHome:
+      configuredClaudeHome ?? absoluteEnv(env, 'CLAUDE_CONFIG_DIR') ?? join(homeDir, '.claude'),
     dbPath: join(dataDir, 'skydeck.db'),
     hookPath: join(dataDir, 'skydeck-hook'),
     nodeLink: join(dataDir, 'node'),
