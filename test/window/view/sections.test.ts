@@ -150,6 +150,32 @@ test('rowPayload: noteHead skips empty lines at the start, as show prints a note
   assert.deepEqual(rowPayload(row, NONE).noteHead, ['real start', '', 'after a gap']);
 });
 
+test('rowPayload: a note line longer than 1,024 UTF-16 units is cut, the cut marked with …', () => {
+  const long = 'x'.repeat(5000);
+  const exact = 'y'.repeat(1024);
+  const row = rowOf(ds({ id: S1 }), { metas: [meta(S1, { note: `${long}\n${exact}\nshort` })] });
+  const [first, second, third] = rowPayload(row, NONE).noteHead;
+  assert.equal(first, `${'x'.repeat(1023)}…`);
+  assert.equal(first?.length, 1024);
+  assert.equal(second, exact);
+  assert.equal(third, 'short');
+});
+
+test('rowPayload: a cut note line never splits a surrogate pair', () => {
+  // 1,022 units, then an emoji (two units) that would straddle the cut at 1,023.
+  const note = `${'a'.repeat(1022)}😀😀😀`;
+  const row = rowOf(ds({ id: S1 }), { metas: [meta(S1, { note })] });
+  const [line] = rowPayload(row, NONE).noteHead;
+  assert.equal(line, `${'a'.repeat(1022)}…`);
+  assert.equal(line?.isWellFormed(), true);
+});
+
+test('rowPayload: the cap counts what is left once a line is sanitised', () => {
+  const note = `${'\x1b[31m'.repeat(400)}${'z'.repeat(1000)}`;
+  const row = rowOf(ds({ id: S1 }), { metas: [meta(S1, { note })] });
+  assert.deepEqual(rowPayload(row, NONE).noteHead, ['z'.repeat(1000)]);
+});
+
 test('rowPayload: a note of one line gives one line; no note gives none', () => {
   const one = rowOf(ds({ id: S1 }), { metas: [meta(S1, { note: 'only\n\n' })] });
   assert.deepEqual(rowPayload(one, NONE).noteHead, ['only']);
@@ -316,6 +342,15 @@ test('projectDirs: a directory the sanitiser changes is not offered', () => {
 test('projectDirs: a directory that is not absolute is not offered (the new form needs one)', () => {
   const list = rows([ds({ id: S1, dir: 'relative/dir' }), ds({ id: S2, dir: '' })]);
   assert.deepEqual(projectDirs(list), []);
+});
+
+test('projectDirs: only directories of rows step 1 lists (no scripted runs, no empty sessions)', () => {
+  const list = rows([
+    ds({ id: S1, dir: '/tmp/sdk-run', transcript: { entrypoint: 'sdk-ts' } }),
+    ds({ id: S2, dir: '/home/dev/never-prompted', transcript: null }),
+    ds({ id: S3, dir: '/home/dev/listed' }),
+  ]);
+  assert.deepEqual(projectDirs(list), ['/home/dev/listed']);
 });
 
 test('projectDirs: no rows, no directories', () => {

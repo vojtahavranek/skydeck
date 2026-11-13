@@ -2,9 +2,11 @@
  * The parts of the window's view model (S2 12.1, 12.2, stage A): which section a row is in, one
  * row as the page receives it, and the project directories the new form offers. Pure.
  *
- * Imports (S2 4.3, plan A8): types of `sessions`, the window's message and hub types, and `text`.
+ * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed`, the window's message and hub
+ * types, and `text`.
  */
 import type { Ns } from '../../platform/types.ts';
+import { isListed } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import type { TerminalInfo, TerminalState } from '../hub.ts';
@@ -15,6 +17,10 @@ const WEEK_NS: Ns = 7n * 86_400n * 1_000_000_000n;
 
 /** The note lines a row carries (S2 8.2.3: "the note's first three lines"). */
 const NOTE_HEAD_LINES = 3;
+
+/** The longest note line a row carries, in UTF-16 units, the ellipsis included (ruled, #45): a
+ *  note can be any length, and the list message is sent whole on every change. */
+const NOTE_LINE_MAX = 1024;
 
 /** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was lost or
  *  never started has no program that could. */
@@ -37,24 +43,42 @@ export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'w
   return nowNs - row.lastActivityNs <= WEEK_NS ? 'week' : 'earlier';
 }
 
+/** `line` cut to NOTE_LINE_MAX units with the cut marked by '…', never inside a surrogate pair. */
+function capLine(line: string): string {
+  if (line.length <= NOTE_LINE_MAX) {
+    return line;
+  }
+  let cut = NOTE_LINE_MAX - 1;
+  const last = line.charCodeAt(cut - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    cut -= 1;
+  }
+  return `${line.slice(0, cut)}…`;
+}
+
 /**
  * The first lines of a note as `show` prints a note (design 7.4): split at every line break (a
  * lone carriage return too), each line sanitised, a line that is nothing once sanitised empty,
- * empty lines at the start dropped; then at most three.
+ * empty lines at the start and the end dropped; then at most three, each capped (`capLine`).
  */
 function noteHead(note: string | null): string[] {
   if (note === null) {
     return [];
   }
-  const lines = note.split(/\r\n|\r|\n/).map((line) => {
+  const head: string[] = [];
+  for (const line of note.split(/\r\n|\r|\n/)) {
     const clean = sanitize(line);
-    return clean.trim() === '' ? '' : clean;
-  });
-  const first = lines.findIndex((line) => line !== '');
-  if (first === -1) {
-    return [];
+    if (clean.trim() === '') {
+      if (head.length > 0) {
+        head.push('');
+      }
+    } else {
+      head.push(capLine(clean));
+    }
+    if (head.length === NOTE_HEAD_LINES) {
+      break;
+    }
   }
-  const head = lines.slice(first, first + NOTE_HEAD_LINES);
   while (head.at(-1) === '') {
     head.pop();
   }
@@ -122,15 +146,16 @@ export function rowPayload(
 
 /**
  * The known project directories for the new form (S2 12.6), most recently active first, each once
- * (ties by name). A directory is offered only as it really is: one the sanitiser changes (a control
- * character, a line break) is left out, since the form would show one path and start another, and
- * so is one that is not absolute, which `prepareNew` refuses.
+ * (ties by name), of the rows step 1 lists (`isListed` with done ones: no scripted run's temporary
+ * directory; ruled, #45). A directory is offered only as it really is: one the sanitiser changes
+ * (a control character, a line break) is left out, since the form would show one path and start
+ * another, and so is one that is not absolute, which `prepareNew` refuses.
  */
 export function projectDirs(rows: readonly ListRow[]): string[] {
   const latest = new Map<string, Ns>();
   for (const row of rows) {
     const dir = row.session.dir;
-    if (dir === null || row.dir !== dir || !dir.startsWith('/')) {
+    if (dir === null || row.dir !== dir || !dir.startsWith('/') || !isListed(row, true)) {
       continue;
     }
     const seen = latest.get(dir);

@@ -1882,12 +1882,20 @@ export interface ViewInput {
 }
 /** Ruled by the plan owner (task 13, #45): listed are design 7.2's rows (`isListed` with
  *  `showDone`), every open row (running, or starting in the window) whatever its done mark
- *  (S2 12.10), and a `new` terminal's own row while the terminal is there. The filter picks the
- *  sections' rows and the done rows `doneHidden` counts (only those that match it); `counts`
- *  ignore it. While a filter is set every section is unfolded (S2 12.8); otherwise Earlier is
- *  folded unless `view.unfolded` names it, and a folded section carries `count`, `firstNs` and
- *  `lastNs` with `rows: []`. `elsewhere` is taken only for a row that is running. `selected` is
- *  passed on only when its `sessionId` equals `view.selected`, else null. */
+ *  (S2 12.10), and a `new` terminal's own session's row while the terminal is there — also one
+ *  step 1 does not list (ended before its first prompt), unless it is done and stopped. The
+ *  filter picks the sections' rows and the done rows `doneHidden` counts (only those that match
+ *  it); `counts` ignore it. While a filter is set every section is unfolded (S2 12.8); otherwise
+ *  Earlier is folded unless `view.unfolded` names it, and a folded section carries `count`,
+ *  `firstNs` and `lastNs` with `rows: []`. `elsewhere` is taken only for a row that is running; a
+ *  row held both in the window and elsewhere (a duplicate) counts as `elsewhere`. `selected` is
+ *  passed on only when its `sessionId` equals `view.selected`, else null.
+ *  Terminals on rows: a terminal that may still run (not `ended`, `lost`, `not-started`) claims a
+ *  session's row before one that may not, one showing the session before one waiting for it, then
+ *  by slot and opening time; a terminal that may not run is put only on a row that is not running.
+ *  The view model may assume that an ended terminal never belongs to a running session for longer
+ *  than one tick: it is dropped, its slot freed, when its session runs again (by the resume action
+ *  in the window, task 32; by the server's tick when the session runs anywhere else, task 23). */
 export function buildListMessage(input: ViewInput): Omit<ListMessage, 'terminals'> & { terminals: Omit<TerminalPayload, 'ownsSize'>[] };
 // src/window/view/sections.ts — the parts, exported for tests
 export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'week' | 'earlier';
@@ -1895,10 +1903,11 @@ export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'w
  *  terminal may still start one (not `ended`, `lost` or `not-started`) and the row is not
  *  running. `noteHead`: the note's first three lines as step 1 shows a note (`formatNoteLines`'s
  *  rule: split at every line break, each line sanitised, empty lines at the start and end
- *  dropped). */
+ *  dropped), each cut to 1,024 UTF-16 units with the cut marked by `…` (never inside a surrogate
+ *  pair). `elsewhere.tty` is sanitised like every other foreign text. */
 export function rowPayload(row: ListRow, extra: { terminal: TerminalInfo | null; elsewhere: { pid: number; tty: string | null } | null }): RowPayload;
-/** Most recent first, unique; left out: a directory the sanitiser changes, and one that is not
- *  absolute (ruled, #45). */
+/** Most recent first, unique, of the rows step 1 lists (`isListed(row, true)`); left out: a
+ *  directory the sanitiser changes, and one that is not absolute (ruled, #45). */
 export function projectDirs(rows: readonly ListRow[]): string[];
 ```
 
