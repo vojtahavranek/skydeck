@@ -429,35 +429,62 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
   before doing anything** (A33); there are no defaults. It runs the hook at
   `<repo>/bin/skydeck-hook` (or `$STANDIN_HOOK`).
 - **Arguments.** `--session-id <id>`, `--resume <id>` or `-r <id>`, `-n <name>`; everything else is
-  recorded and ignored.
+  recorded and ignored. With neither `--session-id` nor `--resume` it makes up a session id.
 - **At start** it records `{ ev: 'start', argv, cwd, envNames, env: { TERM, COLORTERM, PWD,
-  WSL_INTEROP }, coreSoft }` (`envNames`: the sorted names of its environment; `coreSoft`: the soft
-  "Max core file size" of `/proc/self/limits` as written there), sets raw mode, sends DA1
-  (`ESC [ c`) and waits up to 2 s for the answer (recorded as `{ ev: 'da1', answer }`; without one
-  it writes `no answer to DA1` on the screen), then CPR (`ESC [ 6 n`, `{ ev: 'cpr', answer }`),
-  runs the hook with `SessionStart` (source `startup` or `resume`) and `CLAUDE_PID` = its pid,
-  writes `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json` (status `idle`, `procStart` as a decimal string
-  from its own `/proc/self/stat`, the shapes of `test/fixtures/claude/sessions/idle.json`), and
-  draws `standin <short id>> `.
-- **Input.** Every chunk is recorded as `{ ev: 'input', hex }`. Printable text is echoed. `\r`
-  ends a line: a line that starts with `/` is a command. `\n` (Ctrl+J) is echoed as `⏎`.
-- **Commands.** `/exit` — `SessionEnd` reason `prompt_input_exit`, live file removed, exit 0.
-  `/fail <n>` — exit `n` without an end event. `/clear` — `SessionEnd` `clear`, a new session id,
-  `SessionStart` `clear`, the live file names the new id. `/busy`, `/idle`, `/waiting <what>` —
-  the live file's status (and `waitingFor`). `/alt`, `/main` — enter and leave the alternate
-  screen, drawing a frame on it. `/mouse` — modes 1000 and 1006 on. `/hide-cursor` — mode 25 off.
-  `/cursor <n>` — DECSCUSR `n`. `/red <text>` — the text in SGR 31. `/lines <n>` — `n` numbered
-  lines. `/flood <bytes>` — that many bytes of numbered lines as fast as it can. `/stall <s>` — reads
-  no input for `s` seconds. `/osc52 <text>` — an OSC 52 clipboard write of `text`. `/link <url>
-  <text>` — an OSC 8 link. `/query` — DA1, DA2, CPR, DECRQM 2026, DECRQSS `m`, XTVERSION, OSC 10 `?`
-  and OSC 11 `?` again; each answer recorded as `{ ev: 'answer', query, answer }`. `/title <text>`
-  — OSC 2. `/wide` — a row with 🙂, a ZWJ sequence and a skin-tone emoji.
-- **Signals.** `SIGWINCH` — records `{ ev: 'resize', cols, rows }` and redraws. `SIGHUP` — records
-  `{ ev: 'hup' }`, `SessionEnd` reason `other`, exit 129. It records `{ ev: 'exit', code }` last.
+  WSL_INTEROP }, coreSoft, cols, rows }` (`argv`: its arguments without the program; `envNames`:
+  the sorted names of its environment — `sh` adds `PWD` even when the caller did not give it;
+  `env` values are null when unset; `coreSoft`: the soft "Max core file size" of
+  `/proc/self/limits` as written there; `cols`, `rows`: the terminal's size, null when its output
+  is not a terminal), sets raw mode, sends DA1 (`ESC [ c`) and waits up to 2 s for the answer
+  (recorded as `{ ev: 'da1', answer }`; without one it writes `no answer to DA1` on the screen and
+  records `answer: null`), then CPR (`ESC [ 6 n`, `{ ev: 'cpr', answer }`; when DA1 had no answer,
+  CPR is sent but not waited for and recorded with `answer: null`), runs the hook with
+  `SessionStart` (source `startup` or `resume`, `session_title` when `-n` is given) and
+  `CLAUDE_PID` = its pid, `CLAUDE_CODE_SESSION_ID` = the session id and `CLAUDE_CODE_ENTRYPOINT`
+  = `cli`, writes `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json` (status `idle`, `procStart` as a
+  decimal string from its own `/proc/self/stat`, `name` when `-n` is given, `version` `standin`,
+  the shapes of `test/fixtures/claude/sessions/idle.json` without `nameSource`; written whole,
+  through a rename), turns bracketed paste (mode 2004) on, as Claude Code does, and draws
+  `standin <short id>> ` (the first 8 characters of the session id).
+- **Input.** Every chunk it reads is recorded as `{ ev: 'input', hex }`, with one exception: while
+  one of its own queries is open (DA1 and CPR at start, `/query`), what arrives goes to the query;
+  the answers are recorded as `da1`, `cpr` or `answer` and never as input, and the bytes that
+  answer nothing are recorded as ONE `input` record when the query closes (all answered, or 2 s).
+  Printable text is echoed. `\r` ends a line: a line that starts with `/` is a command. `\n`
+  (Ctrl+J) is echoed as `⏎`; every other control character in caret notation (`\x16` as `^V`,
+  ESC as `^[`, so a bracketed paste shows `^[[200~…^[[201~`). Lines end in `\n`: Node's raw mode
+  keeps the terminal's ONLCR, as it does for Claude Code, so the terminal receives `\r\n`.
+- **Commands.** `/exit` — bracketed paste off, `SessionEnd` reason `prompt_input_exit`, live file
+  removed, exit 0. `/fail <n>` — exit `n` without an end event; the live file stays, as after a
+  crash. `/clear` — `SessionEnd` `clear`, a new session id, `SessionStart` `clear`, the live file
+  names the new id (and no `-n` name any more). `/busy`, `/idle`, `/waiting <what>` — the live
+  file's status (and `waitingFor`, removed by `/busy` and `/idle`). `/alt`, `/main` — enter and
+  leave the alternate screen, drawing a box around the whole screen on it. `/mouse` — modes 1000
+  and 1006 on. `/hide-cursor` — mode 25 off. `/cursor <n>` — DECSCUSR `n`. `/red <text>` — the
+  text in SGR 31. `/lines <n>` — `n` numbered lines (`line 1` …). `/flood <bytes>` — that many
+  bytes of numbered lines as fast as it can (bytes the program writes; the terminal sees one more
+  CR per line). `/stall <s>` — reads no input for `s` seconds (`stalling <s> s` on the screen;
+  what arrives meanwhile is read afterwards). `/osc52 <text>` — an OSC 52 clipboard write of
+  `text`. `/link <url> <text>` — an OSC 8 link. `/query` — DA1, DA2, CPR, DECRQM 2026, DECRQSS
+  `m`, XTVERSION, OSC 10 `?` and OSC 11 `?` again in one write; each answer recorded as
+  `{ ev: 'answer', query, answer }` with `query` one of `DA1`, `DA2`, `CPR`, `DECRQM 2026`,
+  `DECRQSS m`, `XTVERSION`, `OSC 10`, `OSC 11`; answers may come in any order; the stand-in waits
+  until every query has one or 2 s passed. `/title <text>` — OSC 2. `/wide` — a row with 🙂, a ZWJ
+  sequence and a skin-tone emoji. Any other `/word` — `unknown command: /word`.
+- **Signals.** `SIGWINCH` with a changed size — records `{ ev: 'resize', cols, rows }` and redraws
+  (`size <cols>x<rows>` and the prompt on the main screen, the box on the alternate one). A
+  SIGWINCH that leaves the size as it was records nothing and draws nothing: a server that needs a
+  redraw at the same size must change the size and change it back (S2 7.3: one column narrower and
+  back). `SIGHUP` — records `{ ev: 'hup' }`, `SessionEnd` reason `other`, live file removed, exit
+  129. It records `{ ev: 'exit', code }` last.
 - **It ends itself** (A33), exit 0: when the directory of `STANDIN_RECORD` is gone (checked every
-  second) at once, running no hook and writing nothing (no record, no live file, no spool
-  directory created again); 10 minutes after it started (`STANDIN_MAX_SECONDS` shortens it, for
-  its own test) with `SessionEnd` reason `other` and its live file removed.
+  second, and before every hook run, record and live-file write) at once, running no hook and
+  writing nothing (no record, no live file, no spool directory created again); 10 minutes after
+  it started (`STANDIN_MAX_SECONDS` shortens it, for its own test) with `SessionEnd` reason
+  `other` and its live file removed.
+- **Reading the records.** `readRecords` leaves out a last line that is not complete yet; record
+  times (`ms`) are wall-clock milliseconds, which can step back on WSL — measure durations in the
+  test with `performance.now()`.
 
 ### 2.5 The server's internal interfaces: `src/window/hub.ts` (task 1)
 

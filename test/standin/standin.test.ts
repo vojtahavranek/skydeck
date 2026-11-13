@@ -596,6 +596,21 @@ describe('stand-in: signals', () => {
     await pty.waitFor('size 100x30');
   });
 
+  test('a SIGWINCH that leaves the size as it was records nothing and draws nothing', async (t) => {
+    const { pty, record } = await startStandin(t, { cols: 80, rows: 24 });
+
+    pty.control('signal 28');
+    await sleep(500);
+    pty.control('resize 100 30');
+    await waitForRecord(record, (r) => r.ev === 'resize', 5000);
+
+    assert.deepEqual(
+      readRecords(record).flatMap((r) => (r.ev === 'resize' ? [[r.cols, r.rows]] : [])),
+      [[100, 30]],
+    );
+    assert.equal(pty.output().includes('size 80x24'), false);
+  });
+
   test('SIGHUP: a hup record, SessionEnd other, exit 129 recorded last', async (t) => {
     const { s, pty, start, record } = await startStandin(t);
 
@@ -712,20 +727,21 @@ describe('stand-in: /query', () => {
 
     pty.write('/query\r');
     await pty.waitFor(queries);
-    // The answers in another order than the queries, and in one chunk.
-    pty.write(
-      [...answers]
-        .reverse()
-        .map(([, answer]) => answer)
-        .join(''),
-    );
-    await pty.waitFor(`${PROMPT}${S1.slice(0, 8)}> `, 5000, pty.output().indexOf(queries));
+    // The answers in another order than the queries, in two chunks, with typing between: what
+    // answers nothing becomes ONE input record when the query closes.
+    const reversed = [...answers].reverse().map(([, answer]) => answer);
+    pty.write(`${reversed.slice(0, 4).join('')}z`);
+    await sleep(100);
+    pty.write('y');
+    await sleep(100);
+    pty.write(reversed.slice(4).join(''));
+    await pty.waitFor(`${PROMPT}${S1.slice(0, 8)}> zy`, 5000, pty.output().indexOf(queries));
 
     const got = readRecords(record)
       .filter((r): r is AnswerRecord => r.ev === 'answer')
       .map((r) => [r.query, r.answer]);
     assert.deepEqual(got.sort(), [...answers].sort());
-    assert.deepEqual(inputs(record), [hex('/query\r')]);
+    assert.deepEqual(inputs(record), [hex('/query\r'), hex('zy')]);
   });
 
   test('records no answer when the terminal does not answer, and goes on', async (t) => {
