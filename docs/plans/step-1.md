@@ -1892,7 +1892,7 @@ export type TuiMode = 'list' | 'detail' | 'filter' | 'input';
 export interface TuiInput { purpose: 'label' | 'group' | 'pr'; text: string }
 export interface TuiModel {
   rows: ReadonlyMap<string, ListRow>;                 // every row by id
-  order: { name: string | null; ids: string[] }[];    // fixed at open, on 'r' and on 'a'
+  order: { name: string | null; ids: string[] }[];    // every listable row, done ones too; fixed at open, on 'r' and on 'a'
   showAll: boolean;
   filter: string;
   mode: TuiMode;
@@ -1915,7 +1915,9 @@ export type TuiEffect =
 export function initModel(rows: readonly ListRow[], nowNs: Ns): TuiModel;
 /**
  * reorder true: recompute `order` with buildList. false: keep `order`, drop rows that are gone or no longer listed at all,
- * append new rows, and rows whose group changed, to the end of their group (a new group goes last), drop emptied groups.
+ * append new rows, and rows whose group changed, to the end of their group (a new named group goes before "no group", which
+ * is last), drop emptied groups. `order` always holds the done rows too, with the groups ranked by the members listed under
+ * the current `showAll` (design 7.4), as `skydeck ls` ranks them; a group with nothing listed comes after the others.
  * When the selected row is no longer visible the selection moves to the first visible row and an open detail or input is
  * closed (`mode` is 'list' afterwards).
  */
@@ -1928,6 +1930,13 @@ export function reduce(model: TuiModel, key: string): { model: TuiModel; effect:
 // src/cli/tui/render.ts
 /** Exactly size.rows lines, none longer than size.columns (layout: task 13). */
 export function render(model: TuiModel, size: { columns: number; rows: number }): string[];
+/**
+ * The model with `scroll` moved by the least that keeps the selected row, and its group header when it is the first row of
+ * its group, in view (one line per row the cursor moves, two onto a group's first row from below); a scroll out of range is
+ * made valid. The wrapper calls it after every key and on resize. `render` uses the same rule, so it shows the selected row
+ * even when the wrapper has not called it. The detail does not scroll (the model is returned as it is).
+ */
+export function scrolled(model: TuiModel, size: { columns: number; rows: number }): TuiModel;
 
 // src/cli/tui/keys.ts (task 19)
 /** Splits raw terminal input into key names: ESC[A up, ESC[B down, ESC OA/OB too, \r and \n enter, \x7f and \b backspace, \x03 ctrl-c, a lone ESC escape; other escape sequences are dropped. */
@@ -3766,23 +3775,31 @@ export function render(model: TuiModel, size: { columns: number; rows: number })
 **Row format (contract).** `formatRow` =
 `state.padEnd(11) + ' ' + title + '  ' + formatAge(nowNs − sinceNs).padStart(4)` followed by
 `'  ' + part` for each non-empty part of: `marks.join(',')`, `formatChip(chip)`, `'note'` when
-`hasNote`, `shortId`. When the result is longer than `width`, the title is cut to fit and ends
-with `…` (at least one title character is kept). `formatChip` = `` `${count}pr:${level}` ``.
+`hasNote`, `shortId`. When the result is longer than `width`, columns are dropped, in this
+order, until the title has 24 characters (or all of it, when it is shorter): the `note` part, the
+time in state, all marks but the first (shown as `<first>+<n>`), the count of the chip (shown as
+`pr:<level>`). The state, the title and the short id are never dropped. A title that still does
+not fit is cut to fit and ends with `…` (at least one title character is kept; a title the
+ellipsis would not make shorter is kept whole). `formatChip` = `` `${count}pr:${level}` ``.
 
 **Screen layout (contract).** `render` returns exactly `size.rows` lines, each at most
 `size.columns` long, no escape sequences. Line 0: `skydeck  <visible count> sessions`, plus
 `  filter: <filter>` when the filter is not empty, plus `  (all)` when `showAll`. Last line:
-input mode → `<purpose>: <text>_`; filter mode → `/<filter>_`; else `message` when set; else
+input mode → `<purpose>: <text>_`; filter mode → `/<filter>_` (when either does not fit, the start of the text gives way to
+a `…` so that its end and the `_` stay in view); else `message` when set; else
 `j/k move  enter detail  l label  g group  n note  d done  p PR  R resume  / filter  a all  r refresh  q quit`.
 Body (the lines between): list mode — for each group with visible rows a line with the group name
 (`no group` for null), then each row as `'> '` (selected) or `'  '` + `formatRow(row, nowNs, columns − 2)`;
-`no sessions` when nothing is visible; scrolled so the selected row is visible. Detail mode — the
+`no sessions` when nothing is visible; from the line `model.scroll`, moved as `scrolled` does when the selected row would be
+out of view. Detail mode — the
 selected row as lines `title: …`, `id: …`, `state: <state>[ (<stateDetail>)]`, `since: <iso>`,
 `dir: <dir or ->`, `group: <group or ->`, `marks: <comma list or ->`, one line `pr: ` +
-`formatPrLine(pr)` per PR, `note:` followed by the note lines indented by two spaces.
+`formatPrLine(pr)` per PR, `note:` followed by the note lines indented by two spaces; when the lines do not all fit, the
+last line shown is `…`.
 
 **Key behaviour (contract).** List mode: `j`/`down`, `k`/`up` move (no wrap); `enter` → detail;
-`l` → input `label` prefilled with the row's label; `g` → input `group` empty; `n` → effect `note`;
+`l` → input `label` prefilled with the row's label; `g` → input `group` prefilled with the row's group when the user set it
+(`groupSource` `meta`), else empty (so `enter` straight away changes nothing, and clearing takes a deliberate delete); `n` → effect `note`;
 `d` → effect `done` with `done: !row.done`; `p` → input `pr` empty; `R` → effect `resume`; `/` →
 filter mode; `a` → toggle `showAll` and recompute `order`; `r` → effect `refresh`; `q` → `quit`.
 Detail mode: `escape`, `enter` and `q` → list mode; `l g n d p R` act as in list mode. Filter
@@ -3795,7 +3812,9 @@ action key gives effect `none`. When the selected row stops being visible (a key
 the selection moves to the first visible row (or null) and an open detail or input is closed, so
 that nothing is applied to a row the user did not choose; a filter being typed stays open.
 `withRows` without reorder also drops rows that are no longer listed at all, moves a row whose
-group changed to the end of its new group and drops groups left empty.
+group changed to the end of its new group, puts a group that did not exist before "no group", and
+drops groups left empty. Groups are ranked by the members listed under the current `showAll`
+(design 7.4); `a` and `withRows` with reorder compute `order` that way.
 
 **Test cases** (`R1` group `A`, waiting, id S1, label `'alpha'`, `lastActivityNs T0`; `R2` group `A`, not-running, id S2, title `'beta'`, `T0−1m`; `R3` no group, id S3, `done: true`; `nowNs T0`)
 
@@ -3805,7 +3824,10 @@ group changed to the end of its new group and drops groups left empty.
 - `{ state: 'not-running', title: 'Fix', sinceNs: T0−3h, marks: ['ended-unexpectedly','was-working'], chip: null, hasNote: false }` →
   `'not-running Fix    3h  ended-unexpectedly,was-working  0b5f3c1e'`.
 - `{ state: 'working', title: 'A very long title that will not fit at all', sinceNs: T0−5m }`, width 40 →
-  `'working     A very long…    5m  0b5f3c1e'` (length 40).
+  `'working     A very long title…  0b5f3c1e'` (length 40: even without the time in state the title has 18 characters).
+- `{ state: 'waiting', title: 'abcdefghijklmnopqrstuvwxyz0123456789', sinceNs: T0−12m, marks: ['ended-unexpectedly','was-working'], chip: { level: 'checks-failing', count: 2 }, hasNote: true, id: S1 }`:
+  width 122 → everything; 110 → title cut to 24, everything else shown; 109 → no `note`; 103 → also no time in state;
+  97 → marks `ended-unexpectedly+1`; 87 → chip `pr:checks-failing`; 60 → `'waiting     a…  ended-unexpectedly+1  pr:checks-failing  0b5f3c1e'`.
 - `formatChip({ level: 'merged', count: 1 })` → `'1pr:merged'`.
 - `formatPrLine`: level `draft` → `'https://github.com/o/r/pull/1  draft'`; level `cant-read`, `okAtNs T0`, error `'HTTP 401'` →
   `"https://github.com/o/r/pull/1  can't read, last read 2026-11-12T09:00:00.000Z (HTTP 401)"`; `cant-read`, `okAtNs null`, error `'x'` →
@@ -3818,7 +3840,7 @@ group changed to the end of its new group and drops groups left empty.
 4. `a` → `showAll true`, visible `[R1,R2,R3]`; select R3, `a` → `showAll false`, selected S1.
 5. `/`, `b`, `e`, `t`, `backspace`, `enter` → filter `'be'`, mode `list`; `/`, `escape` → filter `''`.
 6. `l` → input `{ purpose: 'label', text: 'alpha' }`; `backspace`×5, `x`, `enter` → effect `{ kind: 'label', id: S1, text: 'x' }`; `l`, `escape` → effect `none`, mode `list`.
-7. `g`, `G`, `enter` → `{ kind: 'group', id: S1, text: 'G' }`.
+7. `g` → input `{ purpose: 'group', text: 'A' }`; `backspace`, `G`, `enter` → `{ kind: 'group', id: S1, text: 'G' }`; `g`, `enter` → text `'A'`; `g`, `backspace`, `enter` → text `''`; a row whose group came from its title (`groupSource` `title`) or has none → `g` gives text `''`.
 8. `n` → `{ kind: 'note', id: S1 }`; `d` → `{ kind: 'done', id: S1, done: true }`; with `showAll`, R3 selected, `d` → `done: false`.
 9. `p`, then the characters of `https://github.com/o/r/pull/1`, `enter` → `pr-add` with that url; with a leading `-` → `pr-rm` without it.
 10. `R` → `{ kind: 'resume', id: S1 }`; `r` → `{ kind: 'refresh' }`; `x` → `none`.
@@ -3827,6 +3849,8 @@ group changed to the end of its new group and drops groups left empty.
 13. From `m = initModel([R1,R2,R3], T0)`: `withRows(m, [R1, R2 now waiting with lastActivity T0+1m, R3, R4 (group A, id S4)], T0, false)`
     → order A `[S1,S2,S4]`. Separately, `m` with S2 selected, `withRows(m, [R1, R3], T0, false)` → order A `[S1]`, selected S1.
 14. Same rows with `reorder true` → order A `[S2,S1,S4]` (as `buildList`).
+15. Group order: A has a listed row last active 60m ago; B has a listed row 180m ago and a done row 5m ago → `order` names `['A','B']` (B's ids: the done row first); `a` → `['B','A']`; `a` again → `['A','B']`. A group with only done rows comes after A and before "no group".
+16. `withRows` without reorder: a new group `Z` → names `['A','Z',null]`; several new groups keep `buildList` order, all before "no group"; a row whose group changed goes to the end of its new group; a row that is merely hidden (done, `showAll` off) under an open detail or input closes it (mode `list`, selection on the first visible row).
 
 `tui/render.test.ts` (size 80×10 unless stated)
 1. 10 lines, none longer than 80, none containing `'\x1b'`.
@@ -3838,6 +3862,7 @@ group changed to the end of its new group and drops groups left empty.
 7. No rows → line 1 `'no sessions'`.
 8. Detail of R1 with one PR (`…/pull/1`, level `draft`) and note `'a\nb'` → body contains `'id: ' + S1`, `'state: waiting'`,
    `'pr: https://github.com/o/r/pull/1  draft'`, `'note:'`, `'  a'`, `'  b'`; a `cant-read` PR line is `'pr: ' + formatPrLine(pr)`.
+9. `scrolled`: 30 rows in one group, 8 body lines, `j` ×12, the wrapper calling `scrolled` after every key → `scroll` 0 for rows 0–6, then 1…6; going back up from row 20 the window stays until the cursor reaches its top, then moves one line per row; with three groups of ten, the header of a group is on screen whenever its first row is selected, and no step moves the window by more than 2 lines. A detail body longer than the screen ends with a line `'…'`; a long input or filter line shows its end and the `_`.
 
 **Steps**
 - [ ] Write the helper and the three test files. `npm test` → fails.

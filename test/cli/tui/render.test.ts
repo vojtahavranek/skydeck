@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { formatPrLine, formatRow } from '../../../src/cli/row.ts';
 import { initModel, reduce, withMessage } from '../../../src/cli/tui/model.ts';
 import type { TuiModel } from '../../../src/cli/tui/model.ts';
-import { render } from '../../../src/cli/tui/render.ts';
+import { render, scrolled } from '../../../src/cli/tui/render.ts';
 import { NS_PER_MINUTE } from '../../../src/platform/time.ts';
 import type { PrView } from '../../../src/sessions/list.ts';
 import { S1, S2, S3, T0 } from '../../helpers/platform.ts';
@@ -171,7 +171,8 @@ test('the last line: the input, the filter, or the message', () => {
     )[9],
     'label: x_',
   );
-  assert.equal(render(press(open(), 'g', 'G'), SIZE)[9], 'group: G_');
+  // The group input starts with the group the user set (R1: 'A').
+  assert.equal(render(press(open(), 'g', 'G'), SIZE)[9], 'group: AG_');
   assert.equal(render(press(open(), 'p', 'h'), SIZE)[9], 'pr: h_');
   assert.equal(render(press(open(), '/', 'b', 'e'), SIZE)[9], '/be_');
   assert.equal(render(withMessage(open(), 'saved'), SIZE)[9], 'saved');
@@ -201,8 +202,8 @@ test('a long input made of two-unit characters is cut between characters', () =>
 });
 
 test('a long input that fits is shown whole, with the cursor', () => {
-  const text = 'x'.repeat(72);
-  assert.equal(render(press(open(), 'g', ...text), SIZE)[9], `group: ${text}_`);
+  const text = 'x'.repeat(75);
+  assert.equal(render(press(open(), 'p', ...text), SIZE)[9], `pr: ${text}_`);
 });
 
 test('a message is one line without escape sequences or control characters', () => {
@@ -276,6 +277,123 @@ test('a scroll offset that is out of range, or hides the selected row, is correc
 test('the short list is not scrolled', () => {
   const model = { ...open(), scroll: 4 };
   assert.equal(render(model, SIZE)[1], 'A');
+});
+
+/** What a terminal wrapper does after every key: reduce, then keep the window with `scrolled`. */
+function walk(start: TuiModel, keys: string[], size = SIZE): TuiModel[] {
+  const states = [scrolled(start, size)];
+  for (const key of keys) {
+    states.push(scrolled(reduce(states[states.length - 1] ?? start, key).model, size));
+  }
+  return states;
+}
+
+/** Three groups of ten rows, in the order of their names. */
+function groups3(): TuiModel {
+  const rows = Array.from({ length: 30 }, (_, n) =>
+    listRow({
+      id: `row-${String(n).padStart(2, '0')}-0000`,
+      title: `row ${n}`,
+      group: `G${Math.floor(n / 10)}`,
+      lastActivityNs: T0 - BigInt(n) * MIN,
+    }),
+  );
+  return initModel(rows, T0);
+}
+
+test('scrolled: the window moves by the least that keeps the selected row in view', () => {
+  const states = walk(manyRows(30), down(12));
+  // The body is 8 lines and row n is on line n + 1: row 6 is the last one in view from the top.
+  assert.deepEqual(
+    states.map((state) => state.scroll),
+    [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6],
+  );
+});
+
+test('scrolled: going up, the window does not move until the cursor reaches its top, then one line per row', () => {
+  const down20 = walk(manyRows(30), down(20));
+  const end = down20[down20.length - 1] ?? manyRows(30);
+  assert.equal(end.scroll, 14);
+  const states = walk(
+    end,
+    Array.from({ length: 12 }, () => 'k'),
+  );
+  // Rows 20 down to 13 stay in the window that starts at line 14; then one line per row.
+  assert.deepEqual(
+    states.map((state) => state.scroll),
+    [14, 14, 14, 14, 14, 14, 14, 14, 13, 12, 11, 10, 9],
+  );
+});
+
+test('scrolled: no move of the window is ever bigger than one line inside a group', () => {
+  const keys = [...down(29), ...Array.from({ length: 29 }, () => 'k')];
+  const states = walk(manyRows(30), keys);
+  for (let i = 1; i < states.length; i += 1) {
+    const move = Math.abs((states[i]?.scroll ?? 0) - (states[i - 1]?.scroll ?? 0));
+    // The one exception: arriving at the first row brings its group header into view too.
+    assert.ok(move <= (states[i]?.selected === 'row-00-0000' ? 2 : 1), `step ${i}`);
+  }
+});
+
+test('scrolled: the header of a group shows when its first row is selected, and the window is stable across groups', () => {
+  const keys = [...down(29), ...Array.from({ length: 29 }, () => 'k')];
+  const states = walk(groups3(), keys);
+  for (const [i, state] of states.entries()) {
+    const lines = render(state, SIZE);
+    const at = lines.findIndex((line) => line.startsWith('> '));
+    assert.ok(at >= 1 && at <= 8, `step ${i}: the selected row is on screen`);
+    const row = state.rows.get(state.selected ?? '');
+    if (['row 0', 'row 10', 'row 20'].includes(row?.title ?? '')) {
+      assert.match(lines[at - 1] ?? '', /^G\d$/, `step ${i}: header above ${row?.title}`);
+    }
+    if (i > 0) {
+      const before = states[i - 1]?.scroll ?? 0;
+      assert.ok(Math.abs(state.scroll - before) <= 2, `step ${i}`);
+    }
+  }
+});
+
+test('scrolled: render shows what scroll says while the selected row is in view', () => {
+  const states = walk(manyRows(30), down(12));
+  const model = states[12] as TuiModel;
+  assert.equal(model.scroll, 6);
+  const lines = render(model, SIZE);
+  // Body line 6 is "row 5" (line 0 is the group header); row 12, the selected one, is the last line.
+  assert.match(lines[1] ?? '', /row 5 /);
+  assert.match(lines[8] ?? '', /^> .*row 12 /);
+});
+
+test('scrolled: a smaller list, or a taller screen, pulls the window back; it never leaves blank lines under a full list', () => {
+  const atEnd = walk(manyRows(30), down(29)).pop() as TuiModel;
+  assert.equal(atEnd.scroll, 23);
+  const taller = scrolled(atEnd, { columns: 80, rows: 20 });
+  assert.equal(taller.scroll, 31 - 18);
+  const few = scrolled({ ...open(), scroll: 20 }, SIZE);
+  assert.equal(few.scroll, 0);
+});
+
+test('scrolled: a negative or odd scroll is made a valid one', () => {
+  assert.equal(scrolled({ ...manyRows(30), scroll: -5 }, SIZE).scroll, 0);
+  assert.equal(scrolled({ ...manyRows(30), scroll: Number.NaN }, SIZE).scroll, 0);
+});
+
+test('scrolled: the detail keeps the window of the list, and a model without rows needs none', () => {
+  const states = walk(manyRows(30), down(12));
+  const detail = reduce(states[12] as TuiModel, 'enter').model;
+  assert.equal(scrolled(detail, SIZE), detail);
+  assert.equal(scrolled(initModel([], T0), SIZE).scroll, 0);
+});
+
+test('scrolled: a screen with no room for a body still gives a valid model', () => {
+  for (const rows of [0, 1, 2, 3]) {
+    const model = scrolled(press(manyRows(30), ...down(5)), { columns: 80, rows });
+    assert.ok(model.scroll >= 0, String(rows));
+  }
+});
+
+test('scrolled: returns the same model when nothing moves', () => {
+  const model = scrolled(manyRows(30), SIZE);
+  assert.equal(scrolled(model, SIZE), model);
 });
 
 // --- detail ----------------------------------------------------------------------------------------
@@ -398,6 +516,32 @@ test('the detail: lines are cut to the width, and a body that is too long is cut
   assert.equal(lines.length, 12);
   assert.ok(lines.every((line) => line.length <= 30));
   assert.equal(lines[1], 'title: ' + 'T'.repeat(23));
+});
+
+test('the detail: a body that is cut ends with a line of "…"; one that fits has none', () => {
+  const note = Array.from({ length: 40 }, (_, n) => `line ${n}`).join('\n');
+  const long = listRow({ id: S1, hasNote: true, note });
+  const cut = render(press(initModel([long], T0), 'enter'), { columns: 40, rows: 12 });
+  assert.equal(cut[10], '…');
+  // Seven fields, the heading, then the note: the ninth body line is the first note line.
+  assert.equal(cut[9], '  line 0');
+  const fits = listRow({ id: S1, hasNote: true, note: 'a\nb' });
+  const whole = render(press(initModel([fits], T0), 'enter'), { columns: 40, rows: 12 });
+  assert.ok(!whole.includes('…'));
+});
+
+test('the detail: a body exactly as long as the screen is not marked as cut', () => {
+  const row = listRow({ id: S1 });
+  // title, id, state, since, dir, group, marks: seven lines.
+  const lines = render(press(initModel([row], T0), 'enter'), { columns: 60, rows: 9 });
+  assert.ok(!lines.includes('…'));
+  assert.equal(lines[7], 'marks: -');
+});
+
+test('the detail: with room for one body line, that line is the title and not a bare "…"', () => {
+  const row = listRow({ id: S1, hasNote: true, note: 'x' });
+  const lines = render(press(initModel([row], T0), 'enter'), { columns: 60, rows: 3 });
+  assert.equal(lines[1], 'title: t');
 });
 
 test('the detail follows the selected row', () => {
