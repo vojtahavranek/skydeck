@@ -8,6 +8,10 @@
 // digit (Shift on a Czech number row types the digits) and otherwise by the physical key
 // `Digit1` … `Digit9` (on a US layout Shift+1 types `!`). AltGr arrives as Ctrl+Alt, so no chord
 // and no list key has Alt: AltGr characters and dead keys reach xterm.js unchanged.
+//
+// Some keys are classified by two functions — Ctrl+Shift+V (windowChord `paste-raw`, terminalKey
+// `{ send: '\x16' }`), Ctrl+Shift+R and BrowserRefresh (windowChord and listKey `reload`): the
+// page acts on such a key once.
 
 /** @typedef {{ key: string, code: string, ctrlKey: boolean, shiftKey: boolean, altKey: boolean, metaKey: boolean }} KeyLike */
 /** @typedef {'list' | 'terminal'} Zone */
@@ -28,7 +32,8 @@
  * The window's own chord (S2 12.9, stage A): Ctrl+Shift with a letter or a digit of the table,
  * and Ctrl+Tab. The keys of later stages are the window's from stage A on (A11): Ctrl+Shift+J
  * (B) and Ctrl+Shift+P (E) give `later`. Every chord is the window's in both zones, so the
- * result does not depend on `zone`; Ctrl+Shift+R is the page's reload in both (S2 12.9, 15.3).
+ * result does not depend on `zone`. Ctrl+Shift+R and the BrowserRefresh key (alone, with Shift,
+ * with Ctrl; xterm.js sends nothing for it) are the page's reload in both (S2 12.9, 15.3).
  * @param {KeyLike} e
  * @param {Zone} zone
  * @returns {WindowChord | null}
@@ -36,6 +41,9 @@
 export function windowChord(e, zone) {
   if (e.key === 'Tab' && hasOnly(e, 'ctrl')) {
     return { kind: 'previous' };
+  }
+  if (isBrowserRefresh(e)) {
+    return { kind: 'reload' };
   }
   if (!hasOnly(e, 'ctrl', 'shift')) {
     return null;
@@ -96,8 +104,8 @@ export function terminalKey(e) {
  * The list zone's keys (S2 12.9). A character key (`j`, `k`, `/`, `a`, `l`, …) takes no Ctrl,
  * Alt or Meta; Shift may be held, since it chose the character (`/` is Shift+ú on a Czech
  * layout), and an upper-case letter is another key. A named key (arrows, Home, Enter, Esc, F2 …)
- * takes no modifier. The reload keys are F5, Ctrl+R, Ctrl+Shift+R and Ctrl+F5 (15.3). The keys of
- * stage D — `l`, `g`, `n`, `p`, `d` and F2 — give `later` (A11).
+ * takes no modifier. The reload keys are F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and the
+ * BrowserRefresh key alone, with Shift or with Ctrl (S2 12.9, 15.3). The keys of stage D — `l`, `g`, `n`, `p`, `d` and F2 — give `later` (A11).
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -215,18 +223,29 @@ function isAltF4(e) {
 }
 
 /**
- * F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5: the reload keys of S2 12.9 and 15.3.
+ * The reload keys of the list zone (S2 12.9, 15.3): every key on which Chromium reloads the page
+ * — F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R, and the BrowserRefresh key alone, with Shift or
+ * with Ctrl.
  * @param {KeyLike} e
  * @returns {boolean}
  */
 function isReload(e) {
   if (e.key === 'F5') {
-    return hasOnly(e) || hasOnly(e, 'ctrl');
+    return hasOnly(e) || hasOnly(e, 'shift') || hasOnly(e, 'ctrl');
   }
   if (e.key.toLowerCase() === 'r') {
     return hasOnly(e, 'ctrl') || hasOnly(e, 'ctrl', 'shift');
   }
-  return false;
+  return isBrowserRefresh(e);
+}
+
+/**
+ * The keyboard's BrowserRefresh key, alone, with Shift or with Ctrl.
+ * @param {KeyLike} e
+ * @returns {boolean}
+ */
+function isBrowserRefresh(e) {
+  return e.key === 'BrowserRefresh' && (hasOnly(e) || hasOnly(e, 'shift') || hasOnly(e, 'ctrl'));
 }
 
 /**

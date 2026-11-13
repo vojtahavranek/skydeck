@@ -177,6 +177,28 @@ describe('windowChord: matching', () => {
     assert.equal(windowChord(ev('Dead', 'Equal'), 'terminal'), null);
     assert.equal(windowChord(cs('Dead', 'Equal'), 'terminal'), null);
   });
+
+  // Ruled 2026-11-13: Chromium reloads on the BrowserRefresh key too (from memory, unverified),
+  // and xterm.js sends nothing for it, so it is the page's reload in both zones.
+  test('the BrowserRefresh key, alone, with Shift or with Ctrl, is the reload in both zones', () => {
+    for (const zone of ZONES) {
+      for (const mods of [[], ['shift'], ['ctrl']] as Mod[][]) {
+        const e = ev('BrowserRefresh', 'BrowserRefresh', ...mods);
+        assert.deepEqual(windowChord(e, zone), { kind: 'reload' }, `${mods} in ${zone}`);
+      }
+    }
+  });
+
+  test('BrowserRefresh with Alt or with Ctrl+Shift is no chord', () => {
+    assert.equal(windowChord(ev('BrowserRefresh', 'BrowserRefresh', 'alt'), 'list'), null);
+    assert.equal(windowChord(cs('BrowserRefresh', 'BrowserRefresh'), 'list'), null);
+  });
+
+  test('Shift+F5 is not the window’s (in the terminal zone it goes to the program)', () => {
+    for (const zone of ZONES) {
+      assert.equal(windowChord(ev('F5', 'F5', 'shift'), zone), null);
+    }
+  });
 });
 
 describe('terminalKey (S2 9.1)', () => {
@@ -218,6 +240,7 @@ describe('terminalKey (S2 9.1)', () => {
     assert.equal(terminalKey(ev('c', 'KeyC', 'ctrl')), null);
     assert.equal(terminalKey(ev('r', 'KeyR', 'ctrl')), null);
     assert.equal(terminalKey(ev('F5', 'F5')), null);
+    assert.equal(terminalKey(ev('F5', 'F5', 'shift')), null);
     assert.equal(terminalKey(ev('F4', 'F4')), null);
     assert.equal(terminalKey(ev('F4', 'F4', 'ctrl', 'alt')), null);
     assert.equal(terminalKey(ev('Escape', 'Escape')), null);
@@ -249,6 +272,10 @@ describe('listKey (S2 12.9)', () => {
     ['Ctrl+R', ev('r', 'KeyR', 'ctrl'), { kind: 'reload' }],
     ['Ctrl+Shift+R', cs('R', 'KeyR'), { kind: 'reload' }],
     ['Ctrl+F5', ev('F5', 'F5', 'ctrl'), { kind: 'reload' }],
+    ['Shift+F5 (ruled 2026-11-13)', ev('F5', 'F5', 'shift'), { kind: 'reload' }],
+    ['BrowserRefresh', ev('BrowserRefresh', 'BrowserRefresh'), { kind: 'reload' }],
+    ['Shift+BrowserRefresh', ev('BrowserRefresh', 'BrowserRefresh', 'shift'), { kind: 'reload' }],
+    ['Ctrl+BrowserRefresh', ev('BrowserRefresh', 'BrowserRefresh', 'ctrl'), { kind: 'reload' }],
     ['l', ev('l', 'KeyL'), { kind: 'later', stage: 'D' }],
     ['g', ev('g', 'KeyG'), { kind: 'later', stage: 'D' }],
     ['n', ev('n', 'KeyN'), { kind: 'later', stage: 'D' }],
@@ -294,6 +321,8 @@ describe('listKey (S2 12.9)', () => {
 
   test('other reload-looking keys are not the list’s', () => {
     assert.equal(listKey(ev('F5', 'F5', 'alt')), null);
+    assert.equal(listKey(ev('F5', 'F5', 'ctrl', 'shift')), null);
+    assert.equal(listKey(ev('BrowserRefresh', 'BrowserRefresh', 'alt')), null);
     assert.equal(listKey(ev('r', 'KeyR')), null);
     assert.equal(listKey(ev('r', 'KeyR', 'ctrl', 'alt')), null);
   });
@@ -344,6 +373,22 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
     assert.equal(cancels(ev('F5', 'F5'), 'terminal', false), false);
     assert.equal(cancels(ev('r', 'KeyR', 'ctrl'), 'terminal', false), false);
     assert.equal(cancels(ev('F5', 'F5', 'ctrl'), 'terminal', false), false);
+  });
+
+  test('Shift+F5: yes in the list zone, no in the terminal zone (it goes to the program)', () => {
+    for (const handled of [false, true]) {
+      assert.equal(cancels(ev('F5', 'F5', 'shift'), 'list', handled), true);
+    }
+    assert.equal(cancels(ev('F5', 'F5', 'shift'), 'terminal', false), false);
+  });
+
+  test('BrowserRefresh, alone, with Shift or with Ctrl, in both zones', () => {
+    for (const zone of ZONES) {
+      for (const mods of [[], ['shift'], ['ctrl']] as Mod[][]) {
+        const e = ev('BrowserRefresh', 'BrowserRefresh', ...mods);
+        assert.equal(cancels(e, zone, false), true, `${mods} in ${zone}`);
+      }
+    }
   });
 
   test('Ctrl+Shift+R in both zones', () => {
@@ -401,6 +446,19 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
   test('in the terminal zone the list keys and `later` list keys go to the program', () => {
     for (const e of [ev('l', 'KeyL'), ev('F2', 'F2'), ev('j', 'KeyJ'), ev('Escape', 'Escape')]) {
       assert.notEqual(listKey(e), null);
+      assert.equal(cancels(e, 'terminal', false), false, e.key);
+    }
+  });
+
+  test('the `later` list keys l g n p d F2 are nothing of the window’s or the terminal mapping', () => {
+    const later = [
+      ...['l', 'g', 'n', 'p', 'd'].map((c) => ev(c, `Key${c.toUpperCase()}`)),
+      ev('F2', 'F2'),
+    ];
+    for (const e of later) {
+      assert.deepEqual(listKey(e), { kind: 'later', stage: 'D' }, e.key);
+      assert.equal(windowChord(e, 'terminal'), null, e.key);
+      assert.equal(terminalKey(e), null, e.key);
       assert.equal(cancels(e, 'terminal', false), false, e.key);
     }
   });
