@@ -15,7 +15,12 @@ function claudeHome(t: TestContext): { files: Files; home: string } {
 }
 
 /** `files` with `method` throwing an error of `code` for `path`. */
-function failing(files: Files, method: 'list' | 'stat', path: string, code: string): Files {
+function failing(
+  files: Files,
+  method: 'list' | 'stat' | 'lstat',
+  path: string,
+  code: string,
+): Files {
   return {
     ...files,
     [method]: (p: string) => {
@@ -64,7 +69,7 @@ test('a sessions folder that cannot be listed is unreadable, with the reason', (
 test('a sessions folder that cannot be looked at is unreadable, not missing', (t) => {
   const { files, home } = claudeHome(t);
   const sessions = join(home, 'sessions');
-  const look = lookAtClaudeFolders(failing(files, 'stat', sessions, 'EACCES'), home);
+  const look = lookAtClaudeFolders(failing(files, 'lstat', sessions, 'EACCES'), home);
   assert.deepEqual(look.sessions, {
     path: sessions,
     missing: false,
@@ -79,6 +84,53 @@ test('a sessions "folder" that is a file is unreadable: ENOTDIR', (t) => {
   assert.deepEqual(lookAtClaudeFolders(files, home).sessions.unreadable, [
     { path: sessions, reason: 'ENOTDIR' },
   ]);
+});
+
+test('a projects "folder" that is a file is unreadable: ENOTDIR', (t) => {
+  const { files, home } = claudeHome(t);
+  const projects = join(home, 'projects');
+  writeFileSync(projects, '');
+  assert.deepEqual(lookAtClaudeFolders(files, home).projects, {
+    path: projects,
+    missing: false,
+    unreadable: [{ path: projects, reason: 'ENOTDIR' }],
+    transcripts: 0,
+  });
+});
+
+test('a dangling symbolic link (a moved folder on a disk that is not there) is unreadable, not missing', (t) => {
+  const { files, home } = claudeHome(t);
+  const sessions = join(home, 'sessions');
+  const projects = join(home, 'projects');
+  symlinkSync('/mnt/not-mounted/claude-sessions', sessions);
+  symlinkSync('/mnt/not-mounted/claude-projects', projects);
+
+  const look = lookAtClaudeFolders(files, home);
+
+  assert.deepEqual(look.sessions, {
+    path: sessions,
+    missing: false,
+    unreadable: [{ path: sessions, reason: 'ENOENT' }],
+  });
+  assert.deepEqual(look.projects, {
+    path: projects,
+    missing: false,
+    unreadable: [{ path: projects, reason: 'ENOENT' }],
+    transcripts: 0,
+  });
+});
+
+test('a symbolic link to a folder is followed', (t) => {
+  const { files, home } = claudeHome(t);
+  const elsewhere = join(home, '..', 'moved-projects');
+  mkdirSync(join(elsewhere, 'demo'), { recursive: true });
+  writeFileSync(join(elsewhere, 'demo', `${S1}.jsonl`), '');
+  symlinkSync(elsewhere, join(home, 'projects'));
+
+  const { projects } = lookAtClaudeFolders(files, home);
+
+  assert.deepEqual(projects.unreadable, []);
+  assert.equal(projects.transcripts, 1);
 });
 
 test('a loop under projects is named; the rest is still counted', (t) => {
