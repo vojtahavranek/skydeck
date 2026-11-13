@@ -1091,10 +1091,9 @@ Ctrl+click on a URL in a terminal (an OSC 8 link, or plain text that looks like 
 send `act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so
 for one whose text is not its URL the page first shows the target and opens it only on a second
 click. The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme
-`http` or `https`, and is re-serialised by the WHATWG URL parser (so it cannot start with `-`) to
-at most 2,048 characters again (percent-encoding can make it several times longer, and the
-re-serialised URL is what Edge gets), by
-running
+`http` or `https`, and is still at most 2,048 characters once the WHATWG URL parser has
+re-serialised it (so it cannot start with `-`; percent-encoding can make it several times longer,
+and the re-serialised URL is what Edge gets). It opens it by running
 `window.edge` with that URL as its only argument (no profile folder): it opens in the user's own
 Edge profile, where they are logged in, not in the window's profile. The page itself never
 navigates away: it cancels drag and drop over the window, which would otherwise open a dropped file
