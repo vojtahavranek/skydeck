@@ -13,17 +13,21 @@ import {
   LOCK_TTL_NS,
   acquireLock,
   checkResumable,
+  flagWarnings,
   isLockHeld,
   lockEventId,
   lockKey,
+  openSafely,
   prepareNew,
   prepareResume,
   readLock,
   releaseLock,
   renewLock,
+  settleFailedLaunch,
   sweepLocks,
 } from '../../src/sessions/resume.ts';
-import type { SawEvents } from '../../src/sessions/resume.ts';
+import type { PreparedLaunch, SawEvents } from '../../src/sessions/resume.ts';
+import type { Terminal } from '../../src/terminals/types.ts';
 import type { DerivedSession, Holder } from '../../src/sessions/types.ts';
 import type { Store } from '../../src/store/store.ts';
 import type { NewEvent } from '../../src/store/types.ts';
@@ -770,6 +774,88 @@ test('isLockHeld is true for a lock that holds, by the rules of acquireLock, and
   isLockHeld(w.deck, S2);
   assert.equal(w.transactions(), 0);
   assert.equal(lockOf(d, S2), null);
+});
+
+// --- what the command line and restore share about a launch ---------------------------------------
+
+test('flagWarnings: what a resume says about the flags it could not take over, unprefixed', () => {
+  assert.deepEqual(flagWarnings({ flagsKnown: true, unknownFlags: [] }), []);
+  assert.deepEqual(flagWarnings({ flagsKnown: false, unknownFlags: ['--a\x1b[1mb', '--c'] }), [
+    'original flags unknown; resuming with defaults',
+    'started with flags skydeck does not know, not passed on resume: --ab --c',
+  ]);
+});
+
+test('openSafely turns a terminal that rejects into a failed open, not a timeout', async () => {
+  const spec = { cwd: '/w', argv: ['claude'] };
+  const rejecting: Terminal = {
+    name: 'wezterm',
+    opensTabs: true,
+    open: () => Promise.reject(new Error('the terminal fell over')),
+  };
+  assert.deepEqual(await openSafely(rejecting, spec), {
+    ok: false,
+    error: 'cannot open the terminal (Error: the terminal fell over)',
+    timedOut: false,
+  });
+  const fine: Terminal = { ...rejecting, open: async () => ({ ok: true }) };
+  assert.deepEqual(await openSafely(fine, spec), { ok: true });
+});
+
+function launch(d: TestDeck, over: Partial<PreparedLaunch> = {}): PreparedLaunch {
+  return {
+    sessionId: S1,
+    cwd: '/w',
+    argv: ['claude', '--resume', S1],
+    flagsKnown: true,
+    unknownFlags: [],
+    kind: 'resume',
+    ...over,
+  };
+}
+
+const UNPRINTABLE_ARGV = ['claude', '--resume', S1, '--model', 'op\x1b[31mus'];
+
+test('settleFailedLaunch gives the command to print, and keeps the lock: the user may run it now', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, sawNow(d));
+  assert.equal(
+    settleFailedLaunch(d.deck, launch(d), `${T0}`, false),
+    `cd -- /w && claude --resume ${S1}`,
+  );
+  assert.equal(lockOf(d, S1), `${T0}`);
+});
+
+test('settleFailedLaunch after a timeout gives no command and keeps the lock: it may have started', (t) => {
+  for (const argv of [['claude', '--resume', S1], UNPRINTABLE_ARGV]) {
+    const d = testDeck(t);
+    acquireLock(d.deck, S1, sawNow(d));
+    assert.equal(settleFailedLaunch(d.deck, launch(d, { argv }), `${T0}`, true), null);
+    assert.equal(lockOf(d, S1), `${T0}`, JSON.stringify(argv));
+  }
+});
+
+test('settleFailedLaunch with nothing started and nothing printable releases the lock, if still ours', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, sawNow(d));
+  assert.equal(
+    settleFailedLaunch(d.deck, launch(d, { argv: UNPRINTABLE_ARGV }), `${T0}`, false),
+    null,
+  );
+  assert.equal(lockOf(d, S1), null);
+  writeLock(d, S1, 'someone else');
+  settleFailedLaunch(d.deck, launch(d, { argv: UNPRINTABLE_ARGV }), `${T0}`, false);
+  assert.equal(lockOf(d, S1), 'someone else');
+});
+
+test('settleFailedLaunch of a new session that started nothing and printed nothing removes its label and group', (t) => {
+  const d = testDeck(t);
+  d.deck.store.updateMeta(S1, { label: 'fix it', group: 'G' }, T0);
+  const p = launch(d, { kind: 'new', argv: UNPRINTABLE_ARGV });
+  assert.equal(settleFailedLaunch(d.deck, p, null, true), null); // timed out: kept
+  assert.equal(d.deck.store.meta(S1)?.label, 'fix it');
+  assert.equal(settleFailedLaunch(d.deck, p, null, false), null);
+  assert.equal(d.deck.store.meta(S1), null);
 });
 
 // --- prepareResume ---------------------------------------------------------------------------------

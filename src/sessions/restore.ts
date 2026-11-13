@@ -6,23 +6,24 @@ import { RefError, ResumeRefusedError } from '../platform/errors.ts';
 import { NS_PER_MINUTE, NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
 import type { EventRow } from '../store/types.ts';
-import type { OpenResult, Terminal } from '../terminals/types.ts';
+import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { printableCommand } from '../text/shell.ts';
 import type { Deck } from './deck.ts';
 import { ingestSpool } from './ingest.ts';
 import type { ListRow } from './list.ts';
 import { loadRows } from './load.ts';
-import { describeError } from './problems.ts';
 import { refresh } from './refresh.ts';
 import { prepareResumeById } from './resume-by-id.ts';
 import {
   checkResumable,
+  flagWarnings,
   isLockHeld,
   lockEventId,
+  openSafely,
   readLock,
   releaseLock,
   renewLock,
+  settleFailedLaunch,
 } from './resume.ts';
 import type { PreparedLaunch } from './resume.ts';
 
@@ -184,14 +185,19 @@ async function runInTabs(run: Run, entries: readonly RestoreEntry[]): Promise<vo
       if (taken === null) {
         continue;
       }
-      const result = await openSafely(run.terminal, taken.prepared);
+      const { prepared, lock, afterEventId } = taken;
+      const result = await openSafely(run.terminal, { cwd: prepared.cwd, argv: prepared.argv });
       // A call that timed out may have opened the tab anyway: its session is waited for like the
       // others, so that no more than one batch is starting at a time.
       if (result.ok || result.timedOut) {
-        opened.push({ row: entry.row, lock: taken.lock, afterEventId: taken.afterEventId });
-      } else {
-        startedNothing(run, entry.row, taken.lock);
-        fail(run, entry.row, result.error);
+        opened.push({ row: entry.row, lock, afterEventId });
+        continue;
+      }
+      fail(run, entry.row, result.error);
+      // The tab definitely did not open, and restore prints no command for it: the lock would only
+      // keep the user waiting.
+      if (lock !== null) {
+        releaseLock(deck, entry.row.id, lock);
       }
     }
     await awaitStarts(run, opened, sinceNs);
@@ -257,17 +263,6 @@ function renewLocks(deck: Deck, sessions: readonly Waiting[]): void {
   }
 }
 
-/**
- * A launch that definitely started nothing (the terminal refused, is not installed, or the open
- * rejected; not a timeout) and for which no command is printed: the lock restore took would only
- * keep the user waiting, so it goes, if it is still that lock.
- */
-function startedNothing(run: Run, row: ListRow, lock: string | null): void {
-  if (lock !== null) {
-    releaseLock(run.deck, row.id, lock);
-  }
-}
-
 async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void> {
   if (!enoughMemory(run, entries)) {
     return;
@@ -281,19 +276,22 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       }
       handoffTried = true;
       const { prepared } = taken;
-      const result = await openSafely(run.terminal, prepared);
+      const result = await openSafely(run.terminal, { cwd: prepared.cwd, argv: prepared.argv });
       if (result.ok) {
         run.outcome.handedOff = entry.row.id;
         run.report(`resuming ${entry.row.shortId} ${entry.row.title} in this terminal`);
         continue;
       }
       fail(run, entry.row, result.error);
-      // As `resume` does when it cannot start the session: the command is printed for the user to
-      // run, and the lock stays so that no other skydeck starts the session meanwhile. Not after a
-      // timeout, when the program may have started anyway (the lock stays then too).
-      if (!result.timedOut && !print(run, prepared.cwd, prepared.argv)) {
+      // As `resume` does when it cannot start the session (settleFailedLaunch): the command is
+      // printed for the user to run, and the lock stays so that no other skydeck starts the session
+      // meanwhile. After a timeout nothing is printed and the lock stays: the program may have
+      // started. With nothing started and nothing printable, the lock is released.
+      const command = settleFailedLaunch(run.deck, prepared, taken.lock, result.timedOut);
+      if (command !== null) {
+        printLine(run, command);
+      } else if (!result.timedOut) {
         run.report(`${entry.row.shortId}: ${UNPRINTABLE}`);
-        startedNothing(run, entry.row, taken.lock); // nothing to run by hand: nothing to protect
       }
       continue;
     }
@@ -315,7 +313,10 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       continue;
     }
     const launch = row.session.launch;
-    warn(run, row, launch !== null, launch === null ? [] : unknownFlags(launch));
+    warn(run, row, {
+      flagsKnown: launch !== null,
+      unknownFlags: launch === null ? [] : unknownFlags(launch),
+    });
     printLine(run, resumeLine(row.id));
   }
 }
@@ -332,20 +333,6 @@ function resumeLine(sessionId: string): string {
 }
 
 const UNPRINTABLE = 'the command contains control characters and cannot be printed safely';
-
-/**
- * Prints "cd -- <q dir> && <q argv…>" (printLine); false, and nothing printed, when the directory or
- * a word holds anything sanitize() would change: such a line could act on the terminal, or break
- * when it is pasted.
- */
-function print(run: Run, dir: string, argv: readonly string[]): boolean {
-  const line = printableCommand(dir, argv);
-  if (line === null) {
-    return false;
-  }
-  printLine(run, line);
-  return true;
-}
 
 /** A line for the user to run, to `printed` and `report`, after a header line the first time. */
 function printLine(run: Run, line: string): void {
@@ -415,33 +402,19 @@ function prepare(
     fail(run, row, error.message);
     return null;
   }
-  warn(run, row, prepared.flagsKnown, prepared.unknownFlags);
+  warn(run, row, prepared);
   const lock = readLock(run.deck, row.id);
   return { prepared, lock, afterEventId: lock === null ? null : lockEventId(lock) };
 }
 
-/** What `resume` says before it starts a session, as one line each, naming the session. */
-function warn(run: Run, row: ListRow, flagsKnown: boolean, unknown: readonly string[]): void {
-  if (!flagsKnown) {
-    run.report(`${row.shortId}: original flags unknown; resuming with defaults`);
-  }
-  if (unknown.length > 0) {
-    run.report(
-      `${row.shortId}: started with flags skydeck does not know, not passed on resume: ${unknown.map(sanitize).join(' ')}`,
-    );
-  }
-}
-
-/** terminal.open, with a rejection turned into a failed open. */
-async function openSafely(terminal: Terminal, prepared: PreparedLaunch): Promise<OpenResult> {
-  try {
-    return await terminal.open({ cwd: prepared.cwd, argv: prepared.argv });
-  } catch (error) {
-    return {
-      ok: false,
-      error: `cannot open the terminal (${describeError(error)})`,
-      timedOut: false,
-    };
+/** What `resume` says before it starts a session (flagWarnings), one line each, naming the session. */
+function warn(
+  run: Run,
+  row: ListRow,
+  launch: Pick<PreparedLaunch, 'flagsKnown' | 'unknownFlags'>,
+): void {
+  for (const line of flagWarnings(launch)) {
+    run.report(`${row.shortId}: ${line}`);
   }
 }
 

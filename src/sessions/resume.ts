@@ -1,5 +1,6 @@
 // Resume and new (design 7.6, 7.7): the guard that refuses a session that runs or cannot be
-// resumed, the lock that keeps two resumes of one session apart (principle 7), and the commands.
+// resumed, the lock that keeps two resumes of one session apart (principle 7), the commands, and
+// what the command line and restore share about starting one and about a launch that failed.
 import { isAbsolute } from 'node:path';
 
 import {
@@ -16,6 +17,9 @@ import { NS_PER_SECOND } from '../platform/time.ts';
 import type { Files, Ns } from '../platform/types.ts';
 import type { Store } from '../store/store.ts';
 import type { KvKey } from '../store/types.ts';
+import type { LaunchSpec, OpenResult, Terminal } from '../terminals/types.ts';
+import { sanitize } from '../text/sanitize.ts';
+import { printableCommand } from '../text/shell.ts';
 import type { Deck } from './deck.ts';
 import { cleanGroup, cleanLabel } from './labels.ts';
 import type { ListRow } from './list.ts';
@@ -280,6 +284,69 @@ export interface PreparedLaunch {
   unknownFlags: string[];
   /** 'new': the session does not exist until claude starts, so there is nothing to resume yet. */
   kind: 'resume' | 'new';
+}
+
+/**
+ * What a resume says before it starts the session, one line each, without a prefix (the command
+ * line puts "skydeck: " before them, restore the session's short id): "original flags unknown;
+ * resuming with defaults" when !flagsKnown; "started with flags skydeck does not know, not passed on
+ * resume: <names>" (sanitised, joined by one space) when unknownFlags is not empty.
+ */
+export function flagWarnings(
+  launch: Pick<PreparedLaunch, 'flagsKnown' | 'unknownFlags'>,
+): string[] {
+  const lines: string[] = [];
+  if (!launch.flagsKnown) {
+    lines.push('original flags unknown; resuming with defaults');
+  }
+  if (launch.unknownFlags.length > 0) {
+    const names = launch.unknownFlags.map(sanitize).join(' ');
+    lines.push(`started with flags skydeck does not know, not passed on resume: ${names}`);
+  }
+  return lines;
+}
+
+/** terminal.open, with a rejection (a write that failed, an empty argument list) turned into a failed open. */
+export async function openSafely(terminal: Terminal, spec: LaunchSpec): Promise<OpenResult> {
+  try {
+    return await terminal.open(spec);
+  } catch (error) {
+    return {
+      ok: false,
+      error: `cannot open the terminal (${describeError(error)})`,
+      timedOut: false,
+    };
+  }
+}
+
+/**
+ * After an open that failed: the command line to print for the user to run instead
+ * (printableCommand), or null — after a timeout (the program may have started: a command run by hand
+ * could start the session twice) and when the directory or a word holds a control character. When
+ * the launch definitely started nothing (not a timeout) and no command can be printed, nothing is
+ * left to run by hand, so what was taken for it is given back: the lock (`lock`, the value read
+ * before opening; released only while it is still that one) and, for kind 'new', the label and group
+ * prepareNew stored (a session that will never exist). Otherwise both stay.
+ */
+export function settleFailedLaunch(
+  deck: Deck,
+  prepared: PreparedLaunch,
+  lock: string | null,
+  timedOut: boolean,
+): string | null {
+  if (timedOut) {
+    return null;
+  }
+  const command = printableCommand(prepared.cwd, prepared.argv);
+  if (command === null) {
+    if (lock !== null) {
+      releaseLock(deck, prepared.sessionId, lock);
+    }
+    if (prepared.kind === 'new') {
+      deck.store.deleteMeta(prepared.sessionId);
+    }
+  }
+  return command;
 }
 
 /**

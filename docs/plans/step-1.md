@@ -1794,6 +1794,20 @@ export function releaseLock(deck: Deck, sessionId: string, ours: string): boolea
 export function isLockHeld(deck: Deck, sessionId: string): boolean;
 
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }   // kind: ruled in review
+// Fix-2 (item 9, ruled): what launchPrepared (cli) and restore (sessions) share about starting a
+// prepared launch, so that each rule and wording exists once. They live here, not in src/cli/launching.ts,
+// because src/sessions does not import src/cli and uses terminals only as an interface (design 11).
+/** The lines a resume says before it starts, unprefixed: "original flags unknown; resuming with defaults" when !flagsKnown; "started with flags skydeck does not know, not passed on resume: <names>" (sanitised, joined by one space) when unknownFlags is not empty. */
+export function flagWarnings(launch: Pick<PreparedLaunch, 'flagsKnown' | 'unknownFlags'>): string[];
+/** terminal.open(spec), a rejection turned into { ok: false, error: "cannot open the terminal (<reason>)", timedOut: false }. */
+export function openSafely(terminal: Terminal, spec: LaunchSpec): Promise<OpenResult>;
+/**
+ * After a failed open: the command line to print instead (printableCommand), or null after a timeout
+ * and when it holds a control character. When the launch definitely started nothing (not a timeout)
+ * and no command can be printed, it releases `lock` (releaseLock, while still that one) and, for
+ * kind 'new', deletes the session_meta row prepareNew wrote (store.deleteMeta); otherwise both stay.
+ */
+export function settleFailedLaunch(deck: Deck, prepared: PreparedLaunch, lock: string | null, timedOut: boolean): string | null;
 /**
  * checkResumable — which refuses first, "cannot tell which sessions are running: the boot id could not
  * be read", when `row.session.bootId` is null: the boot id the row was derived with, never a second read
@@ -2051,7 +2065,9 @@ export interface LaunchOutcome { code: number; lines: string[] }   // lines as p
  * by hand, so it is released (releaseLock with the value read before opening). (Fix-2, ruled.) In
  * that same case, for kind 'new', the label and group prepareNew stored are removed
  * (store.deleteMeta); after a timeout, or where the command is printed, they stay. The command
- * line is printableCommand(prepared.cwd, prepared.argv).
+ * line is printableCommand(prepared.cwd, prepared.argv). (Fix-2, item 9.) The warning lines, the
+ * failed open and this rule come from flagWarnings, openSafely and settleFailedLaunch (2.8.6),
+ * which restore uses too.
  */
 export function launchPrepared(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
 ```
