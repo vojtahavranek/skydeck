@@ -135,7 +135,7 @@ The inputs of these two events contain no conversation content.
 
 Every skydeck command that works on sessions (`ls`, `show`, `label`, `group`, `note`, `done`,
 `undone`, `pr`, `new`, `resume`, `restore` and the interactive list) starts with the same three
-steps, in this order. `install` runs them after it has made its links (8); `doctor` and
+steps, in this order. `install` runs them after it has made its links and changed the settings (8); `doctor` and
 `uninstall` do not run them (8); the hook is a script, not a command, and does none of this:
 
 1. **Ingest the spool.** Files are read in name order. Each becomes at most one row in `events`,
