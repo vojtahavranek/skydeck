@@ -31,6 +31,7 @@ const TERMINAL_VARIABLES: readonly string[] = [
   // The terminal of the shell that ran `skydeck window`, not the new one: a pinentry would draw
   // there, and an editor's Claude Code extension would be reached from every session.
   'CLAUDE_CODE_SSE_PORT',
+  'ENABLE_IDE_INTEGRATION',
   'GPG_TTY',
   'SSH_TTY',
 ];

@@ -159,6 +159,7 @@ const TERMINAL_NAMES = [
   'ITERM_SESSION_ID',
   // The terminal of the shell that ran `skydeck window`, and an editor's Claude Code connection.
   'CLAUDE_CODE_SSE_PORT',
+  'ENABLE_IDE_INTEGRATION',
   'GPG_TTY',
   'SSH_TTY',
 ];
