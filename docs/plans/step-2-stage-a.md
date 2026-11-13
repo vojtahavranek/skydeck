@@ -1193,12 +1193,15 @@ pid line and `$WSL_INTEROP`, then stays while the server or any keeper is alive,
 - Create: `bin/skydeck-keepalive`
 - Test: `test/bin/keepalive.test.ts`
 
-**Behaviour.** S2 6.1: `sh` builtins, `sleep` and `mv` only. It writes `keepalive.pid` (`<pid>
+**Behaviour.** S2 6.1: `sh` builtins, `sleep`, `mv` and `rm` only; `rm` removes nothing but
+`keepalive.pid` at exit (below) and the script's own temporary file after a failed write (ruled by
+the plan owner in pull request #34: no builtin deletes a file). It writes `keepalive.pid` (`<pid>
 <process start> <boot id>`, the format of 2.8, process start from field 22 of `/proc/$$/stat`
 after the last `)`) and `keepalive.interop` (`$WSL_INTEROP`, empty when unset), each through a
 temporary name and `mv`. Every 10 seconds (`SKYDECK_TEST_KEEPALIVE_SECONDS` overrides, for tests only)
 it reads `server.pid` and `terms/*.pid` and exits 0 when none names a process alive on the current
-boot with the same process start. It removes `keepalive.pid` when it exits.
+boot with the same process start. It removes `keepalive.pid` when it exits, only while that file
+still holds its own line.
 
 **Tests** (platform: none; real `sh`, real processes, the interval set to 1 s)
 - with a `server.pid` naming a live `sleep` → still running after 3 s; after the `sleep` is killed

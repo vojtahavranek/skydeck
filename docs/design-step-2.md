@@ -170,7 +170,7 @@ Added to design 11:
 | Module | Job | May import |
 |---|---|---|
 | `bin/skydeck-keeper` | The keeper (7.1), python3. | — |
-| `bin/skydeck-keepalive` | The keep-alive's inner script (6.1): `sh` builtins, `sleep` and `mv` only. | — |
+| `bin/skydeck-keepalive` | The keep-alive's inner script (6.1): `sh` builtins, `sleep`, `mv` and `rm` only (`rm` for its own `keepalive.pid` and temporary file). | — |
 | `src/claude/terminal.ts` | What Claude Code sets in its children's environment (7.4); the meaning of a live-file status change for a turn end (10.3). | platform |
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses. | platform, text, store, claude, sessions, terminals, github |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | — |

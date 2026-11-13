@@ -286,7 +286,7 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
     await waitFor(() => existsSync(pidFile), 5000, 'keepalive.pid');
 
     assert.equal(read(pidFile), pidLine(k.pid, procStart(k.pid), BOOT_ID));
-    assert.equal(read(join(p.dir, 'keepalive.interop')), `${INTEROP}\n`);
+    assert.equal(read(join(p.dir, 'keepalive.interop')), INTEROP);
     // Nothing else: no temporary file is left behind.
     assert.deepEqual(readdirSync(p.dir).sort(), [
       'keepalive.interop',
@@ -297,30 +297,16 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
     assert.equal(k.status(), undefined);
   });
 
-  test('keepalive.interop is one empty line when WSL_INTEROP is unset', async (t) => {
+  test('keepalive.interop is empty when WSL_INTEROP is unset', async (t) => {
     const p = place(t);
     const server = await liveProcess(t, p.s);
     writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
     startKeepAlive(t, p, { env: { WSL_INTEROP: undefined } });
     await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
-    assert.equal(read(join(p.dir, 'keepalive.interop')), '\n');
+    assert.equal(read(join(p.dir, 'keepalive.interop')), '');
   });
 
-  for (const [name, value] of [
-    ['a newline', `${INTEROP}\n${INTEROP}`],
-    ['a carriage return', `${INTEROP}\r`],
-  ]) {
-    test(`a WSL_INTEROP that contains ${name} is written as an empty line`, async (t) => {
-      const p = place(t);
-      const server = await liveProcess(t, p.s);
-      writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
-      startKeepAlive(t, p, { env: { WSL_INTEROP: value } });
-      await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
-      assert.equal(read(join(p.dir, 'keepalive.interop')), '\n');
-    });
-  }
-
-  test('neither file is ever seen half written: a reader in a loop reads whole lines only', async (t) => {
+  test('neither file is ever seen half written: a reader in a loop reads whole contents only', async (t) => {
     const p = place(t);
     const pidPattern = new RegExp(`^\\d+ \\d+ ${BOOT_ID}\\n$`);
     for (let run = 0; run < 20; run++) {
@@ -342,7 +328,7 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
         assert.match(text, pidPattern, `run ${run}: keepalive.pid read as ${JSON.stringify(text)}`);
       }
       for (const text of seen.interop) {
-        assert.equal(text, `${INTEROP}\n`, `run ${run}: keepalive.interop read half written`);
+        assert.equal(text, INTEROP, `run ${run}: keepalive.interop read half written`);
       }
       k.child.kill('SIGTERM');
       await exitsWithin(k, 2 * INTERVAL_MS);

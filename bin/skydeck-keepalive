@@ -7,13 +7,15 @@
 # has anything to keep. In the runtime directory it writes, each through a temporary name and a
 # rename, so that a reader never sees a part of one:
 #   keepalive.pid      its own pid line, "<pid> <process start> <boot id>" (plan contract 2.8);
-#   keepalive.interop  one line: its $WSL_INTEROP, empty when that is unset (design-step-2 6.4).
+#   keepalive.interop  its $WSL_INTEROP exactly, no newline added; empty when that is unset
+#                      (design-step-2 6.4).
 # Then, every 10 seconds, it checks whether server.pid or any terms/*.pid names a process alive by
 # design 5.5's rule (same boot id; /proc/<pid>/stat exists and gives the recorded process start).
 # When none does it exits 0. On SIGHUP, SIGINT or SIGTERM it exits at once, 128 + the signal's
 # number. Whenever it exits it removes keepalive.pid, as long as that still holds its own line.
 #
-# Rules: sh builtins plus sleep, mv and rm only; nothing on stdout. Exit 2: wrong arguments (a
+# Rules: sh builtins plus sleep, mv and rm only, and rm removes nothing but keepalive.pid (above)
+# and its own temporary file after a failed write; nothing on stdout. Exit 2: wrong arguments (a
 # usage line on stderr); exit 1: it could not read its own process start or the boot id, could not
 # write its files (the shell's message on stderr), or sleep failed.
 #
@@ -25,7 +27,6 @@ umask 077
 
 nl='
 '
-cr=$(printf '\r')
 
 dir=
 boot_id=
@@ -145,14 +146,8 @@ main() {
   read_proc_start "$$"
   [ -n "$proc_start" ] || exit 1
 
-  # A value with a newline or a carriage return would make more than one line; it is written
-  # empty, as the hook does (it never has one in practice).
-  interop=${WSL_INTEROP-}
-  case $interop in
-    *"$nl"* | *"$cr"*) interop= ;;
-  esac
   # keepalive.interop first: whoever sees keepalive.pid can read it.
-  write_file keepalive.interop "$interop$nl" || exit 1
+  write_file keepalive.interop "${WSL_INTEROP-}" || exit 1
   own_line="$$ $proc_start $boot_id"
   write_file keepalive.pid "$own_line$nl" || exit 1
 
