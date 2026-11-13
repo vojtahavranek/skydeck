@@ -857,20 +857,42 @@ Two additions to S2 8.2.3 and 8.3 that task 1 records in the design: `result` ca
 ### 2.8 Server modules other tasks call
 
 ```ts
-// src/window/auth.ts (task 11)
-export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array; // one transaction
-export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm
+// src/window/auth.ts (task 11). Thrown errors below were ruled by the plan owner (task 11); their
+// messages name sizes, never values. Callers (tasks 17 and 18) run isNonce on every nonce a peer
+// sent before they call pageProof, serverProof or wrapSecret, so a page's bad nonce closes the
+// connection (4001) and never reaches a throw.
+/** One transaction. A stored value that is not 32 bytes in isNonce's form is replaced as if absent
+ *  (ruled): it could prove nothing, and a page holding a key from it gets 4003 and asks for a new launch. */
+export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array;
+export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm; one transaction
+/** RangeError for a key that is not 32 bytes, a mode other than 'key' | 'launch', or an sN or cN that is not isNonce. */
 export function pageProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string;
-export function serverProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string;
+export function serverProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string; // as pageProof
+/** RangeError for a secret or token that is not 32 bytes, an IV that is not 12, or an sN or cN that is not isNonce. */
 export function wrapSecret(secret: Uint8Array, token: Uint8Array, sN: string, cN: string, iv: Uint8Array): string;
-export function isNonce(text: string): boolean; // 43 characters of base64url, 32 bytes
+/** 43 characters of base64url, 32 bytes, in the canonical form (ruled): the two bits the last
+ *  character has to spare are zero, as an encoder writes them, so one value has one text. */
+export function isNonce(text: string): boolean;
 export interface Tokens {
+  /** `id`: 32 lower-case hex characters (16 random bytes, the control parser's form). RangeError for
+   *  seconds other than 30 and 600, or a random source that gives another number of bytes; Error
+   *  when it repeats an id. How a token ends (ruled): it expires when its `clock.after` timer of
+   *  `seconds` runs out (a timer counts on a clock that does not jump, so WSL's wall clock stepping
+   *  back cannot stretch it) or when it is looked at (`state`, `check`) with the wall clock at or past
+   *  `expiresAtNs` (a PC that slept), whichever comes first. It holds its timer only while it waits:
+   *  a use, a drop and forgetAll stop it. */
   mint(seconds: 30 | 600): { id: string; token: Uint8Array; expiresAtNs: Ns };
+  /** null for an id never minted (or forgotten). A used token stays 'used' (or 'reused') whatever
+   *  comes later; an unused one is 'dropped' once given up, else 'expired', else 'waiting'. */
   state(id: string): TokenState | null;
-  drop(id: string): boolean;
-  /** Constant-time check of `proof` against every token; a match marks it used (or reused: the alarm). */
+  drop(id: string): boolean; // false for an unknown id
+  /** Constant-time check of `proof` against every token a proof can still reach — waiting, used or
+   *  reused; one dropped or expired before its use can only give 'none' and is skipped: timingSafeEqual
+   *  on equal-length buffers, not stopping at a match. A proof that is not 43 bytes, or an sN or cN
+   *  that is not isNonce, is 'none' without comparing; it never throws. A match marks the token
+   *  used; a proof with a used token marks it reused and calls onAlarm (each time): the alarm. */
   check(proof: string, sN: string, cN: string, origin: string): { kind: 'match'; token: Uint8Array } | { kind: 'reused' } | { kind: 'none' };
-  forgetAll(): void;
+  forgetAll(): void; // empties everything, stops every timer
 }
 export function createTokens(clock: Clock, random: (n: number) => Uint8Array, onAlarm: () => void): Tokens;
 export function raiseAlarm(store: Store, nowNs: Ns): void; // kv window_alarm
@@ -1778,17 +1800,22 @@ and a random source; no socket.
 - `wrapSecret`'s output opens with Node's AES-256-GCM under the HKDF key of the token and both
   nonces, and not with another token or with the nonces swapped.
 - `ensureSecret` creates 32 bytes once (two calls return the same; a second connection's call in
-  between returns the first's), stored base64url without padding; `replaceSecret` changes it and
-  clears `window_alarm`.
+  between returns the first's), stored base64url without padding; a stored value that is not a
+  secret in that form is replaced (ruled); `replaceSecret` changes it and clears `window_alarm`.
 - Tokens (fake clock): `mint(30)` → `state` `waiting`; a proof made with it → `match` and
   `used`; the same proof again → `reused`, `onAlarm` called once; after 30 s an unused token →
   `none` and `state` `expired`; `drop` → `dropped`, and a later proof with it → `none` (`reused`
   when it had been used); `mint(600)` lives 10 minutes; a used token stays known after `forgetAll`
-  is not called (the server's life); `forgetAll` empties everything.
+  is not called (the server's life); `forgetAll` empties everything. A token lives no longer than
+  its seconds when the wall clock steps back, expires at once when it jumps past `expiresAtNs`,
+  and holds a timer only while it waits (ruled).
 - `check` compares in constant time (`crypto.timingSafeEqual` on equal-length buffers; a proof
   of another length is `none` without comparing); a proof made with the server's label never
   matches a page proof.
-- `isNonce`: 43 base64url characters of 32 bytes → true; 42, 44, `+`, `/`, `=` → false.
+- `isNonce`: 43 base64url characters of 32 bytes → true; 42, 44, `+`, `/`, `=`, a last character
+  whose two spare bits are not zero → false.
+- The thrown cases of 2.8 (ruled): a key, nonce, mode or IV of the wrong kind, seconds other than
+  30 and 600, a random source that gives the wrong number of bytes or repeats an id.
 - `raiseAlarm` writes the time; the secret's bytes never appear in any string the module returns
   except `wrapSecret`'s ciphertext (checked by searching every returned string for the
   base64url of the secret).
@@ -2775,7 +2802,9 @@ session into a terminal pane that says "terminal view comes with task 28".
 - Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`
 
 **Behaviour.** `auth.js`: S2 8.2.2 steps 3–6 and "where the page keeps its key" — HMAC proofs,
-HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. `connection.js`:
+HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. The page
+encodes its nonce `cN` from its 32 random bytes in canonical base64url without padding, and takes
+the server's `sN` only in that form (the rule of 2.8's `isNonce`; ruled, task 11). `connection.js`:
 S2 6.3, 8.2.5 and the reload keys of S2 12.9 and 15.3 (a new connection, the server's proof, only
 then `location.reload()`); `input` split into messages of at most 64 KiB. `app.js`: `start`,
 `view` and `focus` messages; selection, zones (the terminal by default; a coloured top edge and

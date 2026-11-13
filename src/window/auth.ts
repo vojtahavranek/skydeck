@@ -204,7 +204,11 @@ export interface Tokens {
    * when it had been used, which stays known. False for an unknown id.
    */
   drop(id: string): boolean;
-  /** Constant-time check of `proof` against every token; a match marks it used (or reused: the alarm). */
+  /**
+   * Constant-time check of `proof` against every token a proof can still reach (waiting, used or
+   * reused; see createTokens); a match marks it used, a proof with a used token marks it reused
+   * and calls onAlarm. Never throws.
+   */
   check(
     proof: string,
     sN: string,
