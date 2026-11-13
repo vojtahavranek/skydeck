@@ -544,10 +544,7 @@ and the rows carry it, so a failed read and a later successful one are never mix
 nothing and does not need it. It refuses when the session is running, naming the holder. It then takes a lock for the session; if the lock exists and is younger than 60 seconds,
 resume is refused and says how long to wait.
 The lock is removed when a `start` event of a real process for the session appears that was
-recorded after the lock was taken and is dated at or after it — or up to 5 seconds before it when
-the lock holds an event id, because the wall clock can step back between the lock and the start
-(under WSL it does, by about 1.7 seconds every half minute) and the later id already shows that
-the start came after the lock; a lock without an id keeps the exact time (a start without a pid or a process
+recorded after the lock was taken and is dated at or after it (a start without a pid or a process
 start time names no `claude` and releases nobody; nor does a `scripted` or `scripted-end` event
 (5.3), which is no `start` but counts as the session's latest event for the lock's own check; a
 start recorded before the lock but dated after
@@ -555,14 +552,23 @@ it — the clock was ahead when it was written, then stepped back — is not the
 would otherwise make every lock of the session stale at once) or after 60 seconds — or at once when starting the session definitely failed and skydeck
 printed no command for it (the command holds a control character, or restore only reports the
 failure): nothing was started and nothing is left to run by hand, so the lock would only make the
-user wait. Where skydeck prints the command for the user to run, and after a timeout (the program
+user wait. When the lock holds an event id, a start dated up to 5 seconds before the lock counts too:
+the wall clock can step back between the lock and the start (measured on one WSL machine: about
+1.7 to 1.9 seconds every 32 seconds), and the resume's own start would then be stamped before the
+lock; a lock an earlier version wrote (the time alone) keeps the exact time. The id shows when a
+start was recorded, not when its process began, so a start stamped up to 5 seconds before the lock
+and recorded only after it releases the lock even when it is not the resume's own — another
+process on the session that began within those 5 seconds, is recorded late and is already gone,
+followed by a second resume before the first one's `claude` reports. That is accepted: the guard
+still refuses while any holder lives. Where skydeck prints the command for the user to run, and after a timeout (the program
 may have started), the lock stays for its 60 seconds. Whoever took a lock may renew it while it
 waits longer than that for the session to start (restore, 7.8), and renews or releases only the
 lock it wrote: one another skydeck took over is left alone. The lock
 is an entry `resume_lock:<session id>` in the database's `kv` table, holding the time it was
 taken in nanoseconds (so its age does not depend on any file's modification time) and the id of
-the session's latest event at that moment, which tells a start recorded after the lock from one
-recorded before it (event ids grow in the order events are recorded, whatever their times). Reading the
+the session's latest event at that moment (0 when it has none), which tells a start recorded after
+the lock from one recorded before it (event ids grow in the order events are recorded, whatever
+their times). Reading the
 lock and writing it happen in one database transaction, which no two skydecks hold at once, so
 of several resumes started together exactly one gets the lock. Inside that transaction the
 session's latest event is read again, and resume is refused ("the session's state changed while
