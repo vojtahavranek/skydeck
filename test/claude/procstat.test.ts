@@ -64,6 +64,18 @@ test('argvFromCmdline keeps empty arguments in the middle', () => {
   assert.deepEqual(argvFromCmdline(bytes('claude\0\0x\0')), ['claude', '', 'x']);
 });
 
+test('argvFromCmdline keeps an empty last argument', () => {
+  assert.deepEqual(argvFromCmdline(bytes('claude\0--system-prompt\0\0')), [
+    'claude',
+    '--system-prompt',
+    '',
+  ]);
+});
+
+test('argvFromCmdline gives [""] for a single NUL (one empty argument)', () => {
+  assert.deepEqual(argvFromCmdline(bytes('\0')), ['']);
+});
+
 test('argvFromCmdline gives [] for empty input', () => {
   assert.deepEqual(argvFromCmdline(bytes('')), []);
 });
@@ -73,9 +85,9 @@ test('argvFromCmdline decodes UTF-8', () => {
 });
 
 test('argvFromCmdline keeps a leading byte-order mark as part of the first argument', () => {
-  assert.deepEqual(argvFromCmdline(bytes('﻿claude\0')), ['﻿claude']);
+  assert.deepEqual(argvFromCmdline(bytes('\uFEFFclaude\0')), ['\uFEFFclaude']);
 });
 
 test('argvFromCmdline replaces invalid UTF-8 instead of throwing', () => {
-  assert.deepEqual(argvFromCmdline(Uint8Array.from([0x61, 0xff, 0x62, 0])), ['a�b']);
+  assert.deepEqual(argvFromCmdline(Uint8Array.from([0x61, 0xff, 0x62, 0])), ['a\uFFFDb']);
 });
