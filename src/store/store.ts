@@ -99,6 +99,8 @@ export interface Store {
   deleteKv(key: KvKey): void;
   /** Treats a missing value as 0. */
   addToKv(key: KvKey, delta: number): void;
+  /** Every entry whose key starts with `prefix` (compared literally, case included), ordered by key. */
+  kvEntries(prefix: string): { key: KvKey; value: string }[];
 }
 
 type Row = Record<string, SQLOutputValue>;
@@ -691,6 +693,14 @@ class SqliteStore implements Store {
 
   deleteKv(key: KvKey): void {
     this.#run('DELETE FROM kv WHERE key = ?', key);
+  }
+
+  kvEntries(prefix: string): { key: KvKey; value: string }[] {
+    // substr, not LIKE: in LIKE `_` and `%` are wildcards and ASCII letters match in any case.
+    return this.#all(
+      'SELECT key, value FROM kv WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key',
+      prefix,
+    ).map((row) => ({ key: reqStr(row, 'key') as KvKey, value: reqStr(row, 'value') }));
   }
 
   addToKv(key: KvKey, delta: number): void {

@@ -117,4 +117,6 @@ export type KvKey =
   // absent when it skipped nothing. Written by refresh (task 8) for doctor; holds no message text.
   | 'ingest_problems'
   | 'reconcile_problems'
-  | 'scan_problems';
+  | 'scan_problems'
+  // A resume lock (design 7.6, D16): the decimal time in ns it was taken; one per session id.
+  | `resume_lock:${string}`;

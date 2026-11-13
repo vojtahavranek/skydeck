@@ -13,6 +13,7 @@ import { isDatabaseFailure, openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import type {
   EventRow,
+  KvKey,
   NewEvent,
   PrFetchResult,
   SessionPrRow,
@@ -996,6 +997,31 @@ describe('kv', () => {
     store.deleteKv('doctor_probe');
 
     assert.equal(store.getKv('doctor_probe'), null);
+  });
+
+  test('kvEntries gives the entries whose key starts with the prefix, ordered by key', (t) => {
+    const { store } = fresh(t);
+    store.setKv('resume_lock:b', '2');
+    store.setKv('resume_lock:a', '1');
+    store.setKv('settings_hash', 'x');
+
+    assert.deepEqual(store.kvEntries('resume_lock:'), [
+      { key: 'resume_lock:a', value: '1' },
+      { key: 'resume_lock:b', value: '2' },
+    ]);
+    assert.deepEqual(store.kvEntries('nothing:'), []);
+  });
+
+  test('kvEntries reads the prefix literally: no LIKE wildcards, and case counts', (t) => {
+    const { store } = fresh(t);
+    // In LIKE, `_` matches any character and `%` any text, and ASCII letters match in any case.
+    store.setKv('resume_lockXa' as KvKey, '1');
+    store.setKv('RESUME_LOCK:b' as KvKey, '2');
+    store.setKv('resume_lock:%', '3');
+
+    assert.deepEqual(store.kvEntries('resume_lock:'), [{ key: 'resume_lock:%', value: '3' }]);
+    assert.deepEqual(store.kvEntries('resume_lock:%'), [{ key: 'resume_lock:%', value: '3' }]);
+    assert.deepEqual(store.kvEntries('resume_lock:%x'), []);
   });
 });
 
