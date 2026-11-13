@@ -73,6 +73,11 @@ that `nvm` is loaded:
 
 ```sh
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash
+```
+
+Then, in the new terminal:
+
+```sh
 nvm install 24
 node --version
 ```
@@ -94,17 +99,24 @@ then the login:
 	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
 	&& sudo apt update \
 	&& sudo apt install gh -y
+```
+
+```sh
 gh auth login
 ```
 
-Claude Code itself: install it as Anthropic's documentation describes, and start it once.
+`gh` asks a few questions. Let it set up Git's credentials when it offers (or choose SSH), or an
+HTTPS clone of the private repository asks for a password.
+
+Claude Code itself: install it as Anthropic's setup page describes (code.claude.com/docs/en/setup;
+for Linux and WSL it gives `curl -fsSL https://claude.ai/install.sh | bash`), and run `claude` once.
 
 ## Install
 
 **1. Clone the repository.** Keep it where it can stay: the links that install makes point into it.
 
 ```sh
-gh auth login
+gh auth login     # skip if you did it above
 gh repo clone vojtahavranek/skydeck ~/skydeck
 cd ~/skydeck
 ```
@@ -315,7 +327,7 @@ ignored.
 | `restoreMinFreeMb` | `4096` | `restore` stops (exit 5) before a batch when less memory than this (MiB, `MemAvailable`) is free. |
 | `restoreStartTimeoutSeconds` | `120` | How long `restore` waits for the sessions of a batch to report their start. |
 | `claudeHome` | `null` | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
-| `claudeCommand` | `"claude"` | The program `resume` and `new` run. One word: a name on `PATH` or an absolute path. It is not split into arguments. |
+| `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. |
 
 The numbers must be positive integers. An example that uses WezTerm tabs and a lower-case ticket key:
 
@@ -433,7 +445,7 @@ A database written by a newer skydeck is not opened by an older one: the command
 ## When the checkout or Node.js changes
 
 The links point at the checkout and at one Node.js binary. If you move the checkout, or delete it and
-clone again, the links dangle: the `skydeck` command is not found, and the hook records nothing (it
+clone it somewhere else, the links dangle: the `skydeck` command is not found, and the hook records nothing (it
 is silent, and never disturbs a session). If you remove the Node.js version that `<dataDir>/node`
 points at, the launcher falls back to `node` on `PATH`, and stops with the message above when that
 one is older than 24.12.
@@ -512,6 +524,6 @@ Sessions and transcripts live in Claude Code's folder, and skydeck only reads th
 | `skydeck: cannot run 'node'; install Node.js or set SKYDECK_NODE ...` (exit 127) | There is no `node` on `PATH` and no working link. Install Node.js 24.12 or newer, or set `SKYDECK_NODE`. |
 | `skydeck: not started through bin/skydeck` | A `--here` start needs the launcher. Run skydeck as `~/.local/bin/skydeck` or `bin/skydeck`, not as `node bin/bootstrap.mjs`. |
 | `doctor`: `no SessionStart hook entry ...` | Run `skydeck install`. Claude Code may have rewritten its settings file. |
-| A session you expect is not in `skydeck ls` | A session that is not running and never received a prompt has no transcript and is not listed. One marked done needs `--all`. `claude -p` and SDK runs are not sessions (`doctor` counts them). Run `skydeck doctor`. |
+| A session you expect is not in `skydeck ls` | A session that is not running and never received a prompt has no transcript and is not listed. One marked done needs `--all`. `claude -p` and SDK runs are not sessions (`doctor` counts them), and neither is a session whose transcript says it was not started by the interactive `claude` (its entry point is not `cli`). Run `skydeck doctor`. |
 | `skydeck: <id> is running (pid <n>)` when you resume | The session runs in another terminal. skydeck never resumes a session twice (exit 4). |
 | `skydeck: <id> is being resumed (<n> s ago); try again in <m> s` | A resume of that session started less than a minute ago. When skydeck printed a command for you to run, the same hold applies for that minute. |

@@ -61,7 +61,8 @@ commands for the others. Details are at the top of [docs/install.md](docs/instal
 `skydeck --version` prints the version.
 
 `<ref>` is a full session id, a unique id prefix of at least 4 characters, or a label equal to the
-text. No match, or more than one, is an error that lists the candidates.
+text. More than one match is an error that lists the candidates; no match is an error too (both
+exit 3).
 
 Exit codes: 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not found
 or ambiguous; 4 resume refused; 5 restore stopped before finishing.

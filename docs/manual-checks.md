@@ -8,7 +8,10 @@ Setup:
 
 - skydeck is installed ([install.md](install.md)); item 1 is the install itself.
 - Make a throwaway project folder: `mkdir -p ~/skydeck-try`.
-- Use several terminals: **A** (and **B**, **C**) run `claude`; **S** runs `skydeck`. `<ref>` is the
+- Items 1 and 8 run `bin/skydeck` from the checkout: while skydeck is not installed there is no
+  `<dataDir>/node` link, so with a default `node` older than 24.12 put `SKYDECK_NODE=...` in front,
+  as in [install.md](install.md), step 2. The `skydeck` command of the other items uses the link.
+- Use several terminals: **A** (and **B**) run `claude`; **S** (and **C**) run `skydeck`. `<ref>` is the
   first 4 or more characters of a session id; `skydeck ls` prints the first 8, as the last column.
 - **Send one prompt in every session you want to see again after it ends.** A session that never
   received a prompt has no transcript, and one that is not running and has no transcript is not
@@ -23,7 +26,8 @@ Run item 8 last: it removes the hook. Install again afterwards.
 
 ## 1. Install
 
-On a machine with an existing `~/.claude/settings.json`:
+On a machine with an existing `~/.claude/settings.json`, where skydeck is not installed yet (or
+after item 8):
 
 ```sh
 cp ~/.claude/settings.json /tmp/settings.before.json
@@ -198,5 +202,6 @@ If you or Claude Code changed the settings file after the install, the line is
 `removed the hook entries from <settings file>` instead, and your later changes stay. That is the
 right result too.
 
-`bin/skydeck doctor` now reports `problem  no SessionStart hook entry ...`. Run
-`bin/skydeck install` to put skydeck back.
+`bin/skydeck doctor` now reports `problem  no SessionStart hook entry ...`, or, with a default `node`
+older than 24.12 (the link is gone), the line about `SKYDECK_NODE`. Run `bin/skydeck install` (with
+`SKYDECK_NODE=...` in front in that case) to put skydeck back.
