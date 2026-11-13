@@ -167,13 +167,15 @@ The places of design 9.1 stay. Step 2 adds:
 | `<runtimeDir>/keepalive.interop` | The keep-alive's `$WSL_INTEROP` (6.4). |
 | `<runtimeDir>/terms/<terminal id>.sock` | A keeper's unix socket, mode 600, in a directory of mode 700. |
 | `<runtimeDir>/interop` | A symbolic link to a live WSL interop socket (6.4). |
-| `<stateDir>/server.log`, `<stateDir>/keepers.log` | The server's and the keepers' own diagnostics, one line each, never conversation content, typed text or the secret (2); at 1 MiB a file is renamed to `.1` (one older file is kept). |
+| `<stateDir>/server.log`, `<stateDir>/keepers.log` | The server's and the keepers' own diagnostics, one line each, never conversation content, typed text or the secret (2); at 1 MiB a file is copied to `.1` and emptied in place (one older file is kept): not renamed, because the server's own stdout and stderr and each keeper's stderr hold these files open and go on writing into them. A line written between the copy and the emptying can be lost. |
 | the store | Migration 2 (10.2) and the `kv` entries of 10.2. |
 | the Edge profile folder | A Windows folder (5.4). Edge creates and writes it; skydeck never writes or removes it. |
 
 A unix socket path must be shorter than 108 bytes. With a fallback under `<stateDir>` or
-`$SKYDECK_HOME` and a long home directory it can be longer; then the server refuses to start (for
-`server.sock`) or to open terminals, says why, and `doctor` reports it.
+`$SKYDECK_HOME` and a long home directory it can be longer. The longest is a keeper's,
+`<runtimeDir>/terms/<terminal id>.sock`; when it would not fit, the server refuses to start
+(`serve` exits 12, 5.2), says why, and `doctor` reports it. It does not start without terminals:
+a server that can list sessions but open none is of no use, and one rule is easier to explain.
 
 ### 4.3 Code layout
 
