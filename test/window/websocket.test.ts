@@ -1398,4 +1398,34 @@ describe('WebSocket: a listener that throws (ruled, #44)', () => {
       assert.equal(await within('onClose', accepted.closed), code);
     });
   }
+
+  test('an onText and an onClose listener that both throw: the socket is still destroyed', async (t) => {
+    const d = direct(t);
+    const accepted = d.accepted as Accepted;
+    accepted.conn.onText(() => {
+      throw new Error('text listener failed');
+    });
+    accepted.conn.onClose(() => {
+      throw new Error('close listener failed');
+    });
+    await tick();
+
+    assert.throws(() => d.peer.write(clientFrame(OP.text, Buffer.from('a'))), /listener failed/);
+
+    assert.equal(d.socket.destroyed, true);
+    assert.equal(await within('onClose', accepted.closed), 1006);
+  });
+
+  test('destroy() with an onClose listener that throws: the socket is destroyed all the same', async (t) => {
+    const d = direct(t);
+    const accepted = d.accepted as Accepted;
+    accepted.conn.onClose(() => {
+      throw new Error('close listener failed');
+    });
+
+    assert.throws(() => accepted.conn.destroy(), /close listener failed/);
+
+    assert.equal(d.socket.destroyed, true);
+    assert.equal(await within('onClose', accepted.closed), 1006);
+  });
 });

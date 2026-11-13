@@ -301,10 +301,10 @@ class Connection implements WebSocketConnection {
     }
     socket.on('end', () => {
       // The peer will send nothing more. Its socket is half-open (node:http's allowHalfOpen):
-      // ending ours as well lets it close.
-      this.#gone();
+      // ending ours as well lets it close. The socket first: a listener that onClose calls may throw.
       socket.end();
       this.#waitForPeer();
+      this.#gone();
     });
     socket.on('drain', () => {
       if (this.#state !== 'open') return;
@@ -353,9 +353,10 @@ class Connection implements WebSocketConnection {
   }
 
   destroy(): void {
-    this.#gone();
+    // The socket first: a listener that onClose calls may throw.
     this.#stopWaiting();
     this.#socket.destroy();
+    this.#gone();
   }
 
   onText(listener: (text: string) => void): void {
