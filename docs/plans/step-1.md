@@ -4903,8 +4903,8 @@ the filter and the detail it refreshes as usual. A failure (of the refresh, or o
 line once: the same failure again says nothing more until that work has succeeded; it never ends the list. Measured
 with the real files and `/proc` and 4 live processes: at 300 sessions (246 MB of transcripts) a tick that always
 loaded the rows cost 18 ms (median; p95 35 ms); at 3,000 sessions it cost 70 ms (loading the 7,243 events 30 ms,
-deriving 14 ms, the scan 11 ms), and with the change check a tick of the real list costs 14 ms (median; the
-once-a-minute reload 67 ms; mean of all ticks 19 ms), flat over 1,200 ticks. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
+deriving 14 ms, the scan 11 ms), and with the change check a tick of the real list costs 15 ms (median; the
+once-a-minute reload 81 ms; mean of all ticks 21 ms), flat over 1,200 ticks. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
 resize (`io.onResize`, which also repaints at once). Nothing is painted while the alternate screen is left.
 
 Effects: `label`/`group` → `cleanLabel`/`cleanGroup` (empty text clears) + `setLabel`/`setGroup`; `note` → leave the
