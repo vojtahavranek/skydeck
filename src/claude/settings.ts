@@ -142,8 +142,12 @@ export function addHookEntries(settingsText: string | null, hookPath: string): S
  * groups left with no hooks, event arrays left empty, and `hooks` when left empty. Nothing else
  * changes: a group or array that was empty before stays. `events` names the hooked events that
  * lost an entry (HookEvent cannot name another event); `changed` is true when anything went.
+ * Throws SkydeckError when hookPath is empty or blank, which would match every hook.
  */
 export function removeHookEntries(settingsText: string, hookPath: string): SettingsEdit {
+  if (hookPath.trim() === '') {
+    throw new SkydeckError('the hook path is empty, so no hook entry can be told apart');
+  }
   const { settings, hooks } = parseForEdit(settingsText);
   const removed: HookEvent[] = [];
   let changed = false;
@@ -221,8 +225,11 @@ export function hookStatus(
   return status;
 }
 
-/** cleanupPeriodDays when it is a positive number, else 30. Unparsable or null text → 30. */
+/**
+ * cleanupPeriodDays when it is a positive safe integer, else 30 (task 10 turns it into a BigInt
+ * duration). Unparsable or null text → 30.
+ */
 export function cleanupPeriodDays(settingsText: string | null): number {
   const days = parseLoosely(settingsText)?.['cleanupPeriodDays'];
-  return typeof days === 'number' && days > 0 ? days : 30;
+  return typeof days === 'number' && Number.isSafeInteger(days) && days > 0 ? days : 30;
 }

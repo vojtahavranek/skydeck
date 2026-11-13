@@ -265,6 +265,13 @@ describe('settings: removeHookEntries', () => {
     assert.deepEqual(parse(edit.text), { hooks: { Stop: 'x' } });
   });
 
+  test('an empty or blank hook path is refused instead of matching every hook', () => {
+    const text = JSON.stringify({ hooks: { Stop: [FOREIGN_GROUP] } });
+
+    assert.throws(() => removeHookEntries(text, ''), SkydeckError);
+    assert.throws(() => removeHookEntries(text, '  '), SkydeckError);
+  });
+
   test('settings that are not valid JSON throw a SkydeckError', () => {
     assert.throws(() => removeHookEntries('not json', H), SkydeckError);
     assert.throws(() => removeHookEntries('[]', H), SkydeckError);
@@ -319,6 +326,9 @@ describe('settings: cleanupPeriodDays', () => {
   test('falls back to 30 for zero, a negative number, a string or garbage', () => {
     assert.equal(cleanupPeriodDays('{"cleanupPeriodDays":0}'), 30);
     assert.equal(cleanupPeriodDays('{"cleanupPeriodDays":-3}'), 30);
+    assert.equal(cleanupPeriodDays('{"cleanupPeriodDays":7.5}'), 30);
+    assert.equal(cleanupPeriodDays('{"cleanupPeriodDays":1e400}'), 30);
+    assert.equal(cleanupPeriodDays('{"cleanupPeriodDays":1e21}'), 30);
     assert.equal(cleanupPeriodDays('{"cleanupPeriodDays":"9"}'), 30);
     assert.equal(cleanupPeriodDays('bad'), 30);
     assert.equal(cleanupPeriodDays('[]'), 30);
