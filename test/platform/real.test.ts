@@ -1713,6 +1713,43 @@ describe('the Windows guard (A32)', () => {
     assert.equal(existsSync(marker), false, 'no stub ran');
   });
 
+  test('a PATH directory under /mnt/ that does not hold the program refuses nothing', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const platform = realPlatformWith('1');
+
+    const result = await platform.runner.run('sh', ['-c', 'printf ran'], {
+      env: { PATH: `${s.bin}:/mnt/skydeck-test-none/bin` },
+    });
+
+    assert.equal(result.stdout, 'ran');
+  });
+
+  test('a program that is a FIFO does not block the guard: it is judged without being opened', async (t) => {
+    const s = sandbox(t);
+    s.link('sh', 'mkfifo');
+    const fifo = join(s.root, 'tool');
+    const made = await realPlatform().runner.run('mkfifo', ['-m', '644', fifo], { env: s.env() });
+    assert.equal(made.code, 0, made.stderr);
+    // In a child: were the guard to open the FIFO, it would block that process, not this one.
+    const script = [
+      `const { realPlatform } = await import(${JSON.stringify(REAL_MODULE)});`,
+      'const platform = realPlatform({ refuseWindows: true });',
+      `const outcome = await platform.processes.startDetached(${JSON.stringify(fifo)}, [], { cwd: ${JSON.stringify(s.root)}, env: { PATH: ${JSON.stringify(s.bin)} } }).then(() => 'started', (error) => error.code);`,
+      'process.stdout.write(String(outcome));',
+    ].join('\n');
+
+    const result = await realPlatform().runner.run(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { cwd: s.root, env: s.env(), timeoutMs: 10_000 },
+    );
+
+    assert.equal(result.timedOut, false, 'the guard blocked on the FIFO');
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, 'EACCES', 'not refused as Windows, and a FIFO cannot be run');
+  });
+
   test('a file that starts with MZ (what WSL interop runs) is refused whatever its name', async (t) => {
     const s = sandbox(t);
     stubs(s);

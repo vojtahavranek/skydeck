@@ -9,6 +9,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
@@ -1332,6 +1334,43 @@ describe('killKeepersIn (A34)', () => {
 
     assert.equal(await exitWithin(keeper, 300), 'running');
     assert.equal(await exitWithin(elsewhere, 0), 'running');
+  });
+
+  test('a line whose process cannot be read is not signalled; the others are, then it throws', async (t) => {
+    const s = sandbox(t);
+    const first = await sleeper(t, s);
+    const unreadable = await sleeper(t, s);
+    const last = await sleeper(t, s);
+    const dir = `${s.skydeckHome}/run`;
+    writeLine(dir, 'aaaaaaaaaaaa', `${first.pid} ${first.procStart} ${BOOT()} 1 1`);
+    writeLine(dir, 'bbbbbbbbbbbb', `${unreadable.pid} ${unreadable.procStart} ${BOOT()} 1 1`);
+    writeLine(dir, 'cccccccccccc', `${last.pid} ${last.procStart} ${BOOT()} 1 1`);
+    // /proc/<pid>/stat of the middle one fails as it would without permission (EACCES).
+    const readFileSync = fs.readFileSync;
+    const denied = `/proc/${unreadable.pid}/stat`;
+    const mocked = t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof readFileSync>) => {
+      if (args[0] === denied) {
+        throw Object.assign(new Error(`EACCES: permission denied, open '${denied}'`), {
+          code: 'EACCES',
+        });
+      }
+      return readFileSync(...args);
+    });
+    syncBuiltinESMExports(); // the named imports of node:fs (real.ts, kill.ts) now see the mock
+    let thrown: unknown;
+    try {
+      killKeepersIn(s, dir);
+    } catch (error) {
+      thrown = error;
+    } finally {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+
+    assert.match(String(thrown), new RegExp(`could not tell whether ${unreadable.pid} still run`));
+    assert.deepEqual(await exitWithin(first, 5000), { code: null, signal: 'SIGKILL' });
+    assert.deepEqual(await exitWithin(last, 5000), { code: null, signal: 'SIGKILL' });
+    assert.equal(await exitWithin(unreadable, 300), 'running');
   });
 
   test('a line that names this process is skipped: the test lives on', (t) => {

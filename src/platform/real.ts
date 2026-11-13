@@ -420,10 +420,16 @@ function candidatesOf(command: string, cwd: string | undefined, path: string): s
   return path.split(':').map((dir) => `${dir === '' ? base : under(dir)}/${command}`);
 }
 
-/** Whether the file starts with "MZ": a Windows program, which WSL interop would run. */
+/**
+ * Whether the file starts with "MZ": a Windows program, which WSL interop would run. Only a regular
+ * file is opened: opening a FIFO would block this whole process until something writes to it.
+ */
 function startsWithMz(path: string): boolean {
   let fd: number | undefined;
   try {
+    if (!statSync(path).isFile()) {
+      return false; // a FIFO, a device, a directory: nothing interop runs
+    }
     fd = openSync(path, 'r');
     const head = new Uint8Array(2);
     return readSync(fd, head, 0, 2, 0) === 2 && head[0] === 0x4d && head[1] === 0x5a;
@@ -436,18 +442,19 @@ function startsWithMz(path: string): boolean {
   }
 }
 
-/** Whether `candidate`, followed as the kernel follows it, is a Windows program. */
+/**
+ * Whether `candidate`, followed as the kernel follows it, is a Windows program. Judged only when it
+ * exists: a PATH directory under /mnt/ that does not hold the program is no reason to refuse (the
+ * command's own name is judged by the guard itself).
+ */
 function leadsToWindows(candidate: string): boolean {
-  if (isWindowsCommand(candidate)) {
-    return true;
-  }
   let real: string;
   try {
     real = realpathSync.native(candidate); // the kernel's resolution, `..` after the link
   } catch {
     return false; // not there: starting it fails as ENOENT
   }
-  return isWindowsCommand(real) || startsWithMz(real);
+  return isWindowsCommand(candidate) || isWindowsCommand(real) || startsWithMz(real);
 }
 
 /**
