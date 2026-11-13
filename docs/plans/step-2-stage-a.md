@@ -68,7 +68,7 @@ is `off`, unless the test is about them; and no test links the real `/run/WSL/1_
 test runs under the sandbox of `test/helpers/sandbox.ts`. A server under test listens on a port
 the system picks (A6). **Two test platforms** (task 5, 2.2): `testPlatform` (fake clock, fake
 `/proc`, fake processes) for logic, and `realTestPlatform` (real clock, real `/proc` and boot id,
-`process.pid`, real processes behind the Windows guard, the programs a keeper and the stand-in
+`process.pid`, real processes that always refuse Windows programs, the programs a keeper and the stand-in
 need linked into the sandbox's `bin`) for every test that starts a keeper, the stand-in or a
 server, or judges a real process alive: the tests of tasks 9, 15 (the lock with live processes),
 16, 21, 22, 23, 24 (keepers), 25 and 26–29. With the fake clock a keeper's `startBy` lies in its
@@ -193,8 +193,8 @@ Each is binding for the implementer. The last column names the task that records
 | A29 | `skydeck window` passes its working directory to `serve` in `SKYDECK_ENV_ORIGIN`; `serve` takes it out of its environment (task 8's `serverEnvironment`) and records it with its start time as "where the environment came from" (S2 5.2); a `serve` started by hand records its own working directory. | `serve` runs in `/` (S2 5.2), so it cannot see where its environment came from. | 23 (5.2) |
 | A30 | `doctor`'s port check reads `/proc/net/tcp` and `/proc/net/tcp6` (`Proc.tcpListening`, task 5) for a listener on `<window.port>`; when one exists and no server of this installation answers, something else holds the port. | No side effect: binding the port, even for an instant, could make a server that starts at that moment exit 10; no request is sent to a foreign program. | 24 (16.3) |
 | A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
-| A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); `testPlatform`'s processes refuse them whatever the environment. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
-| A33 | The stand-in refuses to run outside a sandbox (review A, must-fix): it exits 2 before doing anything — no hook, no live file, no record — unless `STANDIN_RECORD`, `SKYDECK_HOME` and `CLAUDE_CONFIG_DIR` are all set to absolute paths; there are no defaults. It ends itself (as on `/exit`, but with `SessionEnd` reason `other` and exit 0) when the directory of its record file is gone (checked every second) or 10 minutes after it started. | Implementers run tests inside Claude Code sessions on a machine with the hook installed: a stand-in with an inherited environment would write into the user's real spool and `~/.claude/sessions`, and a crashed test would leave keepers and stand-ins running. | — |
+| A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); the processes of both test platforms, `testPlatform` and `realTestPlatform`, refuse them always, whatever any environment says (the guard is part of the processes object they build, never read from `process.env`: in the test process the variable is in the platform's environment, not in the runner's own). `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
+| A33 | The stand-in refuses to run outside a sandbox (review A, must-fix): it exits 2 before doing anything — no hook, no live file, no record — unless `STANDIN_RECORD`, `SKYDECK_HOME` and `CLAUDE_CONFIG_DIR` are all set to absolute paths; there are no defaults. It ends itself, exit 0, when the directory of its record file is gone (checked every second) — then without running the hook or writing anything, since the hook would create `$SKYDECK_HOME/state/spool` again and leave a directory behind after every crashed test — or 10 minutes after it started, with `SessionEnd` reason `other` as on `/exit`. | Implementers run tests inside Claude Code sessions on a machine with the hook installed: a stand-in with an inherited environment would write into the user's real spool and `~/.claude/sessions`, and a crashed test would leave keepers and stand-ins running. | — |
 | A34 | Test helpers signal only through `killKeepersIn(s, runtimeDir)` (task 5, `test/helpers/kill.ts`), which asserts that the real path of `runtimeDir` lies under `s.root` before it reads a single `.pid` line, and signals only pids whose lines are alive by design 5.5's rule; a test signals other processes only through the child handles it started itself. | If a runtime directory were ever resolved wrongly, a cleanup would kill the user's real keepers and their sessions. | — |
 | A35 | Every module the server uses is loaded before it listens, the vendored xterm modules (`loadXterm`) included; no `import()` runs after start. | S2 16.5: the server must never read new code from a checkout that `git pull` changed under it. | — |
 
@@ -348,7 +348,8 @@ real loopback and unix sockets) and the fake processes, unless options ask for r
 
 `realTestPlatform(t, options?)` (same file) returns a `TestPlatform` whose `platform` has the real
 clock, the real `/proc` (so the real boot id), `pid` = `process.pid`, the real `uid` and
-`userName`, real processes behind the Windows guard (A32), the real `net`, real `randomBytes`,
+`userName`, real processes that refuse a command under `/mnt/` or ending in `.exe` always (A32: the
+guard is built into the processes object, not read from an environment), the real `net`, real `randomBytes`,
 `homeDir` and `cwd` = the sandbox's home, `appRoot` = the repository, and the sandbox's
 environment; it links `python3`, `sh`, `sleep`, `date`, `cat`, `base64`, `mkdir`, `mv`, `rm`,
 `dirname` and `readlink` into the sandbox's `bin` (the keeper, the stand-in, the hook and the
@@ -449,9 +450,10 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
   — OSC 2. `/wide` — a row with 🙂, a ZWJ sequence and a skin-tone emoji.
 - **Signals.** `SIGWINCH` — records `{ ev: 'resize', cols, rows }` and redraws. `SIGHUP` — records
   `{ ev: 'hup' }`, `SessionEnd` reason `other`, exit 129. It records `{ ev: 'exit', code }` last.
-- **It ends itself** (A33) when the directory of `STANDIN_RECORD` is gone (checked every second)
-  or 10 minutes after it started (`STANDIN_MAX_SECONDS` shortens it, for its own test): `SessionEnd`
-  reason `other`, live file removed, exit 0.
+- **It ends itself** (A33), exit 0: when the directory of `STANDIN_RECORD` is gone (checked every
+  second) at once, running no hook and writing nothing (no record, no live file, no spool
+  directory created again); 10 minutes after it started (`STANDIN_MAX_SECONDS` shortens it, for
+  its own test) with `SessionEnd` reason `other` and its live file removed.
 
 ### 2.5 The server's internal interfaces: `src/window/hub.ts` (task 1)
 
@@ -669,7 +671,8 @@ export interface SizeMessage { t: 'size'; term: string; cols: number; rows: numb
 export interface ExitMessage { t: 'exit'; term: string; code: number | null; signal: number | null; atNs: NsText; lost: boolean; notStarted: string | null }
 /** `sessionId`: the session a successful resume or new started (A25 below), else null. */
 export interface ResultMessage { t: 'result'; id: number; ok: boolean; lines: string[]; error: string | null; sessionId: string | null }
-export interface NoticeMessage { t: 'notice'; kind: 'keepalive-lost' | 'keepalive-back' | 'gap' | 'newer-keeper' | 'input-full' | 'tick-failed'; text: string }
+/** `term`: the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the keep-alive and tick notices. */
+export interface NoticeMessage { t: 'notice'; kind: 'keepalive-lost' | 'keepalive-back' | 'gap' | 'newer-keeper' | 'input-full' | 'tick-failed'; term: string | null; text: string }
 export interface ByeMessage { t: 'bye'; reason: string }
 export type ServerMessage = ChallengeMessage | WelcomeMessage | PongMessage | ListMessage | SnapMessage
   | SizeMessage | ExitMessage | ResultMessage | NoticeMessage | ByeMessage;
@@ -1004,8 +1007,9 @@ test, never the keeper, which is task 9)
 - `standinCommand(s, { wrapper: true })`: the stand-in's parent is the wrapper script.
 - Refusal (A33): with `STANDIN_RECORD`, `SKYDECK_HOME` or `CLAUDE_CONFIG_DIR` unset, empty or
   relative (each alone) → exit 2, no spool file anywhere in the sandbox, no live file, no record.
-- Ending itself: the record file's directory removed → exit 0 within 2 s, `SessionEnd` `other`
-  in the spool; `STANDIN_MAX_SECONDS=2` → exit 0 after about 2 s.
+- Ending itself: the record file's directory removed (the test also removes `SKYDECK_HOME`) → exit
+  0 within 2 s, the hook not run: `SKYDECK_HOME` does not exist again afterwards;
+  `STANDIN_MAX_SECONDS=2` → exit 0 after about 2 s with `SessionEnd` `other` in the spool.
 
 **Done when:** every command and record of 2.4 works and is covered; the stand-in never needs the
 network or anything outside the sandbox.
@@ -1865,7 +1869,9 @@ export function createPages(deps: PagesDeps): Pages;
 - Streams: `attach` → `snap` with a fresh channel, then binary frames `1, ch, bytes` in order, and
   `size` in stream order; two pages attached share one order; `detach` stops it; `input` with
   `binary: true` passes bytes as given (a byte string), without it UTF-8; `'full'` → `notice
-  input-full`; `exit` reaches every attached page.
+  input-full` with that terminal's `term`; a sink's `gap` and `newer-keeper` reach each attached
+  page with the terminal's `term`; `pages.notice` (keep-alive, tick) carries `term` null; `exit`
+  reaches every attached page.
 - Size (`size.test.ts`, pure): the first page to attach owns; a later page's `resize` is only
   remembered; its `input` makes it the owner and applies its proposal; the owner detaches →
   the page that sent input last, else the one that attached last, and its proposal applies; nobody
