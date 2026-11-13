@@ -1565,16 +1565,17 @@ export interface ListRow {
   shortId: string;
   title: string;                  // sanitised
   titleSource: TitleSource;
-  label: string | null;
-  group: string | null;           // meta group, else groupPattern match on the title
+  label: string | null;           // sanitised
+  group: string | null;           // sanitised; meta group, else groupPattern match on the title
+  groupSource: 'meta' | 'title' | null;   // where `group` comes from; null exactly when `group` is
   state: State;
   stateDetail: string | null;     // sanitised
   sinceNs: Ns;
   lastActivityNs: Ns;
-  dir: string | null;             // sanitised
+  dir: string | null;             // sanitised, so for display only: the path to use is session.dir
   marks: Mark[];
   hasNote: boolean;
-  note: string | null;
+  note: string | null;            // as typed (free multi-line text); sanitised by whoever prints it
   continuedFrom: string | null;
   done: boolean;                  // = session.hidden
   prs: PrView[];                  // attached and not detached, sorted by url
@@ -1588,14 +1589,16 @@ export interface ListModel { generatedAtNs: Ns; groups: ListGroup[] }
  * One row per derived session (none dropped, in the order given), every foreign string sanitised
  * (7.4). A `customTitle` or `aiTitle` that is empty or only whitespace once sanitised is not a
  * title: the next source is used (the transcript reader keeps an empty `customTitle`, a cleared
- * name). A `groupPattern` that matches the empty string gives no group. The fallback title is built
+ * name); titles are shown trimmed. The label and the group are sanitised too (defence in depth:
+ * cleanLabel and cleanGroup refuse such text); one that is blank once sanitised is not set. A
+ * `groupPattern` that matches the empty string gives no group. The fallback title is built
  * from the sanitised directory.
  */
 export function buildRows(input: {
   sessions: readonly DerivedSession[]; metas: readonly SessionMeta[];
   prs: readonly PrRow[]; sessionPrs: readonly SessionPrRow[]; groupPattern: string;
 }): ListRow[];
-/** 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with showAll); done (unless showAll) → false; expired with no label, group, note or PR → false. */
+/** 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with showAll); done (unless showAll) → false; expired with nothing the user attached (no label, no group set by the user (`groupSource` 'meta'), no note, no PR) → false. A group `groupPattern` took from the title does not count. */
 export function isListed(row: ListRow, showAll: boolean): boolean;
 /** Case-insensitive substring match on title, group, note, dir, and per PR "<repo>", "<number>", "<repo>#<number>". Empty filter matches all. */
 export function matchesFilter(row: ListRow, filter: string): boolean;
@@ -1630,11 +1633,12 @@ export function resolveRef(ref: string, rows: readonly ListRow[]): ListRow;
 // src/sessions/labels.ts (7.1)
 /**
  * Trimmed label (trimmed first, so a trailing newline goes). UsageError when what is left contains a
- * line break (LF, CR, VT, FF, NEL, U+2028, U+2029), is empty, or starts with '-'. The message does
- * not repeat the text.
+ * line break (LF, CR, VT, FF, NEL, U+2028, U+2029) or anything else `sanitize()` would change (a tab,
+ * an escape sequence, a control or bidirectional character), is empty, or starts with '-'. The
+ * message does not repeat the text.
  */
 export function cleanLabel(text: string): string;
-/** Trimmed group. UsageError when what is left contains a line break (as for a label) or is empty. */
+/** Trimmed group. UsageError when what is left contains a line break or anything `sanitize()` would change (as for a label), or is empty. */
 export function cleanGroup(text: string): string;
 ```
 
@@ -3547,9 +3551,14 @@ export function cleanGroup(text: string): string;   // throws UsageError
 **Rules fixed here.** Title: meta label → `'label'`; transcript `customTitle` → `'name'`;
 transcript `aiTitle` → `'generated'`; else `'fallback'` = `YYYY-MM-DD HH:MM <basename(dir) or ?>`
 from `firstSeenNs` in UTC (D12). A `customTitle` or `aiTitle` that is empty or only whitespace once sanitised is
-skipped (the next source is used). Group: meta group, else `new RegExp(groupPattern).exec(title)?.[0]`,
-else null. Sanitised with `sanitize`: title (all sources except the label), `stateDetail`, `dir`,
-PR `title` and `error`. **Order (7.4):** groups by the largest `lastActivityNs` of their rows,
+skipped (the next source is used); titles are shown trimmed. Group: meta group, else
+`new RegExp(groupPattern).exec(title)?.[0]`, else null; `groupSource` says which. Sanitised with
+`sanitize`: title (every source, the label included: `cleanLabel` and `cleanGroup` refuse such text, so this
+only guards against a database changed by other means; one that is blank once sanitised is not set), `label`,
+`group`, `stateDetail`, `dir` (for display only; the path to use is `session.dir`), PR `title` and `error`;
+`note` is free multi-line text, left as typed. **Listed (7.2):** an expired session counts as having
+something attached only through a label, a group set by the user (`groupSource` 'meta'), a note or a pull
+request; a group taken from the title does not. **Order (7.4):** groups by the largest `lastActivityNs` of their rows,
 descending; the null group last; ties by name ascending. Rows by rank — `waiting` 0, `working` 1,
 `running` 2, `not-running` with `ended-unexpectedly` 3, other `not-running` 4 — then
 `lastActivityNs` descending, then id ascending.

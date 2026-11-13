@@ -293,7 +293,8 @@ Marks are shown next to the state.
 
 ### 7.1 Labels, groups, notes, done
 
-- **Label.** One line, trimmed, not empty, not starting with `-`. The **title** of a row is the
+- **Label.** One line, trimmed, not empty, not starting with `-`, and without control characters
+  (anything the sanitiser of 7.4 would change). The **title** of a row is the
   first that exists of: the skydeck label; the name set in Claude Code (`custom-title`); Claude
   Code's generated title (`ai-title`); otherwise the start time and the project directory name,
   as `YYYY-MM-DD HH:MM <directory name>` in UTC (`?` when the directory is not known). A name or
@@ -302,7 +303,7 @@ Marks are shown next to the state.
   When skydeck starts or resumes a session that has a label, it passes the label to Claude Code
   as the session name, so the terminal tab shows it. Claude Code itself keeps a session name
   across `/clear`.
-- **Group.** One line, optional. When no group is set and the title starts with a ticket key
+- **Group.** One line without control characters, optional. When no group is set and the title starts with a ticket key
   (configuration `groupPattern`, default `^[A-Z][A-Z0-9]+-[0-9]+`), that key is the group.
 - **Note.** Free text of any length, edited in `$EDITOR`.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
@@ -317,7 +318,9 @@ Marks are shown next to the state.
 
 Every session known from events or transcripts, except: sessions whose transcript has an
 `entrypoint` other than `cli`; sessions hidden by done (shown with `--all`); and sessions that
-are `expired` and have no label, group, note or pull request. A session that is not running and
+are `expired` and have nothing the user attached: no label, no group set by the user, no note and
+no attached pull request (a group that `groupPattern` takes from the title does not count, or an
+expired session with a ticket key in its title would stay in the list for ever). A session that is not running and
 has no transcript is never listed, not even with `--all`: there is nothing to resume, and one that
 never received a prompt has no transcript (14).
 
@@ -360,6 +363,8 @@ otherwise it behaves like `skydeck ls`.
   short id (first 8 characters of the session id).
 - Every string that comes from a transcript, a live-session file or GitHub passes through the
   sanitiser, which removes control characters and escape sequences, when the list model is built.
+  So do the label and the group, although setting them refuses such characters (7.1): the
+  database can be changed by other means. A note is free multi-line text and is not part of a row.
 
 Keys: arrows or `j`/`k` move; `Enter` detail; `l` label; `g` group; `n` note; `d` done or undo;
 `p` pull requests; `R` resume; `/` filter; `a` show all; `r` refresh; `q` quit. The filter
