@@ -79,7 +79,13 @@ fi
 # word quoted for sh (src/terminals/here.ts), and exits. The launcher reads it, deletes it and only
 # then runs it, so no handoff file outlives the launcher, and the exec'd program does not inherit
 # the variable. Without a handoff the launcher exits with node's status.
-handoff=$(mktemp "${TMPDIR:-/tmp}/skydeck-handoff.XXXXXX") || exit 1
+# $TMPDIR is used only when it is an absolute path to a directory (a relative one would name another
+# file once the handoff has changed directory); otherwise the file goes to /tmp.
+tmp=/tmp
+case ${TMPDIR:-} in
+  /*) if [ -d "$TMPDIR" ]; then tmp=$TMPDIR; fi ;;
+esac
+handoff=$(mktemp "$tmp/skydeck-handoff.XXXXXX") || exit 1
 trap 'rm -f -- "$handoff"' EXIT
 trap 'exit 130' HUP INT TERM
 SKYDECK_HANDOFF=$handoff

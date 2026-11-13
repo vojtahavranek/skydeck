@@ -3,7 +3,14 @@
 // copies a prepared fragment (made by the real handoffScript) into the handoff file.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -214,11 +221,28 @@ describe('bin/skydeck: the handoff', () => {
     assert.deepEqual(leftovers(r), []);
   });
 
-  test('fails with status 1 when the handoff file cannot be created', (t) => {
-    const r = rig(t);
+  describe('a TMPDIR that cannot hold the handoff file falls back to /tmp', () => {
+    const cases: ReadonlyArray<readonly [name: string, tmpdir: (r: Rig) => string | undefined]> = [
+      ['unset', () => undefined],
+      ['empty', () => ''],
+      ['relative (an existing directory, reached relative to the working directory)', () => 'tmp'],
+      ['a directory that does not exist', (r) => join(r.s.root, 'no-such-tmp')],
+      ['a file, not a directory', (r) => r.stub],
+    ];
+    for (const [name, tmpdir] of cases) {
+      test(name, (t) => {
+        const r = rig(t);
+        handoff(r, { cwd: r.s.root, argv: ['/bin/sh', '-c', 'echo ran'] });
 
-    const result = run(r, { TMPDIR: join(r.s.root, 'no-such-tmp') });
+        const result = run(r, { STUB_SOURCE: r.source, TMPDIR: tmpdir(r) });
 
-    assert.equal(result.status, 1);
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stdout, 'ran\n');
+        const path = readFileSync(r.seen, 'utf8').trim();
+        assert.ok(path.startsWith('/tmp/skydeck-handoff.'), path);
+        assert.equal(existsSync(path), false);
+        assert.deepEqual(leftovers(r), []);
+      });
+    }
   });
 });
