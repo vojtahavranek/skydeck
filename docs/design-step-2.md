@@ -70,7 +70,8 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   program gives back the caller's `LC_CTYPE` (python3 sets it in its own environment under a C
   locale) and sets the two signals python3 ignores by itself (SIGPIPE, SIGXFSZ) back to what the
   caller had (an ignored signal stays ignored across `exec`), since the server's environment
-  becomes every program's (7.4). Keepers inherit the limit; each keeper's
+  becomes every program's (7.4). Nothing in the program may keep Node.js from starting: every
+  step but the `exec` is optional, and a closed stderr stops none of them. Keepers inherit the limit; each keeper's
   child sets the soft limit back to that value before it `exec`s the program, so `claude` keeps
   the user's own limit (7.1). When the program cannot set the limit (the hard limit is 0, or
   `setrlimit` fails), it still starts Node.js, without `SKYDECK_CORE_SOFT`, and writes one line
@@ -200,7 +201,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 
 | Where | Change | Stage |
 |---|---|---|
-| `bin/skydeck` (launcher) | For `serve`: Node.js is started through a short program passed with `python3 -I -c` that sets the soft core limit to 1 byte and records the old one (2); without python3, directly. For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside a `NODE_COMPILE_CACHE` the launcher chose itself, so the server can drop the launcher's cache variable from the programs' environment and keep one the user set (5.2, 7.4). Tests in `test/bin/` for both. | A |
+| `bin/skydeck` (launcher) | For `serve`: Node.js is started through a short program passed with `python3 -I -c` that sets the soft core limit to 1 byte and records the old one (2); without python3, directly. For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside a `NODE_COMPILE_CACHE` the launcher chose itself, so the server can drop the launcher's cache variable from the programs' environment and keep one the user set (5.2, 7.4); the program of the `--here` handoff gets no marker. Tests in `test/bin/` for both. | A |
 | `src/platform/` | New interfaces: detached processes with a given environment, long-lived children, TCP and unix sockets, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value and the start deadline; the `Terminal` names gain `window` (11.1, 11.2). | A |

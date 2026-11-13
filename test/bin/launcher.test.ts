@@ -608,6 +608,27 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
     assert.match(r.stderr, /^skydeck: cannot run '.*broken-node': .+\n$/);
   });
 
+  test('with python3: hard limit 0, no state directory and stderr closed: node still runs', (t) => {
+    const s = serveSandbox(t, true);
+
+    const r = launchReported('ulimit -S -c 0 && ulimit -H -c 0 && exec 2>&-', ['serve'], s.env());
+
+    assert.equal(r.status, 0);
+    assert.equal(r.field('node'), 'reporting');
+    assert.equal(r.field('core-soft'), 'unset');
+  });
+
+  test('with python3: a node that cannot be executed, with stderr closed, still exits 127', (t) => {
+    const s = serveSandbox(t, true);
+    const broken = join(s.root, 'broken-node');
+    writeFileSync(broken, '#!/no/such/interpreter\n');
+    chmodSync(broken, 0o755);
+
+    const r = launchReported('exec 2>&-', ['serve'], s.env({ SKYDECK_NODE: broken }));
+
+    assert.equal(r.status, 127);
+  });
+
   test("with python3: node's exit code is the launcher's", (t) => {
     const s = serveSandbox(t, true);
 

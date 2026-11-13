@@ -193,16 +193,26 @@ describe('bin/skydeck: the handoff', () => {
     assert.equal(result.stdout, '[unset]\n');
   });
 
-  test("a SKYDECK_LAUNCHER_CACHE the caller had is still the caller's for the program", (t) => {
+  test('a SKYDECK_LAUNCHER_CACHE the caller had does not reach the program either', (t) => {
+    // The marker is skydeck's own (S2 5.2); like SKYDECK_HANDOFF, no program it hands over to
+    // gets it, while a NODE_COMPILE_CACHE the caller set stays the caller's.
     const r = rig(t);
     handoff(r, {
       cwd: r.s.root,
-      argv: ['/bin/sh', '-c', 'echo "[${SKYDECK_LAUNCHER_CACHE-unset}]"'],
+      argv: [
+        '/bin/sh',
+        '-c',
+        'echo "[${SKYDECK_LAUNCHER_CACHE-unset}] [${NODE_COMPILE_CACHE-unset}]"',
+      ],
     });
 
-    const result = run(r, { STUB_SOURCE: r.source, SKYDECK_LAUNCHER_CACHE: '/theirs' });
+    const result = run(r, {
+      STUB_SOURCE: r.source,
+      SKYDECK_LAUNCHER_CACHE: '/my/cache',
+      NODE_COMPILE_CACHE: '/my/cache',
+    });
 
-    assert.equal(result.stdout, '[/theirs]\n');
+    assert.equal(result.stdout, '[unset] [/my/cache]\n');
   });
 
   test('an empty NODE_COMPILE_CACHE of the caller stays empty for the program', (t) => {

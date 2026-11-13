@@ -1169,7 +1169,11 @@ environment under a C or POSIX locale, PEP 538); sets SIGPIPE and SIGXFSZ, which
 by itself, back to the caller's disposition (ignored when the launcher's `SigIgn` in
 `/proc/self/status` has them, else the default); writes the server.log line to stderr when that
 file cannot be written; and, when Node.js cannot be executed, prints `skydeck: cannot run
-'<node>': <reason>` and exits 127, as the launcher does, instead of a traceback. The launcher stays
+'<node>': <reason>` and exits 127, as the launcher does, instead of a traceback. Nothing in the
+program may keep Node.js from starting: every step but the exec is guarded, and every write
+tolerates a closed stderr (ruled, pull request #36). The `--here` handoff unsets
+`SKYDECK_LAUNCHER_CACHE` together with `SKYDECK_HANDOFF`: no program the launcher hands over to
+gets the marker, also not one the caller had. The launcher stays
 POSIX `sh` (shellcheck clean); the python is a short program held in a shell variable and passed
 as the single `-c` argument, no file. The marker (S2 5.2): set to the cache's value only when the
 launcher chose the cache itself (the caller's `NODE_COMPILE_CACHE` unset or empty); a
@@ -1187,7 +1191,8 @@ linked into the sandbox where needed)
   `SKYDECK_CORE_SOFT`; node sees `LC_CTYPE` as the caller had it, also unset and empty; node's
   ignored-signal set (`SigIgn` of `/proc/self/status`) equals that of a `serve` started without
   python3, also when the caller ignores SIGPIPE, SIGXFSZ or another signal; a Node.js that cannot
-  be executed gives the one line and exit 127.
+  be executed gives the one line and exit 127; with stderr closed, a hard limit of 0 and no state
+  directory node still runs, and a Node.js that cannot be executed still gives exit 127.
 - `serve` without python3 on `PATH`: node runs, no `SKYDECK_CORE_SOFT`.
 - `ls` (any other command): no python3 started (a python3 stub that records its calls is never
   called), limits unchanged.
@@ -1196,7 +1201,8 @@ linked into the sandbox where needed)
   unchanged with no marker, and a marker the caller has beside it is left as found; through two
   launchers (a fake node that starts `bin/skydeck serve`, as `skydeck window` does) the first
   one's cache and marker reach the second one's node unchanged.
-- the `--here` handoff still does not pass the cache variable or the marker to the handed-off program.
+- the `--here` handoff still does not pass the launcher's cache variable to the handed-off program,
+  nor any marker, also not one the caller had (a `NODE_COMPILE_CACHE` the caller set stays).
 
 **Done when:** the cases pass and `shellcheck bin/skydeck` is clean.
 

@@ -16,8 +16,9 @@
 # fragment to the file named by $SKYDECK_HANDOFF, and once node has exited the launcher runs it, so
 # that `claude` replaces this shell and no wrapper process stays behind.
 #
-# The program the handoff starts gets the caller's environment, apart from SKYDECK_HANDOFF (unset
-# before it runs). So the launcher's own shell variables carry a `skydeck_` prefix: a variable the
+# The program the handoff starts gets the caller's environment, apart from SKYDECK_HANDOFF and the
+# cache marker SKYDECK_LAUNCHER_CACHE (both skydeck's own, unset before it runs). So the
+# launcher's own shell variables carry a `skydeck_` prefix: a variable the
 # caller exported under a plain name such as `status` or `cache` is changed by an assignment here,
 # and the changed value would be inherited. CDPATH is unset only where a `cd` needs it unset.
 
@@ -109,8 +110,34 @@ fi
 # ignores SIGPIPE and SIGXFSZ, which would stay ignored across exec, so each is set back to what
 # the caller had: ignored when the caller ignored it, else the default (as python's own
 # subprocess does when the caller's choice is unknown).
+# Nothing in it may keep node from starting: every step but the exec is optional and guarded, and
+# every write tolerates a closed stderr (sys.stderr is then None).
 skydeck_core_limit='
-import datetime, os, resource, signal, sys
+import os, sys
+
+
+def say(line):
+    try:
+        sys.stderr.write(line)
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def report_limit_not_set(log, error):
+    try:
+        import time
+        now = time.time()
+        line = "%s.%03dZ launcher: the soft core limit could not be set to 1 byte (%s); core dumps of the server are not prevented\n" % (
+            time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)), int(now * 1000) % 1000, error)
+    except Exception:
+        return
+    try:
+        with open(log, "a") as file:
+            file.write(line)
+    except Exception:
+        say(line)
+
 
 log, ctype_was_set, ctype, ignored = sys.argv[1:5]
 command = sys.argv[5:]
@@ -119,34 +146,33 @@ if ctype_was_set:
     env["LC_CTYPE"] = ctype
 else:
     env.pop("LC_CTYPE", None)
-try:
-    ignored_mask = int(ignored, 16)
-except ValueError:
-    ignored_mask = 0
-for name in ("SIGPIPE", "SIGXFSZ"):
-    number = getattr(signal, name)
-    caller_ignored = ignored_mask >> (number - 1) & 1
-    signal.signal(number, signal.SIG_IGN if caller_ignored else signal.SIG_DFL)
 env.pop("SKYDECK_CORE_SOFT", None)
 try:
+    import signal
+    try:
+        ignored_mask = int(ignored, 16)
+    except ValueError:
+        ignored_mask = 0
+    for name in ("SIGPIPE", "SIGXFSZ"):
+        number = getattr(signal, name)
+        caller_ignored = ignored_mask >> (number - 1) & 1
+        signal.signal(number, signal.SIG_IGN if caller_ignored else signal.SIG_DFL)
+except Exception:
+    pass
+try:
+    import resource
     soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
     if hard == 0:
         raise ValueError("the hard limit is 0")
     resource.setrlimit(resource.RLIMIT_CORE, (1, hard))
     env["SKYDECK_CORE_SOFT"] = "unlimited" if soft == resource.RLIM_INFINITY else str(soft)
-except (OSError, ValueError) as error:
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
-    line = "%s launcher: the soft core limit could not be set to 1 byte (%s); core dumps of the server are not prevented\n" % (now.replace("+00:00", "Z"), error)
-    try:
-        with open(log, "a") as file:
-            file.write(line)
-    except OSError:
-        sys.stderr.write(line)
+except Exception as error:
+    report_limit_not_set(log, error)
 try:
     os.execvpe(command[0], command, env)
-except OSError as error:
-    sys.stderr.write("skydeck: cannot run %r: %s\n" % (command[0], error.strerror))
-    sys.exit(127)
+except Exception as error:
+    say("skydeck: cannot run %r: %s\n" % (command[0], getattr(error, "strerror", None) or error))
+os._exit(127)
 '
 
 # The handoff file: node writes "cd -- <dir> || exit 1" and "exec <program and arguments>", every
@@ -205,7 +231,7 @@ if [ -s "$skydeck_handoff" ]; then
   skydeck_script=$(cat -- "$skydeck_handoff")
   rm -f -- "$skydeck_handoff"
   trap - EXIT
-  unset SKYDECK_HANDOFF
+  unset SKYDECK_HANDOFF SKYDECK_LAUNCHER_CACHE
   eval "$skydeck_script"
 fi
 exit "$skydeck_status"
