@@ -10,7 +10,7 @@ import { handoffScript } from '../../src/terminals/here.ts';
 import { testDeck } from '../helpers/deck.ts';
 import { S1, T0, fakeRunner, runResult } from '../helpers/platform.ts';
 
-/** S1 has no event in these decks. */
+/** S1 has no event in these decks: its lock records id 0. */
 const NO_EVENTS = { latestEventId: null };
 
 function prepared(dir: string, over: Partial<PreparedLaunch> = {}): PreparedLaunch {
@@ -95,7 +95,7 @@ test('launchPrepared keeps the lock when it prints the command: the user may run
     const outcome = await launchPrepared(d.deck, prepared('/w'), where);
     assert.equal(outcome.code, 1);
     assert.equal(outcome.lines.at(-1), `cd -- /w && claude --resume ${S1}`);
-    assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}:0`);
   }
 });
 
@@ -103,7 +103,7 @@ test('launchPrepared keeps the lock when no tab adapter is configured: it prints
   const d = testDeck(t);
   acquireLock(d.deck, S1, NO_EVENTS);
   assert.equal((await launchPrepared(d.deck, prepared('/w'), 'tab')).code, 1);
-  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}:0`);
 });
 
 test('launchPrepared releases the lock after a definite failure when it prints no command', async (t) => {
@@ -124,7 +124,7 @@ test('launchPrepared keeps the lock after a timeout: the program may have starte
   acquireLock(d.deck, S1, NO_EVENTS);
   d.platform.runner = fakeRunner(() => runResult({ code: null, timedOut: true }));
   assert.equal((await launchPrepared(d.deck, prepared('/w'), null)).code, 1);
-  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}:0`);
 });
 
 test('launchPrepared keeps the lock after a timeout even when the command cannot be printed', async (t) => {

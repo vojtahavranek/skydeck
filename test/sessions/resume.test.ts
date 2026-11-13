@@ -301,7 +301,7 @@ test('lockKey refuses anything but a session id', () => {
 test('acquireLock stores the lock with the time as its value', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:0`); // no event yet: id 0
 });
 
 test('acquireLock refuses within 60 s, says how long to wait and leaves the lock as it is', (t) => {
@@ -312,7 +312,7 @@ test('acquireLock refuses within 60 s, says how long to wait and leaves the lock
     refusal(() => acquireLock(d.deck, S1, sawNow(d))),
     '0b5f3c1e is being resumed (10 s ago); try again in 50 s',
   );
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:0`);
 });
 
 test('acquireLock rounds the age down and the wait up', (t) => {
@@ -330,7 +330,7 @@ test('acquireLock replaces a lock older than 60 s', (t) => {
   acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 61n * SEC);
   acquireLock(d.deck, S1, sawNow(d));
-  assert.equal(lockOf(d, S1), `${T0 + 61n * SEC}`);
+  assert.equal(lockOf(d, S1), `${T0 + 61n * SEC}:0`);
 });
 
 test('acquireLock replaces a lock exactly 60 s old', (t) => {
@@ -338,7 +338,7 @@ test('acquireLock replaces a lock exactly 60 s old', (t) => {
   acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 60n * SEC);
   acquireLock(d.deck, S1, sawNow(d));
-  assert.equal(lockOf(d, S1), `${T0 + 60n * SEC}`);
+  assert.equal(lockOf(d, S1), `${T0 + 60n * SEC}:0`);
 });
 
 test('acquireLock replaces a lock when the session started at or after the lock', (t) => {
@@ -355,7 +355,7 @@ test('acquireLock replaces a lock when the session started at or after the lock'
 test('acquireLock keeps a lock when the session started before it, or another one started', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
-  startEvent(d, S1, T0 - 1n);
+  startEvent(d, S1, T0 - 6n * SEC); // older than the tolerance: an old start stored late
   startEvent(d, S2, T0 + SEC);
   d.clock.setNs(T0 + 5n * SEC);
   assert.match(
@@ -382,7 +382,7 @@ test('a start event without a real process does not release a lock: acquireLock 
       '0b5f3c1e is being resumed (10 s ago); try again in 50 s',
       JSON.stringify(over),
     );
-    assert.equal(lockOf(d, S1), `${T0}`);
+    assert.equal(lockOf(d, S1), `${T0}:0`);
   }
 });
 
@@ -401,8 +401,19 @@ test("acquireLock records the session's latest event id after the time: `<time>:
   const seen = startEvent(d, S1, T0 - 10n * SEC);
   acquireLock(d.deck, S1, { latestEventId: seen });
   assert.equal(lockOf(d, S1), `${T0}:${seen}`);
-  acquireLock(d.deck, S2, { latestEventId: null }); // a session without events: the time alone
-  assert.equal(lockOf(d, S2), `${T0}`);
+  // A session without events (known only from its transcript): id 0, which every event exceeds. A
+  // bare time is what an earlier version wrote, and keeps its exact rule.
+  acquireLock(d.deck, S2, { latestEventId: null });
+  assert.equal(lockOf(d, S2), `${T0}:0`);
+});
+
+test('the lock of a session that had no event is released by a start 1.7 s before it, like any lock with an id', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, { latestEventId: null });
+  startEvent(d, S1, T0 - 1_700_000_000n); // the clock stepped back before the claude started
+  d.clock.setNs(T0 + 5n * SEC);
+  assert.equal(isLockHeld(d.deck, S1), false);
+  assert.equal(sweepLocks(d.deck), 1);
 });
 
 /** A start of a real process (pid 5151, dead now) dated ten minutes ahead: the clock stepped back since. */
@@ -473,8 +484,8 @@ test('LOCK_START_TOLERANCE_NS is 5 seconds', () => {
 });
 
 test('a start stored after the lock and dated up to 5 s before it releases it: the clock stepped back', (t) => {
-  // This machine's clock steps back about 1.7 s every half minute: a claude that started after the
-  // lock is stamped before it. The greater id already says it came after the lock.
+  // A wall clock can step back (measured on one WSL machine: about 1.7 to 1.9 s every 32 s), and a
+  // claude that started after the lock is then stamped before it. Its id says it was recorded after.
   for (const [startNs, released] of [
     [T0 - 1_700_000_000n, true],
     [T0 - 5n * SEC, true],
@@ -528,13 +539,14 @@ test('a lock whose event id is not a number is stale like any value skydeck did 
     writeLock(d, S1, value);
     assert.equal(isLockHeld(d.deck, S1), false, JSON.stringify(value));
     acquireLock(d.deck, S1, sawNow(d));
-    assert.equal(lockOf(d, S1), `${T0}`, JSON.stringify(value));
+    assert.equal(lockOf(d, S1), `${T0}:0`, JSON.stringify(value));
   }
 });
 
 test('lockEventId is the event id a lock records; null when it records none or is no lock', () => {
   assert.equal(lockEventId(`${T0}:42`), 42);
-  assert.equal(lockEventId(`${T0}`), null);
+  assert.equal(lockEventId(`${T0}:0`), 0); // taken while the session had no event
+  assert.equal(lockEventId(`${T0}`), null); // an earlier version's lock
   assert.equal(lockEventId('soon'), null);
   assert.equal(lockEventId(`${T0}:x`), null);
 });
@@ -543,7 +555,7 @@ test('acquireLock locks each session on its own', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
   acquireLock(d.deck, S2, sawNow(d, S2));
-  assert.equal(lockOf(d, S2), `${T0}`);
+  assert.equal(lockOf(d, S2), `${T0}:0`);
 });
 
 test('acquireLock replaces a lock whose value is not a time', (t) => {
@@ -551,7 +563,7 @@ test('acquireLock replaces a lock whose value is not a time', (t) => {
     const d = testDeck(t);
     writeLock(d, S1, value);
     acquireLock(d.deck, S1, sawNow(d));
-    assert.equal(lockOf(d, S1), `${T0}`, JSON.stringify(value));
+    assert.equal(lockOf(d, S1), `${T0}:0`, JSON.stringify(value));
   }
 });
 
@@ -564,7 +576,7 @@ test('acquireLock treats a lock dated a little in the future as fresh, one far a
   );
   writeLock(d, S1, `${T0 + 60n * SEC}`);
   acquireLock(d.deck, S1, sawNow(d));
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:0`);
 });
 
 test('acquireLock reads and writes the lock inside one transaction', (t) => {
@@ -596,7 +608,7 @@ test('acquireLock takes the lock when the session still has the latest event it 
   assert.equal(lockOf(d, S1), `${T0}:${seen}`);
   d.clock.setNs(T0 + 61n * SEC);
   acquireLock(d.deck, S2, { latestEventId: null }); // none seen, none there
-  assert.equal(lockOf(d, S2), `${T0 + 61n * SEC}`);
+  assert.equal(lockOf(d, S2), `${T0 + 61n * SEC}:0`);
 });
 
 test('acquireLock refuses, and writes no lock, when the session has a newer event than the decision saw', (t) => {
@@ -778,7 +790,7 @@ test('no lock is a file: the locks directory stays empty', (t) => {
   mkdirSync(d.deck.places.locksDir, { recursive: true });
   writeFileSync(join(d.deck.places.locksDir, `${S2}.lock`), `${T0 - 600n * SEC}\n`);
   assert.equal(sweepLocks(d.deck), 0); // a file there is not a lock any more
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:0`);
 });
 
 // --- readLock, renewLock, releaseLock, isLockHeld --------------------------------------------------
@@ -787,15 +799,15 @@ test("readLock is the value of the session's lock, null without one", (t) => {
   const d = testDeck(t);
   assert.equal(readLock(d.deck, S1), null);
   acquireLock(d.deck, S1, sawNow(d));
-  assert.equal(readLock(d.deck, S1), `${T0}`);
+  assert.equal(readLock(d.deck, S1), `${T0}:0`);
 });
 
 test('renewLock moves a lock that is still ours to now and returns its new value', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 50n * SEC);
-  assert.equal(renewLock(d.deck, S1, `${T0}`), `${T0 + 50n * SEC}`);
-  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC}`);
+  assert.equal(renewLock(d.deck, S1, `${T0}:0`), `${T0 + 50n * SEC}:0`);
+  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC}:0`);
   d.clock.setNs(T0 + 100n * SEC); // 50 s after the renewal: it still holds
   assert.throws(() => acquireLock(d.deck, S1, sawNow(d)), /is being resumed \(50 s ago\)/);
 });
@@ -823,7 +835,7 @@ test('renewLock reads and writes inside one transaction', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
   const w = watched(d);
-  renewLock(w.deck, S1, `${T0}`);
+  renewLock(w.deck, S1, `${T0}:0`);
   assert.equal(w.transactions(), 1);
   assert.deepEqual(w.depths, [1, 1]);
 });
@@ -832,7 +844,7 @@ test('releaseLock removes a lock that is still ours, and only that', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
   writeLock(d, S2, `${T0 + 1n}`);
-  assert.equal(releaseLock(d.deck, S1, `${T0}`), true);
+  assert.equal(releaseLock(d.deck, S1, `${T0}:0`), true);
   assert.equal(lockOf(d, S1), null);
   assert.equal(releaseLock(d.deck, S2, `${T0}`), false);
   assert.equal(lockOf(d, S2), `${T0 + 1n}`);
@@ -903,18 +915,18 @@ test('settleFailedLaunch gives the command to print, and keeps the lock: the use
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
   assert.equal(
-    settleFailedLaunch(d.deck, launch(d), `${T0}`, false),
+    settleFailedLaunch(d.deck, launch(d), `${T0}:0`, false),
     `cd -- /w && claude --resume ${S1}`,
   );
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:0`);
 });
 
 test('settleFailedLaunch after a timeout gives no command and keeps the lock: it may have started', (t) => {
   for (const argv of [['claude', '--resume', S1], UNPRINTABLE_ARGV]) {
     const d = testDeck(t);
     acquireLock(d.deck, S1, sawNow(d));
-    assert.equal(settleFailedLaunch(d.deck, launch(d, { argv }), `${T0}`, true), null);
-    assert.equal(lockOf(d, S1), `${T0}`, JSON.stringify(argv));
+    assert.equal(settleFailedLaunch(d.deck, launch(d, { argv }), `${T0}:0`, true), null);
+    assert.equal(lockOf(d, S1), `${T0}:0`, JSON.stringify(argv));
   }
 });
 
@@ -922,12 +934,12 @@ test('settleFailedLaunch with nothing started and nothing printable releases the
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
   assert.equal(
-    settleFailedLaunch(d.deck, launch(d, { argv: UNPRINTABLE_ARGV }), `${T0}`, false),
+    settleFailedLaunch(d.deck, launch(d, { argv: UNPRINTABLE_ARGV }), `${T0}:0`, false),
     null,
   );
   assert.equal(lockOf(d, S1), null);
   writeLock(d, S1, 'someone else');
-  settleFailedLaunch(d.deck, launch(d, { argv: UNPRINTABLE_ARGV }), `${T0}`, false);
+  settleFailedLaunch(d.deck, launch(d, { argv: UNPRINTABLE_ARGV }), `${T0}:0`, false);
   assert.equal(lockOf(d, S1), 'someone else');
 });
 
@@ -960,7 +972,7 @@ test('prepareResume builds the command and takes the lock', (t) => {
     kind: 'resume',
   });
   assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '-n', 'fix', '--model', 'opus']);
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:0`);
 });
 
 test('prepareResume runs the configured program', (t) => {
