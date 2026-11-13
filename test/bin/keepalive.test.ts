@@ -68,13 +68,17 @@ interface Live {
   end: () => Promise<void>;
 }
 
-/** Starts a `sleep 60` (through `program`, a link to sleep): a real process for a pid line to name. */
+/**
+ * Starts a real process for a pid line to name: `sleep 60`, or the `command` given. Its standard
+ * input is a pipe the test never closes, so a `read` in it waits until the process is killed.
+ */
 async function liveProcess(
   t: TestContext,
   s: Sandbox,
-  program: string = join(s.bin, 'sleep'),
+  command: [string, ...string[]] = [join(s.bin, 'sleep'), '60'],
 ): Promise<Live> {
-  const child = spawn(program, ['60'], { env: s.env(), stdio: 'ignore' });
+  const [program, ...args] = command;
+  const child = spawn(program, args, { env: s.env(), stdio: ['pipe', 'ignore', 'ignore'] });
   t.after(() => {
     child.kill('SIGKILL');
   });
@@ -322,17 +326,15 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
   });
 
   // The kernel names a process after the file it was started from: here a symlink of that name to
-  // sh for the keep-alive itself, and one to sleep for the server it watches.
+  // sh, for the keep-alive itself and for the server it watches (an sh waiting in `read`). Not a
+  // link to sleep: where sleep is a multi-call binary, it runs no utility under a strange name.
   for (const comm of ['a) b', 'a)\n) b']) {
     test(`a comm of ${JSON.stringify(comm)} still gives the right process start, its own and the server's`, async (t) => {
       const p = place(t);
-      const oddSleep = join(p.s.root, 'odd', comm);
-      mkdirSync(join(p.s.root, 'odd'));
-      symlinkSync(realpathSync(join(p.s.bin, 'sleep')), oddSleep);
-      const server = await liveProcess(t, p.s, oddSleep);
-      writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
       const oddShell = join(p.s.bin, comm);
       symlinkSync(realpathSync(join(p.s.bin, 'sh')), oddShell);
+      const server = await liveProcess(t, p.s, [oddShell, '-c', 'read -r line']);
+      writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
       const k = startKeepAlive(t, p, { shell: oddShell });
       const pidFile = join(p.dir, 'keepalive.pid');
       await waitFor(() => existsSync(pidFile), 5000, 'keepalive.pid');
@@ -342,6 +344,7 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
       }
       assert.equal(read(pidFile), pidLine(k.pid, procStart(k.pid), BOOT_ID));
       await delay(2.5 * INTERVAL_MS);
+      assert.equal(server.child.exitCode, null, 'the server itself still runs');
       assert.equal(k.status(), undefined, 'the server is judged alive: still running');
       await server.end();
       assert.deepEqual(await exitsWithin(k, 2 * INTERVAL_MS), { code: 0, signal: null });
