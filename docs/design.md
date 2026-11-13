@@ -313,7 +313,8 @@ Marks are shown next to the state.
   When the text cannot be stored the file is kept, and the next edit of that note continues with it.
   A file kept like that is never removed by an editor that fails. When the editor fails on a file
   that this edit made, the file is removed only while it still holds what the edit put there: text
-  the editor changed but never stored stays.
+  the editor changed but never stored stays, and the error that says the editor failed names the
+  file (`editor exited 1; your text is in <path>`).
   `skydeck note <ref> --set <text>` sets it without an editor (and removes such a kept file), and an
   empty note is no note.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it

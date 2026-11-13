@@ -377,6 +377,7 @@ describe('bin/skydeck when its standard output or error is closed before it writ
     t: TestContext,
     args: string[],
     which: 'stdout' | 'stderr' = 'stdout',
+    input = '',
   ): { stderr: string; status: string; left: string[] } {
     const s = launcherSandbox(t);
     const fifo = join(s.root, 'out.fifo');
@@ -394,6 +395,7 @@ describe('bin/skydeck when its standard output or error is closed before it writ
     ].join('\n');
     const r = spawnSync('/bin/sh', ['-c', script, 'sh', fifo, statusFile, launcher, ...args], {
       encoding: 'utf8',
+      input,
       env: s.env({ SKYDECK_NODE: process.execPath }),
     });
     assert.equal(r.status, 0, r.stderr);
@@ -433,5 +435,13 @@ describe('bin/skydeck when its standard output or error is closed before it writ
 
     assert.equal(r.stderr, '');
     assert.equal(r.status, '3'); // a reference that matches nothing; not 1 from a crash, not 141
+  });
+
+  test('standard error closed: a command that succeeds still exits 0', (t) => {
+    // `install` asks its question on stderr (the header, the entries, the prompt), then goes ahead.
+    const r = withClosedPipe(t, ['install'], 'stderr', 'y\n');
+
+    assert.equal(r.stderr, '');
+    assert.equal(r.status, '0'); // not 141: only a closed stdout changes the status of a success
   });
 });

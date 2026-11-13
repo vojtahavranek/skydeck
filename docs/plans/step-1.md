@@ -2016,7 +2016,7 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
  * Writes the note to <stateDir>/note-<sessionId>.md, runs the editor (D14) through
  * platform.runner.runInteractive, stores what comes back, removes the file (when the editor
  * fails: only a file this edit made and the editor left as it was; fix 3). The file is created with mode 0o600. UsageError when stdin is not a terminal;
- * SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit; SkydeckError "editor did
+ * SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit, with `; your text is in <path>` appended when the editor changed the file before failing (fix 3); SkydeckError "editor did
  * not finish: <program> could not be run or was killed" when runInteractive returns null; SkydeckError
  * when the editor removed the file (note unchanged: a missing file is not an empty note); SkydeckError
  * "editor could not be run: <program> (<reason>)" when runInteractive rejects (a file that is not
