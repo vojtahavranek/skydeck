@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { isAlive, isLiveFileTrusted, readLiveFiles } from '../../src/claude/live.ts';
+import { isAlive, isLiveFileTrusted, isSessionId, readLiveFiles } from '../../src/claude/live.ts';
 import type { LiveFile, ProcessKey } from '../../src/claude/live.ts';
 import type { Files } from '../../src/platform/types.ts';
 import {
@@ -20,6 +20,7 @@ import {
   BOOT_B,
   fakeProc,
   S1,
+  S2,
   SEC,
   statLine,
   T0,
@@ -45,7 +46,10 @@ function putFixture(claudeHome: string, name: string, pid = 4242): string {
   return path;
 }
 
-/** `C/sessions/<file>` with the fields of fixture `base`, `changes` applied (undefined removes one). */
+/**
+ * `C/sessions/<file>` with the fields of fixture `base`, `changes` applied (undefined removes one).
+ * The pid is the number in the file name unless `changes` says otherwise.
+ */
 function putVariant(
   claudeHome: string,
   file: string,
@@ -53,6 +57,9 @@ function putVariant(
   base = 'busy.json',
 ): string {
   const record = JSON.parse(readFileSync(fixture(base), 'utf8')) as Record<string, unknown>;
+  if (/^[0-9]+\.json$/.test(file)) {
+    record.pid = Number(file.slice(0, -'.json'.length));
+  }
   for (const [name, value] of Object.entries(changes)) {
     if (value === undefined) {
       delete record[name];
@@ -234,6 +241,66 @@ test('readLiveFiles skips a file that is not JSON, not an object, or lacks a pid
   putVariant(places.claudeHome, '4259.json', { pid: 42.5 });
   putVariant(places.claudeHome, '4260.json', { pid: 1e300 });
   assert.deepEqual(readLiveFiles(platform.files, places.claudeHome), []);
+});
+
+test('isSessionId accepts a lowercase UUID and nothing else', () => {
+  assert.equal(isSessionId(S1), true);
+  assert.equal(isSessionId(S2), true);
+  assert.equal(isSessionId('00000000-0000-4000-8000-000000000001'), true);
+  const rejected = [
+    '',
+    S1.toUpperCase(),
+    `${S1}\n`,
+    `\n${S1}`,
+    ` ${S1}`,
+    `${S1}x`,
+    S1.replaceAll('-', ''),
+    S1.slice(1),
+    S1.replace('0', 'g'),
+    '--dangerously-skip-permissions',
+    '-r',
+    'latest',
+  ];
+  for (const text of rejected) {
+    assert.equal(isSessionId(text), false, JSON.stringify(text));
+  }
+});
+
+test('readLiveFiles skips a file whose sessionId is not a lowercase UUID', (t) => {
+  const { platform, places } = testPlatform(t);
+  // The id ends up after `--resume` on a command line: a flag-like value must never get through.
+  const rejected: unknown[] = [
+    '',
+    7,
+    null,
+    '--dangerously-skip-permissions',
+    S1.toUpperCase(),
+    `${S1}\n`,
+    ` ${S1}`,
+    S1.slice(0, -1),
+    [S1],
+  ];
+  rejected.forEach((sessionId, i) => {
+    putVariant(places.claudeHome, `${i + 1}.json`, { sessionId });
+  });
+  putVariant(places.claudeHome, '100.json', { sessionId: S2 });
+  assert.deepEqual(
+    readLiveFiles(platform.files, places.claudeHome).map((f) => [f.pid, f.sessionId]),
+    [[100, S2]],
+  );
+});
+
+test('readLiveFiles uses a file only when the pid inside is the number in its name', (t) => {
+  const { platform, places } = testPlatform(t);
+  putVariant(places.claudeHome, '4242.json', {});
+  putVariant(places.claudeHome, '4244.json', { pid: 9999 });
+  putVariant(places.claudeHome, '04245.json', { pid: 4245 });
+  putVariant(places.claudeHome, '4246.json', { pid: 4247 });
+  putVariant(places.claudeHome, '9999.json', { pid: 9999 });
+  assert.deepEqual(
+    readLiveFiles(platform.files, places.claudeHome).map((f) => f.pid),
+    [4242, 9999],
+  );
 });
 
 test('readLiveFiles never opens a name other than <digits>.json', (t) => {

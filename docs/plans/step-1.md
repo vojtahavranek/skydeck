@@ -1107,13 +1107,22 @@ export interface LiveFile {
  * holds credential files). Files that do not parse, or lack a numeric pid or a string sessionId,
  * are skipped. Sorted by pid.
  *
- * Ruled at review: the pid must be a positive safe integer and the sessionId a non-empty string
- * (anything else identifies nothing). A file that cannot be read (permissions, or a directory with
- * such a name) is skipped, not thrown: 6.2 treats "no live-session file can be read" as state
+ * Ruled at review: the pid must be a positive safe integer and equal to the number in the file's
+ * name (`4242.json` holds pid 4242; `04242.json` is skipped), and the sessionId must satisfy
+ * `isSessionId` (anything else identifies nothing, and an id is put after `--resume`). A file that
+ * cannot be read (permissions, or a directory with such a name), and a sessions directory that
+ * cannot be listed, are skipped, not thrown: 6.2 treats "no live-session file can be read" as state
  * `running`. Epoch-millisecond times are numbers from 0 to 8.64e15 (a fraction is truncated);
  * anything else gives null, so no later conversion to an ISO string can throw.
  */
 export function readLiveFiles(files: Files, claudeHome: string): LiveFile[];
+
+/**
+ * Ruled at review: true for a lowercase UUID (8-4-4-4-12 hex digits) and nothing else. Every session
+ * id taken from a Claude Code file passes this check (live files here, transcript file names in
+ * transcripts.ts); a value such as `--dangerously-skip-permissions` must never reach a command line.
+ */
+export function isSessionId(text: string): boolean;
 
 /** 5.5: bootId equals currentBootId, /proc/<pid>/stat exists, and its field 22 equals procStart (non-null). */
 export function isAlive(p: ProcessKey, proc: Proc, currentBootId: string | null): boolean;
@@ -1133,7 +1142,10 @@ export interface TranscriptFile { path: string; sessionId: string; size: number;
  *
  * Ruled at review: "regular" is read with lstat, so a symbolic link to a file is not listed; a
  * symbolic link to a project folder is followed (a relocated folder still counts). Sorted by the
- * whole path in UTF-16 code units, not by folder and then name.
+ * whole path in UTF-16 code units, not by folder and then name. The name's id must satisfy
+ * `isSessionId` (2.5.4). An entry that cannot be looked at or listed (a symbolic link loop,
+ * permissions) is skipped and the rest is listed; so is an unreadable `projects` directory
+ * ([]): nothing in one folder or file may stop a refresh. A listing can therefore be partial.
  */
 export function listTranscriptFiles(files: Files, claudeHome: string): TranscriptFile[];
 
@@ -1144,14 +1156,23 @@ export interface TranscriptFacts {
   customTitle: string | null;     // latest 'custom-title' record's customTitle
   firstRecordNs: Ns | null;       // smallest parseable timestamp
   lastRecordNs: Ns | null;        // largest parseable timestamp
-  lastUserNs: Ns | null;          // largest timestamp of a record with type 'user'
-  lastTurnRole: 'user' | 'assistant' | null;   // type of the last (in file order) 'user' or 'assistant' record
+  lastUserNs: Ns | null;          // largest timestamp of a 'user' record that is a turn (ruled at review, below)
+  lastTurnRole: 'user' | 'assistant' | null;   // type of the last (in file order) 'assistant' record or 'user' record that is a turn
 }
 export const EMPTY_FACTS: TranscriptFacts;   // all null
 
 /**
  * Folds complete JSONL lines into facts. Lines that are not JSON objects are skipped. Returns the
  * prUrl of every 'pr-link' record with a string prUrl, in order. Keeps no message text.
+ *
+ * Ruled at review: not every 'user' record is a turn. For `lastTurnRole` and `lastUserNs` a 'user'
+ * record counts only when it is a prompt, a task notification or a tool result: NOT when it has
+ * `isMeta`, `isCompactSummary` or `isSidechain` equal to true, nor when its text (the message
+ * content when a string, else the first text block) starts with `<command-name>`,
+ * `<command-message>`, `<local-command-stdout>`, `<local-command-stderr>`, `<local-command-caveat>`,
+ * `<bash-input>`, `<bash-stdout>`, `<bash-stderr>` or `[Request interrupted`. The text is compared
+ * and dropped. A shape that is not recognised is a turn. A user record that is not a turn still
+ * counts for the cwd, the entrypoint and the record times.
  */
 export function foldLines(facts: TranscriptFacts, lines: readonly string[]): { facts: TranscriptFacts; prUrls: string[] };
 
@@ -1164,7 +1185,9 @@ export interface TranscriptRead { facts: TranscriptFacts; sizeRead: number; prUr
  * Ruled at review: the file is read in pieces of 4 MiB and each line is decoded on its own (one
  * decoded string of a transcript of hundreds of megabytes would exceed V8's string limit); sizeRead
  * counts the bytes actually returned. It throws what Files.readBytes throws, for example when the
- * file has vanished since it was listed.
+ * file has vanished since it was listed. Before reading from `previous.sizeRead` it checks that the
+ * byte just before it is a newline (it always is in the file the offset came from); when it is not,
+ * the file was replaced and is read from the start.
  */
 export function readTranscript(files: Files, file: TranscriptFile, previous: { facts: TranscriptFacts; sizeRead: number } | null): TranscriptRead;
 ```
@@ -2758,6 +2781,7 @@ export interface LiveFile {
   updatedAtNs: Ns | null; statusUpdatedAtNs: Ns | null; mtimeNs: Ns;
 }
 export function readLiveFiles(files: Files, claudeHome: string): LiveFile[];
+export function isSessionId(text: string): boolean;   // lowercase UUID, ruled at review (2.5.4)
 export function isAlive(p: ProcessKey, proc: Proc, currentBootId: string | null): boolean;
 export function isLiveFileTrusted(f: LiveFile, proc: Proc): boolean;
 // src/claude/transcripts.ts

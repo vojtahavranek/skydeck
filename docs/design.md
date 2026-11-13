@@ -209,14 +209,21 @@ The folder name is a lossy encoding and is never parsed.
 
 The scan reads each file incrementally from the stored byte offset; only files whose size or
 modification time changed are opened. A last line without a newline is left for the next scan. A
-file that shrank is read again from the start. From the records it keeps, per file: the session
+file that shrank, or was replaced (the byte before the stored offset is not a newline), is read
+again from the start. From the records it keeps, per file: the session
 id, the first `cwd` (the project directory), the `entrypoint`, the latest `ai-title` and
-`custom-title`, the times of the first record, the last record and the last `user` record, the
-type of the last record that is a `user` or `assistant` record, and the pull requests named in
-`pr-link` records. It keeps no text of any message.
+`custom-title`, the times of the first record, the last record and the last `user` record that is
+a turn, the type of the last record that is an `assistant` record or a `user` record that is a turn,
+and the pull requests named in `pr-link` records. A `user` record is a turn when it is a prompt, a
+task notification or a tool result: not when it is marked meta, is a compaction summary or a
+sidechain record, or is what a command typed at the prompt leaves (a slash command or a `!` command,
+its output, an interrupt marker). The text of a record is compared with those markers and dropped.
+It keeps no text of any message.
 
 A transcript whose `entrypoint` is not `cli` is recorded but its session is never listed.
 A known transcript whose file has disappeared is marked missing with the time it was noticed.
+A folder that cannot be read is skipped, so that one odd entry never stops a command; the
+transcripts in it then look as if they had disappeared.
 
 The first scan on a machine reads everything once (hundreds of megabytes take some seconds); on a
 terminal it shows a one-line progress indicator on stderr.
@@ -258,7 +265,7 @@ Marks are shown next to the state.
 | Mark | Rule |
 |---|---|
 | `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. |
-| `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `user`/`assistant` record of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
+| `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `assistant` record or `user` turn (5.6) of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
 | `continued` | The session is the target of a `clear` or `fork` link. `show` names the session it continues. |
 | `expired` | Its transcript is missing. It cannot be resumed. |
 | `expiring` | Its transcript was last modified more than (retention − 5) days ago, where retention is `cleanupPeriodDays` from the settings file, default 30. |
@@ -278,7 +285,7 @@ Marks are shown next to the state.
   (configuration `groupPattern`, default `^[A-Z][A-Z0-9]+-[0-9]+`), that key is the group.
 - **Note.** Free text of any length, edited in `$EDITOR`.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
-  has activity after the done time: a `user` record in its transcript, or a `start` event with
+  has activity after the done time: a `user` turn (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
   transcript is not activity.
 - **First run.** `skydeck install` offers to mark as done every listed session whose last

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   appendFileSync,
+  chmodSync,
   mkdirSync,
   readFileSync,
   statSync,
@@ -19,7 +20,7 @@ import {
   readTranscript,
 } from '../../src/claude/transcripts.ts';
 import type { TranscriptFacts, TranscriptFile } from '../../src/claude/transcripts.ts';
-import { isoFromNs } from '../../src/platform/time.ts';
+import { isoFromNs, nsFromIso } from '../../src/platform/time.ts';
 import type { Files, Ns } from '../../src/platform/types.ts';
 import { S1, S2, S3, SEC, T0, testPlatform } from '../helpers/platform.ts';
 
@@ -134,6 +135,117 @@ test('listTranscriptFiles ignores symbolic links to files, follows a symbolic li
     [join(projects, 'moved', `${S2}.jsonl`)],
   );
 });
+
+/** `files`, except that `method` throws (as the real one does for ELOOP or EACCES) on a path containing `needle`. */
+function failingOn(
+  files: Files,
+  method: 'stat' | 'lstat' | 'list',
+  needle: string,
+  code: string,
+): Files {
+  return new Proxy(files, {
+    get(target, prop, receiver) {
+      if (prop !== method) return Reflect.get(target, prop, receiver) as unknown;
+      return (path: string) => {
+        if (path.includes(needle)) {
+          throw Object.assign(new Error(`${code}: ${path}`), { code });
+        }
+        return target[method](path);
+      };
+    },
+  });
+}
+
+test('listTranscriptFiles skips an entry whose stat, list or lstat fails, and lists the rest', (t) => {
+  const { platform, places } = testPlatform(t);
+  const projects = join(places.claudeHome, 'projects');
+  for (const folder of ['denied', 'half', 'looping']) {
+    mkdirSync(join(projects, folder), { recursive: true });
+    writeFileSync(join(projects, folder, `${S1}.jsonl`), 'x\n');
+  }
+  writeFileSync(join(projects, 'half', `${S2}.jsonl`), 'x\n');
+  const at = (folder: string, id = S1): string => join(projects, folder, `${id}.jsonl`);
+  const listed = (files: Files): string[] =>
+    listTranscriptFiles(files, places.claudeHome).map((f) => f.path);
+
+  // stat of a folder fails (a symbolic link loop): that folder is skipped
+  assert.deepEqual(listed(failingOn(platform.files, 'stat', 'looping', 'ELOOP')), [
+    at('denied'),
+    at('half'),
+    at('half', S2),
+  ]);
+  // list of a folder fails (permissions): that folder is skipped
+  assert.deepEqual(listed(failingOn(platform.files, 'list', 'denied', 'EACCES')), [
+    at('half'),
+    at('half', S2),
+    at('looping'),
+  ]);
+  // lstat of one file fails: that file is skipped
+  assert.deepEqual(listed(failingOn(platform.files, 'lstat', `half/${S2}`, 'EACCES')), [
+    at('denied'),
+    at('half'),
+    at('looping'),
+  ]);
+});
+
+test('listTranscriptFiles gives [] when the projects directory cannot be listed', (t) => {
+  const { platform, places } = testPlatform(t);
+  mkdirSync(join(places.claudeHome, 'projects', 'p'), { recursive: true });
+  writeFileSync(join(places.claudeHome, 'projects', 'p', `${S1}.jsonl`), 'x\n');
+  const denied = failingOn(platform.files, 'list', join(places.claudeHome, 'projects'), 'EACCES');
+  // Every path under projects matches the needle, but only the listing of projects itself is asked first.
+  assert.deepEqual(listTranscriptFiles(denied, places.claudeHome), []);
+});
+
+test('listTranscriptFiles skips a symbolic link loop in projects', (t) => {
+  const { platform, places } = testPlatform(t);
+  const projects = join(places.claudeHome, 'projects');
+  mkdirSync(join(projects, 'good'), { recursive: true });
+  writeFileSync(join(projects, 'good', `${S1}.jsonl`), 'x\n');
+  symlinkSync(join(projects, 'loop'), join(projects, 'loop'));
+  assert.deepEqual(
+    listTranscriptFiles(platform.files, places.claudeHome).map((f) => f.path),
+    [join(projects, 'good', `${S1}.jsonl`)],
+  );
+});
+
+test(
+  'listTranscriptFiles skips a project folder with mode 000',
+  { skip: process.getuid?.() === 0 },
+  (t) => {
+    const { platform, places } = testPlatform(t);
+    const projects = join(places.claudeHome, 'projects');
+    mkdirSync(join(projects, 'good'), { recursive: true });
+    mkdirSync(join(projects, 'closed'), { recursive: true });
+    writeFileSync(join(projects, 'good', `${S1}.jsonl`), 'x\n');
+    writeFileSync(join(projects, 'closed', `${S2}.jsonl`), 'x\n');
+    chmodSync(join(projects, 'closed'), 0o000);
+    try {
+      assert.deepEqual(
+        listTranscriptFiles(platform.files, places.claudeHome).map((f) => f.path),
+        [join(projects, 'good', `${S1}.jsonl`)],
+      );
+    } finally {
+      chmodSync(join(projects, 'closed'), 0o700); // the sandbox cannot remove it otherwise
+    }
+  },
+);
+
+test(
+  'listTranscriptFiles gives [] when projects has mode 000',
+  { skip: process.getuid?.() === 0 },
+  (t) => {
+    const { platform, places } = testPlatform(t);
+    const projects = join(places.claudeHome, 'projects');
+    mkdirSync(join(projects, 'p'), { recursive: true });
+    chmodSync(projects, 0o000);
+    try {
+      assert.deepEqual(listTranscriptFiles(platform.files, places.claudeHome), []);
+    } finally {
+      chmodSync(projects, 0o700);
+    }
+  },
+);
 
 test('listTranscriptFiles gives [] when projects is missing or empty', (t) => {
   const { platform, places } = testPlatform(t);
@@ -377,6 +489,105 @@ test('the recorded fixture has one line of each record type and holds only place
   }
 });
 
+const nonTurnFixture = (): string[] =>
+  readFileSync(
+    fileURLToPath(
+      new URL('../fixtures/claude/transcripts/non-turn-user-records.jsonl', import.meta.url),
+    ),
+    'utf8',
+  )
+    .split('\n')
+    .filter((line) => line !== '');
+
+/** One per line of non-turn-user-records.jsonl, in order. */
+const NON_TURN_KINDS = [
+  'marked meta',
+  'a compaction summary',
+  'a sidechain record',
+  'a slash command',
+  'local command output (stdout)',
+  'local command output (stderr)',
+  'a local command caveat',
+  'bash input',
+  'bash output',
+  'an interrupt marker with an interruptedMessageId',
+  'an interrupt marker without one (string content)',
+  'a slash command in a text block',
+  'a slash command that opens with its message',
+  'bash error output',
+] as const;
+
+test('the non-turn fixture has one user line for each kind, with invented content only', () => {
+  const lines = nonTurnFixture();
+  assert.equal(lines.length, NON_TURN_KINDS.length);
+  for (const line of lines) {
+    assert.equal((JSON.parse(line) as { type: string }).type, 'user');
+  }
+});
+
+NON_TURN_KINDS.forEach((kind, i) => {
+  test(`foldLines: a user record that is ${kind} is not a turn`, () => {
+    const line = nonTurnFixture()[i] ?? '';
+    const at = nsFromIso((JSON.parse(line) as { timestamp: string }).timestamp);
+    assert.ok(at !== null && at > T0 + 10n * SEC);
+    // After an assistant turn: still the assistant's turn, and the last user time stays.
+    const afterAssistant = foldMore(fold(user(T0), assistant(T0 + 5n * SEC)).facts, line);
+    assert.equal(afterAssistant.lastTurnRole, 'assistant');
+    assert.equal(afterAssistant.lastUserNs, T0);
+    assert.equal(afterAssistant.lastRecordNs, at);
+    // After a real prompt: still the prompt's turn, at the prompt's time.
+    const afterUser = foldMore(fold(user(T0)).facts, line);
+    assert.equal(afterUser.lastTurnRole, 'user');
+    assert.equal(afterUser.lastUserNs, T0);
+  });
+});
+
+test('foldLines: a user record that is not a turn still gives cwd, entrypoint and the record times', () => {
+  const [line] = nonTurnFixture();
+  const { facts } = fold(line ?? '');
+  assert.equal(facts.firstCwd, '/home/dev/projects/demo');
+  assert.equal(facts.entrypoint, 'cli');
+  assert.equal(facts.firstRecordNs, facts.lastRecordNs);
+  assert.notEqual(facts.firstRecordNs, null);
+  assert.equal(facts.lastTurnRole, null);
+  assert.equal(facts.lastUserNs, null);
+});
+
+test('foldLines: a prompt, a prompt with an image, a task notification and a tool result are turns', () => {
+  const turns: Record<string, unknown>[] = [
+    { message: { role: 'user', content: '<redacted>' } },
+    {
+      message: {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', data: '<redacted>' } },
+          { type: 'text', text: '<redacted>' },
+        ],
+      },
+    },
+    { message: { role: 'user', content: '<task-notification>invented</task-notification>' } },
+    {
+      message: { role: 'user', content: [{ type: 'tool_result', content: '<redacted>' }] },
+      toolUseResult: { stdout: '<redacted>' },
+    },
+    // A marker counts only at the start; flags count only when exactly true.
+    { message: { role: 'user', content: 'a prompt that mentions <command-name> in passing' } },
+    { message: { role: 'user', content: 'x' }, isMeta: false, isSidechain: false },
+    { message: { role: 'user', content: 'x' }, isMeta: 'true', isCompactSummary: 1 },
+    // A shape that is not known is a turn: the safe reading of an unknown record is "in progress".
+    {},
+    { message: null },
+    { message: { role: 'user' } },
+    { message: { role: 'user', content: [] } },
+    { message: { role: 'user', content: [{ type: 'image' }] } },
+  ];
+  for (const fields of turns) {
+    const { facts } = fold(assistant(T0), user(T0 + SEC, fields));
+    assert.equal(facts.lastTurnRole, 'user', JSON.stringify(fields));
+    assert.equal(facts.lastUserNs, T0 + SEC, JSON.stringify(fields));
+  }
+});
+
 test('foldLines keeps a hostile title raw (sanitising is the list model’s job)', () => {
   const hostile = '\x1b]0;pwn\x07Title';
   assert.equal(fold(rec('ai-title', { aiTitle: hostile })).facts.aiTitle, hostile);
@@ -489,8 +700,37 @@ test('readTranscript with a previous read reads only the bytes after it', (t) =>
   assert.equal(second.facts.lastTurnRole, 'assistant');
   assert.equal(second.facts.lastRecordNs, T0 + 4n * SEC);
   assert.equal(second.facts.firstRecordNs, T0);
-  assert.equal(ranges[0]?.[0], Buffer.byteLength(head));
-  assert.ok(ranges.every(([start, end]) => start >= Buffer.byteLength(head) && end <= file().size));
+  // One byte before the offset is looked at (is it a newline?); everything else starts at the offset.
+  const at = Buffer.byteLength(head);
+  assert.deepEqual(ranges[0], [at - 1, at]);
+  assert.equal(ranges[1]?.[0], at);
+  assert.ok(ranges.every(([start, end]) => start >= at - 1 && end <= file().size));
+});
+
+test('readTranscript reads again from the start when the file was replaced by a larger one', (t) => {
+  const { path, file, files } = transcriptAt(t);
+  writeFileSync(path, text(rec('ai-title', { aiTitle: 'Old' }), user(T0)));
+  const first = readTranscript(files, file(), null);
+  assert.equal(first.facts.aiTitle, 'Old');
+
+  const replacement = text(
+    rec('ai-title', { aiTitle: 'New' }),
+    user(T0 + SEC, { cwd: '/new' }),
+    prLink('https://github.com/o/r/pull/9', T0 + 2n * SEC),
+    assistant(T0 + 3n * SEC),
+  );
+  // The byte before the stored offset is not a newline in the replacement.
+  assert.notEqual(replacement[first.sizeRead - 1], '\n');
+  assert.ok(replacement.length > first.sizeRead);
+  writeFileSync(path, replacement);
+
+  const second = readTranscript(files, file(), first);
+  assert.equal(second.facts.aiTitle, 'New');
+  assert.equal(second.facts.firstCwd, '/new');
+  assert.equal(second.facts.firstRecordNs, T0 + SEC);
+  assert.equal(second.facts.lastTurnRole, 'assistant');
+  assert.equal(second.sizeRead, Buffer.byteLength(replacement));
+  assert.deepEqual(second.prUrls, ['https://github.com/o/r/pull/9']);
 });
 
 test('readTranscript does not read when nothing was added', (t) => {

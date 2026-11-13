@@ -32,6 +32,18 @@ export interface LiveFile {
 /** The names that are live-session files; the directory also holds credential files. */
 const LIVE_FILE_NAME = /^[0-9]+\.json$/;
 
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Whether `text` is a session id: a lowercase UUID (8-4-4-4-12 hex digits) and nothing more. Every
+ * session id skydeck takes from a Claude Code file passes through this check, because the id ends
+ * up on a command line after `--resume`, where a value such as `--dangerously-skip-permissions`
+ * would be read as a flag (principle 5).
+ */
+export function isSessionId(text: string): boolean {
+  return SESSION_ID.test(text);
+}
+
 /** The largest epoch-millisecond value `Date` can show, and so the largest time skydeck converts. */
 const MAX_EPOCH_MS = 8.64e15;
 
@@ -88,8 +100,9 @@ function listOrEmpty(files: Files, dir: string): string[] {
 
 /**
  * Reads <claudeHome>/sessions/ — only names matching ^[0-9]+\.json$ are opened (the directory also
- * holds credential files). Files that do not parse, or lack a numeric pid or a string sessionId,
- * are skipped, and so are files that cannot be read. Sorted by pid.
+ * holds credential files). Files that do not parse, or lack a numeric pid or a session id (a
+ * lowercase UUID), are skipped, and so are files whose pid is not the number in their name and
+ * files that cannot be read. An unreadable sessions directory gives []. Sorted by pid.
  */
 export function readLiveFiles(files: Files, claudeHome: string): LiveFile[] {
   const dir = join(claudeHome, 'sessions');
@@ -115,7 +128,12 @@ export function readLiveFiles(files: Files, claudeHome: string): LiveFile[] {
     if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) {
       continue;
     }
-    if (typeof sessionId !== 'string' || sessionId === '') {
+    // The file is named by the process that wrote it; another pid inside means it is not what it
+    // seems, and `04245.json` beside `4245.json` would be two files for one process.
+    if (name !== `${pid}.json`) {
+      continue;
+    }
+    if (typeof sessionId !== 'string' || !isSessionId(sessionId)) {
       continue;
     }
     result.push({

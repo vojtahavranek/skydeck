@@ -5,7 +5,8 @@
 import { join } from 'node:path';
 
 import { nsFromIso } from '../platform/time.ts';
-import type { Files, Ns } from '../platform/types.ts';
+import type { FileInfo, Files, Ns } from '../platform/types.ts';
+import { isSessionId } from './live.ts';
 
 export interface TranscriptFile {
   path: string;
@@ -14,39 +15,52 @@ export interface TranscriptFile {
   mtimeNs: Ns;
 }
 
-/** Exactly a lowercase UUID and `.jsonl`: nested folders (subagents) and set-aside copies are not. */
-const TRANSCRIPT_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
-const EXTENSION_LENGTH = '.jsonl'.length;
+const EXTENSION = '.jsonl';
+
+/** The names in a directory; none when it cannot be listed (permissions, a symbolic link loop). */
+function listOrEmpty(files: Files, dir: string): string[] {
+  try {
+    return files.list(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** The file's info, or null when it is not there or cannot be looked at. */
+function infoOrNull(look: () => FileInfo | null): FileInfo | null {
+  try {
+    return look();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * <claudeHome>/projects/<folder>/<uuid>.jsonl, exactly two levels deep, name exactly a lowercase
  * UUID + '.jsonl', regular files only (a symbolic link to a file is not one; a symbolic link to a
  * folder is followed, so that a relocated project folder still counts). Sorted by path. Folder
- * names are never parsed.
+ * names are never parsed. An entry that cannot be looked at or listed (a symbolic link loop,
+ * permissions) is skipped, and the rest is listed: nothing in one folder may stop a refresh.
  */
 export function listTranscriptFiles(files: Files, claudeHome: string): TranscriptFile[] {
   const root = join(claudeHome, 'projects');
   const found: TranscriptFile[] = [];
-  for (const folder of files.list(root)) {
+  for (const folder of listOrEmpty(files, root)) {
     const folderPath = join(root, folder);
-    if (files.stat(folderPath)?.kind !== 'dir') {
+    if (infoOrNull(() => files.stat(folderPath))?.kind !== 'dir') {
       continue;
     }
-    for (const name of files.list(folderPath)) {
-      if (!TRANSCRIPT_NAME.test(name)) {
+    for (const name of listOrEmpty(files, folderPath)) {
+      const sessionId = name.endsWith(EXTENSION) ? name.slice(0, -EXTENSION.length) : '';
+      if (!isSessionId(sessionId)) {
         continue;
       }
       const path = join(folderPath, name);
-      const info = files.lstat(path);
+      const info = infoOrNull(() => files.lstat(path));
       if (info?.kind !== 'file') {
         continue;
       }
-      found.push({
-        path,
-        sessionId: name.slice(0, -EXTENSION_LENGTH),
-        size: info.size,
-        mtimeNs: info.mtimeNs,
-      });
+      found.push({ path, sessionId, size: info.size, mtimeNs: info.mtimeNs });
     }
   }
   // By the whole path (code units): 'a-b/x' sorts before 'a/x', though 'a' sorts before 'a-b'.
@@ -60,8 +74,8 @@ export interface TranscriptFacts {
   customTitle: string | null; // latest 'custom-title' record's customTitle
   firstRecordNs: Ns | null; // smallest parseable timestamp
   lastRecordNs: Ns | null; // largest parseable timestamp
-  lastUserNs: Ns | null; // largest timestamp of a record with type 'user'
-  lastTurnRole: 'user' | 'assistant' | null; // type of the last (in file order) 'user' or 'assistant' record
+  lastUserNs: Ns | null; // largest timestamp of a 'user' record that is a turn (see isTurnRecord)
+  lastTurnRole: 'user' | 'assistant' | null; // type of the last (in file order) 'assistant' record or 'user' record that is a turn
 }
 
 export const EMPTY_FACTS: TranscriptFacts = Object.freeze({
@@ -89,13 +103,65 @@ function parseRecord(line: string): Record<string, unknown> | null {
 }
 
 /**
+ * What a `user` record that is not a turn opens its text with: a slash command and its output, a
+ * command run from the prompt (`!`) and its output, and the marker Claude Code writes when the user
+ * interrupts. Seen in real transcripts (design 5.6); the pairs (stderr, caveat) are the same family.
+ */
+const NON_TURN_TEXT_STARTS = [
+  '<command-name>',
+  '<command-message>',
+  '<local-command-stdout>',
+  '<local-command-stderr>',
+  '<local-command-caveat>',
+  '<bash-input>',
+  '<bash-stdout>',
+  '<bash-stderr>',
+  '[Request interrupted',
+];
+
+/** The first text of a message: its content when that is a string, else its first text block. */
+function leadingText(message: unknown): string | null {
+  const content = (message as { content?: unknown } | null | undefined)?.content;
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    for (const block of content as unknown[]) {
+      const { type, text } = (block ?? {}) as { type?: unknown; text?: unknown };
+      if (type === 'text' && typeof text === 'string') {
+        return text;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether a `user` record is a turn: something the model answers or is working on (a prompt, a
+ * task notification, a tool result). Not a turn: a record marked meta, a compaction summary, a
+ * sidechain record, and the records a command typed at the prompt leaves (a slash command, a `!`
+ * command, their output, an interrupt marker). The text is compared with the markers above and
+ * dropped (principle 4). What is not recognised is a turn, so that a session is never taken
+ * for idle when it may be working.
+ */
+function isTurnRecord(record: Record<string, unknown>): boolean {
+  if (record.isMeta === true || record.isCompactSummary === true || record.isSidechain === true) {
+    return false;
+  }
+  const text = leadingText(record.message);
+  return text === null || !NON_TURN_TEXT_STARTS.some((start) => text.startsWith(start));
+}
+
+/**
  * Folds complete JSONL lines into facts. Lines that are not JSON objects are skipped. Returns the
  * prUrl of every 'pr-link' record with a string prUrl, in order. Keeps no message text. The facts
  * given are not changed.
  *
  * A first cwd or entrypoint must be a non-empty string; a title is kept as found, an empty one
  * included (a cleared name replaces the one before it) and unsanitised (that is the list's job).
- * The last turn follows file order; the times follow the timestamps, which are not in order.
+ * The last turn follows file order; the times follow the timestamps, which are not in order. A
+ * `user` record that is not a turn (`isTurnRecord`) counts for the record times, the cwd and the
+ * entrypoint, but neither for `lastTurnRole` nor for `lastUserNs`.
  */
 export function foldLines(
   facts: TranscriptFacts,
@@ -118,12 +184,14 @@ export function foldLines(
       if (lastRecordNs === null || ns > lastRecordNs) {
         lastRecordNs = ns;
       }
-      if (type === 'user' && (lastUserNs === null || ns > lastUserNs)) {
+    }
+    if (type === 'user' && isTurnRecord(record)) {
+      lastTurnRole = 'user';
+      if (ns !== null && (lastUserNs === null || ns > lastUserNs)) {
         lastUserNs = ns;
       }
-    }
-    if (type === 'user' || type === 'assistant') {
-      lastTurnRole = type;
+    } else if (type === 'assistant') {
+      lastTurnRole = 'assistant';
     }
     if (firstCwd === null && typeof record.cwd === 'string' && record.cwd !== '') {
       firstCwd = record.cwd;
@@ -176,10 +244,24 @@ function concat(parts: readonly Uint8Array[]): Uint8Array {
 }
 
 /**
+ * Whether the byte before `offset` is a newline, as it is in the file the offset was taken from
+ * (`sizeRead` stops after a 0x0A). When it is not, the file was replaced, and an offset into the
+ * old one would land in the middle of a line.
+ */
+function endsALine(files: Files, path: string, offset: number): boolean {
+  if (offset === 0) {
+    return true;
+  }
+  const byte = files.readBytes(path, offset - 1, offset);
+  return byte.length === 1 && byte[0] === NEWLINE;
+}
+
+/**
  * Reads bytes [previous.sizeRead, file.size) — or from 0 with EMPTY_FACTS when previous is null or
  * file.size < previous.sizeRead (shrunk) — splits on byte 0x0A, folds the complete lines, and
  * leaves a last line without a newline for the next read (sizeRead stops after the last 0x0A).
- * `prUrls` are those of the lines read now. Throws what `Files.readBytes` throws, for example when
+ * A file whose byte before `previous.sizeRead` is not a newline was replaced: it is read from the
+ * start too. `prUrls` are those of the lines read now. Throws what `Files.readBytes` throws, for example when
  * the file has disappeared since it was listed.
  *
  * The file is read in pieces of a few megabytes and every line is decoded on its own, so that
@@ -190,7 +272,10 @@ export function readTranscript(
   file: TranscriptFile,
   previous: { facts: TranscriptFacts; sizeRead: number } | null,
 ): TranscriptRead {
-  const resumed = previous !== null && file.size >= previous.sizeRead;
+  const resumed =
+    previous !== null &&
+    file.size >= previous.sizeRead &&
+    (file.size === previous.sizeRead || endsALine(files, file.path, previous.sizeRead));
   let facts = resumed ? previous.facts : EMPTY_FACTS;
   const start = resumed ? previous.sizeRead : 0;
   let sizeRead = start;
