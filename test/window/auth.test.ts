@@ -1,0 +1,673 @@
+import assert from 'node:assert/strict';
+import crypto, { createDecipheriv, hkdfSync } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
+import { test } from 'node:test';
+import type { TestContext } from 'node:test';
+
+import { openStore } from '../../src/store/store.ts';
+import type { Store } from '../../src/store/store.ts';
+import {
+  createTokens,
+  ensureSecret,
+  isNonce,
+  pageProof,
+  raiseAlarm,
+  replaceSecret,
+  serverProof,
+  wrapSecret,
+} from '../../src/window/auth.ts';
+import type { Tokens } from '../../src/window/auth.ts';
+import { testDeck } from '../helpers/deck.ts';
+import { SEC, T0, testPlatform } from '../helpers/platform.ts';
+import type { FakeClock } from '../helpers/platform.ts';
+
+// ---------------------------------------------------------------------------------------------
+// The vector of S2 8.2.2, computed with Node.js's crypto; the page test (17.4) runs the same
+// inputs through Web Crypto.
+
+/** `length` bytes counting up from `from`. */
+function counting(from: number, length = 32): Uint8Array {
+  return Uint8Array.from({ length }, (_, i) => from + i);
+}
+
+const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64url');
+
+const SECRET = counting(0x00);
+const TOKEN = counting(0x20);
+const SN = 'QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8';
+const CN = 'YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8';
+const ORIGIN = 'http://127.0.0.1:47613';
+const IV = counting(0x80, 12);
+
+const SECRET_TEXT = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+const TOKEN_TEXT = 'ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8';
+const KEY_PAGE = 'I2kfIbEbNedSunJ5O-iFTu1xMaucB1TaOXfPgule6rE';
+const KEY_SERVER = 'PCSrj1ouBWLrjthlVwJEhf7wtjQVvd99qg30B5MzN9k';
+const LAUNCH_PAGE = 'Cr2pbVrX3H03jJHuH4XHBB-cqsOPpzQCkE0JpYYrpm4';
+const LAUNCH_SERVER = 'JM1U0NnH9f1h_LMtP3J9aBD6GWG7dyJX0cRhjXBHCUw';
+const WRAPPED = 'gIGCg4SFhoeIiYqL8-uwKEfl-QQONxqvTE8BdkWwIYHdwQkWN6_IJiXkHtLOZknj-CrYjV5peDDAyWDo';
+
+/** Two other nonces, for a second connection. */
+const SN2 = b64(counting(0xa0));
+const CN2 = b64(counting(0xc0));
+
+test("the vector's inputs are the bytes the design names", () => {
+  assert.equal(b64(SECRET), SECRET_TEXT);
+  assert.equal(b64(TOKEN), TOKEN_TEXT);
+  assert.equal(b64(counting(0x40)), SN);
+  assert.equal(b64(counting(0x60)), CN);
+});
+
+test('pageProof and serverProof in mode key equal the vector', () => {
+  assert.equal(pageProof(SECRET, 'key', SN, CN, ORIGIN), KEY_PAGE);
+  assert.equal(serverProof(SECRET, 'key', SN, CN, ORIGIN), KEY_SERVER);
+});
+
+test('pageProof and serverProof in mode launch, keyed by the token, equal the vector', () => {
+  assert.equal(pageProof(TOKEN, 'launch', SN, CN, ORIGIN), LAUNCH_PAGE);
+  assert.equal(serverProof(TOKEN, 'launch', SN, CN, ORIGIN), LAUNCH_SERVER);
+});
+
+test("wrapSecret with the vector's IV equals the vector", () => {
+  assert.equal(wrapSecret(SECRET, TOKEN, SN, CN, IV), WRAPPED);
+});
+
+test('a proof depends on every input', () => {
+  const proofs = [
+    pageProof(SECRET, 'key', SN, CN, ORIGIN),
+    pageProof(TOKEN, 'key', SN, CN, ORIGIN),
+    pageProof(SECRET, 'launch', SN, CN, ORIGIN),
+    pageProof(SECRET, 'key', SN2, CN, ORIGIN),
+    pageProof(SECRET, 'key', SN, CN2, ORIGIN),
+    pageProof(SECRET, 'key', CN, SN, ORIGIN),
+    pageProof(SECRET, 'key', SN, CN, 'http://127.0.0.1:47614'),
+    serverProof(SECRET, 'key', SN, CN, ORIGIN),
+  ];
+  assert.equal(new Set(proofs).size, proofs.length);
+  for (const proof of proofs) {
+    assert.match(proof, /^[A-Za-z0-9_-]{43}$/);
+  }
+});
+
+test('the proofs and wrapSecret refuse a key, a nonce or an IV of the wrong size', () => {
+  const refused = { name: 'RangeError' };
+  for (const prove of [pageProof, serverProof]) {
+    assert.throws(() => prove(new Uint8Array(0), 'key', SN, CN, ORIGIN), refused);
+    assert.throws(() => prove(counting(0, 31), 'key', SN, CN, ORIGIN), refused);
+    assert.throws(() => prove(counting(0, 33), 'key', SN, CN, ORIGIN), refused);
+    assert.throws(() => prove(SECRET, 'key', SN.slice(1), CN, ORIGIN), refused);
+    assert.throws(() => prove(SECRET, 'key', SN, `${CN}\n`, ORIGIN), refused);
+  }
+  assert.throws(() => wrapSecret(counting(0, 31), TOKEN, SN, CN, IV), refused);
+  assert.throws(() => wrapSecret(SECRET, counting(0, 16), SN, CN, IV), refused);
+  assert.throws(() => wrapSecret(SECRET, TOKEN, SN, CN, counting(0x80, 11)), refused);
+  assert.throws(() => wrapSecret(SECRET, TOKEN, SN, CN, counting(0x80, 16)), refused);
+  assert.throws(() => wrapSecret(SECRET, TOKEN, 'x', CN, IV), refused);
+});
+
+// ---------------------------------------------------------------------------------------------
+// wrapSecret opens with Node's AES-256-GCM under the HKDF key of the token and both nonces.
+
+/** What a page does with `key` (S2 8.2.2): split off the IV, derive the key, open. Throws when it does not open. */
+function unwrap(wrapped: string, token: Uint8Array, sN: string, cN: string): Uint8Array {
+  const bytes = Buffer.from(wrapped, 'base64url');
+  const iv = bytes.subarray(0, 12);
+  const tag = bytes.subarray(bytes.length - 16);
+  const sealed = bytes.subarray(12, bytes.length - 16);
+  const key = Buffer.from(
+    hkdfSync('sha256', token, Buffer.from(sN + cN, 'utf8'), Buffer.from('skydeck key 1'), 32),
+  );
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  return new Uint8Array(Buffer.concat([decipher.update(sealed), decipher.final()]));
+}
+
+test('wrapSecret is the IV, then the ciphertext, then the 16-byte tag', () => {
+  const wrapped = Buffer.from(wrapSecret(SECRET, TOKEN, SN, CN, IV), 'base64url');
+  assert.equal(wrapped.length, 12 + 32 + 16);
+  assert.deepEqual(new Uint8Array(wrapped.subarray(0, 12)), IV);
+});
+
+test("wrapSecret's output opens with the token and both nonces", () => {
+  assert.deepEqual(unwrap(WRAPPED, TOKEN, SN, CN), SECRET);
+  const iv = counting(0x10, 12);
+  assert.deepEqual(unwrap(wrapSecret(SECRET, TOKEN, SN2, CN2, iv), TOKEN, SN2, CN2), SECRET);
+});
+
+test("wrapSecret's output does not open with another token or with the nonces swapped", () => {
+  const wrapped = wrapSecret(SECRET, TOKEN, SN, CN, IV);
+  assert.throws(() => unwrap(wrapped, counting(0x21), SN, CN));
+  assert.throws(() => unwrap(wrapped, SECRET, SN, CN));
+  assert.throws(() => unwrap(wrapped, TOKEN, CN, SN));
+  assert.throws(() => unwrap(wrapped, TOKEN, SN2, CN));
+});
+
+// ---------------------------------------------------------------------------------------------
+// isNonce
+
+test('isNonce accepts 43 base64url characters of 32 bytes', () => {
+  assert.equal(isNonce(SN), true);
+  assert.equal(isNonce(CN), true);
+  assert.equal(isNonce(b64(new Uint8Array(32).fill(0xff))), true);
+  assert.equal(isNonce(b64(new Uint8Array(32))), true);
+});
+
+test('isNonce refuses 42 or 44 characters, +, /, = and a non-canonical last character', () => {
+  assert.equal(isNonce(SN.slice(0, 42)), false);
+  assert.equal(isNonce(`${SN}A`), false);
+  assert.equal(isNonce(`${SN.slice(0, 10)}+${SN.slice(11)}`), false);
+  assert.equal(isNonce(`${SN.slice(0, 10)}/${SN.slice(11)}`), false);
+  assert.equal(isNonce(`${SN.slice(0, 42)}=`), false);
+  assert.equal(isNonce(`${SN}=`), false);
+  assert.equal(isNonce(''), false);
+  assert.equal(isNonce(`${SN.slice(0, 42)}é`), false);
+  assert.equal(isNonce(` ${SN.slice(1)}`), false);
+  // 32 bytes leave two bits of the last character unused; only the encoding with zeros is one.
+  assert.equal(isNonce(`${SN.slice(0, 42)}9`), false);
+  assert.equal(b64(Buffer.from(`${SN.slice(0, 42)}9`, 'base64url')), SN);
+});
+
+// ---------------------------------------------------------------------------------------------
+// The secret in kv (S2 10.2, 15.2)
+
+/** A random source that counts its calls, as testPlatform's randomBytes does across calls. */
+function countingRandom(t: TestContext): { random: (n: number) => Uint8Array; calls: number[] } {
+  const { platform } = testPlatform(t);
+  const calls: number[] = [];
+  return {
+    random: (n) => {
+      calls.push(n);
+      return platform.randomBytes(n);
+    },
+    calls,
+  };
+}
+
+/** The store, with every call of a kv method recorded, and whether it ran inside `transaction`. */
+function watched(store: Store): { store: Store; calls: string[] } {
+  const calls: string[] = [];
+  let depth = 0;
+  const proxy = new Proxy(store, {
+    get(target, key) {
+      const value: unknown = Reflect.get(target, key, target);
+      if (typeof value !== 'function') {
+        return value;
+      }
+      if (key === 'transaction') {
+        return <T>(fn: () => T): T => {
+          depth += 1;
+          try {
+            return target.transaction(fn);
+          } finally {
+            depth -= 1;
+          }
+        };
+      }
+      return (...args: unknown[]): unknown => {
+        if (typeof key === 'string' && key.endsWith('Kv')) {
+          calls.push(`${key} ${depth > 0 ? 'inside' : 'outside'}`);
+        }
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  return { store: proxy, calls };
+}
+
+test('ensureSecret creates 32 bytes once and stores them base64url without padding', (t) => {
+  const { deck } = testDeck(t);
+  const { random, calls } = countingRandom(t);
+  const first = ensureSecret(deck.store, random);
+  assert.equal(first.length, 32);
+  assert.deepEqual(calls, [32]);
+  const stored = deck.store.getKv('window_secret');
+  assert.equal(stored, b64(first));
+  assert.match(stored ?? '', /^[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(ensureSecret(deck.store, random), first);
+  assert.deepEqual(calls, [32], 'the second call draws nothing');
+});
+
+test("a second connection's call in between returns the first's secret", (t) => {
+  const { deck } = testDeck(t);
+  const other = openStore(deck.store.path);
+  t.after(() => {
+    other.close();
+  });
+  const { random } = countingRandom(t);
+  const first = ensureSecret(deck.store, random);
+  assert.deepEqual(ensureSecret(other, random), first);
+  assert.deepEqual(ensureSecret(deck.store, random), first);
+});
+
+test('ensureSecret reads and creates inside one transaction', (t) => {
+  const { deck } = testDeck(t);
+  const { random } = countingRandom(t);
+  const { store, calls } = watched(deck.store);
+  ensureSecret(store, random);
+  assert.deepEqual(calls, ['getKv inside', 'setKv inside']);
+  calls.length = 0;
+  ensureSecret(store, random);
+  assert.deepEqual(calls, ['getKv inside']);
+});
+
+test('ensureSecret replaces a stored value that is not a secret', (t) => {
+  const { deck } = testDeck(t);
+  const { random } = countingRandom(t);
+  for (const bad of [
+    'x',
+    '',
+    `${SECRET_TEXT}=`,
+    SECRET_TEXT.slice(1),
+    `${SECRET_TEXT.slice(0, 42)}9`,
+  ]) {
+    deck.store.setKv('window_secret', bad);
+    const secret = ensureSecret(deck.store, random);
+    assert.equal(secret.length, 32);
+    assert.equal(deck.store.getKv('window_secret'), b64(secret));
+  }
+});
+
+test('ensureSecret keeps a stored secret it did not create', (t) => {
+  const { deck } = testDeck(t);
+  const { random, calls } = countingRandom(t);
+  deck.store.setKv('window_secret', SECRET_TEXT);
+  assert.deepEqual(ensureSecret(deck.store, random), SECRET);
+  assert.deepEqual(calls, []);
+});
+
+test('ensureSecret refuses a random source that gives the wrong number of bytes, and stores nothing', (t) => {
+  const { deck } = testDeck(t);
+  assert.throws(() => ensureSecret(deck.store, () => new Uint8Array(31)), { name: 'RangeError' });
+  assert.equal(deck.store.getKv('window_secret'), null);
+});
+
+test('replaceSecret changes the secret and clears window_alarm, in one transaction', (t) => {
+  const { deck } = testDeck(t);
+  const { random } = countingRandom(t);
+  const before = ensureSecret(deck.store, random);
+  raiseAlarm(deck.store, T0);
+  const { store, calls } = watched(deck.store);
+  replaceSecret(store, random);
+  assert.deepEqual(calls.toSorted(), ['deleteKv inside', 'setKv inside']);
+  const after = ensureSecret(deck.store, random);
+  assert.equal(after.length, 32);
+  assert.notDeepEqual(after, before);
+  assert.equal(deck.store.getKv('window_secret'), b64(after));
+  assert.equal(deck.store.getKv('window_alarm'), null);
+});
+
+test('replaceSecret creates a secret where there was none', (t) => {
+  const { deck } = testDeck(t);
+  const { random } = countingRandom(t);
+  replaceSecret(deck.store, random);
+  assert.match(deck.store.getKv('window_secret') ?? '', /^[A-Za-z0-9_-]{43}$/);
+});
+
+test('raiseAlarm writes the time in ns as a decimal string', (t) => {
+  const { deck } = testDeck(t);
+  raiseAlarm(deck.store, T0 + 5n);
+  assert.equal(deck.store.getKv('window_alarm'), String(T0 + 5n));
+  raiseAlarm(deck.store, T0 + 9n);
+  assert.equal(deck.store.getKv('window_alarm'), String(T0 + 9n));
+});
+
+// ---------------------------------------------------------------------------------------------
+// Launch tokens (fake clock)
+
+interface TokenRig {
+  tokens: Tokens;
+  clock: FakeClock;
+  alarms: () => number;
+}
+
+function tokenRig(t: TestContext): TokenRig {
+  const { platform, clock } = testPlatform(t);
+  let alarms = 0;
+  const tokens = createTokens(clock, platform.randomBytes, () => {
+    alarms += 1;
+  });
+  return { tokens, clock, alarms: () => alarms };
+}
+
+/** The page's proof with a launch token, on the first connection's nonces unless given others. */
+function launchProof(token: Uint8Array, sN = SN, cN = CN): string {
+  return pageProof(token, 'launch', sN, cN, ORIGIN);
+}
+
+test('mint(30) gives a 32-hex id, 32 random bytes, an expiry 30 s on, and the state waiting', (t) => {
+  const { tokens } = tokenRig(t);
+  const minted = tokens.mint(30);
+  assert.match(minted.id, /^[0-9a-f]{32}$/);
+  assert.equal(minted.token.length, 32);
+  assert.equal(minted.expiresAtNs, T0 + 30n * SEC);
+  assert.equal(tokens.state(minted.id), 'waiting');
+  const second = tokens.mint(30);
+  assert.notEqual(second.id, minted.id);
+  assert.notDeepEqual(second.token, minted.token);
+});
+
+test('a proof made with a waiting token matches, and the token is used at once', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  const result = tokens.check(launchProof(token), SN, CN, ORIGIN);
+  assert.equal(result.kind, 'match');
+  assert.deepEqual(result.kind === 'match' ? result.token : null, token);
+  assert.equal(tokens.state(id), 'used');
+  assert.equal(alarms(), 0);
+});
+
+test('the same proof again is reused and raises the alarm once', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  tokens.check(launchProof(token), SN, CN, ORIGIN);
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'reused' });
+  assert.equal(alarms(), 1);
+  assert.equal(tokens.state(id), 'reused');
+});
+
+test('a used token presented on another connection is reused too, and each time raises the alarm', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  tokens.check(launchProof(token), SN, CN, ORIGIN);
+  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), {
+    kind: 'reused',
+  });
+  assert.deepEqual(tokens.check(launchProof(token, CN2, SN2), CN2, SN2, ORIGIN), {
+    kind: 'reused',
+  });
+  assert.equal(alarms(), 2);
+  assert.equal(tokens.state(id), 'reused');
+});
+
+test('changing the token that check returned changes nothing the tokens hold', (t) => {
+  const { tokens } = tokenRig(t);
+  const minted = tokens.mint(30);
+  const copy = Uint8Array.from(minted.token);
+  minted.token.fill(0);
+  const result = tokens.check(launchProof(copy), SN, CN, ORIGIN);
+  assert.equal(result.kind, 'match');
+  if (result.kind === 'match') {
+    result.token.fill(0);
+  }
+  assert.deepEqual(tokens.check(launchProof(copy), SN, CN, ORIGIN), { kind: 'reused' });
+});
+
+test('after 30 s an unused token is expired and its proof matches nothing', (t) => {
+  const { tokens, clock, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  clock.advanceMs(29_999);
+  assert.equal(tokens.state(id), 'waiting');
+  clock.advanceMs(1);
+  assert.equal(tokens.state(id), 'expired');
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'none' });
+  assert.equal(tokens.state(id), 'expired');
+  assert.equal(alarms(), 0);
+});
+
+test('mint(600) lives 10 minutes', (t) => {
+  const { tokens, clock } = tokenRig(t);
+  const { id, token, expiresAtNs } = tokens.mint(600);
+  assert.equal(expiresAtNs, T0 + 600n * SEC);
+  clock.advanceMs(599_999);
+  assert.equal(tokens.state(id), 'waiting');
+  clock.advanceMs(1);
+  assert.equal(tokens.state(id), 'expired');
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'none' });
+});
+
+test('a token lives no longer than its seconds when the wall clock steps back', (t) => {
+  const { tokens, clock } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  clock.advanceMs(10_000);
+  clock.setNs(clock.nowNs() - 10n * SEC); // WSL's clock steps back (design 7.6)
+  clock.advanceMs(19_999);
+  assert.equal(tokens.state(id), 'waiting');
+  clock.advanceMs(1);
+  assert.ok(clock.nowNs() < T0 + 30n * SEC, 'the wall clock is still before the expiry');
+  assert.equal(tokens.state(id), 'expired');
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'none' });
+});
+
+test('a token expires at once when the wall clock jumps past its expiry (the PC slept)', (t) => {
+  const { tokens, clock } = tokenRig(t);
+  const { id, token } = tokens.mint(600);
+  clock.setNs(T0 + 3_600n * SEC);
+  assert.equal(tokens.state(id), 'expired');
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'none' });
+});
+
+test('drop gives a waiting token up; a later proof with it matches nothing', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  assert.equal(tokens.drop(id), true);
+  assert.equal(tokens.state(id), 'dropped');
+  assert.deepEqual(tokens.check(launchProof(token), SN, CN, ORIGIN), { kind: 'none' });
+  assert.equal(tokens.state(id), 'dropped');
+  assert.equal(alarms(), 0);
+});
+
+test('a used token that was dropped is still recognised: a later proof is reused', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  tokens.check(launchProof(token), SN, CN, ORIGIN);
+  assert.equal(tokens.drop(id), true);
+  assert.equal(tokens.state(id), 'used');
+  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), {
+    kind: 'reused',
+  });
+  assert.equal(tokens.state(id), 'reused');
+  assert.equal(alarms(), 1);
+});
+
+test('drop and state of an id never minted', (t) => {
+  const { tokens } = tokenRig(t);
+  assert.equal(tokens.state('0123456789abcdef0123456789abcdef'), null);
+  assert.equal(tokens.drop('0123456789abcdef0123456789abcdef'), false);
+});
+
+test('an expired token that is dropped is dropped', (t) => {
+  const { tokens, clock } = tokenRig(t);
+  const { id } = tokens.mint(30);
+  clock.advanceMs(31_000);
+  assert.equal(tokens.drop(id), true);
+  assert.equal(tokens.state(id), 'dropped');
+});
+
+test("a used token stays known for the server's life, long after its expiry", (t) => {
+  const { tokens, clock, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  tokens.check(launchProof(token), SN, CN, ORIGIN);
+  clock.advanceMs(7 * 24 * 3_600_000);
+  // testPlatform's random source repeats after 256 bytes, so after 16 tokens an id would recur.
+  for (let i = 0; i < 10; i += 1) {
+    tokens.drop(tokens.mint(30).id);
+  }
+  assert.equal(tokens.state(id), 'used');
+  assert.deepEqual(tokens.check(launchProof(token, SN2, CN2), SN2, CN2, ORIGIN), {
+    kind: 'reused',
+  });
+  assert.equal(alarms(), 1);
+});
+
+test('forgetAll empties everything', (t) => {
+  const { tokens, clock, alarms } = tokenRig(t);
+  const used = tokens.mint(30);
+  const waiting = tokens.mint(600);
+  tokens.check(launchProof(used.token), SN, CN, ORIGIN);
+  tokens.forgetAll();
+  assert.equal(tokens.state(used.id), null);
+  assert.equal(tokens.state(waiting.id), null);
+  assert.deepEqual(tokens.check(launchProof(used.token), SN, CN, ORIGIN), { kind: 'none' });
+  assert.deepEqual(tokens.check(launchProof(waiting.token), SN, CN, ORIGIN), { kind: 'none' });
+  assert.equal(alarms(), 0);
+  assert.equal(clock.timers(), 0);
+});
+
+test('a token holds a timer only while it waits', (t) => {
+  const { tokens, clock } = tokenRig(t);
+  const used = tokens.mint(30);
+  const dropped = tokens.mint(30);
+  tokens.mint(30);
+  assert.equal(clock.timers(), 3);
+  tokens.check(launchProof(used.token), SN, CN, ORIGIN);
+  tokens.drop(dropped.id);
+  assert.equal(clock.timers(), 1);
+  clock.advanceMs(30_000);
+  assert.equal(clock.timers(), 0);
+});
+
+test('a proof made with the server label, another mode, another origin or other nonces never matches', (t) => {
+  const { tokens, alarms } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  const wrong = [
+    serverProof(token, 'launch', SN, CN, ORIGIN),
+    pageProof(token, 'key', SN, CN, ORIGIN),
+    pageProof(token, 'launch', SN, CN, 'http://127.0.0.1:47614'),
+    pageProof(token, 'launch', CN, SN, ORIGIN),
+    pageProof(token, 'launch', SN2, CN, ORIGIN),
+    pageProof(SECRET, 'launch', SN, CN, ORIGIN),
+  ];
+  for (const proof of wrong) {
+    assert.deepEqual(tokens.check(proof, SN, CN, ORIGIN), { kind: 'none' });
+  }
+  assert.equal(tokens.state(id), 'waiting');
+  assert.equal(alarms(), 0);
+  assert.equal(tokens.check(launchProof(token), SN, CN, ORIGIN).kind, 'match');
+});
+
+test('check with a nonce that is not one matches nothing and throws nothing', (t) => {
+  const { tokens } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  const proof = launchProof(token);
+  assert.deepEqual(tokens.check(proof, SN.slice(1), CN, ORIGIN), { kind: 'none' });
+  assert.deepEqual(tokens.check(proof, SN, `${CN}=`, ORIGIN), { kind: 'none' });
+  assert.equal(tokens.state(id), 'waiting');
+});
+
+test('mint refuses seconds other than 30 and 600', (t) => {
+  const { tokens } = tokenRig(t);
+  assert.throws(() => tokens.mint(31 as 30), { name: 'RangeError' });
+  assert.throws(() => tokens.mint(0 as 30), { name: 'RangeError' });
+});
+
+test('mint refuses a random source that repeats an id or gives the wrong number of bytes', (t) => {
+  const { clock } = testPlatform(t);
+  const same = createTokens(
+    clock,
+    (n) => new Uint8Array(n),
+    () => {},
+  );
+  same.mint(30);
+  assert.throws(() => same.mint(30));
+  const short = createTokens(
+    clock,
+    (n) => new Uint8Array(n - 1),
+    () => {},
+  );
+  assert.throws(() => short.mint(30), { name: 'RangeError' });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Constant time: crypto.timingSafeEqual on equal-length buffers, nothing compared for a proof of
+// another length.
+
+/** Records the lengths timingSafeEqual is called with, for the duration of the test. */
+function spyTimingSafeEqual(t: TestContext): [number, number][] {
+  const lengths: [number, number][] = [];
+  const original = crypto.timingSafeEqual;
+  t.mock.method(
+    crypto,
+    'timingSafeEqual',
+    (a: NodeJS.ArrayBufferView, b: NodeJS.ArrayBufferView) => {
+      lengths.push([a.byteLength, b.byteLength]);
+      return original(a, b);
+    },
+  );
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  return lengths;
+}
+
+test('check compares with timingSafeEqual on equal-length buffers, against every token', (t) => {
+  const { tokens } = tokenRig(t);
+  const first = tokens.mint(30);
+  tokens.mint(30);
+  tokens.mint(600);
+  const lengths = spyTimingSafeEqual(t);
+  assert.equal(tokens.check(launchProof(first.token), SN, CN, ORIGIN).kind, 'match');
+  assert.equal(lengths.length, 3, 'one comparison per token, the match does not stop it');
+  for (const [a, b] of lengths) {
+    assert.equal(a, b);
+  }
+  lengths.length = 0;
+  assert.deepEqual(tokens.check(KEY_PAGE, SN, CN, ORIGIN), { kind: 'none' });
+  assert.equal(lengths.length, 3);
+});
+
+test('a proof of another length is none without comparing', (t) => {
+  const { tokens } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  const lengths = spyTimingSafeEqual(t);
+  const proof = launchProof(token);
+  for (const other of [
+    proof.slice(0, 42),
+    `${proof}A`,
+    `${proof}=`,
+    '',
+    `${proof.slice(0, 42)}é`,
+  ]) {
+    assert.deepEqual(tokens.check(other, SN, CN, ORIGIN), { kind: 'none' });
+  }
+  assert.deepEqual(lengths, []);
+  assert.equal(tokens.state(id), 'waiting');
+});
+
+// ---------------------------------------------------------------------------------------------
+// The secret's bytes never appear in a string the module returns.
+
+test("the secret's base64url appears in no string the module returns", (t) => {
+  const { deck } = testDeck(t);
+  const { random } = countingRandom(t);
+  const secret = ensureSecret(deck.store, random);
+  const needle = b64(secret);
+  const returned: string[] = [];
+  const keep = (value: unknown): void => {
+    if (typeof value === 'string') {
+      returned.push(value);
+    } else if (value instanceof Error) {
+      returned.push(value.message, String(value.stack));
+    }
+  };
+  for (const mode of ['key', 'launch'] as const) {
+    keep(pageProof(secret, mode, SN, CN, ORIGIN));
+    keep(serverProof(secret, mode, SN, CN, ORIGIN));
+  }
+  const { tokens } = tokenRig(t);
+  const { id, token } = tokens.mint(30);
+  keep(id);
+  keep(wrapSecret(secret, token, SN, CN, random(12)));
+  keep(tokens.state(id));
+  const checked = tokens.check(launchProof(token), SN, CN, ORIGIN);
+  keep(checked.kind);
+  keep(tokens.state(id));
+  for (const fail of [
+    () => pageProof(secret, 'key', 'x', CN, ORIGIN),
+    () => wrapSecret(secret, token, SN, CN, new Uint8Array(1)),
+    () => wrapSecret(secret.subarray(1), token, SN, CN, random(12)),
+  ]) {
+    try {
+      fail();
+      assert.fail('expected a throw');
+    } catch (error) {
+      keep(error);
+    }
+  }
+  assert.ok(returned.length >= 10);
+  for (const text of returned) {
+    assert.ok(!text.includes(needle), `the secret appears in ${JSON.stringify(text)}`);
+  }
+  assert.equal(isNonce(needle), true, 'the needle is the 43-character form');
+});
