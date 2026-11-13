@@ -618,8 +618,10 @@ The server's environment (5.2), with:
 - removed: the variables that say which terminal or multiplexer a process runs in
   (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `WT_SESSION`, `WT_PROFILE_ID`, every `WEZTERM_*`,
   `TMUX`, `TMUX_PANE`, `STY`, `VTE_VERSION`, `KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, `KONSOLE_*`),
-  `SKYDECK_HANDOFF`, `SKYDECK_LAUNCHER_CACHE` and the launcher's `NODE_COMPILE_CACHE` (5.2), and
-  `SKYDECK_CORE_SOFT` (2; its value goes into the keeper's spec instead);
+  `SKYDECK_HANDOFF`, `SKYDECK_LAUNCHER_CACHE` and the launcher's `NODE_COMPILE_CACHE` (5.2),
+  `SKYDECK_CORE_SOFT` (2; its value goes into the keeper's spec instead) and `SKYDECK_ENV_ORIGIN`
+  (5.2: where the server's environment came from). The other `SKYDECK_*` variables pass:
+  `SKYDECK_HOME` and `SKYDECK_NODE` are the user's settings, and the hook needs them;
 - removed, as a second line of defence behind 5.1's refusal to start a server inside a Claude Code
   session: the variables Claude Code sets for the programs it runs, so that no program in the
   window looks like another session's child or carries its messaging token. The list lives in
@@ -1089,7 +1091,9 @@ Ctrl+click on a URL in a terminal (an OSC 8 link, or plain text that looks like 
 send `act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so
 for one whose text is not its URL the page first shows the target and opens it only on a second
 click. The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme
-`http` or `https`, and is re-serialised by the WHATWG URL parser (so it cannot start with `-`), by
+`http` or `https`, and is re-serialised by the WHATWG URL parser (so it cannot start with `-`) to
+at most 2,048 characters again (percent-encoding can make it several times longer, and the
+re-serialised URL is what Edge gets), by
 running
 `window.edge` with that URL as its only argument (no profile folder): it opens in the user's own
 Edge profile, where they are logged in, not in the window's profile. The page itself never
@@ -1437,7 +1441,8 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
   the label, the group and extra flags. A label that starts with a ticket key gives the group
-  through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by spaces;
+  through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by
+  whitespace (spaces, tabs, line breaks: a pasted text, and nothing can hide inside one word);
   `'…'` and `"…"` group words (no escapes, no variables); design 7.7's refusals apply. It starts in
   the window (11.3).
 

@@ -767,7 +767,10 @@ export function rotateLog(files: Files, path: string): void;
 //   terms/<id>.pid (a keeper): "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f 1 0"
 //   — pid, process start (field 22), boot id, and for a keeper its KEEPER_VERSION and started 0|1,
 //   separated by one space. Tasks 7 (sh), 8 (TypeScript) and 9 (python) write and read this form.
+//   The boot id and the version are any token without whitespace (tests invent boot ids); pid and
+//   process start decimal integers (safe integers). The final '\n' may be missing when read.
 export interface PidLine { pid: number; procStart: number; bootId: string; keeper?: { version: string; started: boolean } }
+/** Throws only for a text field that would break the line: empty, or holding whitespace. */
 export function formatPidLine(line: PidLine): string;
 export function parsePidLine(text: string): PidLine | null;
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean;
@@ -1236,21 +1239,27 @@ export const CLAUDE_CHILD_VARIABLES: readonly string[];
 // src/window/env.ts
 /** S2 5.2: the server's own environment without SKYDECK_HANDOFF, without NODE_COMPILE_CACHE when it
  *  equals SKYDECK_LAUNCHER_CACHE, without the marker; SKYDECK_CORE_SOFT and SKYDECK_ENV_ORIGIN
- *  (A29) taken out and returned. */
+ *  (A29) always taken out and returned — null when absent or unusable (a core limit that is not
+ *  decimal bytes or `unlimited`, an origin that is not an absolute path). */
 export function serverEnvironment(env: Env): { env: Record<string, string>; coreSoft: string | null; origin: string | null };
-/** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). */
+/** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). Removes
+ *  SKYDECK_ENV_ORIGIN too (S2 7.4's list); SKYDECK_HOME and SKYDECK_NODE pass (the hook needs them). */
 export function programEnvironment(serverEnv: Readonly<Record<string, string>>, options: { cwd: string; interop: string | null }): Record<string, string>;
 // src/window/windows.ts
-/** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/. */
+/** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/, and for one
+ *  with a '.' or '..' segment or a backslash in a name (it would leave the drive or split a name). */
 export function windowsPath(linuxPath: string): string | null;
 /** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
 export function deriveProfileDir(files: Files): { ok: true; dir: string } | { ok: false; error: string };
+/** For tests: deriveProfileDir with `usersRoot` standing for /mnt/c/Users (a sandbox folder). */
+export function deriveProfileDirUnder(files: Files, usersRoot: string): { ok: true; dir: string } | { ok: false; error: string };
 /** S2 5.3: the arguments for msedge.exe. */
 export function edgeArgs(port: number, token: string, profileDir: string): string[];
-/** S2 9.6: the URL to open (re-serialised), or null when it must not be opened. */
+/** S2 9.6: the URL to open (re-serialised), or null when it must not be opened; the re-serialised
+ *  URL must also be at most 2,048 characters. */
 export function linkToOpen(url: string): string | null;
 // src/window/flags.ts
-/** S2 12.6: words separated by spaces, '…' and "…" group words, no escapes; an unclosed quote is an error. */
+/** S2 12.6: words separated by whitespace, '…' and "…" group words, no escapes; an unclosed quote is an error. */
 export function splitFlags(text: string): { ok: true; flags: string[] } | { ok: false; error: string };
 // src/claude/procstat.ts
 export function parentPidFromStat(line: string): number | null; // field 4, after the last ')'
@@ -1267,8 +1276,9 @@ export function parentPidFromStat(line: string): number | null; // field 4, afte
 - pid lines: round trip with and without the keeper fields; garbled lines → null; `isPidLineAlive`
   with the fake proc: alive, other boot, reused pid, no boot id.
 - `windowsPath`, `deriveProfileDir` with sandbox folders standing for `/mnt/c/Users/*/AppData/Local/Microsoft/Edge`
-  (the function takes the `/mnt/c/Users` root as a parameter in its private helper so the test can
-  point it into the sandbox): one user → the folder; none, two, an unreadable one.
+  (the function takes the `/mnt/c/Users` root as a parameter in a helper, `deriveProfileDirUnder`,
+  exported for tests only, so the test can point it into the sandbox): one user → the folder;
+  none, two, an unreadable one.
 - `edgeArgs(47613, 'abc', 'C:\\x')` → exactly the four arguments of S2 5.3.
 - `linkToOpen`: `https://github.com/a/b/pull/1` → itself; `http://x` → `http://x/`; `file:///etc`,
   `javascript:…`, a 2,049-character URL, `-https://x`, `not a url` → null.

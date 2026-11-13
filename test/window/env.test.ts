@@ -195,6 +195,22 @@ test("programEnvironment removes skydeck's own variables", () => {
   }
 });
 
+test("programEnvironment passes the SKYDECK_* variables the hook needs: only skydeck's own internal ones go", () => {
+  const { env } = serverEnvironment({
+    SKYDECK_HOME: '/home/me/trial',
+    SKYDECK_NODE: '/opt/node/bin/node',
+    SKYDECK_HANDOFF: '/tmp/h',
+    SKYDECK_CORE_SOFT: '0',
+  });
+  assert.deepEqual(program(env), {
+    SKYDECK_HOME: '/home/me/trial',
+    SKYDECK_NODE: '/opt/node/bin/node',
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    PWD: CWD,
+  });
+});
+
 test("programEnvironment removes the launcher's NODE_COMPILE_CACHE when the marker is still there", () => {
   const result = program({ HOME: '/h', NODE_COMPILE_CACHE: '/c', SKYDECK_LAUNCHER_CACHE: '/c' });
   assert.equal('NODE_COMPILE_CACHE' in result, false);
