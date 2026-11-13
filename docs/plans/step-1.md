@@ -1106,6 +1106,12 @@ export interface LiveFile {
  * Reads <claudeHome>/sessions/ — only names matching ^[0-9]+\.json$ are opened (the directory also
  * holds credential files). Files that do not parse, or lack a numeric pid or a string sessionId,
  * are skipped. Sorted by pid.
+ *
+ * Ruled at review: the pid must be a positive safe integer and the sessionId a non-empty string
+ * (anything else identifies nothing). A file that cannot be read (permissions, or a directory with
+ * such a name) is skipped, not thrown: 6.2 treats "no live-session file can be read" as state
+ * `running`. Epoch-millisecond times are numbers from 0 to 8.64e15 (a fraction is truncated);
+ * anything else gives null, so no later conversion to an ISO string can throw.
  */
 export function readLiveFiles(files: Files, claudeHome: string): LiveFile[];
 
@@ -1124,12 +1130,16 @@ export interface TranscriptFile { path: string; sessionId: string; size: number;
 /**
  * <claudeHome>/projects/<folder>/<uuid>.jsonl, exactly two levels deep, name exactly a lowercase
  * UUID + '.jsonl', regular files only. Sorted by path. Folder names are never parsed.
+ *
+ * Ruled at review: "regular" is read with lstat, so a symbolic link to a file is not listed; a
+ * symbolic link to a project folder is followed (a relocated folder still counts). Sorted by the
+ * whole path in UTF-16 code units, not by folder and then name.
  */
 export function listTranscriptFiles(files: Files, claudeHome: string): TranscriptFile[];
 
 export interface TranscriptFacts {
-  firstCwd: string | null;        // first record carrying a string cwd
-  entrypoint: string | null;      // first record carrying a string entrypoint
+  firstCwd: string | null;        // first record carrying a non-empty string cwd (ruled at review: an empty one is no value)
+  entrypoint: string | null;      // first record carrying a non-empty string entrypoint (same)
   aiTitle: string | null;         // latest 'ai-title' record's aiTitle
   customTitle: string | null;     // latest 'custom-title' record's customTitle
   firstRecordNs: Ns | null;       // smallest parseable timestamp
@@ -1150,6 +1160,11 @@ export interface TranscriptRead { facts: TranscriptFacts; sizeRead: number; prUr
  * Reads bytes [previous.sizeRead, file.size) — or from 0 with EMPTY_FACTS when previous is null or
  * file.size < previous.sizeRead (shrunk) — splits on byte 0x0A, folds the complete lines, and
  * leaves a last line without a newline for the next read (sizeRead stops after the last 0x0A).
+ *
+ * Ruled at review: the file is read in pieces of 4 MiB and each line is decoded on its own (one
+ * decoded string of a transcript of hundreds of megabytes would exceed V8's string limit); sizeRead
+ * counts the bytes actually returned. It throws what Files.readBytes throws, for example when the
+ * file has vanished since it was listed.
  */
 export function readTranscript(files: Files, file: TranscriptFile, previous: { facts: TranscriptFacts; sizeRead: number } | null): TranscriptRead;
 ```
