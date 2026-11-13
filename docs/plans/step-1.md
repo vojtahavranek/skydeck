@@ -1293,8 +1293,10 @@ export function batchArgs(keys: readonly PrKey[]): string[];
 /**
  * Maps one `gh` result to a fetch result per key url.
  * - timedOut → every key: error "gh timed out after 10 s"; notFound → "gh is not installed".
- * - stdout not JSON with a `data` object → every key: the first line of stderr that has text on it
- *   (trimmed), else "gh exited <code>" ("gh was killed by a signal" when there is no code).
+ * - stdout not JSON with a `data` object → every key: with exit code 0 "gh returned output skydeck
+ *   could not read" (stderr is not used: gh succeeded, and a line on it may concern one pull
+ *   request only); otherwise the first line of stderr that has text on it (trimmed), else
+ *   "gh exited <code>" ("gh was killed by a signal" when there is no code).
  * - otherwise per alias p<i>: pullRequest object → ok (state MERGED→merged, CLOSED→closed,
  *   OPEN+isDraft→draft, OPEN→open; reviewDecision APPROVED→approved, CHANGES_REQUESTED→
  *   changes-requested, REVIEW_REQUIRED→review-required, else null; rollup SUCCESS→passing,
@@ -1318,8 +1320,9 @@ export function parseBatch(keys: readonly PrKey[], result: RunResult, atNs: Ns):
  * results count neither as fetched nor as failed.
  * `deps.env` (required) is the environment of the calling process (`platform.env`; this file may
  * not read `process.env`, and the runner's `env` option is the child's complete environment): `gh`
- * always runs with { timeoutMs: GH_TIMEOUT_MS, env } where env is that environment without GH_HOST
- * and GH_FORCE_TTY and with GH_PROMPT_DISABLED=1 and NO_COLOR=1 (the rest is passed, so `gh` finds
+ * always runs with { timeoutMs: GH_TIMEOUT_MS, env } where env is that environment without GH_HOST,
+ * GH_FORCE_TTY and CLICOLOR_FORCE (the last beats NO_COLOR in `gh`) and with GH_PROMPT_DISABLED=1
+ * and NO_COLOR=1 (the rest is passed, so `gh` finds
  * its login). Callers pass `env: ctx.platform.env`.
  */
 export function fetchPrs(
@@ -3224,7 +3227,7 @@ export function chipFor(prs: readonly PrRow[]): { level: ChipLevel; count: numbe
 - `p1` missing, no `errors` → `p1` error `'not found'`.
 - `errors: [{ message: 'Something went wrong …' }]` (no path), `p1: null` → `p1` error with that message, `p0` ok; an error with a path of its own wins over one without.
 - A `pullRequest` without a string `title`, or with state `'SUSPENDED'` → `ok: false` (never `closed`).
-- `timedOut` → both `'gh timed out after 10 s'`; `notFound` → both `'gh is not installed'`; code `null` (killed) → `'gh was killed by a signal'`;
+- `timedOut` → both `'gh timed out after 10 s'`; `notFound` → both `'gh is not installed'`; code `null` (killed) → `'gh was killed by a signal'`; code `0` with stdout that is no answer (colour escape sequences, `''`, `null`) and any stderr → both `'gh returned output skydeck could not read'` (stderr not used); code `1` with the same stdout → the first stderr line;
   stdout `''`, stderr `'HTTP 401: Bad credentials\nmore'`, code 1 → both `'HTTP 401: Bad credentials'`; stdout `''`, stderr `''`, code 4 → `'gh exited 4'`.
 
 `refreshPrs` (store in a temp dir, `fakeRunner`, `fakeClock(T0)`, `refreshMinutes 5`)
@@ -3234,7 +3237,7 @@ export function chipFor(prs: readonly PrRow[]): { level: ChipLevel; count: numbe
 - No due rows → no `gh` call.
 - `fetchPrs(deps, [url1])` with a non-due open row → one `gh` call with one alias, the row updated; `fetchPrs(deps, [])` → no call.
 - `fetchPrs(deps, [mergedUrl])` → no call, the row unchanged (`pr add` of a merged pull request while `gh` fails). Two overlapping refreshes of one open row, the slow one failing or answering `OPEN` after the fast one saved `MERGED` → the row stays `merged`, no error; `{ fetched: 0, failed: 0 }` for the slow one.
-- `deps.env` `{ PATH, HOME, GH_TOKEN, GH_HOST, GH_FORCE_TTY, GH_PROMPT_DISABLED: '0', NO_COLOR: undefined }` → every `gh` call has options `{ timeoutMs: 10000, env: { PATH, HOME, GH_TOKEN, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } }` (so the first `refreshPrs` case above reads `{ timeoutMs: 10000, env }` with that `env`); `deps.env` `{}` → env `{ GH_PROMPT_DISABLED: '1', NO_COLOR: '1' }`; deps without `env` do not compile (`@ts-expect-error`). A runner that rejects → the rows get `'gh could not be run: <first line>'`, no throw; a repeated url is asked once; a url that is no row is not asked.
+- `deps.env` `{ PATH, HOME, GH_TOKEN, GH_HOST, GH_FORCE_TTY, CLICOLOR_FORCE, GH_PROMPT_DISABLED: '0', NO_COLOR: undefined }` → every `gh` call has options `{ timeoutMs: 10000, env: { PATH, HOME, GH_TOKEN, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } }` (so the first `refreshPrs` case above reads `{ timeoutMs: 10000, env }` with that `env`); `deps.env` `{}` → env `{ GH_PROMPT_DISABLED: '1', NO_COLOR: '1' }`; deps without `env` do not compile (`@ts-expect-error`). A runner that rejects → the rows get `'gh could not be run: <first line>'`, no throw; a repeated url is asked once; a url that is no row is not asked.
 
 `prLevel` / `chipFor`
 
