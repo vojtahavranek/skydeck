@@ -64,7 +64,12 @@ if ! runnable "$node"; then
 fi
 
 # Cache compiled modules between runs; the start-up time of a short command is mostly compiling.
-NODE_COMPILE_CACHE=${NODE_COMPILE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/skydeck/compile-cache}
+if [ -z "${NODE_COMPILE_CACHE:-}" ]; then
+  case ${XDG_CACHE_HOME:-} in
+    /*) NODE_COMPILE_CACHE=$XDG_CACHE_HOME/skydeck/compile-cache ;;
+    *) NODE_COMPILE_CACHE=$HOME/.cache/skydeck/compile-cache ;;
+  esac
+fi
 export NODE_COMPILE_CACHE
 
 # The handoff file: node writes "cd -- <dir> || exit 1" and "exec <program and arguments>", every

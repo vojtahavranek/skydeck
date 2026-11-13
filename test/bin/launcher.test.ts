@@ -285,6 +285,15 @@ describe('bin/skydeck: how it calls node', () => {
     assert.equal(r.cache, join(s.home, '.cache/skydeck/compile-cache'));
   });
 
+  test('a relative XDG_CACHE_HOME is ignored', (t) => {
+    const s = launcherSandbox(t);
+    writeFakeNode(join(s.bin, 'node'), 'path');
+
+    const r = launch(launcher, [], s.env({ XDG_CACHE_HOME: 'rel-cache' }), s.root);
+
+    assert.equal(r.cache, join(s.home, '.cache/skydeck/compile-cache'));
+  });
+
   test('a NODE_COMPILE_CACHE that is already set is left alone', (t) => {
     const s = launcherSandbox(t);
     writeFakeNode(join(s.bin, 'node'), 'path');
