@@ -190,6 +190,48 @@ test('no boot id: nothing is reconciled, and that is recorded', (t) => {
   assert.equal(problems(d), null);
 });
 
+/** What the real platform throws when /proc cannot be read for another reason than absence. */
+const procError = (code: string): Error =>
+  Object.assign(new Error(`cannot read /proc (${code})`), { code });
+
+for (const code of ['EACCES', 'EMFILE']) {
+  test(`a boot id that cannot be read (${code}) is no missing boot id: the reconcile stops with the error, recording nothing`, (t) => {
+    const d = setup(t);
+    const deck = deckWith(d.deck, {
+      proc: {
+        bootId: () => {
+          throw procError(code);
+        },
+      },
+    });
+
+    assert.throws(() => reconcile(deck), { code });
+    assert.deepEqual(observed(d), []);
+    assert.equal(problems(d), null);
+  });
+
+  test(`a process whose /proc/<pid>/stat cannot be read (${code}) is recorded and skipped, not taken as gone`, (t) => {
+    const d = setup(t);
+    d.proc.setProcess(4343, { stat: statLine(4343, START), cmdline: ['claude'] });
+    live(d, { pid: 4343, sessionId: S2 });
+    const deck = deckWith(d.deck, {
+      proc: {
+        stat: (pid) => {
+          if (pid === 4242) throw procError(code);
+          return d.proc.stat(pid);
+        },
+      },
+    });
+
+    assert.deepEqual(reconcile(deck), { observed: 1 });
+    assert.deepEqual(
+      observed(d).map((e) => [e.pid, e.sessionId]),
+      [[4343, S2]],
+    );
+    assert.deepEqual(problems(d), [`process 4242: ${code}`]);
+  });
+}
+
 test('a live file modified exactly 2 seconds ago is still left for later', (t) => {
   const d = setup(t);
   live(d, {}, T0 - 2n * SEC);

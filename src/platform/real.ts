@@ -308,16 +308,35 @@ function realFiles(): Files {
   };
 }
 
+/** The file, or what a vanished process leaves, is not there: ENOENT, ENOTDIR, ESRCH. */
+function isGone(error: unknown): boolean {
+  return isMissing(error) || errorCode(error) === 'ESRCH';
+}
+
 function realProc(): Proc {
+  // Lenient: every failure reads as "not there" (cmdline, meminfo: a caller only loses a detail).
   const read = (path: string): Buffer | null => {
     try {
       return readFileSync(path);
     } catch {
-      return null; // every failure reads as "not there": the process ended, or /proc is not Linux's
+      return null;
     }
   };
-  const readLine = (path: string): string | null => {
-    const bytes = read(path);
+  // Strict, for what liveness is judged by (stat, the boot id): null only when the file is not
+  // there; any other failure (EACCES, EMFILE, EIO …) is thrown, so that a process that could not be
+  // read is never taken for one that is gone.
+  const readStrict = (path: string): Buffer | null => {
+    try {
+      return readFileSync(path);
+    } catch (error) {
+      if (isGone(error)) {
+        return null;
+      }
+      const code = errorCode(error) ?? 'unknown error';
+      throw Object.assign(new SkydeckError(`cannot read ${path} (${code})`), { code });
+    }
+  };
+  const lineOf = (bytes: Buffer | null): string | null => {
     if (bytes === null) {
       return null;
     }
@@ -326,8 +345,8 @@ function realProc(): Proc {
   };
   const isPid = (pid: number): boolean => Number.isSafeInteger(pid) && pid > 0;
   return {
-    bootId: () => readLine('/proc/sys/kernel/random/boot_id'),
-    stat: (pid) => (isPid(pid) ? readLine(`/proc/${pid}/stat`) : null),
+    bootId: () => lineOf(readStrict('/proc/sys/kernel/random/boot_id')),
+    stat: (pid) => (isPid(pid) ? lineOf(readStrict(`/proc/${pid}/stat`)) : null),
     cmdline(pid) {
       const bytes = isPid(pid) ? read(`/proc/${pid}/cmdline`) : null;
       return bytes === null ? null : new Uint8Array(bytes);

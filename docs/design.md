@@ -246,6 +246,12 @@ A process recorded as (boot id, pid, process start) is alive if and only if:
 
 A live-session file is trusted only when its `pid` and `procStart` satisfy 2 and 3.
 
+"Does not exist" means exactly that: the file is not there. When the boot id or
+`/proc/<pid>/stat` cannot be read for another reason (no permission, too many open files), the
+process is neither alive nor dead but unknown, and nothing is decided on it: the command stops
+with the error, except in the refresh's reconcile, which records an unreadable process and leaves
+it for the next run.
+
 ### 5.6 Transcripts
 
 Transcripts are `<claudeHome>/projects/<folder>/<uuid>.jsonl`. Only files whose name is exactly a

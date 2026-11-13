@@ -250,3 +250,35 @@ test('the rows are derived with one boot id, which they carry; a failed read is 
   assert.equal(loadSessions(deck)[0]?.bootId, BOOT_A); // the next load reads again
   assert.equal(loadRows(d.deck)[0]?.session.bootId, BOOT_A);
 });
+
+/** What the real platform throws when /proc cannot be read for another reason than absence. */
+const procError = (code: string): Error =>
+  Object.assign(new Error(`cannot read /proc/4242/stat (${code})`), { code });
+
+for (const code of ['EACCES', 'EMFILE']) {
+  test(`a process whose /proc cannot be read (${code}) is never taken as dead: loading stops with the error`, (t) => {
+    const d = testDeck(t);
+    spoolStart(d, S1, 4242);
+    liveFile(d, S1, 4242);
+    transcript(d, S1);
+    refresh(d.deck);
+    const unreadable = deckWith(d.deck, {
+      proc: {
+        stat: () => {
+          throw procError(code);
+        },
+      },
+    });
+    const noBootId = deckWith(d.deck, {
+      proc: {
+        bootId: () => {
+          throw procError(code);
+        },
+      },
+    });
+
+    assert.throws(() => loadRows(unreadable), { code });
+    assert.throws(() => loadSessions(unreadable), { code });
+    assert.throws(() => loadRows(noBootId), { code });
+  });
+}

@@ -259,6 +259,11 @@ export interface FileInfo {
   uid: number;
 }
 export interface Proc {
+  // bootId() and stat() (step 1's) change (ruling, for task 8's three-valued pidLineState): null
+  // only when the file is not there (ENOENT, ENOTDIR, ESRCH); any other failure (EACCES, EMFILE …)
+  // is thrown as a SkydeckError carrying its `code`, so that nothing is removed or ended on a
+  // process that could not be read. Step 1's callers: reconcile records and skips that process;
+  // an unreadable boot id, and loading the sessions, stop the command with the error (design 5.5).
   /** The target of the symbolic link /proc/<pid>/fd/<fd>; null when it cannot be read. */
   fdTarget(pid: number, fd: number): string | null;
   /** Whether /proc/net/tcp or /proc/net/tcp6 lists a socket in state LISTEN (0A) on `port`; null
@@ -1111,7 +1116,9 @@ own in wave 1; moving it to wave 2 would delay tasks 9 and 15, which need it, by
 the largest task of wave 1; a reviewer reads the platform first, then the helpers.
 
 **Files**
-- Modify: `src/platform/types.ts`, `src/platform/real.ts`, `src/platform/paths.ts`,
+- Modify: `src/platform/types.ts`, `src/platform/real.ts` (also `Proc.stat` / `bootId` throw
+  unless the file is not there, ruling), `docs/design.md` 5.5 (unknown liveness, ruling),
+  `src/platform/paths.ts`,
   `src/platform/config.ts`, `src/platform/time.ts` (`MAX_TIMER_MS`, ruling),
   `test/helpers/platform.ts`, `test/helpers/context.ts` (`testContextOn`, ruling),
   `test/helpers/sandbox.ts` (`SKYDECK_TEST_NO_WINDOWS`, A32)

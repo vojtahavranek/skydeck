@@ -73,11 +73,17 @@ export interface Files {
   chmod(path: string, mode: number): void;
 }
 
-/** Linux /proc. Every method returns null when the file cannot be read. */
+/**
+ * Linux /proc. bootId and stat, by which liveness is judged (design 5.5), return null only when
+ * the file is not there (ENOENT, ENOTDIR, ESRCH: the process is gone, or /proc is not Linux's) and
+ * throw any other failure (EACCES, EMFILE …) as a SkydeckError carrying its `code`: a process that
+ * could not be read is never taken for one that is gone. The other methods return null when the
+ * file cannot be read.
+ */
 export interface Proc {
   /** /proc/sys/kernel/random/boot_id without the trailing newline. */
   bootId(): string | null;
-  /** The single line of /proc/<pid>/stat without the trailing newline. */
+  /** The single line of /proc/<pid>/stat without the trailing newline; null for a pid ≤ 0. */
   stat(pid: number): string | null;
   /** Raw bytes of /proc/<pid>/cmdline. */
   cmdline(pid: number): Uint8Array | null;

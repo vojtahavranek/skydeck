@@ -455,3 +455,25 @@ test('resume keeps the permission flag the session was started with, once', asyn
     }),
   );
 });
+
+for (const code of ['EACCES', 'EMFILE']) {
+  test(`a holder whose /proc cannot be read (${code}) is never taken as gone: resume stops, starts nothing, takes no lock`, async (t) => {
+    const d = deck(t);
+    session(d, { argv: ['claude'], running: true });
+    const realStat = d.proc.stat.bind(d.proc);
+    d.proc.stat = (pid) => {
+      if (pid === 4242) {
+        throw Object.assign(new Error(`cannot read /proc/4242/stat (${code})`), { code });
+      }
+      return realStat(pid);
+    };
+    const { ctx, runner } = withRunner(d, () => runResult({}));
+
+    assert.equal(await main(['resume', '0b5f', '--here'], ctx), 1);
+
+    assert.ok(d.stderr().includes(code), d.stderr());
+    assert.equal(existsSync(handoffPath(d)), false);
+    assert.deepEqual(runner.calls, []);
+    assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+  });
+}

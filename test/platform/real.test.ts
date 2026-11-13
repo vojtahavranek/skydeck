@@ -1674,3 +1674,47 @@ describe('the Windows guard (A32)', () => {
     assert.equal(result.stdout, 'ok');
   });
 });
+
+describe('real proc: a read that fails is not a process that is gone (ruling)', () => {
+  test('stat and bootId throw for EMFILE, naming the file; cmdline and the others still read as null', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const script = [
+      `import { openSync } from 'node:fs';`,
+      `const { realPlatform } = await import(${JSON.stringify(REAL_MODULE)});`,
+      'const { proc } = realPlatform();',
+      'const held = [];',
+      'try { for (;;) held.push(openSync("/dev/null", "r")); } catch (error) { if (error.code !== "EMFILE") throw error; }',
+      'const outcome = (read) => { try { return { value: read() }; } catch (error) { return { code: error.code, name: error.name, message: error.message }; } };',
+      'process.stdout.write(JSON.stringify({',
+      '  stat: outcome(() => proc.stat(process.pid)),',
+      '  bootId: outcome(() => proc.bootId()),',
+      '  cmdline: outcome(() => proc.cmdline(process.pid)),',
+      '  memAvailableMb: outcome(() => proc.memAvailableMb()),',
+      '}));',
+    ].join('\n');
+
+    const result = await realPlatform().runner.run(
+      'sh',
+      ['-c', 'ulimit -n 64 && exec "$NODE" --input-type=module -e "$1"', 'sh', script],
+      { cwd: s.root, env: s.env({ NODE: process.execPath }), timeoutMs: 20_000 },
+    );
+    const got = JSON.parse(result.stdout) as Record<string, Record<string, unknown>>;
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(got['stat']?.['code'], 'EMFILE');
+    assert.equal(got['stat']?.['name'], 'SkydeckError');
+    assert.match(String(got['stat']?.['message']), /^cannot read \/proc\/\d+\/stat \(EMFILE\)$/);
+    assert.equal(got['bootId']?.['code'], 'EMFILE');
+    assert.match(String(got['bootId']?.['message']), /\/proc\/sys\/kernel\/random\/boot_id/);
+    assert.deepEqual(got['cmdline'], { value: null });
+    assert.deepEqual(got['memAvailableMb'], { value: null });
+  });
+
+  test('a pid that is not there is null, not an error', () => {
+    const { proc } = realPlatform();
+
+    assert.equal(proc.stat(999_999_999), null);
+    assert.notEqual(proc.bootId(), null);
+  });
+});
