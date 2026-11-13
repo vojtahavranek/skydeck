@@ -285,6 +285,33 @@ describe('hook: a value can never add a line to the file', () => {
     assert.equal(head.filter((line) => line.startsWith('argv_b64=')).length, 0);
   });
 
+  test('a carriage return is treated like a newline: the value is written empty', (t) => {
+    const s = hookSandbox(t);
+    const dir = join(s.root, 'd\rentrypoint_env=sdk-cli');
+    mkdirSync(dir);
+
+    const ran = run(
+      s,
+      'SessionEnd',
+      {
+        CLAUDE_PID: undefined,
+        CLAUDE_CODE_SESSION_ID: `${S1}\rx`,
+        CLAUDE_CODE_ENTRYPOINT: 'cli\r',
+      },
+      INPUT,
+      dir,
+    );
+
+    assertSilent(ran);
+    const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+    const { head } = split(content);
+    assert.equal(head.length, 9);
+    assert.ok(head.includes('session_env='));
+    assert.ok(head.includes('entrypoint_env='));
+    assert.ok(head.includes('pwd='));
+    assert.equal(content.includes('\r'), false);
+  });
+
   test('a CLAUDE_PID with a newline is recorded as no pid', (t) => {
     const s = hookSandbox(t);
 

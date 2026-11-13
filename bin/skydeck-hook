@@ -10,8 +10,9 @@
 # The spool holds working directories and launch command lines, so it is private to the user.
 umask 077
 
-# A line break in a value would add header lines to the spool file, so such a value is written
-# empty (a value never contains one in practice; a directory name can).
+# A newline in a value would add header lines to the spool file, and a carriage return would do the
+# same for a reader that treats it as a line end, so such a value is written empty (a value never
+# contains one in practice; a directory name can).
 nl='
 '
 
@@ -46,16 +47,18 @@ resolve_state() {
 }
 
 main() {
+  # First, so that the time is as close to the event as it can be.
+  time_ns=$(date +%s%N)
+
+  cr=$(printf '\r') # $(...) strips only trailing newlines
   event=${1-}
   session_env=${CLAUDE_CODE_SESSION_ID-}
   entrypoint_env=${CLAUDE_CODE_ENTRYPOINT-}
   cwd=${PWD-}
-  case $event in *"$nl"*) event= ;; esac
-  case $session_env in *"$nl"*) session_env= ;; esac
-  case $entrypoint_env in *"$nl"*) entrypoint_env= ;; esac
-  case $cwd in *"$nl"*) cwd= ;; esac
-  # First, so that the time is as close to the event as it can be.
-  time_ns=$(date +%s%N)
+  case $event in *"$nl"* | *"$cr"*) event= ;; esac
+  case $session_env in *"$nl"* | *"$cr"*) session_env= ;; esac
+  case $entrypoint_env in *"$nl"* | *"$cr"*) entrypoint_env= ;; esac
+  case $cwd in *"$nl"* | *"$cr"*) cwd= ;; esac
 
   resolve_state
   if [ -z "$state" ]; then

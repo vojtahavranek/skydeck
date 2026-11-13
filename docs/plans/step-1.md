@@ -908,11 +908,11 @@ export class SpoolParseError extends Error {}
  * match ^[0-9]+-[0-9]+-[0-9]+\.ev$; there is no line '--'; a key appears twice before it; v is not
  * 1; event is not SessionStart or SessionEnd; time_ns is not digits; boot_id is empty; claude_pid
  * is neither empty nor digits; the hook input is not a JSON object; no session id (input
- * session_id, else session_env) is a UUID. The hook writes a value that contained a line break as
- * empty, and a claude_pid that is not all digits as empty (name part 0), so pwd, session_env and
- * entrypoint_env may be empty: empty means "unknown", never a valid value. The launch command is
- * normalised to flags and flag values: positional arguments are dropped before anything is
- * stored (design principle 4). Lines are split on '\n' only; a '\r' belongs to the value.
+ * session_id, else session_env) is a UUID. The hook writes a value that contained a newline or a
+ * carriage return as empty, and a claude_pid that is not all digits as empty (name part 0), so pwd,
+ * session_env and entrypoint_env may be empty: empty means "unknown", never a valid value. The
+ * launch command is normalised to flags and flag values: positional arguments are dropped before
+ * anything is stored (design principle 4). Lines are split on '\n' only; a '\r' belongs to the value.
  * `exists` is used only by absolutizePathFlags.
  */
 export function parseSpoolFile(name: string, content: string, exists: (path: string) => boolean): SpoolEvent;
@@ -1647,9 +1647,9 @@ Lines end with `\n` only; a `\r` is part of the value, so the parser splits on `
 
 `argv_b64` is present for `SessionStart` only, and empty when `/proc/<pid>/cmdline` cannot be
 read. `stat` is empty when `/proc/<pid>/stat` cannot be read. Missing variables give empty values,
-and so does a value that contains a line break (`event`, `session_env`, `entrypoint_env`, `pwd`) or
-a `claude_pid` that is not all digits (its name part is then `0`). The parser ignores keys it does
-not know (so later versions can add keys); a line before `--` without `=` is a parse error, and so
+and so does a value that contains a newline or a carriage return (`event`, `session_env`,
+`entrypoint_env`, `pwd`) or a `claude_pid` that is not all digits (its name part is then `0`). The parser
+ignores keys it does not know (so later versions can add keys); a line before `--` without `=` is a parse error, and so
 is a key that appears twice.
 
 State directory of the hook (D26): `$SKYDECK_HOME/state` when `SKYDECK_HOME` is non-empty and absolute; else
