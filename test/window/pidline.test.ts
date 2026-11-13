@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { formatPidLine, isPidLineAlive, parsePidLine } from '../../src/window/pidline.ts';
+import {
+  formatPidLine,
+  isPidLineAlive,
+  parsePidLine,
+  pidLineState,
+} from '../../src/window/pidline.ts';
 import type { PidLine } from '../../src/window/pidline.ts';
+import type { Proc } from '../../src/platform/types.ts';
 import { BOOT_A, BOOT_B, fakeProc, statLine } from '../helpers/platform.ts';
 
 const SERVER: PidLine = { pid: 4242, procStart: 51234567, bootId: BOOT_A };
@@ -101,6 +107,8 @@ test('parsePidLine gives null for garbled lines', () => {
     `4242 51234567 ${BOOT_A}\r\n`, // CRLF
     `4242 51234567 ${BOOT_A}\n\n`, // two newlines
     `4242 51234567 ${BOOT_A}\n4243 1 ${BOOT_A}\n`, // two lines
+    `0 51234567 ${BOOT_A}\n`, // pid 0: a signal to it would reach the caller's own group
+    `00 51234567 ${BOOT_A}\n`,
     `-1 51234567 ${BOOT_A}\n`,
     `+4242 51234567 ${BOOT_A}\n`,
     `42x 51234567 ${BOOT_A}\n`,
@@ -141,59 +149,92 @@ test('formatPidLine refuses a field that would break the line: empty or holding 
   }
 });
 
+test('formatPidLine refuses a pid that is not a positive whole number', () => {
+  for (const pid of [
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    assert.throws(() => formatPidLine({ ...SERVER, pid }), /pid line/, String(pid));
+  }
+});
+
+test('formatPidLine refuses a process start that is not a non-negative whole number', () => {
+  for (const procStart of [
+    -1,
+    0.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    assert.throws(() => formatPidLine({ ...SERVER, procStart }), /pid line/, String(procStart));
+  }
+});
+
 // ---------------------------------------------------------------------------------------------
-// Liveness: design 5.5's rule (boot id, pid, process start).
+// Liveness: design 5.5's rule (boot id, pid, process start), with "cannot tell" kept apart.
 
-test('isPidLineAlive: the same boot, the pid exists and its process start matches', () => {
-  const proc = fakeProc({
-    bootId: BOOT_A,
-    processes: { 4242: { stat: statLine(4242, 51234567), cmdline: [] } },
+function procWith(stat: string | null, bootId: string | null = BOOT_A): Proc {
+  return fakeProc({
+    bootId,
+    processes: stat === null ? {} : { 4242: { stat, cmdline: [] } },
   });
-  assert.equal(isPidLineAlive(SERVER, proc, BOOT_A), true);
-  assert.equal(isPidLineAlive(KEEPER, proc, BOOT_A), true);
+}
+
+test('pidLineState: alive when the boot, the pid and its process start all match', () => {
+  const proc = procWith(statLine(4242, 51234567));
+  assert.equal(pidLineState(SERVER, proc, BOOT_A), 'alive');
+  assert.equal(pidLineState(KEEPER, proc, BOOT_A), 'alive');
 });
 
-test('isPidLineAlive: a line from another boot is dead, even when the pid and start match', () => {
-  const proc = fakeProc({
-    bootId: BOOT_B,
-    processes: { 4242: { stat: statLine(4242, 51234567), cmdline: [] } },
-  });
-  assert.equal(isPidLineAlive(SERVER, proc, BOOT_B), false);
+test('pidLineState: dead when the line is from another boot, even when the pid and start match', () => {
+  assert.equal(pidLineState(SERVER, procWith(statLine(4242, 51234567), BOOT_B), BOOT_B), 'dead');
 });
 
-test('isPidLineAlive: a reused pid (another process start) is dead', () => {
-  const proc = fakeProc({
-    bootId: BOOT_A,
-    processes: { 4242: { stat: statLine(4242, 51234568), cmdline: [] } },
-  });
-  assert.equal(isPidLineAlive(SERVER, proc, BOOT_A), false);
+test('pidLineState: dead when the pid was reused (another process start)', () => {
+  assert.equal(pidLineState(SERVER, procWith(statLine(4242, 51234568)), BOOT_A), 'dead');
 });
 
-test('isPidLineAlive: without a current boot id nothing counts as alive', () => {
-  const proc = fakeProc({
-    bootId: null,
-    processes: { 4242: { stat: statLine(4242, 51234567), cmdline: [] } },
-  });
-  assert.equal(isPidLineAlive(SERVER, proc, null), false);
+test('pidLineState: dead when no process has the pid', () => {
+  assert.equal(pidLineState(SERVER, procWith(null), BOOT_A), 'dead');
 });
 
-test('isPidLineAlive: a pid with no process is dead', () => {
-  assert.equal(isPidLineAlive(SERVER, fakeProc({ bootId: BOOT_A }), BOOT_A), false);
+test('pidLineState: unknown without a current boot id, even when the process matches', () => {
+  assert.equal(pidLineState(SERVER, procWith(statLine(4242, 51234567), null), null), 'unknown');
 });
 
-test('isPidLineAlive: a stat line whose start cannot be read is dead', () => {
-  const proc = fakeProc({
-    bootId: BOOT_A,
-    processes: { 4242: { stat: '4242 (claude) S 1', cmdline: [] } },
-  });
-  assert.equal(isPidLineAlive(SERVER, proc, BOOT_A), false);
+test('pidLineState: unknown when reading /proc fails', () => {
+  const proc: Proc = {
+    ...procWith(statLine(4242, 51234567)),
+    stat() {
+      throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' });
+    },
+  };
+  assert.equal(pidLineState(SERVER, proc, BOOT_A), 'unknown');
 });
 
-test('isPidLineAlive judges by the boot id it is given, not by asking proc', () => {
+test('pidLineState: unknown when the stat line exists but its process start cannot be read', () => {
+  assert.equal(pidLineState(SERVER, procWith('4242 (claude) S 1'), BOOT_A), 'unknown');
+});
+
+test('pidLineState judges by the boot id it is given, not by asking proc', () => {
   // The caller reads the boot id once for many lines; a proc whose own answer differs is ignored.
-  const proc = fakeProc({
-    bootId: BOOT_B,
-    processes: { 4242: { stat: statLine(4242, 51234567), cmdline: [] } },
-  });
-  assert.equal(isPidLineAlive(SERVER, proc, BOOT_A), true);
+  assert.equal(pidLineState(SERVER, procWith(statLine(4242, 51234567), BOOT_B), BOOT_A), 'alive');
+});
+
+test('isPidLineAlive is true only for a line known to be alive', () => {
+  const cases: [Proc, string | null, boolean][] = [
+    [procWith(statLine(4242, 51234567)), BOOT_A, true],
+    [procWith(statLine(4242, 51234567), BOOT_B), BOOT_B, false], // other boot: dead
+    [procWith(statLine(4242, 51234568)), BOOT_A, false], // reused pid: dead
+    [procWith(null), BOOT_A, false], // no process: dead
+    [procWith(statLine(4242, 51234567), null), null, false], // no boot id: unknown
+    [procWith('4242 (claude) S 1'), BOOT_A, false], // unreadable start: unknown
+  ];
+  for (const [proc, bootId, alive] of cases) {
+    assert.equal(isPidLineAlive(SERVER, proc, bootId), alive);
+  }
 });

@@ -35,13 +35,24 @@ function breaksLine(field: string): boolean {
   return field === '' || /\s/.test(field);
 }
 
-/** The line with its one '\n'. Throws only for a text field that would break the line. */
+/**
+ * The line with its one '\n'. Throws for a field that would break the line or that no reader
+ * accepts: a pid that is not a positive whole number, a process start that is not a non-negative
+ * whole number (both safe integers), an empty boot id or version, or one holding whitespace.
+ */
 export function formatPidLine(line: PidLine): string {
   const fields = [String(line.pid), String(line.procStart), line.bootId];
   if (line.keeper !== undefined) {
     fields.push(line.keeper.version, line.keeper.started ? '1' : '0');
   }
-  if (breaksLine(line.bootId) || (line.keeper !== undefined && breaksLine(line.keeper.version))) {
+  if (
+    !Number.isSafeInteger(line.pid) ||
+    line.pid < 1 ||
+    !Number.isSafeInteger(line.procStart) ||
+    line.procStart < 0 ||
+    breaksLine(line.bootId) ||
+    (line.keeper !== undefined && breaksLine(line.keeper.version))
+  ) {
     throw new Error(`not a valid pid line: ${JSON.stringify(fields.join(' '))}`);
   }
   return `${fields.join(' ')}\n`;
@@ -49,8 +60,9 @@ export function formatPidLine(line: PidLine): string {
 
 /**
  * The fields of one pid line, or null for anything else (another separator, a missing or extra
- * field, a second line, a number that is not decimal digits or not a safe integer). The final '\n'
- * may be missing; nothing else is tolerated.
+ * field, a second line, a number that is not decimal digits or not a safe integer, pid 0 — a
+ * signal to pid 0 would reach the caller's own process group). The final '\n' may be missing;
+ * nothing else is tolerated.
  */
 export function parsePidLine(text: string): PidLine | null {
   const match = LINE.exec(text);
@@ -59,7 +71,7 @@ export function parsePidLine(text: string): PidLine | null {
   if (pidText === undefined || startText === undefined || bootId === undefined) return null;
   const pid = safeInteger(pidText);
   const procStart = safeInteger(startText);
-  if (pid === null || procStart === null) return null;
+  if (pid === null || pid < 1 || procStart === null) return null;
   const line: PidLine = { pid, procStart, bootId };
   if (version !== undefined && started !== undefined) {
     line.keeper = { version, started: started === '1' };
@@ -68,17 +80,41 @@ export function parsePidLine(text: string): PidLine | null {
 }
 
 /**
- * Design 5.5: alive when the line's boot id is `bootId` (the current one, read once by the
- * caller), /proc/<pid>/stat exists, and its field 22 equals the line's process start. Without a
- * current boot id nothing is alive.
- *
- * false means "not proven alive", which is also the answer when the boot id or the stat line could
- * not be read (the platform turns every read error into null). A caller that REMOVES something of
- * the line's owner (its socket, its pid file) or signals it must therefore first have a non-null
- * boot id, and should treat a failed read as "cannot tell", not as "dead".
+ * What design 5.5's rule can say about a line: alive, dead, or unknown — it could not tell.
+ * Nothing is ever removed, ended or given up on 'unknown': only 'dead' allows removing a socket or
+ * a pid file.
+ */
+export type PidLineState = 'alive' | 'dead' | 'unknown';
+
+/**
+ * Design 5.5, three-valued. `bootId` is the current boot id, read once by the caller (null when it
+ * could not be read).
+ * - unknown: no current boot id; reading /proc/<pid>/stat failed (the platform threw); or the
+ *   stat line exists but its process start cannot be read;
+ * - dead: the line is from another boot; no process has the pid; or its process start differs
+ *   (the pid was reused);
+ * - alive: the boot id, the pid and the process start all match.
+ */
+export function pidLineState(line: PidLine, proc: Proc, bootId: string | null): PidLineState {
+  if (bootId === null) return 'unknown';
+  if (line.bootId !== bootId) return 'dead';
+  let stat: string | null;
+  try {
+    stat = proc.stat(line.pid);
+  } catch {
+    return 'unknown';
+  }
+  if (stat === null) return 'dead';
+  const start = procStartFromStat(stat);
+  if (start === null) return 'unknown';
+  return start === line.procStart ? 'alive' : 'dead';
+}
+
+/**
+ * "Known alive": pidLineState is 'alive'. For showing and counting, and before signalling a
+ * process. A caller that removes something of the line's owner or gives up on it uses
+ * pidLineState and acts only on 'dead'.
  */
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean {
-  if (bootId === null || line.bootId !== bootId) return false;
-  const stat = proc.stat(line.pid);
-  return stat !== null && procStartFromStat(stat) === line.procStart;
+  return pidLineState(line, proc, bootId) === 'alive';
 }
