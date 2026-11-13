@@ -422,7 +422,10 @@ otherwise it behaves like `skydeck ls`.
   the cursor. While the list is on screen it also refreshes by itself every 5 seconds (5.3, then
   the automatic pull-request refresh of 7.3) and repaints when what it shows changed; that refresh
   keeps the order and the selected session (a new session goes to the end of its group) and waits
-  while an input is being typed.
+  while an input is being typed. When the selected session leaves the list, the cursor goes to the
+  row that takes its place, not to the top, and the message line says which session left.
+- The title line counts the sessions shown and how many of them are in each state, so that a
+  session that starts waiting out of view is still seen.
 - A row shows: state, title, time in state, marks, the pull-request chip, a note mark, and the
   short id (first 8 characters of the session id).
 - Every string that comes from a transcript, a live-session file or GitHub passes through the
