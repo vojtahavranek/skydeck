@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -16,7 +16,7 @@ import { handoffScript } from '../../../src/terminals/here.ts';
 import { shellQuote } from '../../../src/text/shell.ts';
 import { testDeck } from '../../helpers/deck.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
-import { S1, S2, S3, SEC, T0, fakeRunner, runResult } from '../../helpers/platform.ts';
+import { S1, S2, S3, SEC, T0, fakeRunner, runResult, statLine } from '../../helpers/platform.ts';
 import type { FakeRunner, RunCall } from '../../helpers/platform.ts';
 import {
   startRunning,
@@ -964,7 +964,7 @@ test('every 5 s the list refreshes by itself: new states and sessions show, the 
   assert.deepEqual(rowOrder(refreshed), [short(S1), short(S2), short(S3)]);
   assert.equal(selectedIn(refreshed), short(S2), 'the cursor stays on its session');
   assert.ok(lineOf(refreshed, S2).includes('working'), refreshed.join('\n'));
-  assert.equal(refreshed[0], 'skydeck  3 sessions: 1 working · 2 not-running', 'the counts too');
+  assert.equal(refreshed[0], 'skydeck  3 sessions  1 working · 2 not-running', 'the counts too');
   assert.deepEqual(spooled(d), []);
   assert.equal(d.stderr(), '');
 });
@@ -1615,4 +1615,221 @@ test('what the refresh itself read in shows at once: a session known only from a
   assert.equal(await main([], d.ctx), 0);
 
   assert.deepEqual(rowOrder(refreshed), [short(S1), short(S2), short(S3)]);
+});
+
+// --- what makes a background refresh load the rows again (each the only trigger in its case) -------
+
+/** A hook event for `sessionId` by process `pid`, put in the spool. */
+function spoolEvent(
+  d: TestDeck,
+  event: 'SessionStart' | 'SessionEnd',
+  sessionId: string,
+  pid: number,
+  timeNs: Ns,
+  extra: Record<string, unknown>,
+): void {
+  const fields = { event, timeNs, pid, input: hookInput(event, sessionId, extra) };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 7)), spoolText(fields));
+}
+
+/** A key chunk: `change`, then one tick; the line of `id` in the frame after it is kept. */
+const tickShowing =
+  (get: () => TestDeck, id: string, shown: string[], change: () => void = () => {}) =>
+  (): string => {
+    change();
+    const deck = get();
+    deck.clock.advanceMs(PERIOD_MS);
+    shown.push(lineOf(frames(deck).at(-1) ?? [], id) || '(not shown)');
+    return '';
+  };
+
+test('an end event alone (the live file and the process unchanged) shows at the next tick', async (t) => {
+  let d: TestDeck | undefined;
+  const shown: string[] = [];
+  const get = (): TestDeck => d as TestDeck;
+  d = listDeck(t, [
+    tickShowing(get, S2, shown),
+    tickShowing(get, S2, shown, () => {
+      spoolEvent(get(), 'SessionEnd', S2, 4343, T0 + 6n * SEC, { reason: 'prompt_input_exit' });
+    }),
+    'q',
+  ]);
+  startRunning(d, S2, 4343);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const [before = '', after = ''] = shown;
+  assert.ok(before.includes('working'), before);
+  assert.ok(after.includes('not-running'), after);
+});
+
+test('a session only its live file shows (no hook) appears once reconcile has observed it', async (t) => {
+  let d: TestDeck | undefined;
+  const shown: string[] = [];
+  const get = (): TestDeck => d as TestDeck;
+  d = listDeck(t, [
+    tickShowing(get, S3, shown, () => {
+      const deck = get();
+      const path = join(deck.deck.places.claudeHome, 'sessions', '4444.json');
+      writeFileSync(
+        path,
+        JSON.stringify({
+          pid: 4444,
+          sessionId: S3,
+          cwd: '/home/dev/projects/demo',
+          procStart: '51234567',
+          entrypoint: 'cli',
+          status: 'busy',
+          updatedAt: 1794474030000,
+          statusUpdatedAt: 1794474030000,
+        }),
+      );
+      // Written a second before the tick: reconcile waits until it has settled (5.4).
+      const at = Number((deck.clock.nowNs() + 4n * SEC) / SEC);
+      utimesSync(path, at, at);
+      deck.proc.setProcess(4444, { stat: statLine(4444, 51234567), cmdline: ['claude'] });
+    }),
+    tickShowing(get, S3, shown), // the live files are as they were: only `observed` says so
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const [first = '', second = ''] = shown;
+  assert.equal(first, '(not shown)');
+  assert.ok(second.includes('working'), second);
+});
+
+test('a transcript that is deleted takes its row away at the next tick', async (t) => {
+  let d: TestDeck | undefined;
+  const shown: string[] = [];
+  const get = (): TestDeck => d as TestDeck;
+  d = listDeck(t, [
+    tickShowing(get, S2, shown),
+    tickShowing(get, S2, shown, () => {
+      rmSync(join(get().deck.places.claudeHome, 'projects', 'demo', `${S2}.jsonl`));
+    }),
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const [before = '', after = ''] = shown;
+  assert.ok(before.includes(short(S2)), before);
+  assert.equal(after, '(not shown)');
+});
+
+test('after a tick that failed once it had read something in, the next tick loads the rows', async (t) => {
+  let d: TestDeck | undefined;
+  let broken = false;
+  const shown: string[] = [];
+  const get = (): TestDeck => d as TestDeck;
+  d = listDeck(t, [
+    tickShowing(get, S2, shown, () => {
+      // Ingest saves the end event; reconcile, after it, fails.
+      spoolEvent(get(), 'SessionEnd', S2, 4343, T0 + 1n * SEC, { reason: 'prompt_input_exit' });
+      broken = true;
+    }),
+    tickShowing(get, S2, shown, () => {
+      broken = false;
+    }),
+    'q',
+  ]);
+  startRunning(d, S2, 4343);
+  const bootId = d.proc.bootId;
+  d.proc.bootId = () => {
+    if (broken) {
+      throw new Error('database is locked');
+    }
+    return bootId();
+  };
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const [failed = '', next = ''] = shown;
+  assert.ok(failed.includes('working'), failed);
+  assert.ok(next.includes('not-running'), next);
+  assert.equal(spooled(d).length, 0);
+});
+
+test('reloads: one per change, none for ticks that find nothing, and one per minute after the last', async (t) => {
+  let d: TestDeck | undefined;
+  let counting: ReturnType<typeof countingLoads> | undefined;
+  const loads = (): number => (counting as ReturnType<typeof countingLoads>).loads();
+  const counted: number[] = [];
+  d = listDeck(t, [
+    () => {
+      const deck = d as TestDeck;
+      const opened = loads();
+      startRunning(deck, S2, 4343);
+      deck.clock.advanceMs(PERIOD_MS); // 5 s: a change
+      counted.push(loads() - opened);
+      deck.clock.advanceMs(55_000); // 10 s to 60 s: eleven ticks that find nothing
+      counted.push(loads() - opened);
+      deck.clock.advanceMs(PERIOD_MS); // 65 s: a minute after the last loading
+      counted.push(loads() - opened);
+      deck.clock.advanceMs(55_000); // to 120 s
+      counted.push(loads() - opened);
+      deck.clock.advanceMs(PERIOD_MS); // 125 s
+      counted.push(loads() - opened);
+      return '';
+    },
+    'q',
+  ]);
+  counting = countingLoads(d);
+
+  assert.equal(await main([], counting.ctx), 0);
+
+  assert.deepEqual(counted, [1, 1, 2, 2, 3]);
+});
+
+test('a leftover live file written later than it was (only its time changed) shows at the next tick', async (t) => {
+  // Two processes held S2 and are gone. A ended it properly at T0 - 25 s; B never sent an end, and
+  // its leftover busy file was last written at T0 - 50 s, so A's end is the last holding. When B's
+  // file turns out to be written later than A's end, B ended last, and unexpectedly, while working.
+  let d: TestDeck | undefined;
+  const shown: string[] = [];
+  const get = (): TestDeck => d as TestDeck;
+  const leftover = (deck: TestDeck): string =>
+    join(deck.deck.places.claudeHome, 'sessions', '5002.json');
+  const touch = (path: string, ns: Ns): void => {
+    utimesSync(path, Number(ns / SEC), Number(ns / SEC));
+  };
+  d = listDeck(t, [
+    tickShowing(get, S2, shown),
+    tickShowing(get, S2, shown, () => {
+      touch(leftover(get()), T0 - 10n * SEC);
+    }),
+    'q',
+  ]);
+  spoolEvent(d, 'SessionStart', S2, 5001, T0 - 30n * SEC, { source: 'resume' });
+  spoolEvent(d, 'SessionEnd', S2, 5001, T0 - 25n * SEC, { reason: 'prompt_input_exit' });
+  spoolEvent(d, 'SessionStart', S2, 5002, T0 - 40n * SEC, { source: 'resume' });
+  const busy = JSON.parse(
+    readFileSync(new URL('../../fixtures/claude/sessions/busy.json', import.meta.url), 'utf8'),
+  ) as Record<string, unknown>;
+  writeFileSync(leftover(d), JSON.stringify({ ...busy, pid: 5002, sessionId: S2 }));
+  touch(leftover(d), T0 - 50n * SEC);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  const [before = '', after = ''] = shown;
+  assert.ok(!before.includes('ended-unexpectedly'), before);
+  assert.ok(after.includes('ended-unexpectedly'), after);
+});
+
+test('the notice of a session that left while the editor ran follows the outcome', async (t) => {
+  let d: TestDeck | undefined;
+  const runner = fakeRunner(undefined, (call) => {
+    markDone((d as TestDeck).deck, S2); // done in another skydeck meanwhile
+    writeFileSync(call.args.at(-1) ?? '', 'x');
+    return 0;
+  });
+  d = listDeck(t, ['j', 'n', 'q']);
+
+  assert.equal(await main([], withRunner(d, runner)), 0);
+
+  assert.equal(lastLines(d).at(-1), `saved  session ${short(S2)} left the list`);
+  assert.equal(selectedIn(frames(d).at(-1) ?? []), short(S1));
+  assert.equal(d.deck.store.meta(S2)?.note, 'x');
 });

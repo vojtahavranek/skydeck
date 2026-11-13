@@ -133,6 +133,11 @@ class TerminalList {
   #loadedAtNs: Ns;
   /** The change marks the last background refresh (or the opening) saw. */
   #marks: ChangeMarks;
+  /**
+   * A background refresh failed: it may have saved something (ingest commits before reconcile
+   * runs) without loading the rows, and the next one would find nothing new; it loads them.
+   */
+  #reloadOwed = false;
   #onScreen = false;
   /** The frame last painted on the screen now; null when the screen holds none of ours. */
   #painted: string | null = null;
@@ -414,6 +419,7 @@ class TerminalList {
       const marks = this.#marksNow();
       const now = this.#now();
       const changed =
+        this.#reloadOwed ||
         savedSomething(result) ||
         marks.live !== this.#marks.live ||
         marks.data !== this.#marks.data ||
@@ -426,6 +432,7 @@ class TerminalList {
       }
     } catch (error) {
       failure = `the list could not be refreshed: ${describeError(error)}`;
+      this.#reloadOwed = true;
     }
     this.#backgroundOutcome('refresh', failure);
     try {
@@ -531,22 +538,17 @@ class TerminalList {
     return this.#deck.platform.clock.nowNs();
   }
 
-  /** The change marks now (see ChangeMarks): a few small files and one PRAGMA. */
+  /**
+   * The change marks now (see ChangeMarks): a few small files and one PRAGMA. Every field of a live
+   * file counts, its modification time included (derive takes it as the last sign of a process
+   * that is gone), with whether the file is trusted.
+   */
   #marksNow(): ChangeMarks {
     const { platform, places, store } = this.#deck;
     const live = readLiveFiles(platform.files, places.claudeHome).map((file) =>
-      [
-        file.pid,
-        file.sessionId,
-        file.procStart,
-        file.status,
-        file.waitingFor,
-        file.name,
-        file.updatedAtNs,
-        file.statusUpdatedAtNs,
-        file.mtimeNs,
-        isLiveFileTrusted(file, platform.proc),
-      ].join(' '),
+      JSON.stringify([file, isLiveFileTrusted(file, platform.proc)], (_key, value: unknown) =>
+        typeof value === 'bigint' ? String(value) : value,
+      ),
     );
     return { live: live.join('\n'), data: store.dataVersion() };
   }
@@ -564,8 +566,10 @@ class TerminalList {
    */
   #reload(reorder: boolean): string | null {
     const before = this.#model;
+    const rows = loadRows(this.#deck);
     this.#loadedAtNs = this.#now();
-    this.#setModel(withRows(before, loadRows(this.#deck), this.#loadedAtNs, reorder));
+    this.#reloadOwed = false;
+    this.#setModel(withRows(before, rows, this.#loadedAtNs, reorder));
     const left = leftNotice(before, this.#model);
     if (left !== null) {
       this.#setModel(withMessage(this.#model, left));
