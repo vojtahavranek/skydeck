@@ -21,6 +21,7 @@ import {
   HOUR,
   MINUTE,
   NOW,
+  PROC_START,
   addSession,
   fakeTabs,
   leftoverBusyFile,
@@ -759,6 +760,32 @@ test('a start event that names no process does not count as started: the session
   assert.deepEqual(outcome.started, []);
   assert.deepEqual(outcome.timedOut, [sid(1)]);
   assert.notEqual(d.deck.store.getKv(lockKey(sid(1))), null);
+});
+
+test('a start stored before restore took its lock does not count as started, though it is dated later', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  // A claude of this boot (pid 5151, dead now) started sid(1) while the clock was ten minutes ahead.
+  d.deck.store.insertEvent({
+    spoolName: `ahead-${sid(1)}.ev`,
+    timeNs: NOW + 10n * MINUTE,
+    kind: 'start',
+    detail: 'resume',
+    rawDetail: 'resume',
+    sessionId: sid(1),
+    bootId: BOOT_B,
+    pid: 5151,
+    procStart: PROC_START,
+    cwd: projectDir(d),
+    argv: ['claude', '--resume', sid(1)],
+    name: null,
+    payload: null,
+  });
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome } = await run(d, tabs.terminal, entries.slice(0, 1));
+  assert.deepEqual(tabs.opened, [sid(1)]);
+  assert.deepEqual(outcome.started, []);
+  assert.deepEqual(outcome.timedOut, [sid(1)]);
+  assert.notEqual(d.deck.store.getKv(lockKey(sid(1))), null); // its tab may still start it
 });
 
 test('a lock restore waits on is not renewed once another skydeck has taken it over', async (t) => {

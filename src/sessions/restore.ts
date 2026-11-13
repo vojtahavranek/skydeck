@@ -16,7 +16,14 @@ import { loadRows } from './load.ts';
 import { describeError } from './problems.ts';
 import { refresh } from './refresh.ts';
 import { prepareResumeById } from './resume-by-id.ts';
-import { checkResumable, isLockHeld, readLock, releaseLock, renewLock } from './resume.ts';
+import {
+  checkResumable,
+  isLockHeld,
+  lockEventId,
+  readLock,
+  releaseLock,
+  renewLock,
+} from './resume.ts';
 import type { PreparedLaunch } from './resume.ts';
 
 export interface RestoreEntry {
@@ -177,7 +184,7 @@ async function runInTabs(run: Run, entries: readonly RestoreEntry[]): Promise<vo
       // A call that timed out may have opened the tab anyway: its session is waited for like the
       // others, so that no more than one batch is starting at a time.
       if (result.ok || result.timedOut) {
-        opened.push({ row: entry.row, lock: taken.lock });
+        opened.push({ row: entry.row, lock: taken.lock, afterEventId: taken.afterEventId });
       } else {
         startedNothing(run, entry.row, taken.lock);
         fail(run, entry.row, result.error);
@@ -187,15 +194,20 @@ async function runInTabs(run: Run, entries: readonly RestoreEntry[]): Promise<vo
   }
 }
 
-/** A session whose tab was opened and whose start event has not been seen yet; `lock`: the value of its resume lock that restore wrote last. */
+/** A session whose tab was opened and whose start event has not been seen yet. */
 interface Waiting {
   row: ListRow;
+  /** The value of its resume lock that restore wrote last; null once the lock is no longer restore's. */
   lock: string | null;
+  /** The event id its lock records (lockEventId): only a start stored after it is this resume's. */
+  afterEventId: number | null;
 }
 
 /**
- * Looks for the start events of `opened` (at or after `sinceNs`) once a second until all are there
- * or the time is up. At every look the locks of the sessions still waited for are renewed, the
+ * Looks for the start events of `opened` once a second until all are there or the time is up. A
+ * session has started when it has a start event of a real process at or after `sinceNs` that was
+ * stored after restore took its lock (the rule of the lock, D16): one stored before, but dated later
+ * because the clock was ahead then, is not the claude its tab started. At every look the locks of the sessions still waited for are renewed, the
  * last time when restore gives up on them: the wait (default 120 s) is longer than a lock holds
  * (60 s), and a tab that is slow to start claude must not let another resume start it again.
  */
@@ -206,8 +218,8 @@ async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): P
   let waiting = [...opened];
   while (waiting.length > 0) {
     ingestSpool(deck);
-    waiting = waiting.filter(({ row, lock }) => {
-      if (!deck.store.hasProcessStartSince(row.id, sinceNs)) {
+    waiting = waiting.filter(({ row, lock, afterEventId }) => {
+      if (!deck.store.hasProcessStartSince(row.id, sinceNs, afterEventId)) {
         return true;
       }
       // D16: a start removes the lock. Restore may have renewed it after the start (before it read
@@ -376,12 +388,12 @@ function freshRow(run: Run, entry: RestoreEntry): ListRow | null {
 /**
  * prepareResumeById (a refresh, the rows read again, then the guard and the lock), and the lines
  * about its flags; null when refused or no longer known. `lock` is the value of the lock it took,
- * to renew or release that lock and no other.
+ * to renew or release that lock and no other; `afterEventId` the event id that lock records.
  */
 function prepare(
   run: Run,
   entry: RestoreEntry,
-): { prepared: PreparedLaunch; lock: string | null } | null {
+): { prepared: PreparedLaunch; lock: string | null; afterEventId: number | null } | null {
   const { row } = entry;
   let prepared: PreparedLaunch;
   try {
@@ -396,7 +408,8 @@ function prepare(
     return null;
   }
   warn(run, row, prepared.flagsKnown, prepared.unknownFlags);
-  return { prepared, lock: readLock(run.deck, row.id) };
+  const lock = readLock(run.deck, row.id);
+  return { prepared, lock, afterEventId: lock === null ? null : lockEventId(lock) };
 }
 
 /** What `resume` says before it starts a session, as one line each, naming the session. */

@@ -582,8 +582,8 @@ describe('hasProcessStartSince', () => {
     const { store } = fresh(t);
     store.insertEvent(ev({ timeNs: T0 }));
 
-    assert.equal(store.hasProcessStartSince(S1, T0), true);
-    assert.equal(store.hasProcessStartSince(S1, T0 + 1n), false);
+    assert.equal(store.hasProcessStartSince(S1, T0, null), true);
+    assert.equal(store.hasProcessStartSince(S1, T0 + 1n, null), false);
   });
 
   test('an end event, an observed event or another session does not count', (t) => {
@@ -594,7 +594,7 @@ describe('hasProcessStartSince', () => {
     store.insertEvent(ev({ spoolName: null, kind: 'observed', detail: '', timeNs: T0 + 6n * SEC }));
     store.insertEvent(ev({ spoolName: 'b.ev', sessionId: S2, timeNs: T0 + 7n * SEC }));
 
-    assert.equal(store.hasProcessStartSince(S1, T0), false);
+    assert.equal(store.hasProcessStartSince(S1, T0, null), false);
   });
 
   test('a start without a real process does not count: no pid, or no process start time', (t) => {
@@ -603,11 +603,28 @@ describe('hasProcessStartSince', () => {
     store.insertEvent(ev({ spoolName: 'ns.ev', procStart: null, timeNs: T0 + 2n * SEC }));
     store.insertEvent(ev({ spoolName: 'both.ev', pid: 0, procStart: null, timeNs: T0 + 3n * SEC }));
 
-    assert.equal(store.hasProcessStartSince(S1, T0), false);
+    assert.equal(store.hasProcessStartSince(S1, T0, null), false);
 
     store.insertEvent(ev({ spoolName: 'real.ev', timeNs: T0 + 4n * SEC }));
-    assert.equal(store.hasProcessStartSince(S1, T0), true);
-    assert.equal(store.hasProcessStartSince(S1, T0 + 5n * SEC), false);
+    assert.equal(store.hasProcessStartSince(S1, T0, null), true);
+    assert.equal(store.hasProcessStartSince(S1, T0 + 5n * SEC, null), false);
+  });
+
+  test('counts only a start whose id is greater than the given one; null: any id', (t) => {
+    const { store } = fresh(t);
+    // Dated ten minutes ahead (the clock stepped back since), and stored first.
+    const ahead = store.insertEvent(ev({ spoolName: 'ahead.ev', timeNs: T0 + 600n * SEC }));
+    assert.ok(ahead !== null);
+
+    assert.equal(store.hasProcessStartSince(S1, T0, ahead), false);
+    assert.equal(store.hasProcessStartSince(S1, T0, ahead - 1), true);
+    assert.equal(store.hasProcessStartSince(S1, T0, null), true);
+
+    const next = store.insertEvent(ev({ spoolName: 'next.ev', timeNs: T0 + SEC }));
+    assert.ok(next !== null && next > ahead);
+    assert.equal(store.hasProcessStartSince(S1, T0, ahead), true);
+    assert.equal(store.hasProcessStartSince(S1, T0 + 2n * SEC, ahead), false); // later than it
+    assert.equal(store.hasProcessStartSince(S1, T0, next), false);
   });
 });
 

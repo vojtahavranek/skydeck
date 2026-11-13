@@ -79,22 +79,54 @@ export function checkResumable(row: ListRow, files: Files): void {
 
 const STATE_CHANGED = "the session's state changed while preparing; run the command again";
 
-/** The time a lock holds (its kv value); null when the value is not one. */
-function lockTimeOf(value: string): Ns | null {
-  return /^[0-9]{1,30}$/.test(value) ? BigInt(value) : null;
+/**
+ * What a lock's kv value holds: the time it was taken, and the session's latest event id at that
+ * moment (`<time>:<id>`; the time alone when the session had no event, and in a lock an earlier
+ * skydeck wrote).
+ */
+interface LockValue {
+  takenNs: Ns;
+  /** Only a start event stored after this one is the resume's own; null: any. */
+  afterEventId: number | null;
 }
 
-/** How old a lock taken at `takenNs` is at `nowNs`, when it still holds; null when it is stale. */
-function freshAge(store: Store, sessionId: string, takenNs: Ns | null, nowNs: Ns): Ns | null {
-  if (takenNs === null) {
-    return null; // not a time: skydeck never wrote it
+function lockValue({ takenNs, afterEventId }: LockValue): string {
+  return afterEventId === null ? `${takenNs}` : `${takenNs}:${afterEventId}`;
+}
+
+/** The lock a kv value holds; null when it is not one skydeck writes. */
+function parseLock(value: string): LockValue | null {
+  const match = /^([0-9]{1,30})(?::([0-9]{1,15}))?$/.exec(value);
+  if (match === null) {
+    return null;
   }
-  const ageNs = nowNs - takenNs;
-  // A lock from far in the future cannot be from this clock: it would block for as long.
+  const [, taken = '', after] = match;
+  return { takenNs: BigInt(taken), afterEventId: after === undefined ? null : Number(after) };
+}
+
+/**
+ * The event id the lock value records (the session's latest event when the lock was taken): only a
+ * start event with a greater id is the resume's own. Null when it records none — the session had no
+ * event then, or an earlier skydeck wrote the value — or the value is not a lock.
+ */
+export function lockEventId(value: string): number | null {
+  return parseLock(value)?.afterEventId ?? null;
+}
+
+/** How old the lock with this value is at `nowNs`, when it still holds; null when it is stale. */
+function freshAge(store: Store, sessionId: string, value: string, nowNs: Ns): Ns | null {
+  const lock = parseLock(value);
+  if (lock === null) {
+    return null; // skydeck never wrote it
+  }
+  const ageNs = nowNs - lock.takenNs;
+  // A lock from far in the future cannot be from this clock: it would block for as long. A start
+  // releases the lock only when it was stored after the lock was taken: one stored before it, but
+  // dated after it because the clock was ahead then, is not the resume's own.
   if (
     ageNs >= LOCK_TTL_NS ||
     -ageNs >= LOCK_TTL_NS ||
-    store.hasProcessStartSince(sessionId, takenNs)
+    store.hasProcessStartSince(sessionId, lock.takenNs, lock.afterEventId)
   ) {
     return null;
   }
@@ -127,7 +159,7 @@ export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void
   store.transaction(() => {
     const nowNs = platform.clock.nowNs();
     const value = store.getKv(key);
-    const ageNs = value === null ? null : freshAge(store, sessionId, lockTimeOf(value), nowNs);
+    const ageNs = value === null ? null : freshAge(store, sessionId, value, nowNs);
     if (ageNs !== null) {
       const ago = (ageNs > 0n ? ageNs : 0n) / NS_PER_SECOND;
       const wait = (LOCK_TTL_NS - ageNs + NS_PER_SECOND - 1n) / NS_PER_SECOND;
@@ -138,7 +170,7 @@ export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void
     if (store.latestEventIdOfSession(sessionId) !== saw.latestEventId) {
       throw new ResumeRefusedError(STATE_CHANGED);
     }
-    store.setKv(key, `${nowNs}`);
+    store.setKv(key, lockValue({ takenNs: nowNs, afterEventId: saw.latestEventId }));
   });
 }
 
@@ -148,7 +180,7 @@ function staleLocks(store: Store, nowNs: Ns): KvKey[] {
     .kvEntries(LOCK_PREFIX)
     .filter(({ key, value }) => {
       const sessionId = key.slice(LOCK_PREFIX.length);
-      return freshAge(store, sessionId, lockTimeOf(value), nowNs) === null;
+      return freshAge(store, sessionId, value, nowNs) === null;
     })
     .map(({ key }) => key);
 }
@@ -191,10 +223,11 @@ export function renewLock(deck: Deck, sessionId: string, ours: string): string |
   const key = lockKey(sessionId);
   const { store, platform } = deck;
   return store.transaction(() => {
-    if (store.getKv(key) !== ours) {
+    const lock = parseLock(ours);
+    if (lock === null || store.getKv(key) !== ours) {
       return null;
     }
-    const value = `${platform.clock.nowNs()}`;
+    const value = lockValue({ ...lock, takenNs: platform.clock.nowNs() });
     store.setKv(key, value);
     return value;
   });
@@ -225,7 +258,7 @@ export function isLockHeld(deck: Deck, sessionId: string): boolean {
   const value = readLock(deck, sessionId);
   return (
     value !== null &&
-    freshAge(deck.store, sessionId, lockTimeOf(value), deck.platform.clock.nowNs()) !== null
+    freshAge(deck.store, sessionId, value, deck.platform.clock.nowNs()) !== null
   );
 }
 

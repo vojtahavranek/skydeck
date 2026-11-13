@@ -14,6 +14,7 @@ import {
   acquireLock,
   checkResumable,
   isLockHeld,
+  lockEventId,
   lockKey,
   prepareNew,
   prepareResume,
@@ -321,10 +322,10 @@ test('acquireLock replaces a lock when the session started at or after the lock'
   for (const startNs of [T0, T0 + 2n * SEC]) {
     const d = testDeck(t);
     acquireLock(d.deck, S1, sawNow(d));
-    startEvent(d, S1, startNs);
+    const started = startEvent(d, S1, startNs);
     d.clock.setNs(T0 + 5n * SEC);
     acquireLock(d.deck, S1, sawNow(d));
-    assert.equal(lockOf(d, S1), `${T0 + 5n * SEC}`);
+    assert.equal(lockOf(d, S1), `${T0 + 5n * SEC}:${started}`);
   }
 });
 
@@ -370,6 +371,73 @@ test('a start event without a real process does not make sweepLocks remove a loc
     assert.equal(sweepLocks(d.deck), 0, JSON.stringify(over));
     assert.equal(lockOf(d, S1), `${T0 - 5n * SEC}`);
   }
+});
+
+test("acquireLock records the session's latest event id after the time: `<time>:<id>`", (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 10n * SEC);
+  acquireLock(d.deck, S1, { latestEventId: seen });
+  assert.equal(lockOf(d, S1), `${T0}:${seen}`);
+  acquireLock(d.deck, S2, { latestEventId: null }); // a session without events: the time alone
+  assert.equal(lockOf(d, S2), `${T0}`);
+});
+
+/** A start of a real process (pid 5151, dead now) dated ten minutes ahead: the clock stepped back since. */
+function startAhead(d: TestDeck): number {
+  return startEvent(d, S1, T0 + 600n * SEC, { pid: 5151, spoolName: `ahead-${S1}.ev` });
+}
+
+test('a start stored before the lock was taken does not release it, whatever its time', (t) => {
+  const d = testDeck(t);
+  const ahead = startAhead(d);
+  acquireLock(d.deck, S1, { latestEventId: ahead });
+  d.clock.setNs(T0 + 10n * SEC);
+  assert.equal(
+    refusal(() => acquireLock(d.deck, S1, sawNow(d))),
+    '0b5f3c1e is being resumed (10 s ago); try again in 50 s',
+  );
+  assert.equal(isLockHeld(d.deck, S1), true);
+  assert.equal(sweepLocks(d.deck), 0);
+  assert.equal(lockOf(d, S1), `${T0}:${ahead}`);
+});
+
+test('a start stored after the lock was taken releases it when it is dated at or after the lock', (t) => {
+  const d = testDeck(t);
+  const ahead = startAhead(d);
+  acquireLock(d.deck, S1, { latestEventId: ahead });
+  startEvent(d, S1, T0 - 1n); // stored later, but dated before the lock: not this resume's
+  d.clock.setNs(T0 + 5n * SEC);
+  assert.equal(isLockHeld(d.deck, S1), true);
+  const started = startEvent(d, S1, T0 + 2n * SEC); // the claude the resume started
+  assert.equal(isLockHeld(d.deck, S1), false);
+  acquireLock(d.deck, S1, { latestEventId: started });
+  assert.equal(lockOf(d, S1), `${T0 + 5n * SEC}:${started}`);
+});
+
+test('a lock that records no event id (an earlier skydeck wrote it) is released as before', (t) => {
+  const d = testDeck(t);
+  writeLock(d, S1, `${T0}`);
+  startAhead(d); // any start at or after the lock's time releases it
+  d.clock.setNs(T0 + 5n * SEC);
+  assert.equal(isLockHeld(d.deck, S1), false);
+  assert.equal(sweepLocks(d.deck), 1);
+});
+
+test('a lock whose event id is not a number is stale like any value skydeck did not write', (t) => {
+  for (const value of [`${T0}:`, `${T0}:x`, `${T0}:-1`, `${T0}:1:2`, `:1`, `${T0}:1 `]) {
+    const d = testDeck(t);
+    writeLock(d, S1, value);
+    assert.equal(isLockHeld(d.deck, S1), false, JSON.stringify(value));
+    acquireLock(d.deck, S1, sawNow(d));
+    assert.equal(lockOf(d, S1), `${T0}`, JSON.stringify(value));
+  }
+});
+
+test("lockEventId is the event id a lock records; null when it records none or is no lock", () => {
+  assert.equal(lockEventId(`${T0}:42`), 42);
+  assert.equal(lockEventId(`${T0}`), null);
+  assert.equal(lockEventId('soon'), null);
+  assert.equal(lockEventId(`${T0}:x`), null);
 });
 
 test('acquireLock locks each session on its own', (t) => {
@@ -426,7 +494,7 @@ test('acquireLock takes the lock when the session still has the latest event it 
   const d = testDeck(t);
   const seen = startEvent(d, S1, T0 - 10n * SEC);
   acquireLock(d.deck, S1, { latestEventId: seen });
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:${seen}`);
   d.clock.setNs(T0 + 61n * SEC);
   acquireLock(d.deck, S2, { latestEventId: null }); // none seen, none there
   assert.equal(lockOf(d, S2), `${T0 + 61n * SEC}`);
@@ -458,7 +526,7 @@ test('acquireLock ignores the events of other sessions', (t) => {
   const seen = startEvent(d, S1, T0 - 10n * SEC);
   startEvent(d, S2, T0 - 1n * SEC);
   acquireLock(d.deck, S1, { latestEventId: seen });
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:${seen}`);
 });
 
 test('acquireLock cannot be called without the decision it checks (a compile error, not a skipped check)', (t) => {
@@ -631,6 +699,16 @@ test('renewLock moves a lock that is still ours to now and returns its new value
   assert.equal(lockOf(d, S1), `${T0 + 50n * SEC}`);
   d.clock.setNs(T0 + 100n * SEC); // 50 s after the renewal: it still holds
   assert.throws(() => acquireLock(d.deck, S1, sawNow(d)), /is being resumed \(50 s ago\)/);
+});
+
+test('renewLock keeps the event id the lock records: only a later start releases it still', (t) => {
+  const d = testDeck(t);
+  const ahead = startAhead(d);
+  acquireLock(d.deck, S1, { latestEventId: ahead });
+  d.clock.setNs(T0 + 50n * SEC);
+  assert.equal(renewLock(d.deck, S1, `${T0}:${ahead}`), `${T0 + 50n * SEC}:${ahead}`);
+  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC}:${ahead}`);
+  assert.equal(isLockHeld(d.deck, S1), true);
 });
 
 test('renewLock leaves a lock that is no longer ours, or gone, as it is, and says so', (t) => {
@@ -833,7 +911,7 @@ test('prepareResume resumes a session that has not changed since its row was rea
   const seen = startEvent(d, S1, T0 - 120n * SEC);
   const prepared = prepareResume(d.deck, rowWith(d, dead(d, { lastEventId: seen })));
   assert.equal(prepared.sessionId, S1);
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:${seen}`);
 });
 
 const BOOT_UNKNOWN = 'cannot tell which sessions are running: the boot id could not be read';

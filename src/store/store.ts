@@ -62,11 +62,14 @@ export interface Store {
   /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
   hasStartSince(sessionId: string, sinceNs: Ns): boolean;
   /**
-   * Whether a 'start' event of a real process for the session exists with time_ns >= sinceNs: one
-   * with a pid (not 0) and a process start time. A start the hook wrote without them names no
-   * process that could hold the session, so it says nothing about a resume that is under way.
+   * Whether a 'start' event of a real process for the session exists with time_ns >= sinceNs and an
+   * id greater than `afterEventId` (null: any id): one with a pid (not 0) and a process start time.
+   * A start the hook wrote without them names no process that could hold the session, so it says
+   * nothing about a resume that is under way. Ids grow in the order events are stored, whatever
+   * their times, so a start stored before a given event is left out even when it is dated later
+   * (the clock was ahead when it was written).
    */
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;
   /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
   latestEventIdOfSession(sessionId: string): number | null;
   /** All links ordered by time_ns. */
@@ -542,14 +545,16 @@ class SqliteStore implements Store {
     );
   }
 
-  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean {
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean {
     return (
       this.#get(
         `SELECT 1 AS found FROM events
-         WHERE session_id = ? AND kind = 'start' AND time_ns >= ?
+         WHERE session_id = ? AND kind = 'start' AND time_ns >= ? AND (? IS NULL OR id > ?)
            AND pid <> 0 AND proc_start IS NOT NULL LIMIT 1`,
         sessionId,
         sinceNs,
+        afterEventId,
+        afterEventId,
       ) !== undefined
     );
   }
