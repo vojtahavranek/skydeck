@@ -23,6 +23,7 @@ import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
 import { refreshWithProgress, withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
+import { jsonText } from '../json.ts';
 
 const SPEC: ArgSpec = {
   usage:
@@ -120,10 +121,12 @@ async function addHooks(ctx: Context, deck: Deck): Promise<boolean> {
       `Claude Code's directory ${claudeHome} does not exist; run claude once, or set claudeHome`,
     );
   }
+  // The exact groups that will be appended, by event; jsonText escapes, rather than drops, any
+  // character of the path a terminal would act on, so what is shown is what is written.
   ctx.io.stderr(`skydeck will add these hook entries to ${sanitize(path)}:\n`);
-  for (const event of edit.events) {
-    ctx.io.stderr(`  ${event}: ${sanitize(JSON.stringify(hookEntry(hookPath, event)))}\n`);
-  }
+  ctx.io.stderr(
+    jsonText(Object.fromEntries(edit.events.map((event) => [event, [hookEntry(hookPath, event)]]))),
+  );
   if (!isYes(await ctx.io.readLine('Add them? [y/N] '))) {
     return false;
   }

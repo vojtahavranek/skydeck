@@ -59,15 +59,23 @@ describe('install: links and hook entries', () => {
     assert.equal(kv(d, 'settings_hash'), sha256(text));
     assert.deepEqual(backups(d.places), []);
     assert.ok(r.prompts.includes('Add them? [y/N] '));
+    const header = `skydeck will add these hook entries to ${settingsFile(d.places)}:\n`;
+    const announced = r.stderr.indexOf(header);
     const prompt = r.stderr.indexOf('Add them? [y/N] ');
-    const announced = r.stderr.indexOf(
-      `skydeck will add these hook entries to ${settingsFile(d.places)}:`,
-    );
     assert.ok(announced >= 0 && announced < prompt, r.stderr);
-    for (const event of ['SessionStart', 'SessionEnd'] as const) {
-      const shown = r.stderr.indexOf(JSON.stringify(hookEntry(d.places.hookPath, event)));
-      assert.ok(shown > announced && shown < prompt, `${event} entry shown before the prompt`);
-    }
+    // Between the two: exactly the added groups, by event, as JSON.
+    const shown = r.stderr.slice(announced + header.length, prompt);
+    assert.deepEqual(JSON.parse(shown), ourHooks(d));
+  });
+
+  test('a hook path with a character a terminal acts on is shown escaped, not changed', async (t) => {
+    const d = testPlatform(t, { env: (s) => ({ SKYDECK_HOME: join(s.root, 'deck\u009b') }) });
+
+    const r = await run(d.platform, ['install'], { lines: ['n'] });
+
+    assert.equal(r.code, 1);
+    assert.ok(r.stderr.includes('deck\\u009b'), r.stderr);
+    assert.ok(!r.stderr.includes('\u009b'), 'no raw C1 control reaches the terminal');
   });
 
   test('over an existing file: a backup of it, the old keys kept and both entries added', async (t) => {
