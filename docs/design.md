@@ -39,7 +39,7 @@ section first.
    until ingest drops it before storing anything. A spool file that cannot be parsed is kept in
    `spool/bad/` for diagnosis and removed after seven days; a leftover temporary file is removed
    after one hour. An argument that follows a flag skydeck does not know is kept as that flag's
-   value.
+   value, so a prompt after a flag newer than skydeck's table is stored with the launch command.
 5. **Resume by id, with the session's own launch command.** Never by name (names are not unique).
    skydeck never adds a permission flag that the session was not started with.
 6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one
@@ -112,8 +112,9 @@ randomness, and two hooks alive at the same time never share a process id. The t
 `.<final name>.tmp`, and ingest reads only names ending in `.ev`, so a half-written file is never
 read. A missing `CLAUDE_PID` gives an empty `claude_pid` value and `0` in the name; so does one
 that is not a number (it is never put into a path). The spool directory is created with mode 700 and
-the files readable by the user only, because `pwd` and the launch command are private. A value that
-contains a newline or a carriage return is written empty, so no value can add a line to the file.
+the files readable by the user only, because `pwd` and the launch command are private. A value taken
+from the environment or the argument that contains a newline or a carriage return is written empty,
+so no value can add a line to the file.
 
 | Key | Value |
 |---|---|
