@@ -2,7 +2,6 @@
 // The "Claude process" is a `sleep 30` the test starts, so its /proc entries are real.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import {
   chmodSync,
@@ -58,6 +57,16 @@ async function startProcess(t: TestContext): Promise<number> {
   assert.fail('the sleep process never settled');
 }
 
+/**
+ * The hook gives up without reading its input in some cases (no usable state directory, a date that
+ * prints no number). When it has exited before the test has written the input, the write fails with
+ * EPIPE. That says nothing about the hook: the test's own assertions on the exit status and on the
+ * files decide, so an EPIPE on the child's stdin is dropped and every other error stays one.
+ */
+function withoutEpipe(error: Error | undefined): Error | undefined {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'EPIPE' ? undefined : error;
+}
+
 interface Ran {
   status: number | null;
   stdout: string;
@@ -77,12 +86,34 @@ function run(
     cwd,
     encoding: 'utf8',
   });
-  assert.equal(result.error, undefined);
+  assert.equal(withoutEpipe(result.error), undefined);
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
 function assertSilent(ran: Ran): void {
   assert.deepEqual(ran, { status: 0, stdout: '', stderr: '' });
+}
+
+/** Starts the hook without waiting for it; resolves with its [exit code, signal] once it has closed. */
+function startHook(
+  s: Sandbox,
+  event: string,
+  env: Record<string, string | undefined> = {},
+  input: string = INPUT,
+): Promise<unknown> {
+  const child = spawn(hook, [event], {
+    env: s.env({ CLAUDE_CODE_SESSION_ID: S1, CLAUDE_CODE_ENTRYPOINT: 'cli', ...env }),
+    cwd: s.root,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  child.stdin.on('error', (error) => {
+    // An EPIPE is dropped; any other error of the stream is thrown, as it is when nobody listens.
+    if (withoutEpipe(error) !== undefined) {
+      throw error;
+    }
+  });
+  child.stdin.end(input);
+  return once(child, 'close');
 }
 
 /** The one file in `spool`, as [name, content]. */
@@ -436,6 +467,40 @@ describe('hook: failures stay silent and exit 0', () => {
     assert.equal(statSync(join(state, 'spool')).mode & 0o077, 0);
   });
 
+  // The hook gives up before it reads its input in the guard cases. Whether the test's write of the
+  // input to the pipe happens before the hook has exited is a race, so a small input fails only
+  // now and then; an input larger than the pipe's buffer fails every time.
+  const NO_STATE_DIRECTORY = {
+    SKYDECK_HOME: undefined,
+    XDG_STATE_HOME: undefined,
+    HOME: 'relative-home',
+  };
+  const BIGGER_THAN_A_PIPE = 'x'.repeat(4_000_000);
+
+  test('a hook that exits without reading its input is not an error of the test (spawnSync)', (t) => {
+    const s = hookSandbox(t);
+
+    const ran = run(s, 'SessionStart', NO_STATE_DIRECTORY, BIGGER_THAN_A_PIPE);
+
+    assertSilent(ran);
+  });
+
+  test('a hook that exits without reading its input is not an error of the test (spawn)', async (t) => {
+    const s = hookSandbox(t);
+
+    const exit = await startHook(s, 'SessionStart', NO_STATE_DIRECTORY, BIGGER_THAN_A_PIPE);
+
+    assert.deepEqual(exit, [0, null]);
+  });
+
+  test('a real failure to start the hook is still an error of the test', (t) => {
+    const s = hookSandbox(t);
+
+    assert.throws(() => run(s, 'SessionStart', {}, INPUT, join(s.root, 'no-such-directory')), {
+      code: 'ERR_ASSERTION',
+    });
+  });
+
   test('a HOME that is not absolute and no other variable gives up quietly', (t) => {
     const s = hookSandbox(t);
 
@@ -506,23 +571,9 @@ describe('hook: concurrency and the programs it uses', () => {
   test('ten hooks at once write ten distinct files', async (t) => {
     const s = hookSandbox(t);
     const pid = await startProcess(t);
-    const env = s.env({
-      CLAUDE_CODE_SESSION_ID: S1,
-      CLAUDE_CODE_ENTRYPOINT: 'cli',
-      CLAUDE_PID: String(pid),
-    });
-
-    const children: ChildProcess[] = [];
     const exits: Promise<unknown>[] = [];
     for (let i = 0; i < 10; i++) {
-      const child = spawn(hook, ['SessionStart'], {
-        env,
-        cwd: s.root,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      child.stdin?.end(INPUT);
-      children.push(child);
-      exits.push(once(child, 'close'));
+      exits.push(startHook(s, 'SessionStart', { CLAUDE_PID: String(pid) }));
     }
     const results = await Promise.all(exits);
 
