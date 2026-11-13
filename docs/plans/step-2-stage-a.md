@@ -832,7 +832,8 @@ export function prepareRuntimeDir(platform: Platform, files: RuntimeFiles): void
 /** S2 16.5: writes <dir>/keeper-<build>.py (0o600, through a temporary name) and removes the
  *  keeper files of other builds. */
 export function writeKeeperFile(files: Files, runtime: RuntimeFiles, build: string, code: string): void;
-/** S2 7.8: removes terms/<id>.sock and .pid of keepers dead by their line or whose socket refuses. */
+/** S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
+ *  whose socket refuses connections; a line that is 'unknown' never removes anything by itself. */
 export function removeDeadKeeperFiles(platform: Platform, runtime: RuntimeFiles): Promise<string[]>;
 export interface ServerJson { pid: number; procStart: number; bootId: string; port: number; serverId: string; build: string; checkout: string; startedAt: NsText; envOrigin: { dir: string; atNs: NsText } }
 export function readServerJson(files: Files, path: string): ServerJson | null;
@@ -841,8 +842,11 @@ export function writeServerJson(files: Files, path: string, value: ServerJson): 
  *  5.5's rule. */
 export function takeServerLock(deck: Deck, value: { pid: number; procStart: number; bootId: string; checkout: string }): { taken: true } | { taken: false; holder: { pid: number; checkout: string } };
 export function releaseServerLock(deck: Deck): void;
-/** Keepers by their .pid lines (S2 4.2), alive or not, for doctor, uninstall and the server's rediscovery. */
-export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; alive: boolean }[];
+/** Keepers by their .pid lines (S2 4.2), whatever their state (pidLineState, 2.8), for doctor,
+ *  uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
+ *  server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
+ *  is 'alive' or 'unknown'). */
+export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine; state: PidLineState }[];
 
 // src/window/log.ts (task 15)
 /** One line per call with an ISO time; to stderr when `foreground`; at 1 MiB the file becomes .1. */
@@ -855,9 +859,31 @@ export function rotateLog(files: Files, path: string): void;
 //   terms/<id>.pid (a keeper): "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f 1 0"
 //   — pid, process start (field 22), boot id, and for a keeper its KEEPER_VERSION and started 0|1,
 //   separated by one space. Tasks 7 (sh), 8 (TypeScript) and 9 (python) write and read this form.
+//   The boot id and the version are any token without whitespace (tests invent boot ids); pid
+//   (1 or more) and process start (0 or more) decimal integers (safe integers). The final '\n' may
+//   be missing when read.
 export interface PidLine { pid: number; procStart: number; bootId: string; keeper?: { version: string; started: boolean } }
+/** Throws for a pid that is not a positive whole number, a process start that is not a
+ *  non-negative whole number, and an empty boot id or version or one holding whitespace. */
 export function formatPidLine(line: PidLine): string;
-export function parsePidLine(text: string): PidLine | null;
+export function parsePidLine(text: string): PidLine | null; // null for pid 0, too
+/** Design 5.5, three-valued. 'unknown' = it could not tell: no current boot id (`bootId` null),
+ *  a /proc read that failed (the platform threw), a stat line whose process start cannot be read.
+ *  'dead' = another boot, no process with the pid, or another process start.
+ *  NOTHING IS EVER REMOVED, ENDED OR GIVEN UP ON 'unknown': only 'dead' allows removing a socket or
+ *  a pid file. Who uses which:
+ *  - pidLineState, acting only on 'dead': removing a keeper's socket and pid file
+ *    (removeDeadKeeperFiles, the server's rediscovery, tasks 15 and 16); giving up a recorded
+ *    runtime directory (resolveRuntimeDir 'take': only when every keeper line in it is 'dead');
+ *    taking the server lock from the server it names (takeServerLock); `uninstall --purge`
+ *    (refuses unless every keeper is 'dead'); the keep-alive (task 7, sh) ends only when the
+ *    server's and every keeper's line is dead, never when it cannot read the boot id.
+ *  - isPidLineAlive ("known alive"): showing and counting (doctor counts state 'alive'), and
+ *    before signalling a process (stopServer, the tests' killKeepersIn): only a process known alive
+ *    is signalled. */
+export type PidLineState = 'alive' | 'dead' | 'unknown';
+export function pidLineState(line: PidLine, proc: Proc, bootId: string | null): PidLineState;
+/** pidLineState(...) === 'alive'. */
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean;
 
 // src/window/client.ts (task 18): the command line's side of server.sock
@@ -1363,21 +1389,31 @@ export const CLAUDE_CHILD_VARIABLES: readonly string[];
 // src/window/env.ts
 /** S2 5.2: the server's own environment without SKYDECK_HANDOFF, without NODE_COMPILE_CACHE when it
  *  equals SKYDECK_LAUNCHER_CACHE, without the marker; SKYDECK_CORE_SOFT and SKYDECK_ENV_ORIGIN
- *  (A29) taken out and returned. */
+ *  (A29) always taken out and returned — null when absent or unusable (a core limit that is not
+ *  decimal bytes or `unlimited`, an origin that is not an absolute path). */
 export function serverEnvironment(env: Env): { env: Record<string, string>; coreSoft: string | null; origin: string | null };
-/** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). */
+/** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). Removes
+ *  SKYDECK_ENV_ORIGIN too (S2 7.4's list); SKYDECK_HOME and SKYDECK_NODE pass (the hook needs them).
+ *  Prefix rules: WEZTERM_, KONSOLE_, VSCODE_ (S2 7.4 says why); every other name is exact.
+ *  GIT_ASKPASS goes only when VSCODE_GIT_ASKPASS_MAIN is set beside it (the editor's). */
 export function programEnvironment(serverEnv: Readonly<Record<string, string>>, options: { cwd: string; interop: string | null }): Record<string, string>;
 // src/window/windows.ts
-/** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/. */
+/** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/, and for one
+ *  with a segment Windows cannot have: '.' or '..', a control character, " * : < > ? | or a
+ *  backslash, a trailing space or dot. */
 export function windowsPath(linuxPath: string): string | null;
 /** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
 export function deriveProfileDir(files: Files): { ok: true; dir: string } | { ok: false; error: string };
+/** For tests: deriveProfileDir with `usersRoot` standing for /mnt/c/Users (a sandbox folder). */
+export function deriveProfileDirUnder(files: Files, usersRoot: string): { ok: true; dir: string } | { ok: false; error: string };
 /** S2 5.3: the arguments for msedge.exe. */
 export function edgeArgs(port: number, token: string, profileDir: string): string[];
-/** S2 9.6: the URL to open (re-serialised), or null when it must not be opened. */
+/** S2 9.6: the URL to open (re-serialised), or null when it must not be opened; the re-serialised
+ *  URL must also be at most 2,048 characters and hold no '"' and no backslash. */
 export function linkToOpen(url: string): string | null;
 // src/window/flags.ts
-/** S2 12.6: words separated by spaces, '…' and "…" group words, no escapes; an unclosed quote is an error. */
+/** S2 12.6: words separated by any whitespace (JavaScript's \s: a no-break space too), '…' and
+ *  "…" group words, no escapes; an unclosed quote or a NUL is an error. */
 export function splitFlags(text: string): { ok: true; flags: string[] } | { ok: false; error: string };
 // src/claude/procstat.ts
 export function parentPidFromStat(line: string): number | null; // field 4, after the last ')'
@@ -1394,8 +1430,9 @@ export function parentPidFromStat(line: string): number | null; // field 4, afte
 - pid lines: round trip with and without the keeper fields; garbled lines → null; `isPidLineAlive`
   with the fake proc: alive, other boot, reused pid, no boot id.
 - `windowsPath`, `deriveProfileDir` with sandbox folders standing for `/mnt/c/Users/*/AppData/Local/Microsoft/Edge`
-  (the function takes the `/mnt/c/Users` root as a parameter in its private helper so the test can
-  point it into the sandbox): one user → the folder; none, two, an unreadable one.
+  (the function takes the `/mnt/c/Users` root as a parameter in a helper, `deriveProfileDirUnder`,
+  exported for tests only, so the test can point it into the sandbox): one user → the folder;
+  none, two, an unreadable one.
 - `edgeArgs(47613, 'abc', 'C:\\x')` → exactly the four arguments of S2 5.3.
 - `linkToOpen`: `https://github.com/a/b/pull/1` → itself; `http://x` → `http://x/`; `file:///etc`,
   `javascript:…`, a 2,049-character URL, `-https://x`, `not a url` → null.
