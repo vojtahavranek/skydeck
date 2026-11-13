@@ -157,8 +157,12 @@ const TERMINAL_NAMES = [
   'VTE_VERSION',
   'KITTY_WINDOW_ID',
   'ITERM_SESSION_ID',
+  // The terminal of the shell that ran `skydeck window`, and an editor's Claude Code connection.
+  'CLAUDE_CODE_SSE_PORT',
+  'GPG_TTY',
+  'SSH_TTY',
 ];
-// S2 7.4 names these two families by prefix ("every WEZTERM_*", "KONSOLE_*").
+// S2 7.4 names these families by prefix: every WEZTERM_*, KONSOLE_* and VSCODE_*.
 const TERMINAL_FAMILIES = [
   'WEZTERM_PANE',
   'WEZTERM_EXECUTABLE',
@@ -166,6 +170,10 @@ const TERMINAL_FAMILIES = [
   'KONSOLE_DBUS_SESSION',
   'KONSOLE_DBUS_SERVICE',
   'KONSOLE_VERSION',
+  'VSCODE_IPC_HOOK_CLI',
+  'VSCODE_GIT_IPC_HANDLE',
+  'VSCODE_GIT_ASKPASS_NODE',
+  'VSCODE_INJECTION',
 ];
 const SKYDECK_NAMES = [
   'SKYDECK_HANDOFF',
@@ -248,11 +256,24 @@ test("programEnvironment passes the user's own CLAUDE_* settings (names, never p
 });
 
 test('programEnvironment keeps variables that only resemble a terminal family', () => {
-  const result = program({ WEZTERM: 'a', KONSOLE: 'b', MY_TMUX: 'c', TERMINAL: 'd' });
+  const result = program({
+    WEZTERM: 'a',
+    KONSOLE: 'b',
+    MY_TMUX: 'c',
+    TERMINAL: 'd',
+    VSCODE: 'e',
+    MY_VSCODE_X: 'f',
+    SSH_AUTH_SOCK: 'g',
+    GPG_AGENT_INFO: 'h',
+  });
   assert.equal(result.WEZTERM, 'a');
   assert.equal(result.KONSOLE, 'b');
   assert.equal(result.MY_TMUX, 'c');
   assert.equal(result.TERMINAL, 'd');
+  assert.equal(result.VSCODE, 'e');
+  assert.equal(result.MY_VSCODE_X, 'f');
+  assert.equal(result.SSH_AUTH_SOCK, 'g');
+  assert.equal(result.GPG_AGENT_INFO, 'h');
 });
 
 test('programEnvironment sets TERM, COLORTERM and PWD, over what the server had', () => {

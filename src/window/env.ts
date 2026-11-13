@@ -28,9 +28,18 @@ const TERMINAL_VARIABLES: readonly string[] = [
   'VTE_VERSION',
   'KITTY_WINDOW_ID',
   'ITERM_SESSION_ID',
+  // The terminal of the shell that ran `skydeck window`, not the new one: a pinentry would draw
+  // there, and an editor's Claude Code extension would be reached from every session.
+  'CLAUDE_CODE_SSE_PORT',
+  'GPG_TTY',
+  'SSH_TTY',
 ];
-/** S2 7.4 names these two families by prefix: every `WEZTERM_*` and `KONSOLE_*`. */
-const TERMINAL_PREFIXES: readonly string[] = ['WEZTERM_', 'KONSOLE_'];
+/**
+ * S2 7.4 names these families by prefix: every `WEZTERM_*` and `KONSOLE_*`, and every `VSCODE_*`
+ * (an editor's integrated terminal sets many, pointing at that editor's sockets, and their names
+ * change between versions).
+ */
+const TERMINAL_PREFIXES: readonly string[] = ['WEZTERM_', 'KONSOLE_', 'VSCODE_'];
 
 /** A core limit as the launcher writes it: decimal bytes, or `unlimited`. */
 const CORE_LIMIT = /^(?:[0-9]+|unlimited)$/;
