@@ -22,7 +22,7 @@ import type { Env, RunResult } from '../src/platform/types.ts';
 import { openStore } from '../src/store/store.ts';
 import type { Store } from '../src/store/store.ts';
 import type { PrChecks, PrReview, PrRow, PrState } from '../src/store/types.ts';
-import { SEC, T0, fakeClock, fakeRunner, runResult } from './helpers/platform.ts';
+import { S1, S2, SEC, T0, fakeClock, fakeRunner, runResult } from './helpers/platform.ts';
 import type { RunCall } from './helpers/platform.ts';
 import { sandbox } from './helpers/sandbox.ts';
 
@@ -147,7 +147,10 @@ function deck(t: TestContext, handler?: (call: RunCall) => RunResult | Promise<R
   return { store, runner, clock, deps: { runner, clock, store, env: ENV } };
 }
 
-/** Adds pull requests o/r#from..to; `seen` gives them a successful fetch `ageMin` minutes ago. */
+/**
+ * Adds pull requests o/r#from..to, each attached to S1 (a refresh asks only about attached ones);
+ * `seen` gives them a successful fetch `ageMin` minutes ago.
+ */
 function seed(
   store: Store,
   from: number,
@@ -157,6 +160,7 @@ function seed(
   store.transaction(() => {
     for (let number = from; number <= to; number++) {
       store.ensurePr({ url: NUM(number), owner: 'o', repo: 'r', number });
+      store.attachPr(S1, NUM(number), 'auto', T0);
       if (seen !== undefined) {
         store.savePrResult(NUM(number), {
           ok: true,
@@ -718,6 +722,35 @@ describe('fetchPrs and refreshPrs', () => {
       failed: 0,
     });
     assert.equal(runner.calls.length, 0);
+  });
+
+  test('refreshPrs leaves out a pull request that no session has attached any more, even when forced', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 3, { state: 'open', ageMin: 10 });
+    store.attachPr(S2, NUM(3), 'auto', T0);
+    store.ensurePr({ url: NUM(4), owner: 'o', repo: 'r', number: 4 }); // known, attached to nobody
+    store.detachPr(S1, NUM(2), T0); // its only attachment is gone
+    store.detachPr(S1, NUM(3), T0); // S2 still has it
+
+    for (const force of [false, true]) {
+      runner.calls.length = 0;
+      await refreshPrs(deps, { force, refreshMinutes: 5 });
+      assert.deepEqual(runner.calls.flatMap(numbersOf).sort(), [1, 3], `force ${force}`);
+    }
+    assert.equal(row(store, 2).triedAtNs, T0 - 10n * MIN, 'the detached one was never asked about');
+    assert.equal(row(store, 4).triedAtNs, null);
+  });
+
+  test('refreshPrs asks about a pull request again once a session has it attached again', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1, { state: 'open', ageMin: 10 });
+    store.detachPr(S1, NUM(1), T0);
+    await refreshPrs(deps, { force: true, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 0);
+
+    store.attachPr(S1, NUM(1), 'manual', T0);
+    await refreshPrs(deps, { force: true, refreshMinutes: 5 });
+    assert.deepEqual(runner.calls.flatMap(numbersOf), [1]);
   });
 
   test('fetchPrs fetches exactly the pull requests it is given, due or not', async (t) => {

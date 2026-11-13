@@ -393,12 +393,27 @@ export async function fetchPrs(
   return { fetched, failed };
 }
 
-/** fetchPrs of the urls of prsDue(store.prs(), now, refreshMinutes, force). */
+/**
+ * fetchPrs of the urls of prsDue(rows, now, refreshMinutes, force), where `rows` are the store's
+ * pull requests that at least one session still has attached: one whose every attachment was
+ * detached (`pr rm`), or that was never attached, is shown nowhere and is not asked about.
+ */
 export function refreshPrs(
   deps: Deps,
   options: { force: boolean; refreshMinutes: number },
 ): Promise<{ fetched: number; failed: number }> {
-  const due = prsDue(deps.store.prs(), deps.clock.nowNs(), options.refreshMinutes, options.force);
+  const attached = new Set(
+    deps.store
+      .sessionPrs()
+      .filter((link) => link.detachedAtNs === null)
+      .map((link) => link.url),
+  );
+  const due = prsDue(
+    deps.store.prs().filter((pr) => attached.has(pr.url)),
+    deps.clock.nowNs(),
+    options.refreshMinutes,
+    options.force,
+  );
   return fetchPrs(
     deps,
     due.map((pr) => pr.url),
