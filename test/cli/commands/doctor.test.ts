@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
@@ -195,7 +203,11 @@ describe('doctor: each problem alone', () => {
         'gh auth status': { code: 1, stderr: 'You are not logged into any GitHub hosts.\n' },
       },
     });
-    onlyProblem(r, /gh is not logged in/);
+    // gh's own first line can be just a host name; the exit code and a pointer say more.
+    onlyProblem(
+      r,
+      /^problem {2}gh is not logged in, or GitHub cannot be reached \(gh auth status: exit 1\); run gh auth status to see why$/,
+    );
   });
 
   test('the wezterm terminal does not answer', async (t) => {
@@ -344,6 +356,60 @@ describe('doctor: information', () => {
 });
 
 describe('doctor: robustness', () => {
+  test('a config.json that is not valid: one problem line; the checks that do not need it still run', async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(d.places.configPath, '{"nope":1}');
+
+    const r = await doctor(d);
+
+    onlyProblem(r, /^problem {2}configuration: .*unknown key "nope"/);
+    assert.equal(r.problems.length, 1);
+    // claudeHome and the terminal come from the configuration: those checks are skipped.
+    assert.ok(!r.lines.some((line) => /hook entries|transcripts:|terminal:/.test(line)), r.stdout);
+    assert.ok(r.lines.includes('info     scripted runs dropped: 0'), r.stdout);
+    assert.ok(r.lines.includes('ok       gh is logged in'), r.stdout);
+  });
+
+  test('a database that cannot be opened: one problem line; the checks that do not need it still run', async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(d.places.dbPath, 'not a database '.repeat(400));
+
+    const r = await doctor(d);
+
+    onlyProblem(r, /^problem {2}database .*skydeck\.db cannot be opened/);
+    assert.equal(r.problems.length, 1);
+    assert.ok(
+      r.lines.some((line) => line.startsWith('ok       hook entries present')),
+      r.stdout,
+    );
+    assert.ok(r.lines.includes('ok       gh is logged in'), r.stdout);
+  });
+
+  test('with nothing installed: the missing database is a problem, and doctor creates nothing', async (t) => {
+    const d = testPlatform(t);
+    claudeFolders(d.places);
+
+    const r = await doctor(d);
+
+    assert.equal(r.code, 1);
+    assert.ok(
+      r.problems.some((line) => /database .* does not exist; run skydeck install$/.test(line)),
+      r.stdout,
+    );
+    assert.deepEqual(readdirSync(d.sandbox.skydeckHome), []);
+  });
+
+  test('a projects folder that is a symbolic link to nothing is a problem', async (t) => {
+    const d = await installedMachine(t);
+    const projects = join(d.places.claudeHome, 'projects');
+    rmSync(projects, { recursive: true });
+    symlinkSync('/mnt/not-mounted/claude-projects', projects);
+
+    const r = await doctor(d);
+
+    onlyProblem(r, /^problem {2}transcripts: cannot read .*\/projects \(ENOENT\)$/);
+  });
+
   test('a check that fails unexpectedly is one problem line, and the checks after it still run', async (t) => {
     const d = await installedMachine(t);
     const settings = settingsFile(d.places);
