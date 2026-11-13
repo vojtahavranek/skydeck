@@ -1244,6 +1244,132 @@ test('the last holding is the process of the latest event, ties broken by id', (
   assert.deepEqual(s.lastHolding?.process, P2);
 });
 
+// ---- the last holding across several processes: the one that ended last -----------------------
+
+test('two holders: the earlier exits deliberately, the later is killed afterwards: ended unexpectedly', () => {
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        start(P2, S1, T0 + 30n * SEC, 'resume'), // duplicate
+        end(P1, S1, T0 + 60n * SEC, 'exit'),
+      ],
+      // P2 wrote its live file after P1's exit, then was killed: its file is left behind.
+      liveFiles: [live(P2, S1, 'idle', { mtimeNs: T0 + 90n * SEC })],
+    },
+    S1,
+  );
+  assert.equal(s.state, 'not-running');
+  assert.deepEqual(s.lastHolding, { process: P2, endedAtNs: null, endDetail: null, alive: false });
+  assert.deepEqual(s.marks, ['ended-unexpectedly']);
+});
+
+test('two holders: the later exits deliberately, the earlier is killed afterwards: ended unexpectedly', () => {
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        start(P2, S1, T0 + 30n * SEC, 'resume'),
+        end(P2, S1, T0 + 60n * SEC, 'exit'),
+      ],
+      liveFiles: [live(P1, S1, 'busy', { mtimeNs: T0 + 90n * SEC })],
+    },
+    S1,
+  );
+  assert.deepEqual(s.lastHolding, { process: P1, endedAtNs: null, endDetail: null, alive: false });
+  assert.deepEqual(s.marks, ['ended-unexpectedly', 'was-working']);
+});
+
+test('a holder killed before another holder exits deliberately: the exit ended last, no mark', () => {
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        start(P2, S1, T0 + 30n * SEC, 'resume'),
+        end(P2, S1, T0 + 60n * SEC, 'exit'),
+      ],
+      liveFiles: [live(P1, S1, 'idle', { mtimeNs: T0 + 10n * SEC })], // last seen before the exit
+    },
+    S1,
+  );
+  assert.deepEqual(s.lastHolding, {
+    process: P2,
+    endedAtNs: T0 + 60n * SEC,
+    endDetail: 'exit',
+    alive: false,
+  });
+  assert.deepEqual(s.marks, []);
+});
+
+test('a crash, then a resume in a new process that exits deliberately: no mark', () => {
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        start(P2, S1, T0 + 100n * SEC, 'resume'),
+        end(P2, S1, T0 + 200n * SEC, 'exit'),
+      ],
+      liveFiles: [live(P1, S1, 'busy', { mtimeNs: T0 + 5n * SEC })],
+    },
+    S1,
+  );
+  assert.deepEqual(s.lastHolding?.process, P2);
+  assert.deepEqual(s.marks, []);
+});
+
+test('a process that moved on left the session at its first later event, not at its latest', () => {
+  const s = session(
+    {
+      events: [
+        start(P2, S1, T0, 'startup'),
+        start(P1, S1, T0 + 1n * SEC, 'resume'),
+        observed(P1, S2, T0 + 5n * SEC), // P1 left S1 here
+        observed(P1, S3, T0 + 50n * SEC),
+      ],
+      liveFiles: [live(P2, S1, 'idle', { mtimeNs: T0 + 20n * SEC })], // P2 seen after P1 left
+    },
+    S1,
+  );
+  assert.deepEqual(s.lastHolding, { process: P2, endedAtNs: null, endDetail: null, alive: false });
+  assert.deepEqual(s.marks, ['ended-unexpectedly']);
+});
+
+test('a moved-on holding ends at the first event of the process after it', () => {
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        observed(P1, S2, T0 + 5n * SEC),
+        observed(P1, S3, T0 + 50n * SEC),
+      ],
+    },
+    S1,
+  );
+  assert.deepEqual(s.lastHolding, {
+    process: P1,
+    endedAtNs: T0 + 5n * SEC,
+    endDetail: 'moved-on',
+    alive: false,
+  });
+});
+
+test('a live holder is the last holding, whatever ended later before', () => {
+  const s = session(
+    {
+      events: [
+        start(P1, S1, T0, 'startup'),
+        start(P2, S1, T0 + 30n * SEC, 'resume'),
+        end(P2, S1, T0 + 60n * SEC, 'other'),
+      ],
+      isAlive: alive(P1),
+    },
+    S1,
+  );
+  assert.equal(s.state, 'running');
+  assert.deepEqual(s.lastHolding, { process: P1, endedAtNs: null, endDetail: null, alive: true });
+  assert.deepEqual(s.marks, []);
+});
+
 // ---- the contract around the function ---------------------------------------------------------
 
 test('events in any order give the same result as events in (time, id) order', () => {

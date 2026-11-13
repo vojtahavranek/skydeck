@@ -199,6 +199,11 @@ hook file was lost.
   (launch command from `/proc/<pid>/cmdline`, `cwd` from the file). The event's time is the clock
   at reconcile, and its launch command is reduced and its path flags made absolute exactly as for a
   spooled one (5.3).
+- A file that names another session than the process's latest event wins only when it was
+  modified after that event (the hook of the change was lost). When the event is newer, the hook
+  spoke after the file was last written — an in-session `/resume` or `/clear` records the new
+  session while the file can still name the old one — so the file is stale and nothing is
+  inserted; a missing launch command is added once the file names that session too.
 
 An `observed` event never creates a link.
 
@@ -282,7 +287,7 @@ Marks are shown next to the state.
 
 | Mark | Rule |
 |---|---|
-| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. |
+| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. The latest holding is decided per process, not by the latest event: of the holdings of the processes that held the session, the one that ended last. A holding ends at the process's `end` for the session, or at the process's first event naming another session (it moved on); a process that is gone without either ended when it was last seen — its last event, or the last write of the live-session file it left naming the session, whichever is later. So after two holders, one that exited deliberately does not hide one killed after it. |
 | `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `assistant` record or `user` turn (5.6) of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
 | `continued` | The session is the target of a `clear` or `fork` link. `show` names the session it continues. |
 | `expired` | Its transcript is missing. It cannot be resumed. |

@@ -3393,8 +3393,10 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   `absolutizePathFlags(argv, file.cwd, exists)`, then `storableArgv` of that, exactly as
   `parseSpoolFile` does it, so neither an initial prompt, nor a removed flag such as `--prefill-b64`,
   nor the argument of an unknown flag is ever stored (principle 4). Insert an `observed` event when
-  `latest` is null or names another session, or when `!processHasLaunch(key)` and `argv` is
-  non-null. Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
+  `latest` is null; when `latest` names the file's session and `!processHasLaunch(key)` and `argv`
+  is non-null; or when `latest` names another session and `latest.timeNs <= file.mtimeNs` (*ruled
+  in fix 1:* an event newer than the file is the hook speaking after the file was last written —
+  an in-session `/resume` or `/clear` — and the file is stale: nothing is inserted). Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
   The check and the insert run again inside one transaction, with the clock read again there
   (it is the bound of `latestEventOfProcess` and the row's `timeNs`), so two refreshes at once
   record a process once.
@@ -3667,10 +3669,15 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 - **lastActivityNs** = the larger of transcript `lastRecordNs` and the latest event time naming the
   session; falls back to transcript `mtimeNs`. **firstSeenNs** = the smaller of transcript
   `firstRecordNs` and the earliest event time; falls back to `mtimeNs`.
-- **lastHolding**: `E` = latest event naming the session with `pid` ≠ 0; none → null. `E` is an
-  `end` → `{ process: E's, endedAtNs: E.timeNs, endDetail: E.detail }`. Otherwise `L` = that
-  process's latest event: `L` names the session and is not an `end` → `{ endedAtNs: null, endDetail: null }`;
-  else → `{ endedAtNs: L.timeNs, endDetail: 'moved-on' }`. `alive` = `isAlive(process)`.
+- **lastHolding** (*ruled in fix 1:* per process, not by the latest event row): for each process
+  with an event naming the session (`pid` ≠ 0; none → null), `E` = its latest event naming the
+  session. `E` is an `end` → `{ endedAtNs: E.timeNs, endDetail: E.detail }`, ending at `E`.
+  Otherwise `A` = the process's first event after `E`: there is one → `{ endedAtNs: A.timeNs,
+  endDetail: 'moved-on' }`, ending at `A`; none → `{ endedAtNs: null, endDetail: null }`, going on
+  while the process is alive, else ending when it was last seen: the later of `E.timeNs` and the
+  `mtimeNs` of its leftover live files (same pid and procStart) naming the session, tie by `E.id`.
+  The last holding is the one that goes on, else the one that ended last (time, then event id).
+  `alive` = `isAlive(process)`.
 - **Marks** (in `MARK_ORDER`): `ended-unexpectedly` when not running, `lastHolding` non-null, not
   alive, and `endDetail` is null or `'other'`. `was-working` when ended-unexpectedly and either some
   live file with that pid and procStart has status `busy`, or the transcript's `lastTurnRole` is

@@ -36,17 +36,18 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
   const events = [...input.events].sort(compareEvents);
 
   const eventsBySession = new Map<string, EventRow[]>();
-  const latestOfProcess = new Map<string, EventRow>(); // process id → its latest event
+  const eventsOfProcess = new Map<string, EventRow[]>(); // process id → its events, in order
   for (const event of events) {
     push(eventsBySession, event.sessionId, event);
     if (event.pid !== 0) {
-      latestOfProcess.set(processId(event), event);
+      push(eventsOfProcess, processId(event), event);
     }
   }
   // A process holds the session of its latest event unless that event is an `end`.
   const holdingEvents = new Map<string, EventRow[]>(); // session id → latest events of its processes
-  for (const latest of latestOfProcess.values()) {
-    if (latest.kind !== 'end') {
+  for (const processEvents of eventsOfProcess.values()) {
+    const latest = processEvents.at(-1);
+    if (latest !== undefined && latest.kind !== 'end') {
       push(holdingEvents, latest.sessionId, latest);
     }
   }
@@ -108,7 +109,13 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
         return { process, sinceNs: event.timeNs, live };
       });
 
-    const lastHolding = lastHoldingOf(id, sessionEvents, latestOfProcess, isAlive);
+    // A dead process's last sign of life while it held the session: the last write of the live
+    // file it left that names the session (null when there is none).
+    const lastWriteNs = (process: ProcessKey): Ns | null =>
+      (liveFilesOfPid.get(process.pid) ?? [])
+        .filter((file) => isFileOf(file, process) && file.sessionId === id)
+        .reduce<Ns | null>((seen, file) => latest(seen, file.mtimeNs), null);
+    const lastHolding = lastHoldingOf(sessionEvents, eventsOfProcess, isAlive, lastWriteNs);
     const lastActivityNs =
       latest(transcript?.lastRecordNs ?? null, sessionEvents.at(-1)?.timeNs ?? null) ??
       transcript?.mtimeNs ??
@@ -222,30 +229,81 @@ function holdingBeganNs(sessionEvents: readonly EventRow[], process: ProcessKey)
 }
 
 /**
- * 6.1 and 6.3: the last process that held the session and how the holding ended. `E` is the latest
- * event naming the session that has a process; an `end` closes the holding at once, otherwise the
- * process's own latest event says whether it still holds the session or has moved on.
+ * Where a holding stands among the others: one that still goes on (a live process holds the
+ * session) comes after every one that ended; among those, the later end, then the higher event id.
+ */
+interface HoldingRank {
+  goesOn: boolean;
+  atNs: Ns;
+  eventId: number;
+}
+
+/**
+ * 6.1 and 6.3: the session's last holding — of the holdings of the processes that held it (one per
+ * process: its latest event naming the session), the one that ended last, not the one with the
+ * latest event row. A holding ends at the process's `end` for the session, or at the process's
+ * first event after it (it moved on to another session without one). One the process still had at
+ * its last event goes on while the process is alive; a process that is gone without an end event
+ * ended when it was last seen: its last event, or the last write of the live file it left naming
+ * the session (`lastWriteNs`), whichever is later.
  */
 function lastHoldingOf(
-  sessionId: string,
   sessionEvents: readonly EventRow[],
-  latestOfProcess: ReadonlyMap<string, EventRow>,
+  eventsOfProcess: ReadonlyMap<string, readonly EventRow[]>,
   isAlive: (event: EventRow) => boolean,
+  lastWriteNs: (process: ProcessKey) => Ns | null,
 ): LastHolding | null {
-  const last = sessionEvents.findLast((event) => event.pid !== 0);
-  if (last === undefined) {
-    return null;
+  const lastOfProcess = new Map<string, EventRow>(); // process id → its latest event naming the session
+  for (const event of sessionEvents) {
+    if (event.pid !== 0) {
+      lastOfProcess.set(processId(event), event);
+    }
   }
+  let chosen: { holding: LastHolding; rank: HoldingRank } | null = null;
+  for (const [id, last] of lastOfProcess) {
+    const candidate = holdingOf(
+      last,
+      eventsOfProcess.get(id) ?? [last],
+      isAlive(last),
+      lastWriteNs,
+    );
+    if (chosen === null || compareRanks(candidate.rank, chosen.rank) > 0) {
+      chosen = candidate;
+    }
+  }
+  return chosen?.holding ?? null;
+}
+
+/** How the holding that `last` (the process's latest event naming the session) belongs to ended. */
+function holdingOf(
+  last: EventRow,
+  processEvents: readonly EventRow[],
+  alive: boolean,
+  lastWriteNs: (process: ProcessKey) => Ns | null,
+): { holding: LastHolding; rank: HoldingRank } {
   const process = processOf(last);
-  const alive = isAlive(last);
   if (last.kind === 'end') {
-    return { process, alive, endedAtNs: last.timeNs, endDetail: endDetailOf(last) };
+    return {
+      holding: { process, alive, endedAtNs: last.timeNs, endDetail: endDetailOf(last) },
+      rank: { goesOn: false, atNs: last.timeNs, eventId: last.id },
+    };
   }
-  const latestOfIt = latestOfProcess.get(processId(last)) ?? last;
-  if (latestOfIt.sessionId === sessionId && latestOfIt.kind !== 'end') {
-    return { process, alive, endedAtNs: null, endDetail: null };
+  const after = processEvents[processEvents.indexOf(last) + 1];
+  if (after !== undefined) {
+    return {
+      holding: { process, alive, endedAtNs: after.timeNs, endDetail: 'moved-on' },
+      rank: { goesOn: false, atNs: after.timeNs, eventId: after.id },
+    };
   }
-  return { process, alive, endedAtNs: latestOfIt.timeNs, endDetail: 'moved-on' };
+  const seenNs = alive ? last.timeNs : (latest(last.timeNs, lastWriteNs(process)) ?? last.timeNs);
+  return {
+    holding: { process, alive, endedAtNs: null, endDetail: null },
+    rank: { goesOn: alive, atNs: seenNs, eventId: last.id },
+  };
+}
+
+function compareRanks(a: HoldingRank, b: HoldingRank): number {
+  return Number(a.goesOn) - Number(b.goesOn) || compareNs(a.atNs, b.atNs) || a.eventId - b.eventId;
 }
 
 /** 7.1: user input in the transcript, or a start by `startup` or `resume`, after the done time. */
