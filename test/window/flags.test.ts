@@ -82,3 +82,14 @@ test('splitFlags: a NUL is refused, quoted or not (no program can be given it)',
   assert.match(error("--append-system-prompt 'a\u0000b'"), /NUL/);
   assert.match(error('"\u0000"'), /NUL/);
 });
+
+test('splitFlags: any whitespace outside quotes separates words, a pasted no-break space too', () => {
+  assert.deepEqual(words('--model\u00a0opus'), ['--model', 'opus']);
+  for (const space of ['\u2003', '\u3000', '\u2028', '\v', '\f', '\ufeff']) {
+    assert.deepEqual(words(`a${space}b`), ['a', 'b'], JSON.stringify(space));
+  }
+});
+
+test('splitFlags: whitespace inside quotes is kept as it is', () => {
+  assert.deepEqual(words("'a\u00a0b\tc'"), ['a\u00a0b\tc']);
+});

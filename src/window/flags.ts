@@ -1,10 +1,13 @@
 /**
- * The extra flags of the new form (S2 12.6): words separated by whitespace; '…' and "…" group
+ * The extra flags of the new form (S2 12.6): words separated by any whitespace; '…' and "…" group
  * words (no escapes, no variables). Design 7.7's refusals are `prepareNew`'s, not this module's.
  */
 
-/** Separate words outside quotes: spaces, tabs and line breaks (a pasted text). */
-const SEPARATORS = new Set([' ', '\t', '\n', '\r']);
+/**
+ * Separates words outside quotes: any whitespace — spaces, tabs, line breaks, and the no-break
+ * space a text copied from a web page or a chat brings — so that nothing can hide inside one word.
+ */
+const SEPARATOR = /^\s$/;
 
 /**
  * S2 12.6: words separated by whitespace, '…' and "…" group words, no escapes; an unclosed quote is
@@ -28,7 +31,7 @@ export function splitFlags(
     } else if (char === "'" || char === '"') {
       quote = char;
       inWord = true;
-    } else if (SEPARATORS.has(char)) {
+    } else if (SEPARATOR.test(char)) {
       if (inWord) {
         flags.push(word);
         word = '';
