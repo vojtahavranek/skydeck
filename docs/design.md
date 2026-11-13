@@ -419,7 +419,7 @@ match or more than one match is an error that lists the candidates.
 
 **Exit codes:** 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not
 found or ambiguous; 4 resume refused; 5 restore stopped before finishing.
-A reader that closes standard output early (`skydeck ls | head -1`) is not an error: nothing more is written and nothing is said on stderr, the command runs to its end (a state change finishes, the database is closed), and the process exits 141, the status a shell shows for a program killed by SIGPIPE, when the command itself returned 0; a command that failed keeps its own code.
+A reader that closes standard output early (`skydeck ls | head -1`) is not an error: nothing more is written and nothing is said on stderr, the command runs to its end (a state change finishes, the database is closed), and the process exits 141, the status a shell shows for a program killed by SIGPIPE, when the command itself returned 0; a command that failed keeps its own code. A closed standard error is as quiet and changes no exit code.
 
 **`--json`** output of `ls` is stable and versioned:
 

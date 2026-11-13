@@ -366,16 +366,17 @@ describe('bin/skydeck with the real node', () => {
   });
 });
 
-describe('bin/skydeck when its standard output is closed before it writes', () => {
+describe('bin/skydeck when its standard output or error is closed before it writes', () => {
   /**
-   * Runs `skydeck <args>` with standard output a pipe nobody reads any more, as in `skydeck ls |
-   * true`. The reader is a `true` on a fifo that has exited before the launcher starts, so there is
+   * Runs `skydeck <args>` with standard output (`which` 'stdout') or standard error ('stderr') a
+   * pipe nobody reads any more, as in `skydeck ls | true` or `skydeck show x 2>&1 | true`. The reader is a `true` on a fifo that has exited before the launcher starts, so there is
    * no timing in it: a write cannot succeed. Returns what the launcher printed on stderr, the status
    * it exited with (as the shell saw it) and the files it left in the data directory.
    */
-  function withClosedStdout(
+  function withClosedPipe(
     t: TestContext,
     args: string[],
+    which: 'stdout' | 'stderr' = 'stdout',
   ): { stderr: string; status: string; left: string[] } {
     const s = launcherSandbox(t);
     const fifo = join(s.root, 'out.fifo');
@@ -388,7 +389,7 @@ describe('bin/skydeck when its standard output is closed before it writes', () =
       'reader=$!',
       'exec 3>"$fifo"', // waits for the reader to open it
       'wait "$reader"', // gone; this end stays open, so a write fails with EPIPE
-      '"$@" >&3',
+      which === 'stdout' ? '"$@" >&3' : '"$@" 2>&3',
       'echo $? >"$statusfile"',
     ].join('\n');
     const r = spawnSync('/bin/sh', ['-c', script, 'sh', fifo, statusFile, launcher, ...args], {
@@ -409,7 +410,7 @@ describe('bin/skydeck when its standard output is closed before it writes', () =
   }
 
   test('ls: no stack trace and nothing on stderr; exit 141 as a process killed by SIGPIPE shows; the database is closed', (t) => {
-    const r = withClosedStdout(t, ['ls']);
+    const r = withClosedPipe(t, ['ls']);
 
     assert.equal(r.stderr, '');
     assert.equal(r.status, '141');
@@ -421,9 +422,16 @@ describe('bin/skydeck when its standard output is closed before it writes', () =
   });
 
   test('doctor: the same, and its own failing status is kept', (t) => {
-    const r = withClosedStdout(t, ['doctor']);
+    const r = withClosedPipe(t, ['doctor']);
 
     assert.equal(r.stderr, '');
     assert.equal(r.status, '1'); // nothing is installed in the sandbox: doctor reports problems
+  });
+
+  test('standard error closed: the exit code of the command is the one it would have had', (t) => {
+    const r = withClosedPipe(t, ['show', 'nosuch'], 'stderr');
+
+    assert.equal(r.stderr, '');
+    assert.equal(r.status, '3'); // a reference that matches nothing; not 1 from a crash, not 141
   });
 });
