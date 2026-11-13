@@ -43,11 +43,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       push(eventsOfProcess, processId(event), event);
     }
   }
-  // A process holds the session of its latest event unless that event is an `end`.
+  // A process holds the session of its latest event unless that event is an `end` or a `scripted-end`.
   const holdingEvents = new Map<string, EventRow[]>(); // session id → latest events of its processes
   for (const processEvents of eventsOfProcess.values()) {
     const latest = processEvents.at(-1);
-    if (latest !== undefined && latest.kind !== 'end') {
+    if (latest !== undefined && latest.kind !== 'end' && latest.kind !== 'scripted-end') {
       push(holdingEvents, latest.sessionId, latest);
     }
   }
@@ -94,9 +94,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
   const ids = [...new Set([...eventsBySession.keys(), ...transcriptOf.keys()])].sort(compareText);
   return ids.map((id): DerivedSession => {
     const sessionEvents = eventsBySession.get(id) ?? [];
-    // A `scripted` event says only that its process holds the session (5.3): it supplies no
-    // directory, launch command or last holding.
-    const ownEvents = sessionEvents.filter((event) => event.kind !== 'scripted');
+    // A `scripted` event says only that its process holds the session, a `scripted-end` that it no
+    // longer does (5.3): they supply no directory, launch command or last holding.
+    const ownEvents = sessionEvents.filter(
+      (event) => event.kind !== 'scripted' && event.kind !== 'scripted-end',
+    );
     const transcript = transcriptOf.get(id) ?? null;
     const doneAtNs = metaOf.get(id)?.doneAtNs ?? null;
 

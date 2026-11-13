@@ -3,8 +3,9 @@ import type { Ns } from '../platform/types.ts';
 /**
  * `scripted`: a scripted run (`claude -p`, an SDK run) started on a session skydeck already knew
  * (design 5.3). It says only that its process holds the session while it is alive.
+ * `scripted-end`: that process ended its holding (it cleared or switched); it holds nothing more.
  */
-export type EventKind = 'start' | 'end' | 'observed' | 'scripted';
+export type EventKind = 'start' | 'end' | 'observed' | 'scripted' | 'scripted-end';
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
 

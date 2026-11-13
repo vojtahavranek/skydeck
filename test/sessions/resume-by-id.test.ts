@@ -193,6 +193,24 @@ test('prepareResumeById refuses a session a stale live file hides: the hook said
   );
 });
 
+test('a scripted process that cleared away from the session no longer blocks its resume', (t) => {
+  // An SDK host (one process, several sessions) resumed S1, then /clear'ed to a new session.
+  const d = testDeck(t);
+  resumableSession(d);
+  const sdk = { entrypointEnv: 'sdk-ts', argv: ['claude', '--model', 'opus'] };
+  scriptedRunHolds(d, 5555, sdk, T0 - 30n * SEC);
+  const end = {
+    event: 'SessionEnd' as const,
+    timeNs: T0 - 20n * SEC,
+    pid: 5555,
+    entrypointEnv: 'sdk-ts',
+    input: hookInput('SessionEnd', S1, { reason: 'clear' }),
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(end, 10)), spoolText(end));
+  assert.equal(prepareResumeById(d.deck, S1).sessionId, S1);
+  assert.equal(lockOf(d, S1), `${T0}`);
+});
+
 test('prepareResumeById refuses a session whose holder an earlier reconcile recorded on the session it left', (t) => {
   // A reconcile read 4242's file naming S2; before its insert the process /resume'd S1 and the
   // file was rewritten. observed(S2) is stamped after both; the idle file is not written again.

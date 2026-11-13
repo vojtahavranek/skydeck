@@ -569,7 +569,7 @@ export function formatAge(durationNs: bigint): string;
 ```ts
 import type { Ns } from '../platform/types.ts';
 
-export type EventKind = 'start' | 'end' | 'observed' | 'scripted';   // scripted: ruled in fix 1 (design 5.3)
+export type EventKind = 'start' | 'end' | 'observed' | 'scripted' | 'scripted-end';   // the two scripted kinds: ruled in fix 1 (design 5.3)
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
 
@@ -2848,7 +2848,7 @@ the six allowed.
 
 ```ts
 // types.ts (field comments in 2.4.1)
-export type EventKind = 'start' | 'end' | 'observed' | 'scripted';   // scripted: ruled in fix 1 (design 5.3)
+export type EventKind = 'start' | 'end' | 'observed' | 'scripted' | 'scripted-end';   // the two scripted kinds: ruled in fix 1 (design 5.3)
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
 export interface EventRow {
@@ -3359,7 +3359,9 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   `addToKv('dropped_scripted', 1)` — *ruled in fix 1:* except a scripted `start` with a pid and a
   process start on a session skydeck knows (`latestEventIdOfSession` non-null, or a `transcripts` row with entrypoint
   `cli` or null), which is inserted as kind `scripted` (`detail ''`, `rawDetail` the source,
-  `argv null`, `name null`, no link) and counted as ingested. Otherwise, inside one `store.transaction`: compute the link,
+  `argv null`, `name null`, no link) and counted as ingested; and a scripted `end` whose process's
+  latest event (`latestEventOfProcess`) is a `scripted` one naming the same session, which is
+  inserted the same way as kind `scripted-end`. Otherwise, inside one `store.transaction`: compute the link,
   `insertEvent`, `insertLink`; after the commit, delete the file. A `null` from `insertEvent`
   counts as a duplicate (the file is deleted too). **Link:** for a `start` with detail `clear`,
   `resume` or `fork`, `prev = store.latestEventOfProcess(boot, pid, procStart, event.timeNs)`
@@ -3666,8 +3668,9 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 - **holders**: processes that hold the session and `isAlive`, latest event first. `sinceNs` = time
   of that latest event; `live` = a live file with the same pid, procStart and sessionId that `isTrusted`;
   `scripted` = that latest event is of kind `scripted`. *Ruled in fix 1:* `scripted` events count for
-  holding, `lastActivityNs`, `firstSeenNs` and `lastEventId`, and for nothing else (`dir`, `launch`,
-  `lastHolding` and activity after done ignore them).
+  holding (a `scripted-end` ends it, like an `end`), and both kinds count for `lastActivityNs`,
+  `firstSeenNs` and `lastEventId`, and for nothing else (`dir`, `launch`, `lastHolding` and activity
+  after done ignore them).
 - **state**: no holders → `not-running`. Otherwise from `holders[0].live`: status `busy` →
   `working`; `idle` or `waiting` → `waiting` (`stateDetail` = `waitingFor`); no live file or any
   other status → `running`.

@@ -126,14 +126,19 @@ interface KnownSessions {
 /**
  * 5.3 "Scripted runs": whether a scripted event is kept — a start of a process (a pid and a process
  * start time: without them it could never be found alive) on a session skydeck already knows, from
- * an event or from a transcript that the list would show (entry point `cli`, or none). A scripted
- * run that starts its own session, and every scripted end, is dropped.
+ * an event or from a transcript that the list would show (entry point `cli`, or none); and the end
+ * of the session such a kept start holds (an SDK host or an editor extension can clear or switch
+ * inside one process). A scripted run that starts its own session, and any other end, is dropped.
  */
 function holdsKnownSession(deck: Deck, event: SpoolEvent, known: KnownSessions): boolean {
-  if (event.kind !== 'start' || event.pid === 0 || event.procStart === null) {
+  if (event.pid === 0 || event.procStart === null) {
     return false;
   }
   const { store } = deck;
+  if (event.kind === 'end') {
+    const held = store.latestEventOfProcess(event.bootId, event.pid, event.procStart, event.timeNs);
+    return held?.kind === 'scripted' && held.sessionId === event.sessionId;
+  }
   if (store.latestEventIdOfSession(event.sessionId) !== null) {
     return true;
   }
@@ -150,8 +155,9 @@ function holdsKnownSession(deck: Deck, event: SpoolEvent, known: KnownSessions):
  * Inserts the event and, for a start that clears, resumes or forks, the link from the session the
  * same process held before (5.3 "Links"), in one transaction. Returns the new id, or null when the
  * spool file was ingested before. A scripted start (of a known session) is stored as an event of
- * kind `scripted`, which says only that its process holds the session: no detail, launch command
- * or name, and no link.
+ * kind `scripted`, which says only that its process holds the session, and its end as one of kind
+ * `scripted-end`, which says only that the process no longer does: no detail, launch command or
+ * name, and no link.
  */
 function insert(deck: Deck, event: SpoolEvent): number | null {
   const { store } = deck;
@@ -159,7 +165,7 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
     return store.insertEvent({
       spoolName: event.spoolName,
       timeNs: event.timeNs,
-      kind: 'scripted',
+      kind: event.kind === 'start' ? 'scripted' : 'scripted-end',
       detail: '',
       rawDetail: event.rawDetail,
       sessionId: event.sessionId,

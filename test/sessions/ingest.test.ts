@@ -439,16 +439,40 @@ test('scripted runs of sessions skydeck does not know stay dropped and counted',
     assert.equal(d.deck.store.getKv('dropped_scripted'), '3');
   });
 
-  await t.test('the end of a scripted run is dropped, also for a known session', (t) => {
-    const d = testDeck(t);
-    put(d, start(S1, 'startup', T0), 1);
-    put(d, end(S1, 'other', T0 + SEC, { pid: 5555, entrypointEnv: 'sdk-cli' }), 2);
-    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1, scripted: 1 });
-    assert.deepEqual(
-      d.deck.store.events().map((e) => e.kind),
-      ['start'],
-    );
-  });
+  await t.test(
+    'the end of a scripted run whose start was not kept is dropped, also for a known session',
+    (t) => {
+      const d = testDeck(t);
+      put(d, start(S1, 'startup', T0), 1);
+      put(d, end(S1, 'other', T0 + SEC, { pid: 5555, entrypointEnv: 'sdk-cli' }), 2);
+      assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1, scripted: 1 });
+      assert.deepEqual(
+        d.deck.store.events().map((e) => e.kind),
+        ['start'],
+      );
+    },
+  );
+});
+
+test('the end of a scripted process that holds a session by a kept start is kept as `scripted-end`', (t) => {
+  // An SDK host or an editor extension can /clear or switch inside one process: the end of what it
+  // held must release that holding.
+  const d = testDeck(t);
+  const sdk = { pid: 5555, entrypointEnv: 'sdk-ts', argv: ['claude', '--model', 'opus'] };
+  put(d, start(S1, 'startup', T0), 1);
+  put(d, end(S1, 'prompt_input_exit', T0 + SEC), 2);
+  put(d, start(S1, 'resume', T60, sdk), 3);
+  put(d, end(S1, 'clear', T60_2, { pid: 5555, entrypointEnv: 'sdk-ts' }), 4);
+  put(d, start(S2, 'clear', T60_2 + SEC, sdk), 5); // a new session: dropped
+  put(d, end(S2, 'other', T60_2 + 2n * SEC, { pid: 5555, entrypointEnv: 'sdk-ts' }), 6); // holds nothing kept
+  assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 4, scripted: 2 });
+  const kept = d.deck.store.events().at(-1);
+  assert.deepEqual(
+    kept && [kept.kind, kept.detail, kept.rawDetail, kept.sessionId, kept.pid, kept.argv],
+    ['scripted-end', '', 'clear', S1, 5555, null],
+  );
+  assert.equal(d.deck.store.getKv('dropped_scripted'), '2');
+  assert.deepEqual(d.deck.store.links(), []);
 });
 
 /** Ingests each group of files in its own run. */

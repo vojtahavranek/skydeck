@@ -190,9 +190,12 @@ must count as holding it, or a resume would start it a second time (principle 7)
 says only that its process holds the session while the process is alive (6.1); it has no detail,
 launch command or name, makes no link, and is never the session's launch command, directory,
 activity after done, last holding (6.3), or the start that releases a resume lock or that restore
-waits for (7.6, 7.8). No end event is needed: a scripted process holds one session for its whole
-life, and the liveness rule (5.5) ends the holding when it exits. Scripted end events are always
-dropped. A scripted start that is ingested before the session was ever recorded or scanned (the
+waits for (7.6, 7.8). The liveness rule (5.5) ends the holding when the process exits; a
+`claude -p` run holds one session for its whole life. An SDK host or an editor extension can clear
+or switch inside one process, so the scripted `end` of the session that a kept scripted start
+holds is kept too, as an event of kind `scripted-end`: the process no longer holds that session.
+It is never a session's last holding and never gives a mark. Every other scripted end is dropped.
+A scripted start that is ingested before the session was ever recorded or scanned (the
 first refresh after `skydeck install`) is dropped too: skydeck does not know the session yet.
 
 **Links.** When a `start` event with detail `clear`, `resume` or `fork` is ingested for a process
@@ -280,7 +283,9 @@ A process **stopped holding** a session when an `end` event for it arrives. An `
 `exit` is a **deliberate exit**; every other `end` detail, and no `end` at all, is not. A
 `scripted` event (5.3) makes its process hold the session like any other: the guard refuses to
 resume a session that a live scripted run holds, and `show` names such a holder as a scripted
-run. While it runs, the session is `running` (a scripted run has no live-session file, 6.2).
+run. While it runs, the session is `running` (a scripted run has no live-session file, 6.2). A
+`scripted-end` stops the holding like an `end`, but is never a deliberate exit or any other end of
+a holding: 6.3 looks only at holdings of processes that are not scripted runs.
 
 A session is **running** when a live process holds it. If two live processes hold the same
 session (which principle 7 exists to prevent), the session is running, `show` lists both, and the
@@ -794,8 +799,8 @@ CREATE TABLE session_prs (
 CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
-`kind` in `events` can also be `scripted` (5.3); such a row has `detail` `''` and no `argv` or
-`name`. The column is free text, so this needs no migration.
+`kind` in `events` can also be `scripted` or `scripted-end` (5.3); such a row has `detail` `''`
+and no `argv` or `name`. The column is free text, so this needs no migration.
 
 ## 10. Technology
 

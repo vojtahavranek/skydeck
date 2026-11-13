@@ -1472,6 +1472,51 @@ test('a scripted run that ends or is killed leaves no mark: the last interactive
   });
 });
 
+const scriptedEnd = (p: ProcessKey, s: string, t: Ns): EventRow =>
+  event(p, s, t, 'scripted-end', '', { rawDetail: 'clear' });
+
+test('a scripted process that cleared or switched no longer holds the session it left', () => {
+  const events = [...scriptedAfterExit(), scriptedEnd(P5, S1, T0 + 200n * SEC)];
+  const s = session({ events, isAlive: alive(P5) }, S1);
+  assert.equal(s.state, 'not-running');
+  assert.deepEqual(s.holders, []);
+  assert.deepEqual(s.lastHolding, {
+    process: P1,
+    endedAtNs: T0 + 10n * SEC,
+    endDetail: 'exit',
+    alive: false,
+  });
+  assert.deepEqual(s.marks, []);
+  assert.equal(s.lastEventId, events[3]?.id);
+});
+
+test('a scripted process holds the known session it switched to, not the one it left', () => {
+  const events = [
+    ...scriptedAfterExit(),
+    scriptedEnd(P5, S1, T0 + 200n * SEC),
+    start(P2, S2, T0, 'startup'),
+    end(P2, S2, T0 + 5n * SEC, 'exit'),
+    scripted(P5, S2, T0 + 201n * SEC),
+  ];
+  assert.equal(session({ events, isAlive: alive(P5) }, S1).state, 'not-running');
+  const second = session({ events, isAlive: alive(P5) }, S2);
+  assert.deepEqual(
+    second.holders.map((h) => [h.process, h.scripted]),
+    [[P5, true]],
+  );
+});
+
+test('a scripted end is never a last holding: a crash before it still marks the session', () => {
+  const events = [
+    start(P1, S1, T0, 'startup'),
+    scripted(P5, S1, T0 + 100n * SEC),
+    scriptedEnd(P5, S1, T0 + 200n * SEC),
+  ];
+  const s = session({ events }, S1);
+  assert.deepEqual(s.lastHolding, { process: P1, endedAtNs: null, endDetail: null, alive: false });
+  assert.deepEqual(s.marks, ['ended-unexpectedly']);
+});
+
 test('a scripted run is no activity after done: the session stays hidden', () => {
   const s = session(
     {

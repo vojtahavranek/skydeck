@@ -280,18 +280,19 @@ test('a boot in which reconcile observed a session is an earlier boot like one w
   );
 });
 
-/** A `scripted` event (design 5.3): process `pid` of `bootId`, a scripted run on `sessionId`. */
+/** A `scripted` (or `scripted-end`) event (design 5.3) of process `pid` of `bootId` on `sessionId`. */
 function scriptedEvent(
   d: TestDeck,
   bootId: string,
   sessionId: string,
   timeNs: Ns,
   pid: number,
+  kind: 'scripted' | 'scripted-end' = 'scripted',
 ): void {
   d.deck.store.insertEvent({
-    spoolName: `scripted-${pid}.ev`,
+    spoolName: `${kind}-${pid}.ev`,
     timeNs,
-    kind: 'scripted',
+    kind,
     detail: '',
     rawDetail: 'resume',
     sessionId,
@@ -321,6 +322,7 @@ test('a scripted run late in a boot does not move that boot’s last event: the 
   });
   refresh(d.deck);
   scriptedEvent(d, BOOT_A, sid(3), T0 + 10n * MINUTE, 201);
+  scriptedEvent(d, BOOT_A, sid(3), T0 + 11n * MINUTE, 201, 'scripted-end');
   const entries = planRestore(loadRows(d.deck), d.deck.store.events(), BOOT_B, false);
   assert.deepEqual(
     entries.map((entry) => [entry.row.id, entry.preselected]),
