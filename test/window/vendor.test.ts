@@ -91,6 +91,13 @@ describe('readManifest', () => {
     ['a path with an empty segment', JSON.stringify({ files: [entry('vendor/xterm//a.mjs')] })],
     ['a path with a backslash', JSON.stringify({ files: [entry('vendor/xterm/a\\..\\b')] })],
     ['a path with a newline', JSON.stringify({ files: [entry('vendor/xterm/a\nb.mjs')] })],
+    ['a path with a . segment', JSON.stringify({ files: [entry('vendor/xterm/./a.mjs')] })],
+    ['a path with NEL (U+0085)', JSON.stringify({ files: [entry('vendor/xterm/a\u0085b.mjs')] })],
+    ['a path with CSI (U+009B)', JSON.stringify({ files: [entry('vendor/xterm/a\u009b2Jb.mjs')] })],
+    ['a path with RLO (U+202E)', JSON.stringify({ files: [entry('vendor/xterm/a\u202eb.mjs')] })],
+    ['a path with U+2028', JSON.stringify({ files: [entry('vendor/xterm/a\u2028b.mjs')] })],
+    ['a path with a space', JSON.stringify({ files: [entry('vendor/xterm/a b.mjs')] })],
+    ['the same path twice', JSON.stringify({ files: [entry(XTERM), entry(XTERM)] })],
   ];
   for (const [name, text] of invalid) {
     test(`${name} → null`, (t) => {

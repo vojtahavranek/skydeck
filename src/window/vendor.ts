@@ -32,14 +32,14 @@ function errorCode(error: unknown): string {
 }
 
 /**
- * A path relative to the checkout, under `vendor/xterm/`, with no `.`, `..` or empty segment and
- * no backslash or control character (a problem line names the path on one line).
+ * A path relative to the checkout, under `vendor/xterm/`, whose segments are made of ASCII
+ * letters, digits, `.`, `_` and `-` only and are not `.` or `..`: no backslash, space or control
+ * character of any kind, so a problem line can name it as it is.
  */
 function isVendoredPath(path: string): boolean {
-  const segments = path.split('/');
   return (
     path.startsWith('vendor/xterm/') &&
-    segments.every((s) => s !== '' && s !== '.' && s !== '..' && !/[\\\x00-\x1f\x7f]/.test(s))
+    path.split('/').every((s) => /^[A-Za-z0-9._-]+$/.test(s) && s !== '.' && s !== '..')
   );
 }
 
@@ -101,11 +101,13 @@ function load(files: Files, appRoot: string): Loaded {
     return { ok: false, problem: 'invalid' };
   }
   const entries: ManifestEntry[] = [];
+  const paths = new Set<string>();
   for (const value of list) {
     const entry = entryOf(value);
-    if (entry === null) {
+    if (entry === null || paths.has(entry.path)) {
       return { ok: false, problem: 'invalid' };
     }
+    paths.add(entry.path);
     entries.push(entry);
   }
   return { ok: true, entries };
