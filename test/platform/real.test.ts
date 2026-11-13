@@ -220,6 +220,18 @@ describe('real files', () => {
     assert.deepEqual(files.list(dir), ['q']); // no temporary file, after either call
   });
 
+  test('createExclusive with a mode: the file has exactly that mode', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    const q = join(dir, 'q');
+
+    assert.equal(files.createExclusive(q, 'x', 0o600), true);
+
+    assert.equal(mode(q), 0o600);
+    assert.equal(files.readText(q), 'x');
+    assert.deepEqual(files.list(dir), ['q']);
+  });
+
   test('createExclusive fails on an existing directory or empty file without touching it', (t) => {
     const { files } = realPlatform();
     const dir = tmp(t);

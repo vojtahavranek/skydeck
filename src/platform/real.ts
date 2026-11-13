@@ -166,12 +166,17 @@ function realFiles(): Files {
         throw error;
       }
     },
-    createExclusive(path, text) {
+    createExclusive(path, text, mode) {
       // Written to a temporary file and linked into place: link() fails when the name exists, and
-      // the name never shows a file that is empty or half written.
+      // the name never shows a file that is empty or half written. With a mode, the temporary file
+      // is created with it (the umask can only narrow it) and set exactly before it is linked, so
+      // the file never has a wider mode, not even for a moment.
       const temp = siblingTemp(path);
       try {
-        writeFileSync(temp, text, { flag: 'wx' });
+        writeFileSync(temp, text, { flag: 'wx', mode });
+        if (mode !== undefined) {
+          chmodSync(temp, mode);
+        }
         try {
           linkSync(temp, path);
           return true;

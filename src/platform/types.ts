@@ -34,9 +34,10 @@ export interface Files {
   /**
    * Creates the file only if it does not exist; false when it already exists. The content is
    * written to a temporary file that is then hard-linked into place, so no reader ever sees the
-   * file empty or half written. Needs a file system with hard links.
+   * file empty or half written. Needs a file system with hard links. With `mode` the file has
+   * exactly that mode from the start (never a wider one first); without, the umask default.
    */
-  createExclusive(path: string, text: string): boolean;
+  createExclusive(path: string, text: string, mode?: number): boolean;
   /** mkdir -p; `mode` applies to directories it creates. */
   mkdirp(path: string, mode?: number): void;
   rename(from: string, to: string): void;
