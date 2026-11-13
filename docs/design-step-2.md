@@ -411,7 +411,9 @@ of the distribution alive while the window has anything to keep:
 - The script loops: every 10 seconds it checks whether `server.pid` or any `terms/*.pid` names a
   process that is alive by design 5.5's rule — the boot id from `/proc/sys/kernel/random/boot_id`,
   the process start as field 22 of `/proc/<pid>/stat` after its last `)`, both read with `sh`
-  builtins; when none is, it exits, and `wsl.exe` with it. So it outlives a server restart (a new
+  builtins. A line it cannot judge (the boot id cannot be read; the stat cannot be read or holds
+  no process start) counts as alive (4.2); it exits only when every line is known dead or gone,
+  and `wsl.exe` with it. So it outlives a server restart (a new
   server finds `keepalive.pid` alive by the same rule and starts no second one), and it holds WSL
   while terminals run even after `skydeck window --stop`. A stale file from an earlier boot or of a
   reused pid counts as dead.
