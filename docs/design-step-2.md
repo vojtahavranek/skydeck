@@ -1013,7 +1013,7 @@ absolute and existing, no flag that picks a session or names it). The program is
 | Request | Answer |
 |---|---|
 | `GET /ping` | `{ serverId, bootId, build, protocol, pid, port, checkout }` (`checkout`: the checkout the server runs from, which 5.1 compares). |
-| `GET /status` | `{ pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python }`, for `skydeck window` and `doctor`. |
+| `GET /status` | `{ pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin }` (`envOrigin`: where the server's environment came from and when, 5.2), for `skydeck window` and `doctor`. |
 | `POST /resume` | `{ sessionId }` → `prepareResumeById` and the window terminal (11.2) → `{ code, lines }`: the exit code and the lines `skydeck resume` prints (design 7.6), refusals included. |
 | `POST /new` | `{ dir, label, group, flags }` (`flags` an array of strings) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
 | `POST /restore` | `{ sessionIds, all }` → 11.4. The answer is a stream of JSON lines: one per report line of the run, the last one the outcome. |

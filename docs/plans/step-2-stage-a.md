@@ -162,7 +162,7 @@ Each is binding for the implementer. The last column names the task that records
 
 | # | Decision | Why | Design update |
 |---|---|---|---|
-| A1 | The server's parts meet at interfaces fixed in section 2.5 (`TerminalHub`, `ActionHandler`, `PageSink`) and defined as code by task 1: pages (17) code against `TerminalHub` and `ActionHandler`, the registry (16) and the actions (23) implement them. | Pages and terminals are built in the same wave; neither may wait for the other. | — |
+| A1 | The server's parts meet at interfaces fixed in section 2.5 (`TerminalHub`, `ActionHandler`, `StreamSink`) and defined as code by task 1: pages (17) code against `TerminalHub` and `ActionHandler`, the registry (16) and the actions (23) implement them. | Pages and terminals are built in the same wave; neither may wait for the other. | — |
 | A2 | The keeper frame codec is TypeScript, `src/window/frames.ts` (task 1, 2.3). The python keeper implements the same byte layout; task 9's tests drive the keeper through this codec, so both sides are tested against each other. | One definition of S2 8.1 that the server and the keeper's tests share. | — |
 | A3 | Vendored layout: `vendor/xterm/<directory name of the package>/<path inside the package>` (`vendor/xterm/xterm/lib/xterm.mjs`, `vendor/xterm/headless/lib-headless/xterm-headless.mjs`). Only what is used is vendored: each package's `.mjs` bundle, its `typings/*.d.ts`, `@xterm/xterm`'s `css/xterm.css`, and its `LICENSE`. No `.js` (UMD), no `.map`, no `src/`. `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0 ship **no LICENSE file** (checked with `npm pack --dry-run` while writing this plan): for them `npm run vendor` writes `@xterm/xterm`'s `LICENSE`, only after checking that the package's `package.json` declares `"license": "MIT"` and the same repository as `@xterm/xterm` (`github.com/xtermjs/xterm.js`, ignoring a `#branch` suffix; both hold at these versions, checked with `npm view`), and fails otherwise; the manifest records `"licenseFrom": "@xterm/xterm"` and `"licenseReason": "no LICENSE in the package; its package.json declares MIT and the repository of @xterm/xterm"` (ruling 1). Beside each vendored `.mjs` the script writes a declaration file `<name>.d.mts` that re-exports the package's typings, recorded in the manifest with package `skydeck`, so that `tsc` for `web/` never reads a bundle. | S2 16.6 asks for each package's licence file; two packages have none. Type-checking a 400 KB bundle with `checkJs` would be slow and fail. | 2 (16.6) |
 | A4 | The server loads `@xterm/headless` and its addons from `vendor/xterm/` with a dynamic `import()` of a `file:` URL computed from `appRoot` (`src/window/xterm.ts`), typed with `import type` from the development dependencies. Nothing under `src/` imports a vendored file statically, and nothing imports from `node_modules` at run time. | Users never run `npm ci` (docs/install.md): only `vendor/` exists on their machine. | — |
@@ -212,7 +212,10 @@ the contract.
 - **Import rules (S2 4.3).** `src/window/` imports `platform`, `text`, `store`, `claude`,
   `sessions`, `terminals`, `github`. `src/window/view/` imports types of `sessions` and `text`,
   and the two functions of A8. `src/window/protocol.ts`, `src/window/frames.ts` and
-  `src/window/hub.ts` import nothing from `src/` but `platform/types.ts` (types). `src/cli/`
+  `src/window/hub.ts` import nothing from `src/` but `platform/types.ts` (types) and step 1's one
+  session-id rule, `isSessionId`, from `src/claude/session-id.ts` — a file that imports nothing, so
+  that the page's type check (which reads `protocol.ts`) needs no Node.js types; `launch.ts`
+  re-exports it (ruled by the plan owner, task 1). `src/cli/`
   imports `src/window/` (the commands `window`, `serve`, `doctor`, `uninstall`). Nothing outside
   `src/window/` imports `src/window/`'s server parts; `src/sessions/` never imports `src/window/`.
 - **Only `src/platform/real.ts`** opens a socket, starts a program, sends a signal, reads `/proc`,
@@ -410,6 +413,38 @@ export function parseResize(payload: Uint8Array): { ok: true; value: { cols: num
 export function encodeResize(cols: number, rows: number): Uint8Array;
 export const KEEPER_PROTOCOL = 1;
 ```
+
+**What the codec refuses** (ruled by the plan owner, task 1). The keeper (task 9) must write
+nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encoders throw a
+`RangeError`.
+
+- **Frames.** A type byte outside the thirteen above is `unknown-type` as soon as it arrives; a
+  length above `MAX_PAYLOAD` is `too-long` as soon as the 5-byte header is complete. A push that
+  hits either returns the error even when it completed earlier frames, and every later push
+  returns it too. `encodeFrame` throws for an unknown type or a payload above `MAX_PAYLOAD`.
+- **Sizes** (`cols`, `rows` in `H`, `R`, `S`, `P`, `Z`): whole numbers 1–65535, the range of the
+  2-byte fields. **Record numbers** (`seq`, `snapSeq`, the 8-byte field of `S` and `P`): whole
+  numbers from 0 up to `Number.MAX_SAFE_INTEGER`. `encodeSnapshot` and `encodeResize` throw
+  outside these; `decodeSnapshot` is null for a payload shorter than 12 bytes, a record number
+  beyond a safe integer, a size of 0 or a snapshot that is not UTF-8.
+- **JSON payloads** (`H`, `T`, `X`, `R`): UTF-8 (strict) holding a JSON object; a field the parser
+  does not know is ignored (a newer keeper's `hello` must still say that it is newer, S2 7.7),
+  every field listed is required with exactly its type, `null` only where the type allows it.
+- **Times** (`startBy`, `atNs`, `meta.openedNs`): a decimal string without sign or leading zero,
+  at most `2^63 − 1`.
+- **`hello`**: `protocol` a whole number from 0 (any value: the caller decides, S2 7.7); `id` 12
+  lower-case hex characters (A21); `pid` a whole number from 1 or null, `procStart` from 0 or
+  null, both null exactly when `started` is false (S2 8.1: null before the start); `snapSeq` ≤
+  `seq`; `meta.sessionId` passes `isSessionId`; `meta.kind` `resume` or `new`; `meta.slot` 1–9 or
+  null (S2 7.6); `exited`, when not null, as `X` below, with `notStarted` set exactly when
+  `started` is false.
+- **`T` started**: `pid` from 1, `procStart` from 0.
+- **`X` exit — how an exit is represented.** `code` is the exit status (0–255) of a program that
+  exited, else null; `signal` is the number (1–255) of the signal that killed it, else null —
+  never negative: python's `os.waitstatus_to_exitcode` returns `−N` for a death by signal `N`,
+  which the keeper sends as `code: null, signal: N`. A program that ran has exactly one of the
+  two; one that never started has neither, and `notStarted` holds the reason (a failed `exec` is a
+  program that ran: `code` 127).
 
 ### 2.4 The stand-in: `test/fixtures/standin/` (task 3)
 
@@ -704,6 +739,21 @@ export type ControlRequest =
 /** Method, path and JSON body to a request; an unknown field or route is { ok: false, kind }. */
 export function parseControlRequest(method: string, path: string, body: string): { ok: true; value: ControlRequest } | { ok: false; kind: string };
 ```
+
+**Limits `parsePageMessage` applies** (ruled by the plan owner, task 1; also in S2 8.2.3), so
+that the page (tasks 26–29) never sends what the server refuses: strings are measured in UTF-8
+bytes — paths (`new.dir`) and URLs (`open-link.url`; the action then opens one only up to 2,048
+characters, S2 9.6) at most 4,096, `input.data` at most 64 KiB (65,536 bytes; with `binary`, at most
+65,536 characters, each U+0000–U+00FF), every other string at most 1,024 — and every string must
+be well formed (no lone surrogate). `cols` and `rows` (also `focus.area`'s) are whole numbers
+1–65,535; `ping.n` and `act.id` whole numbers from 0; `term` 12 lower-case hex characters,
+`windowId` 16 (A21); `selected` and `sessionId` pass `isSessionId`; `unfolded` holds section names,
+each once; `binary` is `true` or absent; `hello.protocol` any whole number from 0 (the server
+answers 4426) and `hello.nonce`/`proof` only length-checked (their form is `isNonce`, 2.8).
+`parseControlRequest`'s kind starts with `route` when no route matches the method and path (stage
+C's `/resume`, `/new`, `/restore` included; task 18 answers 404) and with `body` for a bad body
+(400); a `GET` has the empty body, `POST /shutdown` the empty body or `{}`; token ids are 32
+lower-case hex characters.
 
 Two additions to S2 8.2.3 and 8.3 that task 1 records in the design: `result` carries
 `sessionId`, so a page can select the session a `new` started (A25); `GET /ping` carries
