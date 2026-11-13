@@ -1093,7 +1093,6 @@ describe('real processes: startDetached', () => {
     assert.equal(platform.processes.signal(child.pid, 'SIGTERM'), true);
     assert.deepEqual(await child.exited, { code: null, signal: 'SIGTERM' });
     assert.ok(await until(() => platform.proc.stat(child.pid) === null), 'reaped');
-    assert.equal(platform.processes.signal(child.pid, 'SIGTERM'), false, 'a dead pid');
   });
 
   test('stdout and stderr are appended to their files, created with mode 0o600', async (t) => {

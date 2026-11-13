@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import { join, resolve } from 'node:path';
 
 import { realPlatform } from '../../src/platform/real.ts';
+import type { Proc } from '../../src/platform/types.ts';
 import { parsePidLine, pidLineState } from '../../src/window/pidline.ts';
 import type { Sandbox } from './sandbox.ts';
 
@@ -68,23 +69,42 @@ export function killKeepersIn(s: Sandbox, runtimeDir: string): void {
   }
 
   const { proc, processes } = realPlatform({ refuseWindows: true });
-  const bootId = proc.bootId();
-  const unknown: number[] = [];
-  for (const text of lines) {
-    const line = parsePidLine(text);
-    if (line === null || line.pid <= 1 || line.pid === process.pid || line.pid === process.ppid) {
-      continue;
-    }
-    const state = pidLineState(line, proc, bootId);
-    if (state === 'alive') {
-      processes.signal(line.pid, 'SIGKILL');
-    } else if (state === 'unknown') {
-      unknown.push(line.pid); // could not be read: never signalled, and the test is told
-    }
+  const { kill, unknown } = keepersToKill(lines, proc, proc.bootId(), [process.pid, process.ppid]);
+  for (const pid of kill) {
+    processes.signal(pid, 'SIGKILL');
   }
   if (unknown.length > 0) {
     throw new Error(
       `killKeepersIn: could not tell whether ${unknown.join(', ')} still run; not signalled`,
     );
   }
+}
+
+/**
+ * The decision of killKeepersIn, without signalling (pure but for `proc`): of the `.pid` lines'
+ * texts, the pids alive by design 5.5's rule (`pidLineState` 'alive') are to kill, those it could
+ * not tell are unknown. A dead, garbled or non-keeper line, pid 1 and the pids of `own` (this
+ * process and its parent) are in neither. `bootId` is the current one, read once by the caller.
+ */
+export function keepersToKill(
+  lines: readonly string[],
+  proc: Proc,
+  bootId: string | null,
+  own: readonly number[],
+): { kill: number[]; unknown: number[] } {
+  const kill: number[] = [];
+  const unknown: number[] = [];
+  for (const text of lines) {
+    const line = parsePidLine(text);
+    if (line === null || line.pid <= 1 || own.includes(line.pid)) {
+      continue;
+    }
+    const state = pidLineState(line, proc, bootId);
+    if (state === 'alive') {
+      kill.push(line.pid);
+    } else if (state === 'unknown') {
+      unknown.push(line.pid); // could not be read: never signalled, and the test is told
+    }
+  }
+  return { kill, unknown };
 }

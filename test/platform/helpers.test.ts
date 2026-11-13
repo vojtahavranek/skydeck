@@ -25,7 +25,7 @@ import type { RunResult } from '../../src/platform/types.ts';
 import { capture } from '../helpers/capture.ts';
 import { testContext } from '../helpers/context.ts';
 import { testDeck } from '../helpers/deck.ts';
-import { killKeepersIn } from '../helpers/kill.ts';
+import { keepersToKill, killKeepersIn } from '../helpers/kill.ts';
 import {
   BOOT_A,
   BOOT_B,
@@ -1334,6 +1334,43 @@ describe('killKeepersIn (A34)', () => {
 
     assert.equal(await exitWithin(keeper, 300), 'running');
     assert.equal(await exitWithin(elsewhere, 0), 'running');
+  });
+
+  test('keepersToKill: alive lines are to kill, unreadable ones unknown; dead, garbled and own ones neither', () => {
+    const proc = fakeProc({
+      bootId: BOOT_A,
+      processes: {
+        10: { stat: statLine(10, 100), cmdline: [] },
+        11: { stat: statLine(11, 100), cmdline: [] },
+        13: { stat: statLine(13, 999), cmdline: [] },
+        14: { stat: statLine(14, 100), cmdline: [] },
+        4000: { stat: statLine(4000, 100), cmdline: [] },
+      },
+    });
+    const stat = proc.stat.bind(proc);
+    proc.stat = (pid) => {
+      if (pid === 11) {
+        throw Object.assign(new Error('cannot read /proc/11/stat (EACCES)'), { code: 'EACCES' });
+      }
+      return stat(pid);
+    };
+    const lines = [
+      `10 100 ${BOOT_A} 1 1\n`, // alive
+      `11 100 ${BOOT_A} 1 1\n`, // cannot be read
+      `12 100 ${BOOT_A} 1 0\n`, // no such process
+      `13 100 ${BOOT_A} 1 1\n`, // pid reused
+      `14 100 ${BOOT_B} 1 1\n`, // another boot
+      `4000 100 ${BOOT_A} 1 1\n`, // this process
+      'garbage\n',
+      `1 100 ${BOOT_A} 1 1\n`, // init
+      `15 100 ${BOOT_A} 1 1\r\n`, // not a pid line (contract 2.8)
+    ];
+
+    assert.deepEqual(keepersToKill(lines, proc, BOOT_A, [4000]), { kill: [10], unknown: [11] });
+    assert.deepEqual(keepersToKill(lines, proc, null, [4000]), {
+      kill: [],
+      unknown: [10, 11, 12, 13, 14],
+    });
   });
 
   test('a line whose process cannot be read is not signalled; the others are, then it throws', async (t) => {
