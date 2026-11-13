@@ -230,9 +230,11 @@ export function readLock(deck: Deck, sessionId: string): string | null {
 
 /**
  * In one store transaction: when the session's lock still holds `ours` (the value this process
- * wrote), sets it to the clock's time and returns the new value; otherwise — another skydeck took
- * the lock over after it went stale, or it is gone — changes nothing and returns null. A caller
- * that waits longer than LOCK_TTL_NS for the session to start renews its lock while it waits.
+ * wrote), sets its time to the clock's, keeping the event id it records (only a start stored after
+ * the lock was first taken releases it), and returns the new value; otherwise — another skydeck
+ * took the lock over after it went stale, or it is gone — changes nothing and returns null. A
+ * caller that waits longer than LOCK_TTL_NS for the session to start renews its lock while it
+ * waits.
  */
 export function renewLock(deck: Deck, sessionId: string, ours: string): string | null {
   const key = lockKey(sessionId);

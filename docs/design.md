@@ -44,7 +44,8 @@ section first.
    skydeck never adds a permission flag that the session was not started with.
 6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one
    session to another. skydeck never stops a process. This is about the user's data (sessions,
-   labels, groups, notes), not skydeck's own transient files (5.3).
+   labels, groups, notes), not skydeck's own transient files (5.3). The one exception is the label
+   and group skydeck itself has just stored for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.
 8. **Local only.** No network service, no account, no telemetry. The only network use is the
    `gh` command line for pull-request status.
@@ -414,8 +415,9 @@ match or more than one match is an error that lists the candidates.
 
 **Exit codes:** 0 success; 1 failure, or `doctor` found a problem; 2 usage error; 3 reference not
 found or ambiguous; 4 resume refused; 5 restore stopped before finishing. After a hand-off (`resume
---here`, `new --here`, or `restore` without a tab adapter) the exit status is `claude`'s own: the
-launcher has become `claude` (7.6 "Where"), so skydeck's status never reaches the caller.
+--here`, `new --here`, `R` in the interactive list when it resumes here, or `restore` without a tab
+adapter) the exit status is `claude`'s own: the launcher has become `claude` (7.6 "Where"), so
+skydeck's status never reaches the caller.
 
 **`--json`** output of `ls` is stable and versioned:
 
@@ -515,9 +517,9 @@ of several resumes started together exactly one gets the lock. Inside that trans
 session's latest event is read again, and resume is refused ("the session's state changed while
 preparing; run the command again") when it is not the one its decision was made on: in between,
 another skydeck may have resumed the session, and a sweep may have removed its lock because its
-start event had been ingested. A lock dated 60 seconds or more in the future, or holding
-something other than a time, counts as stale too; stale locks are deleted, again in one
-transaction, at the end of every refresh.
+start event had been ingested. A lock dated 60 seconds or more in the future, or holding a
+value that is not a lock skydeck writes, counts as stale too; stale locks are deleted, again in
+one transaction, at the end of every refresh.
 
 **Where.** `--here` replaces skydeck with `claude` in the current terminal: the command line tool
 hands the directory and the argument list back to the `bin/skydeck` launcher through a handoff
@@ -612,6 +614,10 @@ in other terminals — not the session's own `claude` command. The user may past
 later, and the session may have been resumed elsewhere meanwhile: `skydeck resume` runs the guard
 and takes the lock at the moment it is run, where a raw command would start a second process on one
 transcript (principle 7). The line is always printable: a session id holds no control character.
+Before each printed command restore prints one line that names its session — short id, title and
+directory, sanitised as in the list — because with `--yes` no list was shown; the command keeps a
+line of its own so that it can be pasted alone (not a trailing `#` comment: zsh takes none in an
+interactive shell).
 If the handoff itself fails, that session's own command is printed too and, as with `resume`, its
 lock stays for its 60 seconds, so that no other skydeck starts the session while the user runs the
 command; when that command cannot be printed, the lock is released. `--dry-run` shows each
