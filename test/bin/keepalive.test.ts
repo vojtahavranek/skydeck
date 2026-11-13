@@ -68,9 +68,13 @@ interface Live {
   end: () => Promise<void>;
 }
 
-/** Starts a `sleep 60`: a real process for a pid line to name. */
-async function liveProcess(t: TestContext, s: Sandbox): Promise<Live> {
-  const child = spawn(join(s.bin, 'sleep'), ['60'], { env: s.env(), stdio: 'ignore' });
+/** Starts a `sleep 60` (through `program`, a link to sleep): a real process for a pid line to name. */
+async function liveProcess(
+  t: TestContext,
+  s: Sandbox,
+  program: string = join(s.bin, 'sleep'),
+): Promise<Live> {
+  const child = spawn(program, ['60'], { env: s.env(), stdio: 'ignore' });
   t.after(() => {
     child.kill('SIGKILL');
   });
@@ -306,66 +310,41 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
     assert.equal(read(join(p.dir, 'keepalive.interop')), '');
   });
 
-  for (const [name, value] of [
-    ['a newline', `${INTEROP}\n${INTEROP}`],
-    ['a carriage return', `${INTEROP}\r`],
-  ]) {
-    test(`keepalive.interop is empty when WSL_INTEROP contains ${name}`, async (t) => {
-      const p = place(t);
-      const server = await liveProcess(t, p.s);
-      writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
-      startKeepAlive(t, p, { env: { WSL_INTEROP: value } });
-      await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
-      assert.equal(read(join(p.dir, 'keepalive.interop')), '');
-    });
-  }
-
-  test('neither file is ever seen half written: a reader in a loop reads whole contents only', async (t) => {
+  // Judging the value is the reader's job (task 19), so even an odd one is written as it is.
+  test('keepalive.interop holds WSL_INTEROP exactly, even with a newline and a carriage return in it', async (t) => {
     const p = place(t);
-    const pidPattern = new RegExp(`^\\d+ \\d+ ${BOOT_ID}\\n$`);
-    for (let run = 0; run < 20; run++) {
-      const dir = join(p.s.root, `run-${run}`);
-      mkdirSync(join(dir, 'terms'), { recursive: true, mode: 0o700 });
-      const k = startKeepAlive(t, { ...p, dir }, { env: { WSL_INTEROP: INTEROP } });
-      const seen: { pid: string[]; interop: string[] } = { pid: [], interop: [] };
-      // A busy loop on purpose: it reads as often as it can while the script writes.
-      const deadline = Date.now() + 5000;
-      while (Date.now() < deadline) {
-        const pid = read(join(dir, 'keepalive.pid'));
-        const interop = read(join(dir, 'keepalive.interop'));
-        if (pid !== null) seen.pid.push(pid);
-        if (interop !== null) seen.interop.push(interop);
-        if (pid !== null && interop !== null) break;
-      }
-      assert.ok(seen.pid.length > 0 && seen.interop.length > 0, `run ${run}: never saw both files`);
-      for (const text of seen.pid) {
-        assert.match(text, pidPattern, `run ${run}: keepalive.pid read as ${JSON.stringify(text)}`);
-      }
-      for (const text of seen.interop) {
-        assert.equal(text, INTEROP, `run ${run}: keepalive.interop read half written`);
-      }
-      k.child.kill('SIGTERM');
-      await exitsWithin(k, 2 * INTERVAL_MS);
-    }
+    const server = await liveProcess(t, p.s);
+    writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
+    const value = `${INTEROP}\n${INTEROP}\r`;
+    startKeepAlive(t, p, { env: { WSL_INTEROP: value } });
+    await waitFor(() => existsSync(join(p.dir, 'keepalive.pid')), 5000, 'keepalive.pid');
+    assert.equal(read(join(p.dir, 'keepalive.interop')), value);
   });
 
-  // The kernel names a process after the file it was started from, here a symlink to sh.
+  // The kernel names a process after the file it was started from: here a symlink of that name to
+  // sh for the keep-alive itself, and one to sleep for the server it watches.
   for (const comm of ['a) b', 'a)\n) b']) {
-    test(`its own comm ${JSON.stringify(comm)} (a symlink of that name to sh) still gives the right process start`, async (t) => {
+    test(`a comm of ${JSON.stringify(comm)} still gives the right process start, its own and the server's`, async (t) => {
       const p = place(t);
+      const oddSleep = join(p.s.root, 'odd', comm);
+      mkdirSync(join(p.s.root, 'odd'));
+      symlinkSync(realpathSync(join(p.s.bin, 'sleep')), oddSleep);
+      const server = await liveProcess(t, p.s, oddSleep);
+      writeFileSync(join(p.dir, 'server.pid'), pidLine(server.pid, server.start, BOOT_ID));
       const oddShell = join(p.s.bin, comm);
       symlinkSync(realpathSync(join(p.s.bin, 'sh')), oddShell);
-      // The keep-alive's own line in terms/ keeps it: it judges that line by the same rule.
       const k = startKeepAlive(t, p, { shell: oddShell });
       const pidFile = join(p.dir, 'keepalive.pid');
       await waitFor(() => existsSync(pidFile), 5000, 'keepalive.pid');
 
-      assert.ok(readFileSync(`/proc/${k.pid}/stat`, 'utf8').includes(` (${comm}) `));
-      const line = pidLine(k.pid, procStart(k.pid), BOOT_ID);
-      assert.equal(read(pidFile), line);
-      writeFileSync(join(p.dir, 'terms', 'self.pid'), line);
+      for (const pid of [k.pid, server.pid]) {
+        assert.ok(readFileSync(`/proc/${pid}/stat`, 'utf8').includes(` (${comm}) `));
+      }
+      assert.equal(read(pidFile), pidLine(k.pid, procStart(k.pid), BOOT_ID));
       await delay(2.5 * INTERVAL_MS);
-      assert.equal(k.status(), undefined, 'still running');
+      assert.equal(k.status(), undefined, 'the server is judged alive: still running');
+      await server.end();
+      assert.deepEqual(await exitsWithin(k, 2 * INTERVAL_MS), { code: 0, signal: null });
     });
   }
 
@@ -471,4 +450,35 @@ describe('bin/skydeck-keepalive', { concurrency: true }, () => {
     assert.deepEqual(status, { code: 1, signal: null });
     assert.deepEqual(readdirSync(dir), []);
   });
+});
+
+// Outside the concurrent block above: its busy loop holds this process's event loop, which would
+// delay the timers and the waits of the tests running beside it.
+test('neither file is ever seen half written: a reader in a loop reads whole contents only', async (t) => {
+  const p = place(t);
+  const pidPattern = new RegExp(`^\\d+ \\d+ ${BOOT_ID}\\n$`);
+  for (let run = 0; run < 20; run++) {
+    const dir = join(p.s.root, `run-${run}`);
+    mkdirSync(join(dir, 'terms'), { recursive: true, mode: 0o700 });
+    const k = startKeepAlive(t, { ...p, dir }, { env: { WSL_INTEROP: INTEROP } });
+    const seen: { pid: string[]; interop: string[] } = { pid: [], interop: [] };
+    // A busy loop on purpose: it reads as often as it can while the script writes.
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const pid = read(join(dir, 'keepalive.pid'));
+      const interop = read(join(dir, 'keepalive.interop'));
+      if (pid !== null) seen.pid.push(pid);
+      if (interop !== null) seen.interop.push(interop);
+      if (pid !== null && interop !== null) break;
+    }
+    assert.ok(seen.pid.length > 0 && seen.interop.length > 0, `run ${run}: never saw both files`);
+    for (const text of seen.pid) {
+      assert.match(text, pidPattern, `run ${run}: keepalive.pid read as ${JSON.stringify(text)}`);
+    }
+    for (const text of seen.interop) {
+      assert.equal(text, INTEROP, `run ${run}: keepalive.interop read half written`);
+    }
+    k.child.kill('SIGTERM');
+    await exitsWithin(k, 2 * INTERVAL_MS);
+  }
 });

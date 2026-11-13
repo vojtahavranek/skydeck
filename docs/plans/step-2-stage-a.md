@@ -1204,8 +1204,8 @@ boot with the same process start. It removes `keepalive.pid` when it exits, only
 still holds its own line.
 
 Also ruled by the plan owner in pull request #34: `keepalive.interop` holds the value exactly, with
-no newline added, and is empty (zero bytes) also when the value contains a newline or a carriage
-return. The script creates its files under `umask 077`. It refuses wrong arguments (none, more than
+no newline added and whatever it contains, and is empty (zero bytes) when it is unset; the reader
+(task 19) checks that what it reads is an absolute path. The script creates its files under `umask 077`. It refuses wrong arguments (none, more than
 one, a relative path, not a directory) with a usage line on stderr and exit 2, writing nothing; it
 exits 1 when it cannot read the boot id or its own process start, cannot write its files, or
 `sleep` fails. `SKYDECK_TEST_KEEPALIVE_SECONDS` counts only as a whole number of at least 1 without
