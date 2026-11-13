@@ -41,19 +41,60 @@ export function processContext(): Context {
 }
 
 /**
+ * What the process exits with when standard output was closed by its reader (`skydeck ls | head -1`)
+ * and the command itself succeeded: 128 + 13, the status a shell reports for a program that SIGPIPE
+ * killed, as `ls` or `cat` would be in the same pipeline. A command that failed keeps its own code.
+ */
+export const EXIT_STDOUT_CLOSED = 141;
+
+/**
+ * Standard output. A reader that has gone (EPIPE) is not an error: from then on nothing is written,
+ * nothing is said on stderr, and the command carries on to its end, so that what it must finish (a
+ * state change, closing the database) is finished; only the exit status tells (EXIT_STDOUT_CLOSED
+ * after a command that returned 0). Any other error of the stream is thrown as it always was.
+ */
+function guardedStdout(): { write: (text: string) => void } {
+  let listening = false;
+  let closed = false;
+  return {
+    write: (text) => {
+      if (closed) {
+        return;
+      }
+      if (!listening) {
+        listening = true;
+        process.stdout.on('error', (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'EPIPE') {
+            throw error;
+          }
+          closed = true;
+          // The failure can arrive after the command has returned (it comes on a later tick), so
+          // the status is decided when the process ends.
+          process.once('exit', (code) => {
+            if (code === 0) {
+              process.exitCode = EXIT_STDOUT_CLOSED;
+            }
+          });
+        });
+      }
+      process.stdout.write(text);
+    },
+  };
+}
+
+/**
  * The standard streams. Standard input is touched only when something reads it, and is paused
  * again afterwards, so that a command that has finished is never kept alive by it. `readLine` and
  * `keys` read the same stream: one after the other is fine, two at once is not.
  */
 function processIo(): Io {
+  const stdout = guardedStdout();
   let lines: AsyncIterator<string> | undefined;
   let reader: Interface | undefined;
   let closed = false; // the interface closed itself at end of input: it cannot be paused or resumed
   let ended = false; // and every line it held has been handed out
   return {
-    stdout: (text) => {
-      process.stdout.write(text);
-    },
+    stdout: stdout.write,
     stderr: (text) => {
       process.stderr.write(text);
     },
