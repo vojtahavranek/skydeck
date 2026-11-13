@@ -581,7 +581,9 @@ running `skydeck` shows whether it started: a session that never started has not
 **The set.** By default: the sessions marked `ended-unexpectedly`, not done and not expired,
 whose last holder belongs to the **latest earlier boot** in which any session was held: of the
 boots other than the current one that have a `start` or `observed` event, the one whose last
-event is the latest. `--all` adds every other session marked `ended-unexpectedly`, from any boot
+event is the latest. A `scripted` event (5.3) counts for neither: a scripted run is not what the
+user had open, so it does not make a boot the latest earlier one or move the last event of its
+boot (which the preselection below measures against). `--all` adds every other session marked `ended-unexpectedly`, from any boot
 including the current one. The set is in list order (as `ls --all` shows it). When the current
 boot id cannot be read, restore refuses (exit 1): every process would look dead, so the sessions
 running now would be offered, and the guard could not see that they run (principle 7).

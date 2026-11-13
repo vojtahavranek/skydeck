@@ -4599,7 +4599,7 @@ export const command: Command;
 **Rules fixed here.**
 - **Boots.** For every boot id in `events`, its last event time. The **latest earlier boot** is
   the boot ≠ `currentBootId` with the largest last event time among boots that have a `start` or
-  `observed` event.
+  `observed` event. *Ruled in fix 1:* `scripted` events are left out of both.
 - **Set.** Default: rows with mark `ended-unexpectedly`, not `done`, not `expired`, whose
   `session.lastHolding.process.bootId` is the latest earlier boot. `all`: additionally every other
   row with `ended-unexpectedly`, not done, not expired, from any boot including the current one.
