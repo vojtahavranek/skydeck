@@ -426,8 +426,10 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
 - **Its environment.** `STANDIN_RECORD`: the JSON-lines file it appends to (each record
   `{ pid, ms, ev, … }`). `CLAUDE_CONFIG_DIR`: where it writes its live-session file.
   `SKYDECK_HOME`: where the hook it runs writes. **All three must be absolute paths, or it exits 2
-  before doing anything** (A33); there are no defaults. It runs the hook at
-  `<repo>/bin/skydeck-hook` (or `$STANDIN_HOOK`).
+  before doing anything** (A33); there are no defaults. `STANDIN_MAX_SECONDS` (optional): a
+  number of seconds from 1 to 600 that shortens its life; any other value, the empty string
+  included, is refused the same way (exit 2 before doing anything). It always runs the hook at
+  `<repo>/bin/skydeck-hook`; no variable changes which program that is.
 - **Arguments.** `--session-id <id>`, `--resume <id>` or `-r <id>`, `-n <name>`; everything else is
   recorded and ignored. With neither `--session-id` nor `--resume` it makes up a session id.
 - **At start** it records `{ ev: 'start', argv, cwd, envNames, env: { TERM, COLORTERM, PWD,
@@ -477,12 +479,14 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
   SIGWINCH that leaves the size as it was records nothing and draws nothing: a server that needs a
   redraw at the same size must change the size and change it back (S2 7.3: one column narrower and
   back). `SIGHUP` — records `{ ev: 'hup' }`, `SessionEnd` reason `other`, live file removed, exit
-  129. It records `{ ev: 'exit', code }` last.
+  129; a SIGHUP while it still waits for DA1 or CPR sends that `SessionEnd` with no `SessionStart`
+  before it (the start hook has not run yet), a case ingest must survive. It records
+  `{ ev: 'exit', code }` last.
 - **It ends itself** (A33), exit 0: when the directory of `STANDIN_RECORD` is gone (checked every
   second, and before every hook run, record and live-file write) at once, running no hook and
   writing nothing (no record, no live file, no spool directory created again); 10 minutes after
-  it started (`STANDIN_MAX_SECONDS` shortens it, for its own test; a larger value counts as 600)
-  with `SessionEnd` reason `other` and its live file removed. Both are timers: while a write to
+  it started (`STANDIN_MAX_SECONDS` shortens it, for its own test) with `SessionEnd` reason
+  `other` and its live file removed. Both are timers: while a write to
   its terminal blocks (`/flood` into a pty that nobody reads, e.g. a keeper under SIGSTOP), they
   wait, and it ends once the terminal is read again or its holder is gone (then the write fails
   or it gets SIGHUP).

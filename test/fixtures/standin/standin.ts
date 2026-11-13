@@ -6,7 +6,8 @@
  * It refuses to run outside a sandbox: STANDIN_RECORD, SKYDECK_HOME and CLAUDE_CONFIG_DIR must be
  * absolute paths (A33). It writes nothing but its record file, `<CLAUDE_CONFIG_DIR>/sessions/` and
  * what the hook writes under SKYDECK_HOME, and it ends itself when its record file's directory is
- * gone (a crashed test) or after 10 minutes (STANDIN_MAX_SECONDS can only shorten that).
+ * gone (a crashed test) or after 10 minutes (STANDIN_MAX_SECONDS, 1 to 600, can only shorten
+ * that; any other value is refused). It always runs the repository's `bin/skydeck-hook`.
  *
  * The test helper `test/helpers/standin.ts` starts it and reads its records.
  */
@@ -32,26 +33,34 @@ import type { StandinRecord } from '../../helpers/standin.ts';
 
 const REQUIRED = ['STANDIN_RECORD', 'SKYDECK_HOME', 'CLAUDE_CONFIG_DIR'] as const;
 const missing = REQUIRED.filter((name) => !isAbsolute(process.env[name] ?? ''));
-if (missing.length > 0) {
-  process.stderr.write(
-    `standin: ${missing.join(', ')} must be set to an absolute path; refusing to run\n`,
-  );
+// The 10 minutes can only be shortened (A33): a larger value could keep a stand-in alive for
+// days, and one above 2^31 ms would overflow Node's timer and end it at once.
+const maxText = process.env['STANDIN_MAX_SECONDS'];
+const maxSeconds = maxText === undefined ? 600 : secondsUpTo600(maxText);
+const problems = [
+  ...(missing.length > 0 ? [`${missing.join(', ')} must be set to an absolute path`] : []),
+  ...(maxSeconds === null ? ['STANDIN_MAX_SECONDS must be a number of seconds from 1 to 600'] : []),
+];
+if (problems.length > 0) {
+  process.stderr.write(`standin: ${problems.join('; ')}; refusing to run\n`);
   process.exit(2);
 }
 
 const RECORD = process.env['STANDIN_RECORD'] as string;
 const RECORD_DIR = dirname(RECORD);
 const CONFIG_DIR = process.env['CLAUDE_CONFIG_DIR'] as string;
-const HOOK =
-  process.env['STANDIN_HOOK'] ||
-  fileURLToPath(new URL('../../../bin/skydeck-hook', import.meta.url));
-// 10 minutes at most (A33): a larger value could keep a stand-in alive for days, and one above
-// 2^31 ms would overflow Node's timer and end it at once.
-const MAX_SECONDS = Math.min(positive(process.env['STANDIN_MAX_SECONDS']) ?? 600, 600);
+const HOOK = fileURLToPath(new URL('../../../bin/skydeck-hook', import.meta.url));
+const MAX_SECONDS = maxSeconds as number;
 const ANSWER_WAIT_MS = 2000;
 
 const ESC = '\x1b';
 const ST = `${ESC}\\`;
+
+/** A decimal number of seconds from 1 to 600, else null. */
+function secondsUpTo600(text: string): number | null {
+  const value = /^[0-9]+(\.[0-9]+)?$/.test(text) ? Number(text) : NaN;
+  return value >= 1 && value <= 600 ? value : null;
+}
 
 function positive(text: string | undefined): number | null {
   const value = Number(text);

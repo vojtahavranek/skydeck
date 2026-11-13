@@ -468,22 +468,17 @@ describe('stand-in: start', () => {
     assert.equal(typeof live['updatedAt'], 'number');
   });
 
-  test('$STANDIN_HOOK is run instead of bin/skydeck-hook', async (t) => {
+  test('$STANDIN_HOOK is not honoured: it always runs bin/skydeck-hook', async (t) => {
     const s = sandbox(t);
     const calls = join(s.root, 'hook-calls');
     const hook = join(s.root, 'hook-recorder');
-    writeFileSync(
-      hook,
-      `#!/bin/sh\nprintf '%s %s\\n' "$1" "$CLAUDE_PID" >> '${calls}'\ncat >> '${calls}'\n`,
-    );
+    writeFileSync(hook, `#!/bin/sh\necho "$1" >> '${calls}'\n`);
     chmodSync(hook, 0o755);
 
     const { start } = await startStandin(t, { s, env: { STANDIN_HOOK: hook } });
 
-    const lines = readFileSync(calls, 'utf8').split('\n');
-    assert.equal(lines[0], `SessionStart ${start.pid}`);
-    assert.equal((JSON.parse(lines[1] ?? '') as Record<string, unknown>)['session_id'], S1);
-    assert.equal(existsSync(join(s.skydeckHome, 'state')), false);
+    assert.equal(existsSync(calls), false);
+    assert.equal(spoolEvents(s)[0]?.claudePid, String(start.pid));
   });
 
   test('--resume and -r resume the session they name; -n names it', async (t) => {
@@ -714,6 +709,23 @@ describe('stand-in: signals', () => {
     assert.equal(pty.output().includes('size 80x24'), false);
   });
 
+  test('SIGHUP while it waits for DA1: a SessionEnd other with no SessionStart before it', async (t) => {
+    const { s, pty, record } = await startStandin(t, { answer: false });
+    await pty.waitFor(DA1);
+
+    pty.control('signal 1');
+
+    assert.equal(await pty.exited(), 129);
+    assert.deepEqual(
+      readRecords(record).map((r) => r.ev),
+      ['start', 'hup', 'exit'],
+    );
+    assert.deepEqual(
+      spoolEvents(s).map((e) => [e.event, e.input['reason'] ?? null]),
+      [['SessionEnd', 'other']],
+    );
+  });
+
   test('SIGHUP: a hup record, SessionEnd other, exit 129 recorded last', async (t) => {
     const { s, pty, start, record } = await startStandin(t);
 
@@ -867,7 +879,37 @@ describe('stand-in: /query', () => {
   });
 });
 
+/** No spool file, record file, live file or state directory anywhere in the sandbox. */
+function assertNothingWritten(s: Sandbox): void {
+  const everything = readdirSync(s.root, { recursive: true }).map(String);
+  assert.deepEqual(
+    everything.filter((path) => path.endsWith('.ev') || path.endsWith('.jsonl')),
+    [],
+  );
+  assert.equal(existsSync(join(s.skydeckHome, 'state')), false);
+  assert.equal(existsSync(join(s.claudeHome, 'sessions')), false);
+  assert.equal(existsSync(join(s.home, '.local')), false);
+}
+
 describe('stand-in: refusing to run outside a sandbox (A33)', () => {
+  // The variable may only shorten the 10 minutes; anything else is refused before anything runs.
+  for (const value of ['', '0', '0.5', '601', '3000000', '-5', '1e2', 'ten', ' 5']) {
+    test(`STANDIN_MAX_SECONDS ${JSON.stringify(value)} → exit 2, nothing written`, (t) => {
+      const s = sandbox(t);
+      const ran = spawnSync(standinCommand(s), ['--session-id', S1], {
+        cwd: s.root,
+        env: s.env({ STANDIN_RECORD: join(s.root, 'standin.jsonl'), STANDIN_MAX_SECONDS: value }),
+        input: '',
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+
+      assert.equal(ran.status, 2, ran.stderr);
+      assert.match(ran.stderr, /STANDIN_MAX_SECONDS/);
+      assertNothingWritten(s);
+    });
+  }
+
   for (const name of ['STANDIN_RECORD', 'SKYDECK_HOME', 'CLAUDE_CONFIG_DIR'] as const) {
     for (const [what, value] of [
       ['unset', undefined],
@@ -898,14 +940,7 @@ describe('stand-in: refusing to run outside a sandbox (A33)', () => {
 
         assert.equal(ran.status, 2, ran.stderr);
         assert.match(ran.stderr, new RegExp(name));
-        const everything = readdirSync(s.root, { recursive: true }).map(String);
-        assert.deepEqual(
-          everything.filter((path) => path.endsWith('.ev') || path.endsWith('.jsonl')),
-          [],
-        );
-        assert.equal(existsSync(join(s.skydeckHome, 'state')), false);
-        assert.equal(existsSync(join(s.claudeHome, 'sessions')), false);
-        assert.equal(existsSync(join(s.home, '.local')), false);
+        assertNothingWritten(s);
       });
     }
   }
@@ -976,16 +1011,15 @@ describe('stand-in: ending itself (A33)', () => {
 });
 
 describe('stand-in: limits on its life', () => {
-  test('STANDIN_MAX_SECONDS only shortens: a huge value is still the 10 minutes', async (t) => {
-    const { pty, record } = await startStandin(t, { env: { STANDIN_MAX_SECONDS: '3000000' } });
+  test('STANDIN_MAX_SECONDS 600 and 1.5 are taken', async (t) => {
+    const long = await startStandin(t, { env: { STANDIN_MAX_SECONDS: '600' } });
+    const short = await startStandin(t, { env: { STANDIN_MAX_SECONDS: '1.5' } });
 
-    await sleep(1000);
-
+    assert.equal(await short.pty.exited(), 0);
     assert.deepEqual(
-      readRecords(record).filter((r) => r.ev === 'exit'),
+      readRecords(long.record).filter((r) => r.ev === 'exit'),
       [],
     );
-    assert.equal(pty.output().includes('TimeoutOverflowWarning'), false);
   });
 
   test('the pty helper takes the program with it when the test process is gone', async (t) => {
