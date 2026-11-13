@@ -1818,8 +1818,9 @@ ship no `LICENSE` file: for them `npm run vendor` writes `@xterm/xterm`'s, and o
 that the package's `package.json` declares `MIT` and the repository of `@xterm/xterm`
 (`github.com/xtermjs/xterm.js`; a `#branch` or a path inside the repository is ignored), and fails
 otherwise. Beside each bundle it writes a declaration file `<name>.d.mts` that re-exports the
-package's typings by the package's name, so that `tsc` for `web/` never reads a bundle (a `paths`
-entry maps each name to the vendored typings). `vendor/MANIFEST.json` lists every file with its
+package's typings by the package's name, so that `tsc` for `web/` never reads a bundle; the
+typings themselves are vendored beside the bundles, within a type checker's reach.
+`vendor/MANIFEST.json` lists every file with its
 package, version and sha256 — paths relative to the checkout, the shims under the package
 `skydeck` with version `-`, a borrowed licence with `licenseFrom` (`@xterm/xterm`) and
 `licenseReason`. The same packages at the same versions are development dependencies;

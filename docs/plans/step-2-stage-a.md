@@ -951,10 +951,23 @@ The implementer checks the bundles for third-party notices (`addon-unicode-graph
 
 ```ts
 // src/window/vendor.ts
+/** `path` is relative to the checkout (`vendor/xterm/xterm/lib/xterm.mjs`). */
 export interface ManifestEntry { path: string; package: string; version: string; sha256: string; licenseFrom?: string; licenseReason?: string }
+/** null when the manifest is missing, unreadable or not a manifest — also when any entry's path
+ *  lies outside `vendor/xterm/` or has a `.`, `..` or empty segment, a backslash or a control
+ *  character (task 14 serves the listed paths). Never throws. */
 export function readManifest(files: Files, appRoot: string): ManifestEntry[] | null;
-/** One line per problem: a listed file missing, or its sha256 different; [] when all match. */
+/** One line per problem: a listed file missing, or its sha256 different; [] when all match.
+ *  Also one line for a listed path that is not a file or cannot be read, and one line for a
+ *  manifest that is missing, unreadable, not valid or lists no files. Never throws. */
 export function verifyVendored(files: Files, appRoot: string): string[];
+
+// scripts/vendor.ts — for tests: the seam the fixture `node_modules` test needs
+export interface VendorOptions { from: string /* holds node_modules/@xterm */; to: string /* receives vendor/ */ }
+/** Checks everything, then replaces `<to>/vendor/xterm/` and `<to>/vendor/MANIFEST.json`;
+ *  throws before writing anything. Returns the manifest's entries. */
+export function vendor(options: VendorOptions): ManifestEntry[];
+// `node scripts/vendor.ts [<directory>]`: from the checkout into <directory> (the checkout by default).
 ```
 
 **Tests** (platform: none — the files of the checkout and a temporary directory)
