@@ -582,7 +582,8 @@ test("writeKeeperFile writes keeper-<build>.py with mode 0o600 and removes other
   const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
   prepareRuntimeDir(d.platform, files);
   writeFileSync(files.keeperFile(OTHER_BUILD), '# old keeper\n');
-  writeFileSync(join(files.dir, `.keeper-${OTHER_BUILD}.py.a1b2c3.tmp`), '# half written\n');
+  // A temporary a write of Files.writeText left behind: `.<name>.<12 hex>.tmp`.
+  writeFileSync(join(files.dir, `.keeper-${OTHER_BUILD}.py.a1b2c3d4e5f6.tmp`), '# half written\n');
   writeFileSync(files.serverJson, '{}');
   writeFileSync(join(files.dir, 'keeper-notes.txt'), 'not a keeper file');
 
@@ -596,6 +597,40 @@ test("writeKeeperFile writes keeper-<build>.py with mode 0o600 and removes other
     'server.json',
     'terms',
   ]);
+});
+
+test('writeKeeperFile removes only files of the forms it creates: no look-alike, no directory', (t) => {
+  const d = testDeck(t);
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  prepareRuntimeDir(d.platform, files);
+  const kept = [
+    `.keeper-${OTHER_BUILD}.py.a1b2c3.tmp`, // not 12 hex
+    `.keeper-${OTHER_BUILD}.py.A1B2C3D4E5F6.tmp`, // not lowercase
+    `.keeper-${OTHER_BUILD}.py.a1b2c3d4e5f6.tmp.x`,
+    `.keeper-${OTHER_BUILD}.pyc.a1b2c3d4e5f6.tmp`,
+    `keeper-${OTHER_BUILD}.py.bak`,
+    `xkeeper-${OTHER_BUILD}.py`,
+  ];
+  for (const name of kept) {
+    writeFileSync(join(files.dir, name), 'not one of its files');
+  }
+  mkdirSync(join(files.dir, `keeper-${OTHER_BUILD}.py`)); // a directory, not a file it wrote
+  mkdirSync(join(files.dir, `.keeper-${OTHER_BUILD}.py.0123456789ab.tmp`));
+  d.platform.files.symlink(join(d.sandbox.root, 'elsewhere'), files.keeperFile('linkbuild'));
+
+  writeKeeperFile(d.platform.files, files, BUILD, '# keeper v1\n');
+
+  assert.deepEqual(
+    readdirSync(files.dir).sort(),
+    [
+      ...kept,
+      `.keeper-${OTHER_BUILD}.py.0123456789ab.tmp`,
+      `keeper-${BUILD}.py`,
+      `keeper-${OTHER_BUILD}.py`,
+      'keeper-linkbuild.py',
+      'terms',
+    ].sort(),
+  );
 });
 
 test("writeKeeperFile keeps the current build's file, replacing its content", (t) => {

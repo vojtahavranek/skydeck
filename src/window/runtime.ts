@@ -29,9 +29,13 @@ const BUILD = /^[A-Za-z0-9_-]+$/;
 const PID_FILE = /^([0-9a-f]{12})\.pid$/;
 /** A keeper's socket in `terms/`. */
 const SOCK_FILE = /^([0-9a-f]{12})\.sock$/;
-/** A keeper code file, and a temporary one a write left behind (Files.writeText's naming). */
+/**
+ * A keeper code file as `keeperFile` names it, and the temporary `Files.writeText` writes it
+ * through (`.<name>.<12 hex>.tmp`, then renamed) that a write cut short leaves behind: the only
+ * names writeKeeperFile creates.
+ */
 const KEEPER_FILE = /^keeper-[A-Za-z0-9_-]+\.py$/;
-const KEEPER_TEMP = /^\.keeper-[A-Za-z0-9_-]+\.py\.[^/]*\.tmp$/;
+const KEEPER_TEMP = /^\.keeper-[A-Za-z0-9_-]+\.py\.[0-9a-f]{12}\.tmp$/;
 /** Where systemd marks a user whose runtime directory outlives their last login session. */
 const LINGER_DIR = '/var/lib/systemd/linger';
 
@@ -226,7 +230,8 @@ function privateDir(platform: Platform, runtimeDir: string, path: string, subjec
 /**
  * S2 16.5: writes <dir>/keeper-<build>.py (0o600, through a temporary name) and removes the
  * keeper files of other builds, and the temporaries a write of one left behind. A running keeper
- * read its code when it started, so nothing needs those files.
+ * read its code when it started, so nothing needs those files. Only regular files directly in the
+ * runtime directory whose names are of those two forms are removed; anything else stays.
  */
 export function writeKeeperFile(
   files: Files,
@@ -238,8 +243,10 @@ export function writeKeeperFile(
   files.writeText(path, code, 0o600);
   const own = `keeper-${build}.py`;
   for (const name of files.list(runtime.dir)) {
-    if ((KEEPER_FILE.test(name) && name !== own) || KEEPER_TEMP.test(name)) {
-      files.remove(join(runtime.dir, name));
+    const ours = (KEEPER_FILE.test(name) && name !== own) || KEEPER_TEMP.test(name);
+    const entry = join(runtime.dir, name);
+    if (ours && files.lstat(entry)?.kind === 'file') {
+      files.remove(entry);
     }
   }
 }
