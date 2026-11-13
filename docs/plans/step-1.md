@@ -216,8 +216,8 @@ export interface Files {
   list(dir: string): string[];
   /** Replaces the file atomically: writes `.<name>.<random>.tmp` beside it, then renames. */
   writeText(path: string, text: string, mode?: number): void;
-  /** Creates the file only if it does not exist (O_EXCL). false when it already exists. */
-  createExclusive(path: string, text: string): boolean;
+  /** Creates the file only if it does not exist (O_EXCL). false when it already exists. With `mode` it has exactly that mode from the start (task 17, ruled in pull request #20). */
+  createExclusive(path: string, text: string, mode?: number): boolean;
   /** mkdir -p; `mode` applies to directories it creates. */
   mkdirp(path: string, mode?: number): void;
   rename(from: string, to: string): void;
@@ -1309,6 +1309,23 @@ export function hookStatus(settingsText: string | null, hookPath: string): Recor
 export function cleanupPeriodDays(settingsText: string | null): number;
 ```
 
+#### 2.5.7 `src/claude/folders.ts` (task 17; ruled by the plan owner in pull request #20)
+
+```ts
+export interface FolderLook {
+  path: string;
+  missing: boolean;               // nothing at all is there (yet)
+  unreadable: UnreadableEntry[];  // the folder itself, or (projects) anything under it, with the error code
+}
+/**
+ * For doctor (design 8, 5.6, 11). Never throws for what it cannot read. Each folder: missing only
+ * when lstat finds nothing; unreadable when it is a symbolic link to nothing (ENOENT), not a folder
+ * (ENOTDIR), or cannot be looked at (or, sessions, listed). projects, when it is a folder:
+ * listTranscriptFiles(files, claudeHome).unreadable, with the number of transcripts found.
+ */
+export function lookAtClaudeFolders(files: Files, claudeHome: string): { sessions: FolderLook; projects: FolderLook & { transcripts: number } };
+```
+
 ### 2.6 `src/github.ts` (`PrKey`, `prKey`: task 2; the rest: task 9)
 
 ```ts
@@ -2241,7 +2258,7 @@ export interface Files {
   readBytes(path: string, start: number, end: number): Uint8Array;
   list(dir: string): string[];
   writeText(path: string, text: string, mode?: number): void;
-  createExclusive(path: string, text: string): boolean;
+  createExclusive(path: string, text: string, mode?: number): boolean;
   mkdirp(path: string, mode?: number): void;
   rename(from: string, to: string): void;
   remove(path: string): void;
@@ -4383,12 +4400,46 @@ permission flag is ever added.
 
 ### Task 17: `install`, `uninstall`, `doctor`
 
-**Depends on:** 3, 11, 12 · **Wave:** 5 · **Design:** 5.1, 7.1 (first-run offer), 8, 12 (settings) · **Contracts:** 2.5.6, 2.4.1 (`KvKey`) · **Decisions:** D20 (update design 8)
+**Depends on:** 3, 11, 12 · **Wave:** 5 · **Design:** 5.1, 7.1 (first-run offer), 8, 12 (settings) · **Contracts:** 2.5.6, 2.5.7, 2.4.1 (`KvKey`) · **Decisions:** D20 (update design 8)
 
 **Files**
-- Create: `src/cli/commands/install.ts`, `src/cli/commands/uninstall.ts`, `src/cli/commands/doctor.ts` (each `export const command: Command`)
-- Modify: `docs/design.md` 8 (D20)
-- Test: `test/cli/commands/install.test.ts`, `test/cli/commands/uninstall.test.ts`, `test/cli/commands/doctor.test.ts`
+- Create: `src/cli/commands/install.ts`, `src/cli/commands/uninstall.ts`, `src/cli/commands/doctor.ts` (each `export const command: Command`), `src/claude/folders.ts` (2.5.7)
+- Modify: `docs/design.md` 8 (D20 and the rulings below), this task's text
+- Test: `test/cli/commands/install.test.ts`, `test/cli/commands/uninstall.test.ts`, `test/cli/commands/doctor.test.ts`, `test/claude/folders.test.ts`; helpers `test/helpers/install.ts`, `test/fixtures/hold-write-lock.ts` (a worker thread holding the store's write lock, so doctor's probe fails without opening the database directly)
+
+**Ruled by the plan owner in pull request #20** (binding, in addition to the text below): install
+stops before making any link when a link path holds something that is not a symbolic link, and
+stops when there is no settings file and `<claudeHome>` is not a directory (it never creates
+Claude Code's home); a link that already points at its target is not touched; the first-run
+question uses the singular for 1 (`Mark 1 session older than 1 day as done? [y/N] `). Doctor wraps
+each check, so that whatever one throws is one `problem` line (`<check>: could not be checked
+(<reason>)`) and the next check runs; a non-zero `gh --version` is a problem; the terminal check
+runs `wezterm cli --no-auto-start list`, retried as `wezterm.exe` from WSL when `wezterm` is not
+found (D15); the `spool/bad/` problem gives the number of files, their age range and that they are
+removed after seven days; the lines in kv `ingest_problems`, `reconcile_problems`,
+`scan_problems` are each a `problem` (`last refresh: <step>: <line>`, sanitised); the readability of
+`<claudeHome>/sessions` and `<claudeHome>/projects` comes from `lookAtClaudeFolders` (2.5.7): a
+missing folder is `info` (`does not exist yet`), an unreadable one (a file, a symbolic link to
+nothing, no permission) a `problem`.
+
+From the code-quality review (also ruled in pull request #20): install runs in this order —
+`resolveDeckPlaces`; every check that can stop it (link paths; settings file readable and JSON; a
+settings path that is a symbolic link to nothing is refused, naming the link and its target; the
+Claude home exists when there is no settings file); show the entries and ask; read the settings
+file again and stop (exit 1, nothing written or created) when it is no longer the text shown; only
+then `withDeck`: links, the same re-read right before writing, the backup (`createExclusive` with
+mode 600, so it is never readable by others, not even for a moment; `Files.createExclusive` gains
+an optional `mode`, 2.2.1), the write, kv. So a refusal or a no leaves no directory, database or
+link behind. A failure to write the settings file or to make a link is a `SkydeckError` naming the
+path, and a failed settings write removes the backup that run made. Uninstall opens the database
+with `openStore` itself, not through `withDeck`, so it never re-creates a directory; its write and
+remove failures are `SkydeckError`s naming the path, and it deletes the kv keys only after
+everything was undone. Doctor does not use `withDeck` and creates nothing: a `config.json` that
+cannot be read is a `problem` (`configuration: …`) and the checks that need the configuration
+(hook entries, Claude Code's folders, the terminal) are skipped; a database that is missing or
+cannot be opened is a `problem` and the checks that need it (writable, last event, scripted runs,
+last refresh) are skipped; every other check still runs. A failing `gh auth status` reads
+`gh is not logged in, or GitHub cannot be reached (gh auth status: exit <n>); run gh auth status to see why`.
 
 **Exported API**
 
@@ -4398,36 +4449,45 @@ export const command: Command;   // in each of the three files
 ```
 
 **Behaviour fixed here** (design 8):
-- **install**, inside `withDeck(ctx, { refresh: false }, …)`: (1) `openDeck` creates the directories and the database. (2) Symlinks:
+- **install** (the order of these steps and the checks before them: see the rulings above), inside `withDeck(ctx, { refresh: false }, …)`: (1) `openDeck` creates the directories and the database. (2) Symlinks:
   `hookPath` → `<appRoot>/bin/skydeck-hook`, `binLink` → `<appRoot>/bin/skydeck` (creating
   `~/.local/bin`), `nodeLink` → `platform.nodePath`. (3) `addHookEntries(<settings text or null>, hookPath)`;
   when `changed`: print to stderr `skydeck will add these hook entries to <settingsPath>:` and the
   added groups as JSON, ask `readLine('Add them? [y/N] ')`; anything but `y`/`yes` (or null) →
-  print `settings not changed` and return 1. On yes: write the backup
-  `<settingsPath>.skydeck-backup` with the old content (kv `settings_backup` = its path, or `none`
-  when there was no file; an existing backup is never overwritten), write the new text, set kv
+  print `settings not changed` and return 1. On yes (ruled by the plan owner in pull request #20):
+  write a NEW backup of the old content, `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC,
+  from `platform.clock`; when that exact name exists, `-2`, `-3`, …), mode 600, created with
+  `files.createExclusive` so that an older backup is never touched or reused (kv `settings_backup`
+  = its path, or `none` when there was no file and so no backup), write the new text, set kv
   `settings_hash` = sha256 hex of the written text. When not changed: print
-  `hook entries already present`. (4) `refreshWithProgress(ctx, deck)`. (5) Unless kv `first_run_offered`:
+  `hook entries already present`; no backup is written and kv is left as it is. (4) `refreshWithProgress(ctx, deck)`. (5) Unless kv `first_run_offered`:
   count rows that are listed, not done, not running, with `lastActivityNs` older than
   `firstRunDoneAfterDays`; when > 0 ask `Mark <n> sessions older than <d> days as done? [y/N] `
   and on yes set their `doneAtNs` with `store.updateMeta(id, { doneAtNs: now }, now)`; set `first_run_offered`. Return `EXIT.ok`.
 - **uninstall** never creates anything: `resolveDeckPlaces`; when `dbPath` exists, it reads and
-  deletes the kv keys through `withDeck(ctx, { refresh: false }, …)`, otherwise kv counts as empty.
+  deletes the kv keys through `openStore(dbPath)` (not `withDeck`, which would re-create
+  directories; ruled above), otherwise kv counts as empty.
   When kv `settings_hash` equals the sha256 of the current settings text → restore:
-  backup path → copy it over `settings.json` and remove the backup; `none` → remove `settings.json`.
-  Otherwise, when the file exists → `removeHookEntries` and write if changed. Remove the three
-  links, each only when it is a symlink pointing where install pointed it. Delete kv
-  `settings_hash`, `settings_backup`. `--purge` → after `withDeck` has returned (the store is
-  closed), `removeTree` dataDir, stateDir, configDir. Return `EXIT.ok`.
-- **doctor** uses `withDeck(ctx, { refresh: false }, …)` and counts the spool as it is (nothing is
-  ingested); one line per check, `ok       <text>`, `info     <text>` or `problem  <text>`;
+  backup path, when that file still exists → copy it over `settings.json` (the backup stays);
+  `none` → remove `settings.json`.
+  Otherwise (hash mismatch, or the recorded backup is gone), when the file exists →
+  `removeHookEntries` and write if changed. Remove the three
+  links, each only when it is a symlink pointing where install pointed it. Never remove a backup
+  file, with or without `--purge`; print one line per `<settingsPath>.skydeck-backup-*` file
+  (ruled by the plan owner in pull request #20). Delete kv
+  `settings_hash`, `settings_backup`. `--purge` → after the store is
+  closed, `removeTree` dataDir, stateDir, configDir. Return `EXIT.ok`.
+- **doctor** reads the configuration and opens an existing database itself (not `withDeck`; ruled
+  above), creates nothing, and counts the spool as it is (nothing is ingested); one line per check, `ok       <text>`, `info     <text>` or `problem  <text>`;
   exit 1 when any line is a problem. Problems: an event without its hook entry
   (`hookStatus`); `hookPath` not resolving to a regular file (`files.stat` kind `file`); `checkNodeVersion(platform.nodeVersion)`
   (from `bin/node-version.mjs`) returns a message; the database not writable (`setKv('doctor_probe', <now>)`
   throws); files in `spool/bad/`; more than 1000 files in the spool; `gh --version` not found;
-  `gh auth status` exit code ≠ 0; terminal `wezterm` and `wezterm cli list` fails; an entry of
-  `<claudeHome>/projects` that cannot be read (`listTranscriptFiles(platform.files, deck.places.claudeHome).unreadable`, one
-  line each: `transcripts: cannot read <path> (<reason>)`, the path through the sanitiser). Info: spool
+  `gh auth status` exit code ≠ 0; terminal `wezterm` and `wezterm cli --no-auto-start list` fails; an entry of
+  `<claudeHome>/projects` that cannot be read (`lookAtClaudeFolders(platform.files, deck.places.claudeHome).projects.unreadable`, one
+  line each: `transcripts: cannot read <path> (<reason>)`, the path through the sanitiser), and
+  likewise `<claudeHome>/sessions` (`cannot read <path> (<reason>)`); each line of what the last
+  refresh recorded. Info: spool
   count, age of the last event (`last event <formatAge> ago` or `no events yet`), the last 5 lines
   of `hook.log` (or `hook.log is empty`), `scripted runs dropped: <n>`.
 
@@ -4437,27 +4497,29 @@ export const command: Command;   // in each of the three files
 1. No settings file, answer `y` → 0; `readlink(H)` = `<appRoot>/bin/skydeck-hook`; `readlink(binLink)` = `<appRoot>/bin/skydeck`;
    `readlink(nodeLink)` = `process.execPath`; `SP` parses to the two entries; kv `settings_backup 'none'`;
    kv `settings_hash` = sha256 of `SP`'s content; stderr shows the entries before the prompt; `prompts` contains `'Add them? [y/N] '`.
-2. Existing `SP` `{"model":"opus"}`, answer `y` → backup file content `{"model":"opus"}`, `SP` has `model` and both entries.
+2. Existing `SP` `{"model":"opus"}`, answer `y` → backup file `<SP>.skydeck-backup-20261112T090000Z` (T0) with content `{"model":"opus"}`, `SP` has `model` and both entries.
 3. Answer `n` → 1, `SP` unchanged, no backup; `readLine` returning null (no terminal) → the same.
-4. Install twice → second run asks nothing about hooks (`prompts` has no `'Add them?'`), `SP`, backup and hash unchanged, stdout/stderr say `hook entries already present`, exit 0.
+4. Install twice → second run asks nothing about hooks (`prompts` has no `'Add them?'`), `SP`, backup and hash unchanged, no second backup, stdout/stderr say `hook entries already present`, exit 0.
+4a. An older backup beside `SP` is left byte-identical and a new one is written; a taken name gets `-2`, then `-3`; an install that changes the file again (the user removed the entries by hand) writes and records another backup.
 5. Foreign hook entries in `SP` survive install.
 6. A spool file present before install → ingested (one event) after install.
 7. First-run offer: two transcripts with `lastActivity` 10 days old, one 2 days old, answer `y` → the two are done; `first_run_offered '1'`; a later install asks nothing.
    No old sessions → no question, flag still set.
 
 `uninstall.test.ts`
-1. After install from no file, `uninstall` → `SP` removed, backup gone, links removed, kv hash/backup deleted, database still present.
-2. After install over `{"model":"opus"}` → `SP` content equals `{"model":"opus"}` again.
-3. After install, the user edits `SP` (adds `"theme":"dark"`) → `uninstall` keeps `theme` and `model`, removes only the entries naming `H`.
+1. After install from no file, `uninstall` → `SP` removed, no backup, links removed, kv hash/backup deleted, database still present.
+2. After install over `{"model":"opus"}` → `SP` content equals `{"model":"opus"}` again; the backup is kept and named on stdout.
+2a. Two installs that changed the file (the user removed the entries by hand in between) → `uninstall` restores the second backup, not the first; the first stays byte-identical.
+3. After install, the user edits `SP` (adds `"theme":"dark"`) → `uninstall` keeps `theme` and `model`, removes only the entries naming `H` (hash mismatch); the same when the recorded backup file was deleted (missing backup).
 4. `binLink` replaced by a symlink to `/elsewhere` → left alone.
-5. `uninstall --purge` → dataDir, stateDir, configDir gone.
+5. `uninstall --purge` → dataDir, stateDir, configDir gone; the backups stay.
 6. `uninstall` with nothing installed → 0; no directory, database or file is created (`sandbox.skydeckHome` stays empty).
 
-`doctor.test.ts` (fake runner answers `gh --version` 0, `gh auth status` 0, `wezterm cli list` 0 unless stated)
+`doctor.test.ts` (fake runner answers `gh --version` 0, `gh auth status` 0, `wezterm cli --no-auto-start list` 0 unless stated)
 1. After a complete install with one event → 0; every line starts with `ok` or `info`; contains `info     last event`.
 2. Each problem alone → 1 with a `problem` line: no hook entries; `H` dangling (re-point `H` at a temporary file, then delete that file — never touch the repository's `bin/skydeck-hook`);
    `nodeVersion '24.11.0'`; a file in `spool/bad/`; 1001 files in the spool; `gh` not found; `gh auth status` code 1;
-   config terminal `wezterm` with `wezterm cli list` code 1; a symbolic link loop in `<claudeHome>/projects` (`transcripts: cannot read … (ELOOP)`).
+   config terminal `wezterm` with `wezterm cli --no-auto-start list` code 1; a symbolic link loop in `<claudeHome>/projects` (`transcripts: cannot read … (ELOOP)`).
 3. `hook.log` with 7 lines → output contains its last 5 lines, not the first 2.
 4. `dropped_scripted 3` → `info     scripted runs dropped: 3`.
 

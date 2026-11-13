@@ -572,16 +572,39 @@ commands for the others.
   database; (2) creates the links `<dataDir>/skydeck-hook` and `~/.local/bin/skydeck`, and
   `<dataDir>/node` pointing at the Node.js binary it runs under; (3) shows the exact change to
   `<claudeHome>/settings.json`, asks, writes a backup beside it, adds the two hook entries and
-  records a hash of the resulting file; (4) runs ingest, reconcile and the first transcript scan;
-  (5) makes the first-run offer (7.1). Running it again changes nothing. Hook entries that belong
-  to something else are never touched.
-- **`skydeck uninstall`**: restores the backup when the settings file still has the recorded
-  hash; otherwise removes exactly the entries whose command names `<hookPath>`. Removes the
-  links. The database stays unless `--purge` is given.
+  records the backup's path and a hash of the resulting file; (4) runs ingest, reconcile and the
+  first transcript scan; (5) makes the first-run offer (7.1), once: a later install does not offer
+  it again, whatever the answer was. Running it again changes nothing. Hook entries that belong to
+  something else are never touched. Every install that changes the settings file writes a new
+  backup of it, `<settings file>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC; `-2`, `-3`, … when that
+  name is taken), readable by the user only; an older backup is never touched or reused, because
+  restoring it could undo what the user changed since. An install that changes nothing writes no
+  backup. Every check that can stop install runs before it creates anything, and the question is
+  asked before anything is created too, so a refusal or a no leaves no directory, database or link
+  behind: a link is created or re-pointed only where there is nothing or a symbolic link; a settings
+  file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
+  to nothing (install names the link and its target and never replaces it with a file), and a
+  missing Claude Code directory (never created for it). After the yes, install reads the settings
+  file again, also right before writing it: if it is no longer what was shown (the user or another
+  session saved it while the question was open), install stops and writes nothing. A write that
+  fails is an error naming the file, and leaves no backup of its own behind.
+- **`skydeck uninstall`**: restores the recorded backup only when the settings file still has the
+  recorded hash and that backup still exists (when there was no file before install, it removes
+  the file); in every other case it removes exactly the entries whose command names
+  `<hookPath>`. Removes the links that still point where install pointed them. It never removes a
+  backup, not even with `--purge`, and names each one. It creates nothing: no directory, database
+  or file, also none the user removed after install. The database stays unless `--purge` is
+  given.
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
-  resolvable; Node.js version; database writable; spool size and files in `spool/bad/`; age of
-  the last event; the last lines of `hook.log`; scripted runs dropped; `gh` present and logged
-  in; the terminal adapter.
+  resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with
+  their ages (they are removed after seven days); age of the last event; the last lines of
+  `hook.log`; scripted runs dropped; what the last refresh skipped (a spool file, a process, a
+  transcript folder or file that could not be read); whether `<claudeHome>/sessions` and every
+  folder and file under `<claudeHome>/projects` can be read (5.6; a folder that is a file or a
+  symbolic link to nothing is a problem); `gh` present and logged in; the terminal adapter. It does
+  not refresh and creates nothing. A check that fails unexpectedly is one problem line, not the end
+  of the report; so is a configuration file that cannot be read or a database that is missing or
+  cannot be opened, and the checks that do not need it still run.
 
 `docs/install.md` is the guide for setting skydeck up on another machine.
 
