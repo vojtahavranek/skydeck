@@ -1,0 +1,69 @@
+/**
+ * The interfaces between the server's parts (plan A1, 2.5): pages (`src/window/pages.ts`) code
+ * against `TerminalHub` and `ActionHandler`; the terminal registry implements `TerminalHub`, the
+ * actions implement `ActionHandler`. Types only.
+ */
+import type { KeeperExit } from './frames.ts';
+import type { ActMessage, ResultMessage, ThemePayload } from './protocol.ts';
+
+export type TerminalState =
+  'starting' | 'running' | 'ended' | 'lost' | 'not-started' | 'reconnecting' | 'newer-keeper';
+
+export interface TerminalInfo {
+  id: string;
+  slot: number | null;
+  state: TerminalState;
+  /** The session it was opened for (S2 7.5); the session it shows is decided by the mapping. */
+  expectedSessionId: string;
+  /** The session it shows now; null while starting. */
+  sessionId: string | null;
+  kind: 'resume' | 'new';
+  label: string | null;
+  dir: string;
+  program: { pid: number; procStart: number } | null;
+  openedNs: bigint;
+  cols: number;
+  rows: number;
+  exit: KeeperExit | null;
+  /** S2 7.5: no holder after restoreStartTimeoutSeconds. */
+  notReported: boolean;
+}
+
+export interface StreamSink {
+  /** One record of output, after the screen side applied it. */
+  output(bytes: Uint8Array): void;
+  /** A resize record, in stream order. */
+  size(cols: number, rows: number): void;
+  exit(exit: KeeperExit, lost: boolean): void;
+  notice(kind: 'gap' | 'newer-keeper' | 'input-full', text: string): void;
+}
+
+export interface TerminalHub {
+  list(): readonly TerminalInfo[];
+  /** The snapshot at the current point of the terminal's chain, then every later record to `sink`
+   *  (S2 8.2.4) until `detach`. null for an unknown terminal. */
+  attach(
+    termId: string,
+    sink: StreamSink,
+  ): { cols: number; rows: number; data: string; detach(): void } | null;
+  input(termId: string, data: Uint8Array): 'ok' | 'full' | 'ended' | 'unknown';
+  /** Sends Z to the keeper; the size reaches every sink when the R record comes back (S2 8.2.6). */
+  resize(termId: string, cols: number, rows: number): void;
+  /** S2 8.2.3 `close-terminal`: forgets an ended, lost or not-started terminal. */
+  close(termId: string): 'ok' | 'running' | 'unknown';
+  /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). */
+  setTheme(theme: ThemePayload): void;
+  /** Called after any change of `list()`; returns the function that unsubscribes. */
+  onChange(listener: () => void): () => void;
+}
+
+export interface PageInfo {
+  windowId: string;
+  focused: boolean;
+  area: { cols: number; rows: number } | null;
+}
+
+export interface ActionHandler {
+  /** Never rejects: a failure is `{ ok: false, error }`. */
+  act(page: PageInfo, action: ActMessage): Promise<ResultMessage>;
+}
