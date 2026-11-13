@@ -289,6 +289,17 @@ test("resolveRuntimeDir 'take' ignores a record that is not an absolute path", (
   assert.equal(d.deck.store.getKv('window_runtime_dir'), dir);
 });
 
+test("resolveRuntimeDir 'follow' takes a record that is not an absolute path for no record, writing nothing", (t) => {
+  const d = testDeck(t);
+  const dir = join(d.sandbox.skydeckHome, 'run');
+  for (const record of ['relative/run', '']) {
+    d.deck.store.setKv('window_runtime_dir', record);
+
+    assert.deepEqual(resolveRuntimeDir(d.deck, 'follow'), { dir, rule: 'skydeck-home' });
+    assert.equal(d.deck.store.getKv('window_runtime_dir'), record);
+  }
+});
+
 test("resolveRuntimeDir 'follow' uses the record whenever there is one, writing nothing", (t) => {
   // No live keeper there (a server without terminals yet) and no XDG_RUNTIME_DIR: still the record.
   const d = testDeck(t, { env: { XDG_RUNTIME_DIR: undefined } });
