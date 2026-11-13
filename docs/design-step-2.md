@@ -187,7 +187,7 @@ Added to design 11:
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses. | platform, text, store, claude, sessions, terminals, github |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
-| `src/window/view/` | The page's view model as pure functions: sections, rows, stacks, attention, the switcher's ranking, the filter (12). | sessions (types), text |
+| `src/window/view/` | The page's view model as pure functions: sections, rows, stacks, attention, the switcher's ranking, the filter (12). | sessions (types, and the pure `isListed` and `matchesFilter` of `src/sessions/list.ts`: stage A's filter is design 7.4's, with one implementation), text |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS. No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
@@ -695,6 +695,12 @@ both in memory: the **expected session**. Which session it shows is decided agai
   session's row; a new session has no row yet, so the server shows the terminal as a row of its
   own, titled with the label or "new session in <directory>"). After `restoreStartTimeoutSeconds`
   without a holder it is shown as "started, not reported" and stays where it is.
+  The row of a terminal opened for `new` has the new session's id (known from `prepareNew`), so
+  that the page can select it, and is marked starting; the keeper's `meta` carries the label and
+  the directory, so the row survives a server restart. When the session reports a start, the
+  terminal moves to that session's ordinary row. A program that ends before its session reported a
+  start leaves the row in place, no longer starting, with the ended terminal (7.8) until the
+  terminal is closed.
 
 ### 7.6 Slots
 
