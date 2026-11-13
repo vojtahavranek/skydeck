@@ -25,9 +25,7 @@ export async function main(argv: string[], ctx: Context): Promise<number> {
 export async function dispatch(argv: string[], ctx: Context, commandsDir: URL): Promise<number> {
   const [first, ...rest] = argv;
   if (first === undefined) {
-    // Becomes the interactive list (design 7.5); until that command exists it is the usage.
-    ctx.io.stdout(await usage(commandsDir));
-    return EXIT.ok;
+    return bareSkydeck(ctx, commandsDir);
   }
   if ((first === '--help' || first === '-h') && rest.length === 0) {
     ctx.io.stdout(await usage(commandsDir));
@@ -48,12 +46,37 @@ export async function dispatch(argv: string[], ctx: Context, commandsDir: URL): 
 }
 
 /**
+ * Bare `skydeck` (design 7.4): the interactive list when stdin and stdout are terminals, else the
+ * `ls` command with no arguments. Either fails through the same mapping as every command.
+ */
+async function bareSkydeck(ctx: Context, commandsDir: URL): Promise<number> {
+  if (ctx.io.isTTY.stdin && ctx.io.isTTY.stdout) {
+    return guarded(ctx, async () => {
+      // Loaded when it is needed, as a command is, so that --help and --version stay quick.
+      const { runInteractiveList } = await import('./tui/run.ts');
+      return runInteractiveList(ctx);
+    });
+  }
+  const ls = await loadCommand('ls', commandsDir);
+  if (ls === undefined) {
+    // A commands directory without `ls` (a test's fixtures) has no list to print.
+    ctx.io.stdout(await usage(commandsDir));
+    return EXIT.ok;
+  }
+  return runCommand(ls, [], ctx);
+}
+
+function runCommand(command: Command, args: string[], ctx: Context): Promise<number> {
+  return guarded(ctx, () => command.run(args, ctx));
+}
+
+/**
  * Runs a command and turns what it throws into an exit code (design 7.5): a `SkydeckError` prints
  * its message and exits with its `exitCode`; anything else is a bug and exits 1.
  */
-async function runCommand(command: Command, args: string[], ctx: Context): Promise<number> {
+async function guarded(ctx: Context, run: () => Promise<number>): Promise<number> {
   try {
-    return await command.run(args, ctx);
+    return await run();
   } catch (error) {
     ctx.io.stderr(failureText(error));
     return error instanceof SkydeckError ? error.exitCode : EXIT.failure;

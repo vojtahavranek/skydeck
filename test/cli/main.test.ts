@@ -34,16 +34,6 @@ describe('main', () => {
     });
   }
 
-  test('bare skydeck prints the usage and exits 0 until the interactive list exists', async () => {
-    const c = testContext();
-
-    const code = await main([], c.ctx);
-
-    assert.equal(code, 0);
-    assert.match(c.stdout(), /^Usage:/m);
-    assert.equal(c.stderr(), '');
-  });
-
   const unknown = [
     ['frobnicate'],
     ['--nope'],
