@@ -211,6 +211,22 @@ test('nothing at or under a folder that cannot be read is marked missing', async
     assert.deepEqual(problems(d), [`cannot read ${demo} (EACCES)`]);
   });
 
+  await t.test('a transcript file that cannot be looked at itself', (t) => {
+    const d = testDeck(t);
+    const { p1, p2 } = two(d);
+    scanTranscripts(d.deck);
+    unlinkSync(p2);
+    const deck = deckWith(d.deck, {
+      files: { lstat: failing(p1, 'EACCES', d.deck.platform.files.lstat) },
+    });
+
+    // p1 is not under an unreadable folder: its own path is the unreadable one. p2 really is gone.
+    assert.deepEqual(scanTranscripts(deck), { read: 0, skipped: 0, missing: 1, prsAttached: 0 });
+    assert.equal(rowOf(d, p1)?.missingSinceNs, null);
+    assert.equal(rowOf(d, p2)?.missingSinceNs, T0);
+    assert.deepEqual(problems(d), [`cannot read ${p1} (EACCES)`]);
+  });
+
   await t.test('an unreadable projects directory', (t) => {
     const d = testDeck(t);
     const { p1, p2 } = two(d);

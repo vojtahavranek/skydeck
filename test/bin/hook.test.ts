@@ -451,6 +451,30 @@ describe('hook: failures stay silent and exit 0', () => {
     assert.notEqual(readFileSync(join(state, 'hook.log'), 'utf8'), '');
   });
 
+  test('an error of two lines is one line of hook.log, with its time', (t) => {
+    const s = hookSandbox(t);
+    rmSync(join(s.bin, 'cat'));
+    writeFileSync(
+      join(s.bin, 'cat'),
+      '#!/bin/sh\necho "cat: first line" >&2\necho "second line" >&2\nexit 1\n',
+      {
+        mode: 0o755,
+      },
+    );
+    const state = join(s.skydeckHome, 'state');
+
+    const ran = run(s, 'SessionStart', { CLAUDE_PID: undefined });
+
+    assertSilent(ran);
+    const lines = readFileSync(join(state, 'hook.log'), 'utf8').split('\n');
+    assert.equal(lines.length, 2, JSON.stringify(lines));
+    assert.equal(lines[1], '');
+    assert.match(
+      lines[0] ?? '',
+      /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ SessionStart write failed: cat: first line second line$/,
+    );
+  });
+
   test('the spool directory is closed to others even under a default ACL', (t) => {
     const s = hookSandbox(t);
     const state = join(s.skydeckHome, 'state');
