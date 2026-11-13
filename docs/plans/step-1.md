@@ -3368,7 +3368,7 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   Events with `pid` 0 never get links. The stored `argv` is the one `parseSpoolFile` returns,
   `storableArgv(recorded)`: no positional arguments, no removed flags, unknown flags as bare names (principle 4).
   *Ruled in fix 1:* a `start` of a process with a pid and a process start that already has an
-  earlier `start` with a stored `argv` is stored with that `argv` (its relative path flags were
+  earlier `start` with a stored `argv` is stored with the `argv` of the first such start (its relative path flags were
   resolved against the cwd the process was launched in; a later hook input's cwd need not be it).
 - **Retention (design 5.3).** After the files are processed: every file in `badDir` whose
   `mtimeNs < now − 7 days` is removed, and so is every entry of `spoolDir` whose name starts with

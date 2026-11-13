@@ -617,6 +617,28 @@ test('a later start of the same process keeps the launch command its first start
   );
 });
 
+test('the launch command reused is the one of the process’s FIRST start that stored one', (t) => {
+  // A later start stored with another resolution (e.g. ingested before this rule existed) is not
+  // the one reused: the first start ran where the process was launched.
+  const d = testDeck(t);
+  const { first, second } = twoProjects(d);
+  ingestRuns(d, [startIn(first, S1, 'startup', T0)]);
+  d.deck.store.insertEvent({
+    ...d.deck.store.events()[0]!,
+    spoolName: 'older-rule.ev',
+    timeNs: T60,
+    sessionId: S2,
+    detail: 'clear',
+    argv: ['claude', '--settings', join(second, 's.json')],
+  });
+  ingestRuns(d, [startIn(second, S3, 'clear', T60_2)]);
+  assert.deepEqual(d.deck.store.events().at(-1)?.argv, [
+    'claude',
+    '--settings',
+    join(first, 's.json'),
+  ]);
+});
+
 test('another process (another process start) resolves its own launch command', (t) => {
   const d = testDeck(t);
   const { first, second } = twoProjects(d);

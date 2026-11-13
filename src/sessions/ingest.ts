@@ -214,7 +214,8 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
 }
 
 /**
- * The launch command an earlier `start` of the same process stored, null when none did. A process's
+ * The launch command the FIRST `start` of the same process that stored one stored, null when none
+ * did (the first start ran where the process was launched). A process's
  * command line never changes, but a later start (after `/clear`, an in-session `/resume`, or once
  * the session changed directory) resolves its relative path flags against the hook input's cwd of
  * that moment, which need not be where the process was launched. A process is known only with a pid
@@ -224,6 +225,8 @@ function storedLaunch(deck: Deck, event: SpoolEvent): string[] | null {
   if (event.pid === 0 || event.procStart === null) {
     return null;
   }
+  // Walks the process's events back to its first, keeping the earliest start with a command.
+  let first: string[] | null = null;
   let beforeNs = event.timeNs;
   for (;;) {
     const earlier = deck.store.latestEventOfProcess(
@@ -233,13 +236,13 @@ function storedLaunch(deck: Deck, event: SpoolEvent): string[] | null {
       beforeNs,
     );
     if (earlier === null) {
-      return null;
+      return first;
     }
     if (earlier.kind === 'start' && earlier.argv !== null) {
-      return earlier.argv;
+      first = earlier.argv;
     }
-    // Two events of one process in the same nanosecond are not told apart here: at worst no stored
-    // command is found, and the start keeps the one it resolved itself.
+    // Two events of one process in the same nanosecond are not told apart here: at worst the one
+    // skipped is not considered.
     beforeNs = earlier.timeNs - 1n;
   }
 }
