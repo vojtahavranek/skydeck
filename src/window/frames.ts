@@ -299,8 +299,8 @@ function isStatus(min: number): (value: number) => boolean {
   return (value) => Number.isInteger(value) && value >= min && value <= STATUS_MAX;
 }
 
-/** Exactly one of `code` and `signal` for a program that ran; neither, and a non-empty reason, for one that
- *  never started. */
+/** Exactly one of `code` and `signal` for a program that ran; neither, and a non-empty reason,
+ *  for one that never started. */
 function readExit(where: string, fields: Fields): KeeperExit {
   const exit: KeeperExit = {
     code: field(where, fields, 'code', 'number', isStatus(0), true),
