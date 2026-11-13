@@ -34,7 +34,9 @@ section first.
 3. **A broken skydeck never disturbs a session.** The hook is silent, fast and always exits 0. It
    does not depend on Node.js or on the database.
 4. **No conversation content.** skydeck stores no prompt text and no assistant output — not in the
-   database, not in the spool, not in logs, not in test fixtures.
+   database, not in logs, not in test fixtures. The one exception is the spool: a prompt passed on
+   the command line is part of the recorded launch command and can sit in a private spool file until
+   the next ingest, which drops it before storing anything.
 5. **Resume by id, with the session's own launch command.** Never by name (names are not unique).
    skydeck never adds a permission flag that the session was not started with.
 6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one
@@ -105,8 +107,9 @@ the hook input from stdin unchanged.
 randomness, and two hooks alive at the same time never share a process id. The temporary name is
 `.<final name>.tmp`, and ingest reads only names ending in `.ev`, so a half-written file is never
 read. A missing `CLAUDE_PID` gives an empty `claude_pid` value and `0` in the name; so does one
-that is not a number (it is never put into a path). The files are created readable by the user only,
-because `pwd` and the launch command are private.
+that is not a number (it is never put into a path). The spool directory is created with mode 700 and
+the files readable by the user only, because `pwd` and the launch command are private. A value that
+contains a line break is written empty, so no value can add a line to the file.
 
 | Key | Value |
 |---|---|
@@ -137,7 +140,12 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
 
 - `session_id` comes from the hook input; `session_env` is the fallback.
 - Process start is field 22 of `stat`, taken after the **last** `)` in the line.
-- The launch command is the base64-decoded `cmdline` split on NUL, last empty element dropped.
+- The launch command is the base64-decoded `cmdline` split on NUL, last empty element dropped,
+  and then stripped of its positional arguments: an initial prompt on the command line is
+  conversation text (principle 4), so nothing but flags and their values is stored. Reconcile (5.4)
+  applies the same rule to the command line it reads itself.
+- A file in which a key appears twice before the `--` line cannot be parsed; it goes to `spool/bad/`.
+  An empty `pwd`, `session_env` or `entrypoint_env` means "unknown".
 - `SessionStart.source` → kind `start` with detail `startup`, `resume`, `clear`, `compact`,
   `fork`, or `unknown` for anything else.
 - `SessionEnd.reason` → kind `end` with detail `clear` (reason `clear`), `switch` (reason

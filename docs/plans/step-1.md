@@ -881,8 +881,9 @@ export interface SpoolEvent {
   bootId: string;
   pid: number;                    // 0 when claude_pid is empty (D7)
   procStart: number | null;
-  cwd: string | null;             // hook input cwd, else the pwd key
-  argv: string[] | null;          // SessionStart with a non-empty argv_b64 only, path flags absolute
+  cwd: string | null;             // hook input cwd, else the pwd key (empty → null)
+  argv: string[] | null;          // SessionStart with a non-empty argv_b64 only, path flags absolute,
+                                  // NO positional arguments (an initial prompt is conversation text)
   name: string | null;            // SessionStart session_title
   payload: string;                // the hook input exactly as received
   entrypointEnv: string | null;   // empty → null
@@ -904,10 +905,14 @@ export class SpoolParseError extends Error {}
 
 /**
  * Parses one spool file (format: section 2.10.1). Throws SpoolParseError when: the name does not
- * match ^[0-9]+-[0-9]+-[0-9]+\.ev$; there is no line '--'; v is not 1; event is not SessionStart or
- * SessionEnd; time_ns is not digits; boot_id is empty; claude_pid is neither empty nor digits;
- * the hook input is not a JSON object; no session id (input session_id, else session_env) is a UUID.
- * `exists` is used only by absolutizePathFlags.
+ * match ^[0-9]+-[0-9]+-[0-9]+\.ev$; there is no line '--'; a key appears twice before it; v is not
+ * 1; event is not SessionStart or SessionEnd; time_ns is not digits; boot_id is empty; claude_pid
+ * is neither empty nor digits; the hook input is not a JSON object; no session id (input
+ * session_id, else session_env) is a UUID. The hook writes a value that contained a line break as
+ * empty, and a claude_pid that is not all digits as empty (name part 0), so pwd, session_env and
+ * entrypoint_env may be empty: empty means "unknown", never a valid value. The launch command is
+ * normalised to flags and flag values: positional arguments are dropped before anything is
+ * stored (design principle 4). `exists` is used only by absolutizePathFlags.
  */
 export function parseSpoolFile(name: string, content: string, exists: (path: string) => boolean): SpoolEvent;
 
@@ -1638,9 +1643,11 @@ argv_b64=Y2xhdWRlAC0tbW9kZWwAb3B1cwA=
 ```
 
 `argv_b64` is present for `SessionStart` only, and empty when `/proc/<pid>/cmdline` cannot be
-read. `stat` is empty when `/proc/<pid>/stat` cannot be read. Missing variables give empty values.
-The parser ignores keys it does not know (so later versions can add keys); a line before `--`
-without `=` is a parse error.
+read. `stat` is empty when `/proc/<pid>/stat` cannot be read. Missing variables give empty values,
+and so does a value that contains a line break (`event`, `session_env`, `entrypoint_env`, `pwd`) or
+a `claude_pid` that is not all digits (its name part is then `0`). The parser ignores keys it does
+not know (so later versions can add keys); a line before `--` without `=` is a parse error, and so
+is a key that appears twice.
 
 State directory of the hook (D26): `$SKYDECK_HOME/state` when `SKYDECK_HOME` is non-empty and absolute; else
 `$XDG_STATE_HOME/skydeck` when it is non-empty and absolute; else `$HOME/.local/state/skydeck`.
