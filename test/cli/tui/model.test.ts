@@ -95,6 +95,53 @@ test('initModel: a row that is never listed (an expired one with nothing of the 
   assert.deepEqual(model.order, [{ name: 'A', ids: [S1] }]);
 });
 
+// --- group order -----------------------------------------------------------------------------------
+
+test('groups are ranked by their listed members: a done row does not lift its group (design 7.4)', () => {
+  const a = listRow({ id: 'a1', group: 'A', lastActivityNs: T0 - 60n * MIN });
+  const b1 = listRow({ id: 'b1', group: 'B', lastActivityNs: T0 - 180n * MIN });
+  const b2 = listRow({ id: 'b2', group: 'B', done: true, lastActivityNs: T0 - 5n * MIN });
+  const model = initModel([a, b1, b2], T0);
+  assert.deepEqual(model.order, [
+    { name: 'A', ids: ['a1'] },
+    { name: 'B', ids: ['b2', 'b1'] },
+  ]);
+  assert.deepEqual(ids(visibleRows(model)), ['a1', 'b1']);
+  // With the done rows shown, B has the most recent row, as in `skydeck ls --all`.
+  const all = press(model, 'a').model;
+  assert.deepEqual(
+    all.order.map((group) => group.name),
+    ['B', 'A'],
+  );
+  assert.deepEqual(
+    press(all, 'a').model.order.map((group) => group.name),
+    ['A', 'B'],
+  );
+});
+
+test('a group with only done members comes after the others, before "no group"', () => {
+  const a = listRow({ id: 'a1', group: 'A', lastActivityNs: T0 - 60n * MIN });
+  const c = listRow({ id: 'c1', group: 'C', done: true, lastActivityNs: T0 - MIN });
+  const n = listRow({ id: 'n1', group: null, lastActivityNs: T0 });
+  const model = initModel([a, c, n], T0);
+  assert.deepEqual(
+    model.order.map((group) => group.name),
+    ['A', 'C', null],
+  );
+  assert.deepEqual(ids(visibleRows(model)), ['a1', 'n1']);
+});
+
+test('withRows with reorder ranks the groups under the current showAll', () => {
+  const a = listRow({ id: 'a1', group: 'A', lastActivityNs: T0 - 60n * MIN });
+  const b1 = listRow({ id: 'b1', group: 'B', lastActivityNs: T0 - 180n * MIN });
+  const b2 = listRow({ id: 'b2', group: 'B', done: true, lastActivityNs: T0 - 5n * MIN });
+  const next = withRows(initModel([a], T0), [a, b1, b2], T0, true);
+  assert.deepEqual(
+    next.order.map((group) => group.name),
+    ['A', 'B'],
+  );
+});
+
 // --- moving ----------------------------------------------------------------------------------------
 
 test('j and k move the cursor and stop at the ends; the arrows do the same', () => {
@@ -270,26 +317,45 @@ test('escape cancels the input', () => {
   assert.equal(model.input, null);
 });
 
-test('g opens an empty group input; enter sends the text', () => {
+test('g opens the group input with the group the user set; the edited text goes out with enter', () => {
   const opened = press(open(), 'g').model;
-  assert.deepEqual(opened.input, { purpose: 'group', text: '' });
-  const { effect } = press(opened, 'G', 'enter');
+  assert.deepEqual(opened.input, { purpose: 'group', text: 'A' });
+  const { effect } = press(opened, 'backspace', 'G', 'enter');
   assert.deepEqual(effect, { kind: 'group', id: S1, text: 'G' });
 });
 
+test('g then enter changes nothing; clearing the group takes a deliberate delete', () => {
+  assert.deepEqual(press(open(), 'g', 'enter').effect, { kind: 'group', id: S1, text: 'A' });
+  assert.deepEqual(press(open(), 'g', 'backspace', 'enter').effect, {
+    kind: 'group',
+    id: S1,
+    text: '',
+  });
+});
+
+test('g starts empty when the group was only taken from the title, or there is none', () => {
+  const fromTitle = listRow({ id: S1, group: 'DE-1', groupSource: 'title', title: 'DE-1 fix' });
+  const none = listRow({ id: S2 });
+  assert.deepEqual(press(initModel([fromTitle], T0), 'g').model.input, {
+    purpose: 'group',
+    text: '',
+  });
+  assert.deepEqual(press(initModel([none], T0), 'g').model.input, { purpose: 'group', text: '' });
+});
+
 test('backspace on empty input text does nothing', () => {
-  const { model } = press(open(), 'g', 'backspace', 'backspace');
-  assert.deepEqual(model.input, { purpose: 'group', text: '' });
+  const { model } = press(open(), 'p', 'backspace', 'backspace');
+  assert.deepEqual(model.input, { purpose: 'pr', text: '' });
 });
 
 test('backspace removes a whole character outside the basic plane', () => {
-  const { model } = press(open(), 'g', '😀', 'backspace');
-  assert.deepEqual(model.input, { purpose: 'group', text: '' });
+  const { model } = press(open(), 'p', '😀', 'backspace');
+  assert.deepEqual(model.input, { purpose: 'pr', text: '' });
 });
 
 test('in the input, keys that act in the list are text', () => {
-  const { model, effect } = press(open(), 'g', 'q', 'j', 'R');
-  assert.deepEqual(model.input, { purpose: 'group', text: 'qjR' });
+  const { model, effect } = press(open(), 'p', 'q', 'j', 'R');
+  assert.deepEqual(model.input, { purpose: 'pr', text: 'qjR' });
   assert.deepEqual(effect, { kind: 'none' });
 });
 
@@ -431,13 +497,38 @@ test('withRows without reorder drops a vanished row and moves the selection to t
   assert.equal(next.selected, S1);
 });
 
-test('withRows without reorder puts a row in a group that did not exist at the end', () => {
+test('withRows without reorder puts a group that did not exist after the named ones and before "no group"', () => {
   const R5 = listRow({ id: S4, group: 'Z', lastActivityNs: T0 + 10n * MIN });
   const next = withRows(open(), [R1, R2, R3, R5], T0, false);
   assert.deepEqual(
     next.order.map((group) => group.name),
-    ['A', null, 'Z'],
+    ['A', 'Z', null],
   );
+});
+
+test('withRows without reorder: several new groups keep the order buildList gives them, all before "no group"', () => {
+  const R5 = listRow({ id: S4, group: 'Z', lastActivityNs: T0 + 10n * MIN });
+  const R6 = listRow({
+    id: '4f9d7a5c-2b6e-4d0f-9a7b-6c5d4e3f2a1b',
+    group: 'Y',
+    lastActivityNs: T0 + 20n * MIN,
+  });
+  const next = withRows(open(), [R1, R2, R3, R5, R6], T0, false);
+  assert.deepEqual(
+    next.order.map((group) => group.name),
+    ['A', 'Y', 'Z', null],
+  );
+});
+
+test('withRows without reorder: a new "no group" row joins the group of no name; a first one goes last', () => {
+  const lone = withRows(initModel([R1, R2], T0), [R1, R2, R3], T0, false);
+  assert.deepEqual(
+    lone.order.map((group) => group.name),
+    ['A', null],
+  );
+  const N = listRow({ id: S4, group: null });
+  const next = withRows(open(), [R1, R2, R3, N], T0, false);
+  assert.deepEqual(next.order[1], { name: null, ids: [S3, S4] });
 });
 
 test('withRows without reorder: several new rows are appended in the order buildList gives them', () => {
@@ -460,8 +551,8 @@ test('withRows without reorder: a row whose group changed moves to the end of it
   const next = withRows(m, [R1g, R2, R3, R5], T0, false);
   assert.deepEqual(next.order, [
     { name: 'A', ids: [S2] },
-    { name: null, ids: [S3] },
     { name: 'B', ids: [S4, S1] },
+    { name: null, ids: [S3] },
   ]);
   assert.equal(next.selected, S1);
 });
@@ -559,7 +650,7 @@ test('a refresh that leaves the selected row alone leaves the detail and the inp
   const typing = press(open(), 'g', 'x').model;
   const next = withRows(typing, [R1, R2, R3], T0, false);
   assert.equal(next.mode, 'input');
-  assert.deepEqual(next.input, { purpose: 'group', text: 'x' });
+  assert.deepEqual(next.input, { purpose: 'group', text: 'Ax' });
 });
 
 test('a filter being typed keeps its mode when the selection moves with it', () => {

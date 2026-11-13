@@ -44,12 +44,25 @@ interface Step {
 
 const NONE: TuiEffect = { kind: 'none' };
 
-/** Every row that could ever be shown, grouped and ordered as in 7.4: the done ones are in it. */
-function orderOf(rows: readonly ListRow[], nowNs: Ns): TuiModel['order'] {
-  return buildList(rows, { showAll: true, filter: '', nowNs }).groups.map((group) => ({
-    name: group.name,
-    ids: group.rows.map((row) => row.id),
-  }));
+/**
+ * Every row that could ever be shown, grouped and ordered as in 7.4: the done ones are in it, so
+ * that `a` shows them where they belong. The groups are ranked by the members that are listed
+ * under `showAll` (7.4: "the most recent activity of a listed member"), as `skydeck ls` ranks
+ * them; a group of which nothing is listed comes after those, and "no group" is last.
+ */
+function orderOf(rows: readonly ListRow[], nowNs: Ns, showAll: boolean): TuiModel['order'] {
+  const everything = buildList(rows, { showAll: true, filter: '', nowNs }).groups;
+  const rank = new Map<string | null, number>();
+  buildList(rows, { showAll, filter: '', nowNs }).groups.forEach((group, at) => {
+    rank.set(group.name, at);
+  });
+  const named = everything.filter((group) => group.name !== null);
+  const ranked = (group: { name: string | null }): number => rank.get(group.name) ?? Infinity;
+  return [
+    ...named.filter((group) => rank.has(group.name)).sort((a, b) => ranked(a) - ranked(b)),
+    ...named.filter((group) => !rank.has(group.name)),
+    ...everything.filter((group) => group.name === null),
+  ].map((group) => ({ name: group.name, ids: group.rows.map((row) => row.id) }));
 }
 
 /** Rows of `order` that are listed (showAll) and match the filter, in order. */
@@ -89,7 +102,7 @@ function settle(model: TuiModel): TuiModel {
 export function initModel(rows: readonly ListRow[], nowNs: Ns): TuiModel {
   return settle({
     rows: new Map(rows.map((row) => [row.id, row])),
-    order: orderOf(rows, nowNs),
+    order: orderOf(rows, nowNs, false),
     showAll: false,
     filter: '',
     mode: 'list',
@@ -104,7 +117,8 @@ export function initModel(rows: readonly ListRow[], nowNs: Ns): TuiModel {
 /**
  * The old order kept where it still holds: a row that is gone, or no longer listed at all, leaves
  * it. A row that is new, or whose group changed, goes to the end of its group, several in the
- * order `fresh` gives them; a group that did not exist goes last; a group left empty is dropped.
+ * order `fresh` gives them; a group that did not exist goes after the named ones and before "no
+ * group" (7.4: it is last); a group left empty is dropped.
  */
 function keepOrder(old: TuiModel['order'], fresh: TuiModel['order']): TuiModel['order'] {
   const groupOf = new Map<string, string | null>();
@@ -129,7 +143,9 @@ function keepOrder(old: TuiModel['order'], fresh: TuiModel['order']): TuiModel['
       let target = order.find((candidate) => candidate.name === group.name);
       if (target === undefined) {
         target = { name: group.name, ids: [] };
-        order.push(target);
+        // "No group" is last (7.4): a new named group goes in front of it.
+        const noGroup = order.findIndex((candidate) => candidate.name === null);
+        order.splice(group.name !== null && noGroup >= 0 ? noGroup : order.length, 0, target);
       }
       target.ids.push(id);
     }
@@ -151,7 +167,7 @@ export function withRows(
   nowNs: Ns,
   reorder: boolean,
 ): TuiModel {
-  const fresh = orderOf(rows, nowNs);
+  const fresh = orderOf(rows, nowNs, model.showAll);
   return settle({
     ...model,
     rows: new Map(rows.map((row) => [row.id, row])),
@@ -194,6 +210,23 @@ function move(model: TuiModel, delta: number): Step {
   return stay(at < 0 || next === undefined ? model : { ...model, selected: next.id });
 }
 
+/**
+ * The input `l`, `g` or `p` opens. The label and the group start as the user set them, so that
+ * `enter` straight away changes nothing and clearing one takes a deliberate delete; a group that
+ * only `groupPattern` took from the title is not the user's and starts empty. A pull-request URL
+ * starts empty.
+ */
+function inputFor(key: 'l' | 'g' | 'p', row: ListRow): TuiInput {
+  switch (key) {
+    case 'l':
+      return { purpose: 'label', text: row.label ?? '' };
+    case 'g':
+      return { purpose: 'group', text: row.groupSource === 'meta' ? (row.group ?? '') : '' };
+    case 'p':
+      return { purpose: 'pr', text: '' };
+  }
+}
+
 /** `l g n d p R`, which act on the selected row in the list and in the detail alike. */
 function actOnRow(model: TuiModel, key: string): Step | null {
   switch (key) {
@@ -204,11 +237,7 @@ function actOnRow(model: TuiModel, key: string): Step | null {
       if (row === undefined) {
         return stay(model);
       }
-      const input: TuiInput =
-        key === 'l'
-          ? { purpose: 'label', text: row.label ?? '' }
-          : { purpose: key === 'g' ? 'group' : 'pr', text: '' };
-      return stay({ ...model, mode: 'input', input });
+      return stay({ ...model, mode: 'input', input: inputFor(key, row) });
     }
     case 'n':
     case 'd':
@@ -243,12 +272,12 @@ function reduceList(model: TuiModel, key: string): Step {
     case '/':
       return stay({ ...model, mode: 'filter' });
     case 'a': {
-      const rows = [...model.rows.values()];
+      const showAll = !model.showAll;
       return stay(
         settle({
           ...model,
-          showAll: !model.showAll,
-          order: orderOf(rows, model.nowNs),
+          showAll,
+          order: orderOf([...model.rows.values()], model.nowNs, showAll),
         }),
       );
     }
