@@ -1,6 +1,6 @@
-/** Parsing of what the kernel exposes under /proc/<pid>/ (design 5.3, 5.5). Pure: no file access. */
+/** Parsing of what the kernel exposes under /proc/<pid>/ (design 5.3, 5.5). Pure: no file I/O. */
 
-/** Index of field 22 among the whitespace-separated fields after the command name (field 3 is index 0). */
+/** Index of field 22 among the fields after the command name (field 3 is index 0). */
 const START_INDEX = 19;
 
 /**

@@ -319,6 +319,56 @@ test('parseLaunchArgs: a cluster counts as removable when any letter in it is', 
   assert.equal(removable('-dv'), false);
 });
 
+// After a short flag that takes no value, Claude Code's parser reads the rest of the token as a new
+// token, prefixed with one more '-': `-c-model` is `-c --model`, `-c-` is `-c --`.
+
+test('parseLaunchArgs: a - after a no-value short flag starts a long flag in the same token', () => {
+  assert.deepEqual(parse(['-c-model', 'opus']), ['F["-c-model","opus"] values ["opus"]']);
+  assert.deepEqual(parse(['-c-model=opus', 'x']), ['F["-c-model=opus"] values ["opus"]', 'P["x"]']);
+  assert.deepEqual(parse(['-cp-model', 'opus']), ['F["-cp-model","opus"] values ["opus"]']);
+  assert.deepEqual(parse(['-c-verbose', 'x']), ['F["-c-verbose"] values []', 'P["x"]']);
+});
+
+test('parseLaunchArgs: -c- is -c followed by the end of the flags', () => {
+  assert.deepEqual(parse(['-c-', '--model', 'opus']), [
+    'F["-c-"] values []',
+    'P["--model"]',
+    'P["opus"]',
+  ]);
+  assert.deepEqual(parse(['-p-', 'x']), ['F["-p-"] values []', 'P["x"]']);
+  assert.deepEqual(parse(['-cp-', '-x']), ['F["-cp-"] values []', 'P["-x"]']);
+  assert.deepEqual(parse(['--model', 'opus', '-c-']), [
+    'F["--model","opus"] values ["opus"]',
+    'F["-c-"] values []',
+  ]);
+});
+
+test('parseLaunchArgs: a long flag after a - that is in no table makes the token unknown, by that flag', () => {
+  assert.deepEqual(parse(['-c-frob', 'x']), ['U["-c-frob","x"] values ["x"]']);
+  assert.deepEqual(parse(['-c-frob=1', 'x']), ['U["-c-frob=1"] values ["1"]', 'P["x"]']);
+  assert.deepEqual(parse(['-c-pv']), ['U["-c-pv"] values []']);
+  const [item] = parseLaunchArgs(['-c-frob=1']);
+  assert.ok(item && item.kind === 'flag');
+  assert.equal(item.name, '--frob');
+  assert.equal(item.spec, null);
+});
+
+test('parseLaunchArgs: a - inside the value of a value-taking short flag stays in the value', () => {
+  assert.deepEqual(parse(['-n-foo', 'x']), ['F["-n-foo"] values ["-foo"]', 'P["x"]']);
+});
+
+test('parseLaunchArgs: a cluster with a long flag is removable when one of its flags is', () => {
+  const spec = (arg: string) => {
+    const [item] = parseLaunchArgs([arg]);
+    assert.ok(item && item.kind === 'flag', arg);
+    return item.spec;
+  };
+  assert.equal(spec('-c-model')?.remove, true);
+  assert.equal(spec('-p-model')?.remove, false);
+  assert.equal(spec('-p-')?.remove, false);
+  assert.equal(spec('-c-')?.remove, true);
+});
+
 test('parseLaunchArgs: a lone - is a value, not a flag', () => {
   assert.deepEqual(parse(['-']), ['P["-"]']);
   assert.deepEqual(parse(['--add-dir', 'a', '-', '--verbose']), [
@@ -776,6 +826,13 @@ test('buildResumeCommand keeps a cluster of short flags that none of the removed
   assert.deepEqual(resume(['claude', '-dv', 'x']).argv, [...R, '-dv']);
 });
 
+test('buildResumeCommand reads a - after a no-value short flag as a new long flag', () => {
+  assert.deepEqual(resume(['claude', '-c-model', 'opus', '--verbose']).argv, [...R, '--verbose']);
+  assert.deepEqual(resume(['claude', '-c-', '--model', 'opus']).argv, R);
+  assert.deepEqual(resume(['claude', '-p-model', 'opus']).argv, [...R, '-p-model', 'opus']);
+  assert.deepEqual(resume(['claude', '-p-', 'prompt']).argv, [...R, '-p-']);
+});
+
 test('buildResumeCommand does not pass on a token with an unknown letter', () => {
   assert.deepEqual(resume(['claude', '-cZ', 'x']).argv, R);
   assert.deepEqual(resume(['claude', '-Zabc', '--verbose']).argv, [...R, '--verbose']);
@@ -967,6 +1024,49 @@ test('storableArgv keeps an unknown flag as its bare name and drops what follows
   ]);
 });
 
+test('storableArgv reads a - after a no-value short flag as a new long flag', () => {
+  // -c is removed, so the whole token goes, and what it carries with it
+  assert.deepEqual(storableArgv(['claude', '-c-model', 'opus', '--verbose']), [
+    'claude',
+    '--verbose',
+  ]);
+  assert.deepEqual(storableArgv(['claude', '-c-', '--model', 'opus']), ['claude']);
+  // -p is kept, with its long flag and the value that long flag takes
+  assert.deepEqual(storableArgv(['claude', '-p-model', 'opus', 'prompt']), [
+    'claude',
+    '-p-model',
+    'opus',
+  ]);
+  // -p- ends the flags: what follows is positional
+  assert.deepEqual(storableArgv(['claude', '-p-', '--model', 'opus']), ['claude', '-p-']);
+});
+
+test('storableArgv stores a long flag that is in no table, after a -, as its bare name', () => {
+  assert.deepEqual(storableArgv(['claude', '-c-frob', 'x', '--model', 'opus']), [
+    'claude',
+    '--frob',
+    '--model',
+    'opus',
+  ]);
+  assert.deepEqual(storableArgv(['claude', '-c-frob=secret']), ['claude', '--frob']);
+});
+
+test('storableArgv never stores the end-of-flags marker as a flag', () => {
+  for (const argv of [
+    ['claude', '-c-model', 'opus'],
+    ['claude', '-c-', '--model', 'opus'],
+    ['claude', '-p-'],
+    ['claude', '-cp-'],
+    ['claude', '-c-frob'],
+  ]) {
+    const stored = storableArgv(argv);
+    assert.ok(!stored.includes('--'), argv.join(' '));
+    assert.deepEqual(storableArgv(stored), stored, `stored twice: ${argv.join(' ')}`);
+    assert.deepEqual(unknownFlags(stored), unknownFlags(argv), `unknown: ${argv.join(' ')}`);
+    assert.deepEqual(resume(stored), resume(argv), `resume: ${argv.join(' ')}`);
+  }
+});
+
 test('storableArgv does not store text written after an unknown letter', () => {
   assert.deepEqual(
     storableArgv(['claude', '-cZfix the login bug', '--model', 'opus', '-Zsecret']),
@@ -1121,6 +1221,11 @@ test('unknownFlags is empty when every flag is known, and for no flags or no com
   assert.deepEqual(unknownFlags([]), []);
 });
 
+test('unknownFlags names a long flag that is in no table, after a -, and not the end-of-flags marker', () => {
+  assert.deepEqual(unknownFlags(['claude', '-c-frob', 'x', '-c-frob=1']), ['--frob']);
+  assert.deepEqual(unknownFlags(['claude', '-c-model', 'opus', '-c-', '-p-']), []);
+});
+
 test('unknownFlags skips the program and what follows --', () => {
   assert.deepEqual(unknownFlags(['--weird-program', '--', '--frob']), []);
   assert.deepEqual(unknownFlags(['claude', '--add-dir', '/x', '--', '--frob']), []);
@@ -1158,6 +1263,15 @@ test('isPrintRun ignores a -p that is a value, a positional after --, or the pro
   assert.equal(isPrintRun(['claude', '--', '-p']), false);
   assert.equal(isPrintRun(['claude', '--add-dir', '/x', '--', '--print']), false);
   assert.equal(isPrintRun(['-p']), false);
+});
+
+test('isPrintRun sees -p before a - that ends the flags or starts a long flag', () => {
+  assert.equal(isPrintRun(['claude', '-p-']), true);
+  assert.equal(isPrintRun(['claude', '-p-model', 'opus']), true);
+  assert.equal(isPrintRun(['claude', '-cp-']), true);
+  assert.equal(isPrintRun(['claude', '-c-', '-p']), false);
+  assert.equal(isPrintRun(['claude', '-c-p']), false);
+  assert.equal(isPrintRun(['claude', '-c-model', 'opus']), false);
 });
 
 test('isPrintRun does not read a letter after a value-taking flag as a flag', () => {
@@ -1198,6 +1312,13 @@ const PIECES = [
   '-rabc',
   '-nfoo',
   '-n=x',
+  '-c-',
+  '-p-',
+  '-cp-',
+  '-c-model',
+  '-p-model',
+  '-c-frob',
+  '-c-frob=1',
   '-cZ',
   '-cZfix it',
   '-pvQ',

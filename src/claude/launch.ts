@@ -14,8 +14,9 @@ export interface FlagSpec {
 }
 
 /**
- * Claude Code 2.1.323 flags: every root flag the program declares, those hidden from `claude --help`
- * included (`test/fixtures/claude/flags-2.1.323.json` is its own table; a test compares the two).
+ * Claude Code 2.1.323 flags: every root flag the program declares, those hidden from
+ * `claude --help` included. `test/fixtures/claude/flags-2.1.323.json` is Claude Code's own table;
+ * a test compares the two.
  */
 export const FLAGS: readonly FlagSpec[] = [
   // removed at resume (7.6)
@@ -183,12 +184,12 @@ export type ParsedArg =
   | { kind: 'flag'; spec: FlagSpec | null; name: string; tokens: string[]; values: string[] }
   | { kind: 'positional'; tokens: [string] };
 
-/** Claude Code's parser calls a token a flag when it starts with '-' and has more than one character. */
+/** Claude Code's parser calls a token a flag when it starts with '-' and has 2+ characters. */
 function isFlagLike(token: string): boolean {
   return token.length > 1 && token.startsWith('-');
 }
 
-/** A token that can be taken as a value: present, and not itself flag-like (a lone '-' is a value). */
+/** A token that can be taken as a value: present, not flag-like (a lone '-' is a value). */
 function isPlainToken(token: string | undefined): boolean {
   return token !== undefined && !isFlagLike(token);
 }
@@ -196,32 +197,49 @@ function isPlainToken(token: string | undefined): boolean {
 /** One flag token, read: which flag it is, and what of it is a value written in the same token. */
 interface FlagToken {
   spec: FlagSpec | null; // null: a flag that is in no table
-  specs: readonly FlagSpec[]; // every flag the token holds: several for a cluster, none when unknown
+  specs: readonly FlagSpec[]; // every flag the token holds: several in a cluster, none if unknown
   name: string; // the flag as written, without a value glued to it
   glued: string | null; // the value glued to the flag in the same token, if any
   shape: FlagShape; // how many of the following tokens it takes when nothing is glued
+  endsFlags: boolean; // the token ends in `--`: every token after it is positional
 }
 
 /** An unknown flag takes a following plain token, exactly as an optional-value flag does. */
 const UNKNOWN_SHAPE: FlagShape = 'optional';
 
-/** `name` is as much of the token as can be classified: for a short token, the unknown letter alone. */
+/** `name`: as much of the token as can be classified (a short token: the unknown letter alone). */
 function unknownFlag(token: string, name: string = token): FlagToken {
-  return { spec: null, specs: [], name, glued: null, shape: UNKNOWN_SHAPE };
+  return { spec: null, specs: [], name, glued: null, shape: UNKNOWN_SHAPE, endsFlags: false };
+}
+
+/** A cluster is represented by its first removable flag, else by its last. */
+function representative(specs: readonly FlagSpec[]): FlagSpec | null {
+  return specs.find((spec) => spec.remove) ?? specs.at(-1) ?? null;
 }
 
 /**
  * `--name`, `--name=value`, `-x`, `-xvalue`, `-xyz` (a cluster of short flags). A token that is a
  * flag's own name is that flag, whatever its length (`-d2e`). Otherwise a short token is read
- * letter by letter as Claude Code's own parser reads it: a no-value flag lets the cluster go on; a
- * value-taking flag ends it and takes the rest of the token, `=` included, as its value when there
- * is a rest. A letter that is not in the table makes the whole token an unknown flag, named by that letter alone. A cluster is
- * represented by its first removable flag, else by its last.
+ * letter by letter as Claude Code's own parser reads it:
+ * - a value-taking flag ends the cluster and takes the rest of the token, `=` included, as its
+ *   value when there is a rest;
+ * - after a no-value flag, a '-' starts a new token: the rest of the token with one more '-' in
+ *   front. `-c-model` is `-c --model`, and `-c-` is `-c --`, which ends the flags;
+ * - a letter that is not in the table makes the whole token an unknown flag, named by that letter
+ *   alone (a long flag that is not in the table, by its name).
+ * A cluster is represented by its first removable flag, else by its last.
  */
 function readFlagToken(token: string): FlagToken {
   const exact = SPEC_BY_NAME.get(token);
   if (exact !== undefined) {
-    return { spec: exact, specs: [exact], name: token, glued: null, shape: exact.shape };
+    return {
+      spec: exact,
+      specs: [exact],
+      name: token,
+      glued: null,
+      shape: exact.shape,
+      endsFlags: false,
+    };
   }
 
   if (token.startsWith('--')) {
@@ -231,7 +249,8 @@ function readFlagToken(token: string): FlagToken {
       const name = token.slice(0, equals);
       const spec = SPEC_BY_NAME.get(name) ?? null;
       const specs = spec === null ? [] : [spec];
-      return { spec, specs, name, glued: token.slice(equals + 1), shape: 'none' };
+      const glued = token.slice(equals + 1);
+      return { spec, specs, name, glued, shape: 'none', endsFlags: false };
     }
     return unknownFlag(token);
   }
@@ -243,23 +262,64 @@ function readFlagToken(token: string): FlagToken {
       return unknownFlag(token, `-${String.fromCodePoint(token.codePointAt(letter) as number)}`);
     }
     specs.push(spec);
-    const represented = specs.find((s) => s.remove) ?? spec;
     if (spec.shape !== 'none') {
       const rest = token.slice(letter + 1);
+      const glued = rest === '' ? null : rest;
       const name = token.slice(0, letter + 1);
       return {
-        spec: represented,
+        spec: representative(specs),
         specs,
         name,
-        glued: rest === '' ? null : rest,
+        glued,
         shape: spec.shape,
+        endsFlags: false,
+      };
+    }
+    if (token[letter + 1] === '-') {
+      const inner = readNewToken(`-${token.slice(letter + 1)}`);
+      if (inner.endsFlags) {
+        return {
+          spec: representative(specs),
+          specs,
+          name: token,
+          glued: null,
+          shape: 'none',
+          endsFlags: true,
+        };
+      }
+      if (inner.spec === null) return { ...inner, specs: [] };
+      const all = [...specs, ...inner.specs];
+      const name =
+        inner.glued === null ? token : token.slice(0, token.length - inner.glued.length - 1);
+      return {
+        spec: representative(all),
+        specs: all,
+        name,
+        glued: inner.glued,
+        shape: inner.shape,
+        endsFlags: false,
       };
     }
     if (letter === token.length - 1) {
-      return { spec: represented, specs, name: token, glued: null, shape: 'none' };
+      return {
+        spec: representative(specs),
+        specs,
+        name: token,
+        glued: null,
+        shape: 'none',
+        endsFlags: false,
+      };
     }
   }
   return unknownFlag(token);
+}
+
+/** The token a cluster hands on after a no-value flag: `--` (end of the flags) or a long flag. */
+function readNewToken(token: string): FlagToken {
+  if (token === '--') {
+    return { spec: null, specs: [], name: token, glued: null, shape: 'none', endsFlags: true };
+  }
+  return readFlagToken(token);
 }
 
 /** The end (exclusive) of the tokens a flag at args[start - 1] takes as values, by its shape. */
@@ -285,7 +345,8 @@ function valuesEnd(args: readonly string[], start: number, shape: FlagShape): nu
  * - `--name=value` (long flags): one token, `values` [value], consumes nothing more; `name` is the
  *   flag as written before the `=`;
  * - a short flag glued to its value (`-rabc`) is one token that takes nothing more; a cluster of
- *   short flags (`-cp`) is one token (see readFlagToken); `name` is the token without the value;
+ *   short flags (`-cp`, `-c-model`, `-c-`) is one token (see readFlagToken), and `-c-` ends the
+ *   flags; `name` is the token without the value;
  * - shape none: no value; one: the next token whatever it is; optional: the next token if it
  *   exists and is not flag-like; many: the next token whatever it is, then every following token up
  *   to the next flag-like one — a token is flag-like when it starts with '-' and has more than one
@@ -321,6 +382,10 @@ export function parseLaunchArgs(args: readonly string[]): ParsedArg[] {
       values: flag.glued === null ? tokens.slice(1) : [flag.glued],
     });
     i = end;
+    if (flag.endsFlags) {
+      for (const rest of args.slice(i)) items.push({ kind: 'positional', tokens: [rest] });
+      break;
+    }
   }
   return items;
 }
@@ -361,7 +426,7 @@ export function absolutizePathFlags(
   return out;
 }
 
-/** The tokens of `args` (WITHOUT the program name) that a resume passes on: known flags not removed. */
+/** The tokens of `args` (WITHOUT the program name) that a resume passes on: known, not removed. */
 function passedOnTokens(args: readonly string[]): string[] {
   return parseLaunchArgs(args).flatMap((item) =>
     item.kind === 'flag' && item.spec !== null && !item.spec.remove ? item.tokens : [],
