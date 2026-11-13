@@ -1,0 +1,838 @@
+import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { describe, test } from 'node:test';
+import type { TestContext } from 'node:test';
+
+import {
+  BATCH_SIZE,
+  CHIP_ORDER,
+  GH_TIMEOUT_MS,
+  batchArgs,
+  chipFor,
+  fetchPrs,
+  parseBatch,
+  prKey,
+  prLevel,
+  prsDue,
+  refreshPrs,
+} from '../src/github.ts';
+import type { PrKey } from '../src/github.ts';
+import { NS_PER_MINUTE } from '../src/platform/time.ts';
+import type { RunResult } from '../src/platform/types.ts';
+import { openStore } from '../src/store/store.ts';
+import type { Store } from '../src/store/store.ts';
+import type { PrChecks, PrReview, PrRow, PrState } from '../src/store/types.ts';
+import { SEC, T0, fakeClock, fakeRunner, runResult } from './helpers/platform.ts';
+import type { RunCall } from './helpers/platform.ts';
+import { sandbox } from './helpers/sandbox.ts';
+
+const MIN = NS_PER_MINUTE;
+const URL1 = 'https://github.com/o/r/pull/1';
+
+function pr(over: Partial<PrRow> = {}): PrRow {
+  return {
+    url: URL1,
+    owner: 'o',
+    repo: 'r',
+    number: 1,
+    title: null,
+    state: null,
+    review: null,
+    checks: null,
+    okAtNs: null,
+    triedAtNs: null,
+    error: null,
+    ...over,
+  };
+}
+
+function key(url: string): PrKey {
+  const parsed = prKey(url);
+  assert.ok(parsed, `${url} is a pull request url`);
+  return parsed;
+}
+
+/** The `pullRequest` object GitHub returns. `rollup` undefined → no commit node at all. */
+function prJson(
+  state: string,
+  isDraft: boolean,
+  review: string | null,
+  rollup: string | null | undefined,
+): Record<string, unknown> {
+  return {
+    title: 'T',
+    state,
+    isDraft,
+    reviewDecision: review,
+    commits: {
+      nodes:
+        rollup === undefined
+          ? []
+          : [{ commit: { statusCheckRollup: rollup === null ? null : { state: rollup } } }],
+    },
+  };
+}
+
+const OK_JSON = prJson('OPEN', false, 'APPROVED', 'SUCCESS');
+
+/** What `gh api graphql` prints: one `{ pullRequest }` per alias. */
+function ghStdout(pullRequests: unknown[], errors?: unknown[]): string {
+  const data: Record<string, unknown> = {};
+  pullRequests.forEach((value, i) => {
+    data[`p${i}`] = { pullRequest: value };
+  });
+  return JSON.stringify(errors === undefined ? { data } : { data, errors });
+}
+
+/** The number of aliases a `gh` call asks about. */
+function aliasesOf(call: RunCall): number {
+  return call.args.filter((arg) => /^n\d+=/.test(arg)).length;
+}
+
+/** The pull-request numbers a `gh` call asks about, in alias order. */
+function numbersOf(call: RunCall): number[] {
+  return call.args.filter((arg) => /^n\d+=/.test(arg)).map((arg) => Number(arg.split('=')[1]));
+}
+
+/** A fake `gh` that answers every alias of every call with `pullRequest`. */
+function answerAll(pullRequest: unknown = OK_JSON): (call: RunCall) => RunResult {
+  return (call) =>
+    runResult({ stdout: ghStdout(Array.from({ length: aliasesOf(call) }, () => pullRequest)) });
+}
+
+const NUM = (n: number): string => `https://github.com/o/r/pull/${n}`;
+
+interface Deck {
+  store: Store;
+  runner: ReturnType<typeof fakeRunner>;
+  clock: ReturnType<typeof fakeClock>;
+  deps: {
+    runner: ReturnType<typeof fakeRunner>;
+    clock: ReturnType<typeof fakeClock>;
+    store: Store;
+  };
+}
+
+/** A store on a temporary database, a fake clock at T0 and a fake `gh`. */
+function deck(t: TestContext, handler?: (call: RunCall) => RunResult): Deck {
+  const store = openStore(join(sandbox(t).root, 'skydeck.db'));
+  t.after(() => {
+    store.close();
+  });
+  const runner = fakeRunner(handler);
+  const clock = fakeClock(T0);
+  return { store, runner, clock, deps: { runner, clock, store } };
+}
+
+/** Adds pull requests o/r#from..to; `seen` gives them a successful fetch `ageMin` minutes ago. */
+function seed(
+  store: Store,
+  from: number,
+  to: number,
+  seen?: { state: PrState; ageMin: number; review?: PrReview; checks?: PrChecks },
+): void {
+  store.transaction(() => {
+    for (let number = from; number <= to; number++) {
+      store.ensurePr({ url: NUM(number), owner: 'o', repo: 'r', number });
+      if (seen !== undefined) {
+        store.savePrResult(NUM(number), {
+          ok: true,
+          atNs: T0 - BigInt(seen.ageMin) * MIN,
+          title: 'old',
+          state: seen.state,
+          review: seen.review ?? null,
+          checks: seen.checks ?? null,
+        });
+      }
+    }
+  });
+}
+
+function row(store: Store, number: number): PrRow {
+  const found = store.prs().find((p) => p.url === NUM(number));
+  assert.ok(found, `row ${number} exists`);
+  return found;
+}
+
+describe('constants', () => {
+  test('a batch holds at most 50 pull requests and gh gets 10 seconds', () => {
+    assert.equal(BATCH_SIZE, 50);
+    assert.equal(GH_TIMEOUT_MS, 10_000);
+  });
+});
+
+describe('prsDue', () => {
+  const rows = (over: Partial<PrRow>): PrRow[] => [pr(over)];
+
+  test('merged and closed rows are never due, not even when forced', () => {
+    for (const state of ['merged', 'closed'] as const) {
+      assert.deepEqual(prsDue(rows({ state, okAtNs: T0 - 600n * MIN }), T0, 5, false), []);
+      assert.deepEqual(prsDue(rows({ state, okAtNs: null }), T0, 5, true), []);
+    }
+  });
+
+  test('an open row last read 10 minutes ago is due with a 5 minute refresh', () => {
+    const due = rows({ state: 'open', okAtNs: T0 - 10n * MIN });
+    assert.deepEqual(prsDue(due, T0, 5, false), due);
+  });
+
+  test('an open row last read 1 minute ago is not due', () => {
+    assert.deepEqual(prsDue(rows({ state: 'open', okAtNs: T0 - MIN }), T0, 5, false), []);
+  });
+
+  test('"older than" is strict: exactly the refresh age is not due, one nanosecond more is', () => {
+    assert.deepEqual(prsDue(rows({ state: 'open', okAtNs: T0 - 5n * MIN }), T0, 5, false), []);
+    assert.equal(
+      prsDue(rows({ state: 'open', okAtNs: T0 - 5n * MIN - 1n }), T0, 5, false).length,
+      1,
+    );
+  });
+
+  test('a draft row that was never read successfully is due', () => {
+    assert.equal(prsDue(rows({ state: 'draft', okAtNs: null }), T0, 5, false).length, 1);
+  });
+
+  test('a row that was never fetched and failed is due', () => {
+    const failed = rows({ state: null, error: 'x', triedAtNs: T0 });
+    assert.deepEqual(prsDue(failed, T0, 5, false), failed);
+  });
+
+  test('a row that failed after a recent success is not due again before the refresh age', () => {
+    const recent = rows({ state: 'open', okAtNs: T0 - MIN, triedAtNs: T0, error: 'x' });
+    assert.deepEqual(prsDue(recent, T0, 5, false), []);
+  });
+
+  test('force makes every non-final row due', () => {
+    const all = [
+      pr({ state: 'open', okAtNs: T0 - MIN }),
+      pr({ state: 'draft', okAtNs: T0 }),
+      pr({ state: null }),
+      pr({ state: 'merged', okAtNs: T0 - 600n * MIN }),
+      pr({ state: 'closed' }),
+    ];
+    assert.deepEqual(prsDue(all, T0, 5, true), all.slice(0, 3));
+  });
+
+  test('a refresh age that is not a whole number of minutes still works', () => {
+    const open = (ageSec: bigint): PrRow[] => rows({ state: 'open', okAtNs: T0 - ageSec * SEC });
+    assert.equal(prsDue(open(29n), T0, 0.5, false).length, 0);
+    assert.equal(prsDue(open(31n), T0, 0.5, false).length, 1);
+  });
+
+  test('the order of the rows is kept and the input is not changed', () => {
+    const input = [
+      pr({ url: NUM(3), number: 3, state: 'open' }),
+      pr({ url: NUM(1), number: 1, state: 'open' }),
+    ];
+    const copy = structuredClone(input);
+    assert.deepEqual(
+      prsDue(input, T0, 5, false).map((p) => p.number),
+      [3, 1],
+    );
+    assert.deepEqual(input, copy);
+  });
+});
+
+describe('batchArgs', () => {
+  const keys = [key('https://github.com/o/r/pull/1'), key('https://github.com/a/b/pull/22')];
+  const args = batchArgs(keys);
+
+  test('starts with api graphql -f query=<query>', () => {
+    assert.deepEqual(args.slice(0, 3), ['api', 'graphql', '-f']);
+    assert.ok(args[3]?.startsWith('query='));
+  });
+
+  test('then the owner, repository and number of every key as variables', () => {
+    assert.deepEqual(args.slice(4), [
+      '-f',
+      'o0=o',
+      '-f',
+      'r0=r',
+      '-F',
+      'n0=1',
+      '-f',
+      'o1=a',
+      '-f',
+      'r1=b',
+      '-F',
+      'n1=22',
+    ]);
+  });
+
+  test('the query declares the variables and asks for the status of each pull request', () => {
+    const query = (args[3] ?? '').slice('query='.length);
+    assert.ok(
+      query.includes(
+        '$o0: String!, $r0: String!, $n0: Int!, $o1: String!, $r1: String!, $n1: Int!',
+      ),
+    );
+    assert.ok(query.includes('p0: repository(owner: $o0, name: $r0)'));
+    assert.ok(query.includes('p1: repository(owner: $o1, name: $r1)'));
+    assert.ok(query.includes('pullRequest(number: $n0)'));
+    assert.ok(query.includes('pullRequest(number: $n1)'));
+    for (const field of ['title', 'state', 'isDraft', 'reviewDecision', 'statusCheckRollup']) {
+      assert.ok(query.includes(field), field);
+    }
+    assert.ok(!query.includes('o/r'));
+    assert.ok(!query.includes('a/b'));
+  });
+
+  test('values never appear inside the query text, whatever they contain', () => {
+    const hostile: PrKey = { url: 'u', owner: 'a"}) { x', repo: "r'\\n", number: 7 };
+    const list = batchArgs([hostile]);
+    const query = list[3] ?? '';
+    assert.ok(!query.includes('a"}'));
+    assert.ok(!query.includes("r'"));
+    assert.ok(list.includes('o0=a"}) { x'));
+    assert.ok(list.includes("r0=r'\\n"));
+  });
+
+  test('a batch holds from 1 to BATCH_SIZE keys', () => {
+    const one = key(URL1);
+    assert.equal(batchArgs([one]).length, 4 + 6);
+    assert.equal(
+      batchArgs(Array.from({ length: BATCH_SIZE }, () => one)).length,
+      4 + 6 * BATCH_SIZE,
+    );
+    assert.throws(() => batchArgs([]), RangeError);
+    assert.throws(() => batchArgs(Array.from({ length: BATCH_SIZE + 1 }, () => one)), RangeError);
+  });
+});
+
+describe('parseBatch', () => {
+  const keys = [key(NUM(1)), key(NUM(2))];
+
+  function parse(stdout: string, over: Partial<RunResult> = {}) {
+    return parseBatch(keys, runResult({ stdout, ...over }), T0);
+  }
+
+  test('a readable pull request becomes an ok result', () => {
+    const results = parse(ghStdout([OK_JSON, OK_JSON]));
+    assert.deepEqual(results.get(NUM(1)), {
+      ok: true,
+      atNs: T0,
+      title: 'T',
+      state: 'open',
+      review: 'approved',
+      checks: 'passing',
+    });
+    assert.equal(results.size, 2);
+    assert.equal(results.get(NUM(2))?.ok, true);
+  });
+
+  test('a draft awaiting review with pending checks', () => {
+    const result = parse(
+      ghStdout([prJson('OPEN', true, 'REVIEW_REQUIRED', 'PENDING'), OK_JSON]),
+    ).get(NUM(1));
+    assert.deepEqual(result, {
+      ok: true,
+      atNs: T0,
+      title: 'T',
+      state: 'draft',
+      review: 'review-required',
+      checks: 'pending',
+    });
+  });
+
+  test('MERGED is merged and CLOSED is closed, draft or not', () => {
+    const merged = parse(ghStdout([prJson('MERGED', false, null, null), OK_JSON])).get(NUM(1));
+    const closed = parse(ghStdout([prJson('CLOSED', true, null, null), OK_JSON])).get(NUM(1));
+    assert.equal(merged?.ok && merged.state, 'merged');
+    assert.equal(closed?.ok && closed.state, 'closed');
+  });
+
+  test('a null rollup and a commit list without nodes both mean checks null', () => {
+    const nullRollup = parse(ghStdout([prJson('OPEN', false, null, null), OK_JSON])).get(NUM(1));
+    const noCommit = parse(ghStdout([prJson('OPEN', false, null, undefined), OK_JSON])).get(NUM(1));
+    assert.equal(nullRollup?.ok && nullRollup.checks, null);
+    assert.equal(noCommit?.ok && noCommit.checks, null);
+  });
+
+  test('FAILURE and ERROR are failing; PENDING and EXPECTED are pending; others are null', () => {
+    const checks = (rollup: string): PrChecks | null | undefined => {
+      const result = parse(ghStdout([prJson('OPEN', false, null, rollup), OK_JSON])).get(NUM(1));
+      return result?.ok ? result.checks : undefined;
+    };
+    assert.equal(checks('SUCCESS'), 'passing');
+    assert.equal(checks('FAILURE'), 'failing');
+    assert.equal(checks('ERROR'), 'failing');
+    assert.equal(checks('PENDING'), 'pending');
+    assert.equal(checks('EXPECTED'), 'pending');
+    assert.equal(checks('SOMETHING_NEW'), null);
+  });
+
+  test('the review decision: approved, changes requested, required, anything else null', () => {
+    const review = (decision: string | null): PrReview | null | undefined => {
+      const result = parse(ghStdout([prJson('OPEN', false, decision, null), OK_JSON])).get(NUM(1));
+      return result?.ok ? result.review : undefined;
+    };
+    assert.equal(review('APPROVED'), 'approved');
+    assert.equal(review('CHANGES_REQUESTED'), 'changes-requested');
+    assert.equal(review('REVIEW_REQUIRED'), 'review-required');
+    assert.equal(review(null), null);
+    assert.equal(review('SOMETHING_NEW'), null);
+  });
+
+  test('an alias GitHub could not resolve gets the message of its own error; the rest is used', () => {
+    const stdout = JSON.stringify({
+      data: { p0: { pullRequest: OK_JSON }, p1: null },
+      errors: [
+        { path: ['p0', 'pullRequest', 'commits'], message: 'about p0, which is readable' },
+        {
+          path: ['p1', 'pullRequest'],
+          message: 'Could not resolve to a PullRequest with the number of 2.',
+        },
+      ],
+    });
+    const results = parse(stdout, { code: 1 });
+    assert.equal(results.get(NUM(1))?.ok, true);
+    assert.deepEqual(results.get(NUM(2)), {
+      ok: false,
+      atNs: T0,
+      error: 'Could not resolve to a PullRequest with the number of 2.',
+    });
+  });
+
+  test('a pull request that is null inside its repository, or a repository that is null, is unreadable', () => {
+    const inner = parse(ghStdout([OK_JSON, null])).get(NUM(2));
+    assert.deepEqual(inner, { ok: false, atNs: T0, error: 'not found' });
+    const outer = parse(JSON.stringify({ data: { p0: { pullRequest: OK_JSON }, p1: null } }));
+    assert.deepEqual(outer.get(NUM(2)), { ok: false, atNs: T0, error: 'not found' });
+  });
+
+  test('an alias that is missing, with no errors, is "not found"', () => {
+    const stdout = JSON.stringify({ data: { p0: { pullRequest: OK_JSON } } });
+    assert.deepEqual(parse(stdout).get(NUM(2)), { ok: false, atNs: T0, error: 'not found' });
+  });
+
+  test('an error entry of another alias, or one without a message, is not borrowed', () => {
+    const stdout = JSON.stringify({
+      data: { p0: { pullRequest: OK_JSON } },
+      errors: [{ path: ['p0'], message: 'about p0' }, { path: ['p1'] }, { message: 'no path' }],
+    });
+    assert.deepEqual(parse(stdout).get(NUM(2)), { ok: false, atNs: T0, error: 'not found' });
+  });
+
+  test('a state GitHub added that we do not know is an error, never "closed"', () => {
+    const result = parse(ghStdout([prJson('SUSPENDED', false, null, null), OK_JSON])).get(NUM(1));
+    assert.equal(result?.ok, false);
+  });
+
+  test('a pull request without a title is an error', () => {
+    const noTitle = { ...OK_JSON, title: undefined };
+    assert.equal(parse(ghStdout([noTitle, OK_JSON])).get(NUM(1))?.ok, false);
+  });
+
+  test('a timeout fails every key with its own message', () => {
+    const results = parse('', { timedOut: true, code: null });
+    for (const url of [NUM(1), NUM(2)]) {
+      assert.deepEqual(results.get(url), { ok: false, atNs: T0, error: 'gh timed out after 10 s' });
+    }
+  });
+
+  test('gh missing fails every key with its own message', () => {
+    const results = parse('', { notFound: true, code: null });
+    for (const url of [NUM(1), NUM(2)]) {
+      assert.deepEqual(results.get(url), { ok: false, atNs: T0, error: 'gh is not installed' });
+    }
+  });
+
+  test('output that is not an answer fails every key with the first line of stderr', () => {
+    const results = parse('', { code: 1, stderr: 'HTTP 401: Bad credentials\nmore' });
+    for (const url of [NUM(1), NUM(2)]) {
+      assert.deepEqual(results.get(url), {
+        ok: false,
+        atNs: T0,
+        error: 'HTTP 401: Bad credentials',
+      });
+    }
+  });
+
+  test('without stderr the message is the exit code', () => {
+    const results = parse('', { code: 4 });
+    assert.deepEqual(results.get(NUM(1)), { ok: false, atNs: T0, error: 'gh exited 4' });
+  });
+
+  test('blank lines before the message of stderr are skipped', () => {
+    const results = parse('', { code: 1, stderr: '\r\n  \n gh: rate limited \r\nmore' });
+    assert.deepEqual(results.get(NUM(1)), { ok: false, atNs: T0, error: 'gh: rate limited' });
+  });
+
+  test('a process killed by a signal has no exit code to name', () => {
+    const results = parse('', { code: null });
+    assert.deepEqual(results.get(NUM(1)), {
+      ok: false,
+      atNs: T0,
+      error: 'gh was killed by a signal',
+    });
+  });
+
+  test('stdout that is JSON but has no data object counts as no answer', () => {
+    for (const stdout of [
+      '{"message":"Bad credentials"}',
+      '{"data":null,"errors":[{"message":"x"}]}',
+      '{"data":[]}',
+      '{"data":"x"}',
+      'null',
+      '[]',
+      '"text"',
+      '42',
+      'not json',
+      '{"data":',
+    ]) {
+      const results = parse(stdout, { code: 1, stderr: 'boom' });
+      assert.deepEqual(results.get(NUM(1)), { ok: false, atNs: T0, error: 'boom' }, stdout);
+      assert.deepEqual(results.get(NUM(2)), { ok: false, atNs: T0, error: 'boom' }, stdout);
+    }
+  });
+
+  test('there is one result per key, in a map keyed by url', () => {
+    const results = parse(ghStdout([OK_JSON, OK_JSON]));
+    assert.deepEqual([...results.keys()], [NUM(1), NUM(2)]);
+  });
+});
+
+describe('fetchPrs and refreshPrs', () => {
+  test('120 due rows go out in 3 gh calls of 50, 50 and 20, each with a 10 second timeout', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 120, { state: 'open', ageMin: 10 });
+    const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.deepEqual(outcome, { fetched: 120, failed: 0 });
+    assert.deepEqual(runner.calls.map(aliasesOf), [50, 50, 20]);
+    for (const call of runner.calls) {
+      assert.equal(call.command, 'gh');
+      assert.deepEqual(call.options, { timeoutMs: 10000 });
+    }
+    for (const p of store.prs()) {
+      assert.equal(p.okAtNs, T0);
+      assert.equal(p.triedAtNs, T0);
+      assert.equal(p.error, null);
+      assert.equal(p.state, 'open');
+      assert.equal(p.review, 'approved');
+      assert.equal(p.checks, 'passing');
+      assert.equal(p.title, 'T');
+    }
+  });
+
+  test('every pull request is asked about once, under the alias of its own number', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 60, { state: 'open', ageMin: 10 });
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    const asked = runner.calls.flatMap(numbersOf).sort((a, b) => a - b);
+    assert.deepEqual(
+      asked,
+      Array.from({ length: 60 }, (_, i) => i + 1),
+    );
+  });
+
+  test('a batch that timed out keeps the old status, records the attempt and counts as failed', async (t) => {
+    let call = 0;
+    const { store, runner, deps } = deck(t, (c) =>
+      ++call === 1 ? runResult({ code: null, timedOut: true }) : answerAll()(c),
+    );
+    seed(store, 1, 60, { state: 'open', ageMin: 10, review: 'approved', checks: 'passing' });
+    const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.deepEqual(outcome, { fetched: 10, failed: 50 });
+    const [first, second] = runner.calls;
+    assert.ok(first && second);
+    for (const number of numbersOf(first)) {
+      const failed = row(store, number);
+      assert.equal(failed.state, 'open');
+      assert.equal(failed.title, 'old');
+      assert.equal(failed.review, 'approved');
+      assert.equal(failed.checks, 'passing');
+      assert.equal(failed.okAtNs, T0 - 10n * MIN);
+      assert.equal(failed.triedAtNs, T0);
+      assert.equal(failed.error, 'gh timed out after 10 s');
+    }
+    for (const number of numbersOf(second)) {
+      const fresh = row(store, number);
+      assert.equal(fresh.okAtNs, T0);
+      assert.equal(fresh.title, 'T');
+      assert.equal(fresh.error, null);
+    }
+  });
+
+  test('a failed batch does not stop the batches after it', async (t) => {
+    const { store, runner, deps } = deck(t, () => runResult({ code: 1, stderr: 'HTTP 502' }));
+    seed(store, 1, 60);
+    const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.deepEqual(outcome, { fetched: 0, failed: 60 });
+    assert.equal(runner.calls.length, 2);
+    assert.ok(store.prs().every((p) => p.error === 'HTTP 502' && p.state === null));
+  });
+
+  test('a gh that cannot be started is a failure of the rows, not an exception', async (t) => {
+    const { store, deps } = deck(t, () => {
+      throw new Error('spawn gh EACCES\nstack');
+    });
+    seed(store, 1, 2);
+    const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.deepEqual(outcome, { fetched: 0, failed: 2 });
+    assert.equal(row(store, 1).error, 'gh could not be run: spawn gh EACCES');
+    assert.equal(row(store, 1).triedAtNs, T0);
+  });
+
+  test('gh missing fails the rows with a message and leaves them readable later', async (t) => {
+    const { store, deps } = deck(t, () => runResult({ code: null, notFound: true }));
+    seed(store, 1, 3);
+    assert.deepEqual(await refreshPrs(deps, { force: false, refreshMinutes: 5 }), {
+      fetched: 0,
+      failed: 3,
+    });
+    assert.ok(store.prs().every((p) => p.error === 'gh is not installed'));
+  });
+
+  test('a pull request GitHub cannot find is saved as failed with its message', async (t) => {
+    const { store, deps } = deck(t, () =>
+      runResult({
+        code: 1,
+        stdout: JSON.stringify({
+          data: { p0: { pullRequest: OK_JSON }, p1: { pullRequest: null } },
+          errors: [{ path: ['p1', 'pullRequest'], message: 'Could not resolve' }],
+        }),
+      }),
+    );
+    seed(store, 1, 2);
+    assert.deepEqual(await refreshPrs(deps, { force: false, refreshMinutes: 5 }), {
+      fetched: 1,
+      failed: 1,
+    });
+    assert.equal(row(store, 1).state, 'open');
+    assert.equal(row(store, 2).state, null);
+    assert.equal(row(store, 2).error, 'Could not resolve');
+  });
+
+  test('merged and closed rows are never sent, even when forced', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1, { state: 'merged', ageMin: 600 });
+    seed(store, 2, 2, { state: 'closed', ageMin: 600 });
+    seed(store, 3, 3, { state: 'open', ageMin: 10 });
+    await refreshPrs(deps, { force: true, refreshMinutes: 5 });
+    assert.deepEqual(runner.calls.flatMap(numbersOf), [3]);
+    assert.equal(row(store, 1).okAtNs, T0 - 600n * MIN);
+    assert.equal(row(store, 1).state, 'merged');
+  });
+
+  test('a row that is not due is sent only when forced', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1, { state: 'open', ageMin: 1 });
+    assert.deepEqual(await refreshPrs(deps, { force: false, refreshMinutes: 5 }), {
+      fetched: 0,
+      failed: 0,
+    });
+    assert.equal(runner.calls.length, 0);
+    assert.deepEqual(await refreshPrs(deps, { force: true, refreshMinutes: 5 }), {
+      fetched: 1,
+      failed: 0,
+    });
+    assert.equal(runner.calls.length, 1);
+  });
+
+  test('with nothing due there is no gh call', async (t) => {
+    const { runner, deps } = deck(t, answerAll());
+    assert.deepEqual(await refreshPrs(deps, { force: true, refreshMinutes: 5 }), {
+      fetched: 0,
+      failed: 0,
+    });
+    assert.equal(runner.calls.length, 0);
+  });
+
+  test('fetchPrs fetches exactly the pull requests it is given, due or not', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 2, { state: 'open', ageMin: 1 });
+    const outcome = await fetchPrs(deps, [NUM(1)]);
+    assert.deepEqual(outcome, { fetched: 1, failed: 0 });
+    assert.equal(runner.calls.length, 1);
+    assert.deepEqual(numbersOf(runner.calls[0] as RunCall), [1]);
+    assert.equal(row(store, 1).okAtNs, T0);
+    assert.equal(row(store, 1).title, 'T');
+    assert.equal(row(store, 2).title, 'old');
+  });
+
+  test('fetchPrs with no urls makes no call', async (t) => {
+    const { runner, deps } = deck(t, answerAll());
+    assert.deepEqual(await fetchPrs(deps, []), { fetched: 0, failed: 0 });
+    assert.equal(runner.calls.length, 0);
+  });
+
+  test('a url that is no row of the store is not asked about, and a repeated one only once', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1);
+    const outcome = await fetchPrs(deps, [NUM(1), NUM(9), NUM(1)]);
+    assert.deepEqual(outcome, { fetched: 1, failed: 0 });
+    assert.deepEqual(runner.calls.flatMap(numbersOf), [1]);
+    assert.deepEqual(await fetchPrs(deps, [NUM(9)]), { fetched: 0, failed: 0 });
+    assert.equal(runner.calls.length, 1);
+  });
+
+  test('the time of a result is the clock when the answer arrived', async (t) => {
+    const { store, clock, deps } = deck(t, (c) => {
+      clock.advanceMs(2500);
+      return answerAll()(c);
+    });
+    seed(store, 1, 1);
+    await fetchPrs(deps, [NUM(1)]);
+    assert.equal(row(store, 1).okAtNs, T0 + 2n * SEC + 500_000_000n);
+  });
+
+  test('a refresh after a success is not due again until the refresh age has passed', async (t) => {
+    const { store, clock, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1);
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    clock.advanceMs(4 * 60_000);
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 1);
+    clock.advanceMs(2 * 60_000);
+    await refreshPrs(deps, { force: false, refreshMinutes: 5 });
+    assert.equal(runner.calls.length, 2);
+  });
+});
+
+describe('prLevel', () => {
+  test('a pull request with an error cannot be read, whatever else it says', () => {
+    assert.equal(prLevel(pr({ state: 'open', error: 'x' })), 'cant-read');
+    assert.equal(prLevel(pr({ state: null, error: 'x' })), 'cant-read');
+    assert.equal(prLevel(pr({ state: 'merged', error: 'x' })), 'cant-read');
+    assert.equal(prLevel(pr({ state: 'closed', error: 'x' })), 'cant-read');
+  });
+
+  test('one that was never fetched is "unfetched"', () => {
+    assert.equal(prLevel(pr({ state: null })), 'unfetched');
+  });
+
+  test('merged and closed are themselves', () => {
+    assert.equal(prLevel(pr({ state: 'merged' })), 'merged');
+    assert.equal(prLevel(pr({ state: 'closed' })), 'closed');
+    assert.equal(
+      prLevel(pr({ state: 'merged', checks: 'failing', review: 'changes-requested' })),
+      'merged',
+    );
+  });
+
+  test('failing checks come before changes requested', () => {
+    assert.equal(
+      prLevel(pr({ state: 'open', checks: 'failing', review: 'changes-requested' })),
+      'checks-failing',
+    );
+  });
+
+  test('changes requested come before pending checks', () => {
+    assert.equal(
+      prLevel(pr({ state: 'open', checks: 'pending', review: 'changes-requested' })),
+      'changes-requested',
+    );
+  });
+
+  test('pending checks come before a review that is still required', () => {
+    assert.equal(
+      prLevel(pr({ state: 'open', checks: 'pending', review: 'review-required' })),
+      'checks-pending',
+    );
+  });
+
+  test('a review that is required comes before the draft', () => {
+    assert.equal(
+      prLevel(pr({ state: 'open', checks: 'passing', review: 'review-required' })),
+      'review-required',
+    );
+    assert.equal(prLevel(pr({ state: 'draft', review: 'review-required' })), 'review-required');
+  });
+
+  test('a draft with nothing to report is a draft; failing checks still win', () => {
+    assert.equal(prLevel(pr({ state: 'draft' })), 'draft');
+    assert.equal(prLevel(pr({ state: 'draft', checks: 'failing' })), 'checks-failing');
+  });
+
+  test('approved and green, or open with nothing known, is approved-green', () => {
+    assert.equal(
+      prLevel(pr({ state: 'open', checks: 'passing', review: 'approved' })),
+      'approved-green',
+    );
+    assert.equal(prLevel(pr({ state: 'open' })), 'approved-green');
+  });
+});
+
+describe('chipFor', () => {
+  const at = (over: Partial<PrRow>): PrRow => pr({ state: 'open', ...over });
+
+  test('no pull requests, no chip', () => {
+    assert.equal(chipFor([]), null);
+  });
+
+  test('the worst level wins and the count is every pull request', () => {
+    assert.deepEqual(
+      chipFor([
+        at({ checks: 'passing', review: 'approved' }),
+        at({ checks: 'failing' }),
+        pr({ state: 'merged' }),
+      ]),
+      { level: 'checks-failing', count: 3 },
+    );
+  });
+
+  test('merged is worse than closed', () => {
+    assert.deepEqual(chipFor([pr({ state: 'merged' }), pr({ state: 'closed' })]), {
+      level: 'merged',
+      count: 2,
+    });
+  });
+
+  test('unfetched is worse than failing checks', () => {
+    assert.deepEqual(chipFor([pr({ state: null }), at({ checks: 'failing' })]), {
+      level: 'unfetched',
+      count: 2,
+    });
+  });
+
+  test('cant-read is worse than unfetched', () => {
+    assert.deepEqual(chipFor([pr({ state: null, error: 'x' }), pr({ state: null })]), {
+      level: 'cant-read',
+      count: 2,
+    });
+    assert.deepEqual(chipFor([pr({ state: null }), at({ error: 'x' })]), {
+      level: 'cant-read',
+      count: 2,
+    });
+  });
+
+  test('a single pull request is its own level', () => {
+    assert.deepEqual(chipFor([pr({ state: 'closed' })]), { level: 'closed', count: 1 });
+  });
+
+  test('CHIP_ORDER is worst first, and prLevel only returns levels from it', () => {
+    assert.deepEqual(
+      [...CHIP_ORDER],
+      [
+        'cant-read',
+        'unfetched',
+        'checks-failing',
+        'changes-requested',
+        'checks-pending',
+        'review-required',
+        'draft',
+        'approved-green',
+        'merged',
+        'closed',
+      ],
+    );
+    const everything: PrRow[] = [
+      pr({ error: 'x' }),
+      pr({ state: null }),
+      at({ checks: 'failing' }),
+      at({ review: 'changes-requested' }),
+      at({ checks: 'pending' }),
+      at({ review: 'review-required' }),
+      pr({ state: 'draft' }),
+      at({}),
+      pr({ state: 'merged' }),
+      pr({ state: 'closed' }),
+    ];
+    assert.deepEqual(everything.map(prLevel), [...CHIP_ORDER]);
+  });
+
+  test('an unreadable pull request is never shown as closed', () => {
+    assert.equal(prLevel(pr({ state: 'closed', error: 'HTTP 404' })), 'cant-read');
+    assert.equal(chipFor([pr({ state: null, error: 'HTTP 404' })])?.level, 'cant-read');
+  });
+});
