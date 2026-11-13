@@ -76,6 +76,11 @@ function command(d: TestDeck, id: string): string {
   return `cd -- ${projectDir(d)} && claude --resume ${id}`;
 }
 
+/** What restore prints for a session it does not start itself. */
+function resumeLine(id: string): string {
+  return `skydeck resume ${id} --here`;
+}
+
 /** The context of `d` with a runner whose WezTerm tabs start claude for the sessions in `starting`. */
 function withTabs(d: TestDeck, starting: readonly string[]): Context {
   const runner = fakeRunner((call) => {
@@ -152,7 +157,7 @@ test('restore without --yes when stdin is not a terminal is a usage error', asyn
   assert.equal(existsSync(handoffPath(d)), false);
 });
 
-test('restore --yes hands off the first preselected session and prints the command of the next', async (t) => {
+test('restore --yes hands off the first preselected session and prints a skydeck resume of the next', async (t) => {
   const d = machine(t);
   assert.equal(await main(['restore', '--yes'], d.ctx), 0);
   assert.equal(
@@ -160,12 +165,26 @@ test('restore --yes hands off the first preselected session and prints the comma
     handoffScript({ cwd: projectDir(d), argv: ['claude', '--resume', sid(1)] }),
   );
   const out = d.stdout();
-  assert.ok(out.includes(`${command(d, sid(2))}\n`), out);
+  assert.ok(out.includes(`to resume these yourself, run:\n${resumeLine(sid(2))}\n`), out);
+  assert.equal(out.includes('cd --'), false, out);
   assert.equal(out.includes(sid(3)), false, out);
   assert.deepEqual(
     d.deck.store.kvEntries('resume_lock:').map((entry) => entry.key),
     [`resume_lock:${sid(1)}`],
   );
+});
+
+test('the line restore prints runs the guard when the user runs it: a session resumed meanwhile is refused', async (t) => {
+  const d = machine(t);
+  assert.equal(await main(['restore', '--yes'], d.ctx), 0);
+  assert.ok(d.stdout().includes(`${resumeLine(sid(2))}\n`), d.stdout());
+  // Minutes later, before the user pastes the line, sid(2) has been resumed in another terminal.
+  d.clock.setNs(NOW + 5n * MINUTE);
+  startClaude(d, sid(2), 4242);
+  const [program, ...args] = resumeLine(sid(2)).split(' ');
+  assert.equal(program, 'skydeck');
+  assert.equal(await main(args, d.ctx), 4);
+  assert.ok(d.stderr().endsWith('skydeck: 00000002 is running (pid 4242)\n'), d.stderr());
 });
 
 test('restore at a terminal: the user toggles entry 3 on, and the run includes it', async (t) => {
@@ -175,8 +194,8 @@ test('restore at a terminal: the user toggles entry 3 on, and the run includes i
   const out = d.stdout();
   assert.ok(out.includes(`3. [ ] 00000003`), out);
   assert.ok(out.includes(`3. [x] 00000003`), out);
-  assert.ok(out.includes(`${command(d, sid(2))}\n`), out);
-  assert.ok(out.includes(`${command(d, sid(3))}\n`), out);
+  assert.ok(out.includes(`${resumeLine(sid(2))}\n`), out);
+  assert.ok(out.includes(`${resumeLine(sid(3))}\n`), out);
   assert.equal(
     readFileSync(handoffPath(d), 'utf8'),
     handoffScript({ cwd: projectDir(d), argv: ['claude', '--resume', sid(1)] }),
@@ -203,7 +222,7 @@ test('restore at a terminal: a number not in the list is refused and asked again
   assert.ok(d.stderr().includes("'7' is not a number from 1 to 3"), d.stderr());
   assert.ok(d.stderr().includes("'x' is not a number from 1 to 3"), d.stderr());
   // Nothing of a refused line is toggled: entry 2 is still selected.
-  assert.ok(d.stdout().includes(`${command(d, sid(2))}\n`), d.stdout());
+  assert.ok(d.stdout().includes(`${resumeLine(sid(2))}\n`), d.stdout());
 });
 
 test('restore at a terminal with everything toggled off starts nothing and exits 0', async (t) => {

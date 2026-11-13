@@ -1,7 +1,7 @@
 // Restore (design 7.8): bring back the sessions that were open when the machine went down — which
 // ones, and starting them a few at a time, each through the resume guard and its lock (principle
 // 7), and only while there is memory to spare.
-import { buildResumeCommand, unknownFlags } from '../claude/launch.ts';
+import { unknownFlags } from '../claude/launch.ts';
 import { RefError, ResumeRefusedError } from '../platform/errors.ts';
 import { NS_PER_MINUTE, NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
@@ -118,7 +118,10 @@ export interface RestoreOutcome {
   notStarted: string[];
   /** Resumed --here (no tab adapter). */
   handedOff: string | null;
-  /** Command lines printed instead (no tab adapter). */
+  /**
+   * Lines printed for the user to run (no tab adapter): `skydeck resume <id> --here` for each session
+   * restore does not start itself; the session's own command when its hand-off failed.
+   */
   printed: string[];
   stoppedForMemory: boolean;
 }
@@ -135,7 +138,8 @@ interface Run {
  * only when there is enough memory, and followed by a wait (one look a second, at most
  * config.restoreStartTimeoutSeconds) until each of its sessions has a start event (a tab whose
  * opening timed out is waited for too: it may have opened). Without one: the first session the
- * guard accepts is handed off here, and the commands of the others are printed.
+ * guard accepts is handed off here, and for each of the others that the guard would let through
+ * now, `skydeck resume <id> --here` is printed (it runs the guard again when the user runs it).
  *
  * Every session goes through the resume guard on fresh state (a refresh just before it), so a
  * session another skydeck resumed meanwhile is refused, not resumed a second time (principle 7).
@@ -311,41 +315,45 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       continue;
     }
     const launch = row.session.launch;
-    const command = buildResumeCommand({
-      claudeCommand: run.deck.config.claudeCommand,
-      launch,
-      sessionId: row.id,
-      label: row.label,
-    });
-    warn(run, row, command.flagsKnown, launch === null ? [] : unknownFlags(launch));
-    const dir = row.session.dir;
-    if (dir === null) {
-      throw new Error('checkResumable let a session without a directory through'); // unreachable
-    }
-    if (!print(run, dir, command.argv)) {
-      fail(run, row, UNPRINTABLE);
-    }
+    warn(run, row, launch !== null, launch === null ? [] : unknownFlags(launch));
+    printLine(run, resumeLine(row.id));
   }
+}
+
+/**
+ * What restore prints for a session it does not start itself: not the session's own command, but a
+ * resume of it. The user may paste the line minutes later, and the session may have been resumed
+ * elsewhere meanwhile: `skydeck resume` runs the guard and takes the lock at the moment it is run,
+ * where a raw `claude --resume` would start a second process on the transcript (principle 7). A
+ * session id is a lowercase UUID, so the line is always safe to print.
+ */
+function resumeLine(sessionId: string): string {
+  return `skydeck resume ${sessionId} --here`;
 }
 
 const UNPRINTABLE = 'the command contains control characters and cannot be printed safely';
 
 /**
- * Prints "cd -- <q dir> && <q argv…>" (to `printed` and `report`), after a header line the first
- * time; false, and nothing printed, when the directory or a word holds anything sanitize() would
- * change: such a line could act on the terminal, or break when it is pasted.
+ * Prints "cd -- <q dir> && <q argv…>" (printLine); false, and nothing printed, when the directory or
+ * a word holds anything sanitize() would change: such a line could act on the terminal, or break
+ * when it is pasted.
  */
 function print(run: Run, dir: string, argv: readonly string[]): boolean {
   const line = printableCommand(dir, argv);
   if (line === null) {
     return false;
   }
+  printLine(run, line);
+  return true;
+}
+
+/** A line for the user to run, to `printed` and `report`, after a header line the first time. */
+function printLine(run: Run, line: string): void {
   if (run.outcome.printed.length === 0) {
     run.report('to resume these yourself, run:');
   }
   run.outcome.printed.push(line);
   run.report(line);
-  return true;
 }
 
 /**
@@ -371,7 +379,7 @@ function enoughMemory(run: Run, rest: readonly RestoreEntry[]): boolean {
 }
 
 /**
- * The entry's row as it is now, for a command that is printed rather than started (no lock): a
+ * The entry's row as it is now, for a session whose resume is printed rather than started (no lock): a
  * refresh and the rows read again, as prepareResumeById does, so that the check sees what happened
  * since the entries were planned. A session the deck no longer knows is a failure (null).
  */

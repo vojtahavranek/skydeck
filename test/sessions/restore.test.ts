@@ -809,17 +809,17 @@ function here(d: TestDeck): Terminal {
   return hereTerminal({ files: d.platform.files, env: d.platform.env });
 }
 
-test('without tabs the first session is handed off here and the commands of the others are printed', async (t) => {
+/** What restore prints for a session it does not start: a resume that guards and locks when it is run. */
+const resumeLine = (id: string): string => `skydeck resume ${id} --here`;
+
+test('without tabs the first session is handed off here and a skydeck resume of each other one is printed', async (t) => {
   const { d, entries } = fiveToRestore(t);
   const dir = projectDir(d);
   const { outcome, lines } = await run(d, here(d), entries.slice(0, 3));
   assert.deepEqual(outcome, {
     ...NOTHING,
     handedOff: sid(1),
-    printed: [
-      `cd -- ${dir} && claude --resume ${sid(2)}`,
-      `cd -- ${dir} && claude --resume ${sid(3)}`,
-    ],
+    printed: [resumeLine(sid(2)), resumeLine(sid(3))],
   });
   assert.equal(
     readFileSync(join(d.sandbox.root, 'handoff'), 'utf8'),
@@ -839,7 +839,7 @@ test('without tabs a first session that became running is refused and the next o
   const { outcome } = await run(d, here(d), entries.slice(0, 3));
   assert.deepEqual(outcome.failed, [{ id: sid(1), reason: '00000001 is running (pid 4242)' }]);
   assert.equal(outcome.handedOff, sid(2));
-  assert.deepEqual(outcome.printed, [`cd -- ${projectDir(d)} && claude --resume ${sid(3)}`]);
+  assert.deepEqual(outcome.printed, [resumeLine(sid(3))]);
 });
 
 test('without tabs a command is not printed for a session that became running', async (t) => {
@@ -848,7 +848,7 @@ test('without tabs a command is not printed for a session that became running', 
   const { outcome } = await run(d, here(d), entries.slice(0, 3));
   assert.equal(outcome.handedOff, sid(1));
   assert.deepEqual(outcome.failed, [{ id: sid(2), reason: '00000002 is running (pid 4242)' }]);
-  assert.deepEqual(outcome.printed, [`cd -- ${projectDir(d)} && claude --resume ${sid(3)}`]);
+  assert.deepEqual(outcome.printed, [resumeLine(sid(3))]);
 });
 
 test('without tabs a command is not printed for a session another skydeck is resuming', async (t) => {
@@ -860,7 +860,7 @@ test('without tabs a command is not printed for a session another skydeck is res
   assert.deepEqual(outcome.failed, [
     { id: sid(2), reason: '00000002 is being resumed by another skydeck' },
   ]);
-  assert.deepEqual(outcome.printed, [`cd -- ${projectDir(d)} && claude --resume ${sid(3)}`]);
+  assert.deepEqual(outcome.printed, [resumeLine(sid(3))]);
 });
 
 test('without tabs a handoff that fails prints that session’s command too and hands nothing off', async (t) => {
@@ -869,10 +869,8 @@ test('without tabs a handoff that fails prints that session’s command too and 
   const { outcome } = await run(d, here(d), entries.slice(0, 2));
   assert.equal(outcome.handedOff, null);
   assert.deepEqual(outcome.failed, [{ id: sid(1), reason: 'not started through bin/skydeck' }]);
-  assert.deepEqual(outcome.printed, [
-    `cd -- ${dir} && claude --resume ${sid(1)}`,
-    `cd -- ${dir} && claude --resume ${sid(2)}`,
-  ]);
+  // As `resume` does after a failed launch: its own command, under the lock restore took for it.
+  assert.deepEqual(outcome.printed, [`cd -- ${dir} && claude --resume ${sid(1)}`, resumeLine(sid(2))]);
   // The user may run sid(1)'s printed command now: its lock keeps other skydecks off it.
   assert.deepEqual(
     d.deck.store.kvEntries('resume_lock:').map((entry) => entry.key),
@@ -926,7 +924,7 @@ test('without tabs a handoff that timed out prints no command and keeps its lock
   }
 });
 
-test('without tabs a command holding control characters is never printed', async (t) => {
+test('without tabs a session whose own command holds control characters gets the skydeck resume line', async (t) => {
   const d = restoreDeck(t, { config: TAB_CONFIG });
   addSession(d, sid(1), { boot: BOOT_A, pid: 101, startNs: T0 - HOUR, activityNs: T0 - MINUTE });
   addSession(d, sid(2), {
@@ -939,13 +937,9 @@ test('without tabs a command holding control characters is never printed', async
   const entries = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, false);
   const { outcome, lines } = await run(d, here(d), entries);
   assert.equal(outcome.handedOff, sid(1));
-  assert.deepEqual(outcome.printed, []);
-  assert.deepEqual(outcome.failed, [
-    {
-      id: sid(2),
-      reason: 'the command contains control characters and cannot be printed safely',
-    },
-  ]);
+  // The raw command is never printed; `skydeck resume` hands it to the launcher, where it is quoted.
+  assert.deepEqual(outcome.printed, [resumeLine(sid(2))]);
+  assert.deepEqual(outcome.failed, []);
   assert.equal(/[\x00-\x09\x0b-\x1f\x7f]/.test(lines.join('\n')), false, JSON.stringify(lines));
 });
 
