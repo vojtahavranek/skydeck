@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
+  chmodSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -243,7 +244,8 @@ test('rotateLog copies a file of 1 MiB or more to .1 and empties it in place, re
   const { tp } = logPlace(t);
   const path = join(tp.places.stateDir, 'keepers.log');
   const full = filler(MIB + 10);
-  writeFileSync(path, full, { mode: 0o600 });
+  writeFileSync(path, full);
+  chmodSync(path, 0o644); // a log another writer created wider: its copy is still 0o600
   writeFileSync(`${path}.1`, 'the oldest\n');
   const held = openSync(path, 'a'); // as a keeper's stderr (S2 7.1)
   t.after(() => closeSync(held));
