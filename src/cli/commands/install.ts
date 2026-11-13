@@ -55,7 +55,8 @@ export const command: Command = {
     return withDeck(ctx, { refresh: false }, async (deck) => {
       makeLinks(ctx, deck);
       if (!(await addHooks(ctx, deck))) {
-        throw new SkydeckError('settings not changed: the hook entries were not added');
+        ctx.io.stderr('settings not changed\n');
+        return EXIT.failure;
       }
       refreshWithProgress(ctx, deck);
       await offerFirstRun(ctx, deck);

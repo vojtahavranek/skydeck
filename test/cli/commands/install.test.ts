@@ -112,7 +112,7 @@ describe('install: links and hook entries', () => {
       const r = await run(d.platform, ['install'], { lines });
 
       assert.equal(r.code, 1);
-      assert.match(r.stderr, /settings not changed/);
+      assert.ok(r.stderr.endsWith('Add them? [y/N] settings not changed\n'), r.stderr);
       assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"opus"}');
       assert.deepEqual(backups(d.places), []);
       assert.equal(kv(d, 'settings_hash'), null);
