@@ -577,6 +577,13 @@ test('formatShow: a note that ends with a line break has no empty line after it'
   assert.ok(text.endsWith('\nnote:\n  a\n  b\n'), JSON.stringify(text));
 });
 
+test('formatShow: lines that are nothing once sanitised leave no empty line before or after the note', () => {
+  const after = showText(listRow({ id: S1, hasNote: true, note: 'a\n\x1b[0m' }));
+  assert.ok(after.endsWith('\nnote:\n  a\n'), JSON.stringify(after));
+  const before = showText(listRow({ id: S1, hasNote: true, note: '\x1b[0m\n\na' }));
+  assert.ok(before.endsWith('\nnote:\n  a\n'), JSON.stringify(before));
+});
+
 test('formatShow: an empty line inside a note stays empty, without trailing spaces', () => {
   const text = showText(listRow({ id: S1, hasNote: true, note: 'a\n\nb' }));
   assert.ok(text.endsWith('\nnote:\n  a\n\n  b\n'), JSON.stringify(text));

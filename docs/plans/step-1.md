@@ -3984,7 +3984,7 @@ lines indented by two spaces when there is a note. Details the lines above leave
 the marks with a comma, and `marks:`, `label:` and `group:` show `-` when there is nothing; the words
 of `launch:` are sanitised before they are quoted, and an empty launch command (`[]`) reads `unknown`
 like none; the note loses its trailing whitespace (so a note saved with a final line break has no empty
-line after it), each of its lines is sanitised (line breaks kept) and an empty line stays empty (a note with nothing left once sanitised gets no `note:` line); the
+line after it), each of its lines is sanitised (line breaks kept) and an empty line inside the note stays empty (lines that are nothing once sanitised are dropped at its start and end, and a note of nothing else gets no `note:` line); the
 text always ends with `\n`.
 `nowNs` is part of the signature and is not used (`since` is an ISO time, not an age). `show --json`
 and `ls --json` are written by `jsonText`; the JSON holds the note and the launch command as stored.

@@ -239,13 +239,20 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
     lines.push(field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}`));
   }
   lines.push(...row.prs.map(prField));
-  // A note is free multi-line text: sanitised line by line, so that its line breaks stay. One that
-  // is nothing once sanitised (only escape sequences) has nothing to show under a heading.
+  // A note is free multi-line text: sanitised line by line, so that its line breaks stay. Lines
+  // that are nothing once sanitised (only escape sequences) are not shown at its start and end,
+  // and a note of nothing else has nothing to show under a heading.
   const noteLines = (row.note?.trimEnd() ?? '').split('\n').map((line) => {
     const clean = sanitize(line);
     return clean.trim() === '' ? '' : INDENT + clean;
   });
-  if (noteLines.some((line) => line !== '')) {
+  while (noteLines[0] === '') {
+    noteLines.shift();
+  }
+  while (noteLines.at(-1) === '') {
+    noteLines.pop();
+  }
+  if (noteLines.length > 0) {
     lines.push('note:', ...noteLines);
   }
   return `${lines.join('\n')}\n`;
