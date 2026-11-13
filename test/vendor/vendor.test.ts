@@ -93,15 +93,38 @@ function manifest(root: string): ManifestEntry[] {
 
 const committed = manifest(checkout);
 
+/**
+ * cpSync's filter for copying `base`: leaves out the packages' `src/` and source maps, judged by
+ * the path inside `base` (the checkout itself may lie under a directory called `src`).
+ */
+function withoutSources(base: string): (src: string) => boolean {
+  return (src) => {
+    const inside = relative(base, src);
+    return !/(^|\/)src(\/|$)/.test(inside) && !inside.endsWith('.map');
+  };
+}
+
 /** A copy of the installed `node_modules/@xterm` in a sandbox (without sources and maps). */
 function fixtureModules(t: TestContext): string {
   const root = sandbox(t).root;
-  const from = join(root, 'from');
-  cpSync(join(checkout, 'node_modules/@xterm'), join(from, 'node_modules/@xterm'), {
+  const installed = join(checkout, 'node_modules/@xterm');
+  cpSync(installed, join(root, 'from/node_modules/@xterm'), {
     recursive: true,
-    filter: (src) => !/\/src(\/|$)/.test(src) && !src.endsWith('.map'),
+    filter: withoutSources(installed),
   });
   return root;
+}
+
+/** Asserts that `<root>/vendor/` holds exactly the committed files, byte for byte. */
+function assertCommittedVendor(root: string): void {
+  const files = tree(join(root, 'vendor'), root);
+  assert.deepEqual(files, tree(join(checkout, 'vendor'), checkout));
+  for (const path of files) {
+    assert.ok(
+      readFileSync(join(root, path)).equals(readFileSync(join(checkout, path))),
+      `${path} differs from the committed one`,
+    );
+  }
 }
 
 /** Changes fields of the fixture's `package.json` of `dir` (`@xterm/<dir>`). */
@@ -134,14 +157,7 @@ describe('npm run vendor', () => {
     const run = spawnSync(process.execPath, [script, s.root], { encoding: 'utf8', env: s.env() });
 
     assert.equal(run.status, 0, run.stderr);
-    const made = tree(join(s.root, 'vendor'), s.root);
-    assert.deepEqual(made, tree(join(checkout, 'vendor'), checkout));
-    for (const path of made) {
-      assert.ok(
-        readFileSync(join(s.root, path)).equals(readFileSync(join(checkout, path))),
-        `${path} differs from the committed one`,
-      );
-    }
+    assertCommittedVendor(s.root);
   });
 
   test('the vendored files are exactly those of A3, and the manifest lists each of them', () => {
@@ -159,7 +175,7 @@ describe('npm run vendor', () => {
 
     vendor({ from: checkout, to: s.root });
 
-    assert.deepEqual(tree(join(s.root, 'vendor'), s.root), tree(join(checkout, 'vendor'), checkout));
+    assertCommittedVendor(s.root);
   });
 });
 
@@ -280,14 +296,35 @@ describe('the licence check', () => {
     assert.throws(() => vendor({ from: join(root, 'from'), to: root }), /@xterm\/headless/);
   });
 
-  test('a refusal leaves an existing vendor/ as it was', (t) => {
-    const root = fixtureModules(t);
-    mkdirSync(join(root, 'vendor/xterm'), { recursive: true });
-    writeFileSync(join(root, 'vendor/MANIFEST.json'), 'before');
-    alterPackage(root, 'headless', { license: 'ISC' });
+  test('the fixture copy judges sources and maps by the path inside the copied directory', () => {
+    const keep = withoutSources('/home/u/src/skydeck/node_modules/@xterm');
 
-    assert.throws(() => vendor({ from: join(root, 'from'), to: root }));
-    assert.equal(readFileSync(join(root, 'vendor/MANIFEST.json'), 'utf8'), 'before');
+    assert.equal(keep('/home/u/src/skydeck/node_modules/@xterm'), true);
+    assert.equal(keep('/home/u/src/skydeck/node_modules/@xterm/xterm/lib/xterm.mjs'), true);
+    assert.equal(keep('/home/u/src/skydeck/node_modules/@xterm/xterm/src'), false);
+    assert.equal(keep('/home/u/src/skydeck/node_modules/@xterm/xterm/src/a/b.ts'), false);
+    assert.equal(keep('/home/u/src/skydeck/node_modules/@xterm/xterm/lib/xterm.mjs.map'), false);
+  });
+
+  for (const [name, breakIt] of [
+    ['a licence it cannot vouch for', (root: string) => alterPackage(root, 'headless', { license: 'ISC' })],
+    ['a missing file', (root: string) => rmSync(join(root, 'from/node_modules/@xterm/addon-fit/typings/addon-fit.d.ts'))],
+  ] as const) {
+    test(`a refusal for ${name} leaves an existing vendor/ as it was, byte for byte`, (t) => {
+      const root = fixtureModules(t);
+      cpSync(join(checkout, 'vendor'), join(root, 'vendor'), { recursive: true });
+      breakIt(root);
+
+      assert.throws(() => vendor({ from: join(root, 'from'), to: root }));
+      assertCommittedVendor(root);
+    });
+  }
+
+  test('refuses a package without LICENSE from another repository of the same owner', (t) => {
+    const root = fixtureModules(t);
+    alterPackage(root, 'headless', { repository: 'https://github.com/xtermjs/xterm.js-other' });
+
+    assert.throws(() => vendor({ from: join(root, 'from'), to: root }), /@xterm\/headless.*repository/);
   });
 
   test("refuses when @xterm/xterm itself has no LICENSE (there is none to borrow)", (t) => {
