@@ -1719,15 +1719,16 @@ export function checkResumable(row: ListRow, files: Files): void;
  * D16. In one store.transaction(): reads the lock; when it holds — younger than LOCK_TTL_NS (a time
  * less than LOCK_TTL_NS in the future counts as now) and no start event for the session at or after
  * it (hasStartSince) — ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s"
- * (n rounded down, m rounded up). A value that is not a time is stale. `saw`, when given, is what the
- * decision to resume was made on (the highest id among the session's events, null for none): still
- * inside the transaction, and before the lock is written, the session's latest event id is read again
+ * (n rounded down, m rounded up). A value that is not a time is stale. `saw` is what the decision to
+ * resume was made on (the highest id among the session's events, null for none); it is required, so
+ * that no caller can skip the check: still inside the transaction, and before the lock is written,
+ * the session's latest event id is read again
  * (store.latestEventIdOfSession), and when it is not `saw.latestEventId` the call throws
  * ResumeRefusedError "the session's state changed while preparing; run the command again" and writes
- * nothing. Otherwise it writes the lock with the clock's time. Without `saw` nothing is compared.
+ * nothing. Otherwise it writes the lock with the clock's time.
  */
 export interface SawEvents { latestEventId: number | null }
-export function acquireLock(deck: Deck, sessionId: string, saw?: SawEvents): void;
+export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void;
 /** Deletes the locks that are stale by the same rules; returns how many. Looks first without a transaction (no stale lock: no write transaction, so a refresh with nothing to sweep takes no write lock), then reads again and deletes inside one store.transaction(). */
 export function sweepLocks(deck: Deck): number;
 
@@ -4246,7 +4247,7 @@ export const LOCK_TTL_NS: Ns;                                                   
 export function lockKey(sessionId: string): `resume_lock:${string}`;            // throws RangeError
 export function checkResumable(row: ListRow, files: Files): void;               // throws ResumeRefusedError
 export interface SawEvents { latestEventId: number | null }
-export function acquireLock(deck: Deck, sessionId: string, saw?: SawEvents): void; // throws ResumeRefusedError
+export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void; // throws ResumeRefusedError
 export function sweepLocks(deck: Deck): number;
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;          // throws ResumeRefusedError
@@ -4268,7 +4269,7 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `checkResumable`: a running row (P1 alive) → `ResumeRefusedError` (exit 4) `'0b5f3c1e is running (pid 4242)'`;
   two holders → `'(pid 4343, pid 4242)'`; no transcript → `'0b5f3c1e has no transcript'`; expired → `'0b5f3c1e has expired: its transcript is gone'`;
   dir `/gone` → `'0b5f3c1e: directory /gone no longer exists'`; a dead session with an existing dir → no throw.
-- `acquireLock(S1)` → kv `resume_lock:<S1>` = `` `${T0}` ``. Second call at `T0+10s` →
+- `acquireLock(S1, saw)` (`saw` = the store's latest event id of S1 at the time of the call, `null` when it has none; the examples that follow leave it out) → kv `resume_lock:<S1>` = `` `${T0}` ``. Second call at `T0+10s` →
   `ResumeRefusedError` `'0b5f3c1e is being resumed (10 s ago); try again in 50 s'`. At `T0+61s` → succeeds, content `T0+61s`.
 - Lock at `T0`, a start event for S1 at `T0` or later ingested, call at `T0+5s` → succeeds (replaced).
 - `sweepLocks` removes a lock older than 60 s and a lock followed by a start event; keeps a fresh one; returns the count.
@@ -4279,7 +4280,8 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - Guard before lock: a running row with a stale lock → refused for running; the lock is unchanged.
 - `acquireLock(S1, { latestEventId })`: the id of S1's only event → lock taken; a second event of S1 (a start by another skydeck) → `ResumeRefusedError`
   `"the session's state changed while preparing; run the command again"`, no lock written (a stale lock stays as it was); `null` with an event present → refused;
-  events of other sessions do not count; without the argument nothing is compared; the latest event is read inside the one transaction, before the write.
+  events of other sessions do not count; the argument is required (a test with `// @ts-expect-error` makes `npm run typecheck` fail when it becomes optional);
+  the latest event is read inside the one transaction, before the write.
 - `prepareResume`: with `proc.setBootId(null)` → `ResumeRefusedError` `'cannot tell which sessions are running: the boot id could not be read'` before every other
   refusal, no lock; with a row whose `lastEventId` is behind the store's (a start event inserted after the row was read, also from inside `files.stat`, which
   `checkResumable` calls between the read and the lock) → the "state changed" refusal and no lock — also when A took the lock, its start event was ingested and `sweepLocks`

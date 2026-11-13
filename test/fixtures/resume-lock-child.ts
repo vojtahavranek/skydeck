@@ -20,7 +20,7 @@ for await (const line of input) {
     if (sweep === '1') {
       sweepLocks(deck);
     }
-    acquireLock(deck, sessionId);
+    acquireLock(deck, sessionId, { latestEventId: null }); // the sessions of this test have no events
     answer = 'ok';
   } catch (error) {
     answer =

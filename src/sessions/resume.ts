@@ -109,14 +109,14 @@ export interface SawEvents {
  * ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s" (n rounded down, m
  * rounded up). A value that is not a time is stale.
  *
- * `saw`, when given, is what the decision to resume was made on. Still inside the transaction and
- * before the lock is written, the session's latest event id is read again; when it is not the one
- * `saw` names, another skydeck acted on the session since (it may have resumed it, and a sweep may
- * have removed its lock as stale once its start event was ingested), and the call throws
- * ResumeRefusedError "the session's state changed while preparing; run the command again". Without
- * `saw` nothing is compared. Otherwise writes the lock with the clock's time.
+ * `saw` is what the decision to resume was made on, and is required so that no caller can skip the
+ * check. Still inside the transaction and before the lock is written, the session's latest event id
+ * is read again; when it is not the one `saw` names, another skydeck acted on the session since (it
+ * may have resumed it, and a sweep may have removed its lock as stale once its start event was
+ * ingested), and the call throws ResumeRefusedError "the session's state changed while preparing;
+ * run the command again". Otherwise writes the lock with the clock's time.
  */
-export function acquireLock(deck: Deck, sessionId: string, saw?: SawEvents): void {
+export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void {
   const key = lockKey(sessionId);
   const { store, platform } = deck;
   store.transaction(() => {
@@ -130,7 +130,7 @@ export function acquireLock(deck: Deck, sessionId: string, saw?: SawEvents): voi
         `${sessionId.slice(0, 8)} is being resumed (${ago} s ago); try again in ${wait} s`,
       );
     }
-    if (saw !== undefined && store.latestEventIdOfSession(sessionId) !== saw.latestEventId) {
+    if (store.latestEventIdOfSession(sessionId) !== saw.latestEventId) {
       throw new ResumeRefusedError(STATE_CHANGED);
     }
     store.setKv(key, `${nowNs}`);

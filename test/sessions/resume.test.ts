@@ -18,6 +18,7 @@ import {
   prepareResume,
   sweepLocks,
 } from '../../src/sessions/resume.ts';
+import type { SawEvents } from '../../src/sessions/resume.ts';
 import type { DerivedSession, Holder } from '../../src/sessions/types.ts';
 import type { Store } from '../../src/store/store.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
@@ -59,6 +60,11 @@ function lockOf(d: TestDeck, sessionId: string): string | null {
 
 function writeLock(d: TestDeck, sessionId: string, value: string): void {
   d.deck.store.setKv(lockKey(sessionId), value);
+}
+
+/** What a decision made right now would have seen of the session: the store's latest event id. */
+function sawNow(d: TestDeck, sessionId: string = S1): SawEvents {
+  return { latestEventId: d.deck.store.latestEventIdOfSession(sessionId) };
 }
 
 function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): number {
@@ -259,16 +265,16 @@ test('lockKey refuses anything but a session id', () => {
 
 test('acquireLock stores the lock with the time as its value', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   assert.equal(lockOf(d, S1), `${T0}`);
 });
 
 test('acquireLock refuses within 60 s, says how long to wait and leaves the lock as it is', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 10n * SEC);
   assert.equal(
-    refusal(() => acquireLock(d.deck, S1)),
+    refusal(() => acquireLock(d.deck, S1, sawNow(d))),
     '0b5f3c1e is being resumed (10 s ago); try again in 50 s',
   );
   assert.equal(lockOf(d, S1), `${T0}`);
@@ -276,57 +282,57 @@ test('acquireLock refuses within 60 s, says how long to wait and leaves the lock
 
 test('acquireLock rounds the age down and the wait up', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 59n * SEC + 500_000_000n);
   assert.equal(
-    refusal(() => acquireLock(d.deck, S1)),
+    refusal(() => acquireLock(d.deck, S1, sawNow(d))),
     '0b5f3c1e is being resumed (59 s ago); try again in 1 s',
   );
 });
 
 test('acquireLock replaces a lock older than 60 s', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 61n * SEC);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   assert.equal(lockOf(d, S1), `${T0 + 61n * SEC}`);
 });
 
 test('acquireLock replaces a lock exactly 60 s old', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 60n * SEC);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   assert.equal(lockOf(d, S1), `${T0 + 60n * SEC}`);
 });
 
 test('acquireLock replaces a lock when the session started at or after the lock', (t) => {
   for (const startNs of [T0, T0 + 2n * SEC]) {
     const d = testDeck(t);
-    acquireLock(d.deck, S1);
+    acquireLock(d.deck, S1, sawNow(d));
     startEvent(d, S1, startNs);
     d.clock.setNs(T0 + 5n * SEC);
-    acquireLock(d.deck, S1);
+    acquireLock(d.deck, S1, sawNow(d));
     assert.equal(lockOf(d, S1), `${T0 + 5n * SEC}`);
   }
 });
 
 test('acquireLock keeps a lock when the session started before it, or another one started', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   startEvent(d, S1, T0 - 1n);
   startEvent(d, S2, T0 + SEC);
   d.clock.setNs(T0 + 5n * SEC);
   assert.match(
-    refusal(() => acquireLock(d.deck, S1)),
+    refusal(() => acquireLock(d.deck, S1, sawNow(d))),
     /being resumed \(5 s ago\)/,
   );
 });
 
 test('acquireLock locks each session on its own', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
-  acquireLock(d.deck, S2);
+  acquireLock(d.deck, S1, sawNow(d));
+  acquireLock(d.deck, S2, sawNow(d, S2));
   assert.equal(lockOf(d, S2), `${T0}`);
 });
 
@@ -334,7 +340,7 @@ test('acquireLock replaces a lock whose value is not a time', (t) => {
   for (const value of ['', 'soon', '12x', '-5', ' 1']) {
     const d = testDeck(t);
     writeLock(d, S1, value);
-    acquireLock(d.deck, S1);
+    acquireLock(d.deck, S1, sawNow(d));
     assert.equal(lockOf(d, S1), `${T0}`, JSON.stringify(value));
   }
 });
@@ -343,11 +349,11 @@ test('acquireLock treats a lock dated a little in the future as fresh, one far a
   const d = testDeck(t);
   writeLock(d, S1, `${T0 + 10n * SEC}`);
   assert.equal(
-    refusal(() => acquireLock(d.deck, S1)),
+    refusal(() => acquireLock(d.deck, S1, sawNow(d))),
     '0b5f3c1e is being resumed (0 s ago); try again in 70 s',
   );
   writeLock(d, S1, `${T0 + 60n * SEC}`);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   assert.equal(lockOf(d, S1), `${T0}`);
 });
 
@@ -355,7 +361,7 @@ test('acquireLock reads and writes the lock inside one transaction', (t) => {
   const d = testDeck(t);
   writeLock(d, S1, `${T0 - 120n * SEC}`);
   const w = watched(d);
-  acquireLock(w.deck, S1);
+  acquireLock(w.deck, S1, sawNow(d));
   assert.equal(w.transactions(), 1);
   assert.ok(w.depths.length >= 2, String(w.depths));
   assert.ok(
@@ -363,7 +369,7 @@ test('acquireLock reads and writes the lock inside one transaction', (t) => {
     String(w.depths),
   );
   d.clock.setNs(T0 + SEC);
-  refusal(() => acquireLock(w.deck, S1));
+  refusal(() => acquireLock(w.deck, S1, sawNow(d)));
   assert.equal(w.transactions(), 2);
   assert.ok(
     w.depths.every((depth) => depth === 1),
@@ -412,11 +418,13 @@ test('acquireLock ignores the events of other sessions', (t) => {
   assert.equal(lockOf(d, S1), `${T0}`);
 });
 
-test('acquireLock without a decision to compare with does not look at the events', (t) => {
+test('acquireLock cannot be called without the decision it checks (a compile error, not a skipped check)', (t) => {
   const d = testDeck(t);
-  startEvent(d, S1, T0 - 1n * SEC);
-  acquireLock(d.deck, S1);
-  assert.equal(lockOf(d, S1), `${T0}`);
+  const withoutIt = (): void => {
+    // @ts-expect-error `saw` is required: a caller that skips the re-check must be a compile error
+    acquireLock(d.deck, S1);
+  };
+  assert.equal(typeof withoutIt, 'function'); // never called: `npm run typecheck` is the test
 });
 
 test('acquireLock leaves a stale lock as it is when the state changed', (t) => {
@@ -455,7 +463,7 @@ test('acquireLock lets a failure of the database through', (t) => {
       },
     },
   });
-  assert.throws(() => acquireLock(deck, S1), failure);
+  assert.throws(() => acquireLock(deck, S1, sawNow(d)), failure);
 });
 
 // --- sweepLocks ------------------------------------------------------------------------------------
@@ -556,7 +564,7 @@ test('refresh sweeps the locks at its end', (t) => {
 
 test('no lock is a file: the locks directory stays empty', (t) => {
   const d = testDeck(t);
-  acquireLock(d.deck, S1);
+  acquireLock(d.deck, S1, sawNow(d));
   mkdirSync(d.deck.places.locksDir, { recursive: true });
   writeFileSync(join(d.deck.places.locksDir, `${S2}.lock`), `${T0 - 600n * SEC}\n`);
   assert.equal(sweepLocks(d.deck), 0); // a file there is not a lock any more
