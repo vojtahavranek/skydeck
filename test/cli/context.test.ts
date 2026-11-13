@@ -181,4 +181,13 @@ describe('processContext', () => {
 
     assert.deepEqual(printed, ['a', 'b', 'done']);
   });
+  test('readLine after keys has used up standard input gives null and the process exits', async (t) => {
+    const { out } = await inChild(
+      t,
+      `for await (const chunk of io.keys()) {} print(await io.readLine('? '));`,
+      'a\nb\n',
+    );
+
+    assert.equal(out, null);
+  });
 });

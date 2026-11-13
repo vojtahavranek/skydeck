@@ -266,6 +266,9 @@ function realProc(): Proc {
   };
 }
 
+/** After a timeout with the child already gone: how long its last output may still take to arrive. */
+const PIPE_GRACE_MS = 100;
+
 function realRunner(): Runner {
   return {
     run(command, args, options: RunOptions = {}) {
@@ -279,6 +282,7 @@ function realRunner(): Runner {
         let stderr = '';
         let timedOut = false;
         let settled = false;
+        let graceTimer: NodeJS.Timeout | undefined;
         const timer =
           options.timeoutMs === undefined
             ? undefined
@@ -287,16 +291,20 @@ function realRunner(): Runner {
                   timedOut = true;
                   child.kill('SIGKILL');
                 } else {
-                  // The child is gone but something it started still holds the pipes.
-                  child.stdout?.destroy();
-                  child.stderr?.destroy();
-                  settle(child.exitCode);
+                  // The child is gone but something it started still holds the pipes: give what
+                  // the child wrote a moment to arrive, then stop waiting for the rest.
+                  graceTimer = setTimeout(() => {
+                    child.stdout?.destroy();
+                    child.stderr?.destroy();
+                    settle(child.exitCode);
+                  }, PIPE_GRACE_MS);
                 }
               }, options.timeoutMs);
         const settle = (code: number | null, notFound = false): void => {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
+            clearTimeout(graceTimer);
             resolve({ code: timedOut ? null : code, stdout, stderr, timedOut, notFound });
           }
         };

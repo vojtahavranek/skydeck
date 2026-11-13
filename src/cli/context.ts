@@ -52,8 +52,8 @@ function processIo(): Io {
     },
     async readLine(prompt) {
       process.stderr.write(prompt);
-      if (ended) {
-        return null;
+      if (ended || process.stdin.readableEnded) {
+        return null; // nothing more will come, and a new interface on an ended stream never answers
       }
       // One reader for the whole process: a second one would not see lines the first already took.
       if (reader === undefined) {
