@@ -29,7 +29,7 @@ export function processContext(): Context {
 /**
  * The standard streams. Standard input is touched only when something reads it, and is paused
  * again afterwards, so that a command that has finished is never kept alive by it. `readLine` and
- * `keys` read the same stream: use one of them at a time.
+ * `keys` read the same stream: one after the other is fine, two at once is not.
  */
 function processIo(): Io {
   let lines: AsyncIterator<string> | undefined;
@@ -78,34 +78,53 @@ function processIo(): Io {
     },
     keys() {
       const stdin = process.stdin;
+      // A readLine reader still listens on stdin: let it go, or it would take the keys as lines
+      // (lines it had read ahead are lost).
+      if (reader !== undefined) {
+        reader.close();
+        reader = undefined;
+        lines = undefined;
+        closed = false;
+      }
       const wasRaw = stdin.isTTY && stdin.isRaw;
       if (stdin.isTTY) {
         stdin.setRawMode(true);
       }
       stdin.setEncoding('utf8');
-      const chunks = stdin.iterator({ destroyOnReturn: false });
+      let chunks: AsyncIterator<unknown> | undefined;
       let finished = false;
-      const finish = (): void => {
-        if (!finished) {
-          finished = true;
-          if (stdin.isTTY) {
-            stdin.setRawMode(wasRaw);
-          }
-          stdin.pause();
+      const nextTick = (): Promise<unknown> => new Promise((resolve) => setImmediate(resolve));
+      const finish = async (): Promise<void> => {
+        if (finished) {
+          return;
         }
+        finished = true;
+        if (stdin.isTTY) {
+          stdin.setRawMode(wasRaw);
+        }
+        // Letting go of the iterator makes the stream resume reading on the next tick; a pause
+        // before that is undone, and an open stdin would keep the process alive.
+        await chunks?.return?.();
+        await nextTick();
+        stdin.pause();
       };
       return {
         async next() {
+          if (chunks === undefined) {
+            // A stdin.pause() (by readLine, or the end of an earlier keys()) stops the handle on
+            // the next tick; start reading only after that, or the read is never requested.
+            await nextTick();
+            chunks = stdin.iterator({ destroyOnReturn: false });
+          }
           const next: IteratorResult<unknown> = await chunks.next();
           if (next.done === true) {
-            finish();
+            await finish();
             return { done: true, value: undefined };
           }
           return { done: false, value: String(next.value) };
         },
         async return() {
-          finish();
-          await chunks.return?.();
+          await finish();
           return { done: true, value: undefined };
         },
         [Symbol.asyncIterator]() {
