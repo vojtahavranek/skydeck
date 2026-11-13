@@ -7,7 +7,7 @@ import { duplexPair } from 'node:stream';
 import type { Duplex } from 'node:stream';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
+import { setImmediate as tick, setTimeout as delay } from 'node:timers/promises';
 
 import WebSocket from 'ws';
 
@@ -1357,5 +1357,26 @@ describe('WebSocket: a peer that resets the connection', () => {
 
     assert.ok(served.accepted.items.length > 0, 'some requests reached acceptWebSocket');
     assert.ok(served.accepted.items.every((item) => item === null));
+  });
+});
+
+describe('WebSocket: a listener that throws (ruled, #44)', () => {
+  test('the socket is destroyed before the error goes on, so nothing is read from the middle of a frame', async (t) => {
+    const d = direct(t);
+    const accepted = d.accepted as Accepted;
+    accepted.conn.onText((text) => {
+      if (text === 'a') throw new Error('listener failed');
+    });
+    await tick(); // the socket flows: a write of the peer is now read inside that write
+    const twoFrames = Buffer.concat([
+      clientFrame(OP.text, Buffer.from('a')),
+      clientFrame(OP.text, Buffer.from('b')),
+    ]);
+
+    assert.throws(() => d.peer.write(twoFrames), /listener failed/);
+
+    assert.equal(d.socket.destroyed, true);
+    assert.equal(await within('onClose', accepted.closed), 1006);
+    assert.equal(accepted.messages.items.length, 1, 'the frame after it was not read');
   });
 });

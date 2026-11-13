@@ -1826,7 +1826,8 @@ export interface WebSocketConnection {
   /** Destroys the socket at once, with no close frame; onClose gets 1006 unless it had a code
    *  (ruled, #44). */
   destroy(): void;
-  // Each onX adds a listener; earlier ones stay (ruled, #44).
+  // Each onX adds a listener; earlier ones stay. When a listener throws, the socket is destroyed
+  // (onClose gets 1006 unless it had a code) and the error is thrown on (ruled, #44).
   onText(listener: (text: string) => void): void;
   onBinary(listener: (bytes: Uint8Array) => void): void;
   onDrain(listener: () => void): void;
