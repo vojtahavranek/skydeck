@@ -1230,11 +1230,16 @@ export interface DerivedSession {
 ```ts
 // src/sessions/ingest.ts
 export interface IngestResult { ingested: number; duplicates: number; bad: number; scripted: number }
-/** 5.3 step 1. Reads <spoolDir>/*.ev in name order (dot files and bad/ ignored). */
+/**
+ * 5.3 step 1. Reads <spoolDir>/*.ev in name order (dot files and bad/ ignored). Afterwards removes
+ * the files in <badDir> older than seven days and the leftover `.<name>.tmp` files in <spoolDir>
+ * older than one hour (age = modification time against the platform clock; a younger temporary
+ * file may belong to a running hook). The removals are not counted in the result.
+ */
 export function ingestSpool(deck: Deck): IngestResult;
 
 // src/sessions/reconcile.ts
-/** 5.4. Inserts observed events; returns how many. */
+/** 5.4. Inserts observed events (launch command without positional arguments); returns how many. */
 export function reconcile(deck: Deck): { observed: number };
 
 // src/sessions/scan.ts
@@ -2414,11 +2419,15 @@ export function hookInput(event: 'SessionStart' | 'SessionEnd', sessionId: strin
 - `pid null` → `pid 0`, `procStart null`; `procStart null` with a pid → `procStart null`.
 - A stat line whose comm is `'a) b'` → `procStart` still parsed from field 22.
 - `argv null` → `argv null`.
+- argv `['claude','--model','opus','fix the bug']` → `['claude','--model','opus']`; `['claude','--','fix the bug']` → `['claude']`;
+  `['claude','--new-flag','fix the bug']` (a flag the table does not know) → unchanged: the following argument is that flag's value (principle 4).
 - argv `['claude','--mcp-config','mcp.json']`, input cwd `/w`, `exists` true only for `/w/mcp.json` → `['claude','--mcp-config','/w/mcp.json']`.
 - `entrypointEnv ''` → `entrypointEnv null`. An extra line `future_key=1` before `--` is ignored.
+- Lines are split on `\n` only: `pwd '/p\rentrypoint_env=sdk-cli'` with no input `cwd` → `cwd '/p\rentrypoint_env=sdk-cli'` and `entrypointEnv` still `'cli'`.
 - `payload` is exactly the bytes after the `--\n` line, trailing newline included.
 - `SpoolParseError` for: name `'x.ev'`; no `--` line; `v=2`; `event=Stop`; `time_ns=abc`; empty `boot_id`;
-  `claude_pid=abc`; input `'not json'`; input `'[1]'`; a line `garbage` before `--`; a missing `v`, `event`, `time_ns` or `boot_id` line.
+  `claude_pid=abc`; input `'not json'`; input `'[1]'`; a line `garbage` before `--`; a missing `v`, `event`, `time_ns` or `boot_id` line;
+  a key twice before `--` (`pwd=/a` and `pwd=/b`, and likewise `future_key=1` twice).
 - Every hook-input fixture file parses inside a spool built with `spoolText({ …, input: <fixture text> })`
   and gives the detail its file name says.
 - `isScriptedRun(['claude','-p','hi'], null)` → true; `(['claude','--print'], 'cli')` → true; `(['claude'], 'sdk-cli')` → true;
@@ -2709,12 +2718,20 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   `resume` or `fork`, `prev = store.latestEventOfProcess(boot, pid, procStart, event.timeNs)`
   (before inserting); when `prev` exists and `prev.sessionId !== event.sessionId`, link
   `{ fromSession: prev.sessionId, toSession: event.sessionId, kind: clear→'clear', resume→'switch', fork→'fork', timeNs: event.timeNs, eventId: <new id> }`.
-  Events with `pid` 0 never get links.
+  Events with `pid` 0 never get links. The stored `argv` is the one `parseSpoolFile` returns: no
+  positional arguments (principle 4).
+- **Retention (design 5.3).** After the files are processed: every file in `badDir` whose
+  `mtimeNs < now − 7 days` is removed, and so is every entry of `spoolDir` whose name starts with
+  `.` and ends with `.tmp` and whose `mtimeNs < now − 1 hour` (`now` = `platform.clock.nowNs()`).
+  Nothing else is removed.
 - **Reconcile.** `bootId = proc.bootId()`; when it is null, do nothing. For each `readLiveFiles`
   file that `isLiveFileTrusted`, whose `entrypoint` is `'cli'` or null, and whose
   `mtimeNs < now − 2 s`: key `(bootId, pid, procStart)`; `latest = latestEventOfProcess(key, now)`;
   `argv = argvFromCmdline(proc.cmdline(pid))`, null when unreadable or empty, then
-  `absolutizePathFlags(argv, file.cwd, exists)`. Insert an `observed` event when
+  `absolutizePathFlags(argv, file.cwd, exists)`, then the positional arguments are dropped as
+  `parseSpoolFile` does it (`parseLaunchArgs(argv.slice(1))`; keep the program name and the `tokens`
+  of every entry that is not `kind: 'positional'`), so an initial prompt is never stored (principle
+  4). Insert an `observed` event when
   `latest` is null or names another session, or when `!processHasLaunch(key)` and `argv` is
   non-null. Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
 - **Scan.** For each `listTranscriptFiles` file: when a row with this path exists with equal
@@ -2739,7 +2756,11 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 3. Files `…-2.ev` at `T0+1s` and `…-1.ev` at `T0` → ids follow name order (`T0` file is id 1).
 4. Same name ingested twice (write, ingest, write again, ingest) → second run `duplicates 1`, one row, file gone.
 5. A valid name with content `garbage` → moved to `spoolDir/bad/<name>`, `bad 1`; a file named `x.ev` → moved to bad too.
-6. `.1794474000000000000-4242-1.ev.tmp` and `README` → untouched, not counted.
+6. Retention (mtimes set with `fs.utimesSync` relative to the fake clock `T0`): `bad/old.ev` at
+   `T0 − 8 days` → removed; `bad/new.ev` at `T0 − 6 days` → kept; `.1794474000000000000-4242-1.ev.tmp`
+   at `T0 − 2 h` → removed; `.1794474000000000000-4242-2.ev.tmp` at `T0 − 10 min` → kept (it may
+   belong to a running hook); `README` at `T0 − 30 days` → untouched. None of them is counted in
+   the result.
 7. argv `['claude','-p','hi']` → no row, file deleted, `getKv('dropped_scripted')` `'1'`; `entrypointEnv 'sdk-ts'` → dropped, `'2'`.
 8. Links (all for process `P`):
    - start startup S1 `T0`; end clear S1 `T0+60s`; start clear S2 `T0+60.2s` → `links()` = `[{ eventId: 3, fromSession: S1, toSession: S2, kind: 'clear', timeNs: T0+60.2s }]`.
@@ -2749,6 +2770,7 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
    - start startup S1; start clear S1 (same session) → no link; start compact S1 → no link.
    - the three files of the first bullet ingested one per run → the same single link.
 9. argv `['claude','--mcp-config','mcp.json']`, input `cwd` = a temp dir containing `mcp.json` → stored argv has its absolute path.
+10. argv `['claude','--model','opus','fix the bug']` → the stored argv is `['claude','--model','opus']`.
 
 `reconcile.test.ts` (fake proc current boot `BOOT_A`, process 4242 `statLine(4242, 51234567)` with cmdline `['claude','--model','opus']`; live file `C/sessions/4242.json` from `busy.json` with mtime set by `fs.utimesSync` to `T0 − 10 s`; clock `T0`)
 1. No events → one observed row `{ spoolName: null, timeNs: T0, kind: 'observed', detail: '', rawDetail: null, sessionId: S1, bootId: BOOT_A, pid: 4242, procStart: 51234567, cwd: '/home/dev/projects/demo', argv: ['claude','--model','opus'], name: 'demo name', payload: null }`; returns `{ observed: 1 }`.
@@ -2760,6 +2782,7 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 7. cmdline `[]` → observed with `argv null`; reconcile again → `0`; cmdline becomes `['claude']` → `1` more (argv `['claude']`).
 8. cmdline `['claude','--settings','s.json']` with `s.json` existing under the live file's `cwd` (a temp dir) → stored absolute.
 9. `proc.bootId()` null → `0`.
+10. cmdline `['claude','--model','opus','fix the bug']` → the observed row's argv is `['claude','--model','opus']`.
 
 `scan.test.ts` (transcripts under `C/projects/demo/`)
 1. Two transcripts → `read 2`; rows hold their facts; `getKv('first_scan_done')` `'1'`; `progress` called with `(1,2)` and `(2,2)`.
@@ -3914,7 +3937,7 @@ and `docs/design.md` no longer disagrees with the code.
 | 1 Purpose, 2 Principles | 1 → all; 2 → 3, 17 (only the two hook entries); 3 → 3; 4 → 5, 6, 8 (fixtures, nothing kept); 5 → 2, 16; 6 → 15, 16, 18; 7 → 16, 18; 8 → 9; 9 → Contracts 2.1 |
 | 5.1 The hook | 3 (script, settings entry), 17 (install writes it) |
 | 5.2 Spool file | 3 (writes), 5 (reads), 2.10.1 |
-| 5.3 Ingest | 5 (parsing, scripted rule), 2 (field 22, cmdline, path flags), 8 (idempotence, bad files, links, order) |
+| 5.3 Ingest | 5 (parsing, scripted rule, positionals dropped, repeated key), 2 (field 22, cmdline, path flags), 8 (idempotence, bad files, links, order, retention of `bad/` and `.tmp` files) |
 | 5.4 Reconcile | 8 |
 | 5.5 Liveness | 6 |
 | 5.6 Transcripts | 6 (reading, last turn role), 4 (`last_turn_role`), 8 (incremental scan, missing) |
