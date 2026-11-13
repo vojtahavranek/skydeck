@@ -148,9 +148,11 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
 - `session_id` comes from the hook input; `session_env` is the fallback.
 - Process start is field 22 of `stat`, taken after the **last** `)` in the line.
 - The launch command is the base64-decoded `cmdline` split on NUL, last empty element dropped,
-  and then stripped of its positional arguments: an initial prompt on the command line is
-  conversation text (principle 4), so nothing but flags and their values is stored. Reconcile (5.4)
-  applies the same rule to the command line it reads itself.
+  and then reduced to what a resume keeps of it (7.6): positional arguments and the flags that
+  carry prompt text or choose the session are dropped, because an initial prompt on the command
+  line is conversation text (principle 4); only the other flags and their values are stored, so a
+  resume from the stored command is the same as from the recorded one. Reconcile (5.4) applies the
+  same rule to the command line it reads itself.
 - A file in which a key appears twice before the `--` line cannot be parsed; it goes to `spool/bad/`.
   An empty `pwd`, `session_env` or `entrypoint_env` means "unknown".
 - `SessionStart.source` → kind `start` with detail `startup`, `resume`, `clear`, `compact`,
@@ -380,15 +382,22 @@ Claude Code flags and their shapes (no value, one value, optional value, several
 argument that does not start with `-`.
 
 Arguments are read as Claude Code's own parser reads them: a flag that takes several values
-consumes the arguments after it up to the next one that starts with `-`, so a prompt written
-directly after such a flag is taken as one of its values; `--flag=value` consumes nothing more;
-`--` ends the flags, and it and everything after it are positional arguments.
+consumes the arguments after it up to the next flag (a token that starts with `-` and has more
+than one character), so a prompt written directly after such a flag is taken as one of its values
+and, like the argument after an unknown flag, stays with the stored launch command (principle 4);
+`--flag=value` consumes nothing more; a short flag takes the rest of its token as its value
+(`-rabc` is `--resume abc`), and a token of several short flags (`-cp`) is one flag, removed as a
+whole when any flag in it is removed; a lone `-` is a value; `--` ends the flags, and it and
+everything after it are positional arguments.
 
 - Removed: `--resume`/`-r` and its value, `--continue`/`-c`, `--session-id` and its value,
   `--fork-session`, `--name`/`-n` and its value, `--worktree`/`-w` and its value, `--bg`,
   `--from-pr` and its value, and positional arguments (an initial prompt). Also removed are the
-  flags that choose which session is opened or where it runs: `--teleport` and `--cloud` with
-  their values, and `--desktop`. Flags that only configure how the session runs, including
+  flags that choose which session is opened or where it runs: `--teleport`, `--cloud` (`--remote`)
+  and `--environment` (`--pool`) with their values, `--desktop`, and `--tmux`, which needs
+  `--worktree`. Flags that carry prompt text are removed too: `--prefill`, `--prefill-b64` and the
+  deep-link flags (`--deep-link-origin`, `--deep-link-repo`, `--deep-link-last-fetch`,
+  `--deep-link-cwd-b64`). Flags that only configure how the session runs, including
   `--remote-control`, are kept.
 - Added, directly after the program: `--resume <session id>`, then `-n <label>` when the session
   has a label.
