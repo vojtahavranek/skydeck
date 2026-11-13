@@ -398,7 +398,11 @@ describe('bin/skydeck when its standard output is closed before it writes', () =
     assert.equal(r.status, 0, r.stderr);
     const data = join(s.skydeckHome, 'data');
     return {
-      stderr: r.stderr,
+      // Node 24.12 warns once that node:sqlite is experimental, on every run; that is not ours.
+      stderr: r.stderr
+        .split('\n')
+        .filter((line) => line !== '' && !/ExperimentalWarning|--trace-warnings/.test(line))
+        .join('\n'),
       status: readFileSync(statusFile, 'utf8').trim(),
       left: existsSync(data) ? readdirSync(data) : [],
     };
