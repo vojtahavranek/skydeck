@@ -9,6 +9,7 @@ import {
   hookEntry,
   hookStatus,
   removeHookEntries,
+  rewriteReport,
   settingsPath,
 } from '../../src/claude/settings.ts';
 import type { HookEvent } from '../../src/claude/settings.ts';
@@ -345,6 +346,63 @@ describe('settings: removeHookEntries', () => {
     assert.throws(() => removeHookEntries('not json', H), SkydeckError);
     assert.throws(() => removeHookEntries('[]', H), SkydeckError);
     assert.throws(() => removeHookEntries('{"hooks":{"SessionEnd":"x"}}', H), SkydeckError);
+  });
+});
+
+describe('settings: rewriteReport', () => {
+  const in2 = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
+  test("a file in skydeck's own formatting would come back as it is", () => {
+    const text = in2({ model: 'opus', hooks: { Stop: [FOREIGN_GROUP] }, n: 1.5, big: 1e21 });
+
+    assert.deepEqual(rewriteReport(text), { reformatted: false, lossyKeys: [] });
+  });
+
+  for (const [why, text] of [
+    ['4-space indentation', JSON.stringify({ model: 'opus', hooks: {} }, null, 4) + '\n'],
+    ['no newline at the end', '{\n  "model": "opus"\n}'],
+    ['a compact file', '{"model":"opus"}'],
+    ['a duplicate key, which collapses', '{\n  "a": 1,\n  "a": 2\n}\n'],
+    ['1.50, which comes back as 1.5', '{\n  "price": 1.50\n}\n'],
+    ['1E+5, which comes back as 100000', '{\n  "n": 1E+5\n}\n'],
+  ] as const) {
+    test(`${why}: the bytes would change, no number loses a digit`, () => {
+      assert.deepEqual(rewriteReport(text), { reformatted: true, lossyKeys: [] });
+    });
+  }
+
+  for (const [why, literal] of [
+    ['an integer beyond the safe range', '12345678901234567890'],
+    ['the first integer a double cannot hold', '9007199254740993'],
+    ['a negative one', '-12345678901234567890'],
+    ['a decimal with more digits than a double keeps', '0.1000000000000000055511151231257827'],
+    ['a number too large for a double, which would be written as null', '1e999'],
+  ] as const) {
+    test(`${why}: the key is named`, () => {
+      const report = rewriteReport(`{\n  "env": {\n    "id": ${literal}\n  }\n}\n`);
+
+      assert.deepEqual(report, { reformatted: true, lossyKeys: ['id'] });
+    });
+  }
+
+  test('an integer a double holds exactly is not lossy, whatever its size', () => {
+    for (const literal of ['9007199254740992', '1000000000000000000000', '-0', '0.5e1']) {
+      const report = rewriteReport(`{\n  "n": ${literal}\n}\n`);
+
+      assert.deepEqual(report.lossyKeys, [], literal);
+    }
+  });
+
+  test('each key once, in file order; an array element is named by its index', () => {
+    const text =
+      '{"a":12345678901234567890,"b":{"a":12345678901234567891},"c":[1,12345678901234567892]}';
+
+    assert.deepEqual(rewriteReport(text).lossyKeys, ['a', '[1]']);
+  });
+
+  test('text that is not a JSON object throws like the editing functions do', () => {
+    assert.throws(() => rewriteReport('not json'), SkydeckError);
+    assert.throws(() => rewriteReport('[]'), SkydeckError);
   });
 });
 

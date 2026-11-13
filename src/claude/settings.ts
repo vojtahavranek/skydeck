@@ -46,19 +46,36 @@ function isObject(value: unknown): value is Json {
 }
 
 /**
- * Parses a settings file that has to be edited: a JSON object whose `hooks`, when present, is an
- * object, and whose `hooks.<event>`, when present, is an array.
+ * A JSON.parse reviver. Node 24.12 and later pass the source text of a primitive value as the
+ * third argument; the TypeScript library has no type for it yet.
  */
-function parseForEdit(text: string): { settings: Json; hooks: Json | null } {
+type Reviver = (
+  this: unknown,
+  key: string,
+  value: unknown,
+  context?: { source?: string },
+) => unknown;
+
+/** The top-level object of a settings file that has to be edited; SkydeckError when it is not one. */
+function parseObject(text: string, reviver?: Reviver): Json {
   let settings: unknown;
   try {
-    settings = JSON.parse(text);
+    settings = JSON.parse(text, reviver);
   } catch (error) {
     throw new SkydeckError(`settings.json is not valid JSON: ${(error as Error).message}`);
   }
   if (!isObject(settings)) {
     throw new SkydeckError('settings.json must hold a JSON object');
   }
+  return settings;
+}
+
+/**
+ * Parses a settings file that has to be edited: a JSON object whose `hooks`, when present, is an
+ * object, and whose `hooks.<event>`, when present, is an array.
+ */
+function parseForEdit(text: string): { settings: Json; hooks: Json | null } {
+  const settings = parseObject(text);
   const hooks = settings['hooks'];
   if (hooks === undefined) {
     return { settings, hooks: null };
@@ -93,6 +110,54 @@ function isHookEvent(name: string): name is HookEvent {
 
 function serialize(settings: Json): string {
   return JSON.stringify(settings, null, 2) + '\n';
+}
+
+export interface RewriteReport {
+  /** Writing the file back unchanged would not give the same bytes: the rest of it is reformatted. */
+  reformatted: boolean;
+  /**
+   * The keys of numbers that would not come back with their digits (content, not formatting):
+   * integers a double cannot hold, decimals with more digits than it keeps, numbers too large for
+   * it. Each key once, in file order; an array element is named by its index, `[1]`.
+   */
+  lossyKeys: string[];
+}
+
+/** A number literal as sign, digits without zeros at either end, and exponent: equal literals are equal numbers. */
+function canonicalNumber(literal: string): string | null {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(literal);
+  if (match === null) {
+    return null;
+  }
+  const [, sign = '', whole = '', fraction = '', exponent = '0'] = match;
+  const digits = (whole + fraction).replace(/^0+/, '');
+  const trimmed = digits.replace(/0+$/, '');
+  if (trimmed === '') {
+    return '0';
+  }
+  return `${sign}${trimmed}e${Number(exponent) - fraction.length + (digits.length - trimmed.length)}`;
+}
+
+/**
+ * What `serialize(parse(text))`, which is what install and uninstall write, would change besides
+ * the entries: the bytes of the rest of the file (indentation, a missing newline at the end,
+ * number spellings, a duplicate key that collapses), and the numbers whose digits would not
+ * survive. Throws SkydeckError like the editing functions when the text is not a JSON object.
+ */
+export function rewriteReport(text: string): RewriteReport {
+  const lossy = new Set<string>();
+  const settings = parseObject(text, function (key, value, context) {
+    const source = context?.source;
+    if (
+      typeof value === 'number' &&
+      source !== undefined &&
+      canonicalNumber(JSON.stringify(value)) !== canonicalNumber(source)
+    ) {
+      lossy.add(Array.isArray(this) ? `[${key}]` : key);
+    }
+    return value;
+  });
+  return { reformatted: serialize(settings) !== text, lossyKeys: [...lossy] };
 }
 
 /** The hook objects of the matcher groups in `groups`. Odd shapes are skipped. */
