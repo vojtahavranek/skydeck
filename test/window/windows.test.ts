@@ -289,6 +289,10 @@ test('linkToOpen refuses every scheme but http and https', () => {
     'vbscript:x',
     'ms-settings:',
     'edge://settings',
+    // Schemes that merely start like http or https.
+    'httpx://x/',
+    'https-foo://x/',
+    'http+unix://x/',
   ]) {
     assert.equal(linkToOpen(url), null, url);
   }
@@ -306,6 +310,8 @@ test('linkToOpen opens a URL of exactly 2,048 characters and refuses one of 2,04
   assert.equal(at.length, 2048);
   assert.equal(linkToOpen(at), at);
   assert.equal(linkToOpen(`${at}b`), null);
+  // The limit applies to what the page sent, too: 2,049 characters in, 2,048 once re-serialised.
+  assert.equal(linkToOpen(` ${at}`), null);
 });
 
 test('linkToOpen refuses a URL that grows beyond 2,048 characters when re-serialised', () => {
