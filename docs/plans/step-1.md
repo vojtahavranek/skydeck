@@ -1872,7 +1872,9 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
  * when the editor removed the file (note unchanged: a missing file is not an empty note); SkydeckError
  * "editor could not be run: <program> (<reason>)" when runInteractive rejects (a file that is not
  * executable). When the editor ended well but storing the text fails, the file is KEPT and the
- * SkydeckError "the note was not saved (<reason>); your text is in <path>" names it.
+ * SkydeckError "the note was not saved (<reason>); your text is in <path>" names it. A file that is already
+ * there when an edit starts is not overwritten: the editor opens it, after one stderr line "skydeck: an
+ * earlier edit of this note was not saved; continuing with its text in <path>".
  */
 export function editNote(ctx: Context, deck: Deck, sessionId: string): Promise<void>;
 

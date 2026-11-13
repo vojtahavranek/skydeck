@@ -183,6 +183,62 @@ describe('editNote', () => {
     assert.equal(noteOf(d), 'old');
   });
 
+  test('after a failed save, the next edit opens the kept file, so the typed text is not lost', async (t) => {
+    const first = withEditor(t, {
+      env: { EDITOR: 'ed' },
+      edit: (path) => writeFileSync(path, 'ten minutes of careful typing'),
+    });
+    const { d } = first;
+    setNote(d.deck, S1, 'old');
+    const file = join(d.places.stateDir, `note-${S1}.md`);
+    const failing = deckWith(first.deck, {
+      store: {
+        updateMeta: () => {
+          throw new Error('database is locked');
+        },
+      },
+    });
+    await assert.rejects(editNote(first.ctx, failing, S1), SkydeckError);
+
+    // the retry, with a store that works: its editor must see what was typed, not the stored note
+    const seen: string[] = [];
+    const runner = fakeRunner(undefined, (call) => {
+      seen.push(readFileSync(fileOf(call), 'utf8'));
+      return 0;
+    });
+    const platform = { ...d.platform, runner };
+    const ctx: Context = { io: d.ctx.io, platform };
+    await editNote(ctx, { ...d.deck, platform }, S1);
+
+    assert.deepEqual(seen, ['ten minutes of careful typing']);
+    assert.equal(noteOf(d), 'ten minutes of careful typing');
+    assert.equal(existsSync(file), false, 'removed once stored');
+    assert.equal(
+      d.stderr(),
+      `skydeck: an earlier edit of this note was not saved; continuing with its text in ${file}\n`,
+    );
+  });
+
+  test('a file left by an earlier edit is continued; quitting the editor with a failure discards it', async (t) => {
+    const { d, ctx, deck, startedWith } = withEditor(t, { env: { EDITOR: 'ed' }, code: 1 });
+    const file = join(d.places.stateDir, `note-${S1}.md`);
+    writeFileSync(file, 'left behind');
+
+    await assert.rejects(editNote(ctx, deck, S1), /^SkydeckError: editor exited 1$/);
+
+    assert.deepEqual(startedWith, ['left behind']);
+    assert.equal(existsSync(file), false);
+    assert.match(d.stderr(), /^skydeck: an earlier edit of this note was not saved; continuing/);
+  });
+
+  test('with no file left, nothing is said and the editor sees the stored note', async (t) => {
+    const { d, ctx, deck, startedWith } = withEditor(t, { env: { EDITOR: 'ed' } });
+    setNote(d.deck, S1, 'stored');
+    await editNote(ctx, deck, S1);
+    assert.deepEqual(startedWith, ['stored']);
+    assert.equal(d.stderr(), '');
+  });
+
   test('an editor that cannot be run (the runner rejects) is a failure that names it; the note is unchanged and the file is gone', async (t) => {
     const { d, ctx, deck } = withEditor(t, {
       env: { EDITOR: '/etc/not-executable --flag' },
