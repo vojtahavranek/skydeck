@@ -3966,8 +3966,10 @@ skydeck does not know, which a resume does not pass on), `continues:` (only when
 ` review <r>` and ` checks <c>` when set and the level is not `cant-read`), then `note:` and the note
 lines indented by two spaces when there is a note. Details the lines above leave open: `marks:` joins
 the marks with a comma, and `marks:`, `label:` and `group:` show `-` when there is nothing; the words
-of `launch:` are sanitised before they are quoted; the note loses its trailing line breaks, each of its
-lines is sanitised (line breaks kept) and an empty line stays empty; the text always ends with `\n`.
+of `launch:` are sanitised before they are quoted, and an empty launch command (`[]`) reads `unknown`
+like none; the note loses its trailing whitespace (so a note saved with a final line break has no empty
+line after it), each of its lines is sanitised (line breaks kept) and an empty line stays empty; the
+text always ends with `\n`.
 `nowNs` is part of the signature and is not used (`since` is an ISO time, not an age). `show --json`
 and `ls --json` are written by `jsonText`; the JSON holds the note and the launch command as stored.
 
