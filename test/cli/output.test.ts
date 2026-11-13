@@ -221,6 +221,7 @@ test('showJson: the session object, then note, launch, unknownFlags, links and h
   const json = showJson(row, []);
   assert.deepEqual(Object.keys(json), [
     ...SESSION_KEYS,
+    'doneAt',
     'note',
     'launch',
     'unknownFlags',
@@ -237,6 +238,28 @@ test('showJson: the session object, then note, launch, unknownFlags, links and h
   assert.deepEqual(json.holders, [
     { pid: 4242, bootId: BOOT_A, procStart: 100, since: '2026-11-12T08:57:00.000Z' },
   ]);
+});
+
+test('showJson: doneAt is the time the session was marked done, null when it is not done', () => {
+  const done = listRow({
+    id: S1,
+    done: true,
+    session: ds({ id: S1, hidden: true, doneAtNs: T0 - 2n * MIN }),
+  });
+  assert.equal(showJson(done, []).doneAt, '2026-11-12T08:58:00.000Z');
+  assert.equal(showJson(done, []).done, true);
+  assert.equal(showJson(listRow({ id: S1 }), []).doneAt, null);
+  const active = listRow({
+    id: S1,
+    done: false,
+    session: ds({ id: S1, hidden: false, doneAtNs: T0 - 2n * MIN }),
+  });
+  assert.equal(showJson(active, []).doneAt, null, 'done and active again: not done');
+  assert.equal(
+    showJson(listRow({ id: S1, done: true }), []).doneAt,
+    null,
+    'no time is known: null, as the text says "yes"',
+  );
 });
 
 test('showJson: no note and no launch command are null; unknownFlags is [] without a launch command', () => {

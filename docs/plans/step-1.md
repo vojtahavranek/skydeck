@@ -133,7 +133,7 @@ Each is binding for the implementer. The last column names the task that records
 | D8 | A transcript's session id is its file name (the UUID). | 5.6 "per file: the session id". | — |
 | D9 | Shared error classes (with their exit codes) live in `src/platform/errors.ts`. | `platform` is the one module everybody may import. | — |
 | D10 | Field-22 parsing and `cmdline` decoding live in `src/claude/procstat.ts`; the path-flag rewrite lives in `src/claude/launch.ts`. Files inside `src/claude/` may import each other. | 5.3 and 5.5 both need field 22; 5.3 needs the flag shapes. | — |
-| D11 | A pull request never fetched, with no failed attempt, is its own level `unfetched`, shown as "not fetched", ranked directly after `cant-read`. `skydeck pr add` fetches the pull request it attaches at once (same timeout; a failure leaves it `cant-read`). `skydeck ls` and `show` take `--refresh`, which makes an explicit refresh before printing (see 2.6: every attached pull request that is not merged or closed, whatever its age and its last result); without it they never touch the network. An automatic refresh fetches a pull request only when it was never tried or its last attempt (not its last success) is older than `prRefreshMinutes`. | 7.3 has no level for it; a fresh attachment should not look broken. | 9 (7.3: the level), 15 (7.3: `pr add`), 14 (7.3, 7.5: `--refresh`) |
+| D11 | A pull request never fetched, with no failed attempt, is its own level `unfetched`, shown as "not fetched", ranked directly after `cant-read`. `skydeck pr add` fetches the pull request it attaches at once (same timeout; a failure leaves it `cant-read`). `skydeck ls` and `show` take `--refresh`, which makes an explicit refresh before printing (see 2.6: every pull request that the sessions the command is about have attached and that is not merged or closed, whatever its age and its last result: `ls` those it prints, so with `--all` all of them, `show` that session's; `pr refresh` all attached ones); without it they never touch the network. An automatic refresh fetches a pull request only when it was never tried or its last attempt (not its last success) is older than `prRefreshMinutes`. | 7.3 has no level for it; a fresh attachment should not look broken. | 9 (7.3: the level), 15 (7.3: `pr add`), 14 (7.3, 7.5: `--refresh`) |
 | D12 | The fallback title is `YYYY-MM-DD HH:MM <basename of dir>` in UTC (`?` when there is no dir). | Deterministic tests. | 11 (7.1) |
 | D13 | `Context` gains `platform`; `Io` gains `isTTY`, `size`, `readLine`, `keys` (task 1, once). Commands open the database through `withDeck` (task 12). | Brief 18: the platform task extends `Context` once. | — |
 | D14 | `$VISUAL`, else `$EDITOR`, else `vi`; the value is split on spaces; the note file path is appended. | 7.1 only says `$EDITOR`. | 15 (7.1) |
@@ -1355,12 +1355,13 @@ export function fetchPrs(
  * fetchPrs of the urls of prsDue(rows, now, refreshMinutes, force), where `rows` are the store's
  * pull requests that at least one session still has attached (a row whose every attachment is
  * detached, or that was never attached, is shown nowhere and is not asked about; ruled by the plan owner).
- * `force: true` is the user's explicit refresh (`pr refresh`, `ls --refresh`, the list's refresh key),
- * `force: false` the automatic one (the list when it opens and in the background).
+ * `force: true` is the user's explicit refresh (`pr refresh`, `ls --refresh`, `show --refresh`, the list's refresh key),
+ * `force: false` the automatic one (the list when it opens and in the background). With `sessionIds`, only the
+ * pull requests that one of those sessions has attached count: the sessions the command is about.
  */
 export function refreshPrs(
   deps: { runner: Runner; clock: Clock; store: Store; env: Env },
-  options: { force: boolean; refreshMinutes: number },
+  options: { force: boolean; refreshMinutes: number; sessionIds?: readonly string[] },
 ): Promise<{ fetched: number; failed: number }>;
 
 /** 7.3 chip, worst first. */
@@ -2099,7 +2100,7 @@ export interface ListJson { version: 1; generatedAt: string; sessions: SessionJs
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
 export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
 export interface ShowJson extends SessionJson {
-  note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[];
+  doneAt: string | null; note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[];
 }
 ```
 
@@ -2107,7 +2108,7 @@ Times are `isoFromNs`. `dir` is `""` when unknown. `sessions` is in list order (
 rows in order). Output is `JSON.stringify(value, null, 2) + "\n"`, written by `jsonText`
 (`src/cli/json.ts`), which also writes DEL, the C1 controls and the bidirectional controls as
 `\uXXXX` escapes (the same value for `JSON.parse`, safe on a terminal). `show --json` adds, after
-`prs`: `note`, `launch` (`session.launch`), `unknownFlags` (`unknownFlags(session.launch)`, `[]` when
+`prs`: `doneAt` (`isoFromNs(session.doneAtNs)` while the session is done, else `null`), `note`, `launch` (`session.launch`), `unknownFlags` (`unknownFlags(session.launch)`, `[]` when
 there is no launch command), `links` (every link from or to the session, by
 time), `holders` (live holders). Version 1 is stable: later changes only add keys.
 
@@ -3424,7 +3425,7 @@ refresh age); `okAtNs T0−20m`, tried `T0−1m`, error → not due (the last at
 - A batch answered `timedOut` → its rows keep their previous `state`, get `error 'gh timed out after 10 s'`, `triedAtNs T0`; `failed` counts them; no throw.
 - `merged` rows are never sent; a non-due `open` row is not sent unless `force`. A row whose fetch keeps timing out is asked about
   again only after the refresh age (fake clock: +4 min no call, +6 min a call); `force` asks about a row that failed a minute ago and one
-  read a minute ago.
+  read a minute ago. With `sessionIds` only the pull requests attached to those sessions are asked about (a detached attachment does not count; `[]` → no call).
 - No due rows → no `gh` call.
 - `fetchPrs(deps, [url1])` with a non-due open row → one `gh` call with one alias, the row updated; `fetchPrs(deps, [])` → no call.
 - `fetchPrs(deps, [mergedUrl])` → no call, the row unchanged (`pr add` of a merged pull request while `gh` fails). Two overlapping refreshes of one open row, the slow one failing or answering `OPEN` after the fast one saved `MERGED` → the row stays `merged`, no error; `{ fetched: 0, failed: 0 }` for the slow one.
@@ -3953,7 +3954,7 @@ export interface SessionJson {
 export interface ListJson { version: 1; generatedAt: string; sessions: SessionJson[] }
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
 export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
-export interface ShowJson extends SessionJson { note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[] }
+export interface ShowJson extends SessionJson { doneAt: string | null; note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[] }
 export function sessionJson(row: ListRow): SessionJson;
 export function listJson(model: ListModel): ListJson;
 export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson;
@@ -3967,14 +3968,14 @@ export const command: Command;
 
 **`--refresh` (D11).** Without it `ls` and `show` never touch the network. With it they make an explicit refresh before printing
 (every attached pull request that is not merged or closed, whatever its age and its last result):
-`ls` runs `refreshPrs({ runner, clock, store, env: ctx.platform.env }, { force: true, refreshMinutes: config.prRefreshMinutes })` (`env` is required in the deps of every `fetchPrs`/`refreshPrs` call, 2.6);
-`show` runs `fetchPrs` (same deps, with `env`) on the urls of that session's attached pull requests (`fetchPrs` leaves merged and closed ones out).
+`ls` runs `refreshPrs({ runner, clock, store, env: ctx.platform.env }, { force: true, refreshMinutes: config.prRefreshMinutes, sessionIds: <the ids of the rows it prints> })` (`env` is required in the deps of every `fetchPrs`/`refreshPrs` call, 2.6) and builds the list again; a done session's pull requests are fetched only with `--all`;
+`show` runs the same `refreshPrs` (same deps, with `env`) with `sessionIds: [<its id>]` and reads the row again.
 
 **Formats (contract).** `formatList`: per group a line with its name (`no group` for null), then
 each row as `'  ' + formatRow(row, nowNs, width − 2)`; one empty line between groups; `'no sessions\n'`
 when there are none; ends with `\n`. `ls` uses `io.size().columns`. `formatShow`: the title, then
 one line per field with the label padded to 11 characters: `id:`, `state:` (`<state>[ (<stateDetail>)] since <iso>`),
-`done:` (only for a session that is done: `since <iso>` of the time it was marked, `yes` when that is not known),
+`done:` (only for a session that is done: `since <iso>` of the time it was marked, `yes` when that is not known; the JSON has `doneAt` for it),
 `marks:`, `label:`, `group:`, `dir:` (`-` for null/empty), `launch:` (`shellJoin(launch)` or `unknown`),
 `unknown:` (only when `unknownFlags(launch)` is not empty: the names, sanitised, joined by one space — the flags
 skydeck does not know, which a resume does not pass on), `continues:` (only when `continuedFrom`: the full id), `link:` per link (`<kind> <fromShort> -> <toShort> at <iso>`),
@@ -4014,7 +4015,7 @@ and `ls --json` are written by `jsonText`; the JSON holds the note and the launc
 - S1 with one never-fetched PR and one open PR fetched 1 minute ago; S2 with a never-fetched PR. `ls` and `show 0b5f`
   without `--refresh` → `runner.calls` empty. `ls --refresh` with gh answering the pull requests `open` → one `gh` call with all
   three (the fresh one too); `ls --json` then shows every PR `state 'open'`. `show 0b5f --refresh` → one `gh` call with S1's two
-  PRs and not S2's. A PR read 2 minutes ago whose later fetch failed 1 minute ago is asked about by `ls --refresh` and by
+  PRs and not S2's. With S2 marked done, `ls --refresh` asks about S1's PRs only, `ls --all --refresh` about all three. A PR read 2 minutes ago whose later fetch failed 1 minute ago is asked about by `ls --refresh` and by
   `show --refresh` (one call each). Merged and closed PRs are never asked about (no call). gh `timedOut` → exit 0, the PR shows `can't read`.
 
 `day.test.ts` — the recorded day. Copy `test/fixtures/day/` into a `testDeck` (spool into `spoolDir`,
@@ -4475,8 +4476,8 @@ guard works on fresh state, design 7.6) → `prepareResume` on the fresh row; wi
 lines, warnings included, when there are any); without one, leave the screen and
 `launchPrepared(deck, p, 'here')`, print its lines on stderr, then return its code. A
 `ResumeRefusedError` becomes the message. `refresh` → `refreshWithProgress(ctx, deck)`, then an explicit
-`refreshPrs` (`{ force: true, refreshMinutes }`, deps with `env`; design 7.3: the refresh key asks about every attached pull request that
-is not merged or closed, a failure is saved on the pull request) + `loadRows` + `withRows(reorder true)`. `quit` or the end of `io.keys()` → write `\x1b[?25h\x1b[?1049l`,
+`refreshPrs` (`{ force: true, refreshMinutes }`, deps with `env`; design 7.3: the refresh key asks about every pull request that the sessions the list lists have attached
+and that is not merged or closed — `sessionIds`: the listed rows; a failure is saved on the pull request) + `loadRows` + `withRows(reorder true)`. `quit` or the end of `io.keys()` → write `\x1b[?25h\x1b[?1049l`,
 call `return()` on the key iterator, return 0. Errors from an effect never leave the terminal in
 the alternate screen.
 

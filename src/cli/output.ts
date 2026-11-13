@@ -66,6 +66,7 @@ export interface HolderJson {
 }
 
 export interface ShowJson extends SessionJson {
+  doneAt: string | null;
   note: string | null;
   launch: string[] | null;
   unknownFlags: string[];
@@ -133,14 +134,21 @@ function holderJson(holder: Holder): HolderJson {
   };
 }
 
+/** The time the user marked a session that is done as done; null for one that is not done (or when it is not known). */
+function doneAt(row: ListRow): string | null {
+  const { doneAtNs } = row.session;
+  return row.done && doneAtNs !== null ? isoFromNs(doneAtNs) : null;
+}
+
 /**
- * The session object, then the note (as stored), the launch command, the names of the flags in it
+ * The session object, then the time it was marked done, the note (as stored), the launch command, the names of the flags in it
  * that skydeck does not know, the links of the session and the processes that hold it.
  */
 export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson {
   const launch = row.session.launch;
   return {
     ...sessionJson(row),
+    doneAt: doneAt(row),
     note: row.note,
     launch: launch === null ? null : [...launch],
     unknownFlags: launch === null ? [] : unknownFlags(launch),

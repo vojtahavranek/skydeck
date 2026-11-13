@@ -400,17 +400,22 @@ export async function fetchPrs(
  * fetchPrs of the urls of prsDue(rows, now, refreshMinutes, force), where `rows` are the store's
  * pull requests that at least one session still has attached: one whose every attachment was
  * detached (`pr rm`), or that was never attached, is shown nowhere and is not asked about.
- * `force: true` is the explicit refresh of the user (`pr refresh`, `ls --refresh`, the list's
- * refresh key), `force: false` the automatic one (the list when it opens, in the background).
+ * `force: true` is the user's explicit refresh (`pr refresh`, `ls --refresh`, `show --refresh`, the
+ * list's refresh key), `force: false` the automatic one (the list when it opens and in the
+ * background). With `sessionIds`, only the pull requests that one of those sessions has attached
+ * count: the sessions the command is about (the rows `ls` prints, the one session `show` shows).
  */
 export function refreshPrs(
   deps: Deps,
-  options: { force: boolean; refreshMinutes: number },
+  options: { force: boolean; refreshMinutes: number; sessionIds?: readonly string[] },
 ): Promise<{ fetched: number; failed: number }> {
+  const sessions = options.sessionIds === undefined ? null : new Set(options.sessionIds);
   const attached = new Set(
     deps.store
       .sessionPrs()
-      .filter((link) => link.detachedAtNs === null)
+      .filter(
+        (link) => link.detachedAtNs === null && (sessions === null || sessions.has(link.sessionId)),
+      )
       .map((link) => link.url),
   );
   const due = prsDue(

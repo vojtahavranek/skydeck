@@ -844,6 +844,34 @@ describe('refreshPrs: the pace of an automatic refresh, and the explicit one', (
     assert.equal(runner.calls.length, 2, 'the last attempt was 6 minutes ago');
   });
 
+  test('with session ids, only the pull requests those sessions have attached are asked about', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 4, { state: 'open', ageMin: 10 }); // all attached to S1
+    store.attachPr(S2, NUM(4), 'auto', T0); // 4 is S2's too
+    store.detachPr(S1, NUM(4), T0); // …and no longer S1's
+    for (const [sessionIds, expected] of [
+      [[S1], [1, 2, 3]],
+      [[S2], [4]],
+      [
+        [S1, S2],
+        [1, 2, 3, 4],
+      ],
+      [[], []],
+    ] as const) {
+      runner.calls.length = 0;
+      await refreshPrs(deps, { force: true, refreshMinutes: 5, sessionIds });
+      assert.deepEqual(runner.calls.flatMap(numbersOf).sort(), expected, sessionIds.join());
+    }
+  });
+
+  test('with session ids and no force, the automatic rule still applies to their pull requests', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 2, { state: 'open', ageMin: 10 });
+    store.savePrResult(NUM(2), { ok: false, atNs: T0 - MIN, error: 'x' });
+    await refreshPrs(deps, { force: false, refreshMinutes: 5, sessionIds: [S1] });
+    assert.deepEqual(runner.calls.flatMap(numbersOf), [1]);
+  });
+
   test('an explicit refresh asks about a pull request that failed a minute ago, and one read a minute ago', async (t) => {
     const { store, runner, deps } = deck(t, answerAll());
     seed(store, 1, 2, { state: 'open', ageMin: 2 });

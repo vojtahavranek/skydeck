@@ -224,6 +224,29 @@ test('ls --refresh asks gh about every attached pull request, the fresh one too,
   assert.deepEqual(askedNumbers(runner.calls[0]), ['1', '2', '3']);
 });
 
+test('ls --refresh asks only about the pull requests of the sessions it prints: not a done session, unless --all', async (t) => {
+  const d = sessionsWithPrs(t);
+  markDone(d.deck, S2); // S2 has PR3
+  const runner = ghOpen();
+
+  assert.equal(await main(['ls', '--refresh'], withRunner(d, runner)), 0);
+  assert.deepEqual(askedNumbers(runner.calls[0]), ['1', '2'], 'S1 prints; S2 is done and hidden');
+  assert.equal(runner.calls.length, 1);
+  assert.equal(d.deck.store.prs().find((pr) => pr.url === PR3)?.state, null);
+
+  runner.calls.length = 0;
+  assert.equal(await main(['ls', '--all', '--refresh'], withRunner(d, runner)), 0);
+  assert.deepEqual(askedNumbers(runner.calls[0]), ['1', '2', '3'], '--all prints S2 too');
+  assert.equal(d.deck.store.prs().find((pr) => pr.url === PR3)?.state, 'open');
+});
+
+test('ls --refresh shows the status it just read, in the rows and in the JSON', async (t) => {
+  const d = sessionsWithPrs(t);
+  assert.equal(await main(['ls', '--refresh'], withRunner(d, ghOpen())), 0);
+  assert.match(d.stdout(), /2pr:approved-green {2}0b5f3c1e/);
+  assert.match(d.stdout(), /1pr:approved-green {2}1c6a4d2f/);
+});
+
 test('ls --refresh asks again about a pull request whose last fetch failed, though it was read a minute before', async (t) => {
   const d = twoSessions(t);
   attachManualPr(d.deck, S1, PR1);

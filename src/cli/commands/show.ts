@@ -1,6 +1,6 @@
 // `skydeck show <ref> [--json] [--refresh]` (design 7.5): one session in full. Without `--refresh`
 // it never touches the network (design 7.3).
-import { fetchPrs } from '../../github.ts';
+import { refreshPrs } from '../../github.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { resolveRef } from '../../sessions/refs.ts';
 import { parseCommandArgs } from '../args.ts';
@@ -44,11 +44,11 @@ export const command: Command = {
       const { runner, clock, env } = ctx.platform;
       let row = resolveRef(ref, loadRows(deck));
       if (parsed.flags['refresh'] === true && row.prs.length > 0) {
-        // An explicit refresh (design 7.3): every pull request of this session that is not merged
-        // or closed (`fetchPrs` leaves those out), whatever its age and its last result.
-        await fetchPrs(
+        // An explicit refresh (design 7.3) of this session: every pull request it has attached
+        // that is not merged or closed, whatever its age and its last result.
+        await refreshPrs(
           { runner, clock, store: deck.store, env },
-          row.prs.map((pr) => pr.url),
+          { force: true, refreshMinutes: deck.config.prRefreshMinutes, sessionIds: [row.id] },
         );
         const id = row.id;
         row = loadRows(deck).find((candidate) => candidate.id === id) ?? row;
