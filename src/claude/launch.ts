@@ -24,10 +24,19 @@ export const FLAGS: readonly FlagSpec[] = [
   { names: ['-w', '--worktree'], shape: 'optional', remove: true, path: false },
   { names: ['--bg', '--background'], shape: 'none', remove: true, path: false },
   { names: ['--from-pr'], shape: 'optional', remove: true, path: false },
-  // they choose which session is opened or where it runs (D28)
+  // they choose which session is opened or where it runs (D28); --tmux needs -w, which is removed
+  { names: ['--tmux'], shape: 'none', remove: true, path: false },
   { names: ['--teleport'], shape: 'optional', remove: true, path: false },
-  { names: ['--cloud'], shape: 'optional', remove: true, path: false },
+  { names: ['--cloud', '--remote'], shape: 'optional', remove: true, path: false },
   { names: ['--desktop'], shape: 'none', remove: true, path: false },
+  { names: ['--environment', '--pool'], shape: 'one', remove: true, path: false },
+  // deep-link launches carry prompt text, which skydeck never stores (principle 4)
+  { names: ['--deep-link-origin'], shape: 'none', remove: true, path: false },
+  { names: ['--deep-link-repo'], shape: 'one', remove: true, path: false },
+  { names: ['--deep-link-last-fetch'], shape: 'one', remove: true, path: false },
+  { names: ['--deep-link-cwd-b64'], shape: 'one', remove: true, path: false },
+  { names: ['--prefill'], shape: 'one', remove: true, path: false },
+  { names: ['--prefill-b64'], shape: 'one', remove: true, path: false },
   // path flags (5.3), kept
   { names: ['--mcp-config'], shape: 'many', remove: false, path: true },
   { names: ['--add-dir'], shape: 'many', remove: false, path: true },
@@ -47,7 +56,6 @@ export const FLAGS: readonly FlagSpec[] = [
     '--autocompact',
     '--debug-file',
     '--effort',
-    '--environment',
     '--fallback-model',
     '--input-format',
     '--json-schema',
@@ -94,7 +102,6 @@ export const FLAGS: readonly FlagSpec[] = [
     '--restricted',
     '--safe-mode',
     '--strict-mcp-config',
-    '--tmux',
     '--verbose',
   ].map((name) => ({ names: [name], shape: 'none' as const, remove: false, path: false })),
 ];
@@ -107,20 +114,97 @@ export type ParsedArg =
   | { kind: 'flag'; spec: FlagSpec | null; name: string; tokens: string[]; values: string[] }
   | { kind: 'positional'; tokens: [string] };
 
-/** A token that can be taken as a value: present, and not itself flag-like. */
+/** Claude Code's parser calls a token a flag when it starts with '-' and has more than one character. */
+function isFlagLike(token: string): boolean {
+  return token.length > 1 && token.startsWith('-');
+}
+
+/** A token that can be taken as a value: present, and not itself flag-like (a lone '-' is a value). */
 function isPlainToken(token: string | undefined): boolean {
-  return token !== undefined && !token.startsWith('-');
+  return token !== undefined && !isFlagLike(token);
+}
+
+/** One flag token, read: which flag it is, and what of it is a value written in the same token. */
+interface FlagToken {
+  spec: FlagSpec | null;
+  name: string; // the flag as written, without a value glued to it
+  glued: string | null; // the value glued to the flag in the same token, if any
+  shape: FlagShape; // how many of the following tokens it takes when nothing is glued
+}
+
+/** An unknown flag takes a following plain token, exactly as an optional-value flag does. */
+const UNKNOWN_SHAPE: FlagShape = 'optional';
+
+/**
+ * `--name`, `--name=value`, `-x`, `-xvalue`, `-xyz` (a cluster of short flags). A short token is read
+ * letter by letter as Claude Code's own parser reads it: a no-value flag lets the cluster go on; a
+ * value-taking flag ends it and takes the rest of the token, `=` included, as its value when there
+ * is a rest. A letter that is not in the table makes the whole token an unknown flag. A cluster is
+ * represented by its first removable flag, else by its last.
+ */
+function readFlagToken(token: string): FlagToken {
+  if (token.startsWith('--')) {
+    // `--name=value`: the `=` must come after a name of at least one character.
+    const equals = token.indexOf('=');
+    if (equals > 2) {
+      const name = token.slice(0, equals);
+      return {
+        spec: SPEC_BY_NAME.get(name) ?? null,
+        name,
+        glued: token.slice(equals + 1),
+        shape: 'none',
+      };
+    }
+    const spec = SPEC_BY_NAME.get(token) ?? null;
+    return { spec, name: token, glued: null, shape: spec === null ? UNKNOWN_SHAPE : spec.shape };
+  }
+
+  const specs: FlagSpec[] = [];
+  for (let letter = 1; letter < token.length; letter += 1) {
+    const spec = SPEC_BY_NAME.get(`-${token[letter]}`);
+    if (spec === undefined) break;
+    specs.push(spec);
+    const represented = specs.find((s) => s.remove) ?? spec;
+    if (spec.shape !== 'none') {
+      const rest = token.slice(letter + 1);
+      const name = token.slice(0, letter + 1);
+      return { spec: represented, name, glued: rest === '' ? null : rest, shape: spec.shape };
+    }
+    if (letter === token.length - 1) {
+      return { spec: represented, name: token, glued: null, shape: 'none' };
+    }
+  }
+  return { spec: null, name: token, glued: null, shape: UNKNOWN_SHAPE };
+}
+
+/** The end (exclusive) of the tokens a flag at args[start - 1] takes as values, by its shape. */
+function valuesEnd(args: readonly string[], start: number, shape: FlagShape): number {
+  switch (shape) {
+    case 'none':
+      return start;
+    case 'one':
+      return Math.min(start + 1, args.length);
+    case 'optional':
+      return isPlainToken(args[start]) ? start + 1 : start;
+    case 'many': {
+      let end = start;
+      while (isPlainToken(args[end])) end += 1;
+      return end;
+    }
+  }
 }
 
 /**
- * Parses arguments (WITHOUT the program name) with FLAGS (D18):
- * - `--name=value` (long flags only): one token, `values` [value], consumes nothing more; `name`
- *   is the flag as written before the `=`;
+ * Parses arguments (WITHOUT the program name) with FLAGS (D18), the way Claude Code's parser does:
+ * - `--name=value` (long flags): one token, `values` [value], consumes nothing more; `name` is the
+ *   flag as written before the `=`;
+ * - a short flag glued to its value (`-rabc`) is one token that takes nothing more; a cluster of
+ *   short flags (`-cp`) is one token (see readFlagToken); `name` is the token without the value;
  * - shape none: no value; one: the next token whatever it is; optional: the next token if it
- *   exists and does not start with '-'; many: every following token up to the next one starting
- *   with '-';
- * - an unknown token starting with '-' is a flag with spec null; it takes the next token as its
- *   value when that exists and does not start with '-';
+ *   exists and is not flag-like; many: every following token up to the next flag-like one — a token
+ *   is flag-like when it starts with '-' and has more than one character, so a lone '-' is a value;
+ * - an unknown flag is a flag with spec null; it takes the next token as its value when that
+ *   exists and is not flag-like;
  * - '--' and every token after it are positionals;
  * - any other token is a positional.
  * Concatenating every `tokens` array gives back the input exactly.
@@ -134,40 +218,21 @@ export function parseLaunchArgs(args: readonly string[]): ParsedArg[] {
       for (const rest of args.slice(i)) items.push({ kind: 'positional', tokens: [rest] });
       break;
     }
-    if (!token.startsWith('-')) {
+    if (!isFlagLike(token)) {
       items.push({ kind: 'positional', tokens: [token] });
       i += 1;
       continue;
     }
-
-    // `--name=value`: the `=` must come after a name of at least one character.
-    const equals = token.startsWith('--') ? token.indexOf('=') : -1;
-    if (equals > 2) {
-      const name = token.slice(0, equals);
-      items.push({
-        kind: 'flag',
-        spec: SPEC_BY_NAME.get(name) ?? null,
-        name,
-        tokens: [token],
-        values: [token.slice(equals + 1)],
-      });
-      i += 1;
-      continue;
-    }
-
-    const spec = SPEC_BY_NAME.get(token) ?? null;
-    // An unknown flag takes a following plain token, exactly as an optional-value flag does.
-    const shape: FlagShape = spec === null ? 'optional' : spec.shape;
-    let end = i + 1;
-    if (shape === 'one') {
-      end = Math.min(end + 1, args.length);
-    } else if (shape === 'optional') {
-      if (isPlainToken(args[end])) end += 1;
-    } else if (shape === 'many') {
-      while (isPlainToken(args[end])) end += 1;
-    }
+    const flag = readFlagToken(token);
+    const end = flag.glued === null ? valuesEnd(args, i + 1, flag.shape) : i + 1;
     const tokens = args.slice(i, end);
-    items.push({ kind: 'flag', spec, name: token, tokens, values: tokens.slice(1) });
+    items.push({
+      kind: 'flag',
+      spec: flag.spec,
+      name: flag.name,
+      tokens,
+      values: flag.glued === null ? tokens.slice(1) : [flag.glued],
+    });
     i = end;
   }
   return items;
@@ -195,8 +260,9 @@ export function absolutizePathFlags(
   const out = argv.slice(0, 1);
   for (const item of parseLaunchArgs(argv.slice(1))) {
     if (item.kind === 'flag' && item.spec?.path === true) {
-      const equalsForm = item.tokens[0] !== item.name;
-      if (equalsForm) {
+      // The path flags are long flags, so a value glued to one is written `--flag=value`.
+      const glued = item.tokens[0] !== item.name;
+      if (glued) {
         out.push(`${item.name}=${absolute(item.values[0] ?? '')}`);
       } else {
         out.push(item.name, ...item.values.map(absolute));
@@ -206,6 +272,25 @@ export function absolutizePathFlags(
     }
   }
   return out;
+}
+
+/** The tokens of `args` (WITHOUT the program name) that a resume keeps, in order. */
+function keptTokens(args: readonly string[]): string[] {
+  return parseLaunchArgs(args).flatMap((item) =>
+    item.kind === 'flag' && item.spec?.remove !== true ? item.tokens : [],
+  );
+}
+
+/**
+ * What skydeck stores of a recorded launch command (design 5.3, principle 4): the program (first
+ * element) and exactly the flags, with their values, that a resume keeps — in order. Positional
+ * arguments (an initial prompt), `--` and everything after it, and every flag with `remove: true`
+ * (with its values) are dropped, so a prompt reaches the database neither as a positional argument
+ * nor inside a removed flag such as `--prefill-b64`. [] for an empty command.
+ * `buildResumeCommand` gives the same result for a command and for `storableArgv` of it.
+ */
+export function storableArgv(argv: readonly string[]): string[] {
+  return [...argv.slice(0, 1), ...keptTokens(argv.slice(1))];
 }
 
 export interface ResumeCommand {
@@ -231,12 +316,7 @@ export function buildResumeCommand(input: {
   sessionId: string;
   label: string | null;
 }): ResumeCommand {
-  const kept: string[] = [];
-  if (input.launch !== null) {
-    for (const item of parseLaunchArgs(input.launch.slice(1))) {
-      if (item.kind === 'flag' && item.spec?.remove !== true) kept.push(...item.tokens);
-    }
-  }
+  const kept = input.launch === null ? [] : keptTokens(input.launch.slice(1));
   return {
     argv: [input.claudeCommand, '--resume', input.sessionId, ...labelArgs(input.label), ...kept],
     flagsKnown: input.launch !== null,
