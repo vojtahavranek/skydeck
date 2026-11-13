@@ -13,7 +13,10 @@ export interface FlagSpec {
   path: boolean; // values are paths made absolute at ingest (5.3)
 }
 
-/** Claude Code 2.1.323 flags (from `claude --help`). */
+/**
+ * Claude Code 2.1.323 flags: every root flag the program declares, those hidden from `claude --help`
+ * included (`test/fixtures/claude/flags-2.1.323.json` is its own table; a test compares the two).
+ */
 export const FLAGS: readonly FlagSpec[] = [
   // removed at resume (7.6)
   { names: ['-r', '--resume'], shape: 'optional', remove: true, path: false },
@@ -30,6 +33,15 @@ export const FLAGS: readonly FlagSpec[] = [
   { names: ['--cloud', '--remote'], shape: 'optional', remove: true, path: false },
   { names: ['--desktop'], shape: 'none', remove: true, path: false },
   { names: ['--environment', '--pool'], shape: 'one', remove: true, path: false },
+  // they choose a session or act once (D28)
+  { names: ['--rewind-files'], shape: 'one', remove: true, path: false },
+  { names: ['--resume-session-at'], shape: 'one', remove: true, path: false },
+  { names: ['--resume-drops-turn'], shape: 'one', remove: true, path: false },
+  { names: ['--reply-on-resume'], shape: 'none', remove: true, path: false },
+  { names: ['--attach-serve'], shape: 'one', remove: true, path: false },
+  { names: ['--session-began-as-copy'], shape: 'one', remove: true, path: false },
+  { names: ['--init-only'], shape: 'none', remove: true, path: false },
+  { names: ['--handle-uri'], shape: 'one', remove: true, path: false },
   // deep-link launches carry prompt text, which skydeck never stores (principle 4)
   { names: ['--deep-link-origin'], shape: 'none', remove: true, path: false },
   { names: ['--deep-link-repo'], shape: 'one', remove: true, path: false },
@@ -42,38 +54,78 @@ export const FLAGS: readonly FlagSpec[] = [
   { names: ['--add-dir'], shape: 'many', remove: false, path: true },
   { names: ['--settings'], shape: 'one', remove: false, path: true },
   { names: ['--plugin-dir'], shape: 'one', remove: false, path: true },
+  { names: ['--plugin-dir-no-mcp'], shape: 'one', remove: false, path: true },
+  { names: ['--system-prompt-file'], shape: 'one', remove: false, path: true },
+  { names: ['--append-system-prompt-file'], shape: 'one', remove: false, path: true },
+  { names: ['--append-subagent-system-prompt-file'], shape: 'one', remove: false, path: true },
   // kept, several values
   { names: ['--allowedTools', '--allowed-tools'], shape: 'many', remove: false, path: false },
   { names: ['--disallowedTools', '--disallowed-tools'], shape: 'many', remove: false, path: false },
-  { names: ['--tools'], shape: 'many', remove: false, path: false },
-  { names: ['--betas'], shape: 'many', remove: false, path: false },
-  { names: ['--file'], shape: 'many', remove: false, path: false },
+  ...['--tools', '--betas', '--file', '--channels', '--dangerously-load-development-channels'].map(
+    (name) => ({ names: [name], shape: 'many' as const, remove: false, path: false }),
+  ),
   // kept, one value
   ...[
-    '--agent',
-    '--agents',
-    '--append-system-prompt',
-    '--autocompact',
-    '--debug-file',
-    '--effort',
-    '--fallback-model',
-    '--input-format',
-    '--json-schema',
-    '--max-budget-usd',
+    '--managed-settings',
+    '--setting-sources',
+    '--client-data-url',
+    '--watch-artifact',
+    '--watch-artifact-no-autoreact',
+    '--team-name',
+    '--agent-id',
+    '--agent-name',
+    '--agent-color',
+    '--parent-session-id',
+    '--lead-verify-key',
+    '--agent-type',
     '--model',
-    '--output-format',
+    '--agent',
+    '--routine',
+    '--effort',
+    '--fast-mode',
     '--permission-mode',
-    '--permission-prompts',
+    '--inherit-permission-mode',
+    '--proactivity',
+    '--debug-file',
+    '--system-prompt',
+    '--append-system-prompt',
+    '--system-prompt-snapshot',
+    '--append-subagent-system-prompt',
+    '--plan-mode-instructions',
     '--permission-prompt-tool',
+    '--permission-prompts',
+    '--json-schema',
+    '--fallback-model',
+    '--advisor',
+    '--agents',
     '--plugin-url',
     '--remote-control-session-name-prefix',
-    '--setting-sources',
-    '--system-prompt',
-    '--system-prompt-snapshot',
+    '--exec',
+    '-m',
+    '--sdk-url',
+    '--thinking',
+    '--thinking-display',
+    '--max-thinking-tokens',
+    '--max-turns',
+    '--max-budget-usd',
+    '--task-budget',
+    '--autocompact',
+    '--workload',
+    '--output-format',
+    '--input-format',
+    '--teammate-mode',
+    '--messaging-socket-path',
+    '--ref',
+    '--on-branch',
+    '--correlation-id',
+    '--forward-home-settings',
+    '--project-config-root',
+    '--runner-declares',
   ].map((name) => ({ names: [name], shape: 'one' as const, remove: false, path: false })),
   // kept, optional value
   { names: ['-d', '--debug'], shape: 'optional', remove: false, path: false },
-  ...['--prompt-suggestions', '--remote-control'].map((name) => ({
+  { names: ['--remote-control', '--rc'], shape: 'optional', remove: false, path: false },
+  ...['--project', '--prompt-suggestions'].map((name) => ({
     names: [name],
     shape: 'optional' as const,
     remove: false,
@@ -82,27 +134,42 @@ export const FLAGS: readonly FlagSpec[] = [
   // kept, no value
   { names: ['-p', '--print'], shape: 'none', remove: false, path: false },
   { names: ['-h', '--help'], shape: 'none', remove: false, path: false },
-  { names: ['-v', '--version'], shape: 'none', remove: false, path: false },
+  { names: ['-v', '--version', '-V'], shape: 'none', remove: false, path: false },
+  { names: ['-d2e', '--debug-to-stderr'], shape: 'none', remove: false, path: false },
   ...[
-    '--allow-dangerously-skip-permissions',
-    '--ax-screen-reader',
+    '--verbose',
     '--bare',
-    '--brief',
-    '--chrome',
-    '--dangerously-skip-permissions',
-    '--disable-slash-commands',
-    '--exclude-dynamic-system-prompt-sections',
-    '--forward-subagent-text',
-    '--ide',
+    '--safe-mode',
+    '--init',
+    '--maintenance',
     '--include-hook-events',
     '--include-partial-messages',
-    '--no-chrome',
-    '--no-session-persistence',
+    '--forward-subagent-text',
+    '--session-mirror',
+    '--await-claim',
+    '--await-initialize',
+    '--managed-settings-in-initialize',
+    '--dangerously-skip-permissions',
+    '--allow-dangerously-skip-permissions',
     '--replay-user-messages',
+    '--host-auth-is-org-sign-in',
+    '--enable-auth-status',
     '--restricted',
-    '--safe-mode',
+    '--allow-other-models',
+    '--exclude-dynamic-system-prompt-sections',
+    '--include-unsupported-models',
+    '--no-session-persistence',
+    '--ide',
     '--strict-mcp-config',
-    '--verbose',
+    '--disable-slash-commands',
+    '--chrome',
+    '--no-chrome',
+    '--enable-auto-mode',
+    '--agents-view-if-allowed',
+    '--brief',
+    '--ax-screen-reader',
+    '--plan-mode-required',
+    '--hard-fail',
   ].map((name) => ({ names: [name], shape: 'none' as const, remove: false, path: false })),
 ];
 
@@ -126,7 +193,8 @@ function isPlainToken(token: string | undefined): boolean {
 
 /** One flag token, read: which flag it is, and what of it is a value written in the same token. */
 interface FlagToken {
-  spec: FlagSpec | null;
+  spec: FlagSpec | null; // null: a flag that is in no table
+  specs: readonly FlagSpec[]; // every flag the token holds: several for a cluster, none when unknown
   name: string; // the flag as written, without a value glued to it
   glued: string | null; // the value glued to the flag in the same token, if any
   shape: FlagShape; // how many of the following tokens it takes when nothing is glued
@@ -135,28 +203,34 @@ interface FlagToken {
 /** An unknown flag takes a following plain token, exactly as an optional-value flag does. */
 const UNKNOWN_SHAPE: FlagShape = 'optional';
 
+function unknownFlag(token: string, name: string = token, glued: string | null = null): FlagToken {
+  return { spec: null, specs: [], name, glued, shape: UNKNOWN_SHAPE };
+}
+
 /**
- * `--name`, `--name=value`, `-x`, `-xvalue`, `-xyz` (a cluster of short flags). A short token is read
+ * `--name`, `--name=value`, `-x`, `-xvalue`, `-xyz` (a cluster of short flags). A token that is a
+ * flag's own name is that flag, whatever its length (`-d2e`). Otherwise a short token is read
  * letter by letter as Claude Code's own parser reads it: a no-value flag lets the cluster go on; a
  * value-taking flag ends it and takes the rest of the token, `=` included, as its value when there
  * is a rest. A letter that is not in the table makes the whole token an unknown flag. A cluster is
  * represented by its first removable flag, else by its last.
  */
 function readFlagToken(token: string): FlagToken {
+  const exact = SPEC_BY_NAME.get(token);
+  if (exact !== undefined) {
+    return { spec: exact, specs: [exact], name: token, glued: null, shape: exact.shape };
+  }
+
   if (token.startsWith('--')) {
     // `--name=value`: the `=` must come after a name of at least one character.
     const equals = token.indexOf('=');
     if (equals > 2) {
       const name = token.slice(0, equals);
-      return {
-        spec: SPEC_BY_NAME.get(name) ?? null,
-        name,
-        glued: token.slice(equals + 1),
-        shape: 'none',
-      };
+      const spec = SPEC_BY_NAME.get(name) ?? null;
+      const specs = spec === null ? [] : [spec];
+      return { spec, specs, name, glued: token.slice(equals + 1), shape: 'none' };
     }
-    const spec = SPEC_BY_NAME.get(token) ?? null;
-    return { spec, name: token, glued: null, shape: spec === null ? UNKNOWN_SHAPE : spec.shape };
+    return unknownFlag(token);
   }
 
   const specs: FlagSpec[] = [];
@@ -168,13 +242,19 @@ function readFlagToken(token: string): FlagToken {
     if (spec.shape !== 'none') {
       const rest = token.slice(letter + 1);
       const name = token.slice(0, letter + 1);
-      return { spec: represented, name, glued: rest === '' ? null : rest, shape: spec.shape };
+      return {
+        spec: represented,
+        specs,
+        name,
+        glued: rest === '' ? null : rest,
+        shape: spec.shape,
+      };
     }
     if (letter === token.length - 1) {
-      return { spec: represented, name: token, glued: null, shape: 'none' };
+      return { spec: represented, specs, name: token, glued: null, shape: 'none' };
     }
   }
-  return { spec: null, name: token, glued: null, shape: UNKNOWN_SHAPE };
+  return unknownFlag(token);
 }
 
 /** The end (exclusive) of the tokens a flag at args[start - 1] takes as values, by its shape. */
@@ -274,23 +354,61 @@ export function absolutizePathFlags(
   return out;
 }
 
-/** The tokens of `args` (WITHOUT the program name) that a resume keeps, in order. */
-function keptTokens(args: readonly string[]): string[] {
+/** The tokens of `args` (WITHOUT the program name) that a resume passes on: known flags not removed. */
+function passedOnTokens(args: readonly string[]): string[] {
   return parseLaunchArgs(args).flatMap((item) =>
-    item.kind === 'flag' && item.spec?.remove !== true ? item.tokens : [],
+    item.kind === 'flag' && item.spec !== null && !item.spec.remove ? item.tokens : [],
   );
 }
 
 /**
  * What skydeck stores of a recorded launch command (design 5.3, principle 4): the program (first
- * element) and exactly the flags, with their values, that a resume keeps — in order. Positional
- * arguments (an initial prompt), `--` and everything after it, and every flag with `remove: true`
- * (with its values) are dropped, so a prompt reaches the database neither as a positional argument
- * nor inside a removed flag such as `--prefill-b64`. [] for an empty command.
- * `buildResumeCommand` gives the same result for a command and for `storableArgv` of it.
+ * element) and the flags, with their values, that a resume keeps — in order. Positional arguments
+ * (an initial prompt), `--` and everything after it, and every flag with `remove: true` (with its
+ * values) are dropped, so a prompt reaches the database neither as a positional argument nor inside
+ * a removed flag such as `--prefill-b64`. A flag that is in no table is stored as its bare name
+ * (`--flag=value` as `--flag`): what follows it cannot be classified, and skydeck never stores text
+ * it cannot classify, but the name lets a resume say the flag was not passed on (`unknownFlags`).
+ * [] for an empty command. `buildResumeCommand` gives the same result for a command and for
+ * `storableArgv` of it.
  */
 export function storableArgv(argv: readonly string[]): string[] {
-  return [...argv.slice(0, 1), ...keptTokens(argv.slice(1))];
+  const stored = argv.slice(0, 1);
+  for (const item of parseLaunchArgs(argv.slice(1))) {
+    if (item.kind !== 'flag') continue;
+    if (item.spec === null) stored.push(item.name);
+    else if (!item.spec.remove) stored.push(...item.tokens);
+  }
+  return stored;
+}
+
+/**
+ * The names of the flags in a recorded or a stored command (program first) that are in no table, in
+ * order, each once. A `--flag=value` is named `--flag`; a token with an unknown letter (`-cZ`) is
+ * named as written. A resume does not pass these on.
+ */
+export function unknownFlags(argv: readonly string[]): string[] {
+  const names: string[] = [];
+  for (const item of parseLaunchArgs(argv.slice(1))) {
+    if (item.kind === 'flag' && item.spec === null && !names.includes(item.name)) {
+      names.push(item.name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Whether a recorded launch command (program first) has the print flag (`-p`, `--print`), alone or
+ * inside a cluster of short flags such as `-cp`. A `-p` that is the value of another flag, or
+ * comes after `--`, is not the flag. Ask it of the RECORDED command: `storableArgv` drops a cluster
+ * with a removed flag (`-cp`) as a whole.
+ */
+export function isPrintRun(argv: readonly string[]): boolean {
+  const print = SPEC_BY_NAME.get('-p');
+  if (print === undefined) return false;
+  return parseLaunchArgs(argv.slice(1)).some(
+    (item) => item.kind === 'flag' && readFlagToken(item.tokens[0] as string).specs.includes(print),
+  );
 }
 
 export interface ResumeCommand {
@@ -307,8 +425,9 @@ function labelArgs(label: string | null): string[] {
  * 7.6. `launch` is a recorded launch command (program first) or null.
  * Result: [claudeCommand, '--resume', sessionId, ...(label ? ['-n', label] : []),
  *          ...every kept token of launch.slice(1) in order].
- * Removed: flags with remove: true (with their values) and positionals. Unknown flags are kept with
- * their value. flagsKnown is false when launch is null. No permission flag is ever added.
+ * Removed: flags with remove: true (with their values), positionals, and flags that are in no table
+ * (with what follows them; `unknownFlags` names them). flagsKnown is false when launch is null. No
+ * permission flag is ever added.
  */
 export function buildResumeCommand(input: {
   claudeCommand: string;
@@ -316,7 +435,7 @@ export function buildResumeCommand(input: {
   sessionId: string;
   label: string | null;
 }): ResumeCommand {
-  const kept = input.launch === null ? [] : keptTokens(input.launch.slice(1));
+  const kept = input.launch === null ? [] : passedOnTokens(input.launch.slice(1));
   return {
     argv: [input.claudeCommand, '--resume', input.sessionId, ...labelArgs(input.label), ...kept],
     flagsKnown: input.launch !== null,
