@@ -1150,8 +1150,7 @@ export interface TranscriptFile { path: string; sessionId: string; size: number;
  * `unreadable` (sorted by path, with the error code) and the rest is listed. A listing with
  * anything in `unreadable` is partial, and what is missing from it must not be taken for deleted:
  * task 8 marks no transcript missing at or under an unreadable path, and `doctor` (task 17) reports
- * the entries. A path that
- * is simply not there (ENOENT) is not unreadable.
+ * the entries. A path that is simply not there (ENOENT) is not unreadable.
  */
 export function listTranscriptFiles(files: Files, claudeHome: string): { files: TranscriptFile[]; unreadable: UnreadableEntry[] };
 
