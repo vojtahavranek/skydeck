@@ -6,8 +6,10 @@
  *
  * The validators read foreign input: they never throw and return `{ ok: false, kind }` with a fixed
  * kind that never quotes the input (plan A22), so a caller can log the kind. This module imports
- * nothing (plan 2.1) and uses nothing the page's type check would not know (no `node:` modules).
+ * nothing but the one session-id rule (`src/claude/session-id.ts`, which imports nothing; ruled by
+ * the plan owner) and uses nothing the page's type check would not know (no `node:` modules).
  */
+import { isSessionId } from '../claude/session-id.ts';
 
 /** Nanoseconds since the Unix epoch, as a decimal string (messages never carry `bigint`). */
 export type NsText = string;
@@ -327,8 +329,6 @@ const DATA_LIMIT = 64 * 1024;
 const SIZE_MAX = 0xffff;
 const TERMINAL_ID = /^[0-9a-f]{12}$/;
 const WINDOW_ID = /^[0-9a-f]{16}$/;
-/** The same rule as `isSessionId` (src/claude/launch.ts); this module imports nothing from src/. */
-const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SECTIONS: ReadonlySet<string> = new Set(['open', 'week', 'earlier']);
 
 function isObject(value: unknown): value is Fields {
@@ -380,7 +380,10 @@ function matching(pattern: RegExp): Check {
     return pattern.test(value) ? null : `${where}: wrong value`;
   };
 }
-const SESSION = matching(SESSION_ID);
+const SESSION: Check = (value, where) => {
+  if (typeof value !== 'string') return `${where}: wrong type`;
+  return isSessionId(value) ? null : `${where}: wrong value`;
+};
 const TERM = matching(TERMINAL_ID);
 const WINDOW = matching(WINDOW_ID);
 

@@ -341,6 +341,14 @@ describe('parseHello', () => {
     ['meta.dir null', { ...HELLO, meta: { ...META, dir: null } }],
     ['exited not an object', { ...HELLO, exited: MARKER }],
     ['exited.atNs missing', { ...HELLO, exited: { ...EXIT, atNs: undefined } }],
+    [
+      'started, but exited as not started',
+      { ...HELLO, exited: { code: null, signal: null, atNs: '1', notStarted: 'x' } },
+    ],
+    [
+      'never started, but exited with a code',
+      { ...HELLO, started: false, pid: null, procStart: null, exited: EXIT },
+    ],
   ];
   for (const [name, value] of bad) {
     test(`${name} → refused`, () => {
@@ -412,6 +420,13 @@ describe('parseExit (X)', () => {
     ['atNs missing', { ...EXIT, atNs: undefined }],
     ['notStarted a number', { ...EXIT, notStarted: 1 }],
     ['notStarted missing', { ...EXIT, notStarted: undefined }],
+    ['code above 255', { ...EXIT, code: 256 }],
+    ['signal 0', { ...EXIT, code: null, signal: 0 }],
+    ['signal above 255', { ...EXIT, code: null, signal: 256 }],
+    ['both code and signal', { ...EXIT, code: 0, signal: 15 }],
+    ['neither code nor signal, though started', { ...EXIT, code: null }],
+    ['not started, with a code', { ...EXIT, notStarted: 'the deadline passed' }],
+    ['not started, with a signal', { ...EXIT, code: null, signal: 9, notStarted: 'x' }],
   ] as [string, unknown][]) {
     test(`${name} → refused`, () => {
       refused(parseExit(json(value)));

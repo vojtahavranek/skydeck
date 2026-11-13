@@ -6,8 +6,10 @@
  *
  * The parsers read foreign input: they never throw and return `{ ok: false, kind }` with a fixed
  * kind that never quotes the payload (plan A22). A field they do not know is ignored, so that a
- * newer keeper's `hello` still reads and the server can tell it is newer (S2 7.7).
+ * newer keeper's `hello` still reads and the server can tell it is newer (S2 7.7). Every rule they
+ * apply is listed in plan 2.3.
  */
+import { isSessionId } from '../claude/session-id.ts';
 
 export type FrameType = 'C' | 'H' | 'G' | 'T' | 'N' | 'S' | 'D' | 'R' | 'X' | 'I' | 'Z' | 'P' | 'A';
 export const MAX_PAYLOAD = 16 * 1024 * 1024;
@@ -25,8 +27,7 @@ const SIZE_MAX = 0xffff;
 const INT64_MAX = 9_223_372_036_854_775_807n;
 const NS_TEXT = /^(?:0|[1-9][0-9]{0,18})$/;
 const TERMINAL_ID = /^[0-9a-f]{12}$/;
-/** The same rule as `isSessionId` (src/claude/launch.ts); this module imports nothing from src/. */
-const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const STATUS_MAX = 255;
 
 /** type byte, 4-byte big-endian length, payload. RangeError above MAX_PAYLOAD. */
 export function encodeFrame(type: FrameType, payload: Uint8Array = new Uint8Array(0)): Uint8Array {
@@ -286,19 +287,34 @@ function parse<T>(read: () => T): Parsed<T> {
   }
 }
 
+function isStatus(min: number): (value: number) => boolean {
+  return (value) => Number.isInteger(value) && value >= min && value <= STATUS_MAX;
+}
+
+/** Exactly one of `code` and `signal` for a program that ran; neither, and a reason, for one that
+ *  never started. */
 function readExit(where: string, fields: Fields): KeeperExit {
-  return {
-    code: field(where, fields, 'code', 'number', isCount, true),
-    signal: field(where, fields, 'signal', 'number', isCount, true),
+  const exit: KeeperExit = {
+    code: field(where, fields, 'code', 'number', isStatus(0), true),
+    signal: field(where, fields, 'signal', 'number', isStatus(1), true),
     atNs: field(where, fields, 'atNs', 'string', isNsText),
     notStarted: field(where, fields, 'notStarted', 'string', () => true, true),
   };
+  const ran = exit.notStarted === null;
+  if (
+    ran
+      ? (exit.code === null) === (exit.signal === null)
+      : exit.code !== null || exit.signal !== null
+  ) {
+    throw new Refusal(`${where}.code: wrong value`);
+  }
+  return exit;
 }
 
 function readMeta(fields: Fields): KeeperMeta {
   const where = 'hello.meta';
   return {
-    sessionId: field(where, fields, 'sessionId', 'string', (v: string) => SESSION_ID.test(v)),
+    sessionId: field(where, fields, 'sessionId', 'string', isSessionId),
     kind: field(where, fields, 'kind', 'string', (v: string) => v === 'resume' || v === 'new'),
     slot: field(
       where,
@@ -349,6 +365,10 @@ export function parseHello(
       throw new Refusal(`${where}.pid: wrong value`);
     }
     if (hello.snapSeq > hello.seq) throw new Refusal(`${where}.snapSeq: wrong value`);
+    // A program that started cannot end as not started, nor one that never started otherwise.
+    if (hello.exited !== null && hello.started !== (hello.exited.notStarted === null)) {
+      throw new Refusal(`${where}.exited: wrong value`);
+    }
     return hello;
   });
 }
