@@ -15,6 +15,7 @@ import { describe, test } from 'node:test';
 
 import { command } from '../../../src/cli/commands/uninstall.ts';
 import { hookEntry } from '../../../src/claude/settings.ts';
+import type { Files } from '../../../src/platform/types.ts';
 import { backupAtT0, backups, run, settingsFile, withStore } from '../../helpers/install.ts';
 import { SEC, T0, testPlatform } from '../../helpers/platform.ts';
 import type { TestPlatform } from '../../helpers/platform.ts';
@@ -159,6 +160,66 @@ describe('uninstall', () => {
       assert.equal(exists(dir), false, dir);
     }
     assert.equal(readFileSync(backupOf(d), 'utf8'), '{"model":"opus"}');
+  });
+
+  test('it creates nothing: state and configuration folders the user removed stay removed', async (t) => {
+    const d = testPlatform(t);
+    await installed(d, null);
+    rmSync(d.places.stateDir, { recursive: true });
+    rmSync(d.places.configDir, { recursive: true });
+
+    const r = await run(d.platform, ['uninstall']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(exists(d.places.stateDir), false);
+    assert.equal(exists(d.places.configDir), false);
+    withStore(d.places, (store) => assert.equal(store.getKv('settings_hash'), null));
+  });
+
+  test('a settings file that cannot be written: a plain error naming it; what install recorded stays', async (t) => {
+    const d = testPlatform(t);
+    await installed(d, '{"model":"opus"}');
+    const written = readFileSync(settingsFile(d.places), 'utf8');
+    const real = d.platform.files;
+    const files: Files = {
+      ...real,
+      writeText(path: string, text: string, mode?: number): void {
+        if (path === settingsFile(d.places)) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        real.writeText(path, text, mode);
+      },
+    };
+
+    const r = await run({ ...d.platform, files }, ['uninstall']);
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /cannot write .*settings\.json \(EACCES\)/);
+    assert.doesNotMatch(r.stderr, /internal error/);
+    assert.equal(readFileSync(settingsFile(d.places), 'utf8'), written);
+    // Nothing recorded is forgotten, so uninstall can restore the backup once the file can be written.
+    withStore(d.places, (store) => assert.notEqual(store.getKv('settings_hash'), null));
+  });
+
+  test('a link that cannot be removed: a plain error naming it', async (t) => {
+    const d = testPlatform(t);
+    await installed(d, null);
+    const real = d.platform.files;
+    const files: Files = {
+      ...real,
+      remove(path: string): void {
+        if (path === d.places.binLink) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        real.remove(path);
+      },
+    };
+
+    const r = await run({ ...d.platform, files }, ['uninstall']);
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /cannot remove .*\.local\/bin\/skydeck \(EACCES\)/);
+    assert.doesNotMatch(r.stderr, /internal error/);
   });
 
   test('with nothing installed: exit 0, and no directory, database or file is created', async (t) => {

@@ -1,6 +1,8 @@
 // `skydeck uninstall [--purge]` (design 8): undoes install's change to Claude Code's settings file,
-// removes install's links, and with --purge skydeck's own directories. It never creates anything:
-// with no database there is nothing recorded, and only the entries naming the hook are removed.
+// removes install's links, and with --purge skydeck's own directories. It never creates anything
+// (ruled by the plan owner): the database is opened by itself, without the directories `withDeck`
+// would make again, and with no database there is nothing recorded, so only the entries naming the
+// hook are removed. It never removes a backup install made.
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 
@@ -10,12 +12,13 @@ import type { Places } from '../../platform/paths.ts';
 import type { Files, Platform } from '../../platform/types.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import { describeError } from '../../sessions/problems.ts';
+import { isDatabaseFailure, openStore } from '../../store/store.ts';
+import type { Store } from '../../store/store.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
-import { withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 
 const SPEC: ArgSpec = {
@@ -53,12 +56,12 @@ export const command: Command = {
     if (platform.files.stat(places.dbPath) === null) {
       undo(ctx, places, { hash: null, backup: null });
     } else {
-      await withDeck(ctx, { refresh: false }, async (deck) => {
-        const { store } = deck;
+      withStoreAt(places.dbPath, (store) => {
         undo(ctx, places, {
           hash: store.getKv('settings_hash'),
           backup: store.getKv('settings_backup'),
         });
+        // Only once all of it is undone: an uninstall that stopped halfway can still restore.
         store.transaction(() => {
           store.deleteKv('settings_hash');
           store.deleteKv('settings_backup');
@@ -66,10 +69,10 @@ export const command: Command = {
       });
     }
     if (parsed.flags['purge'] === true) {
-      // After withDeck: the store is closed.
+      // The store is closed by now.
       for (const dir of [places.dataDir, places.stateDir, places.configDir]) {
         if (platform.files.lstat(dir) !== null) {
-          platform.files.removeTree(dir);
+          attempt(`cannot remove ${dir}`, () => platform.files.removeTree(dir));
           ctx.io.stdout(`removed ${sanitize(dir)}\n`);
         }
       }
@@ -78,11 +81,87 @@ export const command: Command = {
   },
 };
 
+/**
+ * fn(store) on the existing database, closed afterwards. As in withDeck, a failure of the database
+ * as a whole is an error naming it, not an internal error.
+ */
+function withStoreAt(path: string, fn: (store: Store) => void): void {
+  const store = openStore(path);
+  try {
+    fn(store);
+  } catch (error) {
+    if (isDatabaseFailure(error)) {
+      throw new SkydeckError(`the database ${path} failed: ${describeError(error)}`);
+    }
+    throw error;
+  } finally {
+    try {
+      store.close();
+    } catch {
+      // Each write is committed already; an error here would hide the one that ended the command.
+    }
+  }
+}
+
 /** The settings first (they name the hook link), then the links; last, where the backups are. */
 function undo(ctx: Context, places: Places, recorded: Recorded): void {
   restoreSettings(ctx, ctx.platform.files, places, recorded);
   removeLinks(ctx, ctx.platform, places);
   showBackups(ctx, ctx.platform.files, places);
+}
+
+/**
+ * Design 8: when the file is still exactly what install wrote (its hash) and the recorded backup
+ * still exists, the state before install comes back: the backup, or no file at all for `none`. In
+ * every other case exactly the hook objects whose command names hookPath are removed, and
+ * everything else stays. The backup itself is never removed (ruled by the plan owner).
+ */
+function restoreSettings(ctx: Context, files: Files, places: Places, recorded: Recorded): void {
+  const path = settingsPath(places.claudeHome);
+  const text = readOrFail(files, path);
+  if (text === null) {
+    return;
+  }
+  if (recorded.hash !== null && sha256(text) === recorded.hash) {
+    if (recorded.backup === 'none') {
+      attempt(`cannot remove ${path}`, () => files.remove(path));
+      ctx.io.stdout(`removed ${sanitize(path)}: there was none before skydeck install\n`);
+      return;
+    }
+    const before = recorded.backup === null ? null : readOrFail(files, recorded.backup);
+    if (recorded.backup !== null && before !== null) {
+      attempt(`cannot write ${path}`, () => files.writeText(path, before));
+      ctx.io.stdout(`restored ${sanitize(path)} from ${sanitize(recorded.backup)}\n`);
+      return;
+    }
+  }
+  const edit = removeHookEntries(text, places.hookPath);
+  if (edit.changed) {
+    attempt(`cannot write ${path}`, () => files.writeText(path, edit.text));
+    ctx.io.stdout(`removed the hook entries from ${sanitize(path)}\n`);
+  }
+}
+
+/** Each link only when it still points where install pointed it (install.ts gives the same list). */
+function removeLinks(ctx: Context, platform: Platform, places: Places): void {
+  const { files } = platform;
+  const links = [
+    { path: places.hookPath, target: join(platform.appRoot, 'bin', 'skydeck-hook') },
+    { path: places.binLink, target: join(platform.appRoot, 'bin', 'skydeck') },
+    { path: places.nodeLink, target: platform.nodePath },
+  ];
+  for (const { path, target } of links) {
+    const current = files.readlink(path);
+    if (current === null) {
+      continue;
+    }
+    if (current === target) {
+      attempt(`cannot remove ${path}`, () => files.remove(path));
+      ctx.io.stdout(`removed ${sanitize(path)}\n`);
+    } else {
+      ctx.io.stdout(`left ${sanitize(path)} alone: it points at ${sanitize(current)}\n`);
+    }
+  }
 }
 
 /**
@@ -107,57 +186,12 @@ function showBackups(ctx: Context, files: Files, places: Places): void {
   }
 }
 
-/**
- * Design 8: when the file is still exactly what install wrote (its hash) and the recorded backup
- * still exists, the state before install comes back: the backup, or no file at all for `none`. In
- * every other case exactly the hook objects whose command names hookPath are removed, and
- * everything else stays. The backup itself is never removed (ruled by the plan owner).
- */
-function restoreSettings(ctx: Context, files: Files, places: Places, recorded: Recorded): void {
-  const path = settingsPath(places.claudeHome);
-  const text = readOrFail(files, path);
-  if (text === null) {
-    return;
-  }
-  if (recorded.hash !== null && sha256(text) === recorded.hash) {
-    if (recorded.backup === 'none') {
-      files.remove(path);
-      ctx.io.stdout(`removed ${sanitize(path)}: there was none before skydeck install\n`);
-      return;
-    }
-    const before = recorded.backup === null ? null : readOrFail(files, recorded.backup);
-    if (recorded.backup !== null && before !== null) {
-      files.writeText(path, before);
-      ctx.io.stdout(`restored ${sanitize(path)} from ${sanitize(recorded.backup)}\n`);
-      return;
-    }
-  }
-  const edit = removeHookEntries(text, places.hookPath);
-  if (edit.changed) {
-    files.writeText(path, edit.text);
-    ctx.io.stdout(`removed the hook entries from ${sanitize(path)}\n`);
-  }
-}
-
-/** Each link only when it still points where install pointed it (install.ts gives the same list). */
-function removeLinks(ctx: Context, platform: Platform, places: Places): void {
-  const { files } = platform;
-  const links = [
-    { path: places.hookPath, target: join(platform.appRoot, 'bin', 'skydeck-hook') },
-    { path: places.binLink, target: join(platform.appRoot, 'bin', 'skydeck') },
-    { path: places.nodeLink, target: platform.nodePath },
-  ];
-  for (const { path, target } of links) {
-    const current = files.readlink(path);
-    if (current === null) {
-      continue;
-    }
-    if (current === target) {
-      files.remove(path);
-      ctx.io.stdout(`removed ${sanitize(path)}\n`);
-    } else {
-      ctx.io.stdout(`left ${sanitize(path)} alone: it points at ${sanitize(current)}\n`);
-    }
+/** fn(), with a failure of the file system as an error that says what could not be done. */
+function attempt(what: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (error) {
+    throw new SkydeckError(`${what} (${describeError(error)})`);
   }
 }
 
