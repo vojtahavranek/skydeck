@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import type { Files } from '../../src/platform/types.ts';
 import { computeBuild, readBuild } from '../../src/window/build.ts';
 import { testPlatform } from '../helpers/platform.ts';
 
@@ -55,11 +56,13 @@ for (const path of [
   'web/app.js',
   'vendor/xterm/xterm/lib/xterm.mjs',
 ]) {
-  test(`computeBuild changes when ${path} changes`, (t) => {
+  test(`computeBuild changes when one byte of ${path} changes, its length kept`, (t) => {
     const { root, build } = fixture(t);
     const before = build();
+    const bytes = readFileSync(join(root, path));
+    bytes[0] = (bytes[0] ?? 0) ^ 1; // as an edit of `1` to `0`: the same size
 
-    put(root, path, 'changed\n');
+    writeFileSync(join(root, path), bytes);
 
     assert.notEqual(build(), before);
   });
@@ -184,6 +187,49 @@ test('computeBuild skips a dangling link', (t) => {
   symlinkSync(join(root, 'nowhere'), join(root, 'web/dangling.js'));
 
   assert.equal(build(), before);
+});
+
+test('computeBuild skips a link to itself', (t) => {
+  const { root, build } = fixture(t);
+  const before = build();
+
+  symlinkSync('self.js', join(root, 'web/self.js'));
+
+  assert.equal(build(), before);
+});
+
+test('readBuild skips a file removed between its stat and its read, as one gone before', (t) => {
+  const { platform } = testPlatform(t);
+  const racing = fixture(t);
+  const without = fixture(t);
+  rmSync(join(without.root, 'web/app.js'));
+  const files: Files = {
+    ...platform.files,
+    readBytes(path, start, end) {
+      if (path === join(racing.root, 'web/app.js')) {
+        rmSync(path); // an editor or git replacing the file: unlink, then create
+      }
+      return platform.files.readBytes(path, start, end);
+    },
+  };
+
+  const read = readBuild(files, racing.root);
+
+  assert.equal(read.files.has('web/app.js'), false);
+  assert.equal(read.build, without.build());
+});
+
+test('readBuild passes on a read error other than "gone"', (t) => {
+  const { platform } = testPlatform(t);
+  const { root } = fixture(t);
+  const files: Files = {
+    ...platform.files,
+    readBytes() {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    },
+  };
+
+  assert.throws(() => readBuild(files, root), { code: 'EACCES' });
 });
 
 test('readBuild: the files read, by path relative to the app root, and the same build', (t) => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { appendFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
+import { connect } from 'node:net';
 import type { IncomingHttpHeaders } from 'node:http';
 import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
@@ -20,6 +21,8 @@ const checkout = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/
 const JS = 'text/javascript; charset=utf-8';
 const CSS = 'text/css; charset=utf-8';
 const HTML = 'text/html; charset=utf-8';
+const TEXT = 'text/plain; charset=utf-8';
+const IMMUTABLE = 'max-age=31536000, immutable';
 
 const INDEX = [
   '<!doctype html>',
@@ -464,8 +467,7 @@ describe('httpHandler', () => {
     assert.equal(answer.body, OTHERS['web/app.js']);
     assert.equal(answer.headers['content-type'], JS);
     assert.equal(answer.headers['content-length'], String(Buffer.byteLength(answer.body)));
-    assert.match(answer.headers['cache-control'] ?? '', /\bimmutable\b/);
-    assert.match(answer.headers['cache-control'] ?? '', /\bmax-age=\d+/);
+    assert.equal(answer.headers['cache-control'], IMMUTABLE);
   });
 
   test('GET a versioned vendored file → its bytes, its type, immutable', async (t) => {
@@ -477,7 +479,8 @@ describe('httpHandler', () => {
     assert.equal(mjs.status, 200);
     assert.equal(mjs.body, VENDORED['vendor/xterm/xterm/lib/xterm.mjs']);
     assert.equal(mjs.headers['content-type'], JS);
-    assert.match(mjs.headers['cache-control'] ?? '', /\bimmutable\b/);
+    assert.equal(mjs.headers['cache-control'], IMMUTABLE);
+    assert.equal(css.headers['cache-control'], IMMUTABLE);
     assert.equal(css.status, 200);
     assert.equal(css.headers['content-type'], CSS);
   });
@@ -538,11 +541,17 @@ describe('httpHandler', () => {
     assert.equal(xterm.body, VENDORED['vendor/xterm/xterm/lib/xterm.mjs']);
   });
 
-  test('a query string is not part of the path', async (t) => {
+  test('a query string is not part of the path, nor of the cache rule', async (t) => {
     const { port, build } = await served(t);
 
-    assert.equal((await send(port, '/?x=1')).status, 200);
-    assert.equal((await send(port, `/assets/${build}/web/app.js?v=2`)).body, OTHERS['web/app.js']);
+    const index = await send(port, '/?x=1');
+    const app = await send(port, `/assets/${build}/web/app.js?v=2`);
+
+    assert.equal(index.status, 200);
+    assert.equal(index.headers['content-type'], HTML);
+    assert.equal(index.headers['cache-control'], 'no-store');
+    assert.equal(app.body, OTHERS['web/app.js']);
+    assert.equal(app.headers['cache-control'], IMMUTABLE);
   });
 
   test('every answer (200, 404, 421, 403, 405) carries the security headers and no CORS header', async (t) => {
@@ -558,12 +567,38 @@ describe('httpHandler', () => {
     ];
 
     assert.deepEqual(
-      answers.map((a) => a.status),
-      [200, 200, 404, 421, 403, 405],
+      answers.map((a) => [a.status, a.headers['content-type'], a.headers['cache-control']]),
+      [
+        [200, HTML, 'no-store'],
+        [200, JS, IMMUTABLE],
+        [404, TEXT, 'no-store'],
+        [421, TEXT, 'no-store'],
+        [403, TEXT, 'no-store'],
+        [405, TEXT, 'no-store'],
+      ],
     );
     for (const answer of answers) {
       assertSecurityHeaders(answer, port);
     }
+  });
+
+  test('a request without a Host header (HTTP/1.0) → 421', async (t) => {
+    const { port } = await served(t);
+
+    const raw = await new Promise<string>((resolve, reject) => {
+      const socket = connect({ host: '127.0.0.1', port });
+      const chunks: Buffer[] = [];
+      socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+      socket.on('error', reject);
+      socket.on('end', () => {
+        resolve(Buffer.concat(chunks).toString('utf8'));
+      });
+      socket.end('GET / HTTP/1.0\r\n\r\n');
+    });
+
+    assert.match(raw, /^HTTP\/1\.1 421 /);
+    assert.match(raw, /\r\ncontent-security-policy: default-src 'none';/i);
+    assert.doesNotMatch(raw, /doctype/);
   });
 
   test('a Host other than 127.0.0.1:<port> → 421, whatever the path', async (t) => {
