@@ -41,6 +41,8 @@ const TERMINAL_VARIABLES: readonly string[] = [
  * change between versions).
  */
 const TERMINAL_PREFIXES: readonly string[] = ['WEZTERM_', 'KONSOLE_', 'VSCODE_'];
+/** Set beside GIT_ASKPASS by an editor's integrated terminal: GIT_ASKPASS is then the editor's. */
+const EDITOR_ASKPASS_MARKER = 'VSCODE_GIT_ASKPASS_MAIN';
 
 /** A core limit as the launcher writes it: decimal bytes, or `unlimited`. */
 const CORE_LIMIT = /^(?:[0-9]+|unlimited)$/;
@@ -113,6 +115,11 @@ export function programEnvironment(
   dropLauncherVariables(env);
   delete env[CORE_SOFT];
   delete env[ENV_ORIGIN];
+  if (env[EDITOR_ASKPASS_MARKER] !== undefined) {
+    // The editor's askpass script runs "$VSCODE_GIT_ASKPASS_NODE" "$VSCODE_GIT_ASKPASS_MAIN",
+    // which go below; left alone it would answer git with empty credentials.
+    delete env.GIT_ASKPASS;
+  }
   for (const name of Object.keys(env)) {
     if (isTerminalVariable(name) || CLAUDE_CHILD_VARIABLES.includes(name)) {
       delete env[name];

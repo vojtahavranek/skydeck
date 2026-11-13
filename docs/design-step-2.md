@@ -622,10 +622,12 @@ The server's environment (5.2), with:
   every `VSCODE_*`), and those that describe the terminal the server was started from rather than
   the new one: `GPG_TTY` and `SSH_TTY` (a pinentry would draw on that tty), and
   `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION` (an editor's Claude Code extension; every
-  session would reach that editor). `WEZTERM_`, `KONSOLE_` and `VSCODE_` are the only prefix rules: those programs set a
-  family of variables whose names change between versions (an editor's integrated terminal sets
-  many `VSCODE_*`, pointing at that editor's sockets); every other name is exact.
-  Also removed:
+  session would reach that editor), and `GIT_ASKPASS` when `VSCODE_GIT_ASKPASS_MAIN` is set beside
+  it (it is then the editor's askpass script, which runs the `VSCODE_*` names removed here and
+  would answer git with empty credentials; a `GIT_ASKPASS` the user set stays). `WEZTERM_`,
+  `KONSOLE_` and `VSCODE_` are the only prefix rules: those programs set a family of variables
+  whose names change between versions (an editor's integrated terminal sets many `VSCODE_*`,
+  pointing at that editor's sockets); every other name is exact. Also removed:
   `SKYDECK_HANDOFF`, `SKYDECK_LAUNCHER_CACHE` and the launcher's `NODE_COMPILE_CACHE` (5.2),
   `SKYDECK_CORE_SOFT` (2; its value goes into the keeper's spec instead) and `SKYDECK_ENV_ORIGIN`
   (5.2: where the server's environment came from). The other `SKYDECK_*` variables pass:

@@ -1352,7 +1352,8 @@ export const CLAUDE_CHILD_VARIABLES: readonly string[];
 export function serverEnvironment(env: Env): { env: Record<string, string>; coreSoft: string | null; origin: string | null };
 /** S2 7.4: the program's environment from the server's (as serverEnvironment returned it). Removes
  *  SKYDECK_ENV_ORIGIN too (S2 7.4's list); SKYDECK_HOME and SKYDECK_NODE pass (the hook needs them).
- *  Prefix rules: WEZTERM_, KONSOLE_, VSCODE_ (S2 7.4 says why); every other name is exact. */
+ *  Prefix rules: WEZTERM_, KONSOLE_, VSCODE_ (S2 7.4 says why); every other name is exact.
+ *  GIT_ASKPASS goes only when VSCODE_GIT_ASKPASS_MAIN is set beside it (the editor's). */
 export function programEnvironment(serverEnv: Readonly<Record<string, string>>, options: { cwd: string; interop: string | null }): Record<string, string>;
 // src/window/windows.ts
 /** '/mnt/c/Users/me/x' → 'C:\\Users\\me\\x'; null for a path not under /mnt/<letter>/, and for one

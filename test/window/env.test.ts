@@ -226,6 +226,23 @@ test("programEnvironment removes the launcher's NODE_COMPILE_CACHE when the mark
   assert.equal('SKYDECK_LAUNCHER_CACHE' in result, false);
 });
 
+test("programEnvironment removes the editor's GIT_ASKPASS (VSCODE_GIT_ASKPASS_MAIN beside it)", () => {
+  const result = program({
+    GIT_ASKPASS: '/home/me/.vscode-server/bin/x/extensions/git/dist/askpass.sh',
+    VSCODE_GIT_ASKPASS_MAIN: '/home/me/.vscode-server/bin/x/extensions/git/dist/askpass-main.js',
+    VSCODE_GIT_ASKPASS_NODE: '/home/me/.vscode-server/bin/x/node',
+  });
+  assert.equal('GIT_ASKPASS' in result, false);
+  assert.equal('VSCODE_GIT_ASKPASS_MAIN' in result, false);
+});
+
+test('programEnvironment keeps a GIT_ASKPASS the user set (no VSCODE_GIT_ASKPASS_MAIN)', () => {
+  assert.equal(
+    program({ GIT_ASKPASS: '/usr/bin/ksshaskpass' }).GIT_ASKPASS,
+    '/usr/bin/ksshaskpass',
+  );
+});
+
 test('programEnvironment keeps a NODE_COMPILE_CACHE the user set', () => {
   assert.equal(program({ NODE_COMPILE_CACHE: '/mine' }).NODE_COMPILE_CACHE, '/mine');
   assert.equal(
