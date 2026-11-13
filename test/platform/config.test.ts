@@ -68,6 +68,7 @@ describe('loadConfig', () => {
     ['{"claudeCommand":""}', 'claudeCommand'],
     ['{"claudeCommand":3}', 'claudeCommand'],
     ['{"wezterm":{"domain":5}}', 'domain'],
+    ['{"wezterm":{"domain":""}}', 'domain'],
     ['{"wezterm":[]}', 'wezterm'],
     ['{"wezterm":"x"}', 'wezterm'],
   ];

@@ -44,7 +44,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * `wezterm`); a wrong type; `terminal` not here|wezterm; a number that is not a positive integer;
  * `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute; `claudeCommand` empty.
  *
- * `claudeHome` and `wezterm.domain` may also be `null`, which is their default.
+ * `claudeHome` and `wezterm.domain` may also be `null`, which is their default; an empty
+ * `wezterm.domain` is an error like an empty `claudeCommand`.
  */
 export function parseConfig(text: string, source: string): Config {
   function fail(problem: string): never {
@@ -78,8 +79,8 @@ export function parseConfig(text: string, source: string): Config {
           if (name !== 'domain') {
             fail(`unknown key "wezterm.${name}"`);
           }
-          if (domain !== null && typeof domain !== 'string') {
-            fail('"wezterm.domain" must be a string or null');
+          if (domain !== null && (typeof domain !== 'string' || domain === '')) {
+            fail('"wezterm.domain" must be a non-empty string or null');
           }
           config.wezterm.domain = domain;
         }

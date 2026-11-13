@@ -38,6 +38,36 @@ describe('time', () => {
     assert.equal(nsFromIso('yesterday'), null);
   });
 
+  test('nsFromIso accepts a timestamp with or without seconds and fraction', () => {
+    assert.equal(nsFromIso('2026-11-12T09:00:00Z'), T0);
+    assert.equal(nsFromIso('2026-11-12T09:00Z'), T0);
+    assert.equal(nsFromIso('2026-11-12T09:00:00.5Z'), T0 + 500_000_000n);
+    assert.equal(nsFromIso('2026-11-12T09:00:00.123456789Z'), T0 + 123_000_000n);
+    assert.equal(
+      nsFromIso('2026-11-12T09:00:00-05:30'),
+      T0 + 5n * 3_600_000_000_000n + 1_800_000_000_000n,
+    );
+  });
+
+  test('nsFromIso gives null for what is not an ISO 8601 date-time with Z or an offset', () => {
+    for (const text of [
+      '1',
+      '2026',
+      '2026-11-12',
+      '2026-11-12T09:00:00', // local time: the answer would depend on the machine
+      '2026-11-12 09:00:00Z',
+      '2026-11-12T09:00:00z',
+      '2026-11-12T09:00:00+0100',
+      'Thu, 12 Nov 2026 09:00:00 GMT',
+      'November 12, 2026 09:00:00 UTC',
+      '2026-13-12T09:00:00Z',
+      '2026-11-32T09:00:00Z',
+      '',
+    ]) {
+      assert.equal(nsFromIso(text), null, JSON.stringify(text));
+    }
+  });
+
   test('nsFromIso and isoFromNs round-trip', () => {
     assert.equal(nsFromIso(isoFromNs(T0)), T0);
   });
