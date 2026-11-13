@@ -945,7 +945,8 @@ export type ParsedArg =
  *   a value-taking flag ends it and takes the rest of the token, `=` included, as its value when
  *   there is a rest (`-rabc` is `--resume abc`, one token, nothing more consumed), otherwise its
  *   value follows by its shape; a letter that is not in the table makes the whole token an unknown
- *   flag. `name` is the token without the glued value; `spec` is that of the first letter with
+ *   flag, whose `name` is the token up to that letter (`-Zabc` is `-Z`, `-cZfix` is `-cZ`). `name` of
+ *   a known flag is the token without the glued value; `spec` is that of the first letter with
  *   `remove: true`, else of the last letter;
  * - shape none: no value; one: the next token whatever it is; optional: the next token if it
  *   exists and is not flag-like; many: every following token up to the next flag-like one. A token
@@ -973,7 +974,7 @@ export function absolutizePathFlags(argv: readonly string[], cwd: string | null,
  * prompt), '--' and everything after it, and every flag with `remove: true` (with its values) are
  * dropped, so a prompt reaches the database neither as a positional argument nor inside a removed
  * flag such as `--prefill-b64`. A flag that is in no table is stored as its bare name (`--flag=value`
- * as `--flag`; a token with an unknown letter as written): what follows it cannot be classified, and
+ * as `--flag`; a short token cut after its first unknown letter, `-cZfix` as `-cZ`): what follows it cannot be classified, and
  * skydeck never stores text it cannot classify; the name lets a resume say it was not passed on.
  * [] for an empty command. buildResumeCommand gives the same result for a command and for
  * storableArgv of it, and storableArgv(storableArgv(x)) equals storableArgv(x).
@@ -982,7 +983,7 @@ export function storableArgv(argv: readonly string[]): string[];
 
 /**
  * The names of the flags in a recorded or stored command (program first) that are in no table, in
- * order, each once (`--flag=value` is `--flag`). A resume does not pass them on; `resume` and `show`
+ * order, each once (`--flag=value` is `--flag`, `-cZfix` is `-cZ`). A resume does not pass them on; `resume` and `show`
  * say so. unknownFlags(storableArgv(x)) equals unknownFlags(x).
  */
 export function unknownFlags(argv: readonly string[]): string[];
@@ -2227,7 +2228,7 @@ flag of its own and not `-d` with a value, `--max-turns` takes one.
 ['-cp','x']                        → F['-cp'], P['x']                       (cluster of no-value flags)
 ['-cn','foo']                      → F['-cn','foo']      values ['foo']     (cluster ending in a value flag)
 ['-cnfoo','x']                     → F['-cnfoo'], P['x']                    (values ['foo'])
-['-cZ','x']                        → U['-cZ','x']                           (an unknown letter: unknown as a whole)
+['-cZ','x']                        → U['-cZ','x']                           (an unknown letter: unknown as a whole; named '-cZ', and '-Zabc' is named '-Z')
 ['-d2e']                           → F['-d2e']           values []          (a flag's own name wins over the letters)
 ['-']                              → P['-']
 ['--add-dir','a','-','--verbose']  → F['--add-dir','a','-'], F['--verbose'] (a lone '-' is a value)
@@ -2307,7 +2308,8 @@ launch `['claude', name, ...V]` gives `R`; with `remove: false` it gives `[...R,
 ['claude','--add-dir','/x','fix it']                               → unchanged   (D18: the prompt is the flag's value)
 ['claude','--frobnicate','v','prompt']                             → ['claude','--frobnicate']   (an unknown flag: its bare name only)
 ['claude','--frobnicate=fix it','--model=opus']                    → ['claude','--frobnicate','--model=opus']
-['claude','-cZ','x','-Zabc','y']                                   → ['claude','-cZ','-Zabc']
+['claude','-cZ','x','-Zabc','y']                                   → ['claude','-cZ','-Z']   (cut after the first unknown letter)
+['claude','-cZfix the login bug','--model','opus','-Zsecret']      → ['claude','-cZ','--model','opus','-Z']
 ['claude','--model','opus','--','-p','text']                       → ['claude','--model','opus']
 ['claude','--resume','abc','-n','my name','--prefill-b64=Zml4','--prefill','fix','--deep-link-repo','o/r','-wfeat','--model','opus','--cloud'] → ['claude','--model','opus']
 ```
