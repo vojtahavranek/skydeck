@@ -254,6 +254,18 @@ test('checkResumable refuses a running session before anything else', (t) => {
   );
 });
 
+test('checkResumable refuses a row derived without a boot id, before anything else', (t) => {
+  // Without the boot id no process looked alive: the row cannot show that the session runs.
+  const d = testDeck(t);
+  for (const session of [dead(d, { bootId: null }), running(d, [4242])]) {
+    session.bootId = null;
+    assert.equal(
+      refusal(() => checkResumable(rowWith(d, session), d.platform.files)),
+      'cannot tell which sessions are running: the boot id could not be read',
+    );
+  }
+});
+
 test('checkResumable lets a dead session with an existing directory through', (t) => {
   const d = testDeck(t);
   checkResumable(rowOf(dead(d)), d.platform.files);

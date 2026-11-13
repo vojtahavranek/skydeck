@@ -946,6 +946,27 @@ test('without tabs a session whose own command holds control characters gets the
   assert.equal(/[\x00-\x09\x0b-\x1f\x7f]/.test(lines.join('\n')), false, JSON.stringify(lines));
 });
 
+test('without tabs no resume line is printed for a session once the boot id cannot be read', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  // During sid(1)'s hand-off another skydeck starts sid(2), and the boot id stops being readable:
+  // every process now looks dead, sid(2)'s too.
+  const handingOff: Terminal = {
+    name: 'here',
+    opensTabs: false,
+    async open() {
+      startClaude(d, sid(2), 4242);
+      d.proc.setBootId(null);
+      return { ok: true };
+    },
+  };
+  const { outcome } = await run(d, handingOff, entries.slice(0, 2));
+  assert.equal(outcome.handedOff, sid(1));
+  assert.deepEqual(outcome.printed, []);
+  assert.deepEqual(outcome.failed, [
+    { id: sid(2), reason: 'cannot tell which sessions are running: the boot id could not be read' },
+  ]);
+});
+
 test('without tabs too little memory starts nothing', async (t) => {
   const { d, entries } = fiveToRestore(t, { memAvailableMb: 3000 });
   const { outcome } = await run(d, here(d), entries.slice(0, 2));

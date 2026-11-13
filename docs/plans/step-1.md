@@ -1751,7 +1751,9 @@ export const LOCK_TTL_NS: Ns;   // 60 s
 /** The kv key of the session's resume lock, `resume_lock:<sessionId>` (D16). RangeError when sessionId is not a lowercase UUID. */
 export function lockKey(sessionId: string): `resume_lock:${string}`;
 /**
- * 7.6 refusals (ResumeRefusedError), in this order: running → "<short> is running (pid <p>[, pid <p>…])"
+ * 7.6 refusals (ResumeRefusedError), in this order: (fix-2, moved here from prepareResume so that
+ * restore's printed path checks it too) `row.session.bootId` null → "cannot tell which sessions are
+ * running: the boot id could not be read"; running → "<short> is running (pid <p>[, pid <p>…])"
  * (holders latest first); no transcript → "<short> has no transcript"; expired → "<short> has expired:
  * its transcript is gone"; project directory null → "<short>: its project directory is not known";
  * not absolute → "<short>: directory <dir> is not an absolute path"; the existence check throws →
@@ -1795,10 +1797,10 @@ export function isLockHeld(deck: Deck, sessionId: string): boolean;
 
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }   // kind: ruled in review
 /**
- * First, ResumeRefusedError "cannot tell which sessions are running: the boot id could not be read"
- * when `row.session.bootId` is null: the boot id the row was derived with, never a second read of
- * `proc.bootId()` (a failed read and a later successful one must not be mixed; without the boot id
- * every recorded process looks dead, so the row cannot show a running session); then checkResumable, acquireLock(deck, row.id, { latestEventId:
+ * checkResumable — which refuses first, "cannot tell which sessions are running: the boot id could not
+ * be read", when `row.session.bootId` is null: the boot id the row was derived with, never a second read
+ * of `proc.bootId()` (a failed read and a later successful one must not be mixed; without the boot id
+ * every recorded process looks dead, so the row cannot show a running session) — then acquireLock(deck, row.id, { latestEventId:
  * row.session.lastEventId }) — the lock transaction compares it with the store, so a session that
  * another skydeck acted on since the row was read is refused — and buildResumeCommand(config.claudeCommand,
  * row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command).

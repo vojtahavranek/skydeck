@@ -37,16 +37,25 @@ export function lockKey(sessionId: string): `resume_lock:${string}` {
   return `${LOCK_PREFIX}${sessionId}`;
 }
 
+/** Without the boot id every recorded process looks dead (5.5), so no session is seen running. */
+const BOOT_ID_UNKNOWN = 'cannot tell which sessions are running: the boot id could not be read';
+
 /**
- * 7.6 refusals (ResumeRefusedError), in this order: running → "<short> is running (pid <p>[, pid
- * <p>…])", holders latest first; no transcript → "<short> has no transcript"; expired → "<short> has
- * expired: its transcript is gone"; project directory missing (or no longer a directory) →
- * "<short>: directory <dir> no longer exists". A directory that is not known, not absolute, or
- * cannot be looked at is refused too, with a message saying so. The directory checked is the
- * session's own (`row.session.dir`); `row.dir` is display text and only appears in messages.
+ * 7.6 refusals (ResumeRefusedError), in this order: the row was derived without a boot id → "cannot
+ * tell which sessions are running: the boot id could not be read" (the row's own value, never a
+ * second read that may have worked, so a failed read and a later successful one are not mixed);
+ * running → "<short> is running (pid <p>[, pid <p>…])", holders latest first; no transcript →
+ * "<short> has no transcript"; expired → "<short> has expired: its transcript is gone"; project
+ * directory missing (or no longer a directory) → "<short>: directory <dir> no longer exists". A
+ * directory that is not known, not absolute, or cannot be looked at is refused too, with a message
+ * saying so. The directory checked is the session's own (`row.session.dir`); `row.dir` is display
+ * text and only appears in messages.
  */
 export function checkResumable(row: ListRow, files: Files): void {
   const { session, shortId } = row;
+  if (session.bootId === null) {
+    throw new ResumeRefusedError(BOOT_ID_UNKNOWN);
+  }
   if (session.holders.length > 0) {
     const pids = session.holders.map((holder) => `pid ${holder.process.pid}`).join(', ');
     throw new ResumeRefusedError(`${shortId} is running (${pids})`);
@@ -273,14 +282,9 @@ export interface PreparedLaunch {
   kind: 'resume' | 'new';
 }
 
-/** Without the boot id every recorded process looks dead (5.5), so no session is seen running. */
-const BOOT_ID_UNKNOWN = 'cannot tell which sessions are running: the boot id could not be read';
-
 /**
- * Refuses (ResumeRefusedError, first of all) when the row was derived without a boot id: the row's
- * own value is used, never a second read that may have worked, so a failed read and a later
- * successful one are not mixed. Then checkResumable, acquireLock (given the latest event id the
- * row was derived from, so a session that has been acted on since is refused),
+ * checkResumable (which refuses first a row derived without a boot id), acquireLock (given the
+ * latest event id the row was derived from, so a session that has been acted on since is refused),
  * buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label) — in this order, so a
  * session that is refused takes no lock. `unknownFlags` is unknownFlags(row.session.launch) ([]
  * without a launch command).
@@ -290,9 +294,6 @@ const BOOT_ID_UNKNOWN = 'cannot tell which sessions are running: the boot id cou
  * Callers go through `prepareResumeById` (resume-by-id.ts), which refreshes and loads first.
  */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
-  if (row.session.bootId === null) {
-    throw new ResumeRefusedError(BOOT_ID_UNKNOWN);
-  }
   checkResumable(row, deck.platform.files);
   const cwd = row.session.dir;
   if (cwd === null) {
