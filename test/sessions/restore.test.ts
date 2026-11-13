@@ -731,6 +731,36 @@ test('a session that started keeps no lock, though its lock was renewed after th
   assert.equal(prepareResume(d.deck, row).sessionId, sid(1));
 });
 
+test('a start event that names no process does not count as started: the session times out and keeps its lock', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d, {
+    starts: () => false,
+    // The hook ran without CLAUDE_PID: pid 0, no process start time. No claude can be told by it.
+    onOpen: (_count, id) => {
+      const timeNs = d.clock.nowNs();
+      d.deck.store.insertEvent({
+        spoolName: `${timeNs}-0-${id}.ev`,
+        timeNs,
+        kind: 'start',
+        detail: 'resume',
+        rawDetail: 'resume',
+        sessionId: id,
+        bootId: BOOT_B,
+        pid: 0,
+        procStart: null,
+        cwd: projectDir(d),
+        argv: ['claude', '--resume', id],
+        name: null,
+        payload: null,
+      });
+    },
+  });
+  const { outcome } = await run(d, tabs.terminal, entries.slice(0, 1));
+  assert.deepEqual(outcome.started, []);
+  assert.deepEqual(outcome.timedOut, [sid(1)]);
+  assert.notEqual(d.deck.store.getKv(lockKey(sid(1))), null);
+});
+
 test('a lock restore waits on is not renewed once another skydeck has taken it over', async (t) => {
   const { d, entries, sleeps } = fiveToRestore(t, {
     config: { ...TAB_CONFIG, restoreStartTimeoutSeconds: 3 },
