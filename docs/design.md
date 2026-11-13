@@ -326,9 +326,11 @@ are `expired` and have no label, group, note or pull request.
   `skydeck pr refresh` fetches now.
 - A pull request that cannot be read is shown as "can't read" with the time of its last
   successful fetch — never as closed.
+- A pull request that has never been fetched and has no failed attempt is shown as "not
+  fetched": it is neither read nor unreadable, so a fresh attachment does not look broken.
 - **Chip.** A row shows one chip for all attached pull requests: the worst state among them in
-  this order — can't read, checks failing, changes requested, checks pending, review required,
-  draft, approved and green, merged, closed — and the count.
+  this order — can't read, not fetched, checks failing, changes requested, checks pending, review
+  required, draft, approved and green, merged, closed — and the count.
 
 ### 7.4 The list
 
