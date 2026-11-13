@@ -5,6 +5,8 @@ import type { Command } from './command.ts';
 import type { Context } from './context.ts';
 import { EXIT } from './exit.ts';
 import pkg from '../../package.json' with { type: 'json' };
+import { RefError, SkydeckError } from '../platform/errors.ts';
+import { sanitize } from '../text/sanitize.ts';
 
 /** A command name: the file name, without `.ts`, of a file in the commands directory. */
 const COMMAND_NAME = /^[a-z][a-z-]*$/;
@@ -38,11 +40,54 @@ export async function dispatch(argv: string[], ctx: Context, commandsDir: URL): 
   if (COMMAND_NAME.test(first)) {
     const command = await loadCommand(first, commandsDir);
     if (command !== undefined) {
-      return command.run(rest, ctx);
+      return runCommand(command, rest, ctx);
     }
   }
   ctx.io.stderr(await usage(commandsDir));
   return EXIT.usage;
+}
+
+/**
+ * Runs a command and turns what it throws into an exit code (design 7.5): a `SkydeckError` prints
+ * its message and exits with its `exitCode`; anything else is a bug and exits 1.
+ */
+async function runCommand(command: Command, args: string[], ctx: Context): Promise<number> {
+  try {
+    return await command.run(args, ctx);
+  } catch (error) {
+    ctx.io.stderr(failureText(error));
+    return error instanceof SkydeckError ? error.exitCode : EXIT.failure;
+  }
+}
+
+/**
+ * What a command's failure looks like on stderr. A message and a candidate's title may carry text
+ * from the disk or from GitHub, so every line goes through the sanitiser; the line breaks of a
+ * `SkydeckError` message are kept (a usage text follows its reason on lines of its own).
+ */
+function failureText(error: unknown): string {
+  if (!(error instanceof SkydeckError)) {
+    return `skydeck: internal error: ${sanitize(messageOf(error))}\n`;
+  }
+  const lines = error.message.replace(/\n$/, '').split('\n');
+  if (error instanceof RefError) {
+    for (const { id, title } of error.candidates) {
+      lines.push(`  ${id.slice(0, 8)}  ${title}`);
+    }
+  }
+  return `skydeck: ${lines.map(sanitize).join('\n')}\n`;
+}
+
+/** The message of anything that was thrown, also of a value that has no text (`Object.create(null)`). */
+function messageOf(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  try {
+    return String(error);
+  } catch {
+    return 'unprintable value';
+  }
 }
 
 /** Loads `<name>.ts`; undefined when there is no such file. A file that is broken throws. */
