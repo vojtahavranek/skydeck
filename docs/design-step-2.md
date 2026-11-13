@@ -1,15 +1,16 @@
 # skydeck — design of step 2: the window
 
 Status: agreed design for step 2, to be built in the stages of section 19. Section 12 (what the
-window shows) is **provisional** until the user has reacted to the mockup. This document is the
+window shows) was approved by the user on 2026-11-13 after seeing the mockup. This document is the
 source of truth for step 2, next to [design.md](design.md), which stays the source of truth for
 everything step 1 built; when the code and either document disagree, one of them has a bug.
 "Design 7.6" means section 7.6 of design.md; a bare section number means a section of this
 document.
 
 Every fact this design relies on carries its status in section 21: **verified** (on the
-development machine, with a stand-in program, never the real `claude`), **documentation** (with
-the page), **inferred**, or **UNVERIFIED** (a person must check it by hand; section 18).
+development machine, with a stand-in program, never the real `claude`; or by the user on their
+PC, which says so), **documentation** (with the page), **inferred**, or **UNVERIFIED** (a person
+must check it by hand; section 18).
 
 ## 1. Purpose
 
@@ -554,12 +555,13 @@ The server listens on `127.0.0.1:<port>` only. Every request must have the `Host
 |---|---|
 | `GET /` | `web/index.html`. No secret needed: the page holds no secret of its own. |
 | `GET /assets/<asset version>/<path>` | A file of `web/` or `vendor/xterm/`, from a fixed list (no path is taken from the request beyond that list). `Cache-Control: immutable` under the versioned path. |
+| `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
 | `GET /api/ping`, `GET /api/status`, `POST /api/open`, `POST /api/shutdown` | 8.3; they need the secret. |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
 | anything else | 404. |
 
 Every answer carries `Content-Security-Policy: default-src 'none'; script-src 'self';
-style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'
+style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; connect-src 'self'
 ws://127.0.0.1:<port>; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and
 no CORS header ever. `OPTIONS` is answered 403, so a cross-origin request with a custom header
@@ -703,7 +705,8 @@ xterm.js 6.0.0 turns key presses into bytes. The page changes these, in
 | the window's own chords (12.9) | nothing: the page acts on them | They are Ctrl+Shift chords that without the kitty keyboard protocol send the same byte as the plain Ctrl chord, so Claude Code could not tell them apart anyway (section 21). |
 
 Keys are matched as section 12.9 says (letters by the character typed, digits and `/` by the
-physical key). AltGr and dead keys reach xterm.js unchanged (section 21; check W9). No kitty
+physical key). Alt+F4 is let through to Edge (12.9). AltGr and dead keys reach xterm.js
+unchanged (section 21; check W8). No kitty
 keyboard protocol and no `modifyOtherKeys`: xterm.js 6.0.0 has neither; 6.1 is re-evaluated when
 released (20).
 
@@ -910,12 +913,14 @@ command is offered.
   `restore` from the command line then opens its sessions in the window, waiting for their start
   events itself as in design 7.8.
 
-## 12. What the window shows — PROVISIONAL
+## 12. What the window shows
 
-This section is the design of the step 2 UI research (the mockup kept with the research notes,
-2026-11-13) and its nine picks (12.11). They are decisions, **provisional until the user has
-reacted to the mockup**; a change here changes no other section. Every rule that orders, groups,
-filters or judges attention is a pure function in `src/window/view/` (4.3).
+This section is the design of the step 2 UI research (the mockup kept with the research notes)
+and its nine picks (12.11). The user looked at the mockup on 2026-11-13 and approved it ("the list
+looks ok", "overall I like it"; an Edge app window that runs like the mockup is "completely ok"),
+so these are decisions; the pull-request chip's rule for several open pull requests (12.3) is the
+user's ruling of the same day. Every rule that orders, groups, filters or judges attention is a
+pure function in `src/window/view/` (4.3).
 
 ### 12.1 Layout and sections
 
@@ -953,10 +958,33 @@ The title bar shows the counts, e.g. `● 3 need you · 3 working · 2 idle`, an
 ### 12.3 The pull-request chip in the window
 
 The window's chip differs from the list's (design 7.3), which stays as it is for `ls` and the
-interactive list: open and finished pull requests are counted apart. The chip shows the worst
-status among the open and draft ones only (design 7.3's order without merged and closed) and a dim
-tally of merged ones (`PR review +30`). With nothing open: `3 merged` (dim) or `closed`. A pull
-request that cannot be read: a dotted `PR ?`, with the last good read in its tooltip.
+interactive list: open and finished pull requests are counted apart.
+
+- **Open ones** are the attached pull requests not known to be merged or closed: open, draft,
+  never fetched, and those that cannot be read (design 7.3 never fetches a merged or closed one
+  again, so an unreadable one was last seen open, or never seen).
+- **The chip** shows the number of open ones when there is more than one, and the state of the
+  one that most needs the user, in design 7.3's order without merged and closed: can't read
+  (`can't read`), not fetched (`not fetched`), checks failing (`failing`), changes requested
+  (`changes`), checks pending (`pending`), review required (`review`), draft (`draft`), approved
+  and green (`approved`). After it, dim, `+<n>` for the merged ones, when there are any. Closed
+  ones are not counted.
+- **With nothing open:** `<n> merged` (dim) when any is merged, else `closed` (dim); no chip when
+  none is attached.
+- A chip whose state is `can't read` is drawn dotted.
+- **The tooltip** lists each open pull request with its own state (`repo #n · failing`, or `can't
+  read · last read 3h ago`), then the merged and closed counts. The header (12.5) shows each open
+  one on a line of its own.
+
+| Attached | Chip |
+|---|---|
+| 1 open, review required | `PR · review` |
+| 1 open, checks failing; 30 merged | `PR · failing +30` |
+| 2 open: a draft and an approved, green one | `2 PRs · draft` |
+| 2 open: one that cannot be read and one with changes requested; 4 merged | `2 PRs · can't read +4` (dotted) |
+| 3 open, the worst failing; 30 merged | `3 PRs · failing +30` |
+| none open; 3 merged, 1 closed | `3 merged` |
+| none open; 1 closed | `closed` |
 
 ### 12.4 Attention: needs you and seen
 
@@ -1041,9 +1069,20 @@ restart.
 
 ### 12.9 Keys and focus
 
-No leader key: an app window reserves no keys (section 21). The window takes only Ctrl+Shift
-chords with a letter, a digit or `/`, and Ctrl+Tab; never Alt, a bare Ctrl+letter, a function key
-or Esc, which belong to Claude Code and the shell. Ctrl+Shift+- stays with Claude Code (undo).
+No leader key: an app window reserves no keys (section 21; on the user's PC every chord tested
+reached the page, Alt+Space excepted). The window takes only Ctrl+Shift chords with a letter, a
+digit or `/`, and Ctrl+Tab; never Alt, a bare Ctrl+letter, a function key or Esc, which belong to
+Claude Code and the shell. Ctrl+Shift+- stays with Claude Code (undo).
+
+**What the page cancels.** Because the page gets every key first, it decides what Edge does: a key
+whose default the page cancels (`preventDefault`) does nothing in Edge, even Alt+F4 (tested: the
+window stayed open). So the page cancels exactly the keys it handles itself (this table, the list
+keys below) and the keys it passes to the terminal (xterm.js cancels those it sends), and no
+other. Alt+F4 is never passed to the terminal and never cancelled, in either focus zone, so the
+window closes with it as any window does. Alt+Space never reaches the page (Windows keeps it for
+the window menu). A key that neither zone uses keeps Edge's default: in the list zone Ctrl+W closes
+the window and F5 reloads the page, both harmless — closing the window ends no session, and a
+reload reconnects (8.2.5).
 
 | Key | Action |
 |---|---|
@@ -1076,19 +1115,30 @@ A session marked done disappears as in design 7.1, except that a running session
 stays under Open with a `done` mark until it stops (then it is hidden). Marking done shows an Undo
 toast.
 
-### 12.11 The nine picks
+### 12.11 The nine picks, approved by the user on 2026-11-13
 
 1. A stable Open section with attention marks, not a "Needs you" section that rows move into.
 2. A single click on a session that is not running selects it and shows the resume card; it does
    not resume.
 3. The ticket key inline, stacks in history, no group headers. (A "by ticket" view is not in the
    first version.)
-4. The pull-request chip: the worst status among open ones, plus a tally of merged ones.
+4. The pull-request chip: the number of open ones when more than one, the state of the one that
+   most needs the user, and a tally of merged ones (12.3).
 5. Only Ctrl+Shift chords plus Ctrl+Tab; no leader key.
 6. A running session marked done stays under Open until it stops.
 7. Seen = selected for 1.5 seconds with the window focused, or typed into.
 8. A session whose window terminal crashed needs you until seen.
 9. Slots 1–9 in opening order, not reordered in the first version.
+
+### 12.12 The icon
+
+The page has an icon of its own, so that the window and its taskbar button need not show Edge's
+default: an SVG drawn for skydeck as the source, and PNG files of 16, 32, 48, 192 and 512 pixels
+(the 192 and 512 also as maskable icons) committed beside it in `web/icons/` (no build step:
+the PNGs are made once from the SVG and committed). `index.html` names the favicon
+(`<link rel="icon">`) and the manifest (`<link rel="manifest">`), whose `name` and `short_name`
+are `skydeck`, `display` `standalone`, and `icons` the PNGs. Whether Edge's app window and its
+taskbar button show it is check W3. Low priority: stage E (19).
 
 ## 13. Notifications
 
@@ -1377,12 +1427,12 @@ folder, as in manual-checks.md.
 
 | # | Check | Stage | Decides |
 |---|---|---|---|
-| W1 | `skydeck window` opens an Edge app window that loads the page and connects (WSL's localhost forwarding reaches `127.0.0.1:<port>` from Edge). | A | 5, 8.2 |
-| W2 | In the app window, every chord of 12.9 reaches the page and the browser does nothing (no new window, find bar, DevTools, print dialog, reload), including Edge's own chords (Ctrl+Shift+S, E, Y, M, the sidebar). In a normal tab (`--print-url`), which of them the browser keeps. | A | 12.9 |
-| W3 | The window has its own taskbar button, which icon, and the title `(n) skydeck`; a second `skydeck window` opens no second window. | A, B | 5.1, 12.1 |
+| W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified by the user on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) | A | 5 |
+| W2 | The chords of 12.9 that the key test of 2026-11-13 did not press reach the page and the browser does nothing: Ctrl+Shift+P, J, L, F, C, 1–9 and `/`; and Alt+F4 still closes the window once the page is built (12.9). In a normal tab (`--print-url`), which chords the browser keeps. | A | 12.9 |
+| W3 | The window has its own taskbar button with skydeck's icon (12.12), and the title `(n) skydeck`; a second `skydeck window` opens no second window. | A, B, E | 5.1, 12.1, 12.12 |
 | W4 | **Real claude** in a window terminal: status line, subagent display, spinner, redraw on resize. Then `skydeck window --restart`: the screen is exactly what it was. | A | 7.2, 7.3 |
 | W5 | **Real claude**, the screen side answering alone: does Claude Code use synchronized output; does the OSC 11 answer make its automatic theme right; with an XTVERSION answer `xterm.js(6.0.0)` (a one-line change), any visible effect? | A | 9.3 |
-| W6 | **Real claude**: Shift+Enter inserts a newline; Ctrl+V pastes text; Ctrl+Shift+V pastes a Windows screenshot. | A | 9.1 |
+| W6 | **Real claude**: Shift+Enter inserts a newline; Ctrl+V pastes text; Ctrl+Shift+V pastes a Windows screenshot; Ctrl+Shift+C copies a selection, and a program's OSC 52 write reaches the Windows clipboard. | A | 9.1, 9.5 |
 | W7 | W6's Ctrl+Shift+V again after closing the WSL terminal `skydeck window` was run from (the interop link of 6.4). | A | 6.4 |
 | W8 | Czech layout in Edge: AltGr characters (`\ [ ] { } @ # ~ \|`) and dead keys (háček, čárka) in a terminal; Ctrl+Shift+digit and Ctrl+Shift+/ chords. | A | 9.1, 12.9 |
 | W9 | Cascadia and Segoe draw Claude Code's `⏺ ⎿ ⏵` (headless Linux showed empty boxes). | A | the page's font list |
@@ -1439,7 +1489,8 @@ and removing one, in the window (12.5) with the Undo toast; the window's chip (1
 pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d`, `a`.
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
-the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8).
+the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The
+page's own icon (12.12).
 
 ## 20. Left out of step 2 on purpose
 
@@ -1501,14 +1552,16 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | Claude Code recognises xterm.js only from an XTVERSION reply starting `xterm.js` (or `TERM_PROGRAM=vscode`) and then changes wheel scrolling, glyph-atlas resets and link clicks. Under tmux it turns off synchronized output and its extended-keys path. | inferred (strings in the binary) |
 | Claude Code measures widths with `Bun.stringWidth(…, {ambiguousIsNarrow: true})`; `addon-unicode-graphemes` 0.4.0 gives VS16, ZWJ and skin-tone sequences two columns. | inferred (binary) / verified (addon) |
 | A hand-written RFC 6455 server on `node:http` of about 100 lines passes frames from 0 bytes to 1 MiB, fragments, ping and pong, close codes, invalid UTF-8 (1007), unmasked frames (1002), and refuses a wrong token or Origin. | verified (T7, with `ws` 8.23.0 as the client) |
-| In a Chromium `--app` window no key is reserved: every key reaches the page first, and `preventDefault` cancels Ctrl+W, N, T, Shift+T, Tab, R, P, F, L, J, H, O, B, G, D, U, F5, F11, Alt+Left and Ctrl+Shift+V. Edge's own closed-source layer (Ctrl+Shift+S, E, Y, M, the sidebar) is unknown. In a normal tab the browser keeps Ctrl+W, Ctrl+F4, Ctrl+Shift+W, Alt+F4, Ctrl+N, Ctrl+Shift+N, Ctrl+T, Ctrl+Shift+T, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn and Ctrl+PgUp. A page never sees Alt+F4, Alt+Tab, Win chords. | verified in Chromium's source (window research); Edge UNVERIFIED (W2) |
-| `http://127.0.0.1:<port>` is a secure context: Notification and the async clipboard are allowed; notification permission is per origin and profile. | documentation |
+| In a Chromium `--app` window no key is reserved: every key reaches the page first, and `preventDefault` cancels the browser's action. | verified in Chromium's source (window research) |
+| In an Edge 157 app window with its own profile folder, every chord of the key test reached the page and was cancelled by it: Ctrl+W, N, T, Shift+T, Tab, Shift+Tab, R, P, F, L, J, H, O, B, G, D, U, K, E, Z, S, Q; F5, F10, F11, F12; Ctrl+Shift+V, N, W, I, S, E, Y, M, O; Ctrl+PageDown; Alt+Left, Alt+B, Alt+F, Alt+V; and Alt+F4, after which the window stayed open. Alt+Space did not reach the page (Windows keeps it for the window menu). The page loaded once and never reloaded (164 key presses, one load); `display-mode` was `standalone`; it was a secure context. | verified by the user on their PC, 2026-11-13 |
+| In a normal tab the browser keeps Ctrl+W, Ctrl+F4, Ctrl+Shift+W, Alt+F4, Ctrl+N, Ctrl+Shift+N, Ctrl+T, Ctrl+Shift+T, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn and Ctrl+PgUp. A page never sees Alt+Tab or Win chords. | verified in Chromium's source; not tested in Edge (W2) |
+| `http://127.0.0.1:<port>` is a secure context (verified by the user, 2026-11-13): Notification and the async clipboard are allowed; notification permission is per origin and profile. Whether the managed PC lets notifications and clipboard writes through is not tested yet (W6, W11). | documentation |
 | An app window's taskbar identity is made of the app name from the URL (host and port) and the profile path. | verified in Chromium's source |
 | `msedge.exe` started while an Edge on the same profile folder runs hands off and exits at once. | verified in Chromium's source |
 | Started through interop with stdio ignored and a Windows working directory, a Windows program shows no console window. | verified in WSL's source |
 | A WSL distribution stops `instanceIdleTimeout` (default 15 s) after its last Windows client exits; Linux background processes and systemd do not count; the VM stops `vmIdleTimeout` (default 60 s) after the last distribution. `.wslconfig` `[general] instanceIdleTimeout=-1` keeps it. | verified in WSL's source; not measured (W14) |
 | A `wsl.exe` started from inside WSL through interop counts as such a client. | UNVERIFIED (W14) |
-| In WSL's NAT mode a port bound to `127.0.0.1` inside WSL is reachable from Windows as `localhost:<port>`. | documentation; reaching it as `127.0.0.1` from Edge UNVERIFIED (W1) |
+| In WSL's NAT mode a port bound to `127.0.0.1` inside WSL is reachable from Windows. From the Edge app window on the user's PC, `http://127.0.0.1:<port>` in WSL answered 132 pings of 132, in about 7 ms. | documentation; verified by the user on their PC, 2026-11-13 |
 | An Edge window started through interop survives a WSL stop. | inferred (W16) |
 | WSL can hang after hibernation (issue #8696); new `wsl.exe` sessions can time out on WSL 3.0.3 (#42006). | documentation (WSL issues) |
 | On the development PC: BeyondTrust privilege management is installed (policy unreadable); the Edge WebView2 runtime is installed; WSL 3.0.5 with systemd, no `.wslconfig`, NAT networking, interop on; python3 3.12. Whether unsigned programs run from user folders is unknown. | verified (read-only look under `/mnt/c`) |
