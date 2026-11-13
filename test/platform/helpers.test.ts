@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { main } from '../../src/cli/main.ts';
+import type { RunResult } from '../../src/platform/types.ts';
 import { capture } from '../helpers/capture.ts';
 import { testContext } from '../helpers/context.ts';
 import {
@@ -189,6 +190,38 @@ describe('fakeRunner', () => {
     assert.equal(await runner.runInteractive('other', []), null);
   });
 
+  test('run honours a signal: an abort rejects with an AbortError while the answer is pending', async () => {
+    const runner = fakeRunner(() => new Promise<RunResult>(() => {}));
+    const controller = new AbortController();
+
+    const running = runner.run('gh', [], { signal: controller.signal });
+    controller.abort();
+
+    await assert.rejects(running, { name: 'AbortError' });
+    assert.equal(runner.calls.length, 1);
+  });
+
+  test('run with a signal that is already aborted rejects and records no call', async () => {
+    const runner = fakeRunner();
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(runner.run('gh', [], { signal: controller.signal }), {
+      name: 'AbortError',
+    });
+    assert.equal(runner.calls.length, 0);
+  });
+
+  test('an answer that comes before the abort is the result', async () => {
+    const runner = fakeRunner(async () => runResult({ stdout: 'in time' }));
+    const controller = new AbortController();
+
+    const result = await runner.run('gh', [], { signal: controller.signal });
+    controller.abort();
+
+    assert.equal(result.stdout, 'in time');
+  });
+
   test('runResult fills in the defaults', () => {
     assert.deepEqual(runResult({}), {
       code: 0,
@@ -280,6 +313,20 @@ describe('capture', () => {
 
     assert.deepEqual(io.isTTY, { stdin: true, stdout: false, stderr: true });
     assert.deepEqual(io.size(), { columns: 100, rows: 30 });
+  });
+
+  test('resize changes the size and calls every onResize callback until it unsubscribes', () => {
+    const c = capture({ size: { columns: 100, rows: 30 } });
+    const seen: string[] = [];
+    const first = c.io.onResize(() => seen.push(`a ${c.io.size().columns}`));
+    c.io.onResize(() => seen.push(`b ${c.io.size().rows}`));
+
+    c.resize({ columns: 60, rows: 10 });
+    first();
+    c.resize({ columns: 40, rows: 5 });
+
+    assert.deepEqual(seen, ['a 60', 'b 10', 'b 5']);
+    assert.deepEqual(c.io.size(), { columns: 40, rows: 5 });
   });
 
   test('stdout and stderr are recorded separately', () => {

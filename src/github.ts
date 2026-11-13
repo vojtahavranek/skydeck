@@ -5,7 +5,7 @@
  */
 
 import { nsFromMs } from './platform/time.ts';
-import type { Clock, Env, Ns, RunResult, Runner } from './platform/types.ts';
+import type { Clock, Env, Ns, RunOptions, RunResult, Runner } from './platform/types.ts';
 import type { Store } from './store/store.ts';
 import type { PrChecks, PrFetchResult, PrReview, PrRow, PrState } from './store/types.ts';
 
@@ -334,14 +334,19 @@ function ghEnvironment(env: Env): Record<string, string> {
 }
 
 /** One `gh` call for one batch. A runner that rejects (gh not executable, say) fails the batch. */
-async function fetchBatch(deps: Deps, keys: readonly PrKey[]): Promise<Map<string, PrFetchResult>> {
+async function fetchBatch(
+  deps: Deps,
+  keys: readonly PrKey[],
+  signal: AbortSignal | undefined,
+): Promise<Map<string, PrFetchResult>> {
   const args = batchArgs(keys);
+  const options: RunOptions = { timeoutMs: GH_TIMEOUT_MS, env: ghEnvironment(deps.env) };
+  if (signal !== undefined) {
+    options.signal = signal;
+  }
   let result: RunResult;
   try {
-    result = await deps.runner.run('gh', args, {
-      timeoutMs: GH_TIMEOUT_MS,
-      env: ghEnvironment(deps.env),
-    });
+    result = await deps.runner.run('gh', args, options);
   } catch (error) {
     const reason = firstLine(error instanceof Error ? error.message : String(error));
     return failAll(keys, deps.clock.nowNs(), `gh could not be run: ${reason ?? 'unknown error'}`);
@@ -355,6 +360,10 @@ async function fetchBatch(deps: Deps, keys: readonly PrKey[]): Promise<Map<strin
  * the other, and saves every result with store.savePrResult. A failure of `gh` is a failed result
  * saved on the rows, never an exception; there is no call at all for an empty list.
  *
+ * `signal` (passed to the runner) cancels: once it has fired, nothing more is saved and no further
+ * batch starts, also when the answer of the batch in flight arrives anyway. The counts are those
+ * saved before.
+ *
  * A merged or closed pull request is never fetched again (7.3): it is left out when choosing, and
  * a result is dropped when its row has become merged or closed in the meantime (another refresh
  * was faster), so an older or failed answer can never overwrite a final status. Dropped results
@@ -363,7 +372,9 @@ async function fetchBatch(deps: Deps, keys: readonly PrKey[]): Promise<Map<strin
 export async function fetchPrs(
   deps: Deps,
   urls: readonly string[],
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ fetched: number; failed: number }> {
+  const { signal } = options;
   const rows = new Map(deps.store.prs().map((row) => [row.url, row]));
   const keys: PrKey[] = [];
   for (const url of new Set(urls)) {
@@ -374,8 +385,12 @@ export async function fetchPrs(
   }
   let fetched = 0;
   let failed = 0;
-  for (let start = 0; start < keys.length; start += BATCH_SIZE) {
-    const results = await fetchBatch(deps, keys.slice(start, start + BATCH_SIZE));
+  const stopped = (): boolean => signal?.aborted === true;
+  for (let start = 0; start < keys.length && !stopped(); start += BATCH_SIZE) {
+    const results = await fetchBatch(deps, keys.slice(start, start + BATCH_SIZE), signal);
+    if (stopped()) {
+      break; // the caller has gone: what arrived is not wanted, not even as a failure
+    }
     // The transaction is synchronous: it holds no lock while `gh` is running.
     deps.store.transaction(() => {
       const current = new Map(deps.store.prs().map((row) => [row.url, row]));
@@ -404,10 +419,16 @@ export async function fetchPrs(
  * list's refresh key), `force: false` the automatic one (the list when it opens and in the
  * background). With `sessionIds`, only the pull requests that one of those sessions has attached
  * count: the sessions the command is about (the rows `ls` prints, the one session `show` shows).
+ * `signal` cancels as for fetchPrs (the interactive list aborts its refreshes when it ends).
  */
 export function refreshPrs(
   deps: Deps,
-  options: { force: boolean; refreshMinutes: number; sessionIds?: readonly string[] },
+  options: {
+    force: boolean;
+    refreshMinutes: number;
+    sessionIds?: readonly string[];
+    signal?: AbortSignal;
+  },
 ): Promise<{ fetched: number; failed: number }> {
   const sessions = options.sessionIds === undefined ? null : new Set(options.sessionIds);
   const attached = new Set(
@@ -427,6 +448,7 @@ export function refreshPrs(
   return fetchPrs(
     deps,
     due.map((pr) => pr.url),
+    options.signal === undefined ? {} : { signal: options.signal },
   );
 }
 

@@ -1,7 +1,7 @@
 // The interactive list on a terminal (design 7.4): the pure model and renderer (model.ts,
 // render.ts) fed with the keys the user types, and the effects `reduce` asks for carried out on the
-// deck. It paints from the cache, refreshes the pull requests in the background and repaints
-// (design 7.3).
+// deck. It paints from the cache, fetches the pull requests in the background and repaints (design
+// 7.3); leaving the list never waits for `gh`.
 import { refreshPrs } from '../../github.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import type { Ns } from '../../platform/types.ts';
@@ -36,11 +36,6 @@ const ENTER_SCREEN = '\x1b[?1049h\x1b[?25l';
 const LEAVE_SCREEN = '\x1b[?25h\x1b[?1049l';
 /** Cursor home, screen cleared: every frame is painted whole. */
 const CLEAR = '\x1b[H\x1b[2J';
-/**
- * How often the terminal's size is looked at while the list waits for a key. `Io` tells of no
- * resize, and a terminal that was resized must not show a broken frame until the next key.
- */
-const RESIZE_POLL_MS = 250;
 const SAVED = 'saved';
 const REFRESHING = 'refreshing pull requests…';
 const OWN_PREFIX = 'skydeck: ';
@@ -75,8 +70,8 @@ function failureMessage(error: unknown): string {
 }
 
 /**
- * One run of the list. Every effect reads the model again after it awaited something: the
- * background refresh may have replaced it in the meantime.
+ * One run of the list. Every effect reads the model again after it awaited something: a fetch in
+ * the background may have replaced it in the meantime.
  */
 class TerminalList {
   readonly #ctx: Context;
@@ -84,9 +79,11 @@ class TerminalList {
   #model: TuiModel;
   #size: Size;
   #onScreen = false;
-  #ended = false;
   #keys: AsyncIterableIterator<string> | null = null;
-  #background: Promise<void> = Promise.resolve();
+  /** The pull-request fetches running in the background. */
+  readonly #fetches = new Set<Promise<void>>();
+  /** Fired when the list ends or hands the terminal to `claude`: every fetch stops, saving nothing more. */
+  readonly #stop = new AbortController();
 
   constructor(ctx: Context, deck: Deck) {
     this.#ctx = ctx;
@@ -96,13 +93,13 @@ class TerminalList {
   }
 
   async run(): Promise<number> {
-    const poll = setInterval(() => {
+    const unsubscribe = this.#ctx.io.onResize(() => {
       this.#repaintIfResized();
-    }, RESIZE_POLL_MS);
+    });
     try {
       this.#enterScreen();
       this.#paint();
-      this.#background = this.#refreshInBackground();
+      this.#fetchInBackground({ force: false });
       this.#keys = this.#ctx.io.keys();
       for (;;) {
         const chunk: IteratorResult<string> = await (this.#keys?.next() ?? { done: true });
@@ -118,12 +115,13 @@ class TerminalList {
       }
     } finally {
       // Whatever ended the list (q, the end of the keys, a --here resume, an error), the terminal
-      // is given back as it was, and the store stays open until the background refresh is done.
-      clearInterval(poll);
-      this.#ended = true;
+      // is given back as it was. The fetches are stopped, not waited for: an aborted one ends at
+      // once and saves nothing, and the store stays open until it has.
+      unsubscribe();
+      this.#stop.abort();
       this.#leaveScreen();
       await this.#releaseKeys();
-      await this.#background;
+      await Promise.all(this.#fetches);
     }
   }
 
@@ -145,7 +143,7 @@ class TerminalList {
       case 'quit':
         return EXIT.ok;
       case 'refresh':
-        await this.#refresh();
+        this.#refresh();
         return null;
       case 'note':
         await this.#editNote(effect.id);
@@ -246,6 +244,7 @@ class TerminalList {
       this.#setModel(withMessage(this.#model, lines.length === 0 ? opened : messageOf(lines)));
       return null;
     }
+    this.#stop.abort(); // the terminal goes to `claude`: nothing may hold the launcher's exec back
     this.#leaveScreen();
     await this.#releaseKeys();
     const { code, lines } = await launchPrepared(this.#deck, prepared, 'here');
@@ -261,52 +260,72 @@ class TerminalList {
   }
 
   /**
-   * `r`: what changed on disk is read in (design 5), the order is computed again, and every pull
-   * request of the sessions now on the list is asked about, whatever its age (design 7.3: an
-   * explicit refresh). A pull request that cannot be read is saved as such, not thrown.
+   * `r`: what changed on disk is read in (design 5) and the order is computed again, at once; then
+   * every pull request of the sessions now shown is asked about, whatever its age (design 7.3: an
+   * explicit refresh), in the background, so that keys are read meanwhile and `q` never waits for
+   * `gh`. A pull request that cannot be read is saved as such, not thrown.
    */
-  async #refresh(): Promise<void> {
+  #refresh(): void {
     refreshWithProgress(this.#ctx, this.#deck);
     this.#reload(true);
     this.#setModel(withMessage(this.#model, REFRESHING));
-    this.#paint();
-    await refreshPrs(this.#ghDeps(), {
-      force: true,
-      refreshMinutes: this.#deck.config.prRefreshMinutes,
-      sessionIds: visibleRows(this.#model).map((row) => row.id),
-    });
-    this.#reload(true);
-    this.#setModel(withMessage(this.#model, null));
+    this.#fetchInBackground(
+      { force: true, sessionIds: visibleRows(this.#model).map((row) => row.id) },
+      true,
+    );
+  }
+
+  /** Starts a fetch of pull requests that runs while the list goes on; `run` stops it at the end. */
+  #fetchInBackground(
+    options: { force: boolean; sessionIds?: readonly string[] },
+    explicit = false,
+  ): void {
+    const fetch = this.#fetchPrs(options, explicit);
+    this.#fetches.add(fetch);
+    void fetch.then(() => this.#fetches.delete(fetch));
   }
 
   /**
-   * The automatic refresh when the list opens (design 7.3): the pull requests that are due are
-   * fetched while the list is in use, then the rows are loaded again, in the order shown, and
-   * painted. It never rejects: a failure is the message, and after the list has ended nothing is
-   * done with the result (the store is still open: `run` waits for this before it returns).
+   * One fetch (design 7.3): automatic when the list opens (`force` false: the pull requests that
+   * are due), explicit for `r`. When it saved something, the rows are loaded again, in the order
+   * shown, and painted; an explicit one also takes away its "refreshing" message. It never
+   * rejects: a failure is the message. After the list has ended (or the signal fired) nothing is
+   * done with its result.
    */
-  async #refreshInBackground(): Promise<void> {
+  async #fetchPrs(
+    options: { force: boolean; sessionIds?: readonly string[] },
+    explicit: boolean,
+  ): Promise<void> {
+    let saved = 0;
     let failure: string | null = null;
     try {
       const { fetched, failed } = await refreshPrs(this.#ghDeps(), {
-        force: false,
+        ...options,
         refreshMinutes: this.#deck.config.prRefreshMinutes,
+        signal: this.#stop.signal,
       });
-      if (fetched + failed === 0) {
-        return; // nothing was due, or nothing was saved: the frame is still right
-      }
+      saved = fetched + failed;
     } catch (error) {
       failure = `the pull requests could not be refreshed: ${describeError(error)}`;
     }
-    if (this.#ended) {
-      return;
+    if (this.#stop.signal.aborted) {
+      return; // the list has ended, or handed the terminal over
     }
     try {
-      this.#reload(false);
+      let repaint = false;
+      if (saved > 0 || failure !== null) {
+        this.#reload(false);
+        repaint = true;
+      }
       if (failure !== null) {
         this.#setModel(withMessage(this.#model, failure));
+      } else if (explicit && this.#model.message === REFRESHING) {
+        this.#setModel(withMessage(this.#model, null));
+        repaint = true;
       }
-      this.#paint();
+      if (repaint) {
+        this.#paint();
+      }
     } catch {
       // The next key loads and paints again, and meets the same failure where it can end the list.
     }
@@ -342,16 +361,17 @@ class TerminalList {
     return true;
   }
 
+  /** The terminal was resized (Io.onResize): a frame at the new size, without waiting for a key. */
   #repaintIfResized(): void {
     if (!this.#onScreen) {
-      return;
+      return; // the next paint takes the size
     }
     try {
       if (this.#takeSize()) {
         this.#paint();
       }
     } catch {
-      // A timer has nobody to report to; the next key paints and meets the same failure.
+      // An event handler has nobody to report to; the next key paints and meets the same failure.
     }
   }
 

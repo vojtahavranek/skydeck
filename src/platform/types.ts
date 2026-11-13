@@ -74,6 +74,12 @@ export interface RunOptions {
   timeoutMs?: number;
   /** The child's complete environment; omitted → the environment of this process. Tests always pass sandbox.env(). */
   env?: Readonly<Record<string, string>>;
+  /**
+   * When it fires, the child is killed (SIGKILL), nothing it started is waited for, and run()
+   * rejects with an Error named `AbortError`. Already aborted: nothing is started, run() rejects.
+   * A signal that fires after run() has answered changes nothing.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RunResult {

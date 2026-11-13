@@ -97,6 +97,22 @@ describe('processContext', () => {
     assert.equal(typeof ctx.io.keys, 'function');
   });
 
+  test("onResize calls back on standard output's resize event until it unsubscribes", () => {
+    const { io } = processContext();
+    let calls = 0;
+    const before = process.stdout.listenerCount('resize');
+
+    const unsubscribe = io.onResize(() => {
+      calls++;
+    });
+    process.stdout.emit('resize');
+    unsubscribe();
+    process.stdout.emit('resize');
+
+    assert.equal(calls, 1);
+    assert.equal(process.stdout.listenerCount('resize'), before);
+  });
+
   test('isTTY and size describe the streams: pipes are not terminals and give 80x24', async (t) => {
     const { out } = await inChild(t, 'print({ tty: io.isTTY, size: io.size() });', '');
 

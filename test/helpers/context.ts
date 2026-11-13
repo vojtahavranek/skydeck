@@ -12,6 +12,8 @@ export interface TestCtx {
   stdout: () => string;
   stderr: () => string;
   prompts: string[];
+  /** Resizes the fake terminal (see `capture`). */
+  resize: (size: { columns: number; rows: number }) => void;
 }
 
 /** A platform whose every member throws: enough for `--help` and `--version`, nothing more. */
@@ -44,7 +46,12 @@ export function testContext(
   options: TestPlatformOptions & CaptureOptions = {},
 ): TestCtx | (TestCtx & TestPlatform) {
   const captured = capture(options);
-  const shared = { stdout: captured.stdout, stderr: captured.stderr, prompts: captured.prompts };
+  const shared = {
+    stdout: captured.stdout,
+    stderr: captured.stderr,
+    prompts: captured.prompts,
+    resize: captured.resize,
+  };
   if (t === undefined) {
     return { ctx: { io: captured.io, platform: noPlatform() }, ...shared };
   }

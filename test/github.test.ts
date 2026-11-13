@@ -789,6 +789,76 @@ describe('fetchPrs and refreshPrs', () => {
     assert.equal(row(store, 2).title, 'old');
   });
 
+  test('an abort while gh runs saves nothing and starts no further batch', async (t) => {
+    const controller = new AbortController();
+    const { store, runner, deps } = deck(t, () => new Promise<RunResult>(() => {}));
+    seed(store, 1, 60, { state: 'open', ageMin: 10 });
+
+    const fetching = refreshPrs(deps, {
+      force: false,
+      refreshMinutes: 5,
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    assert.deepEqual(await fetching, { fetched: 0, failed: 0 });
+    assert.equal(runner.calls.length, 1, 'the second batch never started');
+    assert.equal(runner.calls[0]?.options?.signal, controller.signal);
+    assert.ok(store.prs().every((p) => p.triedAtNs === T0 - 10n * MIN && p.error === null));
+  });
+
+  test('an answer that arrives after the abort is not saved', async (t) => {
+    const controller = new AbortController();
+    const { store, deps } = deck(t);
+    // A gh that answered just as the signal fired: the runner hands its result back anyway.
+    const late = {
+      ...deps.runner,
+      run: (command: string, args: readonly string[]): Promise<RunResult> => {
+        controller.abort();
+        return Promise.resolve(answerAll()({ command, args, options: undefined }));
+      },
+    };
+    seed(store, 1, 2, { state: 'open', ageMin: 10 });
+
+    const outcome = await fetchPrs({ ...deps, runner: late }, [NUM(1), NUM(2)], {
+      signal: controller.signal,
+    });
+
+    assert.deepEqual(outcome, { fetched: 0, failed: 0 });
+    assert.ok(store.prs().every((p) => p.title === 'old' && p.triedAtNs === T0 - 10n * MIN));
+  });
+
+  test('a signal that is already aborted asks gh nothing', async (t) => {
+    const controller = new AbortController();
+    controller.abort();
+    const { store, deps } = deck(t);
+    let asked = 0;
+    const counting = {
+      ...deps.runner,
+      run: (): Promise<RunResult> => {
+        asked++;
+        return Promise.resolve(runResult({}));
+      },
+    };
+    seed(store, 1, 2, { state: 'open', ageMin: 10 });
+
+    const outcome = await fetchPrs({ ...deps, runner: counting }, [NUM(1), NUM(2)], {
+      signal: controller.signal,
+    });
+
+    assert.deepEqual(outcome, { fetched: 0, failed: 0 });
+    assert.equal(asked, 0);
+  });
+
+  test('without a signal the options of the gh call have none', async (t) => {
+    const { store, runner, deps } = deck(t, answerAll());
+    seed(store, 1, 1, { state: 'open', ageMin: 10 });
+
+    await fetchPrs(deps, [NUM(1)]);
+
+    assert.equal(Object.hasOwn(runner.calls[0]?.options ?? {}, 'signal'), false);
+  });
+
   test('fetchPrs with no urls makes no call', async (t) => {
     const { runner, deps } = deck(t, answerAll());
     assert.deepEqual(await fetchPrs(deps, []), { fetched: 0, failed: 0 });

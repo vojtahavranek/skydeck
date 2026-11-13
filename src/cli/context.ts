@@ -16,6 +16,11 @@ export type Io = {
   readLine(prompt: string): Promise<string | null>;
   /** Raw-mode input, one string per chunk read (task 19 splits chunks into keys). return() restores the terminal. */
   keys(): AsyncIterableIterator<string>;
+  /**
+   * Calls `callback` whenever the terminal is resized (`size()` then gives the new size); never when
+   * stdout is no terminal. Returns the function that unsubscribes it.
+   */
+  onResize(callback: () => void): () => void;
 };
 
 /** Everything a command may reach for, passed in so tests can substitute fakes. */
@@ -75,6 +80,16 @@ function processIo(): Io {
         reader.pause();
       }
       return next.value;
+    },
+    onResize(callback) {
+      // Node updates columns and rows on SIGWINCH, then emits this (only on a terminal).
+      const listener = (): void => {
+        callback();
+      };
+      process.stdout.on('resize', listener);
+      return () => {
+        process.stdout.off('resize', listener);
+      };
     },
     keys() {
       const stdin = process.stdin;

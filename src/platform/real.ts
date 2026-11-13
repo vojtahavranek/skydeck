@@ -269,10 +269,20 @@ function realProc(): Proc {
 /** After a timeout with the child already gone: how long its last output may still take to arrive. */
 const PIPE_GRACE_MS = 100;
 
+/** What `run` rejects with when its signal fires: an Error named AbortError, as Node's own APIs use. */
+function abortError(): Error {
+  return new DOMException('the run was aborted', 'AbortError');
+}
+
 function realRunner(): Runner {
   return {
     run(command, args, options: RunOptions = {}) {
       return new Promise<RunResult>((resolve, reject) => {
+        const { signal } = options;
+        if (signal?.aborted === true) {
+          reject(abortError()); // nothing is started
+          return;
+        }
         const child = spawn(command, args, {
           cwd: options.cwd,
           env: options.env,
@@ -300,14 +310,34 @@ function realRunner(): Runner {
                   }, PIPE_GRACE_MS);
                 }
               }, options.timeoutMs);
+        /** Marks the run as answered; false when it already was. */
+        const finish = (): boolean => {
+          if (settled) {
+            return false;
+          }
+          settled = true;
+          clearTimeout(timer);
+          clearTimeout(graceTimer);
+          signal?.removeEventListener('abort', abort);
+          return true;
+        };
         const settle = (code: number | null, notFound = false): void => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            clearTimeout(graceTimer);
+          if (finish()) {
             resolve({ code: timedOut ? null : code, stdout, stderr, timedOut, notFound });
           }
         };
+        // The caller no longer wants the answer: the child is killed and nothing it, or something
+        // it started, still holds is waited for.
+        function abort(): void {
+          if (finish()) {
+            child.kill('SIGKILL');
+            child.stdin?.destroy();
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+            reject(abortError());
+          }
+        }
+        signal?.addEventListener('abort', abort, { once: true });
 
         child.stdout?.setEncoding('utf8');
         child.stdout?.on('data', (chunk: string) => {
@@ -322,9 +352,7 @@ function realRunner(): Runner {
         child.on('error', (error) => {
           if (errorCode(error) === 'ENOENT') {
             settle(null, true);
-          } else if (!settled) {
-            settled = true;
-            clearTimeout(timer);
+          } else if (finish()) {
             reject(error);
           }
         });

@@ -419,22 +419,83 @@ test('a background refresh with nothing due runs no gh and paints nothing more',
   assert.equal(frames(d).length, 1);
 });
 
-test('quitting while the background refresh runs waits for it, saves its result and paints nothing more', async (t) => {
-  const runner = gh(
-    () =>
-      new Promise<RunResult>((resolve) => {
-        setTimeout(() => resolve(runResult({ stdout: OPEN_GREEN })), 30);
-      }),
-  );
-  const d = listDeck(t, ['q']);
-  attachManualPr(d.deck, S1, PR1);
+/** A `gh` that answers only when it is aborted (the fake runner then rejects, as the real one does). */
+const hangingGh = (): FakeRunner => gh(() => new Promise<RunResult>(() => {}));
 
-  assert.equal(await main([], withRunner(d, runner)), 0);
+/** Lets every timer and pending promise run, so that anything written late would be written by now. */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
 
-  assert.equal(d.deck.store.prs().find((pr) => pr.url === PR1)?.state, 'open');
-  assert.equal(frames(d).length, 1);
-  assert.ok(d.stdout().endsWith(LEAVE));
-});
+test(
+  'q while the background refresh waits for gh returns at once, and nothing is written afterwards',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const runner = hangingGh();
+    const d = listDeck(t, ['q']);
+    attachManualPr(d.deck, S1, PR1);
+
+    assert.equal(await main([], withRunner(d, runner)), 0);
+    await settle();
+
+    assert.equal(ghCalls(runner).length, 1);
+    assert.ok(ghCalls(runner)[0]?.options?.signal?.aborted);
+    const pr = d.deck.store.prs().find((row) => row.url === PR1);
+    assert.deepEqual([pr?.triedAtNs, pr?.okAtNs, pr?.error], [null, null, null]);
+    assert.equal(frames(d).length, 1);
+    assert.ok(d.stdout().endsWith(LEAVE));
+  },
+);
+
+test(
+  'R in this terminal while the background refresh waits for gh hands off at once',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const runner = hangingGh();
+    const d = listDeck(t, ['R']);
+    const dir = resumable(d);
+    attachManualPr(d.deck, S1, PR1);
+
+    assert.equal(await main([], withRunner(d, runner)), 0);
+    await settle();
+
+    assert.equal(
+      readFileSync(join(d.sandbox.root, 'handoff'), 'utf8'),
+      handoffScript({ cwd: dir, argv: ['claude', '--resume', S1] }),
+    );
+    assert.equal(d.deck.store.prs().find((row) => row.url === PR1)?.triedAtNs, null);
+  },
+);
+
+test(
+  'r fetches in the background: keys are read meanwhile, and q does not wait for gh',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const runner = hangingGh();
+    const d = listDeck(t, ['r', 'j', 'q']);
+    attachManualPr(d.deck, S1, PR1);
+    d.deck.store.savePrResult(PR1, {
+      ok: true,
+      atNs: T0 - MINUTE,
+      title: 'Fix the retry',
+      state: 'open',
+      review: null,
+      checks: 'passing',
+    });
+
+    assert.equal(await main([], withRunner(d, runner)), 0);
+    await settle();
+
+    assert.equal(ghCalls(runner).length, 1, 'r asked once');
+    assert.ok(lastLines(d).includes('refreshing pull requests…'), lastLines(d).join('\n'));
+    assert.equal(selectedIn(frames(d).at(-1) ?? []), short(S2), 'j was read while gh was running');
+    assert.equal(d.deck.store.prs().find((row) => row.url === PR1)?.triedAtNs, T0 - MINUTE);
+  },
+);
 
 test('r ingests what is new, and asks about every pull request of the listed sessions again', async (t) => {
   let d: TestDeck | undefined;
@@ -486,29 +547,28 @@ test('after every key the window scrolls by the least that keeps the selected ro
   assert.ok(afterK[2]?.includes(short(S3)), afterK.join('\n'));
 });
 
-test('a resize is painted without waiting for a key', async (t) => {
-  t.mock.timers.enable({ apis: ['setInterval'] });
-  let size = { columns: 80, rows: 24 };
+test('a resize is painted at once, at the new size; after the list it paints nothing', async (t) => {
   let framesBefore = -1;
   let framesAfter = -1;
   let d: TestDeck | undefined;
   d = listDeck(t, [
     () => {
       framesBefore = frames(d as TestDeck).length;
-      size = { columns: 60, rows: 10 };
-      t.mock.timers.tick(1000);
+      d?.resize({ columns: 60, rows: 10 });
       framesAfter = frames(d as TestDeck).length;
       return 'q';
     },
   ]);
-  const ctx: Context = { ...d.ctx, io: { ...d.ctx.io, size: () => size } };
 
-  assert.equal(await main([], ctx), 0);
+  assert.equal(await main([], d.ctx), 0);
+  const written = d.stdout();
+  d.resize({ columns: 40, rows: 5 });
 
   assert.equal(framesAfter, framesBefore + 1);
   const resized = frames(d)[framesBefore] ?? [];
   assert.equal(resized.length, 10);
   assert.ok(resized.every((line) => line.length <= 60));
+  assert.equal(d.stdout(), written, 'the list no longer listens');
 });
 
 test('an error inside the list restores the terminal and is reported by the error mapping', async (t) => {

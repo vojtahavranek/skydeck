@@ -47,11 +47,11 @@ test('a failure of the list goes through the error mapping: one line, its exit c
   assert.equal(c.stdout(), '');
 });
 
-test('bare skydeck in a commands directory without ls prints the usage', async () => {
+test('bare skydeck where the ls command cannot be found fails as an unknown command does', async () => {
   const c = testContext();
 
-  assert.equal(await dispatch([], c.ctx, commandsWithoutLs), EXIT.ok);
+  assert.equal(await dispatch([], c.ctx, commandsWithoutLs), EXIT.usage);
 
-  assert.match(c.stdout(), /^Usage:/);
-  assert.equal(c.stderr(), '');
+  assert.match(c.stderr(), /^Usage:/);
+  assert.equal(c.stdout(), '');
 });

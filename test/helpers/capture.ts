@@ -22,6 +22,8 @@ export interface Captured {
   stderr: () => string;
   /** The prompt of every readLine call, in order. */
   prompts: string[];
+  /** Resizes the fake terminal: size() answers `size` from now on, and every onResize callback is called. */
+  resize: (size: { columns: number; rows: number }) => void;
 }
 
 /** An `Io` that records what is written to it and answers reads from `options`. */
@@ -32,6 +34,8 @@ export function capture(options: CaptureOptions = {}): Captured {
   let nextLine = 0;
   let nextKey = 0;
   const chunks = options.keys ?? [];
+  let size = options.size ?? { columns: 80, rows: 24 };
+  const resized = new Set<() => void>();
   return {
     io: {
       stdout: (text) => {
@@ -45,7 +49,7 @@ export function capture(options: CaptureOptions = {}): Captured {
         stdout: options.stdoutTTY ?? false,
         stderr: options.stderrTTY ?? false,
       },
-      size: () => options.size ?? { columns: 80, rows: 24 },
+      size: () => size,
       readLine: (prompt) => {
         prompts.push(prompt);
         err += prompt;
@@ -58,9 +62,25 @@ export function capture(options: CaptureOptions = {}): Captured {
           yield typeof chunk === 'function' ? chunk() : (chunk ?? '');
         }
       },
+      onResize: (callback) => {
+        // A wrapper per subscription, so that subscribing the same function twice is two subscriptions.
+        const listener = (): void => {
+          callback();
+        };
+        resized.add(listener);
+        return () => {
+          resized.delete(listener);
+        };
+      },
     },
     stdout: () => out,
     stderr: () => err,
     prompts,
+    resize: (next) => {
+      size = next;
+      for (const listener of [...resized]) {
+        listener();
+      }
+    },
   };
 }

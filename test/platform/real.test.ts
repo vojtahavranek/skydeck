@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
@@ -579,6 +580,59 @@ describe('real runner', () => {
     assert.equal(result.code, 0);
     assert.equal(result.notFound, false);
     assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+  });
+
+  test('a signal that fires kills the child at once and run rejects with an AbortError', async (t) => {
+    const s = sandbox(t);
+    s.link('sh', 'sleep');
+    const controller = new AbortController();
+    const started = Date.now();
+
+    // The child's own child holds the pipes too: run must not wait for it either.
+    const running = realPlatform().runner.run('sh', ['-c', 'sleep 5 & sleep 5'], {
+      timeoutMs: 10_000,
+      env: s.env(),
+      signal: controller.signal,
+    });
+    setTimeout(() => {
+      controller.abort();
+    }, 100);
+
+    await assert.rejects(running, { name: 'AbortError' });
+    assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+  });
+
+  test('a signal that is already aborted starts nothing', async (t) => {
+    const s = sandbox(t);
+    s.link('sh', 'touch');
+    const controller = new AbortController();
+    controller.abort();
+    const marker = join(s.root, 'started');
+
+    await assert.rejects(
+      realPlatform().runner.run('sh', ['-c', `touch '${marker}'`], {
+        env: s.env(),
+        signal: controller.signal,
+      }),
+      { name: 'AbortError' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(existsSync(marker), false);
+  });
+
+  test('a signal that fires after the child finished changes nothing', async (t) => {
+    const s = sandbox(t);
+    s.link('sh');
+    const controller = new AbortController();
+
+    const result = await realPlatform().runner.run('sh', ['-c', 'printf ok'], {
+      env: s.env(),
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    assert.equal(result.stdout, 'ok');
+    assert.equal(result.code, 0);
   });
 
   test('a child that finishes before timeoutMs is not timed out', async (t) => {

@@ -59,9 +59,9 @@ async function bareSkydeck(ctx: Context, commandsDir: URL): Promise<number> {
   }
   const ls = await loadCommand('ls', commandsDir);
   if (ls === undefined) {
-    // A commands directory without `ls` (a test's fixtures) has no list to print.
-    ctx.io.stdout(await usage(commandsDir));
-    return EXIT.ok;
+    // A broken installation: as for any command whose file is missing.
+    ctx.io.stderr(await usage(commandsDir));
+    return EXIT.usage;
   }
   return runCommand(ls, [], ctx);
 }

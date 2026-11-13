@@ -153,7 +153,16 @@ export function runResult(partial: Partial<RunResult>): RunResult {
   return { code: 0, stdout: '', stderr: '', timedOut: false, notFound: false, ...partial };
 }
 
-/** `handler` answers run(); runInteractive() answers with `interactive` (default 0). */
+/** What the runners reject with when their signal fires. */
+function abortError(): Error {
+  return new DOMException('the run was aborted', 'AbortError');
+}
+
+/**
+ * `handler` answers run(); runInteractive() answers with `interactive` (default 0). run() honours
+ * `options.signal` as the real runner does: an aborted signal rejects with an AbortError at once and
+ * records no call; one that fires while the handler's answer is pending rejects the same way.
+ */
 export function fakeRunner(
   handler?: (call: RunCall) => RunResult | Promise<RunResult>,
   interactive?: (call: RunCall) => number | null,
@@ -164,9 +173,32 @@ export function fakeRunner(
     calls,
     interactiveCalls,
     async run(command, args, options) {
+      const signal = options?.signal;
+      if (signal?.aborted === true) {
+        throw abortError();
+      }
       const call = { command, args, options };
       calls.push(call);
-      return handler === undefined ? runResult({}) : handler(call);
+      const answer = Promise.resolve(handler === undefined ? runResult({}) : handler(call));
+      if (signal === undefined) {
+        return answer;
+      }
+      return new Promise<RunResult>((resolve, reject) => {
+        const abort = (): void => {
+          reject(abortError());
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        answer.then(
+          (result) => {
+            signal.removeEventListener('abort', abort);
+            resolve(result);
+          },
+          (error: unknown) => {
+            signal.removeEventListener('abort', abort);
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
+      });
     },
     runInteractive(command, args, options) {
       const call = { command, args, options };
