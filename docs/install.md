@@ -42,16 +42,18 @@ See "WezTerm on WSL" below for the configuration.
 
 - **Linux, or Windows with WSL2 (Ubuntu).** skydeck reads `/proc`. Native Windows and macOS are not
   supported. On Windows, run everything below inside the WSL distribution.
-- **Node.js 24.12 or newer.** Check with `node --version`. If the default `node` is older, install a
-  newer one beside it (for example with nvm: `nvm install 24`) and give skydeck its path; see
-  "Install", step 3. skydeck has no runtime dependencies.
+- **Node.js 24.12 or newer.** Check with `node --version`. If there is none, or the default `node` is
+  older, install a newer one from nodejs.org or with nvm (`nvm install 24`; nvm is at
+  github.com/nvm-sh/nvm), beside the old one if you like, and give skydeck its path; see "Install",
+  step 2. skydeck has no runtime dependencies.
 - **Claude Code, installed on this Linux side and started at least once**, so that `~/.claude`
   exists. skydeck relies on the file formats of Claude Code 2.1.3xx (design section 14).
-- **`git`** to clone the repository.
-- **`gh`, logged in** (`gh auth login`; check with `gh auth status`). The repository is private, so
-  the clone needs it (or an SSH key that GitHub accepts). skydeck also uses it later to read
-  pull-request status. Without it everything else works; pull requests show as "can't read" and
-  `skydeck doctor` reports a problem.
+- **`git`** to clone the repository. Install it with your distribution's package manager.
+- **`gh`, the GitHub command line, logged in** (`gh auth login`; check with `gh auth status`; see
+  cli.github.com for installing it). The repository is private, so the clone needs it (or an SSH key
+  that GitHub accepts). skydeck also uses it later to read pull-request status. Without it
+  everything else works; pull requests stay "not fetched" or show "can't read", and `skydeck doctor`
+  reports a problem.
 - **WezTerm, optional.** Only for tabs; see above.
 
 The hook uses `sh`, `date`, `cat`, `base64`, `mkdir` and `mv`, which a standard Ubuntu has.
@@ -69,16 +71,7 @@ cd ~/skydeck
 Without `gh`: `git clone git@github.com:vojtahavranek/skydeck.git ~/skydeck`, with an SSH key that is
 registered on a GitHub account that can read the repository.
 
-**2. Optional: check that this machine can run the tests.** skydeck itself needs no `npm ci`: it has
-no runtime dependencies, and this installs the development tools only (TypeScript, Prettier,
-`@types/node`).
-
-```sh
-npm ci
-npm run check
-```
-
-**3. Check that skydeck starts.**
+**2. Check that skydeck starts.**
 
 ```sh
 bin/skydeck --version
@@ -93,14 +86,14 @@ skydeck needs Node.js 24.12 or newer but found 20.20.2; set SKYDECK_NODE to the 
 Then name the newer binary (adjust the path) and try again:
 
 ```sh
-export SKYDECK_NODE="$HOME/.nvm/versions/node/v24.19.0/bin/node"
-bin/skydeck --version
+SKYDECK_NODE="$HOME/.nvm/versions/node/v24.19.0/bin/node" bin/skydeck --version
 ```
 
-`install` links that binary as `<dataDir>/node`, and from then on the launcher uses the link, so the
-`export` is only needed until the install has run.
+Put the same `SKYDECK_NODE=...` in front of `bin/skydeck install` in the next step. `install` links
+that binary as `<dataDir>/node`, and from then on the launcher uses the link, so the variable is
+needed only for the install itself.
 
-**4. Install.**
+**3. Install.**
 
 ```sh
 bin/skydeck install
@@ -129,7 +122,8 @@ Add them? [y/N]
 ```
 
 Answer `y` (or `yes`). Anything else, or the end of input, is a no: install prints
-`settings not changed`, exits 1 and leaves no folder, database or link behind. After a yes:
+`settings not changed`, exits 1 and leaves no skydeck folder, database or link behind (the launcher's
+compile cache, `~/.cache/skydeck`, is made by every run). After a yes:
 
 ```
 linked /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
@@ -155,7 +149,7 @@ shows `reading transcripts n/m`.
 Running `install` again changes nothing: it prints `hook entries already present` and makes no
 backup.
 
-**5. Put `~/.local/bin` on `PATH`.** Install creates the folder and the link `~/.local/bin/skydeck`.
+**4. Put `~/.local/bin` on `PATH`.** Install creates the folder and the link `~/.local/bin/skydeck`.
 
 ```sh
 command -v skydeck
@@ -168,7 +162,7 @@ the folder exists) or add this line to `~/.bashrc` (or `~/.zshrc`):
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-**6. Check the installation.**
+**5. Check the installation.**
 
 ```sh
 skydeck doctor
@@ -195,14 +189,26 @@ ok       terminal: here (sessions start in the terminal skydeck runs in)
 ```
 
 `doctor` exits 1 when any line starts with `problem`. "Checking" below says what each check means.
+If you cloned with an SSH key and never logged `gh` in, the `gh` line is a `problem` and the exit
+code is 1: run `gh auth login`.
 
-**7. Look at it work.** Start `claude` in some project folder, then, in another terminal:
+**6. Look at it work.** Start `claude` in some project folder, then, in another terminal:
 
 ```sh
 skydeck ls
 ```
 
 The steps to try by hand are in [manual-checks.md](manual-checks.md).
+
+**7. Optional: check that this machine can run the tests.** skydeck itself needs no `npm ci`: it has
+no runtime dependencies, and this installs the development tools only (TypeScript, Prettier,
+`@types/node`). The tests run with the `node` on your `PATH`, which therefore must be 24.12 or newer
+here (`SKYDECK_NODE` is not used by `npm`).
+
+```sh
+npm ci
+npm run check
+```
 
 ## What install changes
 
@@ -223,7 +229,10 @@ Install **refuses**, before it creates anything, when:
 - a path it wants to link already holds something that is not a symbolic link
   (`... exists and is not a symbolic link; move it away and run skydeck install again`);
 - the settings file cannot be read or is not JSON (`settings.json is not valid JSON: ...`);
-- the settings path is a symbolic link to nothing, or Claude Code's folder does not exist
+- the settings path is a symbolic link to nothing
+  (`<path> is a symbolic link to <target>, which does not exist; create that file or remove the link,
+  then run skydeck install again`);
+- there is no settings file and Claude Code's folder does not exist either
   (`Claude Code's directory ... does not exist; run claude once, or set claudeHome`). It never
   creates Claude Code's folder.
 
@@ -291,7 +300,7 @@ skydeck: /home/you/.config/skydeck/config.json: "claudeHome" must be an absolute
 | Variable | Effect |
 |---|---|
 | `SKYDECK_NODE` | The `node` binary the launcher runs. It wins over the link `<dataDir>/node`, which wins over `node` on `PATH`. |
-| `SKYDECK_HOME` | Replaces the three skydeck folders with `$SKYDECK_HOME/data`, `/state` and `/config`. Meant for tests, and for trying skydeck out in a scratch folder. |
+| `SKYDECK_HOME` | Replaces the three skydeck folders with `$SKYDECK_HOME/data`, `/state` and `/config`. Meant for tests. It moves skydeck's own folders only: to try skydeck out in a scratch folder, point `HOME` (the `~/.local/bin/skydeck` link) and `CLAUDE_CONFIG_DIR` (the settings file) there as well, or install writes to the real ones. |
 | `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` | Move the folders of the same names (to `.../skydeck`), unless `SKYDECK_HOME` is set. |
 | `CLAUDE_CONFIG_DIR` | Claude Code's folder, when `config.json` has no `claudeHome`. |
 | `NODE_COMPILE_CACHE`, `XDG_CACHE_HOME` | Where the cache of compiled modules is kept: `$NODE_COMPILE_CACHE`, else `$XDG_CACHE_HOME/skydeck/compile-cache`, else `~/.cache/skydeck/compile-cache`. |
@@ -319,9 +328,10 @@ skydeck runs for each one is:
 wezterm cli --no-auto-start spawn --domain-name <domain> --cwd <session directory> -- claude --resume <id> ...
 ```
 
-- `--domain-name` is left out when `wezterm.domain` is `null`. Set it when the tab must open in a
-  particular WezTerm domain, for example the one that runs your WSL distribution (a domain WezTerm
-  makes for a WSL distribution is named like `WSL:Ubuntu`).
+- `--domain-name` is left out when `wezterm.domain` is `null`, which is the place to start. Set it
+  when the tab must open in a particular WezTerm domain, for example the one that runs your WSL
+  distribution; the domains are the ones in your WezTerm configuration (a domain WezTerm makes for a
+  WSL distribution is named like `WSL:Ubuntu`).
 - `--no-auto-start` is deliberate. With no WezTerm window open the call fails, and skydeck takes its
   fallback (it prints the command). Without the flag WezTerm would start a hidden server, and the
   session would run where nobody can see it. So open a WezTerm window first, and run skydeck from it.
@@ -451,7 +461,7 @@ Sessions and transcripts live in Claude Code's folder, and skydeck only reads th
 
 | You see | Do |
 |---|---|
-| `skydeck needs Node.js 24.12 or newer but found ...` | Set `SKYDECK_NODE` to a newer `node` (Install, step 3), then run `bin/skydeck install` so that the link `<dataDir>/node` points at it. |
+| `skydeck needs Node.js 24.12 or newer but found ...` | Set `SKYDECK_NODE` to a newer `node` (Install, step 2), then run `bin/skydeck install` so that the link `<dataDir>/node` points at it. |
 | `skydeck: cannot run 'node'; install Node.js or set SKYDECK_NODE ...` (exit 127) | There is no `node` on `PATH` and no working link. Install Node.js 24.12 or newer, or set `SKYDECK_NODE`. |
 | `skydeck: not started through bin/skydeck` | A `--here` start needs the launcher. Run skydeck as `~/.local/bin/skydeck` or `bin/skydeck`, not as `node bin/bootstrap.mjs`. |
 | `doctor`: `no SessionStart hook entry ...` | Run `skydeck install`. Claude Code may have rewritten its settings file. |

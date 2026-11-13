@@ -65,7 +65,7 @@ skydeck ls
 ```
 
 Expected: a row for the session in the state `waiting`. Its title is the start time and the folder
-name (`2026-11-13 10:02 skydeck-try`) until Claude Code gives the session a name.
+name (`2026-11-13 10:02 skydeck-try`, the time in UTC) until Claude Code gives the session a name.
 
 In A, type a prompt that takes some seconds to answer (ask it to list the files of the folder and
 explain each). While it answers, `skydeck ls` in S shows `working`. When the answer is done, it shows
@@ -126,8 +126,9 @@ Then exit that session and try the tab variants.
   `is being resumed ... try again in <n> s`: the printed command may be run by you.)
 - With `"terminal": "wezterm"` ([install.md](install.md), "WezTerm on WSL"), from a terminal in a
   WezTerm window: `skydeck resume <ref> --tab` opens a new tab that runs `claude` on that session, and
-  prints nothing. Run the same command from a terminal while no WezTerm window is open: it prints a
-  line with the reason and the command to run by hand, and exits 1.
+  prints nothing. Exit that session (it is running, so a second resume is refused). Then run the same
+  command from a terminal while no WezTerm window is open: it prints a line with the reason and the
+  command to run by hand, and exits 1.
 
 ## 6. Terminal closed in the middle of a turn
 
@@ -168,7 +169,8 @@ Under each entry is its command: `cd -- <folder> && claude --resume <session id>
 skydeck restore
 ```
 
-Expected: the same list, then the prompt `Toggle numbers, Enter to start, q to cancel: `. Press Enter.
+Expected: the same list without the command lines (only `--dry-run` prints them), then the prompt
+`Toggle numbers, Enter to start, q to cancel: `. Press Enter.
 
 - With `"terminal": "wezterm"`, run from a WezTerm window: tabs open (at most `restoreBatch`, default 3,
   at a time), skydeck prints `started <short id> <title>` for each session when it reports its
