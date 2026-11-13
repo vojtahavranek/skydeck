@@ -241,8 +241,28 @@ test('showJson: the session object, then note, launch, unknownFlags, links and h
   assert.deepEqual(json.launch, ['claude', '--model', 'opus']);
   assert.deepEqual(json.unknownFlags, []);
   assert.deepEqual(json.holders, [
-    { pid: 4242, bootId: BOOT_A, procStart: 100, since: '2026-11-12T08:57:00.000Z' },
+    {
+      pid: 4242,
+      bootId: BOOT_A,
+      procStart: 100,
+      since: '2026-11-12T08:57:00.000Z',
+      scripted: false,
+    },
   ]);
+});
+
+test('showJson: a holder that is a scripted run has scripted true', () => {
+  const row = listRow({
+    id: S1,
+    session: ds({ id: S1, holders: [holder(5555, T0, 777, true), holder(4242, T0 - MIN)] }),
+  });
+  assert.deepEqual(
+    showJson(row, []).holders.map((h) => [h.pid, h.scripted]),
+    [
+      [5555, true],
+      [4242, false],
+    ],
+  );
 });
 
 test('showJson: doneAt is the time the session was marked done, null when it is not done', () => {

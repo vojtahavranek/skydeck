@@ -63,6 +63,8 @@ export interface HolderJson {
   bootId: string;
   procStart: number | null;
   since: string;
+  /** The holder is a scripted run (`claude -p`, an SDK run; design 5.3). */
+  scripted: boolean;
 }
 
 export interface ShowJson extends SessionJson {
@@ -131,6 +133,7 @@ function holderJson(holder: Holder): HolderJson {
     bootId: holder.process.bootId,
     procStart: holder.process.procStart,
     since: isoFromNs(holder.sinceNs),
+    scripted: holder.scripted,
   };
 }
 

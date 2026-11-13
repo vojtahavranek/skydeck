@@ -2218,7 +2218,7 @@ export interface SessionJson {
 }
 export interface ListJson { version: 1; generatedAt: string; sessions: SessionJson[] }
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
-export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
+export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string; scripted: boolean }   // scripted: ruled in fix 1
 export interface ShowJson extends SessionJson {
   doneAt: string | null; note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[];
 }
@@ -4127,7 +4127,7 @@ export interface SessionJson {
 }
 export interface ListJson { version: 1; generatedAt: string; sessions: SessionJson[] }
 export interface LinkJson { kind: LinkKind; from: string; to: string; at: string }
-export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string }
+export interface HolderJson { pid: number; bootId: string; procStart: number | null; since: string; scripted: boolean }   // scripted: ruled in fix 1
 export interface ShowJson extends SessionJson { doneAt: string | null; note: string | null; launch: string[] | null; unknownFlags: string[]; links: LinkJson[]; holders: HolderJson[] }
 export function sessionJson(row: ListRow): SessionJson;
 export function listJson(model: ListModel): ListJson;
@@ -4171,7 +4171,7 @@ and `ls --json` are written by `jsonText`; the JSON holds the note and the launc
   (`Object.keys` compared), times as `isoFromNs`, `dir ''` when null, PR `repo 'o/r'`, `okAt` ISO or null.
 - `listJson` → `{ version: 1, generatedAt: isoFromNs(model.generatedAtNs), sessions: <flatRows order> }`.
 - `showJson` → the session object followed by `note`, `launch`, `unknownFlags`, `links` (only links from/to the row, by time,
-  `at` ISO), `holders` (`pid`, `bootId`, `procStart`, `since`).
+  `at` ISO), `holders` (`pid`, `bootId`, `procStart`, `since`, `scripted` — ruled in fix 1).
 - `formatList` of two groups → `'ABC-123\n  <row>\n\nno group\n  <row>\n'`; empty → `'no sessions\n'`.
 - `formatShow` of a row whose `session.launch` is `['claude','--model','opus']` contains `'id:        ' + S1`,
   `'launch:    claude --model opus'` (the recorded command, `shellJoin`), and `'launch:    unknown'` when `launch` is null;

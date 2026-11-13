@@ -455,7 +455,9 @@ Times are UTC ISO 8601 with milliseconds. Sessions are in list order. A pull req
 `review`, `checks` and `okAt` are null until it has been fetched. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
 `launch` (argument list or null), `unknownFlags` (the names of the flags in `launch` that skydeck
-does not know; `[]` without a launch command), `links` and `holders` added. The text of `show` prints a note sanitised line by line (7.4); the
+does not know; `[]` without a launch command), `links` and `holders` added; each holder is
+`{ "pid", "bootId", "procStart", "since", "scripted" }`, where `scripted` (`true` or `false`) says
+whether the holder is a scripted run (5.3). The text of `show` prints a note sanitised line by line (7.4); the
 JSON of `show` holds the note as stored, with the characters a terminal would act on written as `\uXXXX`
 escapes, so that it is safe to print and still parses back to the exact text.
 
