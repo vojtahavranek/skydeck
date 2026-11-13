@@ -392,8 +392,9 @@ token that starts with `-` and has more than one character), so a prompt written
 such a flag is taken as one of its values and stays with the stored launch command (principle 4);
 `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value
 (`-rabc` is `--resume abc`), and a token of several short flags (`-cp`) is one flag, removed as a
-whole when any flag in it is removed; a lone `-` is a value; `--` ends the flags, and it and
-everything after it are positional arguments.
+whole when any flag in it is removed. After a short flag without a value, a `-` starts a new
+token in the same way: `-c-model` is `-c --model`, and `-c-` is `-c --`. A lone `-` is a value;
+`--` ends the flags, and it and everything after it are positional arguments.
 
 - Removed: `--resume`/`-r` and its value, `--continue`/`-c`, `--session-id` and its value,
   `--fork-session`, `--name`/`-n` and its value, `--worktree`/`-w` and its value, `--bg`,

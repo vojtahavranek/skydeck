@@ -773,8 +773,9 @@ export interface FlagSpec {
 }
 
 /**
- * Claude Code 2.1.323 flags: every root flag the program declares, those hidden from `claude --help`
- * included (`test/fixtures/claude/flags-2.1.323.json` is its own table; a test compares the two).
+ * Claude Code 2.1.323 flags: every root flag the program declares, those hidden from
+ * `claude --help` included. `test/fixtures/claude/flags-2.1.323.json` is Claude Code's own table;
+ * a test compares the two.
  */
 export const FLAGS: readonly FlagSpec[] = [
   // removed at resume (7.6)
@@ -946,10 +947,13 @@ export type ParsedArg =
  *   a short flag is read letter by letter: a no-value flag lets the token go on (a cluster, `-cp`);
  *   a value-taking flag ends it and takes the rest of the token, `=` included, as its value when
  *   there is a rest (`-rabc` is `--resume abc`, one token, nothing more consumed), otherwise its
- *   value follows by its shape; a letter that is not in the table makes the whole token an unknown
- *   flag, whose `name` is that letter alone (`-Zabc` is `-Z`, `-cZfix` is `-Z`). `name` of a known
- *   flag is the token without the glued value; `spec` is that of the first letter with
- *   `remove: true`, else of the last letter;
+ *   value follows by its shape; after a no-value flag, a '-' starts a new token, the rest of the
+ *   token with one more '-' in front (`-c-model opus` is `-c --model opus`; `-c-` is `-c --`, which
+ *   ends the flags: every later token is positional); a letter that is not in the table makes the
+ *   whole token an unknown flag, whose `name` is that letter alone (`-Zabc` is `-Z`, `-cZfix` is
+ *   `-Z`), or the long flag's name (`-c-frob` is `--frob`). `name` of a known flag is the token
+ *   without the glued value; `spec` is that of the first flag in the token with `remove: true`,
+ *   else of the last;
  * - shape none: no value; one: the next token whatever it is; optional: the next token if it
  *   exists and is not flag-like; many: the next token whatever it is, then every following token up
  *   to the next flag-like one (as Claude Code's parser does). A token is flag-like when it starts
@@ -2231,6 +2235,12 @@ flag of its own and not `-d` with a value, `--max-turns` takes one.
 ['-n=x','y']                       → F['-n=x']           values ['=x'], P['y']
 ['-cp','x']                        → F['-cp'], P['x']                       (cluster of no-value flags)
 ['-cn','foo']                      → F['-cn','foo']      values ['foo']     (cluster ending in a value flag)
+['-c-model','opus']                → F['-c-model','opus'] values ['opus']          (`-c` then `--model opus`)
+['-c-model=opus','x']              → F['-c-model=opus']  values ['opus'], P['x']
+['-c-','--model','opus']           → F['-c-'], P['--model'], P['opus']              (`-c` then `--`: the flags end)
+['-p-','x']                        → F['-p-'], P['x']
+['-c-frob','x']                    → U['-c-frob','x']    values ['x']               (name '--frob')
+['-n-foo','x']                     → F['-n-foo'], P['x']                            (the value of `-n` is '-foo')
 ['-cnfoo','x']                     → F['-cnfoo'], P['x']                    (values ['foo'])
 ['-cZ','x']                        → U['-cZ','x']                           (an unknown letter: unknown as a whole; its `name` is '-Z', and '-Zabc' is '-Z' too)
 ['-d2e']                           → F['-d2e']           values []          (a flag's own name wins over the letters)
@@ -2238,8 +2248,8 @@ flag of its own and not `-d` with a value, `--max-turns` takes one.
 ['--add-dir','a','-','--verbose']  → F['--add-dir','a','-'], F['--verbose'] (a lone '-' is a value)
 ```
 
-The `spec` of a cluster is that of its first letter with `remove: true`, else of its last letter:
-`-pc` and `-rabc` have `remove: true`, `-pv` and `-dv` do not.
+The `spec` of a cluster is that of its first flag with `remove: true`, else of its last flag:
+`-pc`, `-rabc` and `-c-model` have `remove: true`, `-pv`, `-dv`, `-p-` and `-p-model` do not.
 
 `absolutizePathFlags` (`exists` = membership in a given set):
 
@@ -2282,6 +2292,10 @@ same, label 'fix retry'                                            → [...R,'-n
 ['claude','--','-p']                                               → R
 ['claude','--continue','--worktree','w','--background','--resume=x','--name','n'] → R   (long forms)
 ['claude','-rabc','--fork-session']                                → R   (glued short flags)
+['claude','-c-model','opus','--verbose']                           → [...R,'--verbose']   (`-c` is removed, so the token goes whole)
+['claude','-c-','--model','opus']                                  → R   (`-c --`: the rest is positional)
+['claude','-p-model','opus']                                       → [...R,'-p-model','opus']
+['claude','-p-','prompt']                                           → [...R,'-p-']
 ['claude','-nfoo','--model','opus']                                → [...R,'--model','opus']
 ['claude','-wfeat','fix the bug']                                  → R
 ['claude','-cp','fix it']                                          → R   (a cluster with a removed flag is removed whole)
@@ -2314,6 +2328,10 @@ launch `['claude', name, ...V]` gives `R`; with `remove: false` it gives `[...R,
 ['claude','--add-dir','/x','fix it']                               → unchanged   (D18: the prompt is the flag's value)
 ['claude','--frobnicate','v','prompt']                             → ['claude','--frobnicate']   (an unknown flag: its bare name only)
 ['claude','--frobnicate=fix it','--model=opus']                    → ['claude','--frobnicate','--model=opus']
+['claude','-c-model','opus','--verbose']                           → ['claude','--verbose']
+['claude','-p-model','opus','prompt']                              → ['claude','-p-model','opus']
+['claude','-p-','--model','opus']                                  → ['claude','-p-']   (`-p --`: the rest is positional)
+['claude','-c-frob','x','--model','opus']                          → ['claude','--frob','--model','opus']
 ['claude','-cZ','x','-Zabc','y']                                   → ['claude','-Z','-Z']   (an unknown letter: that letter alone)
 ['claude','-cZfix the login bug','--model','opus','-Zsecret']      → ['claude','-Z','--model','opus','-Z']
 ['claude','--model','opus','--','-p','text']                       → ['claude','--model','opus']
@@ -2336,10 +2354,12 @@ the program and what follows `--` are never named.
 `['claude','-pc']`, `['claude','-hp']` → true; `['claude']`, `[]`, `['claude','--model','opus','-c']`,
 `['claude','--system-prompt','-p']`, `['claude','--','-p']`, `['-p']` (the program), `['claude','-np']`
 (`-n` takes the rest of its token), `['claude','-pZ']` (an unknown letter) → false; and
-`isPrintRun(['claude','-cp','hi'])` is true while `isPrintRun(storableArgv(['claude','-cp','hi']))` is false.
+`isPrintRun(['claude','-cp','hi'])` is true while `isPrintRun(storableArgv(['claude','-cp','hi']))` is false;
+`['claude','-p-']`, `['claude','-p-model','opus']` and `['claude','-cp-']` → true; `['claude','-c-','-p']`, `['claude','-c-p']`
+and `['claude','-c-model','opus']` → false.
 
 A property test with a fixed seed (a small generator in the test file) builds 3000 random commands
-from the table's names, `--`, `-`, `''`, clusters, glued short flags, unknown flags and plain words, and
+from the table's names, `--`, `-`, `''`, clusters (`-cp`, `-c-`, `-p-`, `-c-model`, …), glued short flags, unknown flags and plain words, and
 checks: the tokens of `parseLaunchArgs` give back the input; `storableArgv` twice equals once; the
 `resume` equivalence above; `unknownFlags` of stored equals of recorded; and that no positional, no
 removed flag and no value of an unknown flag survives in the stored command.
@@ -2676,8 +2696,8 @@ export function hookInput(event: 'SessionStart' | 'SessionEnd', sessionId: strin
   and gives the detail its file name says.
 - `scripted` (the `SessionStart` is built with `argv` and `entrypointEnv`; `parse(fields).scripted`):
   `['claude','-p','hi']` with no entry point set (`entrypointEnv ''`) → true; `['claude','--print']` and `'cli'` → true;
-  `['claude','-c','-p']` and `['claude','-cp','hi']` with `'cli'` → true, while the stored `argv` is `['claude']`
-  (the answer comes from the command as recorded); `['claude','--','-p']` and `'cli'` → false;
+  `['claude','-c','-p']` and `['claude','-cp','hi']` with `'cli'` → true, while the stored `argv` is `['claude','-p']` for the first
+  (`-p` is a kept flag) and `['claude']` for the second (`-cp` is dropped whole): the answer comes from the command as recorded; `['claude','--','-p']` and `'cli'` → false;
   `['claude']` with `'sdk-cli'` → true; with `'sdk-ts'` → true; `argv null` with `'sdk-py'` → true; `['claude']` with `'cli'` → false;
   `['claude']` with `''` → false; `argv null` with `''` → false. A `SessionEnd` has no command: with `'sdk-cli'` → true, with `'cli'` → false,
   and an `argv_b64` line carrying `-p` on a `SessionEnd` with `'cli'` → false.
