@@ -1652,7 +1652,7 @@ export function setGroup(deck: Deck, sessionId: string, group: string | null): v
 export function setNote(deck: Deck, sessionId: string, note: string | null): void;
 export function markDone(deck: Deck, sessionId: string): void;     // doneAtNs = clock now
 export function markUndone(deck: Deck, sessionId: string): void;   // doneAtNs = null
-/** prKey, ensurePr, attachPr manual. UsageError "not a GitHub pull-request URL: <text>" when prKey is null. */
+/** prKey, then ensurePr and attachPr manual in one transaction. UsageError "not a GitHub pull-request URL: <text>" when prKey is null (<text> is sanitised: it is shown on a terminal). */
 export function attachManualPr(deck: Deck, sessionId: string, url: string): PrKey;
 /** prKey, detachPr. UsageError when invalid; SkydeckError (1) "<url> is not attached to <short>" when nothing was detached. */
 export function detachSessionPr(deck: Deck, sessionId: string, url: string): PrKey;
@@ -1861,8 +1861,11 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
 // src/cli/notes.ts (task 15)
 /**
  * Writes the note to <stateDir>/note-<sessionId>.md, runs the editor (D14) through
- * platform.runner.runInteractive, stores what comes back, removes the file. UsageError when stdin
- * is not a terminal; SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit.
+ * platform.runner.runInteractive, stores what comes back, removes the file (also when the editor
+ * fails). The file is created with mode 0o600. UsageError when stdin is not a terminal;
+ * SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit; SkydeckError "editor did
+ * not finish: <program> could not be run or was killed" when runInteractive returns null; SkydeckError
+ * when the editor removed the file (note unchanged: a missing file is not an empty note).
  */
 export function editNote(ctx: Context, deck: Deck, sessionId: string): Promise<void>;
 
@@ -3975,6 +3978,7 @@ S6 and S9 are absent; `getKv('dropped_scripted')` is `'1'` afterwards; the run e
 
 **Files**
 - Create: `src/sessions/meta.ts`, `src/cli/notes.ts`
+- Create (test helpers, ruled by the plan owner): `test/helpers/session-files.ts` (transcripts on disk, a running process, `twoSessions`, `withRunner`), `test/helpers/command-cases.ts` (the `--help` / missing-ref / unknown-ref cases of the five `<ref>` commands)
 - Create: `src/cli/commands/label.ts`, `group.ts`, `note.ts`, `done.ts`, `undone.ts`, `pr.ts` (each `export const command: Command`)
 - Modify: `docs/design.md` 7.1 (D14), 7.3 (D11: `pr add` fetches at once), 7.5 (D24)
 - Test: `test/sessions/meta.test.ts`, `test/cli/notes.test.ts`, and `test/cli/commands/<name>.test.ts` for the six commands
@@ -4000,7 +4004,7 @@ Command behaviour: each resolves `<ref>` with `resolveRef(ref, loadRows(deck))` 
 `withDeck(ctx, { refresh: true }, …)`. The text of `label`/`group` is the remaining positionals
 joined by one space (D24), cleaned with `cleanLabel`/`cleanGroup`; no text clears. Each command
 prints one confirmation line on stdout: `0b5f3c1e label: fix retry`, `0b5f3c1e label cleared`,
-`0b5f3c1e group: ABC-9`, `0b5f3c1e note saved`, `0b5f3c1e done`, `0b5f3c1e undone`,
+`0b5f3c1e group: ABC-9`, `0b5f3c1e group cleared`, `0b5f3c1e note saved`, `0b5f3c1e note cleared` (when the note ends up empty: `--set ''`, or an emptied editor buffer), `0b5f3c1e done`, `0b5f3c1e undone`,
 `0b5f3c1e: attached https://github.com/o/r/pull/1 (<status>)` — `<status>` is what `formatPrLine` prints after the url and its two spaces —, `0b5f3c1e: detached https://github.com/o/r/pull/1`.
 `pr add` attaches, then fetches that pull request at once with `fetchPrs({ runner, clock, store, env: ctx.platform.env }, [url])` (D11; same
 timeout); a failed fetch leaves it `cant-read` and the command still exits `EXIT.ok`.
