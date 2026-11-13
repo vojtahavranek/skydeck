@@ -181,6 +181,30 @@ describe('bin/skydeck: the handoff', () => {
     assert.equal(result.stdout, '[/my/cache]\n');
   });
 
+  test('the program does not see the cache marker either', (t) => {
+    const r = rig(t);
+    handoff(r, {
+      cwd: r.s.root,
+      argv: ['/bin/sh', '-c', 'echo "[${SKYDECK_LAUNCHER_CACHE-unset}]"'],
+    });
+
+    const result = run(r, { STUB_SOURCE: r.source });
+
+    assert.equal(result.stdout, '[unset]\n');
+  });
+
+  test("a SKYDECK_LAUNCHER_CACHE the caller had is still the caller's for the program", (t) => {
+    const r = rig(t);
+    handoff(r, {
+      cwd: r.s.root,
+      argv: ['/bin/sh', '-c', 'echo "[${SKYDECK_LAUNCHER_CACHE-unset}]"'],
+    });
+
+    const result = run(r, { STUB_SOURCE: r.source, SKYDECK_LAUNCHER_CACHE: '/theirs' });
+
+    assert.equal(result.stdout, '[/theirs]\n');
+  });
+
   test('an empty NODE_COMPILE_CACHE of the caller stays empty for the program', (t) => {
     const r = rig(t);
     handoff(r, {
@@ -215,8 +239,11 @@ describe('bin/skydeck: the handoff', () => {
       'target',
       'root',
       'linked_node',
+      'data',
+      'state',
       'node',
       'cache',
+      'core_limit',
       'tmp',
       'handoff',
       'status',
