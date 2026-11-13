@@ -47,7 +47,7 @@ function fitTitle(title: string, budget: number): string {
   // that does not fit: one whole character is kept all the same.
   const head =
     clip(title, budget - ELLIPSIS.length) || String.fromCodePoint(title.codePointAt(0) ?? 0);
-  return head.length >= title.length ? title : head + ELLIPSIS;
+  return head.length + ELLIPSIS.length >= title.length ? title : head + ELLIPSIS;
 }
 
 /**

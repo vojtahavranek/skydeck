@@ -182,10 +182,27 @@ test('the input and the filter come before a message', () => {
   assert.equal(render(typing, SIZE)[9], '/b_');
 });
 
-test('a long input line is cut to the width', () => {
-  const model = press(open(), 'g', ...'x'.repeat(100));
+test('a long input line shows the end of the text and the cursor, not the start', () => {
+  const model = press(open(), 'g', ...'x'.repeat(90), 'y', 'z');
   const line = render(model, SIZE)[9] ?? '';
   assert.equal(line.length, 80);
+  assert.equal(line, 'group: …' + 'x'.repeat(69) + 'yz_');
+});
+
+test('a long filter shows the end of the text and the cursor', () => {
+  const line = render(press(open(), '/', ...'x'.repeat(100), 'q'), SIZE)[9] ?? '';
+  assert.equal(line, '/…' + 'x'.repeat(76) + 'q_');
+});
+
+test('a long input made of two-unit characters is cut between characters', () => {
+  const line = render(press(open(), 'g', ...'😀'.repeat(60)), SIZE)[9] ?? '';
+  assert.ok(line.length <= 80, String(line.length));
+  assert.match(line, /^group: …(?:😀)+_$/u);
+});
+
+test('a long input that fits is shown whole, with the cursor', () => {
+  const text = 'x'.repeat(72);
+  assert.equal(render(press(open(), 'g', ...text), SIZE)[9], `group: ${text}_`);
 });
 
 test('a message is one line without escape sequences or control characters', () => {

@@ -20,7 +20,7 @@ export interface TuiModel {
   mode: TuiMode;
   input: TuiInput | null;
   selected: string | null; // id under the cursor
-  scroll: number; // first body line shown
+  scroll: number; // first body line shown; `render` keeps it while the selected line is in view, else centres it; `reduce` never writes it
   message: string | null; // cleared by the next key
   nowNs: Ns;
 }

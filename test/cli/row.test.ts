@@ -90,6 +90,11 @@ test('formatRow: a one-character title is never replaced by something longer', (
   assert.equal(formatRow(row, T0, 1), 'working     T    0s  0b5f3c1e');
 });
 
+test('formatRow: a title the ellipsis would not make shorter is kept whole', () => {
+  const row = listRow({ id: S1, state: 'working', title: 'ab', sinceNs: T0 });
+  assert.equal(formatRow(row, T0, 1), 'working     ab    0s  0b5f3c1e');
+});
+
 test('formatRow: the cut never splits a surrogate pair', () => {
   const row = listRow({ id: S1, state: 'working', title: '😀😀😀😀😀😀😀😀😀😀', sinceNs: T0 });
   // Room for three title units: one whole emoji (two units) and the ellipsis.

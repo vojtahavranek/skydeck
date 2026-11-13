@@ -541,6 +541,18 @@ test('a refresh that makes the row under a label input vanish cancels the input:
   assert.deepEqual(press(next, 'enter').effect, { kind: 'none' });
 });
 
+test('a refresh that only hides the row under the detail or an input (done, showAll off) closes it too', () => {
+  // The row is still known, it is just not visible any more: what was open must not carry over to
+  // the row the cursor moves to (a second `d` would mark a session the user did not choose).
+  const hidden = listRow({ id: S1, group: 'A', state: 'waiting', label: 'alpha', done: true });
+  for (const keys of [['enter'], ['l', 'x']]) {
+    const next = withRows(press(open(), ...keys).model, [hidden, R2, R3], T0, false);
+    assert.equal(next.mode, 'list', keys.join());
+    assert.equal(next.input, null, keys.join());
+    assert.equal(next.selected, S2, keys.join());
+  }
+});
+
 test('a refresh that leaves the selected row alone leaves the detail and the input open', () => {
   const detail = press(open(), 'enter').model;
   assert.equal(withRows(detail, [R1, R2, R3], T0, false).mode, 'detail');

@@ -16,18 +16,45 @@ const MARK_SELECTED = '> ';
 const MARK_OTHER = '  ';
 const NOTE_INDENT = '  ';
 const CURSOR = '_';
+const ELLIPSIS = '…';
+const LOW_SURROGATE_FIRST = 0xdc00;
+const LOW_SURROGATE_LAST = 0xdfff;
 
 function titleLine(model: TuiModel): string {
   const filter = model.filter === '' ? '' : `  filter: ${sanitize(model.filter)}`;
   return `skydeck  ${visibleRows(model).length} sessions${filter}${model.showAll ? '  (all)' : ''}`;
 }
 
-function lastLine(model: TuiModel): string {
+/** The end of `text` that is at most `units` UTF-16 units long and does not start inside a surrogate pair. */
+function endOf(text: string, units: number): string {
+  let start = Math.max(0, text.length - units);
+  const first = text.charCodeAt(start);
+  if (start > 0 && first >= LOW_SURROGATE_FIRST && first <= LOW_SURROGATE_LAST) {
+    start += 1;
+  }
+  return text.slice(start);
+}
+
+/**
+ * `<prefix><text>_`. When it is longer than `columns` the start of the text gives way to an
+ * ellipsis, so that the end of it and the cursor, where the user is typing, stay in view.
+ */
+function typingLine(prefix: string, rawText: string, columns: number): string {
+  const text = sanitize(rawText);
+  const line = `${prefix}${text}${CURSOR}`;
+  const room = columns - prefix.length - ELLIPSIS.length - CURSOR.length;
+  if (line.length <= columns || room < 0) {
+    return line;
+  }
+  return `${prefix}${ELLIPSIS}${endOf(text, room)}${CURSOR}`;
+}
+
+function lastLine(model: TuiModel, columns: number): string {
   if (model.mode === 'input' && model.input !== null) {
-    return `${model.input.purpose}: ${sanitize(model.input.text)}${CURSOR}`;
+    return typingLine(`${model.input.purpose}: `, model.input.text, columns);
   }
   if (model.mode === 'filter') {
-    return `/${sanitize(model.filter)}${CURSOR}`;
+    return typingLine('/', model.filter, columns);
   }
   return model.message === null ? HELP : sanitize(model.message);
 }
@@ -125,7 +152,7 @@ export function render(model: TuiModel, size: { columns: number; rows: number })
   if (rows === 0) {
     return [];
   }
-  const last = clip(lastLine(model), columns);
+  const last = clip(lastLine(model, columns), columns);
   if (rows === 1) {
     return [last];
   }
