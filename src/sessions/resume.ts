@@ -28,6 +28,14 @@ import { describeError } from './problems.ts';
 /** How long a resume lock holds when no `start` event for the session arrives. */
 export const LOCK_TTL_NS: Ns = 60n * NS_PER_SECOND;
 
+/**
+ * How long before a lock's time a start event may be dated and still be the resume's own, when the
+ * lock records an event id (the start's greater id already says it came after the lock). The wall
+ * clock can step back between taking the lock and the claude's start: under WSL it steps back about
+ * 1.7 s every 32 s, and such a start would be stamped before the lock.
+ */
+export const LOCK_START_TOLERANCE_NS: Ns = 5n * NS_PER_SECOND;
+
 const LOCK_PREFIX = 'resume_lock:';
 
 /**
@@ -126,6 +134,24 @@ export function lockEventId(value: string): number | null {
   return parseLock(value)?.afterEventId ?? null;
 }
 
+/**
+ * Whether the claude a resume started has started: the session has a start event of a real process
+ * (store.hasProcessStartSince) with an id greater than `afterEventId` (the latest event id the lock
+ * records) and dated at or after `sinceNs` — or, when `afterEventId` is not null, at most
+ * LOCK_START_TOLERANCE_NS before it (the clock may have stepped back; the id already says the start
+ * came later). With no id (a lock an earlier version wrote, or a session without events) the time is
+ * the only witness, and the rule stays exact. The lock (here) and restore's "started" use it.
+ */
+export function resumeStarted(
+  store: Store,
+  sessionId: string,
+  sinceNs: Ns,
+  afterEventId: number | null,
+): boolean {
+  const fromNs = afterEventId === null ? sinceNs : sinceNs - LOCK_START_TOLERANCE_NS;
+  return store.hasProcessStartSince(sessionId, fromNs, afterEventId);
+}
+
 /** How old the lock with this value is at `nowNs`, when it still holds; null when it is stale. */
 function freshAge(store: Store, sessionId: string, value: string, nowNs: Ns): Ns | null {
   const lock = parseLock(value);
@@ -135,11 +161,11 @@ function freshAge(store: Store, sessionId: string, value: string, nowNs: Ns): Ns
   const ageNs = nowNs - lock.takenNs;
   // A lock from far in the future cannot be from this clock: it would block for as long. A start
   // releases the lock only when it was stored after the lock was taken: one stored before it, but
-  // dated after it because the clock was ahead then, is not the resume's own.
+  // dated after it because the clock was ahead then, is not the resume's own (resumeStarted).
   if (
     ageNs >= LOCK_TTL_NS ||
     -ageNs >= LOCK_TTL_NS ||
-    store.hasProcessStartSince(sessionId, lock.takenNs, lock.afterEventId)
+    resumeStarted(store, sessionId, lock.takenNs, lock.afterEventId)
   ) {
     return null;
   }

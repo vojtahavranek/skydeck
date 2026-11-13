@@ -10,6 +10,7 @@ import type { Ns } from '../../src/platform/types.ts';
 import type { ListRow } from '../../src/sessions/list.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
 import {
+  LOCK_START_TOLERANCE_NS,
   LOCK_TTL_NS,
   acquireLock,
   checkResumable,
@@ -23,6 +24,7 @@ import {
   readLock,
   releaseLock,
   renewLock,
+  resumeStarted,
   settleFailedLaunch,
   sweepLocks,
 } from '../../src/sessions/resume.ts';
@@ -426,7 +428,8 @@ test('a start stored after the lock was taken releases it when it is dated at or
   const d = testDeck(t);
   const ahead = startAhead(d);
   acquireLock(d.deck, S1, { latestEventId: ahead });
-  startEvent(d, S1, T0 - 1n); // stored later, but dated before the lock: not this resume's
+  // Stored later, but dated more than the tolerance before the lock: an old start, not this resume's.
+  startEvent(d, S1, T0 - 6n * SEC);
   d.clock.setNs(T0 + 5n * SEC);
   assert.equal(isLockHeld(d.deck, S1), true);
   const started = startEvent(d, S1, T0 + 2n * SEC); // the claude the resume started
@@ -463,6 +466,51 @@ test('a scripted run or its end, stored after the lock, neither releases it nor 
     acquireLock(d.deck, S1, { latestEventId: scripted }); // it counts as the latest event
     assert.equal(lockOf(d, S1), `${T0 + 61n * SEC}:${scripted}`, kind);
   }
+});
+
+test('LOCK_START_TOLERANCE_NS is 5 seconds', () => {
+  assert.equal(LOCK_START_TOLERANCE_NS, 5n * NS_PER_SECOND);
+});
+
+test('a start stored after the lock and dated up to 5 s before it releases it: the clock stepped back', (t) => {
+  // This machine's clock steps back about 1.7 s every half minute: a claude that started after the
+  // lock is stamped before it. The greater id already says it came after the lock.
+  for (const [startNs, released] of [
+    [T0 - 1_700_000_000n, true],
+    [T0 - 5n * SEC, true],
+    [T0 - 5n * SEC - 1n, false],
+    [T0 - 6n * SEC, false],
+  ] as const) {
+    const d = testDeck(t);
+    const seen = startEvent(d, S1, T0 - 120n * SEC);
+    acquireLock(d.deck, S1, { latestEventId: seen });
+    startEvent(d, S1, startNs);
+    d.clock.setNs(T0 + 5n * SEC);
+    const what = `start at T0${startNs - T0} ns`;
+    assert.equal(isLockHeld(d.deck, S1), !released, what);
+    assert.equal(sweepLocks(d.deck), released ? 1 : 0, what);
+  }
+});
+
+test('resumeStarted: a greater id and a time from LOCK_START_TOLERANCE_NS before; without an id, the exact time', (t) => {
+  const d = testDeck(t);
+  const seen = startEvent(d, S1, T0 - 120n * SEC);
+  const started = startEvent(d, S1, T0 - 1_700_000_000n); // stamped after a step back of the clock
+  const { store } = d.deck;
+  assert.equal(resumeStarted(store, S1, T0, seen), true);
+  assert.equal(resumeStarted(store, S1, T0, started), false); // nothing stored after it
+  assert.equal(resumeStarted(store, S1, T0 + 4n * SEC, seen), false); // 5.7 s before: too early
+  assert.equal(resumeStarted(store, S1, T0, null), false); // no id: the time alone decides
+  assert.equal(resumeStarted(store, S1, T0 - 1_700_000_000n, null), true);
+});
+
+test('a lock that records no event id keeps the exact rule: a start before its time releases nothing', (t) => {
+  const d = testDeck(t);
+  writeLock(d, S1, `${T0}`);
+  startEvent(d, S1, T0 - 1_700_000_000n);
+  d.clock.setNs(T0 + 5n * SEC);
+  assert.equal(isLockHeld(d.deck, S1), true);
+  assert.equal(sweepLocks(d.deck), 0);
 });
 
 test('a lock that records no event id (an earlier skydeck wrote it) is released as before', (t) => {

@@ -824,6 +824,24 @@ test('a start event that names no process does not count as started: the session
   assert.notEqual(d.deck.store.getKv(lockKey(sid(1))), null);
 });
 
+test('a tab whose claude is stamped up to 5 s before restore read the clock counts as started: the clock stepped back', async (t) => {
+  for (const [stepBackNs, started] of [
+    [1_700_000_000n, true],
+    [6n * SEC, false],
+  ] as const) {
+    const { d, entries } = fiveToRestore(t);
+    // The wall clock steps back while the tab opens, so its claude's start is stamped earlier than
+    // the time restore read before opening (and earlier than its lock).
+    const tabs = fakeTabs(d, { onOpen: () => d.clock.setNs(d.clock.nowNs() - stepBackNs) });
+    const { outcome } = await run(d, tabs.terminal, entries.slice(0, 1));
+    const what = `stepped back ${stepBackNs} ns`;
+    assert.deepEqual(outcome.started, started ? [sid(1)] : [], what);
+    assert.deepEqual(outcome.timedOut, started ? [] : [sid(1)], what);
+    // Started: restore dropped its lock. Not counted: the lock stays, its tab may still start it.
+    assert.equal(d.deck.store.getKv(lockKey(sid(1))) === null, started, what);
+  }
+});
+
 test('a start stored before restore took its lock does not count as started, though it is dated later', async (t) => {
   const { d, entries } = fiveToRestore(t);
   // A claude of this boot (pid 5151, dead now) started sid(1) while the clock was ten minutes ahead.
