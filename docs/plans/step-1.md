@@ -703,7 +703,7 @@ export interface Store {
   readonly path: string;
   /** Closes the connection; a second call does nothing. */
   close(): void;
-  /** The connection's PRAGMA values (they are per connection, so tests and doctor read them here). */
+  /** The connection's PRAGMA values (they are per connection, so tests read them here). */
   connectionSettings(): { journalMode: string; synchronous: number; busyTimeout: number; foreignKeys: number };
   /** Runs fn inside BEGIN IMMEDIATE … COMMIT; rolls back and rethrows on error. Not re-entrant. */
   transaction<T>(fn: () => T): T;
@@ -721,9 +721,7 @@ export interface Store {
   latestEventOfProcess(bootId: string, pid: number, procStart: number | null, beforeNs: Ns): EventRow | null;
   /** Whether any event of that process has a non-null argv. */
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
-  /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean;
-  /** As hasStartSince, but only a start of a real process counts: pid not 0 and a process start time (proc_start not NULL). A start the hook wrote without them names no process that could hold the session. (Fix-2.) Only a start with an id greater than `afterEventId` counts (null: any): ids grow in the order events are stored, so a start stored before a given event is left out even when it is dated later. */
+  /** (Fix-2: `hasStartSince`, which counted a start without a process too and had no caller, is removed.) Whether a 'start' event for the session exists with time_ns >= sinceNs; only a start of a real process counts: pid not 0 and a process start time (proc_start not NULL). A start the hook wrote without them names no process that could hold the session. (Fix-2.) Only a start with an id greater than `afterEventId` counts (null: any): ids grow in the order events are stored, so a start stored before a given event is left out even when it is dated later. */
   hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;
   /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
   latestEventIdOfSession(sessionId: string): number | null;
@@ -2909,8 +2907,7 @@ export interface Store {
   events(): EventRow[];
   latestEventOfProcess(bootId: string, pid: number, procStart: number | null, beforeNs: Ns): EventRow | null;
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean;
-  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;  // afterEventId: fix-2
+  hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;  // afterEventId: fix-2 (hasStartSince removed)
   latestEventIdOfSession(sessionId: string): number | null;
   links(): LinkRow[];
   meta(sessionId: string): SessionMeta | null;
@@ -2957,9 +2954,9 @@ do not exist in the schema. Events are bound with `bigint` for every `*_ns` colu
 - `latestEventOfProcess(BOOT_A, 4242, 51234567, T0 + SEC)` with events at `T0`, `T0+2s` → the `T0` one;
   with `procStart null` it matches only rows whose `proc_start` is NULL; another boot → `null`.
 - `processHasLaunch`: a process whose only event has `argv null` → `false`; add one with argv → `true`.
-- With a start event at `T0`: `hasStartSince(S1, T0)` → `true`; `hasStartSince(S1, T0 + 1n)` → `false`; an `end` row does not count.
-- `hasProcessStartSince`: as `hasStartSince` (the same three cases), and a start with `pid 0`, one with `procStart null` and one with both → `false`
-  until a start with a pid and a `procStart` exists → `true` (`hasStartSince` counts all of them). (Fix-2.) With `afterEventId`: a start dated
+- `hasProcessStartSince` (null `afterEventId`): with a start event at `T0`, `(S1, T0)` → `true`, `(S1, T0 + 1n)` → `false`; an `end` row, an
+  `observed` row and another session's start do not count; a start with `pid 0`, one with `procStart null` and one with both → `false`
+  until a start with a pid and a `procStart` exists → `true`. (Fix-2.) With `afterEventId`: a start dated
   `T0+600s` stored first (id `a`) → `false` after `a`, `true` after `a − 1` and for `null`; a start stored next at `T0+1s` → `true` after `a`
   (and `false` from `T0+2s`, or after its own id).
 - `latestEventIdOfSession`: `null` for a session without events (another session's events do not count); otherwise the highest id of

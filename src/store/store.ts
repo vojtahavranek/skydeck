@@ -28,7 +28,7 @@ export interface Store {
   readonly path: string;
   /** Closes the connection; a second call does nothing. */
   close(): void;
-  /** The connection's PRAGMA values (they are per connection, so tests and doctor read them here). */
+  /** The connection's PRAGMA values (they are per connection, so tests read them here). */
   connectionSettings(): {
     journalMode: string;
     synchronous: number;
@@ -59,8 +59,6 @@ export interface Store {
   ): EventRow | null;
   /** Whether any event of that process has a non-null argv. */
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
-  /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean;
   /**
    * Whether a 'start' event of a real process for the session exists with time_ns >= sinceNs and an
    * id greater than `afterEventId` (null: any id): one with a pid (not 0) and a process start time.
@@ -535,17 +533,6 @@ class SqliteStore implements Store {
         bootId,
         int(pid),
         optIntParam(procStart),
-      ) !== undefined
-    );
-  }
-
-  hasStartSince(sessionId: string, sinceNs: Ns): boolean {
-    return (
-      this.#get(
-        `SELECT 1 AS found FROM events
-         WHERE session_id = ? AND kind = 'start' AND time_ns >= ? LIMIT 1`,
-        sessionId,
-        sinceNs,
       ) !== undefined
     );
   }
