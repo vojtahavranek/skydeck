@@ -560,14 +560,23 @@ it — the clock was ahead when it was written, then stepped back — is not the
 would otherwise make every lock of the session stale at once) or after 60 seconds — or at once when starting the session definitely failed and skydeck
 printed no command for it (the command holds a control character, or restore only reports the
 failure): nothing was started and nothing is left to run by hand, so the lock would only make the
-user wait. Where skydeck prints the command for the user to run, and after a timeout (the program
+user wait. When the lock holds an event id, a start dated up to 5 seconds before the lock counts too:
+the wall clock can step back between the lock and the start (measured on one WSL machine: about
+1.7 to 1.9 seconds every 32 seconds), and the resume's own start would then be stamped before the
+lock; a lock an earlier version wrote (the time alone) keeps the exact time. The id shows when a
+start was recorded, not when its process began, so a start stamped up to 5 seconds before the lock
+and recorded only after it releases the lock even when it is not the resume's own — another
+process on the session that began within those 5 seconds, is recorded late and is already gone,
+followed by a second resume before the first one's `claude` reports. That is accepted: the guard
+still refuses while any holder lives. Where skydeck prints the command for the user to run, and after a timeout (the program
 may have started), the lock stays for its 60 seconds. Whoever took a lock may renew it while it
 waits longer than that for the session to start (restore, 7.8), and renews or releases only the
 lock it wrote: one another skydeck took over is left alone. The lock
 is an entry `resume_lock:<session id>` in the database's `kv` table, holding the time it was
 taken in nanoseconds (so its age does not depend on any file's modification time) and the id of
-the session's latest event at that moment, which tells a start recorded after the lock from one
-recorded before it (event ids grow in the order events are recorded, whatever their times). Reading the
+the session's latest event at that moment (0 when it has none), which tells a start recorded after
+the lock from one recorded before it (event ids grow in the order events are recorded, whatever
+their times). Reading the
 lock and writing it happen in one database transaction, which no two skydecks hold at once, so
 of several resumes started together exactly one gets the lock. Inside that transaction the
 session's latest event is read again, and resume is refused ("the session's state changed while
@@ -647,7 +656,8 @@ nothing, so it needs neither `--yes` nor a terminal.
 through the guard of 7.6 and takes its lock, on state refreshed just before it: opening a tab
 takes time, and another skydeck may have resumed the session meanwhile. After starting a batch,
 restore waits until each of its sessions has a `start` event of a real process that counts by the
-lock's rule (7.6: recorded after restore took the lock, and dated at or after the batch started),
+lock's rule (7.6: recorded after restore took the lock, and dated at or after the batch started,
+or up to 5 seconds before it),
 checking once a second, for at most
 `restoreStartTimeoutSeconds` (default 120) counted from the start of the batch. Before each batch
 it reads `MemAvailable` from `/proc/meminfo` and stops (exit 5) when it is below

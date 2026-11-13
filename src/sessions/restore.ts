@@ -25,6 +25,7 @@ import {
   readLock,
   releaseLock,
   renewLock,
+  resumeStarted,
   settleFailedLaunch,
 } from './resume.ts';
 import type { PreparedLaunch } from './resume.ts';
@@ -221,11 +222,13 @@ interface Waiting {
 
 /**
  * Looks for the start events of `opened` once a second until all are there or the time is up. A
- * session has started when it has a start event of a real process at or after `sinceNs` that was
- * stored after restore took its lock (the rule of the lock, D16): one stored before, but dated later
- * because the clock was ahead then, is not the claude its tab started. At every look the locks of the sessions still waited for are renewed, the
- * last time when restore gives up on them: the wait (default 120 s) is longer than a lock holds
- * (60 s), and a tab that is slow to start claude must not let another resume start it again.
+ * session has started by the rule of the lock (resumeStarted, D16), with `sinceNs` as its time: a
+ * start event of a real process stored after restore took its lock, dated at or after `sinceNs` (or
+ * up to LOCK_START_TOLERANCE_NS before it, the clock having stepped back). One stored before the
+ * lock, but dated later because the clock was ahead then, is not the claude its tab started. At
+ * every look the locks of the sessions still waited for are renewed, the last time when restore
+ * gives up on them: the wait (default 120 s) is longer than a lock holds (60 s), and a tab that is
+ * slow to start claude must not let another resume start it again.
  */
 async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): Promise<void> {
   const { deck, outcome, report } = run;
@@ -235,7 +238,7 @@ async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): P
   while (waiting.length > 0) {
     ingestSpool(deck);
     waiting = waiting.filter(({ row, lock, afterEventId }) => {
-      if (!deck.store.hasProcessStartSince(row.id, sinceNs, afterEventId)) {
+      if (!resumeStarted(deck.store, row.id, sinceNs, afterEventId)) {
         return true;
       }
       // D16: a start removes the lock. Restore may have renewed it after the start (before it read

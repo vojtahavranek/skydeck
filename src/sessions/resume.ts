@@ -28,6 +28,17 @@ import { describeError } from './problems.ts';
 /** How long a resume lock holds when no `start` event for the session arrives. */
 export const LOCK_TTL_NS: Ns = 60n * NS_PER_SECOND;
 
+/**
+ * How long before a lock's time a start event may be dated and still release the lock, when the lock
+ * records an event id (and the start's id is greater: it was recorded after the lock). The wall clock
+ * can step back between taking the lock and the claude's start — measured on one WSL machine, about
+ * 1.7 to 1.9 s every 32 s — and the resume's own start would then be stamped before the lock. The id
+ * says when a start was recorded, not when its process began: a start of another process that began
+ * within this tolerance before the lock, is recorded only after it and is already gone releases the
+ * lock too. That is accepted (design 7.6, D16): the guard still refuses while any holder lives.
+ */
+export const LOCK_START_TOLERANCE_NS: Ns = 5n * NS_PER_SECOND;
+
 const LOCK_PREFIX = 'resume_lock:';
 
 /**
@@ -94,12 +105,12 @@ const STATE_CHANGED = "the session's state changed while preparing; run the comm
 
 /**
  * What a lock's kv value holds: the time it was taken, and the session's latest event id at that
- * moment (`<time>:<id>`; the time alone when the session had no event, and in a lock an earlier
- * skydeck wrote).
+ * moment (`<time>:<id>`; id 0 when the session had no event, which every event id exceeds). The time
+ * alone is a lock an earlier skydeck wrote: it keeps the rule of that version (no id, exact time).
  */
 interface LockValue {
   takenNs: Ns;
-  /** Only a start event stored after this one is the resume's own; null: any. */
+  /** Only a start event recorded after this one counts; null: a lock without an id, any. */
   afterEventId: number | null;
 }
 
@@ -118,12 +129,30 @@ function parseLock(value: string): LockValue | null {
 }
 
 /**
- * The event id the lock value records (the session's latest event when the lock was taken): only a
- * start event with a greater id is the resume's own. Null when it records none — the session had no
- * event then, or an earlier skydeck wrote the value — or the value is not a lock.
+ * The event id the lock value records (the session's latest event when the lock was taken; 0 when
+ * the session had none): only a start event with a greater id, recorded after the lock, can release
+ * it. Null for a lock an earlier skydeck wrote (the time alone) and for a value that is not a lock.
  */
 export function lockEventId(value: string): number | null {
   return parseLock(value)?.afterEventId ?? null;
+}
+
+/**
+ * Whether the claude a resume started has started: the session has a start event of a real process
+ * (store.hasProcessStartSince) with an id greater than `afterEventId` (the latest event id the lock
+ * records: the start was recorded after the lock) and dated at or after `sinceNs` — or, when
+ * `afterEventId` is not null, at most LOCK_START_TOLERANCE_NS before it, because the clock may have
+ * stepped back (the price of that tolerance is described there). With no id (a lock an earlier
+ * version wrote) the rule stays exact. The lock (here) and restore's "started" use it.
+ */
+export function resumeStarted(
+  store: Store,
+  sessionId: string,
+  sinceNs: Ns,
+  afterEventId: number | null,
+): boolean {
+  const fromNs = afterEventId === null ? sinceNs : sinceNs - LOCK_START_TOLERANCE_NS;
+  return store.hasProcessStartSince(sessionId, fromNs, afterEventId);
 }
 
 /** How old the lock with this value is at `nowNs`, when it still holds; null when it is stale. */
@@ -135,11 +164,11 @@ function freshAge(store: Store, sessionId: string, value: string, nowNs: Ns): Ns
   const ageNs = nowNs - lock.takenNs;
   // A lock from far in the future cannot be from this clock: it would block for as long. A start
   // releases the lock only when it was stored after the lock was taken: one stored before it, but
-  // dated after it because the clock was ahead then, is not the resume's own.
+  // dated after it because the clock was ahead then, is not the resume's own (resumeStarted).
   if (
     ageNs >= LOCK_TTL_NS ||
     -ageNs >= LOCK_TTL_NS ||
-    store.hasProcessStartSince(sessionId, lock.takenNs, lock.afterEventId)
+    resumeStarted(store, sessionId, lock.takenNs, lock.afterEventId)
   ) {
     return null;
   }
@@ -166,7 +195,7 @@ export interface SawEvents {
  * may have resumed it, and a sweep may have removed its lock as stale once its start event was
  * ingested), and the call throws ResumeRefusedError "the session's state changed while preparing;
  * run the command again". Otherwise writes the lock: the clock's time and `saw.latestEventId`
- * (`<time>:<id>`, the time alone when it is null), so that only a start stored after it releases it.
+ * (`<time>:<id>`, id 0 when it is null), so that only a start recorded after it releases it.
  */
 export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void {
   const key = lockKey(sessionId);
@@ -185,7 +214,9 @@ export function acquireLock(deck: Deck, sessionId: string, saw: SawEvents): void
     if (store.latestEventIdOfSession(sessionId) !== saw.latestEventId) {
       throw new ResumeRefusedError(STATE_CHANGED);
     }
-    store.setKv(key, lockValue({ takenNs: nowNs, afterEventId: saw.latestEventId }));
+    // No event yet (a session known only from its transcript): 0, so that this lock is told apart
+    // from an earlier version's and gets the same rule as any other lock with an id.
+    store.setKv(key, lockValue({ takenNs: nowNs, afterEventId: saw.latestEventId ?? 0 }));
   });
 }
 
