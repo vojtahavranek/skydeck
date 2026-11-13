@@ -454,8 +454,8 @@ nothing else. It is the contract between task 3 and the tests of tasks 9, 16, 21
   (Ctrl+J) is echoed as `⏎`; every other control character in caret notation (`\x16` as `^V`,
   ESC as `^[`, so a bracketed paste shows `^[[200~…^[[201~`). Lines end in `\n`: Node's raw mode
   keeps the terminal's ONLCR, as it does for Claude Code, so the terminal receives `\r\n`.
-- **Commands.** `/exit` — bracketed paste off, `SessionEnd` reason `prompt_input_exit`, live file
-  removed, exit 0. `/fail <n>` — exit `n` without an end event; the live file stays, as after a
+- **Commands.** `/exit` — the alternate screen left when it is on, bracketed paste off,
+  `SessionEnd` reason `prompt_input_exit`, live file removed, exit 0. `/fail <n>` — exit `n` without an end event; the live file stays, as after a
   crash. `/clear` — `SessionEnd` `clear`, a new session id, `SessionStart` `clear`, the live file
   names the new id (and no `-n` name any more). `/busy`, `/idle`, `/waiting <what>` — the live
   file's status (and `waitingFor`, removed by `/busy` and `/idle`). `/alt`, `/main` — enter and
