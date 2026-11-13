@@ -226,6 +226,20 @@ test('4: a holder without a live file is running, since its latest event', () =>
   assert.equal(s.stateDetail, null);
 });
 
+test('4: a running session is since its holder’s latest event, not since its last record', () => {
+  const s = session(
+    {
+      events: [start(P1, S1, T0, 'startup')],
+      isAlive: alive(P1),
+      transcripts: [tr(S1, { lastRecordNs: T0 + 30n * SEC })],
+    },
+    S1,
+  );
+  assert.equal(s.state, 'running');
+  assert.equal(s.sinceNs, T0);
+  assert.equal(s.lastActivityNs, T0 + 30n * SEC);
+});
+
 test('5a: a live file with the status shell is running', () => {
   const s = session(
     {
@@ -383,11 +397,23 @@ test('8: a fork link makes the new session continued', () => {
 });
 
 test('continuedFrom is the latest clear or fork link, whatever order the links come in', () => {
+  // The event ids disagree with the times on purpose: the time decides, the event id breaks ties.
   const links = [
-    link(S1, S3, 'clear', T0 + 20n * SEC, 7),
-    link(S2, S3, 'fork', T0 + 30n * SEC, 9),
-    link(S1, S3, 'switch', T0 + 40n * SEC, 11),
+    link(S1, S3, 'clear', T0 + 20n * SEC, 11),
+    link(S2, S3, 'fork', T0 + 30n * SEC, 7),
+    link(S1, S3, 'switch', T0 + 40n * SEC, 12),
   ];
+  const events = [start(P1, S3, T0 + 50n * SEC, 'clear')];
+  assert.equal(session({ events, links, isAlive: alive(P1) }, S3).continuedFrom, S2);
+  assert.equal(
+    session({ events, links: [...links].reverse(), isAlive: alive(P1) }, S3).continuedFrom,
+    S2,
+  );
+});
+
+test('continuedFrom: links at the same time are told apart by event id', () => {
+  const t = T0 + 20n * SEC;
+  const links = [link(S1, S3, 'clear', t, 7), link(S2, S3, 'clear', t, 9)];
   const events = [start(P1, S3, T0 + 50n * SEC, 'clear')];
   assert.equal(session({ events, links, isAlive: alive(P1) }, S3).continuedFrom, S2);
   assert.equal(
@@ -1022,12 +1048,24 @@ test('a session resumed in a new process after the old one ended: the old end is
   assert.deepEqual(s.marks, []);
 });
 
+test('events are ordered by time first: a later event with a smaller id is still the latest', () => {
+  const late = start(P1, S1, T0 + 10n * SEC, 'startup');
+  const early = start(P2, S1, T0, 'resume');
+  assert.ok(late.id < early.id);
+  const s = session({ events: [late, early], isAlive: alive(P1, P2) }, S1);
+  assert.deepEqual(
+    s.holders.map((h) => h.process),
+    [P1, P2],
+  );
+  assert.deepEqual(s.lastHolding?.process, P1);
+});
+
 test('the last holding is the process of the latest event, ties broken by id', () => {
   const t = T0 + 5n * SEC;
   const first = start(P1, S1, t, 'startup');
   const second = start(P2, S1, t, 'resume');
   assert.ok(first.id < second.id);
-  const s = session({ events: [first, second] }, S1);
+  const s = session({ events: [second, first] }, S1);
   assert.deepEqual(s.lastHolding?.process, P2);
 });
 
