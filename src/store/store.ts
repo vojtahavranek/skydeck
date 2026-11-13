@@ -1,6 +1,6 @@
 import { chmodSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import type { SQLInputValue, SQLOutputValue } from 'node:sqlite';
+import type { SQLInputValue, SQLOutputValue, StatementSync } from 'node:sqlite';
 
 import { SkydeckError } from '../platform/errors.ts';
 import type { Ns } from '../platform/types.ts';
@@ -384,6 +384,8 @@ function migrate(db: DatabaseSync, path: string): void {
  * the write lock (BEGIN IMMEDIATE, so no migration commits between the check and the write), and
  * throws StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION. A single-statement
  * write therefore runs in a transaction of its own on such a connection. Reads are never refused.
+ * No write can go round the check: the store's read helpers refuse anything but a read
+ * (prepareRead), and only its write helpers prepare SQL themselves.
  * Commands do not pass it: a command that migrates is the newer one.
  */
 export function openStore(path: string, options: { guardSchema?: boolean } = {}): Store {
@@ -439,6 +441,22 @@ export function isDatabaseFailure(error: unknown): boolean {
   );
 }
 
+/** What the read helpers accept: SELECT, WITH or PRAGMA first (any case, after leading whitespace). */
+const READ_STATEMENT = /^\s*(?:SELECT|WITH|PRAGMA)\b/i;
+
+/**
+ * Prepares `sql` for a read. Throws (a bug in skydeck) when it is not a read statement: every write
+ * goes through the store's write helpers, where a guarded connection checks the schema version
+ * (S2 10.1), and this keeps one from going round that check through a read helper. Exported for
+ * its test.
+ */
+export function prepareRead(db: DatabaseSync, sql: string): StatementSync {
+  if (!READ_STATEMENT.test(sql)) {
+    throw new Error(`not a read statement: ${JSON.stringify(sql.trim().slice(0, 40))}`);
+  }
+  return db.prepare(sql);
+}
+
 /** One value out of a PRAGMA's single result row. */
 function pragma(db: DatabaseSync, name: string): SQLOutputValue {
   const row = db.prepare(`PRAGMA ${name}`).get();
@@ -460,15 +478,16 @@ class SqliteStore implements Store {
     this.#guardSchema = guardSchema;
   }
 
-  // Reads go through #all and #get, writes through #run and #runReturning and nothing else: those
-  // two are where a guarded connection checks the schema version (#write).
+  // Reads go through #all and #get, which refuse anything but a read (prepareRead); writes through
+  // #run and #runReturning, where a guarded connection checks the schema version (#write). No other
+  // method prepares or runs SQL itself (a test holds this), so no write can skip the check.
 
   #all(sql: string, ...params: SQLInputValue[]): Row[] {
-    return this.#db.prepare(sql).all(...params);
+    return prepareRead(this.#db, sql).all(...params);
   }
 
   #get(sql: string, ...params: SQLInputValue[]): Row | undefined {
-    return this.#db.prepare(sql).get(...params);
+    return prepareRead(this.#db, sql).get(...params);
   }
 
   /** A write statement: the number of rows it changed. */

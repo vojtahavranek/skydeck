@@ -610,8 +610,13 @@ export function launchWhere(deck: Deck, prepared: PreparedLaunch, where: 'here' 
 export class StoreNewerError extends SkydeckError {}
 /** guardSchema (the server's connection only, S2 10.1): before every write transaction and every
  *  single-statement write outside a transaction it reads kv schema_version and throws
- *  StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION. */
+ *  StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION.
+ *  Every write goes through the guarded path by construction (ruled in #39): inside the store only
+ *  the write helpers prepare SQL themselves, and the read helpers prepare through prepareRead,
+ *  which refuses any statement that does not start with SELECT, WITH or PRAGMA; a test holds both. */
 export function openStore(path: string, options?: { guardSchema?: boolean }): Store;
+/** Prepares a read statement; throws Error "not a read statement: …" for anything else. Exported for its test. */
+export function prepareRead(db: DatabaseSync, sql: string): StatementSync;
 // src/sessions/deck.ts
 export function openDeck(platform: Platform, options?: { guardSchema?: boolean }): Deck;
 // src/store/types.ts — KvKey gains:
@@ -1084,6 +1089,10 @@ write guard; `kv` gets the window's keys.
   the same writes succeed (a command migrates, it does not refuse). The `kv` keys of 2.6 type-check.
 - Store guard under the lock: a migration that commits while a guarded write waits for the write
   lock is seen, and the write is refused (the version is read after BEGIN IMMEDIATE).
+- Every write is guarded by construction (ruled in #39): `prepareRead` accepts SELECT, WITH and
+  PRAGMA (any case, after whitespace) and refuses INSERT, UPDATE, DELETE, REPLACE, CREATE, a word
+  that only begins like a read, and empty text, running nothing; a test over the store's source
+  finds `this.#db.prepare(` only in the two write helpers, inside `#write`, and no `this.#db.exec(`.
 - `isDatabaseFailure(new StoreNewerError('<message>'))` is true (ruled in #39): otherwise ingest, reconcile and
   scan, which rethrow only failures of the database as a whole, would record the refusal item by
   item and go on, and the server's tick would not stop at the first refused write.

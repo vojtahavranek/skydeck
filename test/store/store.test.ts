@@ -11,7 +11,12 @@ import { Worker } from 'node:worker_threads';
 import { SkydeckError } from '../../src/platform/errors.ts';
 import { NS_PER_SECOND as SEC } from '../../src/platform/time.ts';
 import { MIGRATIONS, SCHEMA_VERSION } from '../../src/store/migrations.ts';
-import { StoreNewerError, isDatabaseFailure, openStore } from '../../src/store/store.ts';
+import {
+  StoreNewerError,
+  isDatabaseFailure,
+  openStore,
+  prepareRead,
+} from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import type {
   EventRow,
@@ -1382,6 +1387,58 @@ describe('the schema guard of the server (S2 10.1)', () => {
     assert.equal(error.message, 'm');
     assert.equal(error.exitCode, 1);
     assert.equal(new StoreNewerError('m', 5).exitCode, 5);
+  });
+
+  test('the read helpers prepare only reads: a write cannot go round the guard through them', (t) => {
+    const { path } = fresh(t);
+    const db = new DatabaseSync(path);
+    t.after(() => {
+      db.close();
+    });
+    for (const sql of [
+      'SELECT value FROM kv',
+      '  select 1',
+      '\n\tWITH x AS (SELECT 1) SELECT * FROM x',
+      'PRAGMA data_version',
+    ]) {
+      assert.doesNotThrow(() => prepareRead(db, sql).all(), sql);
+    }
+    for (const sql of [
+      "INSERT INTO kv (key, value) VALUES ('doctor_probe', '1')",
+      "  insert or replace into kv (key, value) VALUES ('doctor_probe', '1')",
+      "UPDATE kv SET value = '9' WHERE key = 'schema_version'",
+      'DELETE FROM kv',
+      "REPLACE INTO kv (key, value) VALUES ('doctor_probe', '1')",
+      'CREATE TABLE x (a)',
+      'SELECTED',
+      '',
+    ]) {
+      assert.throws(() => prepareRead(db, sql), /^Error: not a read statement/, sql);
+    }
+    assert.deepEqual(rawRows(path, "SELECT key FROM kv WHERE key <> 'schema_version'"), []);
+  });
+
+  test('inside the store only the two write helpers prepare a statement themselves (S2 10.1)', () => {
+    // Every other method reads through #all / #get (prepareRead) or writes through #run /
+    // #runReturning (#write, the guard): a method that prepared or ran SQL on its own could write
+    // round the schema guard.
+    const source = readFileSync(
+      join(import.meta.dirname, '..', '..', 'src', 'store', 'store.ts'),
+      'utf8',
+    );
+    const body = source.slice(source.indexOf('class SqliteStore'));
+    assert.equal(body.match(/this\.#db\.prepare\(/g)?.length, 2);
+    assert.equal(body.match(/this\.#db\.exec\(/g), null);
+    assert.equal(body.match(/prepareRead\(this\.#db, sql\)/g)?.length, 2);
+    for (const helper of ['#run(', '#runReturning(']) {
+      const start = body.indexOf(`  ${helper}sql: string`);
+      assert.ok(start > 0, helper);
+      assert.match(
+        body.slice(start, body.indexOf('\n  }\n', start)),
+        /this\.#write\(\(\) => [^\n]*this\.#db\.prepare\(/,
+        helper,
+      );
+    }
   });
 
   test("the window's keys are kv keys (S2 10.2)", (t) => {
