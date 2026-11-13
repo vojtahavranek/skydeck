@@ -2205,7 +2205,7 @@ sessions and to switch between their real terminals.
 - Design 7.4's filter (`/`).
 - Configuration, `doctor`, `install` and `uninstall` changes (16) — `terminal` gains `"window"`
   only in C — vendored files, CI (17.5).
-- Manual checks W1–W10, W12–W15, W17, W18, W20, W22–W25.
+- Manual checks W1–W10, W12–W15, W17, W18, W20, W22–W26.
 
 **Stage B — attention and notifications.** Migration 2 (10.2), turn ends (10.3), seen, the three
 reasons and their marks (12.4), Ctrl+Shift+J, the title bar's `needs you` count and `(n) skydeck`,

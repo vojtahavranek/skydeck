@@ -3206,7 +3206,8 @@ server; a session ends only when you end it inside `claude`.
   --restart` and the screen is unchanged), W6 (Shift+Enter, Ctrl+V, Ctrl+Shift+V image paste,
   Ctrl+Shift+C, OSC 52), W22 (a session from a WSL terminal shows "running in another terminal" and
   resumes into the window after `/exit`), W23 (which `CLAUDE*` variables Claude Code sets; `skydeck
-  window` refused inside a session), W5, W10, W17, W18.
+  window` refused inside a session), W5, W10, W17, W18, W26 (a restart while it uses the alternate
+  screen: what a snapshot does not restore).
 - **Keys and fonts in Edge** — W2 (in the window: every chord of S2 12.9 reaches the page and Edge
   does nothing, Ctrl+Shift+P and J included, which say they come in a later stage; Alt+F4 still
   closes; for a normal browser tab, `docs/check-kit/keytest.html`), W8 (Czech layout, AltGr, dead keys,
