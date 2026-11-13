@@ -1839,8 +1839,24 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
 CSS), `@xterm/headless` 6.0.0, `@xterm/addon-serialize` 0.14.0, `@xterm/addon-fit` 0.11.0,
 `@xterm/addon-search` 0.16.0 (published together with xterm.js 6.0.0 on 2025-12-22, and its
 latest release on 2026-11-13; npm registry), `@xterm/addon-unicode-graphemes`
-0.4.0, and their type declarations for `tsc`. `vendor/MANIFEST.json` lists every file with its
-package, version and sha256. The same packages at the same versions are development dependencies;
+0.4.0, and their type declarations for `tsc`. Only what is used is vendored, at
+`vendor/xterm/<package directory>/<path in the package>` (`vendor/xterm/xterm/lib/xterm.mjs`,
+`vendor/xterm/headless/lib-headless/xterm-headless.mjs`): each package's ES module bundle
+(`.mjs`), its `typings/*.d.ts` and its `LICENSE`, and `@xterm/xterm`'s `css/xterm.css` — no UMD
+`.js`, no source maps, no sources. `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0
+ship no `LICENSE` file: for them `npm run vendor` writes `@xterm/xterm`'s, and only after checking
+that the package's `package.json` declares `MIT` and the repository of `@xterm/xterm`
+(`github.com/xtermjs/xterm.js`; a `#branch` or a path inside the repository is ignored), and fails
+otherwise. Beside each bundle it writes a declaration file `<name>.d.mts` that re-exports the
+package's typings by the package's name, so that `tsc` for `web/` never reads a bundle; the
+typings themselves are vendored beside the bundles, within a type checker's reach.
+`@xterm/addon-unicode-graphemes` bundles adapted copies of tiny-inflate and unicode-trie (both
+MIT) without their notices, so the script also writes `vendor/xterm/THIRD-PARTY-NOTICES`, which
+names that bundle and holds both licences as their packages publish them on npm.
+`vendor/MANIFEST.json` lists every file with its
+package, version and sha256 — paths relative to the checkout, the shims and the notices under
+the package `skydeck` with version `-`, a borrowed licence with `licenseFrom` (`@xterm/xterm`) and
+`licenseReason`. The same packages at the same versions are development dependencies;
 `npm run vendor` copies them into `vendor/` and writes the manifest, and a test fails when
 `vendor/` and the installed packages differ, so they are updated only together. `addon-webgl` is
 not vendored in the first version: the DOM renderer is enough for Claude Code's output, and WebGL
@@ -2026,7 +2042,9 @@ In the browser suite, besides those:
   playwright install chromium`), so that a local check does not pass where CI would fail.
 - CI, on every pull request: both legs of the Node matrix run format check, type checks, `npm
   test` (keeper and server tests included; Ubuntu runners have python3), `python3 -m py_compile
-  bin/skydeck-keeper`, the vendored-files check (16.6), and `shellcheck` on the shell scripts by
+  bin/skydeck-keeper`, the vendored-files check (16.6: `test/vendor/vendor.test.ts`, a test in
+  `npm test` that needs the packages `npm ci` installed, so it has no step of its own), and
+  `shellcheck` on the shell scripts by
   name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
   bin/skydeck*` would also match the python keeper. Only the newest leg (Node 24) runs the page
   suite, after `npx playwright install --with-deps chromium` with `~/.cache/ms-playwright` cached
