@@ -297,8 +297,8 @@ Marks are shown next to the state.
   first that exists of: the skydeck label; the name set in Claude Code (`custom-title`); Claude
   Code's generated title (`ai-title`); otherwise the start time and the project directory name,
   as `YYYY-MM-DD HH:MM <directory name>` in UTC (`?` when the directory is not known). A name or
-  title that is empty, or only blanks, once control characters are removed (Claude Code writes an
-  empty name when one is cleared) counts as not set.
+  title that is empty or only whitespace once control characters are removed (Claude Code writes
+  an empty name when one is cleared) counts as not set.
   When skydeck starts or resumes a session that has a label, it passes the label to Claude Code
   as the session name, so the terminal tab shows it. Claude Code itself keeps a session name
   across `/clear`.

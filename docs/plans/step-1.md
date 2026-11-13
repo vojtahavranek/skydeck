@@ -1584,7 +1584,13 @@ export interface ListRow {
 export interface ListGroup { name: string | null; rows: ListRow[] }
 export interface ListModel { generatedAtNs: Ns; groups: ListGroup[] }
 
-/** One row per derived session (none dropped), every foreign string sanitised (7.4). */
+/**
+ * One row per derived session (none dropped, in the order given), every foreign string sanitised
+ * (7.4). A `customTitle` or `aiTitle` that is empty or only whitespace once sanitised is not a
+ * title: the next source is used (the transcript reader keeps an empty `customTitle`, a cleared
+ * name). A `groupPattern` that matches the empty string gives no group. The fallback title is built
+ * from the sanitised directory.
+ */
 export function buildRows(input: {
   sessions: readonly DerivedSession[]; metas: readonly SessionMeta[];
   prs: readonly PrRow[]; sessionPrs: readonly SessionPrRow[]; groupPattern: string;
@@ -1603,6 +1609,8 @@ export function flatRows(model: ListModel): ListRow[];
  * Builds DeriveInput from the store (events, links, transcripts, allMeta), readLiveFiles,
  * isAlive/isLiveFileTrusted with proc and proc.bootId(), clock now, and
  * cleanupPeriodDays(content of settingsPath(claudeHome)); returns deriveSessions(input).
+ * A settings file that cannot be read counts as "no cleanupPeriodDays" (30 days): the list does
+ * not stop for Claude Code's own file. Reads only; it does not refresh.
  */
 export function loadSessions(deck: Deck): DerivedSession[];
 /** loadSessions + store allMeta/prs/sessionPrs + buildRows with config.groupPattern. */
@@ -1613,14 +1621,20 @@ export function loadRows(deck: Deck): ListRow[];
  * 7.5 <ref>: (1) a row whose id equals ref (lowercased); (2) if ref has ≥ 4 characters, rows whose
  * id starts with it, among all rows; (3) rows whose label equals ref, among rows listed with
  * showAll (D22). The first step with ≥ 1 match decides: exactly one → it; several → RefError
- * "'<ref>' matches <n> sessions" with candidates; none at all → RefError "no session matches '<ref>'".
+ * "'<ref>' matches <n> sessions" with candidates (in the order of `rows`); none at all → RefError
+ * "no session matches '<ref>'". Ids are compared in lower case, labels exactly as typed; `<ref>` is
+ * sanitised where a message repeats it. Only the stored id is ever returned, never the typed text.
  */
 export function resolveRef(ref: string, rows: readonly ListRow[]): ListRow;
 
 // src/sessions/labels.ts (7.1)
-/** Trimmed label. UsageError when it contains a line break, is empty after trimming, or starts with '-'. */
+/**
+ * Trimmed label (trimmed first, so a trailing newline goes). UsageError when what is left contains a
+ * line break (LF, CR, VT, FF, NEL, U+2028, U+2029), is empty, or starts with '-'. The message does
+ * not repeat the text.
+ */
 export function cleanLabel(text: string): string;
-/** Trimmed group. UsageError when it contains a line break or is empty after trimming. */
+/** Trimmed group. UsageError when what is left contains a line break (as for a label) or is empty. */
 export function cleanGroup(text: string): string;
 ```
 
@@ -3496,6 +3510,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 - Create: `src/sessions/list.ts`, `src/sessions/load.ts`, `src/sessions/refs.ts`, `src/sessions/labels.ts`
 - Modify: `docs/design.md` 7.1 (D12), 7.2 (D27), 7.5 (D22)
 - Test: `test/sessions/list.test.ts`, `test/sessions/refs.test.ts`, `test/sessions/load.test.ts`, `test/sessions/labels.test.ts`
+- Create: `test/helpers/derived.ts` (builders `ds`, `transcriptRow`, `meta`, `prRow`, `attached`, `rows`, `rowOf` for the tests of the list model; not the `listRow` helper of task 13)
 
 **Exported API**
 
@@ -3531,7 +3546,8 @@ export function cleanGroup(text: string): string;   // throws UsageError
 
 **Rules fixed here.** Title: meta label → `'label'`; transcript `customTitle` → `'name'`;
 transcript `aiTitle` → `'generated'`; else `'fallback'` = `YYYY-MM-DD HH:MM <basename(dir) or ?>`
-from `firstSeenNs` in UTC (D12). Group: meta group, else `new RegExp(groupPattern).exec(title)?.[0]`,
+from `firstSeenNs` in UTC (D12). A `customTitle` or `aiTitle` that is empty or only whitespace once sanitised is
+skipped (the next source is used). Group: meta group, else `new RegExp(groupPattern).exec(title)?.[0]`,
 else null. Sanitised with `sanitize`: title (all sources except the label), `stateDetail`, `dir`,
 PR `title` and `error`. **Order (7.4):** groups by the largest `lastActivityNs` of their rows,
 descending; the null group last; ties by name ascending. Rows by rank — `waiting` 0, `working` 1,
