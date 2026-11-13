@@ -220,6 +220,51 @@ describe('settings: removeHookEntries', () => {
     assert.deepEqual(parse(edit.text), { hooks: { Stop: [] } });
   });
 
+  test('events come in the order of HOOK_EVENTS whatever the order in the file', () => {
+    const reversed = JSON.stringify({
+      hooks: { SessionEnd: [E('SessionEnd')], SessionStart: [E('SessionStart')] },
+    });
+
+    assert.deepEqual(removeHookEntries(reversed, H).events, ['SessionStart', 'SessionEnd']);
+  });
+
+  test('an entry under any other event that names the hook path is removed too', () => {
+    const text = JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: hookCommand(H, 'SessionEnd') }] }],
+        PreToolUse: [FOREIGN_GROUP],
+      },
+    });
+
+    const edit = removeHookEntries(text, H);
+
+    assert.equal(edit.changed, true);
+    assert.deepEqual(edit.events, []);
+    assert.deepEqual(parse(edit.text), { hooks: { PreToolUse: [FOREIGN_GROUP] } });
+  });
+
+  test('a foreign group that was empty already is left alone', () => {
+    const emptyGroup = { matcher: 'x', hooks: [] };
+    const text = JSON.stringify({
+      hooks: { SessionStart: [emptyGroup, E('SessionStart')], Stop: [emptyGroup] },
+    });
+
+    const edit = removeHookEntries(text, H);
+
+    assert.deepEqual(edit.events, ['SessionStart']);
+    assert.deepEqual(parse(edit.text), {
+      hooks: { SessionStart: [emptyGroup], Stop: [emptyGroup] },
+    });
+  });
+
+  test('an event whose value is not an array is left alone', () => {
+    const text = JSON.stringify({ hooks: { Stop: 'x', SessionStart: [E('SessionStart')] } });
+
+    const edit = removeHookEntries(text, H);
+
+    assert.deepEqual(parse(edit.text), { hooks: { Stop: 'x' } });
+  });
+
   test('settings that are not valid JSON throw a SkydeckError', () => {
     assert.throws(() => removeHookEntries('not json', H), SkydeckError);
     assert.throws(() => removeHookEntries('[]', H), SkydeckError);

@@ -87,6 +87,10 @@ function parseLoosely(text: string | null): Json | null {
   }
 }
 
+function isHookEvent(name: string): name is HookEvent {
+  return (HOOK_EVENTS as readonly string[]).includes(name);
+}
+
 function serialize(settings: Json): string {
   return JSON.stringify(settings, null, 2) + '\n';
 }
@@ -134,22 +138,24 @@ export function addHookEntries(settingsText: string | null, hookPath: string): S
 }
 
 /**
- * Removes every hook object whose `command` contains hookPath, in the two hooked events; then
- * drops matcher groups left with no hooks, event arrays left empty, and `hooks` when left empty.
- * Nothing else changes: what was empty before stays.
+ * Removes every hook object whose `command` contains hookPath, under any event; then drops matcher
+ * groups left with no hooks, event arrays left empty, and `hooks` when left empty. Nothing else
+ * changes: a group or array that was empty before stays. `events` names the hooked events that
+ * lost an entry (HookEvent cannot name another event); `changed` is true when anything went.
  */
 export function removeHookEntries(settingsText: string, hookPath: string): SettingsEdit {
   const { settings, hooks } = parseForEdit(settingsText);
   const removed: HookEvent[] = [];
+  let changed = false;
   if (hooks !== null) {
-    for (const event of HOOK_EVENTS) {
-      const groups = hooks[event] as unknown[] | undefined;
-      if (groups === undefined) {
+    for (const event of Object.keys(hooks)) {
+      const groups = hooks[event];
+      if (!Array.isArray(groups)) {
         continue;
       }
       const kept: unknown[] = [];
       let touched = false;
-      for (const group of groups) {
+      for (const group of groups as unknown[]) {
         if (!isObject(group) || !Array.isArray(group['hooks'])) {
           kept.push(group);
           continue;
@@ -173,7 +179,10 @@ export function removeHookEntries(settingsText: string, hookPath: string): Setti
       if (!touched) {
         continue;
       }
-      removed.push(event);
+      changed = true;
+      if (isHookEvent(event)) {
+        removed.push(event);
+      }
       if (kept.length > 0) {
         hooks[event] = kept;
       } else {
@@ -181,13 +190,17 @@ export function removeHookEntries(settingsText: string, hookPath: string): Setti
       }
     }
   }
-  if (removed.length === 0) {
+  if (!changed) {
     return { text: settingsText, changed: false, events: [] };
   }
   if (hooks !== null && Object.keys(hooks).length === 0) {
     delete settings['hooks'];
   }
-  return { text: serialize(settings), changed: true, events: removed };
+  return {
+    text: serialize(settings),
+    changed: true,
+    events: HOOK_EVENTS.filter((event) => removed.includes(event)),
+  };
 }
 
 /**
