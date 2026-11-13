@@ -489,6 +489,11 @@ SQLite through `node:sqlite`, used only inside `src/store/`. Every connection se
 mode 600. Write transactions are short. Schema changes are numbered migrations, each run in one
 transaction; the version is in `kv`.
 
+Integers are read as `BigInt`: a time in nanoseconds is about 1.8·10^18, above 2^53, and
+`node:sqlite` throws when asked to read such a value as a number. Times (every `*_ns` column) are
+therefore `bigint` in TypeScript, bound as `bigint` too; the store converts every other integer
+column (`id`, `pid`, `proc_start`, sizes, pull-request numbers) to `number`.
+
 Migration 1:
 
 ```sql
