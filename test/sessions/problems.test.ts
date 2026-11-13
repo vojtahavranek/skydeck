@@ -9,6 +9,12 @@ test('describeError gives the code of a system error, else the name and message,
   assert.equal(describeError(Object.assign(new Error('EACCES: no'), { code: 'EACCES' })), 'EACCES');
   assert.equal(describeError(new TypeError('bad\nthing\t here')), 'TypeError: bad thing here');
   assert.equal(describeError('plain'), 'plain');
+  // Only an errno-like code stands for the reason; node:sqlite gives every error the same code.
+  const sqlite = Object.assign(new Error('database is locked'), {
+    code: 'ERR_SQLITE_ERROR',
+    errcode: 5,
+  });
+  assert.equal(describeError(sqlite), 'Error: database is locked');
   const long = describeError(new Error('x'.repeat(300)));
   assert.equal(long, `${`Error: ${'x'.repeat(300)}`.slice(0, 200)}…`);
 });

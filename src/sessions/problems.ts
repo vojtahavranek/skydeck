@@ -10,14 +10,18 @@ export type ProblemKey = 'ingest_problems' | 'reconcile_problems' | 'scan_proble
 const MAX_PROBLEMS = 20;
 const MAX_REASON = 200;
 
+/** The code of a system call's error (`EACCES`, `ENOENT`): it says all there is to say. */
+const ERRNO_CODE = /^E[A-Z0-9]+$/;
+
 /**
  * Why something failed, on one short line: the code of a system error (`EACCES`), else the
- * error's name and message (`SpoolParseError: v is not 1`).
+ * error's name and message (`SpoolParseError: v is not 1`). Other codes are not used: node:sqlite
+ * gives every error `ERR_SQLITE_ERROR`, and the message is what tells them apart.
  */
 export function describeError(error: unknown): string {
   const code = (error as { code?: unknown } | null | undefined)?.code;
   let text: string;
-  if (typeof code === 'string' && code !== '') {
+  if (typeof code === 'string' && ERRNO_CODE.test(code)) {
     text = code;
   } else if (error instanceof Error) {
     text = `${error.name}: ${error.message}`;
