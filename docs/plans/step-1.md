@@ -1695,10 +1695,10 @@ export function acquireLock(deck: Deck, sessionId: string): void;
 /** Deletes the locks that are stale by the same rules; returns how many. Looks first without a transaction (no stale lock: no write transaction, so a refresh with nothing to sweep takes no write lock), then reads again and deletes inside one store.transaction(). */
 export function sweepLocks(deck: Deck): number;
 
-export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[] }
+export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }   // kind: ruled in review
 /** checkResumable, acquireLock, buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command). */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;
-/** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` []. UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse, and for an `extra` flag on the flag table's removed list, read with parseLaunchArgs (also inside a short-flag cluster such as `-cp`): "cannot pass <flag>[ (<long name>)] to claude: it chooses the session, its name or where it runs". A prompt (a positional argument) is allowed. */
+/** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` [], `kind` 'new' (prepareResume: 'resume'). UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse, and for an `extra` flag on the flag table's removed list, read with parseLaunchArgs (also inside a short-flag cluster such as `-cp`): "cannot pass <flag>[ (<long name>)] to claude: it chooses the session, its name or where it runs". A prompt (a positional argument) is allowed. */
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;
 ```
 
@@ -1908,7 +1908,9 @@ export interface LaunchOutcome { code: number; lines: string[] }   // lines as p
  * at once so the launcher can exec). Failure, or 'tab' without a tab adapter (D24) → EXIT.failure,
  * the lines ending with "skydeck: to start it yourself, run:" and the command ("cd -- <q dir> &&
  * <shellJoin argv>") — except after an open() whose result has timedOut (the program may have
- * started): "skydeck: run skydeck again to see whether session <id> is running"; and when the
+ * started): "skydeck: run skydeck again to see whether session <id> is running" (kind 'new', a session
+ * that did not start has nothing to resume: "skydeck: the new session's id is <id>; running skydeck
+ * shows whether it started"); and when the
  * directory or a word of argv holds anything sanitize() would change: "skydeck: the command contains
  * control characters and cannot be printed safely". An open() that rejects is a failed open.
  */
@@ -4148,7 +4150,7 @@ export function lockKey(sessionId: string): `resume_lock:${string}`;            
 export function checkResumable(row: ListRow, files: Files): void;               // throws ResumeRefusedError
 export function acquireLock(deck: Deck, sessionId: string): void;                 // throws ResumeRefusedError
 export function sweepLocks(deck: Deck): number;
-export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[] }
+export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;          // throws ResumeRefusedError
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;  // throws UsageError
 // src/cli/launching.ts
@@ -4174,12 +4176,12 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `sweepLocks` removes a lock older than 60 s and a lock followed by a start event; keeps a fresh one; returns the count.
   `refresh(deck)` sweeps too.
 - `prepareResume` on a dead S1 with launch `['claude','--model','opus']` and label `'fix'` →
-  `{ sessionId: S1, cwd: <dir>, argv: buildResumeCommand(...).argv, flagsKnown: true, unknownFlags: [] }`, lock created; on a running row → refused, no lock.
+  `{ sessionId: S1, cwd: <dir>, argv: buildResumeCommand(...).argv, flagsKnown: true, unknownFlags: [], kind: 'resume' }`, lock created; on a running row → refused, no lock.
 - `prepareResume` on a dead S1 with launch `['claude','--frob','x','--model','opus']` → `argv [...R,'--model','opus']`, `unknownFlags ['--frob']`.
 - Guard before lock: a running row with a stale lock → refused for running; the lock is unchanged.
 - `acquireLock` and `sweepLocks` each read and write inside one transaction; several child processes taking one session's lock at once against one database file: exactly one succeeds, every round, with and without a stale lock and a sweep first.
 - `prepareNew({ label: ' x ', group: 'G', extra: ['--model','opus'] })` → `sessionId '00000000-0000-4000-8000-000000000001'`,
-  `cwd` = `platform.cwd`, `argv ['claude','--session-id',<id>,'-n','x','--model','opus']`, `flagsKnown true`, `unknownFlags []`, meta label `'x'` and group `'G'` stored;
+  `cwd` = `platform.cwd`, `argv ['claude','--session-id',<id>,'-n','x','--model','opus']`, `flagsKnown true`, `unknownFlags []`, `kind 'new'`, meta label `'x'` and group `'G'` stored;
   label `'-x'` → `UsageError` and no meta stored; extra `-r <id>`, `-c`, `-cp`, `--session-id=<uuid>` → `UsageError` naming the flag, no meta stored; `--model x 'prompt'` passes.
 
 `commands/resume.test.ts`, `commands/new.test.ts` (`d = testDeck(t, { env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'handoff') }) })`; `await main([...], d.ctx)`)
@@ -4198,7 +4200,7 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 - `new --label 'fix it' --group ABC-1 -- --model opus` → 0; handoff
   `cd -- <cwd> || exit 1\nexec claude --session-id <uuid1> -n 'fix it' --model opus\n`; `meta(<uuid1>)` label `'fix it'`, group `'ABC-1'`.
 - `new --label -x` → 2. `new -- -r <id>` → 2.
-- After a failed open and after a WezTerm timeout the lock still holds (a second resume → 4); after a timeout no command is printed, only the session id.
+- After a failed open and after a WezTerm timeout the lock still holds (a second resume → 4); after a timeout no command is printed. `new --tab` timing out → `'skydeck: the new session\'s id is <uuid1>; running skydeck shows whether it started'`.
 
 **Steps**
 - [ ] Write the three test files. `npm test` → fails.

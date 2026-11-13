@@ -7,7 +7,7 @@ import { launchPrepared } from '../../src/cli/launching.ts';
 import type { PreparedLaunch } from '../../src/sessions/resume.ts';
 import { handoffScript } from '../../src/terminals/here.ts';
 import { testDeck } from '../helpers/deck.ts';
-import { S1 } from '../helpers/platform.ts';
+import { S1, fakeRunner, runResult } from '../helpers/platform.ts';
 
 function prepared(dir: string, over: Partial<PreparedLaunch> = {}): PreparedLaunch {
   return {
@@ -16,6 +16,7 @@ function prepared(dir: string, over: Partial<PreparedLaunch> = {}): PreparedLaun
     argv: ['claude', '--resume', S1],
     flagsKnown: true,
     unknownFlags: [],
+    kind: 'resume',
     ...over,
   };
 }
@@ -55,4 +56,21 @@ test('launchPrepared without a tab adapter returns the reason and the command', 
   ]);
   assert.match(outcome.lines[0] ?? '', /^skydeck: no terminal adapter that opens tabs/);
   assert.equal(d.stderr(), '');
+});
+
+test('launchPrepared after a timeout prints no command: a resume says to look again, a new session names its id', async (t) => {
+  const d = testDeck(t, { config: { terminal: 'wezterm' } });
+  d.platform.runner = fakeRunner(() => runResult({ code: null, timedOut: true }));
+  const reason = 'skydeck: wezterm timed out; a tab may have opened';
+  assert.deepEqual(await launchPrepared(d.deck, prepared('/w'), null), {
+    code: 1,
+    lines: [reason, `skydeck: run skydeck again to see whether session ${S1} is running`],
+  });
+  assert.deepEqual(await launchPrepared(d.deck, prepared('/w', { kind: 'new' }), null), {
+    code: 1,
+    lines: [
+      reason,
+      `skydeck: the new session's id is ${S1}; running skydeck shows whether it started`,
+    ],
+  });
 });

@@ -155,6 +155,8 @@ export interface PreparedLaunch {
   argv: string[];
   flagsKnown: boolean;
   unknownFlags: string[];
+  /** 'new': the session does not exist until claude starts, so there is nothing to resume yet. */
+  kind: 'resume' | 'new';
 }
 
 /**
@@ -182,6 +184,7 @@ export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
     argv: command.argv,
     flagsKnown: command.flagsKnown,
     unknownFlags: launch === null ? [] : unknownFlags(launch),
+    kind: 'resume',
   };
 }
 
@@ -228,5 +231,5 @@ export function prepareNew(
   if (label !== null || group !== null) {
     deck.store.updateMeta(sessionId, { label, group }, platform.clock.nowNs());
   }
-  return { sessionId, cwd, argv, flagsKnown: true, unknownFlags: [] };
+  return { sessionId, cwd, argv, flagsKnown: true, unknownFlags: [], kind: 'new' };
 }

@@ -505,6 +505,8 @@ same `--here` / `--tab` choice as resume. It refuses a flag after `--` that resu
 the flags that choose the session, its name or where it runs, also inside a cluster of short
 flags such as `-cp`): `-r <id>` or `-c` would resume an existing session past the guard and the
 lock (principle 7). A prompt after `--` is passed on; it is the user's own and is never stored.
+When opening its tab times out, `new` prints no command but the new session's id, and says that
+running `skydeck` shows whether it started: a session that never started has nothing to resume.
 
 ### 7.8 Restore
 

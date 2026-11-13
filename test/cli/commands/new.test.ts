@@ -152,7 +152,7 @@ test('new --tab that timed out names the new session and prints no command', asy
   assert.equal(
     d.stderr(),
     'skydeck: wezterm timed out; a tab may have opened\n' +
-      `skydeck: run skydeck again to see whether session ${UUID1} is running\n`,
+      `skydeck: the new session's id is ${UUID1}; running skydeck shows whether it started\n`,
   );
   assert.equal(d.deck.store.meta(UUID1)?.label, 'fix it');
 });

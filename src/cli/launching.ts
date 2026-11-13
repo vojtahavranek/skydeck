@@ -39,9 +39,12 @@ function unprintable(word: string): boolean {
 function failure(prepared: PreparedLaunch, reason: string, timedOut: boolean): string[] {
   const lines = [`skydeck: ${sanitize(reason)}`];
   if (timedOut) {
-    // The program may have started: a command run by hand now could resume the session twice.
+    // The program may have started: a command run by hand now could resume the session twice. A
+    // new session that did not start has nothing to resume, so its id is all there is to give.
     lines.push(
-      `skydeck: run skydeck again to see whether session ${prepared.sessionId} is running`,
+      prepared.kind === 'new'
+        ? `skydeck: the new session's id is ${prepared.sessionId}; running skydeck shows whether it started`
+        : `skydeck: run skydeck again to see whether session ${prepared.sessionId} is running`,
     );
   } else if ([prepared.cwd, ...prepared.argv].some(unprintable)) {
     lines.push('skydeck: the command contains control characters and cannot be printed safely');
@@ -73,7 +76,8 @@ function chooseTerminal(deck: Deck, where: 'here' | 'tab' | null): Terminal | nu
  * exec). On failure, or 'tab' without a tab adapter (D24), it is EXIT.failure and the lines end
  * with "skydeck: to start it yourself, run:" and the command ("cd -- <q dir> && <shellJoin argv>"),
  * except in two cases: after an open() that timed out (the program may have started) they end with
- * "skydeck: run skydeck again to see whether session <id> is running", and when the directory or a
+ * "skydeck: run skydeck again to see whether session <id> is running" (kind 'new': "skydeck: the new
+ * session's id is <id>; running skydeck shows whether it started"), and when the directory or a
  * word of the command holds anything sanitize() would change, with "skydeck: the command contains
  * control characters and cannot be printed safely". An open() that rejects is a failed open.
  */

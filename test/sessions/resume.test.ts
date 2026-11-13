@@ -502,6 +502,7 @@ test('prepareResume builds the command and takes the lock', (t) => {
     argv: buildResumeCommand({ claudeCommand: 'claude', launch, sessionId: S1, label: 'fix' }).argv,
     flagsKnown: true,
     unknownFlags: [],
+    kind: 'resume',
   });
   assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '-n', 'fix', '--model', 'opus']);
   assert.equal(lockOf(d, S1), `${T0}`);
@@ -589,6 +590,7 @@ test('prepareNew stores the cleaned label and group and builds the command', (t)
     argv: ['claude', '--session-id', UUID1, '-n', 'x', '--model', 'opus'],
     flagsKnown: true,
     unknownFlags: [],
+    kind: 'new',
   });
   const stored = d.deck.store.meta(UUID1);
   assert.equal(stored?.label, 'x');
