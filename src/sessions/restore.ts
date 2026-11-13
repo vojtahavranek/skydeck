@@ -2,6 +2,7 @@
 // ones, and starting them a few at a time, each through the resume guard and its lock (principle
 // 7), and only while there is memory to spare.
 import { unknownFlags } from '../claude/launch.ts';
+import { isSessionId } from '../claude/live.ts';
 import { RefError, ResumeRefusedError } from '../platform/errors.ts';
 import { NS_PER_MINUTE, NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
@@ -289,7 +290,7 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       // started. With nothing started and nothing printable, the lock is released.
       const command = settleFailedLaunch(run.deck, prepared, taken.lock, result.timedOut);
       if (command !== null) {
-        printLine(run, command);
+        printLine(run, entry.row, command);
       } else if (!result.timedOut) {
         run.report(`${entry.row.shortId}: ${UNPRINTABLE}`);
       }
@@ -317,7 +318,7 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       flagsKnown: launch !== null,
       unknownFlags: launch === null ? [] : unknownFlags(launch),
     });
-    printLine(run, resumeLine(row.id));
+    printLine(run, row, resumeLine(row.id));
   }
 }
 
@@ -325,20 +326,31 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
  * What restore prints for a session it does not start itself: not the session's own command, but a
  * resume of it. The user may paste the line minutes later, and the session may have been resumed
  * elsewhere meanwhile: `skydeck resume` runs the guard and takes the lock at the moment it is run,
- * where a raw `claude --resume` would start a second process on the transcript (principle 7). A
- * session id is a lowercase UUID, so the line is always safe to print.
+ * where a raw `claude --resume` would start a second process on the transcript (principle 7). Only
+ * a lowercase UUID is put into the line (RangeError otherwise, as buildResumeCommand does), so it is
+ * always safe to print and paste.
  */
 function resumeLine(sessionId: string): string {
+  if (!isSessionId(sessionId)) {
+    throw new RangeError(`not a session id (a lowercase UUID): ${JSON.stringify(sessionId)}`);
+  }
   return `skydeck resume ${sessionId} --here`;
 }
 
 const UNPRINTABLE = 'the command contains control characters and cannot be printed safely';
 
-/** A line for the user to run, to `printed` and `report`, after a header line the first time. */
-function printLine(run: Run, line: string): void {
+/**
+ * A line for the user to run, to `printed` and `report`, after a header line the first time. Before
+ * it, a line that names the session (short id, title, directory; all sanitised in the row): with
+ * --yes no list was shown, and the line itself names only an id. Not a `#` comment after the
+ * command: zsh takes none in an interactive shell. The command keeps a line of its own, so that it
+ * can be pasted alone.
+ */
+function printLine(run: Run, row: ListRow, line: string): void {
   if (run.outcome.printed.length === 0) {
     run.report('to resume these yourself, run:');
   }
+  run.report(`${row.shortId} ${row.title}${row.dir === null ? '' : ` in ${row.dir}`}:`);
   run.outcome.printed.push(line);
   run.report(line);
 }

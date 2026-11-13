@@ -829,8 +829,31 @@ test('without tabs the first session is handed off here and a skydeck resume of 
     d.deck.store.kvEntries('resume_lock:').map((entry) => entry.key),
     [lockKey(sid(1))],
   );
-  assert.ok(lines.includes(outcome.printed[0] ?? '?'), lines.join('\n'));
-  assert.ok(lines.includes(outcome.printed[1] ?? '?'), lines.join('\n'));
+  // Each line names its session first (short id, title, directory): with --yes no list was shown.
+  assert.deepEqual(lines, [
+    `resuming 00000001 ${titleOf(entries, sid(1))} in this terminal`,
+    'to resume these yourself, run:',
+    `00000002 ${titleOf(entries, sid(2))} in ${dir}:`,
+    resumeLine(sid(2)),
+    `00000003 ${titleOf(entries, sid(3))} in ${dir}:`,
+    resumeLine(sid(3)),
+  ]);
+});
+
+test('the line that names a printed session shows its label when it has one', async (t) => {
+  const d = restoreDeck(t, { config: TAB_CONFIG });
+  addSession(d, sid(1), { boot: BOOT_A, pid: 101, startNs: T0 - HOUR, activityNs: T0 - MINUTE });
+  addSession(d, sid(2), {
+    boot: BOOT_A,
+    pid: 102,
+    startNs: T0 - HOUR,
+    activityNs: T0 - 2n * MINUTE,
+  });
+  d.deck.store.updateMeta(sid(2), { label: 'fix it' }, T0);
+  const entries = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, false);
+  const { lines } = await run(d, here(d), entries);
+  assert.ok(lines.includes(`00000002 fix it in ${projectDir(d)}:`), lines.join('\n'));
+  assert.equal(/[\x00-\x09\x0b-\x1f\x7f]/.test(lines.join('\n')), false, JSON.stringify(lines));
 });
 
 test('without tabs a first session that became running is refused and the next one is handed off', async (t) => {
@@ -866,12 +889,19 @@ test('without tabs a command is not printed for a session another skydeck is res
 test('without tabs a handoff that fails prints that session’s command too and hands nothing off', async (t) => {
   const { d, entries } = fiveToRestore(t, { env: { SKYDECK_HANDOFF: undefined } });
   const dir = projectDir(d);
-  const { outcome } = await run(d, here(d), entries.slice(0, 2));
+  const { outcome, lines } = await run(d, here(d), entries.slice(0, 2));
   assert.equal(outcome.handedOff, null);
   assert.deepEqual(outcome.failed, [{ id: sid(1), reason: 'not started through bin/skydeck' }]);
   // As `resume` does after a failed launch: its own command, under the lock restore took for it.
   assert.deepEqual(outcome.printed, [
     `cd -- ${dir} && claude --resume ${sid(1)}`,
+    resumeLine(sid(2)),
+  ]);
+  assert.deepEqual(lines.slice(-5), [
+    'to resume these yourself, run:',
+    `00000001 ${titleOf(entries, sid(1))} in ${dir}:`,
+    `cd -- ${dir} && claude --resume ${sid(1)}`,
+    `00000002 ${titleOf(entries, sid(2))} in ${dir}:`,
     resumeLine(sid(2)),
   ]);
   // The user may run sid(1)'s printed command now: its lock keeps other skydecks off it.

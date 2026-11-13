@@ -177,7 +177,12 @@ test('restore --yes hands off the first preselected session and prints a skydeck
     handoffScript({ cwd: projectDir(d), argv: ['claude', '--resume', sid(1)] }),
   );
   const out = d.stdout();
-  assert.ok(out.includes(`to resume these yourself, run:\n${resumeLine(sid(2))}\n`), out);
+  assert.ok(
+    out.includes(
+      `to resume these yourself, run:\n00000002 ${titleOf(d, sid(2))} in ${projectDir(d)}:\n${resumeLine(sid(2))}\n`,
+    ),
+    out,
+  );
   assert.equal(out.includes('cd --'), false, out);
   assert.equal(out.includes(sid(3)), false, out);
   assert.deepEqual(
@@ -309,6 +314,15 @@ test('restore exits 5 when memory is short, listing what was not started', async
   assert.ok(out.includes(`not started 00000002 ${titleOf(d, sid(2))}\n`), out);
   assert.ok(d.stderr().startsWith('skydeck: restore stopped'), d.stderr());
   assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
+test('restore with no session at all says there is nothing to restore, even without a boot id', async (t) => {
+  // No rows carry a boot id, and there is nothing that could be offered by mistake.
+  const d = restoreDeck(t);
+  d.proc.setBootId(null);
+  assert.equal(await main(['restore', '--yes'], d.ctx), 0);
+  assert.equal(d.stdout(), 'nothing to restore\n');
+  assert.equal(d.stderr(), '');
 });
 
 test('restore refuses to run when the boot id cannot be read', async (t) => {
