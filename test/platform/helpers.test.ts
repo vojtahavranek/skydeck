@@ -315,6 +315,22 @@ describe('capture', () => {
     assert.deepEqual(io.size(), { columns: 100, rows: 30 });
   });
 
+  test('openKeys counts the key readers not yet given back: return() and the end of the keys give one back', async () => {
+    const c = capture({ keys: ['a'] });
+
+    const first = c.io.keys();
+    const second = c.io.keys();
+    assert.equal(c.openKeys(), 2);
+    await first.return?.();
+    await first.return?.();
+    assert.equal(c.openKeys(), 1);
+    assert.deepEqual(await second.next(), { value: 'a', done: false });
+    assert.equal(c.openKeys(), 1);
+    assert.equal((await second.next()).done, true);
+    assert.equal(c.openKeys(), 0);
+    assert.equal((await first.next()).done, true, 'a reader given back reads nothing more');
+  });
+
   test('resize changes the size and calls every onResize callback until it unsubscribes', () => {
     const c = capture({ size: { columns: 100, rows: 30 } });
     const seen: string[] = [];

@@ -24,6 +24,11 @@ export interface Captured {
   prompts: string[];
   /** Resizes the fake terminal: size() answers `size` from now on, and every onResize callback is called. */
   resize: (size: { columns: number; rows: number }) => void;
+  /**
+   * How many keys() readers are open: made and neither given back with return() nor read to the end.
+   * The real one holds the terminal in raw mode and keeps the process alive until then.
+   */
+  openKeys: () => number;
 }
 
 /** An `Io` that records what is written to it and answers reads from `options`. */
@@ -36,6 +41,7 @@ export function capture(options: CaptureOptions = {}): Captured {
   const chunks = options.keys ?? [];
   let size = options.size ?? { columns: 80, rows: 24 };
   const resized = new Set<() => void>();
+  let openKeys = 0;
   return {
     io: {
       stdout: (text) => {
@@ -56,11 +62,28 @@ export function capture(options: CaptureOptions = {}): Captured {
         return Promise.resolve(options.lines?.[nextLine++] ?? null);
       },
       // One cursor for all calls, like the one standard input they stand for.
-      async *keys() {
-        while (nextKey < chunks.length) {
-          const chunk = chunks[nextKey++];
-          yield typeof chunk === 'function' ? chunk() : (chunk ?? '');
-        }
+      keys() {
+        let open = true;
+        openKeys++;
+        const close = (): IteratorResult<string> => {
+          if (open) {
+            open = false;
+            openKeys--;
+          }
+          return { done: true, value: undefined };
+        };
+        const iterator: AsyncIterableIterator<string> = {
+          next: async () => {
+            if (!open || nextKey >= chunks.length) {
+              return close();
+            }
+            const chunk = chunks[nextKey++];
+            return { done: false, value: typeof chunk === 'function' ? chunk() : (chunk ?? '') };
+          },
+          return: async () => close(),
+          [Symbol.asyncIterator]: () => iterator,
+        };
+        return iterator;
       },
       onResize: (callback) => {
         // A wrapper per subscription, so that subscribing the same function twice is two subscriptions.
@@ -76,6 +99,7 @@ export function capture(options: CaptureOptions = {}): Captured {
     stdout: () => out,
     stderr: () => err,
     prompts,
+    openKeys: () => openKeys,
     resize: (next) => {
       size = next;
       for (const listener of [...resized]) {

@@ -97,10 +97,12 @@ class TerminalList {
       this.#repaintIfResized();
     });
     try {
+      // Keys first: raw mode is on before anything is painted, so a key typed now is not echoed
+      // into the frame, and ctrl-c is a key, not a signal that leaves the alternate screen on.
+      this.#keys = this.#ctx.io.keys();
       this.#enterScreen();
       this.#paint();
       this.#fetchInBackground({ force: false });
-      this.#keys = this.#ctx.io.keys();
       for (;;) {
         const chunk: IteratorResult<string> = await (this.#keys?.next() ?? { done: true });
         if (chunk.done === true) {

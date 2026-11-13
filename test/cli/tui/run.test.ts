@@ -137,16 +137,38 @@ test('q: the alternate screen is entered and left, and a frame shows both sessio
   );
   assert.equal(frames(d)[0]?.length, 24, 'a frame fills the terminal');
   assert.equal(d.stderr(), '');
+  assert.equal(d.openKeys(), 0, 'the terminal was given back');
+});
+
+test('the keys are taken before anything is painted, so that nothing typed early is echoed', async (t) => {
+  const d = listDeck(t, ['q']);
+  const writtenWhenTaken: string[] = [];
+  const ctx: Context = {
+    ...d.ctx,
+    io: {
+      ...d.ctx.io,
+      keys: () => {
+        writtenWhenTaken.push(d.stdout());
+        return d.ctx.io.keys();
+      },
+    },
+  };
+
+  assert.equal(await main([], ctx), 0);
+
+  assert.deepEqual(writtenWhenTaken, ['']);
 });
 
 test('the end of the keys quits like q, and ctrl-c quits too', async (t) => {
   const ended = listDeck(t, []);
   assert.equal(await main([], ended.ctx), 0);
   assert.ok(ended.stdout().endsWith(LEAVE));
+  assert.equal(ended.openKeys(), 0);
 
   const interrupted = listDeck(t, ['\x03', 'd']);
   assert.equal(await main([], interrupted.ctx), 0);
   assert.ok(interrupted.stdout().endsWith(LEAVE));
+  assert.equal(interrupted.openKeys(), 0);
   assert.equal(interrupted.deck.store.meta(S1)?.doneAtNs ?? null, null, 'nothing after ctrl-c');
 });
 
@@ -254,13 +276,33 @@ test('p with -URL detaches it; a URL that is not attached, or no URL at all, sho
 test('R on a session that is not running, terminal here: the handoff holds the resume and the list returns 0', async (t) => {
   const d = listDeck(t, ['R']);
   const dir = resumable(d);
+  const handoff = join(d.sandbox.root, 'handoff');
+  // What the terminal looked like when the handoff was written: claude takes it over from there.
+  let atHandoff: { openKeys: number; left: boolean } | undefined;
+  const files = d.platform.files;
+  const ctx: Context = {
+    ...d.ctx,
+    platform: {
+      ...d.platform,
+      files: {
+        ...files,
+        writeText: (path: string, text: string, mode?: number) => {
+          if (path === handoff) {
+            atHandoff = { openKeys: d.openKeys(), left: d.stdout().endsWith(LEAVE) };
+          }
+          files.writeText(path, text, mode);
+        },
+      },
+    },
+  };
 
-  assert.equal(await main([], d.ctx), 0);
+  assert.equal(await main([], ctx), 0);
 
   assert.equal(
-    readFileSync(join(d.sandbox.root, 'handoff'), 'utf8'),
+    readFileSync(handoff, 'utf8'),
     handoffScript({ cwd: dir, argv: ['claude', '--resume', S1] }),
   );
+  assert.deepEqual(atHandoff, { openKeys: 0, left: true });
   assert.ok(d.stdout().endsWith(LEAVE), 'the screen was restored');
   assert.equal(
     d.stdout().indexOf(LEAVE),
@@ -351,9 +393,11 @@ test('R with a tab that fails to open shows the reason and the command in the me
 
 test('n runs the editor outside the alternate screen and stores the note', async (t) => {
   let shownWhileEditing = '';
+  let keysWhileEditing = -1;
   let d: TestDeck | undefined;
   const runner = fakeRunner(undefined, (call) => {
     shownWhileEditing = d?.stdout() ?? '';
+    keysWhileEditing = d?.openKeys() ?? -1;
     writeFileSync(call.args.at(-1) ?? '', 'x');
     return 0;
   });
@@ -363,9 +407,41 @@ test('n runs the editor outside the alternate screen and stores the note', async
 
   assert.equal(d.deck.store.meta(S1)?.note, 'x');
   assert.ok(shownWhileEditing.endsWith(LEAVE), 'the screen was left before the editor');
+  assert.equal(keysWhileEditing, 0, 'the editor has the terminal to itself');
+  assert.equal(d.openKeys(), 0);
   const after = d.stdout().slice(shownWhileEditing.length);
   assert.ok(after.startsWith(ENTER + CLEAR), JSON.stringify(after.slice(0, 30)));
   assert.equal(runner.interactiveCalls.length, 1);
+});
+
+test('a fetch that ends while the editor runs paints nothing over it; the list shows its result after', async (t) => {
+  let answer: (result: RunResult) => void = () => {};
+  const runner = gh(
+    () =>
+      new Promise<RunResult>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  let d: TestDeck | undefined;
+  runner.runInteractive = async (_command, args) => {
+    answer(runResult({ stdout: OPEN_GREEN }));
+    await new Promise((resolve) => setImmediate(resolve)); // the fetch is saved meanwhile
+    writeFileSync(args.at(-1) ?? '', 'x');
+    return 0;
+  };
+  d = listDeck(t, ['n', 'q']);
+  attachManualPr(d.deck, S1, PR1);
+
+  assert.equal(await main([], withRunner(d, runner)), 0);
+
+  const out = d.stdout();
+  const left = out.indexOf(LEAVE);
+  const back = out.indexOf(ENTER, left);
+  assert.ok(left > 0 && back > left, JSON.stringify(out.slice(left, left + 40)));
+  assert.equal(out.slice(left, back).includes(CLEAR), false, 'nothing painted over the editor');
+  assert.equal(d.deck.store.prs().find((row) => row.url === PR1)?.state, 'open');
+  const chip = formatChip({ level: 'approved-green', count: 1 });
+  assert.ok((frames(d).at(-1) ?? []).join('\n').includes(chip));
 });
 
 test('n: the line editNote writes, and its failure, are shown in the message line', async (t) => {
@@ -497,6 +573,22 @@ test(
   },
 );
 
+test('r computes the order again: a session that started running moves up', async (t) => {
+  let d: TestDeck | undefined;
+  d = listDeck(t, [
+    () => {
+      if (d !== undefined) startRunning(d, S2, 4343);
+      return 'r';
+    },
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.deepEqual(rowOrder(frames(d)[0] ?? []), [short(S1), short(S2)]);
+  assert.deepEqual(rowOrder(frames(d).at(-1) ?? []), [short(S2), short(S1)]);
+});
+
 test('r ingests what is new, and asks about every pull request of the listed sessions again', async (t) => {
   let d: TestDeck | undefined;
   const runner = gh(() => runResult({ stdout: OPEN_GREEN }));
@@ -595,5 +687,6 @@ test('an error inside the list restores the terminal and is reported by the erro
 
   assert.ok(d.stdout().startsWith(ENTER));
   assert.ok(d.stdout().endsWith(LEAVE));
+  assert.equal(d.openKeys(), 0);
   assert.equal(d.stderr(), 'skydeck: internal error: boom\n');
 });

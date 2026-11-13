@@ -14,6 +14,8 @@ export interface TestCtx {
   prompts: string[];
   /** Resizes the fake terminal (see `capture`). */
   resize: (size: { columns: number; rows: number }) => void;
+  /** The keys() readers still open (see `capture`). */
+  openKeys: () => number;
 }
 
 /** A platform whose every member throws: enough for `--help` and `--version`, nothing more. */
@@ -51,6 +53,7 @@ export function testContext(
     stderr: captured.stderr,
     prompts: captured.prompts,
     resize: captured.resize,
+    openKeys: captured.openKeys,
   };
   if (t === undefined) {
     return { ctx: { io: captured.io, platform: noPlatform() }, ...shared };
