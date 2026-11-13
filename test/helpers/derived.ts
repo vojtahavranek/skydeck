@@ -7,7 +7,7 @@ import { buildRows } from '../../src/sessions/list.ts';
 import type { ListRow } from '../../src/sessions/list.ts';
 import type { DerivedSession } from '../../src/sessions/types.ts';
 import type { PrRow, SessionMeta, SessionPrRow, TranscriptRow } from '../../src/store/types.ts';
-import { T0 } from './platform.ts';
+import { BOOT_A, T0 } from './platform.ts';
 
 /** A transcript of a `cli` session without a title. */
 export function transcriptRow(sessionId: string, over: Partial<TranscriptRow> = {}): TranscriptRow {
@@ -56,6 +56,7 @@ export function ds(
     transcript: transcript === null ? null : transcriptRow(over.id, transcript),
     lastHolding: null,
     lastEventId: null,
+    bootId: BOOT_A,
     doneAtNs: null,
     hidden: false,
     ...rest,

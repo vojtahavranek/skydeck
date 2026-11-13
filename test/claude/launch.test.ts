@@ -217,6 +217,39 @@ test('sessionPickingFlags finds a cluster that ends in a flag with a value, and 
   assert.deepEqual(shown(sessionPickingFlags(['-cw'])), [['-cw', '-c']]);
 });
 
+test('sessionPickingFlags keeps the flags it read before the first unknown letter of a cluster', () => {
+  // The token is an unknown flag as a whole for the parser (`spec` null), but `-c` was read first.
+  assert.deepEqual(shown(sessionPickingFlags(['-cZ'])), [['-cZ', '-c']]);
+  assert.deepEqual(shown(sessionPickingFlags(['-cZfix the bug'])), [['-cZfix the bug', '-c']]);
+  assert.deepEqual(shown(sessionPickingFlags(['-pcZ', 'x'])), [['-pcZ', '-c']]);
+  assert.deepEqual(shown(sessionPickingFlags(['-c-frob', 'x'])), [['-c-frob', '-c']]);
+  assert.deepEqual(shown(sessionPickingFlags(['-c-frob=x'])), [['-c-frob=x', '-c']]);
+  assert.deepEqual(shown(sessionPickingFlags(['-pc-frob'])), [['-pc-frob', '-c']]);
+  // nothing was read before the unknown letter, or what was read does not pick a session
+  assert.deepEqual(sessionPickingFlags(['-Zc']), []);
+  assert.deepEqual(sessionPickingFlags(['-pZ']), []);
+  assert.deepEqual(sessionPickingFlags(['-p-frob']), []);
+  assert.deepEqual(sessionPickingFlags(['--frob', 'x']), []);
+  assert.deepEqual(nameFlags(['-c-frob']), []);
+});
+
+test('an unknown letter in a cluster still makes the token an unknown flag for everything else', () => {
+  // The parser, what is stored and the names reported are as before.
+  assert.deepEqual(view(parseLaunchArgs(['-cZ', 'x'])), ['U["-cZ","x"] values ["x"]']);
+  assert.deepEqual(
+    parseLaunchArgs(['-c-frob', 'x']).map((item) => item.kind === 'flag' && item.name),
+    ['--frob'],
+  );
+  assert.deepEqual(storableArgv(['claude', '-cZfix', '--model', 'x']), [
+    'claude',
+    '-Z',
+    '--model',
+    'x',
+  ]);
+  assert.deepEqual(unknownFlags(['claude', '-cZ', '-c-frob']), ['-Z', '--frob']);
+  assert.deepEqual(resume(['claude', '-cZ']).argv, R);
+});
+
 test('sessionPickingFlags does not find the flags that say where or how a new session starts', () => {
   const rest = FLAGS.filter((spec) => spec.remove && !spec.picksSession);
   assert.ok(rest.length > 0);
@@ -1430,8 +1463,9 @@ test('isPrintRun does not read a letter after a value-taking flag as a flag', ()
   assert.equal(isPrintRun(['claude', '-cnp']), false);
 });
 
-test('isPrintRun does not count a token with an unknown letter', () => {
+test('isPrintRun does not count a token with an unknown letter, although the flags before it are read', () => {
   assert.equal(isPrintRun(['claude', '-pZ']), false);
+  assert.equal(isPrintRun(['claude', '-p-frob']), false);
 });
 
 test('isPrintRun sees -p in the recorded command, which storableArgv drops from a removed cluster', () => {

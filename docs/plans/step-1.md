@@ -138,7 +138,7 @@ Each is binding for the implementer. The last column names the task that records
 | D13 | `Context` gains `platform`; `Io` gains `isTTY`, `size`, `readLine`, `keys` (task 1, once). Commands open the database through `withDeck` (task 12). | Brief 18: the platform task extends `Context` once. | — |
 | D14 | `$VISUAL`, else `$EDITOR`, else `vi`; the value is split on spaces; the note file path is appended. | 7.1 only says `$EDITOR`. | 15 (7.1) |
 | D15 | The WezTerm adapter runs `wezterm cli --no-auto-start spawn`; when `wezterm` is not found and `$WSL_DISTRO_NAME` is set, it retries with `wezterm.exe`. | 13 "Open": tabs from WSL. | 7 (7.6) |
-| D16 | A resume lock is the `kv` entry `resume_lock:<session id>`, its value the creation time in ns (decimal). `acquireLock` reads it and, unless it holds, writes it inside one `store.transaction()` (BEGIN IMMEDIATE: one skydeck at a time); `sweepLocks` deletes the stale ones in one transaction at the end of every refresh (only when a first look without a transaction found some). Stale: 60 s old or older, dated 60 s or more in the future, a value that is not a time, or a `start` event of the session at or after it. `locksDir` stays in `Places` but holds no lock. `prepareResume` hands `acquireLock` the id of the latest event of the session that its row was derived from (`DerivedSession.lastEventId`, null for none); inside the transaction, before it writes, `acquireLock` reads that id again and refuses (exit 4) when it differs. Without a boot id `prepareResume` refuses first. | The database already serialises skydecks across processes; a lock file taken over without an atomic step would let two resumes both succeed (principle 7). Without the re-check, a skydeck that looked at the session (not running), then lost a few seconds, could take a lock that a sweep had just removed for another skydeck's resume (its start event had been ingested) and resume the session a second time. Without the boot id every recorded process looks dead and a running session cannot be seen. Fake clock in tests. | 16 (7.6) |
+| D16 | A resume lock is the `kv` entry `resume_lock:<session id>`, its value the creation time in ns (decimal). `acquireLock` reads it and, unless it holds, writes it inside one `store.transaction()` (BEGIN IMMEDIATE: one skydeck at a time); `sweepLocks` deletes the stale ones in one transaction at the end of every refresh (only when a first look without a transaction found some). Stale: 60 s old or older, dated 60 s or more in the future, a value that is not a time, or a `start` event of the session at or after it that names a real process (pid not 0, with a process start time: `hasProcessStartSince`). `locksDir` stays in `Places` but holds no lock. `prepareResume` hands `acquireLock` the id of the latest event of the session that its row was derived from (`DerivedSession.lastEventId`, null for none); inside the transaction, before it writes, `acquireLock` reads that id again and refuses (exit 4) when it differs. `prepareResume` refuses first when the row's own boot id (`DerivedSession.bootId`, the one the rows were derived with) is null. `prepareResumeById` refreshes and loads the rows itself right before it calls `prepareResume`, and is the entry point of every caller. | The database already serialises skydecks across processes; a lock file taken over without an atomic step would let two resumes both succeed (principle 7). Without the re-check, a skydeck that looked at the session (not running), then lost a few seconds, could take a lock that a sweep had just removed for another skydeck's resume (its start event had been ingested) and resume the session a second time. Without the boot id every recorded process looks dead and a running session cannot be seen; the row's value is used so that a failed read and a later successful one are never mixed. A start event without a process (pid 0, or no start time) cannot be the claude that a resume started, so it must not release a lock. A start event still in the spool is invisible to a row loaded before it and to the store check of the lock, so the guard refreshes and loads by itself. Fake clock in tests. | 16 (7.6) |
 | D17 | `--all` restore entries are preselected relative to the last event of *their own* boot. | 7.8 defines it for the default set only. | 18 (7.8) |
 | D18 | Arguments are read as Claude Code's own parser reads them: a several-value flag takes the next argument whatever it is and then the following ones up to the next flag-like one (starts with `-`, more than one character, so a lone `-` is a value); `--flag=value` consumes nothing more; a short flag takes the rest of its token as its value (`-rabc`), and a token of no-value short flags (`-cp`) is one flag; `--` ends the flags and everything after it is positional. A flag that is in no table is stored as its bare name and not passed on at resume: what follows it cannot be classified. | 7.6 "several values"; principle 4. | 2 (7.6, 5.3, principle 4) |
 | D19 | Restore's selection prompt: a numbered list, the user types numbers to toggle, an empty line confirms, `q` cancels (exit 5). | 7.8 says only "confirms or changes". | 18 (7.8) |
@@ -709,6 +709,8 @@ export interface Store {
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
   /** Whether a 'start' event for the session exists with time_ns >= sinceNs. */
   hasStartSince(sessionId: string, sinceNs: Ns): boolean;
+  /** As hasStartSince, but only a start of a real process counts: pid not 0 and a process start time (proc_start not NULL). A start the hook wrote without them names no process that could hold the session. */
+  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
   /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
   latestEventIdOfSession(sessionId: string): number | null;
   /** All links ordered by time_ns. */
@@ -1036,8 +1038,10 @@ export interface FoundFlag { written: string; spec: FlagSpec }
 /**
  * The flags in `args` (WITHOUT the program name) with `picksSession: true`, in order: alone, as
  * `--flag=value`, or inside a cluster of short flags (`-cp`: each flag of the cluster is looked at,
- * and `written` is the whole token `-cp`). A flag that is another flag's value, or comes after `--`,
- * is not one. `skydeck new` refuses these (7.7); `--worktree` and the other removed flags that only
+ * and `written` is the whole token `-cp`). The flags read before the first unknown letter of a
+ * cluster count too (`-cZ`, `-cZfix`, `-pcZ`, `-c-frob`, `-c-frob=x`: the token is an unknown flag
+ * for the parser, but it does start with `-c`; `written` is the whole token). A flag that is
+ * another flag's value, or comes after `--`, is not one. `skydeck new` refuses these (7.7); `--worktree` and the other removed flags that only
  * say where or how a new session starts are not found.
  */
 export function sessionPickingFlags(args: readonly string[]): FoundFlag[];
@@ -1516,6 +1520,7 @@ export interface DerivedSession {
   transcript: TranscriptRow | null;
   lastHolding: LastHolding | null;
   lastEventId: number | null;     // the highest id among the events naming the session; null: known from a transcript only (a resume decides on it, 7.6)
+  bootId: string | null;          // the boot id the holders were judged against (= DeriveInput.bootId); null: it could not be read, and no process looked alive (a resume refuses, 7.6)
   doneAtNs: Ns | null;
   hidden: boolean;                // done, and no activity after doneAtNs (7.1)
 }
@@ -1576,6 +1581,7 @@ export interface DeriveInput {
   transcripts: readonly TranscriptRow[];
   metas: readonly SessionMeta[];
   liveFiles: readonly LiveFile[];       // every file read, trusted or not
+  bootId: string | null;                // the boot id `isAlive` judges against, read once; null: it could not be read
   isAlive: (p: ProcessKey) => boolean;
   isTrusted: (f: LiveFile) => boolean;
   nowNs: Ns;
@@ -1652,7 +1658,8 @@ export function flatRows(model: ListModel): ListRow[];
 // src/sessions/load.ts
 /**
  * Builds DeriveInput from the store (events, links, transcripts, allMeta), readLiveFiles,
- * isAlive/isLiveFileTrusted with proc and proc.bootId(), clock now, and
+ * isAlive/isLiveFileTrusted with proc and proc.bootId() (read ONCE per load; the value is also
+ * DeriveInput.bootId, so the rows carry the boot id they were judged with), clock now, and
  * cleanupPeriodDays(content of settingsPath(claudeHome)); returns deriveSessions(input).
  * A settings file that cannot be read counts as "no cleanupPeriodDays" (30 days): the list does
  * not stop for Claude Code's own file. Reads only; it does not refresh.
@@ -1718,7 +1725,8 @@ export function checkResumable(row: ListRow, files: Files): void;
 /**
  * D16. In one store.transaction(): reads the lock; when it holds — younger than LOCK_TTL_NS (a time
  * less than LOCK_TTL_NS in the future counts as now) and no start event for the session at or after
- * it (hasStartSince) — ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s"
+ * it that names a real process (hasProcessStartSince: a pid that is not 0 and a process start time;
+ * a start the hook wrote without them releases nobody's lock) — ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s"
  * (n rounded down, m rounded up). A value that is not a time is stale. `saw` is what the decision to
  * resume was made on (the highest id among the session's events, null for none); it is required, so
  * that no caller can skip the check: still inside the transaction, and before the lock is written,
@@ -1735,14 +1743,26 @@ export function sweepLocks(deck: Deck): number;
 export interface PreparedLaunch { sessionId: string; cwd: string; argv: string[]; flagsKnown: boolean; unknownFlags: string[]; kind: 'resume' | 'new' }   // kind: ruled in review
 /**
  * First, ResumeRefusedError "cannot tell which sessions are running: the boot id could not be read"
- * when `deck.platform.proc.bootId()` is null (without it every recorded process looks dead, so the
- * guard would see no session running); then checkResumable, acquireLock(deck, row.id, { latestEventId:
+ * when `row.session.bootId` is null: the boot id the row was derived with, never a second read of
+ * `proc.bootId()` (a failed read and a later successful one must not be mixed; without the boot id
+ * every recorded process looks dead, so the row cannot show a running session); then checkResumable, acquireLock(deck, row.id, { latestEventId:
  * row.session.lastEventId }) — the lock transaction compares it with the store, so a session that
  * another skydeck acted on since the row was read is refused — and buildResumeCommand(config.claudeCommand,
  * row.session.launch, id, row.label); `unknownFlags` is unknownFlags(row.session.launch) ([] without a launch command).
- * `prepareNew` does not read the boot id: it resumes nothing.
+ * `prepareNew` does not read the boot id: it resumes nothing. The row must come from rows loaded
+ * right after a refresh: a start event that is still a file in the spool is not in it, and the
+ * lock's check of the latest event only sees ingested events. Callers use `prepareResumeById`.
  */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch;
+// src/sessions/resume-by-id.ts (it imports refresh.ts, which imports resume.ts: a separate file avoids the cycle)
+/**
+ * The one entry point for starting a resume (the `resume` command, the interactive list, restore): the
+ * guard owns its freshness. `refresh(deck)`, `loadRows(deck)`, the row whose id is `sessionId`
+ * (RefError "no session matches '<id>'" when there is none; a prefix, a label or an upper-case id names
+ * nothing), then `prepareResume(deck, row)` — in this order. Callers resolve what the user pointed at
+ * to a whole session id first, and pass the id, never a row they loaded earlier.
+ */
+export function prepareResumeById(deck: Deck, sessionId: string): PreparedLaunch;
 /** 7.7: platform.uuid(), stores label/group (cleaned) as meta (no meta row when both are null), buildNewCommand, cwd = platform.cwd; `flagsKnown` true, `unknownFlags` [], `kind` 'new' (prepareResume: 'resume'). UsageError, and nothing stored, for a label or group cleanLabel/cleanGroup refuse, for an `extra` flag that picks an existing session (`sessionPickingFlags`, also inside a short-flag cluster such as `-cp`): "cannot pass <flag>[ (<long name>)] to claude: it picks an existing session; use skydeck resume", and for `--name` / `-n` (`nameFlags`): "cannot pass <flag>[ (<long name>)] to claude: the label is given with --label, and skydeck passes it as the name". The other removed flags (`--worktree`/`-w`, `--tmux`, `--bg`, `--init`, `--init-only`, `--maintenance`, `--desktop`, the cloud flags) only say where or how a new session starts, so they pass, as does a prompt (a positional argument). */
 export function prepareNew(deck: Deck, options: { label: string | null; group: string | null; extra: readonly string[] }): PreparedLaunch;
 ```
@@ -2516,6 +2536,8 @@ sessionPickingFlags, for every flag with picksSession (each spelling; V = [] for
 ['--model','-c'], ['-wc'], ['-nc'], ['--model','x','--','-r','abc']                                → []   (a value, or after `--`)
 ['--worktree','-c']                                                                                  → [['-c','-c']]
 ['-c','--model','x','--resume','a','--fork-session'] → [['-c','-c'],['--resume','-r'],['--fork-session','--fork-session']]
+['-cZ'], ['-cZfix'], ['-pcZ','x'], ['-c-frob','x'], ['-c-frob=x'], ['-pc-frob']  → [[<the token>,'-c']]   (the flags read before the unknown part)
+['-Zc'], ['-pZ'], ['-p-frob'], ['--frob','x']                                       → []   (nothing that picks a session was read before it)
 nameFlags: ['-n','x'], ['--name=x'], ['-nx'] → [['-n','-n']], [['--name','-n']], [['-n','-n']];  ['-pn','x'] → [['-pn','-n']];
   ['-w','n','--model','-n','-r','abc'] and ['--model','x','--','-n','x'] → []
 ```
@@ -2813,6 +2835,7 @@ export interface Store {
   latestEventOfProcess(bootId: string, pid: number, procStart: number | null, beforeNs: Ns): EventRow | null;
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
   hasStartSince(sessionId: string, sinceNs: Ns): boolean;
+  hasProcessStartSince(sessionId: string, sinceNs: Ns): boolean;
   latestEventIdOfSession(sessionId: string): number | null;
   links(): LinkRow[];
   meta(sessionId: string): SessionMeta | null;
@@ -2859,6 +2882,8 @@ do not exist in the schema. Events are bound with `bigint` for every `*_ns` colu
   with `procStart null` it matches only rows whose `proc_start` is NULL; another boot → `null`.
 - `processHasLaunch`: a process whose only event has `argv null` → `false`; add one with argv → `true`.
 - With a start event at `T0`: `hasStartSince(S1, T0)` → `true`; `hasStartSince(S1, T0 + 1n)` → `false`; an `end` row does not count.
+- `hasProcessStartSince`: as `hasStartSince` (the same three cases), and a start with `pid 0`, one with `procStart null` and one with both → `false`
+  until a start with a pid and a `procStart` exists → `true` (`hasStartSince` counts all of them).
 - `latestEventIdOfSession`: `null` for a session without events (another session's events do not count); otherwise the highest id of
   its events whatever their times and kinds (an `end` or an `observed` event counts, a later id with an earlier time wins).
 - `insertLink({ eventId: 1, fromSession: S1, toSession: S2, kind: 'clear', timeNs: T0 })` → `links()` returns it;
@@ -3548,13 +3573,13 @@ export interface LastHolding { process: ProcessKey; alive: boolean; endedAtNs: N
 export interface DerivedSession {
   id: string; state: State; stateDetail: string | null; sinceNs: Ns; lastActivityNs: Ns; firstSeenNs: Ns;
   holders: Holder[]; marks: Mark[]; continuedFrom: string | null; dir: string | null; launch: string[] | null;
-  transcript: TranscriptRow | null; lastHolding: LastHolding | null; lastEventId: number | null; doneAtNs: Ns | null; hidden: boolean;
+  transcript: TranscriptRow | null; lastHolding: LastHolding | null; lastEventId: number | null; bootId: string | null; doneAtNs: Ns | null; hidden: boolean;
 }
 // derive.ts
 export interface DeriveInput {
   events: readonly EventRow[]; links: readonly LinkRow[]; transcripts: readonly TranscriptRow[];
   metas: readonly SessionMeta[]; liveFiles: readonly LiveFile[];
-  isAlive: (p: ProcessKey) => boolean; isTrusted: (f: LiveFile) => boolean;
+  bootId: string | null; isAlive: (p: ProcessKey) => boolean; isTrusted: (f: LiveFile) => boolean;
   nowNs: Ns; retentionDays: number;
 }
 export function deriveSessions(input: DeriveInput): DerivedSession[];
@@ -3594,6 +3619,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
   `mtimeNs < nowNs − max(retentionDays − 5, 0) days`. `duplicate` when 2+ holders.
 - **dir**: transcript `firstCwd`, else `cwd` of the earliest event having one, else null.
   **launch**: `argv` of the latest `start` or `observed` event having one.
+- **bootId**: `input.bootId`, copied to every session (the boot id the holders were judged against).
 - **lastEventId**: the highest `id` among the events with `sessionId` = the session (the events
   are in (`timeNs`, `id`) order, so it need not be the last one); null for a session known only
   from a transcript.
@@ -3644,6 +3670,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[];
 | 30 | `start S1 T0`, `start S1 T0+60s 'compact'`; alive P1; `live(P1,S1,'busy',{statusUpdatedAtNs: T0+20s, updatedAtNs: T0+61s})` | `working`, since `T0+20s` (a compaction does not restart it) |
 | 31 | `observed(P1,S1,T0+300s)` only; alive P1; `live(P1,S1,'idle',{statusUpdatedAtNs: T0+20s})` | `waiting`, since `T0+20s` (reconcile does not restart it) |
 | 32 | P1: `start S1 T0+9s`, `end S1 T0 'exit'` (the later id has the earlier time); P2: `start S2 T0+20s` | S1 `lastEventId` = the id of the `end`; S2 = its own; a session known only from `tr(S1)` → `null` |
+| 33 | `start S1 T0`, with `bootId` `BOOT_A`, `BOOT_B` or `null`; also a session known only from `tr(S2)` with `null` | every session's `bootId` is the input's, `null` included |
 
 **Steps**
 - [ ] Write `test/sessions/derive.test.ts` with the 35 cases. `npm test` → fails.
@@ -4232,7 +4259,7 @@ results are checked in the store (`d.deck.store.meta`, `sessionPrs`, `prs`) or w
 **Depends on:** 2, 7, 11, 12 · **Wave:** 5 · **Design:** 7.6, 7.7, principles 5 and 7, 12 (resume: guard and lock) · **Contracts:** 2.8.6, 2.9.4 (`launching.ts`), 2.10.3, 2.10.4 · **Decisions:** D16, D24 (tab without adapter) (update design 7.6)
 
 **Files**
-- Create: `src/sessions/resume.ts`, `src/cli/launching.ts`
+- Create: `src/sessions/resume.ts`, `src/sessions/resume-by-id.ts`, `src/cli/launching.ts`
 - Modify: `src/sessions/refresh.ts` — call `sweepLocks(deck)` at the end of `refresh` (one line)
 - Modify (ruled in review): `src/store/types.ts` and `src/store/store.ts` (`KvKey` `resume_lock:<id>`, `kvEntries`), `src/terminals/{types,here,wezterm}.ts` (`timedOut` in `OpenResult`), with their tests
 - Create: `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` (each `export const command: Command`)
@@ -4260,7 +4287,8 @@ export const command: Command;
 ```
 
 `--here` and `--tab` together → `UsageError`. The order inside `resume` is: `withDeck(ctx, { refresh: true }, …)`
-(ingest, reconcile, scan — design 7.6) → `loadRows` → `resolveRef` → `prepareResume` (guard, then
+(ingest, reconcile, scan — design 7.6) → `loadRows` → `resolveRef` (to a session id) →
+`prepareResumeById(deck, row.id)` (which refreshes and loads again, then `prepareResume`: guard, then
 lock, then command) → `launchPrepared`. `prepareNew` cleans the label and group with `cleanLabel`/`cleanGroup` (task 11).
 
 **Test cases** (`testDeck`, clock `T0`; `rowOf(id)` = the `loadRows` row)
@@ -4282,10 +4310,14 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
   `"the session's state changed while preparing; run the command again"`, no lock written (a stale lock stays as it was); `null` with an event present → refused;
   events of other sessions do not count; the argument is required (a test with `// @ts-expect-error` makes `npm run typecheck` fail when it becomes optional);
   the latest event is read inside the one transaction, before the write.
-- `prepareResume`: with `proc.setBootId(null)` → `ResumeRefusedError` `'cannot tell which sessions are running: the boot id could not be read'` before every other
-  refusal, no lock; with a row whose `lastEventId` is behind the store's (a start event inserted after the row was read, also from inside `files.stat`, which
+- `acquireLock`: a start event with `pid 0` and/or no `procStart` after a fresh lock does not release it (still "is being resumed"); `sweepLocks` keeps such a lock.
+- `prepareResume`: with a row whose `session.bootId` is null (also when `proc.bootId()` works now) → `ResumeRefusedError` `'cannot tell which sessions are running: the boot id could not be read'` before every other
+  refusal, no lock; a row whose `bootId` is set resumes whatever `proc.bootId()` says now; with a row whose `lastEventId` is behind the store's (a start event inserted after the row was read, also from inside `files.stat`, which
   `checkResumable` calls between the read and the lock) → the "state changed" refusal and no lock — also when A took the lock, its start event was ingested and `sweepLocks`
   removed the lock before B's call; a row that is up to date resumes. `prepareNew` with no boot id works.
+- `prepareResumeById(deck, S1)` (`test/sessions/resume-by-id.test.ts`): a dead S1 → the resume command and the lock; after rows were loaded, a start event of another process
+  (4343, alive) written to the spool → refused `'0b5f3c1e is running (pid 4343)'`, no lock; refusals of the guard (directory gone, boot id unreadable, a second resume within 60 s) pass through
+  with no lock; an unknown id, a prefix, a label and an upper-case id → `RefError`.
 - `acquireLock` and `sweepLocks` each read and write inside one transaction; several child processes taking one session's lock at once against one database file: exactly one succeeds, every round, with and without a stale lock and a sweep first.
 - `prepareNew({ label: ' x ', group: 'G', extra: ['--model','opus'] })` → `sessionId '00000000-0000-4000-8000-000000000001'`,
   `cwd` = `platform.cwd`, `argv ['claude','--session-id',<id>,'-n','x','--model','opus']`, `flagsKnown true`, `unknownFlags []`, `kind 'new'`, meta label `'x'` and group `'G'` stored;
@@ -4293,6 +4325,7 @@ lock, then command) → `launchPrepared`. `prepareNew` cleans the label and grou
 
 `commands/resume.test.ts`, `commands/new.test.ts` (`d = testDeck(t, { env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'handoff') }) })`; `await main([...], d.ctx)`)
 - `resume --help`, `new --help` → 0 with the usage.
+- `resume 0b5f` where, between the command's first look and `prepareResumeById`'s own refresh (the second listing of the spool), another process (4343) writes a start event of S1 to the spool → 4, stderr `'skydeck: 0b5f3c1e is running (pid 4343)\n'`, no lock, no handoff file.
 - `resume 0b5f` (also `--tab`, `--here`) with `proc.setBootId(null)`, S1 recorded as running → 4, stderr `'skydeck: cannot tell which sessions are running: the boot id could not be read\n'`, no lock, no handoff file, no program run.
 - `resume 0b5f` (config default `here`) → 0, `<root>/handoff` = `handoffScript({ cwd: <dir>, argv })`.
 - Without `SKYDECK_HANDOFF` (`env: { SKYDECK_HANDOFF: undefined }`) → 1, stderr contains `not started through bin/skydeck` and `cd -- <dir> && claude --resume <S1>`.

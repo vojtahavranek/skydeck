@@ -106,6 +106,41 @@ test('resume --here --tab is a usage error', async (t) => {
   assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
 });
 
+test('resume refuses a session whose start event reaches the spool after the command looked at it', async (t) => {
+  const d = deck(t);
+  const dir = session(d, { argv: ['claude', '--model', 'opus'] });
+  // The command's first refresh (before it looks) lists the spool once; the one that
+  // prepareResumeById runs right before the guard lists it again, and another skydeck's
+  // `claude` (pid 4343) has written its start event by then.
+  const spool = d.deck.places.spoolDir;
+  const real = d.platform.files;
+  let listings = 0;
+  const files = {
+    ...real,
+    list(path: string): string[] {
+      if (path === spool && ++listings === 2) {
+        d.proc.setProcess(4343, { stat: statLine(4343, 51234567), cmdline: ['claude'] });
+        const fields = {
+          event: 'SessionStart' as const,
+          timeNs: T0 - SEC,
+          pid: 4343,
+          pwd: dir,
+          argv: ['claude'],
+          input: hookInput('SessionStart', S1, { source: 'resume', cwd: dir }),
+        };
+        writeFileSync(join(spool, spoolName(fields, 2)), spoolText(fields));
+      }
+      return real.list(path);
+    },
+  };
+  const ctx = { ...d.ctx, platform: { ...d.platform, files } };
+  assert.equal(await main(['resume', '0b5f'], ctx), 4);
+  assert.equal(d.stderr(), 'skydeck: 0b5f3c1e is running (pid 4343)\n');
+  assert.ok(listings >= 2, String(listings));
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+  assert.equal(existsSync(handoffPath(d)), false);
+});
+
 test('resume with an unknown boot id is refused, takes no lock and starts nothing', async (t) => {
   const d = deck(t, { config: { terminal: 'wezterm' } });
   session(d, { argv: ['claude', '--model', 'opus'], running: true });

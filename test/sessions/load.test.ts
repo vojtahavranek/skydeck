@@ -11,7 +11,7 @@ import { loadRows, loadSessions } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { BOOT_B, S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
+import { BOOT_A, BOOT_B, S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 
 const START = 51234567;
@@ -231,4 +231,22 @@ test('the group pattern of the configuration is used', (t) => {
   refresh(d.deck);
   const groups = Object.fromEntries(loadRows(d.deck).map((row) => [row.id, row.group]));
   assert.deepEqual(groups, { [S1]: '[ops]', [S2]: null });
+});
+
+test('the rows are derived with one boot id, which they carry; a failed read is not replaced by a later one', (t) => {
+  const d = testDeck(t);
+  spoolStart(d, S1, 4242);
+  transcript(d, S1);
+  refresh(d.deck);
+  const reads: (string | null)[] = [null, BOOT_A];
+  const deck = deckWith(d.deck, {
+    proc: { bootId: () => (reads.length > 0 ? (reads.shift() as string | null) : BOOT_A) },
+  });
+
+  const [row] = loadRows(deck);
+  assert.equal(row?.session.bootId, null); // the first (and only) read of this load
+  assert.deepEqual(reads, [BOOT_A]);
+
+  assert.equal(loadSessions(deck)[0]?.bootId, BOOT_A); // the next load reads again
+  assert.equal(loadRows(d.deck)[0]?.session.bootId, BOOT_A);
 });

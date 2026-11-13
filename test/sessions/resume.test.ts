@@ -21,6 +21,7 @@ import {
 import type { SawEvents } from '../../src/sessions/resume.ts';
 import type { DerivedSession, Holder } from '../../src/sessions/types.ts';
 import type { Store } from '../../src/store/store.ts';
+import type { NewEvent } from '../../src/store/types.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { ds, meta, rowOf } from '../helpers/derived.ts';
@@ -67,7 +68,12 @@ function sawNow(d: TestDeck, sessionId: string = S1): SawEvents {
   return { latestEventId: d.deck.store.latestEventIdOfSession(sessionId) };
 }
 
-function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): number {
+function startEvent(
+  d: TestDeck,
+  sessionId: string,
+  timeNs: Ns,
+  over: Partial<NewEvent> = {},
+): number {
   const id = d.deck.store.insertEvent({
     spoolName: `${timeNs}-4242-${sessionId}.ev`,
     timeNs,
@@ -82,6 +88,7 @@ function startEvent(d: TestDeck, sessionId: string, timeNs: Ns): number {
     argv: ['claude'],
     name: null,
     payload: null,
+    ...over,
   });
   assert.ok(id !== null);
   return id;
@@ -329,6 +336,38 @@ test('acquireLock keeps a lock when the session started before it, or another on
   );
 });
 
+/** A start event the hook wrote without a process to name: no `CLAUDE_PID`, or no readable `stat`. */
+const WITHOUT_A_PROCESS: Partial<NewEvent>[] = [
+  { pid: 0, procStart: null },
+  { pid: 0 },
+  { procStart: null },
+];
+
+test('a start event without a real process does not release a lock: acquireLock still refuses', (t) => {
+  for (const over of WITHOUT_A_PROCESS) {
+    const d = testDeck(t);
+    acquireLock(d.deck, S1, sawNow(d));
+    d.clock.setNs(T0 + 10n * SEC);
+    startEvent(d, S1, T0 + 5n * SEC, over);
+    assert.equal(
+      refusal(() => acquireLock(d.deck, S1, sawNow(d))),
+      '0b5f3c1e is being resumed (10 s ago); try again in 50 s',
+      JSON.stringify(over),
+    );
+    assert.equal(lockOf(d, S1), `${T0}`);
+  }
+});
+
+test('a start event without a real process does not make sweepLocks remove a lock', (t) => {
+  for (const over of WITHOUT_A_PROCESS) {
+    const d = testDeck(t);
+    writeLock(d, S1, `${T0 - 5n * SEC}`);
+    startEvent(d, S1, T0 - 2n * SEC, over);
+    assert.equal(sweepLocks(d.deck), 0, JSON.stringify(over));
+    assert.equal(lockOf(d, S1), `${T0 - 5n * SEC}`);
+  }
+});
+
 test('acquireLock locks each session on its own', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
@@ -546,7 +585,7 @@ test('sweepLocks lets a failure of the database through', (t) => {
   const failure = locked();
   const deck = deckWith(d.deck, {
     store: {
-      hasStartSince(): boolean {
+      hasProcessStartSince(): boolean {
         throw failure;
       },
     },
@@ -727,11 +766,10 @@ test('prepareResume resumes a session that has not changed since its row was rea
 
 const BOOT_UNKNOWN = 'cannot tell which sessions are running: the boot id could not be read';
 
-test('prepareResume refuses when the boot id is unknown, and takes no lock', (t) => {
+test('prepareResume refuses a row derived without a boot id, and takes no lock', (t) => {
   const d = testDeck(t);
-  d.proc.setBootId(null);
   assert.equal(
-    refusal(() => prepareResume(d.deck, rowWith(d, dead(d)))),
+    refusal(() => prepareResume(d.deck, rowWith(d, dead(d, { bootId: null })))),
     BOOT_UNKNOWN,
   );
   assert.equal(lockOf(d, S1), null);
@@ -740,22 +778,27 @@ test('prepareResume refuses when the boot id is unknown, and takes no lock', (t)
 
 test('an unknown boot id is refused before anything else: no process looks alive without it', (t) => {
   const d = testDeck(t);
-  d.proc.setBootId(null);
-  const noTranscript = rowOf(ds({ id: S1, dir: d.sandbox.home, transcript: null }));
+  const noTranscript = rowOf(ds({ id: S1, dir: d.sandbox.home, transcript: null, bootId: null }));
   assert.equal(
     refusal(() => prepareResume(d.deck, noTranscript)),
     BOOT_UNKNOWN,
   );
   // the refusal is the guard's own: exit 4, like the other refusals of 7.6
-  assert.throws(() => prepareResume(d.deck, rowWith(d, dead(d))), ResumeRefusedError);
+  assert.throws(
+    () => prepareResume(d.deck, rowWith(d, dead(d, { bootId: null }))),
+    ResumeRefusedError,
+  );
 });
 
-test('prepareResume works again once the boot id can be read', (t) => {
+test("the boot id of the decision is the row's: a read that failed then is not replaced by one that works now", (t) => {
   const d = testDeck(t);
-  d.proc.setBootId(null);
-  refusal(() => prepareResume(d.deck, rowWith(d, dead(d))));
-  d.proc.setBootId(BOOT_A);
-  assert.equal(prepareResume(d.deck, rowWith(d, dead(d))).sessionId, S1);
+  d.proc.setBootId(BOOT_A); // readable now; the row was judged without it
+  assert.equal(
+    refusal(() => prepareResume(d.deck, rowWith(d, dead(d, { bootId: null })))),
+    BOOT_UNKNOWN,
+  );
+  assert.equal(lockOf(d, S1), null);
+  assert.equal(prepareResume(d.deck, rowWith(d, dead(d, { bootId: BOOT_A }))).sessionId, S1);
 });
 
 // --- prepareNew ------------------------------------------------------------------------------------
@@ -846,6 +889,23 @@ test('prepareNew refuses every flag that picks an existing session: alone, as --
         assert.match(refusedExtra(d, [`-p${name.slice(1)}`]), /^cannot pass -p. \(--/, name);
       }
     }
+  }
+});
+
+test('prepareNew refuses a cluster that picks a session before an unknown letter or an unknown long flag', (t) => {
+  const d = testDeck(t);
+  assert.match(refusedExtra(d, ['-cZ']), /^cannot pass -cZ \(--continue\) to claude: it picks/);
+  assert.match(refusedExtra(d, ['-pcZfix']), /^cannot pass -pcZfix \(--continue\) to claude: /);
+  assert.match(
+    refusedExtra(d, ['-c-frob', 'x']),
+    /^cannot pass -c-frob \(--continue\) to claude: /,
+  );
+  assert.match(refusedExtra(d, ['-c-frob=x']), /^cannot pass -c-frob=x \(--continue\) to claude: /);
+  assert.match(refusedExtra(d, ['-pc-frob']), /^cannot pass -pc-frob \(--continue\) to claude: /);
+  // nothing that picks a session was read before the unknown part: the flags are passed on
+  for (const extra of [['-pZ'], ['-Zc'], ['-p-frob'], ['--frob', 'x']]) {
+    const prepared = prepareNew(d.deck, { label: null, group: null, extra });
+    assert.deepEqual(prepared.argv.slice(3), extra, extra.join(' '));
   }
 });
 

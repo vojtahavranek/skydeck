@@ -13,6 +13,8 @@ export interface DeriveInput {
   transcripts: readonly TranscriptRow[];
   metas: readonly SessionMeta[];
   liveFiles: readonly LiveFile[]; // every file read, trusted or not
+  /** The boot id `isAlive` judges against, read once; null when it could not be read. */
+  bootId: string | null;
   isAlive: (p: ProcessKey) => boolean;
   isTrusted: (f: LiveFile) => boolean;
   nowNs: Ns;
@@ -169,6 +171,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
         (highest, event) => (highest === null || event.id > highest ? event.id : highest),
         null,
       ),
+      bootId: input.bootId,
       doneAtNs,
       hidden: doneAtNs !== null && !activityAfter(doneAtNs, transcript, sessionEvents),
     };

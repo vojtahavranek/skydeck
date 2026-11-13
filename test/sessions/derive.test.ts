@@ -151,6 +151,7 @@ function derive(given: Given = {}): DerivedSession[] {
     transcripts: [],
     metas: [],
     liveFiles: [],
+    bootId: BOOT_A,
     isAlive: () => false,
     isTrusted: () => true,
     nowNs: NOW,
@@ -175,6 +176,14 @@ test('lastEventId is the highest id among the events of the session, whatever th
   const events = [first, other, second];
   assert.equal(session({ events }, S1).lastEventId, second.id);
   assert.equal(session({ events }, S2).lastEventId, other.id);
+});
+
+test('every session carries the boot id its holders were judged against, null when there was none', () => {
+  const events = [start(P1, S1, T0, 'startup')];
+  assert.equal(session({ events }, S1).bootId, BOOT_A);
+  assert.equal(session({ events, bootId: BOOT_B }, S1).bootId, BOOT_B);
+  assert.equal(session({ events, bootId: null }, S1).bootId, null);
+  assert.equal(session({ transcripts: [tr(S2)], bootId: null }, S2).bootId, null);
 });
 
 test('lastEventId is null for a session known only from its transcript', () => {
@@ -1269,6 +1278,7 @@ test('the input is not changed, and a second run gives the same result', () => {
     transcripts,
     metas,
     liveFiles,
+    bootId: BOOT_A,
     isAlive: alive(P1),
     isTrusted: () => true,
     nowNs: NOW,
@@ -1297,6 +1307,7 @@ test('every derived session carries the fields of the contract', () => {
     S1,
   );
   assert.deepEqual(Object.keys(s).sort(), [
+    'bootId',
     'continuedFrom',
     'dir',
     'doneAtNs',

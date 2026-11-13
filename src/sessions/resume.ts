@@ -91,7 +91,11 @@ function freshAge(store: Store, sessionId: string, takenNs: Ns | null, nowNs: Ns
   }
   const ageNs = nowNs - takenNs;
   // A lock from far in the future cannot be from this clock: it would block for as long.
-  if (ageNs >= LOCK_TTL_NS || -ageNs >= LOCK_TTL_NS || store.hasStartSince(sessionId, takenNs)) {
+  if (
+    ageNs >= LOCK_TTL_NS ||
+    -ageNs >= LOCK_TTL_NS ||
+    store.hasProcessStartSince(sessionId, takenNs)
+  ) {
     return null;
   }
   return ageNs;
@@ -105,7 +109,8 @@ export interface SawEvents {
 /**
  * D16. In one store transaction (BEGIN IMMEDIATE, which no two skydecks hold at once): reads the
  * session's lock; when it holds — younger than LOCK_TTL_NS (a time less than LOCK_TTL_NS in the
- * future counts as now), and no start event for the session at or after it (hasStartSince) — throws
+ * future counts as now), and no start event for the session at or after it that names a real
+ * process (hasProcessStartSince: a pid that is not 0 and a process start time) — throws
  * ResumeRefusedError "<short> is being resumed (<n> s ago); try again in <m> s" (n rounded down, m
  * rounded up). A value that is not a time is stale.
  *
@@ -182,14 +187,20 @@ export interface PreparedLaunch {
 const BOOT_ID_UNKNOWN = 'cannot tell which sessions are running: the boot id could not be read';
 
 /**
- * Refuses (ResumeRefusedError, first of all) when the current boot id cannot be read, then
- * checkResumable, acquireLock (given the latest event id the row was derived from, so a session
- * that has been acted on since is refused), buildResumeCommand(config.claudeCommand,
- * row.session.launch, id, row.label) — in this order, so a session that is refused takes no lock. `unknownFlags` is
- * unknownFlags(row.session.launch) ([] without a launch command).
+ * Refuses (ResumeRefusedError, first of all) when the row was derived without a boot id: the row's
+ * own value is used, never a second read that may have worked, so a failed read and a later
+ * successful one are not mixed. Then checkResumable, acquireLock (given the latest event id the
+ * row was derived from, so a session that has been acted on since is refused),
+ * buildResumeCommand(config.claudeCommand, row.session.launch, id, row.label) — in this order, so a
+ * session that is refused takes no lock. `unknownFlags` is unknownFlags(row.session.launch) ([]
+ * without a launch command).
+ *
+ * The row must come from rows loaded right after a refresh: a start event that is still a file in
+ * the spool is not in the row, and the lock's check of the latest event only sees ingested events.
+ * Callers go through `prepareResumeById` (resume-by-id.ts), which refreshes and loads first.
  */
 export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
-  if (deck.platform.proc.bootId() === null) {
+  if (row.session.bootId === null) {
     throw new ResumeRefusedError(BOOT_ID_UNKNOWN);
   }
   checkResumable(row, deck.platform.files);

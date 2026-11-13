@@ -49,6 +49,11 @@ export interface DerivedSession {
   lastHolding: LastHolding | null;
   /** The highest id among the events that name the session; null when it is known only from a transcript. */
   lastEventId: number | null;
+  /**
+   * The boot id the holders were judged against (a process is alive only on the boot it was
+   * recorded in); null when it could not be read, and then no process looked alive.
+   */
+  bootId: string | null;
   doneAtNs: Ns | null;
   hidden: boolean; // done, and no activity after doneAtNs (7.1)
 }

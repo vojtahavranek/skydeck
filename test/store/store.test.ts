@@ -568,6 +568,47 @@ describe('hasStartSince', () => {
 
     assert.equal(store.hasStartSince(S1, T0), false);
   });
+
+  test('a start without a real process counts: it is a start', (t) => {
+    const { store } = fresh(t);
+    store.insertEvent(ev({ pid: 0, procStart: null }));
+
+    assert.equal(store.hasStartSince(S1, T0), true);
+  });
+});
+
+describe('hasProcessStartSince', () => {
+  test('is true for a start at or after the given time only', (t) => {
+    const { store } = fresh(t);
+    store.insertEvent(ev({ timeNs: T0 }));
+
+    assert.equal(store.hasProcessStartSince(S1, T0), true);
+    assert.equal(store.hasProcessStartSince(S1, T0 + 1n), false);
+  });
+
+  test('an end event, an observed event or another session does not count', (t) => {
+    const { store } = fresh(t);
+    store.insertEvent(
+      ev({ spoolName: 'a.ev', kind: 'end', detail: 'exit', timeNs: T0 + 5n * SEC, argv: null }),
+    );
+    store.insertEvent(ev({ spoolName: null, kind: 'observed', detail: '', timeNs: T0 + 6n * SEC }));
+    store.insertEvent(ev({ spoolName: 'b.ev', sessionId: S2, timeNs: T0 + 7n * SEC }));
+
+    assert.equal(store.hasProcessStartSince(S1, T0), false);
+  });
+
+  test('a start without a real process does not count: no pid, or no process start time', (t) => {
+    const { store } = fresh(t);
+    store.insertEvent(ev({ spoolName: 'p0.ev', pid: 0, timeNs: T0 + SEC }));
+    store.insertEvent(ev({ spoolName: 'ns.ev', procStart: null, timeNs: T0 + 2n * SEC }));
+    store.insertEvent(ev({ spoolName: 'both.ev', pid: 0, procStart: null, timeNs: T0 + 3n * SEC }));
+
+    assert.equal(store.hasProcessStartSince(S1, T0), false);
+
+    store.insertEvent(ev({ spoolName: 'real.ev', timeNs: T0 + 4n * SEC }));
+    assert.equal(store.hasProcessStartSince(S1, T0), true);
+    assert.equal(store.hasProcessStartSince(S1, T0 + 5n * SEC), false);
+  });
 });
 
 describe('latestEventIdOfSession', () => {

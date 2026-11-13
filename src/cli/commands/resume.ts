@@ -2,7 +2,7 @@
 import { UsageError } from '../../platform/errors.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { resolveRef } from '../../sessions/refs.ts';
-import { prepareResume } from '../../sessions/resume.ts';
+import { prepareResumeById } from '../../sessions/resume-by-id.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec, ParsedArgs } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -48,7 +48,8 @@ export const command: Command = {
     const [ref = ''] = parsed.positionals;
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const row = resolveRef(ref, loadRows(deck));
-      const outcome = await launchPrepared(deck, prepareResume(deck, row), where);
+      // The guard refreshes again by itself and decides on the rows of that refresh, not on these.
+      const outcome = await launchPrepared(deck, prepareResumeById(deck, row.id), where);
       for (const line of outcome.lines) {
         ctx.io.stderr(`${line}\n`);
       }

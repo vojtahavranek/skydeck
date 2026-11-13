@@ -31,6 +31,7 @@ function derive(deck: Deck, metas: readonly SessionMeta[]): DerivedSession[] {
     transcripts: store.transcripts(),
     metas,
     liveFiles: readLiveFiles(platform.files, deck.places.claudeHome),
+    bootId,
     isAlive: (key) => isAlive(key, platform.proc, bootId),
     isTrusted: (file) => isLiveFileTrusted(file, platform.proc),
     nowNs: platform.clock.nowNs(),

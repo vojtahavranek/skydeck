@@ -317,9 +317,25 @@ interface FlagToken {
 /** An unknown flag takes a following plain token, exactly as an optional-value flag does. */
 const UNKNOWN_SHAPE: FlagShape = 'optional';
 
-/** `name`: as much of the token as can be classified (a short token: the unknown letter alone). */
-function unknownFlag(token: string, name: string = token): FlagToken {
-  return { spec: null, specs: [], name, glued: null, shape: UNKNOWN_SHAPE, endsFlags: false };
+/**
+ * `name`: as much of the token as can be classified (a short token: the unknown letter alone).
+ * `read`: the flags of the token that were read before the unknown part. The token is unknown as a
+ * whole (`spec` null), but `-cZ` did start with `-c`, and whoever must not miss that flag
+ * (`skydeck new`, the print flag) finds it in `specs`.
+ */
+function unknownFlag(
+  token: string,
+  name: string = token,
+  read: readonly FlagSpec[] = [],
+): FlagToken {
+  return {
+    spec: null,
+    specs: read,
+    name,
+    glued: null,
+    shape: UNKNOWN_SHAPE,
+    endsFlags: false,
+  };
 }
 
 /** A cluster is represented by its first removable flag, else by its last. */
@@ -369,7 +385,8 @@ function readFlagToken(token: string): FlagToken {
   for (let letter = 1; letter < token.length; letter += 1) {
     const spec = SPEC_BY_NAME.get(`-${token[letter]}`);
     if (spec === undefined) {
-      return unknownFlag(token, `-${String.fromCodePoint(token.codePointAt(letter) as number)}`);
+      const name = `-${String.fromCodePoint(token.codePointAt(letter) as number)}`;
+      return unknownFlag(token, name, specs);
     }
     specs.push(spec);
     if (spec.shape !== 'none') {
@@ -397,7 +414,7 @@ function readFlagToken(token: string): FlagToken {
           endsFlags: true,
         };
       }
-      if (inner.spec === null) return { ...inner, specs: [] };
+      if (inner.spec === null) return { ...inner, specs: [...specs, ...inner.specs] };
       const all = [...specs, ...inner.specs];
       const name =
         inner.glued === null ? token : token.slice(0, token.length - inner.glued.length - 1);
@@ -595,8 +612,12 @@ export function unknownFlags(argv: readonly string[]): string[] {
 export function isPrintRun(argv: readonly string[]): boolean {
   const print = SPEC_BY_NAME.get('-p');
   if (print === undefined) return false;
+  // A token with an unknown letter is not counted, although `specs` holds what was read before it.
   return parseLaunchArgs(argv.slice(1)).some(
-    (item) => item.kind === 'flag' && readFlagToken(item.tokens[0] as string).specs.includes(print),
+    (item) =>
+      item.kind === 'flag' &&
+      item.spec !== null &&
+      readFlagToken(item.tokens[0] as string).specs.includes(print),
   );
 }
 
@@ -608,17 +629,20 @@ export interface FoundFlag {
 
 /** Every flag of `args` (WITHOUT the program name), each flag of a cluster such as `-cp` on its own. */
 function flagsIn(args: readonly string[]): FoundFlag[] {
-  return parseLaunchArgs(args).flatMap((item) =>
-    item.kind === 'flag'
-      ? readFlagToken(item.tokens[0] as string).specs.map((spec) => ({ written: item.name, spec }))
-      : [],
-  );
+  return parseLaunchArgs(args).flatMap((item) => {
+    if (item.kind !== 'flag') return [];
+    // An unknown token's `name` is the unknown part alone; the flags read before it are in the token.
+    const written = item.spec === null ? (item.tokens[0] as string) : item.name;
+    return readFlagToken(item.tokens[0] as string).specs.map((spec) => ({ written, spec }));
+  });
 }
 
 /**
  * The flags in `args` (WITHOUT the program name) that pick an existing session (`picksSession`), in
  * order: alone, as `--flag=value`, or inside a cluster of short flags (`-cp`; `written` is then the
- * whole token). A flag that is another flag's value, or comes after `--`, is not one. `skydeck new`
+ * whole token). The flags read before the first unknown letter of a cluster count (`-cZ`,
+ * `-c-frob`): the token is unknown to the parser, but it does start with `-c`. A flag that is
+ * another flag's value, or comes after `--`, is not one. `skydeck new`
  * refuses these (7.7); `--worktree` and the other flags that say where a new session starts are not.
  */
 export function sessionPickingFlags(args: readonly string[]): FoundFlag[] {
