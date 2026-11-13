@@ -590,9 +590,10 @@ export interface LaunchOutcome { code: number; lines: string[] }
 /** A20: lock time + LOCK_TTL_NS − LOCK_START_TOLERANCE_NS for a resume (the time read from `lock`
  *  with lockTakenNs); preparedAtNs + the same for `new`, and for a resume whose `lock` is null or
  *  not a lock skydeck writes (ruled in #39: it has no time to read). Such a resume is protected by
- *  no lock of its own: a terminal that starts the program itself against the deadline — the window
- *  terminal (task 21) — must not start it (no keeper, `{ ok: false, timedOut: false }` with the
- *  reason). `here` and `wezterm` ignore the deadline and the lock, as in step 1. */
+ *  no lock of its own, so the window terminal (task 21) does not start a resume whose spec's lock
+ *  is null or `lockTakenNs(lock) === null`: it answers `{ ok: false, timedOut: false }` without
+ *  spawning a keeper. `launchPrepared` keeps step 1's behaviour for `here` and `wezterm`, which
+ *  ignore the deadline and the lock. */
 export function startDeadline(prepared: PreparedLaunch, lock: string | null): Ns;
 export function launchSpec(prepared: PreparedLaunch, lock: string | null): LaunchSpec;
 /** launchPrepared of step 1 with the terminal as a parameter; `terminal` null means "no terminal
@@ -603,10 +604,10 @@ export function launchPrepared(deck: Deck, prepared: PreparedLaunch, terminal: T
 export function launchWhere(deck: Deck, prepared: PreparedLaunch, where: 'here' | 'tab' | null): Promise<LaunchOutcome>;
 
 // src/store/store.ts
-/** (ruled in #39) `new StoreNewerError()` says "skydeck was updated; run skydeck window"; the
- *  (message, exitCode?) form of SkydeckError works too. isDatabaseFailure counts it: a refresh's
- *  per-item catches rethrow it instead of recording it against one spool file, process or transcript. */
-export class StoreNewerError extends SkydeckError { constructor(message?: string, exitCode?: ExitCode) }
+/** The store throws it with "skydeck was updated; run skydeck window". isDatabaseFailure counts it
+ *  (ruled in #39): a refresh's per-item catches rethrow it instead of recording it against one spool
+ *  file, process or transcript and going on. */
+export class StoreNewerError extends SkydeckError {}
 /** guardSchema (the server's connection only, S2 10.1): before every write transaction and every
  *  single-statement write outside a transaction it reads kv schema_version and throws
  *  StoreNewerError, writing nothing, when it is newer than SCHEMA_VERSION. */
