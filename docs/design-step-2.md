@@ -1857,7 +1857,10 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
   `bin/skydeck-keeper` from the checkout again. So an old server never serves new files under its
   old, immutable asset path, and never starts a new keeper it does not speak. Its **build** is a
   hash (sha256, first 16 hex characters) over the paths and contents of every file under `bin/`,
-  `src/`, `web/` and `vendor/`, computed from what it read; `skydeck window` computes the same for
+  `src/`, `web/` and `vendor/`, computed from what it read; names that start with `.` and
+  `__pycache__` directories are left out at any depth, so that `python3 -m py_compile` writing
+  `bin/__pycache__/` (or an editor's swap file) neither changes the build nor restarts the server
+  for nothing, and they are not served either. `skydeck window` computes the same for
   the checkout and restarts a server of the same checkout whose build differs (5.1). A server whose
   store is migrated under it makes no further write and stops (10.1). Sessions keep running across
   the restart, every screen is rebuilt (7.3), and pages reload themselves for the new assets
