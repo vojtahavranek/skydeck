@@ -1602,6 +1602,33 @@ describe('the Windows guard (A32)', () => {
     assert.equal(existsSync(marker), false, 'no stub ran');
   });
 
+  test('nothing a caller passes turns the refusal off while the variable is set', async (t) => {
+    const s = sandbox(t);
+    const { marker } = stubs(s);
+    const saved = process.env['SKYDECK_TEST_NO_WINDOWS'];
+    process.env['SKYDECK_TEST_NO_WINDOWS'] = '1';
+    let platforms: Platform[];
+    try {
+      platforms = [
+        realPlatform({ refuseWindows: false }),
+        realPlatform({}),
+        realPlatform({ refuseWindows: undefined }),
+      ];
+    } finally {
+      if (saved === undefined) {
+        delete process.env['SKYDECK_TEST_NO_WINDOWS'];
+      } else {
+        process.env['SKYDECK_TEST_NO_WINDOWS'] = saved;
+      }
+    }
+
+    for (const platform of platforms) {
+      await assertRefused(platform, s, 'cmd.exe', { PATH: s.bin });
+    }
+
+    assert.equal(existsSync(marker), false, 'no stub ran');
+  });
+
   test('refuseWindows refuses always, whatever the environment says', async (t) => {
     const s = sandbox(t);
     const { marker } = stubs(s);

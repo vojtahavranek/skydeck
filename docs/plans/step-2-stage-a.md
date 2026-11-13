@@ -62,10 +62,10 @@ waves (step 1's plan did the same with task 14).
 read or write the real `~/.claude` or `~/.local/...`, never use the network, never start a Windows
 program. The last is enforced, not only asked for (A32): the sandbox's environment carries
 `SKYDECK_TEST_NO_WINDOWS=1`, under which the real platform refuses to start any program under
-`/mnt/` or whose name ends in `.exe`; whatever can start a real process in a test platform
-(`realTestPlatform`, `testPlatform` with real processes) refuses them always, and the fake
-processes, which start nothing, record such a call like any other; every server a test
-starts gets a sandbox `config.json` whose `window.edge` is a recording stub and whose `keepAlive`
+`/mnt/` or whose name ends in `.exe`; a platform that can start a real process (`realTestPlatform`,
+`testPlatform` given real processes) refuses them always; the pure fake starts nothing: it records
+the call and returns what its handler scripts, also for a Windows command (ruling); every server a
+test starts gets a sandbox `config.json` whose `window.edge` is a recording stub and whose `keepAlive`
 is `off`, unless the test is about them; and no test links the real `/run/WSL/1_interop`. Every
 test runs under the sandbox of `test/helpers/sandbox.ts`. A server under test listens on a port
 the system picks (A6). **Two test platforms** (task 5, 2.2): `testPlatform` (fake clock, fake
@@ -195,7 +195,7 @@ Each is binding for the implementer. The last column names the task that records
 | A29 | `skydeck window` passes its working directory to `serve` in `SKYDECK_ENV_ORIGIN`; `serve` takes it out of its environment (task 8's `serverEnvironment`) and records it with its start time as "where the environment came from" (S2 5.2); a `serve` started by hand records its own working directory. | `serve` runs in `/` (S2 5.2), so it cannot see where its environment came from. | 23 (5.2) |
 | A30 | `doctor`'s port check reads `/proc/net/tcp` and `/proc/net/tcp6` (`Proc.tcpListening`, task 5) for a listener on `<window.port>`; when one exists and no server of this installation answers, something else holds the port. | No side effect: binding the port, even for an instant, could make a server that starts at that moment exit 10; no request is sent to a foreign program. | 24 (16.3) |
 | A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
-| A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); the real processes and runner of the test platforms (`realTestPlatform`, `testPlatform` with `realProcesses`) refuse them always, whatever any environment says (the guard is part of the processes object they build, `realPlatform({ refuseWindows: true })`, never read from `process.env`: in the test process the variable is in the platform's environment, not in the runner's own); the fake processes of `testPlatform` start nothing and record such a call like any other, so that a test can assert the command line (ruling of 2026-11-13, task 5). The guard also covers `runner.runInteractive`, follows `PATH` and symbolic links, and is also active when the variable is in the environment given to the child. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
+| A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); a platform that can start a real process — `realTestPlatform`, and `testPlatform` given real processes (`realProcesses: true`) — refuses them always, whatever any environment says (the guard is part of the processes object they build, `realPlatform({ refuseWindows: true })`, never read from `process.env`: in the test process the variable is in the platform's environment, not in the runner's own; `refuseWindows` can only turn the refusal on); the pure fake starts nothing: it records the call and returns what its handler scripts, also for a Windows command, so that a test can assert the command line (ruling of 2026-11-13, task 5). The guard also covers `runner.runInteractive`, follows `PATH` and symbolic links, and is also active when the variable is in the environment given to the child. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
 | A33 | The stand-in refuses to run outside a sandbox (review A, must-fix): it exits 2 before doing anything — no hook, no live file, no record — unless `STANDIN_RECORD`, `SKYDECK_HOME` and `CLAUDE_CONFIG_DIR` are all set to absolute paths; there are no defaults. It ends itself, exit 0, when the directory of its record file is gone (checked every second) — then without running the hook or writing anything, since the hook would create `$SKYDECK_HOME/state/spool` again and leave a directory behind after every crashed test — or 10 minutes after it started, with `SessionEnd` reason `other` as on `/exit`. | Implementers run tests inside Claude Code sessions on a machine with the hook installed: a stand-in with an inherited environment would write into the user's real spool and `~/.claude/sessions`, and a crashed test would leave keepers and stand-ins running. | — |
 | A34 | Test helpers signal only through `killKeepersIn(s, runtimeDir)` (task 5, `test/helpers/kill.ts`), which asserts that the real path of `runtimeDir` lies under `s.root` before it reads a single `.pid` line, and signals only pids whose lines are alive by design 5.5's rule; a test signals other processes only through the child handles it started itself. | If a runtime directory were ever resolved wrongly, a cleanup would kill the user's real keepers and their sessions. | — |
 | A35 | Every module the server uses is loaded before it listens, the vendored xterm modules (`loadXterm`) included; no `import()` runs after start. | S2 16.5: the server must never read new code from a checkout that `git pull` changed under it. | — |
@@ -262,7 +262,7 @@ export interface Proc {
   /** The target of the symbolic link /proc/<pid>/fd/<fd>; null when it cannot be read. */
   fdTarget(pid: number, fd: number): string | null;
   /** Whether /proc/net/tcp or /proc/net/tcp6 lists a socket in state LISTEN (0A) on `port`; null
-   *  when neither can be read (A30). */
+   *  when neither can be read (A30); false for a number that is not a port (1–65535). */
   tcpListening(port: number): boolean | null;
 }
 export interface DetachedOptions {
@@ -280,6 +280,10 @@ export interface Detached {
    *  alive and gets no SIGHUP from this process's terminal (setsid, a session of its own). */
   exited: Promise<{ code: number | null; signal: string | null }>;
 }
+/** With SKYDECK_TEST_NO_WINDOWS=1 in skydeck's environment or the child's, and always for
+ *  realPlatform({ refuseWindows: true }), startDetached, Runner.run and Runner.runInteractive refuse
+ *  a command under /mnt/ or ending in .exe (any case; also reached through PATH or a symbolic link)
+ *  with an Error whose `code` is 'EWINDOWS', and start nothing (A32). */
 export interface Processes {
   /** Starts a program detached in a new session. Rejects with an Error whose `code` is 'ENOENT'
    *  when the program (or `cwd`) does not exist. */
@@ -324,6 +328,12 @@ export interface Platform {
 ```
 
 ```ts
+// src/platform/real.ts — added (ruling): the guard the test platforms build their processes with.
+export interface RealPlatformOptions { refuseWindows?: boolean } // can only turn the refusal on
+export function realPlatform(options?: RealPlatformOptions): Platform;
+// src/platform/time.ts — added (ruling): the longest delay of Clock.after.
+export const MAX_TIMER_MS = 2_147_483_647;
+
 // src/platform/paths.ts — added
 /** The first 8 hex digits of the sha256 of the store's path (S2 4.2). */
 export function storeId(dbPath: string): string;
@@ -1102,11 +1112,13 @@ the largest task of wave 1; a reviewer reads the platform first, then the helper
 
 **Files**
 - Modify: `src/platform/types.ts`, `src/platform/real.ts`, `src/platform/paths.ts`,
-  `src/platform/config.ts`, `test/helpers/platform.ts`, `test/helpers/context.ts` if the stub
-  platform lists members, `test/helpers/sandbox.ts` (`SKYDECK_TEST_NO_WINDOWS`, A32)
+  `src/platform/config.ts`, `src/platform/time.ts` (`MAX_TIMER_MS`, ruling),
+  `test/helpers/platform.ts`, `test/helpers/context.ts` (`testContextOn`, ruling),
+  `test/helpers/sandbox.ts` (`SKYDECK_TEST_NO_WINDOWS`, A32)
 - Create: `test/helpers/window-config.ts`, `test/helpers/kill.ts` (A32, A34)
 - Modify: `test/helpers/deck.ts` (`testDeck(t, { real: true })`)
-- Modify: `docs/design-step-2.md` 4.3 (A9, A10), 16.4 (A6)
+- Modify: `docs/design-step-2.md` 4.3 (A9, A10), 4.4's `src/platform/` row (A9, ruling), 16.4
+  (A6), 17 (A32, A36)
 - Test: `test/platform/real.test.ts`, `test/platform/paths.test.ts`, `test/platform/config.test.ts`,
   `test/platform/helpers.test.ts` (extended)
 

@@ -762,6 +762,30 @@ describe('fakeProcesses', () => {
     assert.deepEqual(processes.calls[0], { command: 'wsl.exe', args: keepAlive, options });
   });
 
+  test('a Windows command given to the fake starts no process: no child, no exec', async (t) => {
+    const tp = testPlatform(t);
+    const marker = `${tp.sandbox.root}/marker`;
+    for (const name of ['wsl.exe', 'msedge.exe']) {
+      writeFileSync(`${tp.sandbox.bin}/${name}`, `#!/bin/sh\necho "$0" >> ${marker}\n`, {
+        mode: 0o755,
+      });
+    }
+    const env = tp.platform.env as Record<string, string>;
+
+    await tp.platform.processes.startDetached('wsl.exe', ['--exec', '/bin/sh'], {
+      cwd: tp.sandbox.root,
+      env,
+    });
+    await tp.platform.processes.startDetached(`${tp.sandbox.bin}/msedge.exe`, [], {
+      cwd: tp.sandbox.root,
+      env,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(tp.processes.calls.length, 2);
+    assert.equal(existsSync(marker), false, 'neither stub ran');
+  });
+
   test('signal answers from the set of live pids and records every call', () => {
     const processes = fakeProcesses(undefined, [10]);
 
@@ -1073,11 +1097,13 @@ describe('writeWindowConfig (A32)', () => {
 });
 
 describe('killKeepersIn (A34)', () => {
-  /** A `sleep` this test started, ended when the test ends if still running. */
+  type Exit = { code: number | null; signal: string | null };
+
+  /** A `sleep 30` this test started itself, killed when the test ends if still running. */
   async function sleeper(
     t: TestContext,
     s: Sandbox,
-  ): Promise<{ pid: number; procStart: number; exited: Promise<unknown> }> {
+  ): Promise<{ pid: number; procStart: number; exited: Promise<Exit> }> {
     s.link('sleep');
     const platform = realPlatform();
     const child = await platform.processes.startDetached('sleep', ['30'], {
@@ -1085,18 +1111,26 @@ describe('killKeepersIn (A34)', () => {
       env: s.env(),
     });
     let ended = false;
-    const exited = child.exited.then(() => {
+    void child.exited.then(() => {
       ended = true;
     });
     t.after(async () => {
       if (!ended) {
         platform.processes.signal(child.pid, 'SIGKILL');
-        await exited;
+        await child.exited;
       }
     });
     const procStart = procStartFromStat(platform.proc.stat(child.pid) ?? '');
     assert.ok(procStart !== null);
-    return { pid: child.pid, procStart, exited };
+    return { pid: child.pid, procStart, exited: child.exited };
+  }
+
+  /** How the process ended within `ms`, or 'running' (far less than the 30 s of its sleep). */
+  function exitWithin(p: { exited: Promise<Exit> }, ms: number): Promise<Exit | 'running'> {
+    return Promise.race([
+      p.exited,
+      new Promise<'running'>((resolve) => setTimeout(() => resolve('running'), ms)),
+    ]);
   }
 
   const BOOT = (): string => readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
@@ -1123,8 +1157,8 @@ describe('killKeepersIn (A34)', () => {
     writeLine(dir, 'aaaaaaaaaaaa', `${keeper.pid} ${keeper.procStart} ${BOOT()} 1 1`);
 
     assert.throws(() => killKeepersIn(s, dir), assert.AssertionError);
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    assert.equal(await exitWithin(keeper, 300), 'running');
     assert.equal(alive(keeper.pid), true);
   });
 
@@ -1140,8 +1174,8 @@ describe('killKeepersIn (A34)', () => {
     assert.throws(() => killKeepersIn(s, `${s.root}/run`), assert.AssertionError);
     assert.throws(() => killKeepersIn(s, `${s.root}/run2`), assert.AssertionError);
     assert.throws(() => killKeepersIn(s, `${s.root}/run/../../`), assert.AssertionError);
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    assert.equal(await exitWithin(keeper, 300), 'running');
     assert.equal(alive(keeper.pid), true);
   });
 
@@ -1151,11 +1185,13 @@ describe('killKeepersIn (A34)', () => {
     assert.throws(() => killKeepersIn(s, s.root), assert.AssertionError);
   });
 
-  test('inside: a live keeper line is killed; a dead line, another process start and another boot are skipped', async (t) => {
+  test('inside: a live keeper line is killed at once; a dead line, another process start and another boot are skipped', async (t) => {
     const s = sandbox(t);
     const keeper = await sleeper(t, s);
     const reused = await sleeper(t, s);
     const otherBoot = await sleeper(t, s);
+    const stranger = await sleeper(t, s);
+    writeLine(outside(t), 'aaaaaaaaaaaa', `${stranger.pid} ${stranger.procStart} ${BOOT()} 1 1`);
     const dir = `${s.skydeckHome}/run`;
     writeLine(dir, 'aaaaaaaaaaaa', `${keeper.pid} ${keeper.procStart} ${BOOT()} 1 1`);
     writeLine(dir, 'bbbbbbbbbbbb', `${reused.pid} ${reused.procStart + 1} ${BOOT()} 1 1`);
@@ -1168,11 +1204,16 @@ describe('killKeepersIn (A34)', () => {
     );
 
     killKeepersIn(s, dir);
-    await keeper.exited;
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    assert.equal(alive(reused.pid), true, 'another process start');
-    assert.equal(alive(otherBoot.pid), true, 'another boot');
+    assert.deepEqual(await exitWithin(keeper, 5000), { code: null, signal: 'SIGKILL' });
+    for (const [other, why] of [
+      [reused, 'another process start'],
+      [otherBoot, 'another boot'],
+      [stranger, 'a line outside the sandbox'],
+    ] as const) {
+      assert.equal(await exitWithin(other, 100), 'running', why);
+      assert.equal(alive(other.pid), true, why);
+    }
   });
 
   test('a runtime directory that does not exist (yet) is nothing to do', (t) => {
