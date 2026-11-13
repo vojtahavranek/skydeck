@@ -62,47 +62,119 @@ test('formatRow: marks are joined by a comma; no chip and no note leave no gap',
   );
 });
 
-test('formatRow: a title that does not fit is cut and ends with an ellipsis; the line is `width` long', () => {
+test('formatRow: a title that does not fit is cut; the time in state goes before the title shrinks below 24', () => {
   const row = listRow({
     id: S1,
     state: 'working',
     title: 'A very long title that will not fit at all',
     sinceNs: T0 - 5n * MIN,
   });
+  // Even without the time in state the title has only 18 characters here: it is cut to them.
   const line = formatRow(row, T0, 40);
-  assert.equal(line, 'working     A very long…    5m  0b5f3c1e');
+  assert.equal(line, 'working     A very long title…  0b5f3c1e');
   assert.equal(line.length, 40);
 });
 
-test('formatRow: a title that fits exactly is not cut', () => {
+test('formatRow: a title that fits exactly is not cut, and keeps the time in state', () => {
   const row = listRow({ id: S1, state: 'working', title: 'A very long…', sinceNs: T0 - 5n * MIN });
   assert.equal(formatRow(row, T0, 40), 'working     A very long…    5m  0b5f3c1e');
 });
 
-test('formatRow: at least one title character is kept, however narrow the width', () => {
+test('formatRow: a short title is never cut to make room for a column that fits', () => {
+  const row = listRow({ id: S1, state: 'working', title: 'Fix', sinceNs: T0 - 5n * MIN });
+  assert.equal(formatRow(row, T0, 28 + 3), 'working     Fix    5m  0b5f3c1e');
+});
+
+test('formatRow: at least one title character is kept, however narrow the width; the id stays', () => {
   const row = listRow({ id: S1, state: 'working', title: 'Title', sinceNs: T0 });
-  const line = formatRow(row, T0, 5);
-  assert.equal(line, 'working     T…    0s  0b5f3c1e');
+  assert.equal(formatRow(row, T0, 5), 'working     T…  0b5f3c1e');
 });
 
 test('formatRow: a one-character title is never replaced by something longer', () => {
   const row = listRow({ id: S1, state: 'working', title: 'T', sinceNs: T0 });
-  assert.equal(formatRow(row, T0, 1), 'working     T    0s  0b5f3c1e');
+  assert.equal(formatRow(row, T0, 1), 'working     T  0b5f3c1e');
 });
 
 test('formatRow: a title the ellipsis would not make shorter is kept whole', () => {
   const row = listRow({ id: S1, state: 'working', title: 'ab', sinceNs: T0 });
-  assert.equal(formatRow(row, T0, 1), 'working     ab    0s  0b5f3c1e');
+  assert.equal(formatRow(row, T0, 1), 'working     ab  0b5f3c1e');
 });
 
 test('formatRow: the cut never splits a surrogate pair', () => {
   const row = listRow({ id: S1, state: 'working', title: '😀😀😀😀😀😀😀😀😀😀', sinceNs: T0 });
-  // Room for three title units: one whole emoji (two units) and the ellipsis.
-  const line = formatRow(row, T0, 31);
-  assert.ok(line.length <= 31, line);
-  assert.doesNotMatch(line, /[\ud800-\udbff](?![\udc00-\udfff])/u);
-  assert.doesNotMatch(line, /(?<![\ud800-\udbff])[\udc00-\udfff]/u);
-  assert.equal(line, 'working     😀…    0s  0b5f3c1e');
+  // Room for eight title units: three whole emoji (six units) and the ellipsis, one unit unused.
+  const line = formatRow(row, T0, 30);
+  assert.equal(line, 'working     😀😀😀…  0b5f3c1e');
+  assert.ok(line.length <= 30, line);
+});
+
+// Optional columns are dropped, in this order, until the title has 24 characters (or all of it):
+// the note mark, the time in state, all marks but the first (shown as "+n"), the pull-request
+// count. The state, the title and the short id are never dropped.
+const BUSY = listRow({
+  id: S1,
+  state: 'waiting',
+  title: 'abcdefghijklmnopqrstuvwxyz0123456789',
+  sinceNs: T0 - 12n * MIN,
+  marks: ['ended-unexpectedly', 'was-working'],
+  chip: { level: 'checks-failing', count: 2 },
+  hasNote: true,
+});
+
+for (const [width, expected] of [
+  [
+    122,
+    'waiting     abcdefghijklmnopqrstuvwxyz0123456789   12m  ended-unexpectedly,was-working  2pr:checks-failing  note  0b5f3c1e',
+  ],
+  [
+    110,
+    'waiting     abcdefghijklmnopqrstuvw…   12m  ended-unexpectedly,was-working  2pr:checks-failing  note  0b5f3c1e',
+  ],
+  [
+    109,
+    'waiting     abcdefghijklmnopqrstuvwxyz01…   12m  ended-unexpectedly,was-working  2pr:checks-failing  0b5f3c1e',
+  ],
+  [
+    104,
+    'waiting     abcdefghijklmnopqrstuvw…   12m  ended-unexpectedly,was-working  2pr:checks-failing  0b5f3c1e',
+  ],
+  [
+    103,
+    'waiting     abcdefghijklmnopqrstuvwxyz01…  ended-unexpectedly,was-working  2pr:checks-failing  0b5f3c1e',
+  ],
+  [
+    97,
+    'waiting     abcdefghijklmnopqrstuvwxyz012345…  ended-unexpectedly+1  2pr:checks-failing  0b5f3c1e',
+  ],
+  [88, 'waiting     abcdefghijklmnopqrstuvw…  ended-unexpectedly+1  2pr:checks-failing  0b5f3c1e'],
+  [87, 'waiting     abcdefghijklmnopqrstuvw…  ended-unexpectedly+1  pr:checks-failing  0b5f3c1e'],
+  [86, 'waiting     abcdefghijklmnopqrstuv…  ended-unexpectedly+1  pr:checks-failing  0b5f3c1e'],
+] as const) {
+  test(`formatRow: a busy row at width ${width} drops columns in the agreed order`, () => {
+    const line = formatRow(BUSY, T0, width);
+    assert.equal(line, expected);
+    assert.ok(line.length <= width);
+  });
+}
+
+test('formatRow: below the last step the id and the first mark are still there; only the title shrinks', () => {
+  const line = formatRow(BUSY, T0, 60);
+  assert.equal(line, 'waiting     a…  ended-unexpectedly+1  pr:checks-failing  0b5f3c1e');
+});
+
+test('formatRow: a single mark is not shortened; the pull-request count goes last', () => {
+  const row = listRow({
+    id: S1,
+    state: 'working',
+    title: 'abcdefghijklmnopqrstuvwxyz0123456789',
+    marks: ['expired'],
+    chip: { level: 'merged', count: 1 },
+    sinceNs: T0,
+  });
+  assert.equal(
+    formatRow(row, T0, 60),
+    'working     abcdefghijklmnopq…  expired  pr:merged  0b5f3c1e',
+  );
 });
 
 test('formatRow: a time in state in the future counts as 0s; days past two show as days', () => {
