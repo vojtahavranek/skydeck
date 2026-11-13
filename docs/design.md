@@ -183,7 +183,7 @@ flag — `-p` or `--print`, alone or inside a cluster of short flags such as `-c
 entry point decides. User-level hooks also fire for `claude -p` and SDK runs; those are not
 sessions a person works in, and nearly all of them start a session of their own, so scripted
 events are **dropped** at ingest (and counted in `kv`) — with one exception. A scripted `start` of
-a process (it has a pid) on a session skydeck already knows — an event names it, or it has a
+a process (it has a pid and a process start time) on a session skydeck already knows — an event names it, or it has a
 transcript that would be listed (entry point `cli`, or none; 7.2) — is kept as an event of kind
 `scripted`: `claude -p --resume <id>` or `claude -p -c` appends to that session's transcript, and
 must count as holding it, or a resume would start it a second time (principle 7). Such an event

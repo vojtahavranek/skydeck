@@ -3356,8 +3356,8 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
 - **Ingest.** Names ending in `.ev` and not starting with `.`, in name order. Not a regular file,
   unreadable, `SpoolParseError` or any other error while reading or parsing → moved to `badDir`
   (created when needed); a file that is gone when it is read is skipped. `event.scripted` → file deleted,
-  `addToKv('dropped_scripted', 1)` — *ruled in fix 1:* except a scripted `start` with a pid on a
-  session skydeck knows (`latestEventIdOfSession` non-null, or a `transcripts` row with entrypoint
+  `addToKv('dropped_scripted', 1)` — *ruled in fix 1:* except a scripted `start` with a pid and a
+  process start on a session skydeck knows (`latestEventIdOfSession` non-null, or a `transcripts` row with entrypoint
   `cli` or null), which is inserted as kind `scripted` (`detail ''`, `rawDetail` the source,
   `argv null`, `name null`, no link) and counted as ingested. Otherwise, inside one `store.transaction`: compute the link,
   `insertEvent`, `insertLink`; after the commit, delete the file. A `null` from `insertEvent`

@@ -124,12 +124,13 @@ interface KnownSessions {
 }
 
 /**
- * 5.3 "Scripted runs": whether a scripted event is kept — a start of a process (a pid) on a session
- * skydeck already knows, from an event or from a transcript that the list would show (entry point
- * `cli`, or none). A scripted run that starts its own session, and every scripted end, is dropped.
+ * 5.3 "Scripted runs": whether a scripted event is kept — a start of a process (a pid and a process
+ * start time: without them it could never be found alive) on a session skydeck already knows, from
+ * an event or from a transcript that the list would show (entry point `cli`, or none). A scripted
+ * run that starts its own session, and every scripted end, is dropped.
  */
 function holdsKnownSession(deck: Deck, event: SpoolEvent, known: KnownSessions): boolean {
-  if (event.kind !== 'start' || event.pid === 0) {
+  if (event.kind !== 'start' || event.pid === 0 || event.procStart === null) {
     return false;
   }
   const { store } = deck;

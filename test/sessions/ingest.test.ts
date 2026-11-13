@@ -401,6 +401,14 @@ test('a scripted start of a session skydeck knows is kept as a `scripted` event,
     assert.equal(d.deck.store.getKv('dropped_scripted'), '1');
   });
 
+  await t.test('without a process start it could never be found alive: dropped', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'startup', T0), 1);
+    put(d, { ...scriptedRun(2), procStart: null }, 2);
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1, scripted: 1 });
+    assert.equal(d.deck.store.getKv('dropped_scripted'), '1');
+  });
+
   for (const entrypoint of ['cli', null]) {
     await t.test(`known only from its transcript (entry point ${String(entrypoint)})`, (t) => {
       const d = testDeck(t);
