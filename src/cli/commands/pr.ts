@@ -49,9 +49,8 @@ function statusOf(pr: PrView): string {
 /** UsageError "missing argument" / "too many arguments" unless `rest` has exactly `count` words. */
 function expectArguments(rest: readonly string[], count: number): void {
   if (rest.length !== count) {
-    throw new UsageError(
-      `${rest.length < count ? 'missing' : 'too many'} arguments\n${SPEC.usage}`,
-    );
+    const reason = rest.length < count ? 'missing argument' : 'too many arguments';
+    throw new UsageError(`${reason}\n${SPEC.usage}`);
   }
 }
 

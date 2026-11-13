@@ -59,18 +59,20 @@ test('pr and pr <unknown> are usage errors (exit 2) that show the usage', async 
   assert.equal(d.stdout(), '');
 });
 
-test('each subcommand checks its number of arguments (exit 2)', async (t) => {
+test('each subcommand checks its number of arguments (exit 2), in the words of the other commands', async (t) => {
   const d = twoSessions(t);
-  for (const args of [
-    ['add'],
-    ['add', '0b5f'],
-    ['add', '0b5f', PR1, 'more'],
-    ['rm'],
-    ['rm', '0b5f'],
-    ['rm', '0b5f', PR1, 'more'],
-    ['refresh', 'extra'],
-  ]) {
+  const cases: [string[], string][] = [
+    [['add'], 'missing argument'],
+    [['add', '0b5f'], 'missing argument'],
+    [['add', '0b5f', PR1, 'more'], 'too many arguments'],
+    [['rm'], 'missing argument'],
+    [['rm', '0b5f'], 'missing argument'],
+    [['rm', '0b5f', PR1, 'more'], 'too many arguments'],
+    [['refresh', 'extra'], 'too many arguments'],
+  ];
+  for (const [args, reason] of cases) {
     assert.equal(await main(['pr', ...args], d.ctx), 2, args.join(' '));
+    assert.match(d.stderr(), new RegExp(`skydeck: ${reason}\\n${USAGE.replaceAll('|', '\\|')}`));
   }
   assert.equal(d.stdout(), '');
   assert.deepEqual(d.deck.store.sessionPrs(), []);

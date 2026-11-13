@@ -305,10 +305,8 @@ Marks are shown next to the state.
   across `/clear`.
 - **Group.** One line without control characters, optional. When no group is set and the title starts with a ticket key
   (configuration `groupPattern`, default `^[A-Z][A-Z0-9]+-[0-9]+`), that key is the group.
-- **Note.** Free text of any length, stored as typed. It is edited in `$VISUAL`, else `$EDITOR`,
-  else `vi`: the value is split on spaces and the path of a temporary file holding the note
-  (`<stateDir>/note-<session id>.md`, removed afterwards) is appended; stdin must be a terminal.
-  `skydeck note <ref> --set <text>` sets it without an editor, and an empty note is no note.
+- **Note.** Free text of any length, edited in `$VISUAL`, else `$EDITOR`, else `vi`: the value is
+  split on spaces and the path of the note file is appended.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
@@ -386,7 +384,7 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 | `skydeck ls [--all] [--json]` | Print the list. |
 | `skydeck show <ref> [--json]` | One session: state, marks, project directory, launch command, links, note, pull requests, holders. |
 | `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text, clear. The text is all the arguments after `<ref>`, joined by one space. |
-| `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
+| `skydeck note <ref> [--set <text>]` | Edit in `$EDITOR`, or set directly. |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
 | `skydeck new [--label <text>] [--group <text>] [-- <claude flags>]` | Start a new session in the current directory (7.7). |
