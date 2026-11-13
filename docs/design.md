@@ -494,7 +494,13 @@ and the rows carry it, so a failed read and a later successful one are never mix
 nothing and does not need it. It refuses when the session is running, naming the holder. It then takes a lock for the session; if the lock exists and is younger than 60 seconds,
 resume is refused and says how long to wait.
 The lock is removed when a `start` event of a real process for the session appears (a start
-without a pid or a process start time names no `claude` and releases nobody) or after 60 seconds. The lock
+without a pid or a process start time names no `claude` and releases nobody) or after 60 seconds — or at once when starting the session definitely failed and skydeck
+printed no command for it (the command holds a control character, or restore only reports the
+failure): nothing was started and nothing is left to run by hand, so the lock would only make the
+user wait. Where skydeck prints the command for the user to run, and after a timeout (the program
+may have started), the lock stays for its 60 seconds. Whoever took a lock may renew it while it
+waits longer than that for the session to start (restore, 7.8), and renews or releases only the
+lock it wrote: one another skydeck took over is left alone. The lock
 is an entry `resume_lock:<session id>` in the database's `kv` table, holding the time it was
 taken in nanoseconds (so its age does not depend on any file's modification time). Reading the
 lock and writing it happen in one database transaction, which no two skydecks hold at once, so
@@ -547,24 +553,54 @@ running `skydeck` shows whether it started: a session that never started has not
 ### 7.8 Restore
 
 **The set.** By default: the sessions marked `ended-unexpectedly`, not done and not expired,
-whose last holder belongs to the **latest earlier boot** in which any session was held. `--all`
-adds every other session marked `ended-unexpectedly`, from any boot including the current one.
+whose last holder belongs to the **latest earlier boot** in which any session was held: of the
+boots other than the current one that have a `start` or `observed` event, the one whose last
+event is the latest. `--all` adds every other session marked `ended-unexpectedly`, from any boot
+including the current one. The set is in list order (as `ls --all` shows it). When the current
+boot id cannot be read, restore refuses (exit 1): every process would look dead, so the sessions
+running now would be offered, and the guard could not see that they run (principle 7).
 
 **The selection.** Each entry shows how it ended (no exit recorded, or ended at a time) and
 `was-working`. Preselected are the entries with no exit recorded and those that ended within two
-minutes of that boot's last event; entries that ended earlier are listed unselected. The user
-confirms or changes the selection. `--yes` accepts the preselection and is required when stdin is
-not a terminal. `--dry-run` prints the set and the commands and exits 0.
+minutes of the last event of their own boot (for the default set that is the latest earlier boot;
+with `--all` each entry is measured against its own); entries that ended earlier are listed
+unselected. The user confirms or changes the selection: the entries are a numbered list, a line
+of numbers separated by spaces toggles them (a line with anything else is refused whole and asked
+again), an empty line confirms (with nothing selected, nothing starts), and `q` or the end of
+input cancels (exit 5) before anything starts. `--yes` accepts the preselection and is required
+when stdin is not a terminal. `--dry-run` prints the set and the commands and exits 0; it starts
+nothing, so it needs neither `--yes` nor a terminal.
 
-**Running it.** Sessions are resumed in tabs, `restoreBatch` at a time (default 3). After
-starting a batch, restore waits until each of its sessions has a `start` event, checking once a
-second, for at most `restoreStartTimeoutSeconds` (default 120). Before each batch it reads
-`MemAvailable` from `/proc/meminfo` and stops (exit 5) when it is below `restoreMinFreeMb`
-(default 4096), listing what was not started. A session that does not start in time is reported
-and skipped.
+**Running it.** Sessions are resumed in tabs, `restoreBatch` at a time (default 3). Each one goes
+through the guard of 7.6 and takes its lock, on state refreshed just before it: opening a tab
+takes time, and another skydeck may have resumed the session meanwhile. After starting a batch,
+restore waits until each of its sessions has a `start` event, checking once a second, for at most
+`restoreStartTimeoutSeconds` (default 120) counted from the start of the batch. Before each batch
+it reads `MemAvailable` from `/proc/meminfo` and stops (exit 5) when it is below
+`restoreMinFreeMb` (default 4096; a value that cannot be read counts as enough), listing what was
+not started. From the moment a session's tab is opened until restore stops waiting for it,
+restore renews the session's lock — before it opens each further tab of the batch, and at every
+check (opening a batch and the wait both can last longer than a lock holds), the last time when
+it gives up: a session that does not start
+in time is reported and skipped, and for a minute after that no resume starts it a second time
+while its tab may still open. When it sees a session's start event it removes that session's
+lock itself (it may have renewed the lock after the start). A lock another skydeck has taken over
+meanwhile is left alone. A tab whose opening timed
+out may have opened all the same, so its session is waited for like the others. A session the
+guard refuses, or whose tab cannot be opened, is reported and skipped; restore prints no command
+for it. When the tab definitely did not open (the terminal refused, or is not installed), nothing was
+started and restore prints no command for it, so its lock is released at once.
 
-Without a tab adapter, restore resumes the first selected session `--here` and prints the
-commands for the others.
+Without a tab adapter, restore resumes the first selected session the guard accepts `--here` and
+prints the commands for the others, each only after the guard let it through — restore takes no
+lock for them, but one another skydeck holds refuses the command — and only when it holds no
+control character. If the handoff itself fails, that session's command is printed too and, as with `resume`, its
+lock stays for its 60 seconds, so that no other skydeck starts the session while the user runs the
+command; when that command cannot be printed, the lock is released.
+
+**Exit codes.** 0 when every selected session started, was handed off or had its command
+printed; 1 when any was refused, failed to open or did not start in time; 5 when restore was
+stopped by the memory check or cancelled at the prompt.
 
 ## 8. Install, uninstall, doctor
 

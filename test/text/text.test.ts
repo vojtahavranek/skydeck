@@ -4,7 +4,7 @@ import { describe, test } from 'node:test';
 
 import { formatAge } from '../../src/text/age.ts';
 import { sanitize } from '../../src/text/sanitize.ts';
-import { shellJoin, shellQuote } from '../../src/text/shell.ts';
+import { printableCommand, shellJoin, shellQuote } from '../../src/text/shell.ts';
 import { S1, SEC } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 
@@ -144,6 +144,23 @@ describe('shellQuote and shellJoin', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout, words.map((w) => `[${w}]\n`).join(''));
     assert.equal(r.stderr, '');
+  });
+});
+
+describe('printableCommand', () => {
+  test('is "cd -- <dir> && <command>", every word quoted', () => {
+    assert.equal(
+      printableCommand('/home/u/my project', ['claude', '--resume', S1, '-n', "it's"]),
+      `cd -- '/home/u/my project' && claude --resume ${S1} -n 'it'\\''s'`,
+    );
+  });
+
+  test('is null when the directory or a word holds anything sanitize() would change', () => {
+    assert.equal(printableCommand('/w\x1b]0;x\x07', ['claude']), null);
+    assert.equal(printableCommand('/w', ['claude', '--model', 'op\x1b[31mus']), null);
+    assert.equal(printableCommand('/w', ['claude', 'a\nb']), null);
+    assert.equal(printableCommand('/w', ['claude', 'a\tb']), null);
+    assert.equal(printableCommand('/w', ['claude', 'a\u202eb']), null);
   });
 });
 

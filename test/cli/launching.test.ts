@@ -4,10 +4,14 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { launchPrepared } from '../../src/cli/launching.ts';
+import { acquireLock, lockKey } from '../../src/sessions/resume.ts';
 import type { PreparedLaunch } from '../../src/sessions/resume.ts';
 import { handoffScript } from '../../src/terminals/here.ts';
 import { testDeck } from '../helpers/deck.ts';
-import { S1, fakeRunner, runResult } from '../helpers/platform.ts';
+import { S1, T0, fakeRunner, runResult } from '../helpers/platform.ts';
+
+/** S1 has no event in these decks. */
+const NO_EVENTS = { latestEventId: null };
 
 function prepared(dir: string, over: Partial<PreparedLaunch> = {}): PreparedLaunch {
   return {
@@ -73,4 +77,64 @@ test('launchPrepared after a timeout prints no command: a resume says to look ag
       `skydeck: the new session's id is ${S1}; running skydeck shows whether it started`,
     ],
   });
+});
+
+test('launchPrepared keeps the lock when it prints the command: the user may run it now', async (t) => {
+  const d = testDeck(t, {
+    config: { terminal: 'wezterm' },
+    env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'no-such-dir', 'h') }),
+  });
+  acquireLock(d.deck, S1, NO_EVENTS);
+  const cases: { runner: ReturnType<typeof fakeRunner>; where: 'here' | 'tab' | null }[] = [
+    { runner: fakeRunner(() => runResult({ code: 1, stderr: 'no window\n' })), where: null }, // refused
+    { runner: fakeRunner(() => runResult({ code: null, notFound: true })), where: null }, // not installed
+    { runner: fakeRunner(), where: 'here' }, // the handoff cannot be written: a rejected open
+  ];
+  for (const { runner, where } of cases) {
+    d.platform.runner = runner;
+    const outcome = await launchPrepared(d.deck, prepared('/w'), where);
+    assert.equal(outcome.code, 1);
+    assert.equal(outcome.lines.at(-1), `cd -- /w && claude --resume ${S1}`);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+  }
+});
+
+test('launchPrepared keeps the lock when no tab adapter is configured: it prints the command', async (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, NO_EVENTS);
+  assert.equal((await launchPrepared(d.deck, prepared('/w'), 'tab')).code, 1);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+});
+
+test('launchPrepared releases the lock after a definite failure when it prints no command', async (t) => {
+  const d = testDeck(t, { config: { terminal: 'wezterm' } });
+  acquireLock(d.deck, S1, NO_EVENTS);
+  d.platform.runner = fakeRunner(() => runResult({ code: 1, stderr: 'no window\n' }));
+  const p = prepared('/w', { argv: ['claude', '--resume', S1, '--model', 'op\x1b[31mus'] });
+  const outcome = await launchPrepared(d.deck, p, null);
+  assert.equal(
+    outcome.lines.at(-1),
+    'skydeck: the command contains control characters and cannot be printed safely',
+  );
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null); // nothing started, nothing to run by hand
+});
+
+test('launchPrepared keeps the lock after a timeout: the program may have started', async (t) => {
+  const d = testDeck(t, { config: { terminal: 'wezterm' } });
+  acquireLock(d.deck, S1, NO_EVENTS);
+  d.platform.runner = fakeRunner(() => runResult({ code: null, timedOut: true }));
+  assert.equal((await launchPrepared(d.deck, prepared('/w'), null)).code, 1);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`);
+});
+
+test('launchPrepared leaves a lock alone that is not the one the resume took', async (t) => {
+  const d = testDeck(t, { config: { terminal: 'wezterm' } });
+  d.deck.store.setKv(lockKey(S1), `${T0}`);
+  d.platform.runner = fakeRunner(() => {
+    d.deck.store.setKv(lockKey(S1), 'someone else'); // taken over while the terminal was asked
+    return runResult({ code: 1, stderr: 'no window\n' });
+  });
+  const p = prepared('/w', { argv: ['claude', '--resume', S1, 'a\tb'] }); // not printable: released
+  assert.equal((await launchPrepared(d.deck, p, null)).code, 1);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), 'someone else');
 });

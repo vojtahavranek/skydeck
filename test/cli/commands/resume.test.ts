@@ -241,7 +241,7 @@ test('resume --tab that WezTerm refuses prints the reason and the quoted command
   assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 1);
   assert.equal(d.deck.store.getKv(lockKey(S1)), `${T0}`); // the printed command may be run now
   d.clock.setNs(T0 + 5n * SEC);
-  assert.equal(await main(['resume', '0b5f', '--tab'], ctx), 4);
+  assert.equal(await main(['resume', '0b5f', '--tab'], d.ctx), 4);
   d.clock.setNs(T0);
   assert.ok(d.stderr().includes('no window'), d.stderr());
   assert.ok(
@@ -317,6 +317,8 @@ test('resume never prints a command that holds control characters', async (t) =>
   assert.ok(err.includes('control characters'), err);
   assert.equal(/[\x00-\x09\x0b-\x1f\x7f]/.test(err), false, JSON.stringify(err));
   assert.equal(err.includes('cd --'), false, err);
+  // Nothing was started and no command was printed: the lock does not keep the user waiting.
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null);
 });
 
 test('resume of an unknown reference exits 3', async (t) => {

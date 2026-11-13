@@ -13,9 +13,13 @@ import {
   LOCK_TTL_NS,
   acquireLock,
   checkResumable,
+  isLockHeld,
   lockKey,
   prepareNew,
   prepareResume,
+  readLock,
+  releaseLock,
+  renewLock,
   sweepLocks,
 } from '../../src/sessions/resume.ts';
 import type { SawEvents } from '../../src/sessions/resume.ts';
@@ -608,6 +612,74 @@ test('no lock is a file: the locks directory stays empty', (t) => {
   writeFileSync(join(d.deck.places.locksDir, `${S2}.lock`), `${T0 - 600n * SEC}\n`);
   assert.equal(sweepLocks(d.deck), 0); // a file there is not a lock any more
   assert.equal(lockOf(d, S1), `${T0}`);
+});
+
+// --- readLock, renewLock, releaseLock, isLockHeld --------------------------------------------------
+
+test("readLock is the value of the session's lock, null without one", (t) => {
+  const d = testDeck(t);
+  assert.equal(readLock(d.deck, S1), null);
+  acquireLock(d.deck, S1, sawNow(d));
+  assert.equal(readLock(d.deck, S1), `${T0}`);
+});
+
+test('renewLock moves a lock that is still ours to now and returns its new value', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, sawNow(d));
+  d.clock.setNs(T0 + 50n * SEC);
+  assert.equal(renewLock(d.deck, S1, `${T0}`), `${T0 + 50n * SEC}`);
+  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC}`);
+  d.clock.setNs(T0 + 100n * SEC); // 50 s after the renewal: it still holds
+  assert.throws(() => acquireLock(d.deck, S1, sawNow(d)), /is being resumed \(50 s ago\)/);
+});
+
+test('renewLock leaves a lock that is no longer ours, or gone, as it is, and says so', (t) => {
+  const d = testDeck(t);
+  writeLock(d, S1, `${T0 + 1n}`); // another skydeck took it over
+  assert.equal(renewLock(d.deck, S1, `${T0}`), null);
+  assert.equal(lockOf(d, S1), `${T0 + 1n}`);
+  assert.equal(renewLock(d.deck, S2, `${T0}`), null);
+  assert.equal(lockOf(d, S2), null);
+});
+
+test('renewLock reads and writes inside one transaction', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, sawNow(d));
+  const w = watched(d);
+  renewLock(w.deck, S1, `${T0}`);
+  assert.equal(w.transactions(), 1);
+  assert.deepEqual(w.depths, [1, 1]);
+});
+
+test('releaseLock removes a lock that is still ours, and only that', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, sawNow(d));
+  writeLock(d, S2, `${T0 + 1n}`);
+  assert.equal(releaseLock(d.deck, S1, `${T0}`), true);
+  assert.equal(lockOf(d, S1), null);
+  assert.equal(releaseLock(d.deck, S2, `${T0}`), false);
+  assert.equal(lockOf(d, S2), `${T0 + 1n}`);
+  const w = watched(d);
+  releaseLock(w.deck, S2, `${T0}`);
+  assert.equal(w.transactions(), 1);
+});
+
+test('isLockHeld is true for a lock that holds, by the rules of acquireLock, and takes none', (t) => {
+  const d = testDeck(t);
+  assert.equal(isLockHeld(d.deck, S1), false);
+  writeLock(d, S1, `${T0 - 59n * SEC}`);
+  assert.equal(isLockHeld(d.deck, S1), true);
+  writeLock(d, S1, `${T0 - 60n * SEC}`);
+  assert.equal(isLockHeld(d.deck, S1), false);
+  writeLock(d, S1, 'soon');
+  assert.equal(isLockHeld(d.deck, S1), false);
+  writeLock(d, S1, `${T0 - 5n * SEC}`);
+  startEvent(d, S1, T0 - 2n * SEC);
+  assert.equal(isLockHeld(d.deck, S1), false); // it started: the guard's running check takes over
+  const w = watched(d);
+  isLockHeld(w.deck, S2);
+  assert.equal(w.transactions(), 0);
+  assert.equal(lockOf(d, S2), null);
 });
 
 // --- prepareResume ---------------------------------------------------------------------------------

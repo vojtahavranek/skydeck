@@ -3,11 +3,12 @@
 // for the user to run instead — unless printing it could do harm.
 import type { Deck } from '../sessions/deck.ts';
 import { describeError } from '../sessions/problems.ts';
+import { readLock, releaseLock } from '../sessions/resume.ts';
 import type { PreparedLaunch } from '../sessions/resume.ts';
 import { terminalFor } from '../terminals/index.ts';
 import type { OpenResult, Terminal } from '../terminals/index.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { shellJoin, shellQuote } from '../text/shell.ts';
+import { printableCommand } from '../text/shell.ts';
 import { EXIT } from './exit.ts';
 
 /** What launchPrepared did: the exit code, and the lines to show the user, in order. */
@@ -17,27 +18,15 @@ export interface LaunchOutcome {
   lines: string[];
 }
 
-/** The command as a POSIX shell line: "cd -- <q dir> && <q argv…>". */
-function commandLine(prepared: PreparedLaunch): string {
-  return `cd -- ${shellQuote(prepared.cwd)} && ${shellJoin(prepared.argv)}`;
-}
-
-/**
- * Whether a word holds something the sanitiser would change (a control character, an escape
- * sequence, a line break or a tab). Such a word is safe inside the quotes of the handoff, which no
- * terminal shows, but not on the user's screen, where it could move the cursor or hide text, nor
- * in a line that may be pasted into a shell.
- */
-function unprintable(word: string): boolean {
-  return sanitize(word) !== word;
-}
-
 /**
  * The reason a launch failed, then what the user can do about it. The command is printed only when
  * running it cannot start the session a second time and it holds nothing a terminal would act on.
  */
 function failure(prepared: PreparedLaunch, reason: string, timedOut: boolean): string[] {
   const lines = [`skydeck: ${sanitize(reason)}`];
+  // A word with a control character is safe inside the quotes of the handoff, which no terminal
+  // shows, but not on the user's screen nor in a line that may be pasted into a shell.
+  const command = printableCommand(prepared.cwd, prepared.argv);
   if (timedOut) {
     // The program may have started: a command run by hand now could resume the session twice. A
     // new session that did not start has nothing to resume, so its id is all there is to give.
@@ -46,10 +35,10 @@ function failure(prepared: PreparedLaunch, reason: string, timedOut: boolean): s
         ? `skydeck: the new session's id is ${prepared.sessionId}; running skydeck shows whether it started`
         : `skydeck: run skydeck again to see whether session ${prepared.sessionId} is running`,
     );
-  } else if ([prepared.cwd, ...prepared.argv].some(unprintable)) {
+  } else if (command === null) {
     lines.push('skydeck: the command contains control characters and cannot be printed safely');
   } else {
-    lines.push('skydeck: to start it yourself, run:', commandLine(prepared));
+    lines.push('skydeck: to start it yourself, run:', command);
   }
   return lines;
 }
@@ -80,6 +69,11 @@ function chooseTerminal(deck: Deck, where: 'here' | 'tab' | null): Terminal | nu
  * session's id is <id>; running skydeck shows whether it started"), and when the directory or a
  * word of the command holds anything sanitize() would change, with "skydeck: the command contains
  * control characters and cannot be printed safely". An open() that rejects is a failed open.
+ *
+ * The lock prepareResume took stays after a failure — the program may have started (a timeout),
+ * or the user may run the printed command now — except after a failure other than a timeout whose
+ * command cannot be printed: nothing was started and there is nothing to run by hand, so it is
+ * released (releaseLock: only while it is still that lock) and the user is not kept waiting.
  */
 export async function launchPrepared(
   deck: Deck,
@@ -95,6 +89,7 @@ export async function launchPrepared(
     lines.push(`skydeck: started with flags skydeck does not know, not passed on resume: ${names}`);
   }
   const terminal = chooseTerminal(deck, where);
+  const lock = prepared.kind === 'resume' ? readLock(deck, prepared.sessionId) : null;
   let result: OpenResult;
   if (terminal === null) {
     const error = `no terminal adapter that opens tabs is configured (set "terminal" in ${deck.places.configPath})`;
@@ -112,6 +107,9 @@ export async function launchPrepared(
   }
   if (result.ok) {
     return { code: EXIT.ok, lines };
+  }
+  if (!result.timedOut && lock !== null && printableCommand(prepared.cwd, prepared.argv) === null) {
+    releaseLock(deck, prepared.sessionId, lock);
   }
   return {
     code: EXIT.failure,

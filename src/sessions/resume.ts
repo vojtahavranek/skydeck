@@ -173,6 +173,62 @@ export function sweepLocks(deck: Deck): number {
   });
 }
 
+/**
+ * The value of the session's resume lock, null when there is none. A caller that has just taken
+ * the lock keeps it, to renew or release that lock later and no other (renewLock, releaseLock).
+ */
+export function readLock(deck: Deck, sessionId: string): string | null {
+  return deck.store.getKv(lockKey(sessionId));
+}
+
+/**
+ * In one store transaction: when the session's lock still holds `ours` (the value this process
+ * wrote), sets it to the clock's time and returns the new value; otherwise — another skydeck took
+ * the lock over after it went stale, or it is gone — changes nothing and returns null. A caller
+ * that waits longer than LOCK_TTL_NS for the session to start renews its lock while it waits.
+ */
+export function renewLock(deck: Deck, sessionId: string, ours: string): string | null {
+  const key = lockKey(sessionId);
+  const { store, platform } = deck;
+  return store.transaction(() => {
+    if (store.getKv(key) !== ours) {
+      return null;
+    }
+    const value = `${platform.clock.nowNs()}`;
+    store.setKv(key, value);
+    return value;
+  });
+}
+
+/**
+ * In one store transaction: removes the session's lock when it still holds `ours`; whether it did.
+ * For a resume that definitely started nothing (the terminal refused, or is not installed): its lock
+ * would only make the user wait. A timeout is not such a case: the program may have started.
+ */
+export function releaseLock(deck: Deck, sessionId: string, ours: string): boolean {
+  const key = lockKey(sessionId);
+  const { store } = deck;
+  return store.transaction(() => {
+    if (store.getKv(key) !== ours) {
+      return false;
+    }
+    store.deleteKv(key);
+    return true;
+  });
+}
+
+/**
+ * Whether a lock that holds by the rules of acquireLock exists for the session: another skydeck is
+ * starting it. Reads only; takes no lock and no transaction.
+ */
+export function isLockHeld(deck: Deck, sessionId: string): boolean {
+  const value = readLock(deck, sessionId);
+  return (
+    value !== null &&
+    freshAge(deck.store, sessionId, lockTimeOf(value), deck.platform.clock.nowNs()) !== null
+  );
+}
+
 export interface PreparedLaunch {
   sessionId: string;
   cwd: string;
