@@ -2064,6 +2064,11 @@ sessions and to switch between their real terminals.
 - Terminals in the window: attach and switch by click, Ctrl+Shift+1–9, Ctrl+Tab and Ctrl+Shift+O,
   Ctrl+Shift+L; the keys of 9.1, find (9.7), links (9.6), the clipboard (9.5); the ended bar; the
   card for sessions running in another terminal; the key help.
+- Every key of 12.9 is the window's from stage A on, also those whose action comes in a later
+  stage, so that a key never means Edge's action in one stage and the window's in the next:
+  Ctrl+Shift+J (B), Ctrl+Shift+P (E) and, in the list, `l`, `g`, `n`, `p`, `d` and F2 (D) are
+  cancelled and show `<key>: comes in a later stage` in the key bar; the key help lists them as
+  coming later.
 - Resume into the window (resume card, Enter, double click) and New (12.6), through the shared code
   of 11.1.
 - Design 7.4's filter (`/`).
@@ -2081,7 +2086,7 @@ configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` 
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
 and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3) and the
-pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d`.
+pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2.
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
 the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The
