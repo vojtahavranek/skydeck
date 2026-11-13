@@ -136,11 +136,11 @@ The places of design 9.1 stay. Step 2 adds:
 
 | Place | Holds |
 |---|---|
-| `<runtimeDir>` | The first that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run`. Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the other two are not, so the server treats anything there from another boot as stale (6.3, 7.8). The bootstrap, the server and the keep-alive script all resolve it by this rule, and a test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
+| `<runtimeDir>` | The first that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run`. Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the other two are not, so the server treats anything there from another boot as stale (6.3, 7.8). The command line and the server resolve it by this rule (the keep-alive script is given it as an argument, 6.1), and a test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
 | `<runtimeDir>/server.json` | The running server: `pid`, `procStart`, `bootId`, `port`, `serverId` (random per start), `build` (16.5), `checkout` (its `appRoot`), `startedAt`, and where its environment came from (5.2). Mode 600. Written after the server listens, removed when it stops. |
 | `<runtimeDir>/server.sock` | The server's unix socket for the command line (8.3), mode 600. |
 | `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
-| `<runtimeDir>/keeper-<build>.py` | The keeper's code as the server read it at start (16.5): what new keepers run. |
+| `<runtimeDir>/keeper-<build>.py` | The keeper's code as the server read it at start (16.5): what new keepers run. Written by the server at start through a temporary name and a rename, mode 600. A running keeper has read its code when it started, so the server removes the files of other builds at start. |
 | `<runtimeDir>/keepalive.interop` | The keep-alive's `$WSL_INTEROP` (6.4). |
 | `<runtimeDir>/terms/<terminal id>.sock` | A keeper's unix socket, mode 600, in a directory of mode 700. |
 | `<runtimeDir>/interop` | A symbolic link to a live WSL interop socket (6.4). |
@@ -184,7 +184,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 
 | Where | Change | Stage |
 |---|---|---|
-| `bin/skydeck` (launcher) | For `serve`: `ulimit -c 0` before Node.js starts (2). For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside `NODE_COMPILE_CACHE`, so the server can drop the launcher's cache variable from the programs' environment (5.2, 7.4). | A |
+| `bin/skydeck` (launcher) | For `serve`: `ulimit -c 0` before Node.js starts (2). For every command: `SKYDECK_LAUNCHER_CACHE` passed to Node.js beside `NODE_COMPILE_CACHE`, so the server can drop the launcher's cache variable from the programs' environment (5.2, 7.4). Tests in `test/bin/` for both. | A |
 | `src/platform/` | New interfaces: detached processes with a given environment, long-lived children, TCP and unix sockets, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value and the start deadline; the `Terminal` names gain `window` (11.1, 11.2). | A |
@@ -489,7 +489,8 @@ object, then closes stdin:
 
 `startBy` is the **start deadline**, no later than the resume lock holds: for a resume, the time
 the lock was taken plus `LOCK_TTL_NS` minus `LOCK_START_TOLERANCE_NS` (55 s, design 7.6); for a
-new session, the time `prepareNew` stored its label and group plus the same 55 s. Past it, the
+new session, the clock when `prepareNew` ran plus the same 55 s (it stores no row when there is
+neither a label nor a group). Past it, the
 guard's decision that allowed this launch is no longer protected by the lock: another skydeck may
 have resumed the session since, and starting it then could run one session twice (principle 7).
 
@@ -595,8 +596,10 @@ The server's environment (5.2), with:
 - removed, as a second line of defence behind 5.1's refusal to start a server inside a Claude Code
   session: the variables Claude Code sets for the programs it runs, so that no program in the
   window looks like another session's child or carries its messaging token. The list lives in
-  `src/claude/terminal.ts` and is **to be confirmed** (check W23): known today `CLAUDECODE`,
-  `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID` (design 14); seen in the
+  `src/claude/terminal.ts` and is **to be confirmed** (check W23): known today
+  `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID` (design 14, in a hook's
+  environment) and `CLAUDECODE` (in the environment of a Claude Code session's command, seen on the
+  development machine on 2026-11-13); seen in the
   environment of a Claude Code session's command, origin not yet known, `CLAUDE_CODE_CHILD_SESSION`,
   `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
   `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_EFFORT`. Names only, never a prefix: `CLAUDE_CODE_USE_BEDROCK`
@@ -659,8 +662,10 @@ The server, on `exit`:
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
   and the session's lock is still the one this launch took, releases that lock, and for a new
-  session removes the label and group it stored, as `settleFailedLaunch` does after a definite
-  failure (design 7.6, 7.7): nothing runs, and the bar's Resume must not be refused for a minute.
+  session removes the label and group it stored (design 7.6, 7.7): nothing runs, and the bar's
+  Resume must not be refused for a minute. This differs **on purpose** from `settleFailedLaunch`,
+  which releases only when no command could be printed (a printed command may yet be run by hand):
+  here nothing is printed for the user to run, and the bar offers Resume itself.
 
 A keeper whose connection ends without `exit` is **lost** only when its process is dead by design
 5.5's rule (its `.pid` line) or its socket refuses connections: then its program got SIGHUP
@@ -696,7 +701,8 @@ keeper). Protocol version 1:
 | `C` claim | server → keeper | Empty. The connection becomes the screen side (7.1, step 3). The first frame of every connection. |
 | `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers, 0 for none), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
 | `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
-| `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output; a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
+| `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output (when
+`exec` then fails, `X` with code 127 follows); a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
 | `N` do not start | server → keeper | UTF-8 reason. The program is never started (7.1, step 2). |
 | `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. |
 | `D` output | keeper → server | One record: bytes as read from the pty. After `H` (and `S`) come the tail's records, then live ones. |
@@ -720,7 +726,7 @@ The server listens on `127.0.0.1:<port>` only. Every request must have the `Host
 
 | Request | Answer |
 |---|---|
-| `GET /` | `web/index.html`. No secret needed: the page holds no secret of its own. |
+| `GET /` | `web/index.html`, with the asset version put into its asset URLs by the server when it reads the file at start (there is no build step). No secret needed: the page holds no secret of its own. |
 | `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list). `Cache-Control: immutable` under the versioned path. |
 | `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
@@ -794,6 +800,27 @@ the server's proof.
    connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server).
 
+**Encodings.** Keys (the secret, a launch token) are 32 raw bytes, written as base64url without
+padding wherever they are stored or printed; HMAC and HKDF take the raw bytes. Nonces, proofs and
+`key` are base64url without padding in the messages. The HMAC input is the UTF-8 of the text
+shown, with `sN` and `cN` in their base64url form and `\n` a single line feed. The HKDF salt is the
+UTF-8 of `sN` and `cN` (base64url) concatenated, the info is the UTF-8 of `skydeck key 1`, the
+output 32 bytes. `key` is the 12-byte IV, then the ciphertext, then the 16-byte tag — what Web
+Crypto's `unwrapKey` with AES-GCM takes after the IV is split off. One vector, computed with
+Node.js's `crypto`, is pinned by a server test (17.3) and by a page test that runs the same inputs
+through Web Crypto (17.4); the same flow — HKDF, `unwrapKey` into a non-extractable HMAC key, a
+proof equal to Node.js's — was run in headless Chromium in review (section 21):
+
+| Input | Value |
+|---|---|
+| secret | bytes `0x00`…`0x1f`: `AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8` |
+| launch token | bytes `0x20`…`0x3f`: `ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8` |
+| `sN`, `cN` | bytes `0x40`…`0x5f` and `0x60`…`0x7f`: `QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8`, `YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8` |
+| origin, IV | `http://127.0.0.1:47613`; bytes `0x80`…`0x8b` |
+| `pP`, `pS` in mode `key` | `I2kfIbEbNedSunJ5O-iFTu1xMaucB1TaOXfPgule6rE`, `PCSrj1ouBWLrjthlVwJEhf7wtjQVvd99qg30B5MzN9k` |
+| `pP`, `pS` in mode `launch` | `Cr2pbVrX3H03jJHuH4XHBB-cqsOPpzQCkE0JpYYrpm4`, `JM1U0NnH9f1h_LMtP3J9aBD6GWG7dyJX0cRhjXBHCUw` |
+| `key` | `gIGCg4SFhoeIiYqL8-uwKEfl-QQONxqvTE8BdkWwIYHdwQkWN6_IJiXkHtLOZknj-CrYjV5peDDAyWDo` |
+
 A close with 4003 means that the page's key is not valid any more (after `--new-secret`), or that
 its launch token was used already or has expired; the page says `this window's key is not valid;
 run skydeck window again`.
@@ -826,7 +853,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 |---|---|---|
 | `ping` | `n` | `pong` with the same `n`, `bootId`, `serverId`. |
 | `view` | `filter`, `chips`, `unfolded`, `showDone`, `selected` | The page's view state; the server answers with `list` and keeps sending `list` when it changes (12). |
-| `focus` | `focused`, `selected` | Window focus and selection, for seen (12.4), notifications (13) and the size owner. |
+| `focus` | `focused`, `selected`, `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
 | `attach` | `term`, `cols`, `rows` | Start a terminal stream (8.2.4). The page's size is a proposal (8.2.6). |
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
@@ -860,7 +887,7 @@ Server → page:
 | `list` | The view model (12), sent whole (about 50 KB for 100 sessions) when it changed, at most once a second: `counts`; `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `cols`, `rows`, whether this page owns the size). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests, chip) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
-| `exit` | `term`, `code`, `signal`, `atNs`, `lost`. |
+| `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`. |
 | `notify` | `sessionId`, `title`, `reason` (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `restore-progress`), `text`. |
@@ -880,8 +907,9 @@ applied, so nothing is lost or doubled.
 
 #### 8.2.5 Reconnect
 
-A page that reconnects (6.3) sends `hello` again and attaches the terminals it had attached; each
-starts over with a fresh `snap`. There is no resume from a position: a snapshot is cheap enough
+A page that reconnects (6.3) goes through the whole handshake again — `challenge`, `hello`,
+`welcome`, `start` (8.2.2) — in mode `key`, then sends its `view` and `focus` and attaches the
+terminals it had attached; each starts over with a fresh `snap`. There is no resume from a position: a snapshot is cheap enough
 (7.3) and always right.
 
 #### 8.2.6 Size
@@ -890,8 +918,8 @@ A terminal has one size, the pty's. The server remembers, per terminal, the size
 page last proposed (`attach`, `resize`). The rules:
 
 - **First size.** A terminal opened from a page (`act resume`, `act new`) starts at the size that
-  page sent with the action. One opened by the command line or by a restore starts at the size of
-  the terminal area of the page that had focus last, or 120 × 40 when no page is connected.
+  page sent with the action. One opened by the command line or by a restore starts at the `area`
+  the page that had focus last reported in `focus` (8.2.3), or 120 × 40 when no page is connected.
 - **Owner.** The size owner is the page that last sent `input` for the terminal; before any input,
   the first page that attached. A page that attaches to a terminal without an owner becomes it.
 - **Changes.** When a page becomes the owner, its remembered proposal applies at once; afterwards
@@ -1139,7 +1167,8 @@ freshly refreshed rows (`prepareResumeById`), the refusal without a boot id, the
 release and renewal rules, the start-event rule (`resumeStarted`), the memory check and batches of
 restore.
 
-Four changes to step 1's code make that possible, with no change of behaviour for the commands:
+Four changes to step 1's code make that possible, with no change of behaviour for the commands
+(4.4 lists every change step 2 makes to step 1's code, with its stage):
 
 - **Starting a prepared launch** (`launchPrepared`, today in `src/cli/launching.ts`) moves to
   `src/sessions/launch.ts` and takes the `Terminal` to open with as a parameter. The command line
@@ -1157,8 +1186,8 @@ Four changes to step 1's code make that possible, with no change of behaviour fo
 - **Restore planning** moves out of `src/cli/commands/restore.ts`, where `plan()` is private (the
   boot-id refusal, `buildList`, `flatRows`, `planRestore`), into `src/sessions/restore.ts` as one
   function the command and the server share. It also returns the earlier boot and the time of its
-  last event, which `planRestore` computes and today keeps to itself: the banner says "WSL stopped
-  <time>" from it (12.7).
+  last event, which `planRestore` computes and today keeps to itself: the banner shows that time as
+  the last activity before the restart (12.7) — the stop itself is not recorded.
 
 ### 11.2 The window terminal
 
@@ -1218,7 +1247,11 @@ command line to run by hand when that is safe, and none after a timeout.
   set from freshly refreshed rows, keeps the entries the user selected (an id no longer in the set
   is reported `failed <short>: no longer offered for restore`), and runs `runRestore` with the
   window terminal (11.3). The command prints each report line as it arrives and exits with design
-  7.8's code for the outcome. `--dry-run` asks the server nothing.
+  7.8's code for the outcome. `--dry-run` asks the server nothing. The command asks the server for
+  `GET /ping` before it plans or prompts, so "the window is not running" comes before any
+  question. While a restore runs, the server sends a line at least every 10 seconds (`waiting for
+  <n> sessions` when nothing else happened); a command that hears nothing for 30 seconds says `the
+  window's server stopped answering; run skydeck to see what started` and exits 1.
 
 ## 12. What the window shows
 
@@ -1362,7 +1395,8 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 ### 12.7 The restore banner
 
 At the top of the list while design 7.8's default set is not empty and the user has not dismissed
-it for that boot: "WSL stopped yesterday at 18:02 with 3 sessions open", a checkbox per session
+it for that boot: "Before the restart (last activity yesterday at 18:02) 3 sessions were open", a
+checkbox per session
 preselected by design 7.8's rule, "Restore 3" and "Not now". Restore runs as in 11.3; the sessions
 show under Open as `starting…` and the banner reports each line of the run (started, timed out,
 failed, stopped for memory). "Not now" stores the boot id (10.2): the banner does not come back for
@@ -1684,8 +1718,8 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
 `vendor/xterm/` holds, at exact versions, each with its `LICENSE`: `@xterm/xterm` 6.0.0 (with its
 CSS), `@xterm/headless` 6.0.0, `@xterm/addon-serialize` 0.14.0, `@xterm/addon-fit` 0.11.0,
-`@xterm/addon-search` (the release made for xterm.js 6.0.0; the research named no version, so it
-is pinned exactly when the files are vendored, like the others), `@xterm/addon-unicode-graphemes`
+`@xterm/addon-search` 0.16.0 (published together with xterm.js 6.0.0 on 2025-12-22, and its
+latest release on 2026-11-13; npm registry), `@xterm/addon-unicode-graphemes`
 0.4.0, and their type declarations for `tsc`. `vendor/MANIFEST.json` lists every file with its
 package, version and sha256. The same packages at the same versions are development dependencies;
 `npm run vendor` copies them into `vendor/` and writes the manifest, and a test fails when
@@ -1735,7 +1769,14 @@ Driven over its socket by `node:test` with real python3 (CI has it):
 - the tail cap and `gap`; the send queue cap;
 - exit status after a normal exit, a signal, and `exec` failing (127); `A` ending the keeper; the
   10-minute linger (shortened through an environment variable that only tests set);
-- killing the keeper ends the program (SIGHUP), and the stand-in reports `SessionEnd` `other`.
+- killing the keeper ends the program (SIGHUP), and the stand-in reports `SessionEnd` `other`;
+- `T` comes once after `G`, before the first output, with the program's pid and process start;
+  with a failing `exec`, `T` then `X` 127.
+
+**The keep-alive script** (`bin/skydeck-keepalive`), with real `sh` and real processes: it stays
+while a `.pid` line names a live process; it ends when every line names a dead one, one of another
+boot id, or a live pid with another process start (a reused pid); it writes its own two files
+atomically. `wsl.exe` is replaced by running the script directly.
 
 ### 17.3 The server
 
@@ -1746,6 +1787,17 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
 - authentication: a wrong page proof, a proof replayed on a new connection (fresh nonce), a proof
   made with the server's label, a missing `hello`; wrong `Origin`, wrong `Host`, `OPTIONS`; CORS
   headers never present; the secret's bytes appear in no frame and no log line the tests capture;
+- the handshake's vector (8.2.2): the server's proofs and `key` for the fixed inputs;
+- `T` resolves `open()`; a holder whose pid is the program, or descends from it, maps to the
+  terminal at once, without a server restart;
+- nobody but the server connects to a keeper: `doctor` and `uninstall --purge` run against keepers
+  whose sockets record every connection, a not-started one included, and none is recorded; the
+  not-started keeper stays not started;
+- `skydeck resume --window` and `new --window` with no server running print `the window is not
+  running…` and exit 1, and start nothing; `restore` says it before its prompt;
+- `serve` refuses with `CLAUDECODE` set (exit 13), and the `serve` process has a core limit of 0
+  (`/proc/<pid>/limits`); `skydeck window` prints each fixed message of 5.2 for each exit code of a
+  fake `serve`;
 - launch tokens: one works once — two pages racing with the same token, one gets `welcome`, the
   other 4003 —, an expired one fails, `--new-secret` drops the unused ones, `key` opens only with
   the token and both nonces;
@@ -1813,6 +1865,8 @@ In the browser suite, besides those:
 - keys: Ctrl+Shift+P sends nothing to the terminal (xterm.js 6.0.0); a paste with Ctrl+V reaches
   the server as a bracketed paste and never as `\x16`; Ctrl+Shift+V as `\x16`; Shift+Enter as
   `\n`; Alt+F4 is not cancelled; a paste of 2 MiB arrives whole, in messages of at most 64 KiB;
+- the handshake's vector (8.2.2) through Web Crypto: the page's proofs and the unwrapped key's
+  proofs equal the pinned values;
 - the key: the launch token leaves the address before any connection opens; after a reload the
   stored key works and its bytes cannot be exported (`exportKey` fails); the page sends nothing
   after `hello` until the server's proof checks out, and against a stand-in server with a wrong
@@ -1993,6 +2047,9 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | On WSL a crashing process's core dump is piped to WSL's crash collector (`core_pattern` is `\|/wsl-capture-crash …`), which keeps up to `maxCrashDumpCount` (default 10) dumps in `crashDumpFolder` (default `%Temp%\wsl-crashes`). A non-dumpable process (`PR_SET_DUMPABLE` 0) produces no dump, piped or not; whether the collector honours a core limit of 0 is not known. | `core_pattern` verified; documentation (learn.microsoft.com/windows/wsl/wsl-config); kernel behaviour documentation (`prctl(2)`, `core(5)`); collector UNVERIFIED (W24) |
 | `/run/user/<uid>` outlives the user's last terminal only when the user lingers; on the development machine the user does. | verified |
 | The keeper's code needs python3 3.9 or newer (`os.waitstatus_to_exitcode`); it was run on 3.12 only. | inferred (3.9) / verified (3.12) |
+| The Web Crypto flow of 8.2.2 works in Chromium: HKDF-SHA256 from the token, AES-256-GCM `unwrapKey` into a non-extractable HMAC key, a proof equal to Node.js's HMAC over the same bytes; `exportKey` fails; the key survives a round trip through IndexedDB and still signs; the page is a secure context. | verified in headless Chromium (review, 2026-11-13) |
+| `@xterm/addon-search` 0.16.0 was published with xterm.js 6.0.0 (2025-12-22) and is its latest release. | documentation (npm registry, 2026-11-13) |
+| `CLAUDECODE` is set in the environment of a command a Claude Code session runs. | verified (the development machine, 2026-11-13) |
 | Which `CLAUDE*` variables Claude Code sets for the programs it runs, beyond `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PID`. | UNVERIFIED (W23) |
 | `msedge.exe` started while an Edge on the same profile folder runs hands off and exits at once. | verified in Chromium's source |
 | Started through interop with stdio ignored and a Windows working directory, a Windows program shows no console window. | verified in WSL's source |
