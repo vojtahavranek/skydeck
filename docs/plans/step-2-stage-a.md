@@ -1317,8 +1317,9 @@ cancels) and `web/format.js` (the age format of design 7.4). No DOM, no state: f
 // web/format.js
 /** design 7.4's compact age: < 60 s "<n>s", < 60 min "<n>m", < 48 h "<n>h", else "<n>d"; negative counts as 0. */
 export function formatAge(durationNs) {} // bigint → string
-/** The age between two decimal-string nanosecond times of the protocol; a TypeError for a string
- *  that is not all digits (never pass an empty or null time). */
+/** The age between two decimal-string nanosecond times of the protocol. Never throws: when either
+ *  is not an integer in decimal digits (empty, null, malformed) it returns '' (ruled for task 31:
+ *  one bad value must not break the list). */
 export function ageBetween(nowNs, thenNs) {} // (string, string) → string
 ```
 
@@ -1335,7 +1336,8 @@ export function ageBetween(nowNs, thenNs) {} // (string, string) → string
   Ctrl+R in the list zone yes and in the terminal zone no, Ctrl+Shift+R in both, every `later` key
   yes.
 - `format.test.ts`: `formatAge` equals `src/text/age.ts`'s for 0, 59 s, 60 s, 59 min, 47 h, 48 h,
-  400 days and a negative duration (A18); `ageBetween` on decimal strings above 2^53.
+  400 days and a negative duration (A18); `ageBetween` on decimal strings above 2^53, and `''`
+  for an empty, null or malformed time.
 
 **Done when:** the whole key policy of S2 12.9 and 9.1 is a tested pure function, on both layouts.
 

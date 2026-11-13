@@ -69,18 +69,33 @@ describe('ageBetween', () => {
     assert.equal(ageBetween(String(then + 400n * DAY), String(then)), '400d');
   });
 
-  const malformed: ReadonlyArray<readonly [name: string, text: string]> = [
+  // Ruled 2026-11-13: a formatter that throws would break the whole list for one bad value, so
+  // anything that is not two integer nanosecond times gives an empty age.
+  const malformed: ReadonlyArray<readonly [name: string, value: string | null | undefined]> = [
     ['an empty string', ''],
-    ['a negative number', '-5'],
+    ['null', null],
+    ['undefined', undefined],
     ['a hexadecimal number', '0x10'],
     ['surrounding blanks', ' 12 '],
     ['an exponent', '1e3'],
     ['a fraction', '1.5'],
+    ['a word', 'never'],
+    ['a trailing newline', '12\n'],
   ];
-  for (const [name, text] of malformed) {
-    test(`refuses ${name} as a time, on either side`, () => {
-      assert.throws(() => ageBetween(text, '1'), TypeError);
-      assert.throws(() => ageBetween('1', text), TypeError);
+  for (const [name, value] of malformed) {
+    test(`${name} as a time, on either side, gives an empty age and never throws`, () => {
+      assert.equal(ageBetween(value, '1'), '');
+      assert.equal(ageBetween('1', value), '');
     });
   }
+
+  test('a value that is not a string gives an empty age', () => {
+    assert.equal(ageBetween(5 as unknown as string, '1'), '');
+    assert.equal(ageBetween('1', 5n as unknown as string), '');
+  });
+
+  test('a negative integer time is still a number: the age counts from it', () => {
+    assert.equal(ageBetween('59000000000', '-1000000000'), '1m');
+    assert.equal(ageBetween('-5', '1'), '0s');
+  });
 });

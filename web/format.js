@@ -7,8 +7,8 @@ const SECONDS_PER_MINUTE = 60n;
 const SECONDS_PER_HOUR = 3600n;
 const SECONDS_PER_DAY = 86_400n;
 
-/** A time of the protocol: nanoseconds as a decimal string (S2 8.2.3). */
-const DECIMAL_TIME = /^[0-9]+$/;
+/** A time of the protocol: integer nanoseconds as a decimal string (S2 8.2.3). */
+const DECIMAL_TIME = /^-?[0-9]+$/;
 
 /**
  * Design 7.4's compact age of a duration in ns (negative counts as 0): < 60 s → "<n>s";
@@ -32,24 +32,25 @@ export function formatAge(durationNs) {
 
 /**
  * The age between two times of the protocol (decimal strings of nanoseconds), computed exactly:
- * the times lie far above 2^53. A `thenNs` after `nowNs` counts as 0.
- * @param {string} nowNs
- * @param {string} thenNs
+ * the times lie far above 2^53. A `thenNs` after `nowNs` counts as 0. Anything that is not two
+ * integer times — an empty, null or malformed value — gives an empty string: one bad value must
+ * not break the list (ruled for task 31). Never throws.
+ * @param {string | null | undefined} nowNs
+ * @param {string | null | undefined} thenNs
  * @returns {string}
- * @throws {TypeError} when either is not a decimal string of digits
  */
 export function ageBetween(nowNs, thenNs) {
-  return formatAge(parseTime(nowNs) - parseTime(thenNs));
+  const now = parseTime(nowNs);
+  const then = parseTime(thenNs);
+  return now === null || then === null ? '' : formatAge(now - then);
 }
 
 /**
- * `BigInt` alone would also take "", " 1 " and "0x10"; a time of the protocol is digits only.
- * @param {string} text
- * @returns {bigint}
+ * `BigInt` alone would also take "", " 1 " and "0x10", and throw on "1.5"; a time of the
+ * protocol is an integer in decimal digits.
+ * @param {unknown} value
+ * @returns {bigint | null}
  */
-function parseTime(text) {
-  if (!DECIMAL_TIME.test(text)) {
-    throw new TypeError('a time must be a decimal string of nanoseconds');
-  }
-  return BigInt(text);
+function parseTime(value) {
+  return typeof value === 'string' && DECIMAL_TIME.test(value) ? BigInt(value) : null;
 }
