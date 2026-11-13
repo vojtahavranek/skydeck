@@ -1504,10 +1504,10 @@ keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no s
 Letters are matched by the character the key types (Claude Code's own rule). A digit is matched by
 the character typed when that is a digit — on a Czech layout Shift on the number row types the
 digits — and otherwise by the physical key (`Digit1` … `Digit9`), because on a US layout Shift+1
-types `!`. The Ctrl chords (and Ctrl+R, Ctrl+V) are matched by the typed Latin character, so on
-a layout whose letters are not Latin (Russian, Greek) they do not match — the window's chords do
-nothing, Edge reloads on Ctrl+R by itself and Ctrl+V does not paste: a known limit, US and Czech
-are not affected. No chord is matched by a physical key alone that could type something else on another
+types `!`. The Ctrl+Shift letter chords (and Ctrl+R, Ctrl+V) are matched by the typed Latin
+character, so on a layout whose letters are not Latin (Russian, Greek) they do not match — those
+chords do nothing (Ctrl+Shift+1–9 and Ctrl+Tab still work), Edge reloads on Ctrl+R by itself and
+Ctrl+V does not paste: a known limit, US and Czech are not affected. No chord is matched by a physical key alone that could type something else on another
 layout: that is why the help is Ctrl+Shift+H and not Ctrl+Shift+/, whose physical key types `-` on
 a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on the kitty keyboard
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
