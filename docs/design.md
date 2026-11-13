@@ -364,7 +364,7 @@ otherwise it behaves like `skydeck ls`.
 - Every string that comes from a transcript, a live-session file or GitHub passes through the
   sanitiser, which removes control characters and escape sequences, when the list model is built.
   So do the label and the group, although setting them refuses such characters (7.1): the
-  database can be changed by other means. A note is free multi-line text and is not part of a row.
+  database can be changed by other means. A note is free multi-line text: a row only shows that there is one, and whoever prints a note sanitises it.
 
 Keys: arrows or `j`/`k` move; `Enter` detail; `l` label; `g` group; `n` note; `d` done or undo;
 `p` pull requests; `R` resume; `/` filter; `a` show all; `r` refresh; `q` quit. The filter
