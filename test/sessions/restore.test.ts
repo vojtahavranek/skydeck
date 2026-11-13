@@ -283,6 +283,66 @@ test('a boot in which reconcile observed a session is an earlier boot like one w
   );
 });
 
+/** A `scripted` (or `scripted-end`) event (design 5.3) of process `pid` of `bootId` on `sessionId`. */
+function scriptedEvent(
+  d: TestDeck,
+  bootId: string,
+  sessionId: string,
+  timeNs: Ns,
+  pid: number,
+  kind: 'scripted' | 'scripted-end' = 'scripted',
+): void {
+  d.deck.store.insertEvent({
+    spoolName: `${kind}-${pid}.ev`,
+    timeNs,
+    kind,
+    detail: '',
+    rawDetail: 'resume',
+    sessionId,
+    bootId,
+    pid,
+    procStart: 1,
+    cwd: null,
+    argv: null,
+    name: null,
+    payload: null,
+  });
+}
+
+test('a scripted run late in a boot does not move that boot’s last event: the preselection stays', (t) => {
+  const d = restoreDeck(t);
+  addSession(d, sid(1), {
+    boot: BOOT_A,
+    pid: 101,
+    startNs: T0 - HOUR,
+    end: { detail: 'other', atNs: T0 - 2n * MINUTE },
+  });
+  addSession(d, sid(3), {
+    boot: BOOT_A,
+    pid: 103,
+    startNs: T0 - HOUR,
+    end: { detail: 'exit', atNs: T0 },
+  });
+  refresh(d.deck);
+  scriptedEvent(d, BOOT_A, sid(3), T0 + 10n * MINUTE, 201);
+  scriptedEvent(d, BOOT_A, sid(3), T0 + 11n * MINUTE, 201, 'scripted-end');
+  const entries = planRestore(loadRows(d.deck), d.deck.store.events(), BOOT_B, false);
+  assert.deepEqual(
+    entries.map((entry) => [entry.row.id, entry.preselected]),
+    [[sid(1), true]],
+  );
+});
+
+test('a scripted run late in an older boot does not make it the latest earlier boot', (t) => {
+  const d = restartedMachine(t);
+  scriptedEvent(d, BOOT_C, sid(5), T0 + HOUR, 205); // later than BOOT_A's last event (T0)
+  const entries = planRestore(loadRows(d.deck), d.deck.store.events(), BOOT_B, false);
+  assert.deepEqual(
+    entries.map((entry) => entry.row.id),
+    [sid(1), sid(2), sid(3), sid(9)],
+  );
+});
+
 // --- runRestore with tabs ----------------------------------------------------------------------
 
 const TAB_CONFIG = { restoreBatch: 2, restoreStartTimeoutSeconds: 3, restoreMinFreeMb: 4096 };

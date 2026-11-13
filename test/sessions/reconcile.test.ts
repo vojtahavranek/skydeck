@@ -296,6 +296,130 @@ test('a process another refresh recorded in the meantime is not recorded twice',
   assert.equal(observed(d).length, 1);
 });
 
+/**
+ * The hook's end(S1) and start(S2) of process 4242 at `atNs` (an in-session `/resume` or `/clear`:
+ * reason `resume` / `clear`, source the same), ingested.
+ */
+function switchByHook(d: TestDeck, how: 'resume' | 'clear', atNs: Ns): void {
+  const end = {
+    event: 'SessionEnd' as const,
+    timeNs: atNs,
+    pid: 4242,
+    input: hookInput('SessionEnd', S1, { reason: how }),
+  };
+  const start = {
+    event: 'SessionStart' as const,
+    timeNs: atNs + 200_000_000n,
+    pid: 4242,
+    input: hookInput('SessionStart', S2, { source: how }),
+    argv: ['claude', '--model', 'opus'],
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(end, 2)), spoolText(end));
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(start, 3)), spoolText(start));
+  assert.equal(ingestSpool(d.deck).ingested, 2);
+}
+
+/** The session the process 4242 holds by its latest event (null after an end). */
+function heldBy4242(d: TestDeck): string | null {
+  const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, START, T0 + 3600n * SEC);
+  return latest === null || latest.kind === 'end' ? null : latest.sessionId;
+}
+
+test('a hook event newer than the live file wins: the file still names the session the process left', async (t) => {
+  for (const how of ['resume', 'clear'] as const) {
+    await t.test(how, (t) => {
+      const d = setup(t);
+      hookStart(d); // S1 at T0 - 20 s
+      live(d, {}, T0 - 60n * SEC); // names S1, written a minute ago
+      switchByHook(d, how, T0 - 5n * SEC);
+      assert.deepEqual(reconcile(d.deck), { observed: 0 });
+      assert.equal(heldBy4242(d), S2);
+    });
+  }
+});
+
+test('a start event newer than a live file naming another session adds no observed event', (t) => {
+  const d = setup(t);
+  live(d, {}, T0 - 60n * SEC); // names S1
+  hookStart(d, S2); // T0 - 20 s, with a launch command
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  assert.equal(heldBy4242(d), S2);
+});
+
+test('a start event without a launch command, newer than a live file naming another session, adds nothing either', (t) => {
+  const d = setup(t);
+  live(d, {}, T0 - 60n * SEC); // names S1
+  const fields = {
+    event: 'SessionStart' as const,
+    timeNs: T0 - 20n * SEC,
+    pid: 4242,
+    input: hookInput('SessionStart', S2, { source: 'resume' }),
+    argv: null,
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 1)), spoolText(fields));
+  assert.equal(ingestSpool(d.deck).ingested, 1);
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  assert.equal(heldBy4242(d), S2);
+
+  // Once the file names S2, the launch command it can read is added.
+  live(d, { sessionId: S2 }, T0 - 10n * SEC);
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.deepEqual(observed(d)[0]?.argv, ['claude', '--model', 'opus']);
+  assert.equal(heldBy4242(d), S2);
+});
+
+test('when the live file is rewritten after the hook and names what the hook said, nothing is added', (t) => {
+  const d = setup(t);
+  hookStart(d); // S1 at T0 - 20 s
+  live(d, {}, T0 - 60n * SEC);
+  switchByHook(d, 'clear', T0 - 15n * SEC);
+  live(d, { sessionId: S2 }, T0 - 10n * SEC); // rewritten after the switch
+  assert.deepEqual(reconcile(d.deck), { observed: 0 });
+  assert.equal(heldBy4242(d), S2);
+});
+
+test('reconcile’s own observed event is no hook speaking: a file that names another session wins over it', (t) => {
+  // Reconcile read the file naming S1; before its insert the process switched to S2 and the file
+  // was rewritten, so observed(S1) is stamped after the file and after the hook's start(S2).
+  const d = setup(t);
+  d.deck.store.insertEvent({
+    spoolName: null,
+    timeNs: T0,
+    kind: 'observed',
+    detail: '',
+    rawDetail: null,
+    sessionId: S1,
+    bootId: BOOT_A,
+    pid: 4242,
+    procStart: START,
+    cwd: '/home/dev/projects/demo',
+    argv: ['claude', '--model', 'opus'],
+    name: null,
+    payload: null,
+  });
+  const fields = {
+    event: 'SessionStart' as const,
+    timeNs: T0 - 1n * SEC,
+    pid: 4242,
+    input: hookInput('SessionStart', S2, { source: 'resume' }),
+    argv: ['claude', '--model', 'opus'],
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 1)), spoolText(fields));
+  assert.equal(ingestSpool(d.deck).ingested, 1);
+  live(d, { sessionId: S2 }, T0 - 1n * SEC); // idle from now on: never rewritten
+  d.clock.setNs(T0 + 600n * SEC);
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.equal(heldBy4242(d), S2);
+});
+
+test('a hook event older than the live file still loses to it (the hook of the change was lost)', (t) => {
+  const d = setup(t);
+  hookStart(d); // S1 at T0 - 20 s
+  live(d, { sessionId: S2 }, T0 - 10n * SEC);
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.equal(heldBy4242(d), S2);
+});
+
 /** What node:sqlite throws while another connection holds the write lock. */
 const locked = (): Error =>
   Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });

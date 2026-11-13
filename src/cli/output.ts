@@ -63,6 +63,8 @@ export interface HolderJson {
   bootId: string;
   procStart: number | null;
   since: string;
+  /** The holder is a scripted run (`claude -p`, an SDK run; design 5.3). */
+  scripted: boolean;
 }
 
 export interface ShowJson extends SessionJson {
@@ -135,6 +137,7 @@ function holderJson(holder: Holder): HolderJson {
     bootId: holder.process.bootId,
     procStart: holder.process.procStart,
     since: isoFromNs(holder.sinceNs),
+    scripted: holder.scripted,
   };
 }
 
@@ -248,7 +251,10 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
     lines.push(field('link:', `${link.kind} ${from} -> ${to} at ${isoFromNs(link.timeNs)}`));
   }
   for (const holder of row.session.holders) {
-    lines.push(field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}`));
+    const what = holder.scripted ? ' (scripted run)' : '';
+    lines.push(
+      field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}${what}`),
+    );
   }
   lines.push(...row.prs.map(prField));
   // A note is free multi-line text; a note that has nothing to show gets no heading.

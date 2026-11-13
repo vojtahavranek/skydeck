@@ -175,12 +175,31 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
   The original string is stored as well.
 - Relative values of the path flags `--mcp-config`, `--settings`, `--add-dir`, `--plugin-dir`
   in the launch command are made absolute against the event's `cwd` when that path exists.
+  A later `start` of a process (same boot, pid and process start) that already has a `start` with a
+  stored launch command is stored with the command of the first such start instead: the command line of a process never
+  changes, but after `/clear`, an in-session `/resume` or a change of directory the hook input's
+  `cwd` need not be the directory the process was launched in.
 
-**Scripted runs are dropped at ingest.** An event is discarded (and counted in `kv`) when its
-launch command, as recorded, has the print flag — `-p` or `--print`, alone or inside a cluster of
-short flags such as `-cp` — or when `entrypoint_env` is set and is not `cli`. An end event has
-no launch command, so there only the entry point decides. User-level hooks also fire for
-`claude -p` and SDK runs; those are not sessions a person works in.
+**Scripted runs.** An event is **scripted** when its launch command, as recorded, has the print
+flag — `-p` or `--print`, alone or inside a cluster of short flags such as `-cp` — or when
+`entrypoint_env` is set and is not `cli`. An end event has no launch command, so there only the
+entry point decides. User-level hooks also fire for `claude -p` and SDK runs; those are not
+sessions a person works in, and nearly all of them start a session of their own, so scripted
+events are **dropped** at ingest (and counted in `kv`) — with the two exceptions below. A scripted `start` of
+a process (it has a pid and a process start time) on a session skydeck already knows — an event names it, or it has a
+transcript that would be listed (entry point `cli`, or none; 7.2) — is kept as an event of kind
+`scripted`: `claude -p --resume <id>` or `claude -p -c` appends to that session's transcript, and
+must count as holding it, or a resume would start it a second time (principle 7). Such an event
+says only that its process holds the session while the process is alive (6.1); it has no detail,
+launch command or name, makes no link, and is never the session's launch command, directory,
+activity after done, last holding (6.3), or the start that releases a resume lock or that restore
+waits for (7.6, 7.8). The liveness rule (5.5) ends the holding when the process exits; a
+`claude -p` run holds one session for its whole life. An SDK host or an editor extension can clear
+or switch inside one process, so the scripted `end` of the session that a kept scripted start
+holds is kept too, as an event of kind `scripted-end`: the process no longer holds that session.
+It is never a session's last holding and never gives a mark. Every other scripted end is dropped.
+A scripted start that is ingested before the session was ever recorded or scanned (the
+first refresh after `skydeck install`) is dropped too: skydeck does not know the session yet.
 
 **Links.** When a `start` event with detail `clear`, `resume` or `fork` is ingested for a process
 whose previously held session (6.1) is a different session, a row old → new is written to
@@ -202,6 +221,13 @@ hook file was lost.
   (launch command from `/proc/<pid>/cmdline`, `cwd` from the file). The event's time is the clock
   at reconcile, and its launch command is reduced and its path flags made absolute exactly as for a
   spooled one (5.3).
+- A file that names another session than the process's latest event wins only when it was
+  modified after that event (the hook of the change was lost). When the event is newer, the hook
+  spoke after the file was last written — an in-session `/resume` or `/clear` records the new
+  session while the file can still name the old one — so the file is stale and nothing is
+  inserted; a missing launch command is added once the file names that session too. An `observed`
+  event is not the hook speaking: it is stamped with the clock at reconcile, after the file it was
+  read from, so a file that names another session than it always wins (the file changed since).
 
 An `observed` event never creates a link.
 
@@ -257,7 +283,16 @@ a command runs. None of it is stored.
 
 For a process, the **held session** is the session id of its latest event that is not an `end`.
 A process **stopped holding** a session when an `end` event for it arrives. An `end` with detail
-`exit` is a **deliberate exit**; every other `end` detail, and no `end` at all, is not.
+`exit` is a **deliberate exit**; every other `end` detail, and no `end` at all, is not. A
+`scripted` event (5.3) makes its process hold the session like any other: the guard refuses to
+resume a session that a live scripted run holds, and `show` names such a holder as a scripted
+run. While it runs, the session is `running` (a scripted run has no live-session file, 6.2). A
+`scripted-end` stops the holding like an `end`, but is never a deliberate exit or any other end of
+a holding: 6.3 looks only at holdings of processes that are not scripted runs. One case escapes
+this, and is left as it is: a kept `claude -cp` start whose `entrypoint_env` is empty is scripted
+by its launch command, but its end has no launch command and so is not scripted (5.3); it is
+stored as a plain `end`, and that process's holding can then be a session's last holding. Claude
+Code always sets the entry point today, so this does not happen.
 
 A session is **running** when a live process holds it. If two live processes hold the same
 session (which principle 7 exists to prevent), the session is running, `show` lists both, and the
@@ -285,7 +320,7 @@ Marks are shown next to the state.
 
 | Mark | Rule |
 |---|---|
-| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. |
+| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. The latest holding is decided per process, not by the latest event: of the holdings of the processes that held the session, the one that ended last. A holding ends at the process's `end` for the session, or at the process's first event naming another session (it moved on; when that event is an `observed` one, reconcile noticed the move only then, so the holding counts as ended at the process's last event for the session); a process that is gone without either ended when it was last seen — its last event, or the last write of the live-session file it left naming the session, whichever is later. So after two holders, one that exited deliberately does not hide one killed after it — when anything shows the killed one alive after that exit. A live-session file is not rewritten while its session is idle, so a holder killed while idle since before the other holder's exit cannot be told from one that died first: its holding counts as ended when it was last seen, before the exit, and the session gets no mark (a known limit). A scripted run's holding (5.3) is never the latest holding: when it ends or is killed it leaves no mark, and the session keeps what its last interactive holding says, so restore never offers a session because of a scripted run. |
 | `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `assistant` record or `user` turn (5.6) of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
 | `continued` | The session is the target of a `clear` or `fork` link. `show` names the session it continues. |
 | `expired` | Its transcript is missing. It cannot be resumed. |
@@ -444,7 +479,9 @@ are written as `\uXXXX` escapes like in any other string of the JSON. Sessions a
 `review`, `checks` and `okAt` are null until it has been fetched. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
 `launch` (argument list or null), `unknownFlags` (the names of the flags in `launch` that skydeck
-does not know; `[]` without a launch command), `links` and `holders` added. The text of `show` prints a note sanitised line by line (7.4); the
+does not know; `[]` without a launch command), `links` and `holders` added; each holder is
+`{ "pid", "bootId", "procStart", "since", "scripted" }`, where `scripted` (`true` or `false`) says
+whether the holder is a scripted run (5.3). The text of `show` prints a note sanitised line by line (7.4); the
 JSON of `show` holds the note as stored, with the characters a terminal would act on written as `\uXXXX`
 escapes, so that it is safe to print and still parses back to the exact text.
 
@@ -577,7 +614,9 @@ they stay.
 **The set.** By default: the sessions marked `ended-unexpectedly`, not done and not expired,
 whose last holder belongs to the **latest earlier boot** in which any session was held: of the
 boots other than the current one that have a `start` or `observed` event, the one whose last
-event is the latest. `--all` adds every other session marked `ended-unexpectedly`, from any boot
+event is the latest. A `scripted` event (5.3) counts for neither: a scripted run is not what the
+user had open, so it does not make a boot the latest earlier one or move the last event of its
+boot (which the preselection below measures against). `--all` adds every other session marked `ended-unexpectedly`, from any boot
 including the current one. The set is in list order (as `ls --all` shows it). When the current
 boot id cannot be read, restore refuses (exit 1): every process would look dead, so the sessions
 running now would be offered, and the guard could not see that they run (principle 7). As for the
@@ -816,6 +855,9 @@ CREATE TABLE session_prs (
 CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
+`kind` in `events` can also be `scripted` or `scripted-end` (5.3); such a row has `detail` `''`
+and no `argv` or `name`. The column is free text, so this needs no migration.
+
 ## 10. Technology
 
 - **TypeScript on Node.js 24.12 or later**, run directly through Node's type stripping, with the
@@ -935,6 +977,7 @@ inspecting local files, unless marked otherwise.
 | `--session-id <uuid>` starts a session with a chosen id. | documentation |
 | `-n <name>` together with `--resume <id>` keeps the session id and gives the session that name; a later `-n` wins over a stored name, and a resume without `-n` keeps the stored name. | observed |
 | Closing the terminal (SIGHUP, or the terminal side of the pty closing) fires `SessionEnd` with reason `other` and removes the live-session file, also in the middle of a turn. SIGKILL fires nothing and leaves the file with its last `status`. | observed |
+| `claude -p` and SDK runs write no live-session file that is left behind: on 2026-11-13 all 178 files in `<claudeHome>/sessions/` on the development machine (left-over ones of killed processes included) had `entrypoint` `cli` and `kind` `interactive`, although `claude -p` runs on that machine every day. So the hook, not a live-session file, is what shows that a scripted run holds a session (5.3). A `claude -p` prompt is written to the transcript with `turnOrigin` `sdk`, so it is not user input (5.6). | observed (local files) |
 | In a hook's environment `$CLAUDE_CODE_ENTRYPOINT` is `cli` for an interactive session and `sdk-cli` for `claude -p`. Hooks fire for `-p` runs, and their command line contains `-p`. After `/clear`, the environment and the hook input both carry the new session id. | observed |
 | A session that never received a prompt has no transcript. | observed |
 

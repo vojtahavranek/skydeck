@@ -43,8 +43,13 @@ function link(over: Partial<LinkRow> & Pick<LinkRow, 'fromSession' | 'toSession'
   return { eventId: 1, kind: 'clear', timeNs: T0, ...over };
 }
 
-function holder(pid: number, sinceNs: bigint, procStart: number | null = 777): Holder {
-  return { process: { bootId: BOOT_A, pid, procStart }, sinceNs, live: null };
+function holder(
+  pid: number,
+  sinceNs: bigint,
+  procStart: number | null = 777,
+  scripted = false,
+): Holder {
+  return { process: { bootId: BOOT_A, pid, procStart }, sinceNs, live: null, scripted };
 }
 
 /** A row with every field of the session object set. */
@@ -244,8 +249,28 @@ test('showJson: the session object, then note, launch, unknownFlags, links and h
   assert.deepEqual(json.launch, ['claude', '--model', 'opus']);
   assert.deepEqual(json.unknownFlags, []);
   assert.deepEqual(json.holders, [
-    { pid: 4242, bootId: BOOT_A, procStart: 100, since: '2026-11-12T08:57:00.000Z' },
+    {
+      pid: 4242,
+      bootId: BOOT_A,
+      procStart: 100,
+      since: '2026-11-12T08:57:00.000Z',
+      scripted: false,
+    },
   ]);
+});
+
+test('showJson: a holder that is a scripted run has scripted true', () => {
+  const row = listRow({
+    id: S1,
+    session: ds({ id: S1, holders: [holder(5555, T0, 777, true), holder(4242, T0 - MIN)] }),
+  });
+  assert.deepEqual(
+    showJson(row, []).holders.map((h) => [h.pid, h.scripted]),
+    [
+      [5555, true],
+      [4242, false],
+    ],
+  );
 });
 
 test('showJson: doneAt is the time the session was marked done, null when it is not done', () => {
@@ -528,6 +553,23 @@ test('formatShow: one "holder:" line per live holder', () => {
   assert.deepEqual(lines, [
     'holder:    pid 4242 since 2026-11-12T08:58:00.000Z',
     'holder:    pid 5000 since 2026-11-12T08:59:00.000Z',
+  ]);
+});
+
+test('formatShow: a holder that is a scripted run says so', () => {
+  const row = listRow({
+    id: S1,
+    session: ds({
+      id: S1,
+      holders: [holder(5555, T0 - MIN, 777, true), holder(4242, T0 - 2n * MIN)],
+    }),
+  });
+  const lines = showText(row)
+    .split('\n')
+    .filter((line) => line.startsWith('holder:'));
+  assert.deepEqual(lines, [
+    'holder:    pid 5555 since 2026-11-12T08:59:00.000Z (scripted run)',
+    'holder:    pid 4242 since 2026-11-12T08:58:00.000Z',
   ]);
 });
 

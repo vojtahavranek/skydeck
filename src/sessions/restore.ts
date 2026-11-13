@@ -52,7 +52,8 @@ const START_CHECK_MS = 1000;
  * set is the rows marked `ended-unexpectedly`, not done and not expired, whose last holding was in
  * that boot; `all` takes such rows from every boot, the current one included. An entry is
  * preselected when no exit was recorded, or when it ended at most two minutes before the last
- * event of its own boot (D17).
+ * event of its own boot (D17). `scripted` and `scripted-end` events (design 5.3) are left out of both: a scripted run
+ * neither makes a boot the latest earlier one nor moves the last event of its boot.
  */
 export function planRestore(
   rows: readonly ListRow[],
@@ -63,6 +64,9 @@ export function planRestore(
   const lastEventOf = new Map<string, Ns>();
   const heldIn = new Set<string>();
   for (const event of events) {
+    if (event.kind === 'scripted' || event.kind === 'scripted-end') {
+      continue; // a scripted run (design 5.3) is not what the user had open: it moves no boot's end
+    }
     const last = lastEventOf.get(event.bootId);
     if (last === undefined || event.timeNs > last) {
       lastEventOf.set(event.bootId, event.timeNs);

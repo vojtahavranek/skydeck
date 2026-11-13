@@ -65,11 +65,18 @@ function recordObserved(deck: Deck, bootId: string, file: LiveFile, now: Ns): bo
   const argv = launchCommand(platform, file);
   const needed = (atNs: Ns): boolean => {
     const latest = store.latestEventOfProcess(bootId, pid, procStart, atNs);
-    return (
-      latest === null ||
-      latest.sessionId !== file.sessionId ||
-      (argv !== null && !store.processHasLaunch(bootId, pid, procStart))
-    );
+    if (latest === null) {
+      return true;
+    }
+    if (latest.sessionId === file.sessionId) {
+      return argv !== null && !store.processHasLaunch(bootId, pid, procStart);
+    }
+    // The file names another session. It wins only when it was written after the latest event (the
+    // hook of the change was lost); an event newer than the file is the hook speaking after the
+    // file was last written (an in-session `/resume` or `/clear`), and the file is stale. An
+    // `observed` event is not the hook: it is stamped with the clock at reconcile, later than the
+    // file it was read from, and the file has changed since, so the file wins.
+    return latest.kind === 'observed' || latest.timeNs <= file.mtimeNs;
   };
   if (!needed(now)) {
     return false;
