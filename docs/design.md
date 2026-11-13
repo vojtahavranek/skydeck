@@ -545,7 +545,9 @@ nothing and does not need it. It refuses when the session is running, naming the
 resume is refused and says how long to wait.
 The lock is removed when a `start` event of a real process for the session appears that was
 recorded after the lock was taken and is dated at or after it (a start without a pid or a process
-start time names no `claude` and releases nobody; a start recorded before the lock but dated after
+start time names no `claude` and releases nobody; nor does a `scripted` or `scripted-end` event
+(5.3), which is no `start` but counts as the session's latest event for the lock's own check; a
+start recorded before the lock but dated after
 it — the clock was ahead when it was written, then stepped back — is not the resume's own, and
 would otherwise make every lock of the session stale at once) or after 60 seconds — or at once when starting the session definitely failed and skydeck
 printed no command for it (the command holds a control character, or restore only reports the
