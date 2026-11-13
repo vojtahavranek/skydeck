@@ -166,6 +166,14 @@ test('sessionJson: dir is the empty string when the directory is not known; labe
   assert.deepEqual(json.prs, []);
 });
 
+test('sessionJson: dir is the directory as stored, not the sanitised text the row shows', () => {
+  const raw = '/home/dev/pro\u0007jects/a\u009bb';
+  const row = listRow({ id: S1, dir: '/home/dev/projects/ab', session: ds({ id: S1, dir: raw }) });
+
+  assert.equal(sessionJson(row).dir, raw);
+  assert.equal(showJson(row, []).dir, raw);
+});
+
 test('sessionJson does not hand out the row own marks array', () => {
   const row = listRow({ id: S1, marks: ['was-working'] });
   const json = sessionJson(row);

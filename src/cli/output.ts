@@ -87,7 +87,11 @@ function prJson(pr: PrView): PrJson {
   };
 }
 
-/** The session object of design 7.5; `dir` is "" when the directory is not known. */
+/**
+ * The session object of design 7.5. `dir` is the project directory as stored, not the sanitised
+ * text of the row (`row.dir`, for display only): someone has to be able to `cd` to it, and
+ * `jsonText` makes raw text safe to print. It is "" when the directory is not known.
+ */
 export function sessionJson(row: ListRow): SessionJson {
   return {
     id: row.id,
@@ -100,7 +104,7 @@ export function sessionJson(row: ListRow): SessionJson {
     stateDetail: row.stateDetail,
     since: isoFromNs(row.sinceNs),
     lastActivity: isoFromNs(row.lastActivityNs),
-    dir: row.dir ?? '',
+    dir: row.session.dir ?? '',
     marks: [...row.marks],
     hasNote: row.hasNote,
     continuedFrom: row.continuedFrom,
