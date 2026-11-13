@@ -27,7 +27,9 @@ const SETTLE_NS = 2n * NS_PER_SECOND;
  *
  * Never throws for one process: an error while looking at one or saving its event (the store's
  * included) is recorded in kv `reconcile_problems` (replaced on every run) and the next one is
- * looked at. A failure of the database as a whole is thrown at once. Without a boot id nothing is reconciled, and that is recorded too.
+ * looked at. A failure of the database as a whole is thrown at once. Without a boot id nothing is
+ * reconciled, and that is recorded too; a boot id that cannot be read for another reason than its
+ * absence (Proc.bootId throws) is thrown, as is unknown liveness everywhere (design 5.5).
  */
 export function reconcile(deck: Deck): { observed: number } {
   const { platform, store } = deck;

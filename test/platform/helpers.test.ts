@@ -1028,7 +1028,7 @@ describe('realTestPlatform (A36)', () => {
   test("a run without env or cwd gets the sandbox environment and home, never the developer's", async (t) => {
     const { platform, sandbox: s } = realTestPlatform(t);
     const script =
-      'printf "%s|%s|%s|%s|%s" "$HOME" "$SKYDECK_HOME" "$SKYDECK_TEST_NO_WINDOWS" "$PATH" "$(pwd)"';
+      'printf "%s|%s|%s|%s|%s|%s" "$HOME" "$SKYDECK_HOME" "$SKYDECK_TEST_NO_WINDOWS" "$PATH" "$(pwd)" "$(command -v claude; command -v skydeck)"';
 
     const plain = await platform.runner.run('sh', ['-c', script]);
     const interactive = await platform.runner.runInteractive('sh', [
@@ -1036,7 +1036,12 @@ describe('realTestPlatform (A36)', () => {
       `[ "$HOME|$PATH|$(pwd)" = "${s.home}|${s.bin}|${s.home}" ]`,
     ]);
 
-    assert.equal(plain.stdout, `${s.home}|${s.skydeckHome}|1|${s.bin}|${s.home}`);
+    assert.equal(
+      plain.stdout,
+      `${s.home}|${s.skydeckHome}|1|${s.bin}|${s.home}|`,
+      'no claude, no skydeck',
+    );
+    assert.notEqual(s.home, userInfo().homedir);
     assert.equal(interactive, 0);
   });
 

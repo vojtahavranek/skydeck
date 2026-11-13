@@ -250,7 +250,8 @@ A live-session file is trusted only when its `pid` and `procStart` satisfy 2 and
 `/proc/<pid>/stat` cannot be read for another reason (no permission, too many open files), the
 process is neither alive nor dead but unknown, and nothing is decided on it: the command stops
 with the error, except in the refresh's reconcile, which records an unreadable process and leaves
-it for the next run.
+it for the next run. (With `/proc` mounted `hidepid`, a recorded pid that another user's process
+has taken reads that way, and commands that load the sessions fail until that process ends.)
 
 ### 5.6 Transcripts
 

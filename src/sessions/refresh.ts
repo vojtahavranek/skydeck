@@ -17,7 +17,8 @@ export interface RefreshResult {
  * ingestSpool, reconcile, scanTranscripts — in this order (5.3) — and then sweepLocks (D16).
  * Never throws for one spool file, live process or transcript, whatever fails while it is read or
  * saved: that one is skipped and recorded in kv (`ingest_problems`, `reconcile_problems`,
- * `scan_problems`). A failure of the database itself (isDatabaseFailure) ends the command.
+ * `scan_problems`). A failure of the database itself (isDatabaseFailure) ends the command, and so
+ * does a boot id that cannot be read for another reason than its absence (design 5.5).
  */
 export function refresh(
   deck: Deck,

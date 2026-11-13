@@ -1716,8 +1716,9 @@ describe('the Windows guard (A32)', () => {
   test('a file that starts with MZ (what WSL interop runs) is refused whatever its name', async (t) => {
     const s = sandbox(t);
     stubs(s);
-    // Not executable: should the guard ever fail, the start fails with EACCES and nothing runs.
-    writeFileSync(join(s.root, 'tool'), 'MZ\x90\x00not a real program', { mode: 0o644 });
+    // The two bytes only, and not executable: should the guard ever fail, the start fails with
+    // EACCES and nothing runs.
+    writeFileSync(join(s.root, 'tool'), 'MZ', { mode: 0o644 });
     const platform = realPlatformWith('1');
 
     await assertRefused(platform, s, join(s.root, 'tool'), { PATH: s.bin });
