@@ -194,7 +194,7 @@ Each is binding for the implementer. The last column names the task that records
 | A28 | A terminal opened for `new` shows as a row of its own whose `id` is the new session's id (known from `prepareNew`), `starting: true`, titled with the label or `new session in <dir>`; when the session reports a start it becomes that session's ordinary row. Keeper `meta` carries `label` and `dir` so that this survives a server restart. | S2 7.5 says such a row exists; an id is needed for selection. | 13 (7.5) |
 | A29 | `skydeck window` passes its working directory to `serve` in `SKYDECK_ENV_ORIGIN`; `serve` takes it out of its environment (task 8's `serverEnvironment`) and records it with its start time as "where the environment came from" (S2 5.2); a `serve` started by hand records its own working directory. | `serve` runs in `/` (S2 5.2), so it cannot see where its environment came from. | 23 (5.2) |
 | A30 | `doctor`'s port check reads `/proc/net/tcp` and `/proc/net/tcp6` (`Proc.tcpListening`, task 5) for a listener on `<window.port>`; when one exists and no server of this installation answers, something else holds the port. | No side effect: binding the port, even for an instant, could make a server that starts at that moment exit 10; no request is sent to a foreign program. | 24 (16.3) |
-| A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
+| A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). The launcher honours `SKYDECK_TEST_PYTHON3` (an absolute path) in place of `/usr/bin/python3` for `serve`'s core-limit program only when `SKYDECK_TEST_NO_WINDOWS=1` is set too, the mark of a test sandbox; without that mark it is ignored (task 6; ruled, pull request #36). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
 | A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); a platform that can start a real process — `realTestPlatform`, and `testPlatform` given real processes (`realProcesses: true`) — refuses them always, whatever any environment says (the guard is part of the processes object they build, `realPlatform({ refuseWindows: true })`, never read from `process.env`: in the test process the variable is in the platform's environment, not in the runner's own; `refuseWindows` can only turn the refusal on); the pure fake starts nothing: it records the call and returns what its handler scripts, also for a Windows command, so that a test can assert the command line (ruling of 2026-11-13, task 5). The guard also covers `runner.runInteractive`; it judges every file the command can lead execvp to (every directory of `PATH`, or execvp's default without one; a path as the kernel follows it, symbolic links before `..`) by name and by content (a file that starts with `MZ`, what WSL interop runs), and is also active when the variable is in the environment given to the child. Only the program itself is judged: `sh -c '/mnt/…'` runs. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
 | A33 | The stand-in refuses to run outside a sandbox (review A, must-fix): it exits 2 before doing anything — no hook, no live file, no record — unless `STANDIN_RECORD`, `SKYDECK_HOME` and `CLAUDE_CONFIG_DIR` are all set to absolute paths; there are no defaults. It ends itself, exit 0, when the directory of its record file is gone (checked every second) — then without running the hook or writing anything, since the hook would create `$SKYDECK_HOME/state/spool` again and leave a directory behind after every crashed test — or 10 minutes after it started, with `SessionEnd` reason `other` as on `/exit`. | Implementers run tests inside Claude Code sessions on a machine with the hook installed: a stand-in with an inherited environment would write into the user's real spool and `~/.claude/sessions`, and a crashed test would leave keepers and stand-ins running. | — |
 | A34 | Test helpers signal only through `killKeepersIn(s, runtimeDir)` (task 5, `test/helpers/kill.ts`), which asserts that the real path of `runtimeDir` lies under `s.root` before it reads a single `.pid` line, and signals only pids whose lines are alive by design 5.5's rule; a test signals other processes only through the child handles it started itself. | If a runtime directory were ever resolved wrongly, a cleanup would kill the user's real keepers and their sessions. | — |
@@ -1373,33 +1373,80 @@ check of 2.1 passes; step 1's tests pass.
 
 **Depends on:** 0 · **Wave:** 1 · **Design:** S2 2 (crash dumps), 4.4 (`bin/skydeck`), 5.2 (environment), 7.4 · **Contracts:** — · **Decisions:** —
 
-**Goal.** `bin/skydeck` starts Node.js for `serve` through a one-line `python3 -I -c` program that
-sets the soft core limit to 1 byte and records the old one in `SKYDECK_CORE_SOFT`, and passes
-`SKYDECK_LAUNCHER_CACHE` beside `NODE_COMPILE_CACHE` for every command.
+**Goal.** `bin/skydeck` starts Node.js for `serve` through a short program passed with
+`/usr/bin/python3 -I -S -c` that sets the soft core limit to 1 byte and records the old one in
+`SKYDECK_CORE_SOFT`, and, for every command, passes `SKYDECK_LAUNCHER_CACHE` beside a
+`NODE_COMPILE_CACHE` the launcher chose itself (ruled by the plan owner, pull request #36).
 
 **Files**
-- Modify: `bin/skydeck`, `test/bin/launcher.test.ts`
+- Modify: `bin/skydeck`, `test/bin/launcher.test.ts`, `test/bin/launcher-handoff.test.ts` (the
+  handoff cases, beside the existing ones; ruled, pull request #36)
 
-**Behaviour.** S2 2 exactly: for the first argument `serve` only; the python line sets
+**Behaviour.** S2 2 exactly: for the first argument `serve` only; the python program sets
 `RLIMIT_CORE` soft to 1 keeping the hard limit, puts the soft limit it found into
-`SKYDECK_CORE_SOFT` (decimal bytes or `unlimited`), and `os.execv`s Node.js with the same
-arguments; when the hard limit is 0 or `setrlimit` fails it execs Node.js without
-`SKYDECK_CORE_SOFT` and appends one line to `<stateDir>/server.log` (resolved as the launcher
-resolves `<dataDir>`, D26); without `python3` on `PATH`, Node.js is started directly. The launcher
-stays POSIX `sh` (shellcheck clean); the python is one line passed with `-c`, no file.
+`SKYDECK_CORE_SOFT` (decimal bytes or `unlimited`), and execs Node.js with the same arguments;
+when the hard limit is 0 or `setrlimit` fails it execs Node.js without `SKYDECK_CORE_SOFT` and
+appends one line to `<stateDir>/server.log` (resolved as the launcher resolves `<dataDir>`, D26);
+the python3 is `/usr/bin/python3` and nothing else — never one found on `PATH`, whose
+version-manager shim would change the environment node gets — run as `-I -S` (no site
+directories); when that file is missing or not executable the launcher behaves as without
+python3: Node.js is started directly, without an inherited `SKYDECK_CORE_SOFT`, after one line
+`<time> launcher: /usr/bin/python3 cannot be run; core dumps of the server are not prevented` in
+`server.log` (stderr when that cannot be written; each write in a throwaway subshell that
+ignores SIGPIPE and SIGXFSZ) (ruled, pull request #36; tests replace the path with
+`SKYDECK_TEST_PYTHON3`, A31). A program between the launcher and Node.js hands on the environment and the
+signal dispositions as it found them, so the python program also (ruled, pull request #36):
+gives back the caller's `LC_CTYPE`, set, empty or unset (python3 sets it to `C.UTF-8` in its own
+environment under a C or POSIX locale, PEP 538); sets SIGPIPE and SIGXFSZ, which python3 ignores
+by itself, back to the caller's disposition (ignored when the launcher's `SigIgn` in
+`/proc/self/status` has them, else the default); writes the server.log line to stderr when that
+file cannot be written; and, when Node.js cannot be executed, prints `skydeck: cannot run
+'<node>': <reason>` and exits 127, as the launcher does, instead of a traceback. Nothing in the
+program may keep Node.js from starting: every step but the exec is guarded, every write
+tolerates a closed stderr, and SIGPIPE and SIGXFSZ are handed back only right before the exec
+(ignored again if it fails), so a write to a pipe nobody reads or past the file size limit stays
+an error python catches (ruled, pull request #36). The `--here` handoff unsets
+`SKYDECK_LAUNCHER_CACHE` together with `SKYDECK_HANDOFF`: no program the launcher hands over to
+gets the marker, also not one the caller had. The launcher stays
+POSIX `sh` (shellcheck clean); the python is a short program held in a shell variable and passed
+as the single `-c` argument, no file. The marker (S2 5.2): set to the cache's value only when the
+launcher chose the cache itself (the caller's `NODE_COMPILE_CACHE` unset or empty); a
+`NODE_COMPILE_CACHE` the caller set is passed unchanged and the caller's marker, set or not, is
+left as found — so the `window` command's cache and marker reach the `serve` it starts together.
 
-**Tests** (platform: none — the launcher as a child process; fake `node` executables that print what they got, as the existing tests do; `python3`
-linked into the sandbox where needed)
+**Tests** (platform: none — the launcher as a child process; fake `node` executables that print what they got, as the existing tests do; the
+machine's python3 named by `SKYDECK_TEST_PYTHON3` with `SKYDECK_TEST_NO_WINDOWS=1` where needed)
 - `serve` with python3: the fake node sees `SKYDECK_CORE_SOFT` equal to the test's soft limit and
   `/proc/self/limits` of the fake node shows a soft core limit of 1 byte and the original hard limit.
 - `serve` with hard limit 0 (`ulimit -H -c 0` in the test's shell): node runs without
-  `SKYDECK_CORE_SOFT` and `server.log` gains one line.
-- `serve` without python3 on `PATH`: node runs, no `SKYDECK_CORE_SOFT`.
+  `SKYDECK_CORE_SOFT` and `server.log` gains one line; without a state directory the line is on
+  stderr.
+- `serve` with python3: node's environment is that of any other command, plus
+  `SKYDECK_CORE_SOFT`; node sees `LC_CTYPE` as the caller had it, also unset and empty; node's
+  ignored-signal set (`SigIgn` of `/proc/self/status`) equals that of a `serve` started without
+  python3, also when the caller ignores SIGPIPE, SIGXFSZ or another signal; a Node.js that cannot
+  be executed gives the one line and exit 127; with stderr closed or a pipe nobody reads, a hard
+  limit of 0 and no state directory node still runs, and a Node.js that cannot be executed still
+  gives exit 127. Cases that need the limit to be settable skip where the machine's hard limit is
+  0. No case provokes a signal whose default action dumps core (a `server.log` over `ulimit -f`
+  would, through SIGXFSZ, if the order of the program regressed), and the handoff's QUIT case is
+  skipped where `/proc/sys/kernel/core_pattern` starts with `|` (notes-for-tasks: no core dumps
+  leave the sandbox).
+- `serve` without python3 (`SKYDECK_TEST_PYTHON3` missing, a directory, not executable, not
+  absolute): node runs, no `SKYDECK_CORE_SOFT`; `server.log` gains the one line, or stderr has it
+  without a state directory; with stderr a pipe nobody reads node still runs.
+- which python3: `/usr/bin/python3` runs while `PATH` holds a fake `python3` that must not be run;
+  `SKYDECK_TEST_PYTHON3` without `SKYDECK_TEST_NO_WINDOWS=1` is ignored; with it, it is the
+  python3 that runs, as `-I -S -c`.
 - `ls` (any other command): no python3 started (a python3 stub that records its calls is never
   called), limits unchanged.
-- every command: `SKYDECK_LAUNCHER_CACHE` equals `NODE_COMPILE_CACHE` as node sees them; a
-  `NODE_COMPILE_CACHE` the caller set is passed unchanged and is also the marker's value.
-- the `--here` handoff still does not pass the cache variable or the marker to the handed-off program.
+- every command: when the launcher chose the cache, `SKYDECK_LAUNCHER_CACHE` equals
+  `NODE_COMPILE_CACHE` as node sees them; a `NODE_COMPILE_CACHE` the caller set is passed
+  unchanged with no marker, and a marker the caller has beside it is left as found; through two
+  launchers (a fake node that starts `bin/skydeck serve`, as `skydeck window` does) the first
+  one's cache and marker reach the second one's node unchanged.
+- the `--here` handoff still does not pass the launcher's cache variable to the handed-off program,
+  nor any marker, also not one the caller had (a `NODE_COMPILE_CACHE` the caller set stays).
 
 **Done when:** the cases pass and `shellcheck bin/skydeck` is clean.
 
@@ -2948,7 +2995,7 @@ only they can make.
   still alive (it answers in the window; no server-gone bar). Measuring the idle rule with
   `docs/check-kit/lifetime/lifetime.ps1` against a throwaway distribution is an optional second
   form, with the note above. W24's procedure: kill a
-  keeper (and a throwaway `node` started through the launcher's `python3 -I -c` line) with SIGSEGV
+  keeper (and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program) with SIGSEGV
   and look in `%Temp%\wsl-crashes` (or `crashDumpFolder` in `.wslconfig`); neither may leave a
   dump. W25's "small Windows
   program" is given as a PowerShell `TcpListener` one-liner on `127.0.0.1:<port>`, typed at a

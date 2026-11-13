@@ -8,14 +8,17 @@
 #      ${XDG_DATA_HOME:-$HOME/.local/share}/skydeck (design 9.1);
 #      an environment variable counts only when it is an absolute path (D26)
 #   3. `node` from PATH
-# so the launcher does not depend on the shell's default Node version.
+# so the launcher does not depend on the shell's default Node version. For `serve` (the window's
+# server) node is started through a short program run by /usr/bin/python3 that keeps its core
+# dumps from being written (S2 2; see below).
 #
 # It also runs the handoff `skydeck resume --here` asks for (design 7.6): node writes a shell
 # fragment to the file named by $SKYDECK_HANDOFF, and once node has exited the launcher runs it, so
 # that `claude` replaces this shell and no wrapper process stays behind.
 #
-# The program the handoff starts gets the caller's environment, apart from SKYDECK_HANDOFF (unset
-# before it runs). So the launcher's own shell variables carry a `skydeck_` prefix: a variable the
+# The program the handoff starts gets the caller's environment, apart from SKYDECK_HANDOFF and the
+# cache marker SKYDECK_LAUNCHER_CACHE (both skydeck's own, unset before it runs). So the
+# launcher's own shell variables carry a `skydeck_` prefix: a variable the
 # caller exported under a plain name such as `status` or `cache` is changed by an assignment here,
 # and the changed value would be inherited. CDPATH is unset only where a `cd` needs it unset.
 
@@ -42,17 +45,33 @@ runnable() {
   esac
 }
 
-# D26: SKYDECK_HOME and XDG_DATA_HOME count only when they are absolute paths (which also rules out
-# an empty value); a relative one would depend on the directory the user happens to be in.
+# True if $1 is an absolute path to an executable regular file; never looked up on PATH.
+absolute_executable() {
+  case $1 in
+    /*) [ -f "$1" ] && [ -x "$1" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+# D26: SKYDECK_HOME and the XDG variables count only when they are absolute paths (which also rules
+# out an empty value); a relative one would depend on the directory the user happens to be in.
 case ${SKYDECK_HOME:-} in
-  /*) skydeck_linked_node=$SKYDECK_HOME/data/node ;;
+  /*)
+    skydeck_data=$SKYDECK_HOME/data
+    skydeck_state=$SKYDECK_HOME/state
+    ;;
   *)
     case ${XDG_DATA_HOME:-} in
-      /*) skydeck_linked_node=$XDG_DATA_HOME/skydeck/node ;;
-      *) skydeck_linked_node=$HOME/.local/share/skydeck/node ;;
+      /*) skydeck_data=$XDG_DATA_HOME/skydeck ;;
+      *) skydeck_data=$HOME/.local/share/skydeck ;;
+    esac
+    case ${XDG_STATE_HOME:-} in
+      /*) skydeck_state=$XDG_STATE_HOME/skydeck ;;
+      *) skydeck_state=$HOME/.local/state/skydeck ;;
     esac
     ;;
 esac
+skydeck_linked_node=$skydeck_data/node
 if [ -n "${SKYDECK_NODE:-}" ]; then
   skydeck_node=$SKYDECK_NODE
 elif runnable "$skydeck_linked_node"; then
@@ -69,14 +88,107 @@ fi
 # Cache compiled modules between runs; the start-up time of a short command is mostly compiling.
 # It is given to node alone below, not exported: the program the --here handoff starts must not
 # inherit skydeck's cache, but a NODE_COMPILE_CACHE the user set is theirs and stays as it was.
+# When the launcher chose the cache itself, node also gets SKYDECK_LAUNCHER_CACHE with the same
+# value: the marker by which the window's server knows that NODE_COMPILE_CACHE is skydeck's and
+# leaves it out of its programs' environment (S2 5.2). A NODE_COMPILE_CACHE the caller set gets no
+# marker, and a marker the caller has is left as it is: when `skydeck window` starts `serve`, its
+# own launcher's cache and marker come in that way and must still reach the server together.
 if [ -n "${NODE_COMPILE_CACHE:-}" ]; then
   skydeck_cache=$NODE_COMPILE_CACHE
+  skydeck_marker=
 else
   case ${XDG_CACHE_HOME:-} in
     /*) skydeck_cache=$XDG_CACHE_HOME/skydeck/compile-cache ;;
     *) skydeck_cache=$HOME/.cache/skydeck/compile-cache ;;
   esac
+  skydeck_marker=$skydeck_cache
 fi
+
+# `serve` keeps every terminal's screen, the secret and its environment in memory, and on WSL a
+# crashing process's core dump is piped to a crash collector that keeps it in a Windows folder. A
+# core limit of 0 does not stop a piped dump; only a soft limit of exactly 1 byte does, and sh's
+# `ulimit -c` counts in blocks. So node is started for `serve` through this python3 program
+# (S2 2): it sets the soft core limit to 1 byte, keeps the hard limit, puts the soft limit it found
+# into SKYDECK_CORE_SOFT (bytes in decimal, or `unlimited`; the keepers give it back to the
+# programs they start) and execs node. When the limit cannot be set it still execs node, without
+# SKYDECK_CORE_SOFT, and appends one line saying so to server.log (to stderr when that cannot be
+# written). Run with -I -S, so nothing from the environment, the working directory or the site
+# directories (their .pth files) reaches python; it needs the standard library only.
+# Node must start as it would without python in between: python3 sets LC_CTYPE in its own
+# environment when the locale is C (PEP 538), so the caller's LC_CTYPE is given back; and python3
+# ignores SIGPIPE and SIGXFSZ, which would stay ignored across exec, so each is set back to what
+# the caller had: ignored when the caller ignored it, else the default (as python's own
+# subprocess does when the caller's choice is unknown).
+# Nothing in it may keep node from starting: every step but the exec is optional and guarded,
+# every write tolerates a closed stderr (sys.stderr is then None), and the two signals are handed
+# back only right before the exec (ignored again if it fails), so that until then a write to a
+# pipe nobody reads or past the file size limit is an error python catches, not its death.
+skydeck_core_limit='
+import os, sys
+
+
+def say(line):
+    try:
+        sys.stderr.write(line)
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def set_signals(ignore):
+    try:
+        import signal
+        for name in ("SIGPIPE", "SIGXFSZ"):
+            number = getattr(signal, name)
+            signal.signal(number, signal.SIG_IGN if ignore(number) else signal.SIG_DFL)
+    except Exception:
+        pass
+
+
+def report_limit_not_set(log, error):
+    try:
+        import time
+        now = time.time()
+        line = "%s.%03dZ launcher: the soft core limit could not be set to 1 byte (%s); core dumps of the server are not prevented\n" % (
+            time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)), int(now * 1000) % 1000, error)
+    except Exception:
+        return
+    try:
+        with open(log, "a") as file:
+            file.write(line)
+    except Exception:
+        say(line)
+
+
+log, ctype_was_set, ctype, ignored = sys.argv[1:5]
+command = sys.argv[5:]
+env = dict(os.environ)
+if ctype_was_set:
+    env["LC_CTYPE"] = ctype
+else:
+    env.pop("LC_CTYPE", None)
+env.pop("SKYDECK_CORE_SOFT", None)
+try:
+    caller_mask = int(ignored, 16)
+except ValueError:
+    caller_mask = 0
+try:
+    import resource
+    soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    if hard == 0:
+        raise ValueError("the hard limit is 0")
+    resource.setrlimit(resource.RLIMIT_CORE, (1, hard))
+    env["SKYDECK_CORE_SOFT"] = "unlimited" if soft == resource.RLIM_INFINITY else str(soft)
+except Exception as error:
+    report_limit_not_set(log, error)
+set_signals(lambda number: caller_mask >> (number - 1) & 1)
+try:
+    os.execvpe(command[0], command, env)
+except Exception as error:
+    set_signals(lambda number: True)
+    say("skydeck: cannot run %r: %s\n" % (command[0], getattr(error, "strerror", None) or error))
+os._exit(127)
+'
 
 # The handoff file: node writes "cd -- <dir> || exit 1" and "exec <program and arguments>", every
 # word quoted for sh (src/terminals/here.ts), and exits. The launcher reads it, deletes it and only
@@ -96,14 +208,64 @@ trap 'exit 130' HUP INT TERM
 trap 'exit 131' QUIT
 SKYDECK_HANDOFF=$skydeck_handoff
 export SKYDECK_HANDOFF
+# The python3 for `serve` is the distribution's, /usr/bin/python3, and never one found on PATH: a
+# version manager's shim there (pyenv, asdf) changes PATH and sets its own variables before it
+# starts the real python, and those would reach node, the server and every program in the window.
+# Missing or not executable, it counts as no python3. Inside a test sandbox, marked by
+# SKYDECK_TEST_NO_WINDOWS=1, SKYDECK_TEST_PYTHON3 replaces it (plan A31); it must be absolute.
+skydeck_python3=/usr/bin/python3
+if [ "${SKYDECK_TEST_NO_WINDOWS-}" = 1 ] && [ -n "${SKYDECK_TEST_PYTHON3+set}" ]; then
+  skydeck_python3=$SKYDECK_TEST_PYTHON3
+fi
+
 skydeck_status=0
-NODE_COMPILE_CACHE=$skydeck_cache "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@" ||
-  skydeck_status=$?
+# Node runs in a subshell: the variables set for it here never reach the launcher's own
+# environment, which the handoff's program inherits.
+(
+  NODE_COMPILE_CACHE=$skydeck_cache
+  export NODE_COMPILE_CACHE
+  if [ -n "$skydeck_marker" ]; then
+    SKYDECK_LAUNCHER_CACHE=$skydeck_marker
+    export SKYDECK_LAUNCHER_CACHE
+  fi
+  if [ "${1-}" != serve ]; then
+    exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
+  elif absolute_executable "$skydeck_python3"; then
+    # The signals this shell ignores are the ones the caller ignored (a non-interactive shell
+    # ignores none by itself; the traps above catch, they do not ignore, and a subshell resets
+    # them): the SigIgn mask of /proc/self/status, empty when it cannot be read.
+    skydeck_ignored=
+    if [ -r /proc/self/status ]; then
+      while IFS= read -r skydeck_line; do
+        case $skydeck_line in SigIgn:*) skydeck_ignored=${skydeck_line#SigIgn:} ;; esac
+      done </proc/self/status
+    fi
+    # After the program: where to log, the caller's LC_CTYPE (set or not, and its value), the
+    # caller's ignored signals, then node's command line.
+    exec "$skydeck_python3" -I -S -c "$skydeck_core_limit" "$skydeck_state/server.log" \
+      "${LC_CTYPE+set}" "${LC_CTYPE-}" "$skydeck_ignored" \
+      "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
+  else
+    # Without /usr/bin/python3 the server's core dumps are not prevented (S2 2): one line says so
+    # in server.log, or on stderr when that cannot be written. Each write runs in a throwaway
+    # subshell that ignores SIGPIPE and SIGXFSZ, so a pipe nobody reads or a log over the file
+    # size limit is an error there, never a signal that ends this shell (or dumps core), and node
+    # still starts with the caller's dispositions. 3>&2 keeps the real stderr for the second
+    # write while the shell's own complaints go to /dev/null.
+    skydeck_now=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || skydeck_now=
+    skydeck_line="${skydeck_now:+$skydeck_now }launcher: /usr/bin/python3 cannot be run; core dumps of the server are not prevented"
+    (trap '' PIPE XFSZ; printf '%s\n' "$skydeck_line" >>"$skydeck_state/server.log") 2>/dev/null ||
+      (trap '' PIPE XFSZ; printf '%s\n' "$skydeck_line" >&3) 3>&2 2>/dev/null
+    # A SKYDECK_CORE_SOFT the caller had must not pass for a limit that was set.
+    unset SKYDECK_CORE_SOFT
+    exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
+  fi
+) || skydeck_status=$?
 if [ -s "$skydeck_handoff" ]; then
   skydeck_script=$(cat -- "$skydeck_handoff")
   rm -f -- "$skydeck_handoff"
   trap - EXIT
-  unset SKYDECK_HANDOFF
+  unset SKYDECK_HANDOFF SKYDECK_LAUNCHER_CACHE
   eval "$skydeck_script"
 fi
 exit "$skydeck_status"
