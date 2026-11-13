@@ -2,3 +2,4 @@ package-lock.json
 test/fixtures/
 # Prose documents are not reformatted: the design document is edited in parallel branches.
 docs/
+vendor/
