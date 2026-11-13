@@ -938,8 +938,10 @@ export function releaseServerLock(deck: Deck): void;
  *  is 'alive' or 'unknown'). Reads only regular files terms/<terminal id>.pid (a keeper's
  *  temporary must not have that name); one that holds no pid line, or was removed meanwhile, is
  *  skipped. A file that cannot be read (EACCES, EIO …) gives `line: null` with state 'unknown'
- *  (ruled, task 15: never removed, counted as alive wherever something would be given up) and
- *  the others are still read; tasks 16 and 24 handle a null `line`. The boot id is read once, and
+ *  (ruled, task 15: never removed, counted as alive wherever something would be given up — the
+ *  runtime directory's record, the keep-alive, `uninstall --purge`, which refuses on it) and the
+ *  others are still read; tasks 16 and 24 handle a null `line`, and doctor reports such an entry
+ *  on its own, as a keeper file that cannot be read (task 24 decides the text). The boot id is read once, and
  *  every line is 'unknown' when it cannot be read. */
 export function listKeeperLines(platform: Platform, files: RuntimeFiles): { id: string; line: PidLine | null; state: PidLineState }[];
 

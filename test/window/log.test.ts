@@ -204,10 +204,12 @@ test('serverLog never ends the server when stderr cannot be written either', asy
   const { tp, path } = logPlace(t);
   rmSync(tp.places.stateDir, { recursive: true });
 
-  const toFile = await logChild(t, { path, foreground: false, stderr: 'full' });
+  const missingDir = await logChild(t, { path, foreground: false, stderr: 'full' });
+  const fullDisk = await logChild(t, { path: '/dev/full', foreground: false, stderr: 'full' });
   const foreground = await logChild(t, { path, foreground: true, stderr: 'full' });
 
-  assert.deepEqual(toFile, { code: 0, stdout: 'alive\n', stderr: '' });
+  assert.deepEqual(missingDir, { code: 0, stdout: 'alive\n', stderr: '' });
+  assert.deepEqual(fullDisk, { code: 0, stdout: 'alive\n', stderr: '' });
   assert.deepEqual(foreground, { code: 0, stdout: 'alive\n', stderr: '' });
 });
 

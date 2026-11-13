@@ -882,6 +882,47 @@ test('removeDeadKeeperFiles leaves a directory named like a socket or a pid line
   ]);
 });
 
+test('an unreadable .pid beside a live and a dead keeper: the dead removed, the live found, the unreadable unknown and kept', async (t) => {
+  const d = testDeck(t, { real: true });
+  const boot = bootOf(d.proc);
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  prepareRuntimeDir(d.platform, files);
+  const live = await liveSleep(t, d.sandbox, d.proc);
+  const ended = await liveSleep(t, d.sandbox, d.proc);
+  await ended.end();
+  const alive = keeperLine(live.pid, live.procStart, boot);
+  writePidLine(files, ID_A, alive);
+  await listeningSocket(t, d.platform, files.termSock(ID_A));
+  writePidLine(files, ID_B, keeperLine(ended.pid, ended.procStart, boot));
+  writeFileSync(files.termSock(ID_B), '');
+  writePidLine(files, ID_C, alive);
+  writeFileSync(files.termSock(ID_C), '');
+  const platform = cannotRead(d.platform, files.termPid(ID_C));
+
+  const before = listKeeperLines(platform, files);
+  const removed = await removeDeadKeeperFiles(platform, files);
+
+  assert.deepEqual(
+    before.map((k) => [k.id, k.state, k.line === null]),
+    [
+      [ID_A, 'alive', false],
+      [ID_B, 'dead', false],
+      [ID_C, 'unknown', true],
+    ],
+  );
+  assert.deepEqual(removed, [ID_B]);
+  assert.deepEqual(readdirSync(files.termsDir).sort(), [
+    `${ID_A}.pid`,
+    `${ID_A}.sock`,
+    `${ID_C}.pid`,
+    `${ID_C}.sock`,
+  ]);
+  assert.deepEqual(listKeeperLines(platform, files), [
+    { id: ID_A, line: alive, state: 'alive' },
+    { id: ID_C, line: null, state: 'unknown' },
+  ]);
+});
+
 test('removeDeadKeeperFiles removes nothing of a keeper whose .pid file cannot be read, even when its socket refuses', async (t) => {
   const d = testDeck(t, { real: true });
   const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
