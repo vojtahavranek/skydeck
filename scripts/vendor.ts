@@ -121,12 +121,14 @@ function collect(from: string): Array<{ entry: ManifestEntry; bytes: Uint8Array 
     for (const file of files) {
       add(`${base}/${file}`, needed(name, file), name, version);
       if (file.endsWith('.mjs') && typings !== undefined) {
-        // The bundle's types by the package's name, so that tsc never reads the bundle; a
-        // tsconfig maps the name to the vendored typings (or tsc finds the installed package).
+        // The bundle's types are the package's typings, re-exported by the package's name (the
+        // typings of the addons import '@xterm/xterm' by name and augment their own module, so a
+        // relative re-export would find nothing). A tsconfig maps each name to the vendored
+        // typings with "paths"; without that, tsc finds the same bytes in node_modules.
         const shim = file.replace(/\.mjs$/, '.d.mts');
         const text = [
-          `// Written by scripts/vendor.ts: the types of ${basename(file)}, so that tsc never reads the`,
-          `// bundle. They are ${name}'s typings: map '${name}' to ${relative(dirname(shim), typings)}.`,
+          `// Written by scripts/vendor.ts. The types of ${basename(file)}, so that tsc never reads the bundle:`,
+          `// the package's typings by its name; a tsconfig's "paths" maps '${name}' to ${relative(dirname(shim), typings)}.`,
           `export * from '${name}';`,
           '',
         ].join('\n');

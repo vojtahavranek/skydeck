@@ -10,7 +10,7 @@
       "path": "vendor/xterm/addon-fit/lib/addon-fit.d.mts",
       "package": "skydeck",
       "version": "-",
-      "sha256": "dd76ec0b484e9a338d5d85b00dbc7a7d195b35131311ebfeca5129380db8c544"
+      "sha256": "894305a11e4d90b7190762060d77023f7e6beb6f911c5b7c322058ae9f7873a1"
     },
     {
       "path": "vendor/xterm/addon-fit/lib/addon-fit.mjs",
@@ -34,7 +34,7 @@
       "path": "vendor/xterm/addon-search/lib/addon-search.d.mts",
       "package": "skydeck",
       "version": "-",
-      "sha256": "37d379ab7b9b4478e6c875cfd49d7478df5d3964300f10d3df0efb191aa65adb"
+      "sha256": "892e2fc2005c8ba08299b02ed398dc4f649c17b005b91f3e3d0dc6f4dcf3aff1"
     },
     {
       "path": "vendor/xterm/addon-search/lib/addon-search.mjs",
@@ -60,7 +60,7 @@
       "path": "vendor/xterm/addon-serialize/lib/addon-serialize.d.mts",
       "package": "skydeck",
       "version": "-",
-      "sha256": "7f9308d5acfcfa1c2d123ffa276765cd3dc276c94b320d205df0b052ee7e9636"
+      "sha256": "9044c862aac9552baf7a6ec790d4cf9736025fea53012c2ea9c159e777a97931"
     },
     {
       "path": "vendor/xterm/addon-serialize/lib/addon-serialize.mjs",
@@ -84,7 +84,7 @@
       "path": "vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.d.mts",
       "package": "skydeck",
       "version": "-",
-      "sha256": "042d4047dcce49b6258c30d1866b168de9d497745f63c3418382a3d45defb65b"
+      "sha256": "1bccf74ff3bac6cfcb0cf832ef91f152a27eca829e6eeca2e67395307ac172e2"
     },
     {
       "path": "vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs",
@@ -110,7 +110,7 @@
       "path": "vendor/xterm/headless/lib-headless/xterm-headless.d.mts",
       "package": "skydeck",
       "version": "-",
-      "sha256": "521f3bf5da053c402570ce909bc2e82d27f3dfc59b053d40e2b53705d405aac8"
+      "sha256": "99dfd497325764fdcdc7ed9413ec046ff2e0fdd298689ef2d88d3c571c485f9d"
     },
     {
       "path": "vendor/xterm/headless/lib-headless/xterm-headless.mjs",
@@ -140,7 +140,7 @@
       "path": "vendor/xterm/xterm/lib/xterm.d.mts",
       "package": "skydeck",
       "version": "-",
-      "sha256": "c6d3e62239508d1362a896a950567e3abf7b2d5bdee1a384e8ce1323299893b8"
+      "sha256": "63b14d19065adc84c56c81711c5791c8f0b42d668d83a9f06060e792e44300d1"
     },
     {
       "path": "vendor/xterm/xterm/lib/xterm.mjs",
