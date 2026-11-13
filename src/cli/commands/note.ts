@@ -7,7 +7,7 @@ import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import { withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
-import { editNote } from '../notes.ts';
+import { discardKeptNote, editNote } from '../notes.ts';
 
 const SPEC: ArgSpec = {
   usage: `skydeck note <ref> [--set <text>]
@@ -36,6 +36,7 @@ export const command: Command = {
       const row = resolveRef(ref, loadRows(deck));
       if (typeof text === 'string') {
         setNote(deck, row.id, text);
+        discardKeptNote(deck, row.id);
       } else {
         await editNote(ctx, deck, row.id);
       }

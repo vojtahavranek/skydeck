@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { main } from '../../../src/cli/main.ts';
@@ -20,6 +21,29 @@ test('note <ref> --set <text> stores the note', async (t) => {
   const row = loadRows(d.deck).find((r) => r.id === S1);
   assert.equal(row?.hasNote, true);
   assert.equal(row?.note, 'remember');
+});
+
+test('note --set removes a note file kept by a failed edit of that session, and no other', async (t) => {
+  const d = twoSessions(t);
+  const kept = join(d.places.stateDir, `note-${S1}.md`);
+  const other = join(d.places.stateDir, `note-${S2}.md`);
+  writeFileSync(kept, 'typed, never stored');
+  writeFileSync(other, 'another session');
+
+  assert.equal(await main(['note', '0b5f', '--set', 'the new text'], d.ctx), 0);
+
+  assert.equal(d.deck.store.meta(S1)?.note, 'the new text');
+  assert.equal(existsSync(kept), false, 'the user chose the new text over the kept one');
+  assert.equal(existsSync(other), true);
+});
+
+test('note --set that fails to store leaves the kept note file alone', async (t) => {
+  const d = twoSessions(t);
+  const kept = join(d.places.stateDir, `note-${S1}.md`);
+  writeFileSync(kept, 'typed, never stored');
+  // a ref that matches nothing: nothing is stored, so nothing may be discarded
+  assert.equal(await main(['note', 'nope1234', '--set', 'x'], d.ctx), 3);
+  assert.equal(existsSync(kept), true);
 });
 
 test('a note set with --set is stored as typed, several lines included', async (t) => {

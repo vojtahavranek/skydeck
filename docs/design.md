@@ -309,7 +309,8 @@ Marks are shown next to the state.
   else `vi`: the value is split on spaces and the path of a temporary file holding the note
   (`<stateDir>/note-<session id>.md`, removed afterwards) is appended; stdin must be a terminal.
   When the text cannot be stored the file is kept, and the next edit of that note continues with it.
-  `skydeck note <ref> --set <text>` sets it without an editor, and an empty note is no note.
+  `skydeck note <ref> --set <text>` sets it without an editor (and removes such a kept file), and an
+  empty note is no note.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the

@@ -21,6 +21,19 @@ function editorCommand(env: Env): string[] {
   return ['vi'];
 }
 
+/** The file the editor works on: `<stateDir>/note-<sessionId>.md`. */
+function notePath(deck: Deck, sessionId: string): string {
+  return join(deck.places.stateDir, `note-${sessionId}.md`);
+}
+
+/**
+ * Removes the note file a failed edit of this session kept: the user has now set the note
+ * another way (`note --set`), so that unsaved text is not wanted any more.
+ */
+export function discardKeptNote(deck: Deck, sessionId: string): void {
+  discard(deck.platform.files, notePath(deck, sessionId));
+}
+
 /** Removes the temporary note file; failing to is not worth ending the command for. */
 function discard(files: Files, path: string): void {
   try {
@@ -50,7 +63,7 @@ export async function editNote(ctx: Context, deck: Deck, sessionId: string): Pro
   if (program === undefined) {
     throw new Error('editorCommand returned no program');
   }
-  const path = join(deck.places.stateDir, `note-${sessionId}.md`);
+  const path = notePath(deck, sessionId);
   if (files.readText(path) === null) {
     files.writeText(path, deck.store.meta(sessionId)?.note ?? '', 0o600);
   } else {

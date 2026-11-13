@@ -1874,7 +1874,8 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
  * executable). When the editor ended well but storing the text fails, the file is KEPT and the
  * SkydeckError "the note was not saved (<reason>); your text is in <path>" names it. A file that is already
  * there when an edit starts is not overwritten: the editor opens it, after one stderr line "skydeck: an
- * earlier edit of this note was not saved; continuing with its text in <path>".
+ * earlier edit of this note was not saved; continuing with its text in <path>". `note --set` removes
+ * such a kept file after it stored the text (also exported: `discardKeptNote(deck, sessionId): void`).
  */
 export function editNote(ctx: Context, deck: Deck, sessionId: string): Promise<void>;
 
