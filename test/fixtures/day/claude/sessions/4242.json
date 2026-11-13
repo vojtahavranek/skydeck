@@ -1,0 +1,14 @@
+{
+  "pid": 4242,
+  "sessionId": "0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d",
+  "cwd": "/home/dev/projects/api",
+  "startedAt": 1794470400000,
+  "procStart": "100",
+  "version": "2.1.323",
+  "peerProtocol": 1,
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "status": "busy",
+  "updatedAt": 1794472800000,
+  "statusUpdatedAt": 1794472800000
+}

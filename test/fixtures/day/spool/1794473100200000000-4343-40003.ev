@@ -1,0 +1,12 @@
+v=1
+event=SessionStart
+time_ns=1794473100200000000
+claude_pid=4343
+session_env=2d7b5e3a-0f4c-4b8d-9e5f-4a3b2c1d0e9f
+entrypoint_env=cli
+boot_id=6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
+stat=4343 (claude) S 1 4343 4343 0 -1 4194304 1000 0 0 0 10 5 0 0 20 0 1 0 200 123456789 5000 18446744073709551615 4194304 4300000 140732000000000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+pwd=/home/dev/projects/web
+argv_b64=Y2xhdWRlAA==
+--
+{"session_id":"2d7b5e3a-0f4c-4b8d-9e5f-4a3b2c1d0e9f","transcript_path":"/home/dev/.claude/projects/-home-dev-projects-web/2d7b5e3a-0f4c-4b8d-9e5f-4a3b2c1d0e9f.jsonl","cwd":"/home/dev/projects/web","hook_event_name":"SessionStart","source":"clear"}

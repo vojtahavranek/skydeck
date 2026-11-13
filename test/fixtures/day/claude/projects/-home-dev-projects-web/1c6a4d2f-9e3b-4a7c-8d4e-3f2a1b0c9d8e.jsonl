@@ -1,0 +1,5 @@
+{"type":"user","timestamp":"2026-11-12T08:30:00.000Z","cwd":"/home/dev/projects/web","entrypoint":"cli","sessionId":"1c6a4d2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e","version":"2.1.323","message":{"role":"user","content":"<redacted>"}}
+{"type":"assistant","timestamp":"2026-11-12T08:34:00.000Z","cwd":"/home/dev/projects/web","entrypoint":"cli","sessionId":"1c6a4d2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e","version":"2.1.323","message":{"role":"assistant","content":"<redacted>"}}
+{"type":"user","timestamp":"2026-11-12T08:40:00.000Z","cwd":"/home/dev/projects/web","entrypoint":"cli","sessionId":"1c6a4d2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e","version":"2.1.323","message":{"role":"user","content":"<redacted>"}}
+{"type":"assistant","timestamp":"2026-11-12T08:44:00.000Z","cwd":"/home/dev/projects/web","entrypoint":"cli","sessionId":"1c6a4d2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e","version":"2.1.323","message":{"role":"assistant","content":"<redacted>"}}
+{"type":"ai-title","aiTitle":"Clean up logging","sessionId":"1c6a4d2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e"}

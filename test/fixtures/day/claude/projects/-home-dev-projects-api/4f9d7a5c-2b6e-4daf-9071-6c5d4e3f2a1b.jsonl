@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-11-12T09:00:00.000Z","cwd":"/home/dev/projects/api","entrypoint":"cli","sessionId":"4f9d7a5c-2b6e-4daf-9071-6c5d4e3f2a1b","version":"2.1.323","message":{"role":"user","content":"<redacted>"}}
+{"type":"assistant","timestamp":"2026-11-12T09:01:00.000Z","cwd":"/home/dev/projects/api","entrypoint":"cli","sessionId":"4f9d7a5c-2b6e-4daf-9071-6c5d4e3f2a1b","version":"2.1.323","message":{"role":"assistant","content":"<redacted>"}}
+{"type":"user","timestamp":"2026-11-12T09:02:00.000Z","cwd":"/home/dev/projects/api","entrypoint":"cli","sessionId":"4f9d7a5c-2b6e-4daf-9071-6c5d4e3f2a1b","version":"2.1.323","message":{"role":"user","content":"<redacted>"}}
+{"type":"ai-title","aiTitle":"ABC-123 add retries","sessionId":"4f9d7a5c-2b6e-4daf-9071-6c5d4e3f2a1b"}

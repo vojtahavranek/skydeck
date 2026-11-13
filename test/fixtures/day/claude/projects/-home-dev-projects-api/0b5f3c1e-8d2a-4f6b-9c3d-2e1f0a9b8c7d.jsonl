@@ -1,0 +1,6 @@
+{"type":"user","timestamp":"2026-11-12T08:00:00.000Z","cwd":"/home/dev/projects/api","entrypoint":"cli","sessionId":"0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d","version":"2.1.323","message":{"role":"user","content":"<redacted>"}}
+{"type":"assistant","timestamp":"2026-11-12T08:10:00.000Z","cwd":"/home/dev/projects/api","entrypoint":"cli","sessionId":"0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d","version":"2.1.323","message":{"role":"assistant","content":"<redacted>"}}
+{"type":"user","timestamp":"2026-11-12T08:20:00.000Z","cwd":"/home/dev/projects/api","entrypoint":"cli","sessionId":"0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d","version":"2.1.323","message":{"role":"user","content":"<redacted>"}}
+{"type":"pr-link","sessionId":"0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d","prNumber":12,"prUrl":"https://github.com/acme/api/pull/12","prRepository":"acme/api","timestamp":"2026-11-12T08:20:00.000Z"}
+{"type":"assistant","timestamp":"2026-11-12T08:40:00.000Z","cwd":"/home/dev/projects/api","entrypoint":"cli","sessionId":"0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d","version":"2.1.323","message":{"role":"assistant","content":"<redacted>"}}
+{"type":"ai-title","aiTitle":"Fix retry loop","sessionId":"0b5f3c1e-8d2a-4f6b-9c3d-2e1f0a9b8c7d"}
