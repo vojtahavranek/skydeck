@@ -1147,32 +1147,45 @@ check of 2.1 passes; step 1's tests pass.
 
 **Depends on:** 0 · **Wave:** 1 · **Design:** S2 2 (crash dumps), 4.4 (`bin/skydeck`), 5.2 (environment), 7.4 · **Contracts:** — · **Decisions:** —
 
-**Goal.** `bin/skydeck` starts Node.js for `serve` through a one-line `python3 -I -c` program that
-sets the soft core limit to 1 byte and records the old one in `SKYDECK_CORE_SOFT`, and passes
-`SKYDECK_LAUNCHER_CACHE` beside `NODE_COMPILE_CACHE` for every command.
+**Goal.** `bin/skydeck` starts Node.js for `serve` through a short python3 program passed with
+`python3 -I -c` that sets the soft core limit to 1 byte and records the old one in
+`SKYDECK_CORE_SOFT`, and, for every command, passes `SKYDECK_LAUNCHER_CACHE` beside a
+`NODE_COMPILE_CACHE` the launcher chose itself (ruled by the plan owner, pull request #36).
 
 **Files**
 - Modify: `bin/skydeck`, `test/bin/launcher.test.ts`
 
-**Behaviour.** S2 2 exactly: for the first argument `serve` only; the python line sets
+**Behaviour.** S2 2 exactly: for the first argument `serve` only; the python program sets
 `RLIMIT_CORE` soft to 1 keeping the hard limit, puts the soft limit it found into
-`SKYDECK_CORE_SOFT` (decimal bytes or `unlimited`), and `os.execv`s Node.js with the same
-arguments; when the hard limit is 0 or `setrlimit` fails it execs Node.js without
+`SKYDECK_CORE_SOFT` (decimal bytes or `unlimited`), and execs Node.js with the same arguments and
+the caller's environment (its own `LC_CTYPE` change undone, SIGPIPE and SIGXFSZ back to their
+default); when the hard limit is 0 or `setrlimit` fails it execs Node.js without
 `SKYDECK_CORE_SOFT` and appends one line to `<stateDir>/server.log` (resolved as the launcher
-resolves `<dataDir>`, D26); without `python3` on `PATH`, Node.js is started directly. The launcher
-stays POSIX `sh` (shellcheck clean); the python is one line passed with `-c`, no file.
+resolves `<dataDir>`, D26; to stderr when that file cannot be written); without `python3` on
+`PATH`, Node.js is started directly, without an inherited `SKYDECK_CORE_SOFT`. The launcher stays
+POSIX `sh` (shellcheck clean); the python is a short program held in a shell variable and passed
+as the single `-c` argument, no file. The marker (S2 5.2): set to the cache's value only when the
+launcher chose the cache itself (the caller's `NODE_COMPILE_CACHE` unset or empty); a
+`NODE_COMPILE_CACHE` the caller set is passed unchanged and the caller's marker, set or not, is
+left as found — so the `window` command's cache and marker reach the `serve` it starts together.
 
 **Tests** (platform: none — the launcher as a child process; fake `node` executables that print what they got, as the existing tests do; `python3`
 linked into the sandbox where needed)
 - `serve` with python3: the fake node sees `SKYDECK_CORE_SOFT` equal to the test's soft limit and
   `/proc/self/limits` of the fake node shows a soft core limit of 1 byte and the original hard limit.
 - `serve` with hard limit 0 (`ulimit -H -c 0` in the test's shell): node runs without
-  `SKYDECK_CORE_SOFT` and `server.log` gains one line.
+  `SKYDECK_CORE_SOFT` and `server.log` gains one line; without a state directory the line is on
+  stderr.
+- `serve` with python3: node's environment and ignored signals are those of any other command,
+  plus `SKYDECK_CORE_SOFT`.
 - `serve` without python3 on `PATH`: node runs, no `SKYDECK_CORE_SOFT`.
 - `ls` (any other command): no python3 started (a python3 stub that records its calls is never
   called), limits unchanged.
-- every command: `SKYDECK_LAUNCHER_CACHE` equals `NODE_COMPILE_CACHE` as node sees them; a
-  `NODE_COMPILE_CACHE` the caller set is passed unchanged and is also the marker's value.
+- every command: when the launcher chose the cache, `SKYDECK_LAUNCHER_CACHE` equals
+  `NODE_COMPILE_CACHE` as node sees them; a `NODE_COMPILE_CACHE` the caller set is passed
+  unchanged with no marker, and a marker the caller has beside it is left as found; through two
+  launchers (a fake node that starts `bin/skydeck serve`, as `skydeck window` does) the first
+  one's cache and marker reach the second one's node unchanged.
 - the `--here` handoff still does not pass the cache variable or the marker to the handed-off program.
 
 **Done when:** the cases pass and `shellcheck bin/skydeck` is clean.
@@ -2681,7 +2694,7 @@ only they can make.
   still alive (it answers in the window; no server-gone bar). Measuring the idle rule with
   `docs/check-kit/lifetime/lifetime.ps1` against a throwaway distribution is an optional second
   form, with the note above. W24's procedure: kill a
-  keeper (and a throwaway `node` started through the launcher's `python3 -I -c` line) with SIGSEGV
+  keeper (and a throwaway `node` started through the launcher's `python3 -I -c` program) with SIGSEGV
   and look in `%Temp%\wsl-crashes` (or `crashDumpFolder` in `.wslconfig`); neither may leave a
   dump. W25's "small Windows
   program" is given as a PowerShell `TcpListener` one-liner on `127.0.0.1:<port>`, typed at a

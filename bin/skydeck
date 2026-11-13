@@ -79,15 +79,20 @@ fi
 # Cache compiled modules between runs; the start-up time of a short command is mostly compiling.
 # It is given to node alone below, not exported: the program the --here handoff starts must not
 # inherit skydeck's cache, but a NODE_COMPILE_CACHE the user set is theirs and stays as it was.
-# Beside it node gets SKYDECK_LAUNCHER_CACHE with the same value, the marker by which the window's
-# server knows the variable came from here and leaves it out of its programs' environment (S2 5.2).
+# When the launcher chose the cache itself, node also gets SKYDECK_LAUNCHER_CACHE with the same
+# value: the marker by which the window's server knows that NODE_COMPILE_CACHE is skydeck's and
+# leaves it out of its programs' environment (S2 5.2). A NODE_COMPILE_CACHE the caller set gets no
+# marker, and a marker the caller has is left as it is: when `skydeck window` starts `serve`, its
+# own launcher's cache and marker come in that way and must still reach the server together.
 if [ -n "${NODE_COMPILE_CACHE:-}" ]; then
   skydeck_cache=$NODE_COMPILE_CACHE
+  skydeck_marker=
 else
   case ${XDG_CACHE_HOME:-} in
     /*) skydeck_cache=$XDG_CACHE_HOME/skydeck/compile-cache ;;
     *) skydeck_cache=$HOME/.cache/skydeck/compile-cache ;;
   esac
+  skydeck_marker=$skydeck_cache
 fi
 
 # `serve` keeps every terminal's screen, the secret and its environment in memory, and on WSL a
@@ -155,27 +160,29 @@ trap 'exit 131' QUIT
 SKYDECK_HANDOFF=$skydeck_handoff
 export SKYDECK_HANDOFF
 skydeck_status=0
-if [ "${1-}" != serve ]; then
-  NODE_COMPILE_CACHE=$skydeck_cache SKYDECK_LAUNCHER_CACHE=$skydeck_cache \
-    "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@" || skydeck_status=$?
-elif runnable python3; then
-  # The arguments after the program: where to log, the caller's LC_CTYPE (set or not, and its
-  # value), then node's command line.
-  NODE_COMPILE_CACHE=$skydeck_cache SKYDECK_LAUNCHER_CACHE=$skydeck_cache \
-    python3 -I -c "$skydeck_core_limit" "$skydeck_state/server.log" "${LC_CTYPE+set}" "${LC_CTYPE-}" \
-    "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@" || skydeck_status=$?
-else
-  # Without python3 the server's core dumps are not prevented (S2 2); a SKYDECK_CORE_SOFT the
-  # caller had must not pass for a limit that was set. The subshell keeps the caller's
-  # environment as it was for everything after it.
-  (
-    unset SKYDECK_CORE_SOFT
-    NODE_COMPILE_CACHE=$skydeck_cache
-    SKYDECK_LAUNCHER_CACHE=$skydeck_cache
-    export NODE_COMPILE_CACHE SKYDECK_LAUNCHER_CACHE
+# Node runs in a subshell: the variables set for it here never reach the launcher's own
+# environment, which the handoff's program inherits.
+(
+  NODE_COMPILE_CACHE=$skydeck_cache
+  export NODE_COMPILE_CACHE
+  if [ -n "$skydeck_marker" ]; then
+    SKYDECK_LAUNCHER_CACHE=$skydeck_marker
+    export SKYDECK_LAUNCHER_CACHE
+  fi
+  if [ "${1-}" != serve ]; then
     exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
-  ) || skydeck_status=$?
-fi
+  elif runnable python3; then
+    # After the program: where to log, the caller's LC_CTYPE (set or not, and its value), then
+    # node's command line.
+    exec python3 -I -c "$skydeck_core_limit" "$skydeck_state/server.log" \
+      "${LC_CTYPE+set}" "${LC_CTYPE-}" "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
+  else
+    # Without python3 the server's core dumps are not prevented (S2 2); a SKYDECK_CORE_SOFT the
+    # caller had must not pass for a limit that was set.
+    unset SKYDECK_CORE_SOFT
+    exec "$skydeck_node" "$skydeck_root/bin/bootstrap.mjs" "$@"
+  fi
+) || skydeck_status=$?
 if [ -s "$skydeck_handoff" ]; then
   skydeck_script=$(cat -- "$skydeck_handoff")
   rm -f -- "$skydeck_handoff"

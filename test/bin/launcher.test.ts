@@ -667,6 +667,8 @@ describe('bin/skydeck serve: the core limit (S2 2)', () => {
 });
 
 describe('bin/skydeck: the cache marker SKYDECK_LAUNCHER_CACHE (S2 5.2)', () => {
+  // The marker says "this NODE_COMPILE_CACHE is the launcher's own": the window's server drops a
+  // NODE_COMPILE_CACHE equal to it, so it is set only when the launcher chose the cache itself.
   const commands: ReadonlyArray<readonly [name: string, args: string[], python: boolean]> = [
     ['no command', [], false],
     ['ls', ['ls'], false],
@@ -674,7 +676,7 @@ describe('bin/skydeck: the cache marker SKYDECK_LAUNCHER_CACHE (S2 5.2)', () => 
     ['serve without python3', ['serve'], false],
   ];
   for (const [name, args, python] of commands) {
-    test(`${name}: the marker equals the NODE_COMPILE_CACHE node sees`, (t) => {
+    test(`${name}: the cache the launcher chose has the marker beside it, with the same value`, (t) => {
       const s = serveSandbox(t, python);
 
       const r = launchReported('', args, s.env({ XDG_CACHE_HOME: '/xdg/cache' }));
@@ -683,22 +685,75 @@ describe('bin/skydeck: the cache marker SKYDECK_LAUNCHER_CACHE (S2 5.2)', () => 
       assert.equal(r.field('marker'), '/xdg/cache/skydeck/compile-cache');
     });
 
-    test(`${name}: a NODE_COMPILE_CACHE the caller set is passed unchanged and is the marker's value`, (t) => {
+    test(`${name}: an empty NODE_COMPILE_CACHE counts as unset, so the marker is set`, (t) => {
+      const s = serveSandbox(t, python);
+
+      const r = launchReported('', args, s.env({ NODE_COMPILE_CACHE: '' }));
+
+      assert.equal(r.field('cache'), join(s.home, '.cache/skydeck/compile-cache'));
+      assert.equal(r.field('marker'), join(s.home, '.cache/skydeck/compile-cache'));
+    });
+
+    test(`${name}: a NODE_COMPILE_CACHE the caller set is passed unchanged, with no marker`, (t) => {
       const s = serveSandbox(t, python);
 
       const r = launchReported('', args, s.env({ NODE_COMPILE_CACHE: '/my/cache' }));
 
       assert.equal(r.field('cache'), '/my/cache');
-      assert.equal(r.field('marker'), '/my/cache');
+      assert.equal(r.field('marker'), 'unset');
+    });
+
+    test(`${name}: with a NODE_COMPILE_CACHE the caller set, the caller's marker is left as found`, (t) => {
+      const s = serveSandbox(t, python);
+
+      const r = launchReported(
+        '',
+        args,
+        s.env({ NODE_COMPILE_CACHE: '/my/cache', SKYDECK_LAUNCHER_CACHE: '/their/marker' }),
+      );
+
+      assert.equal(r.field('cache'), '/my/cache');
+      assert.equal(r.field('marker'), '/their/marker');
     });
   }
 
-  test('a SKYDECK_LAUNCHER_CACHE the caller had is replaced', (t) => {
+  test('a SKYDECK_LAUNCHER_CACHE the caller had is replaced when the launcher chooses the cache', (t) => {
     const s = serveSandbox(t, false);
 
     const r = launchReported('', ['ls'], s.env({ SKYDECK_LAUNCHER_CACHE: '/stale' }));
 
     assert.equal(r.field('marker'), join(s.home, '.cache/skydeck/compile-cache'));
+  });
+
+  describe('through two launchers, as skydeck window starts bin/skydeck serve with its own environment', () => {
+    /** A fake node for the first launcher that starts the launcher again, as `serve`. */
+    function chain(t: TestContext, extra: Record<string, string>): Reported {
+      const s = serveSandbox(t, true);
+      const relay = join(s.root, 'relay-node');
+      writeFileSync(
+        relay,
+        `#!/bin/sh\nSKYDECK_NODE='${join(s.bin, 'node')}' exec '${launcher}' serve\n`,
+      );
+      chmodSync(relay, 0o755);
+
+      return launchReported('', ['window'], s.env({ SKYDECK_NODE: relay, ...extra }));
+    }
+
+    test("the first launcher's cache and marker reach the server unchanged", (t) => {
+      const r = chain(t, { XDG_CACHE_HOME: '/xdg/cache' });
+
+      assert.equal(r.field('node'), 'reporting');
+      assert.equal(r.field('cache'), '/xdg/cache/skydeck/compile-cache');
+      assert.equal(r.field('marker'), '/xdg/cache/skydeck/compile-cache');
+    });
+
+    test('a cache the user set reaches the server with no marker, so the server keeps it', (t) => {
+      const r = chain(t, { NODE_COMPILE_CACHE: '/my/cache' });
+
+      assert.equal(r.field('node'), 'reporting');
+      assert.equal(r.field('cache'), '/my/cache');
+      assert.equal(r.field('marker'), 'unset');
+    });
   });
 });
 
