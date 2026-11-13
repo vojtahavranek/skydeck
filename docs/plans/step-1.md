@@ -3401,9 +3401,11 @@ Rules that are part of this task (design 5.3–5.6, 9.1):
   `parseSpoolFile` does it, so neither an initial prompt, nor a removed flag such as `--prefill-b64`,
   nor the argument of an unknown flag is ever stored (principle 4). Insert an `observed` event when
   `latest` is null; when `latest` names the file's session and `!processHasLaunch(key)` and `argv`
-  is non-null; or when `latest` names another session and `latest.timeNs <= file.mtimeNs` (*ruled
-  in fix 1:* an event newer than the file is the hook speaking after the file was last written —
-  an in-session `/resume` or `/clear` — and the file is stale: nothing is inserted). Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
+  is non-null; or when `latest` names another session and is `observed` or has `latest.timeNs <= file.mtimeNs`
+  (*ruled in fix 1:* a hook event newer than the file is the hook speaking after the file was last
+  written — an in-session `/resume` or `/clear` — and the file is stale: nothing is inserted; an
+  `observed` event is stamped at reconcile, after the file it was read from, so it never makes a
+  file stale). Observed rows: `spoolName null, timeNs now, detail '', rawDetail null, cwd file.cwd, name file.name, payload null`.
   The check and the insert run again inside one transaction, with the clock read again there
   (it is the bound of `latestEventOfProcess` and the row's `timeNs`), so two refreshes at once
   record a process once.

@@ -378,6 +378,40 @@ test('when the live file is rewritten after the hook and names what the hook sai
   assert.equal(heldBy4242(d), S2);
 });
 
+test('reconcile’s own observed event is no hook speaking: a file that names another session wins over it', (t) => {
+  // Reconcile read the file naming S1; before its insert the process switched to S2 and the file
+  // was rewritten, so observed(S1) is stamped after the file and after the hook's start(S2).
+  const d = setup(t);
+  d.deck.store.insertEvent({
+    spoolName: null,
+    timeNs: T0,
+    kind: 'observed',
+    detail: '',
+    rawDetail: null,
+    sessionId: S1,
+    bootId: BOOT_A,
+    pid: 4242,
+    procStart: START,
+    cwd: '/home/dev/projects/demo',
+    argv: ['claude', '--model', 'opus'],
+    name: null,
+    payload: null,
+  });
+  const fields = {
+    event: 'SessionStart' as const,
+    timeNs: T0 - 1n * SEC,
+    pid: 4242,
+    input: hookInput('SessionStart', S2, { source: 'resume' }),
+    argv: ['claude', '--model', 'opus'],
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 1)), spoolText(fields));
+  assert.equal(ingestSpool(d.deck).ingested, 1);
+  live(d, { sessionId: S2 }, T0 - 1n * SEC); // idle from now on: never rewritten
+  d.clock.setNs(T0 + 600n * SEC);
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  assert.equal(heldBy4242(d), S2);
+});
+
 test('a hook event older than the live file still loses to it (the hook of the change was lost)', (t) => {
   const d = setup(t);
   hookStart(d); // S1 at T0 - 20 s

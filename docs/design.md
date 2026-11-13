@@ -219,7 +219,9 @@ hook file was lost.
   modified after that event (the hook of the change was lost). When the event is newer, the hook
   spoke after the file was last written — an in-session `/resume` or `/clear` records the new
   session while the file can still name the old one — so the file is stale and nothing is
-  inserted; a missing launch command is added once the file names that session too.
+  inserted; a missing launch command is added once the file names that session too. An `observed`
+  event is not the hook speaking: it is stamped with the clock at reconcile, after the file it was
+  read from, so a file that names another session than it always wins (the file changed since).
 
 An `observed` event never creates a link.
 

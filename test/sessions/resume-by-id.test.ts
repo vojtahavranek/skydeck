@@ -193,6 +193,49 @@ test('prepareResumeById refuses a session a stale live file hides: the hook said
   );
 });
 
+test('prepareResumeById refuses a session whose holder an earlier reconcile recorded on the session it left', (t) => {
+  // A reconcile read 4242's file naming S2; before its insert the process /resume'd S1 and the
+  // file was rewritten. observed(S2) is stamped after both; the idle file is not written again.
+  const d = testDeck(t);
+  writeTranscript(d, S1, [{ ...userRecord(S1, T0 - 300n * SEC), cwd: d.sandbox.home }]);
+  d.proc.setProcess(4242, { stat: statLine(4242, 51234567), cmdline: ['claude'] });
+  d.deck.store.insertEvent({
+    spoolName: null,
+    timeNs: T0,
+    kind: 'observed',
+    detail: '',
+    rawDetail: null,
+    sessionId: S2,
+    bootId: d.proc.bootId() ?? '',
+    pid: 4242,
+    procStart: 51234567,
+    cwd: d.sandbox.home,
+    argv: ['claude'],
+    name: null,
+    payload: null,
+  });
+  spoolStart(d, 4242, T0 - 1n * SEC, 1); // start(S1, resume)
+  const file = join(d.deck.places.claudeHome, 'sessions', '4242.json');
+  writeFileSync(
+    file,
+    JSON.stringify({
+      pid: 4242,
+      sessionId: S1,
+      cwd: d.sandbox.home,
+      procStart: '51234567',
+      entrypoint: 'cli',
+      status: 'idle',
+    }),
+  );
+  const secondAgo = Number((T0 - 1n * SEC) / SEC);
+  utimesSync(file, secondAgo, secondAgo);
+  d.clock.setNs(T0 + 600n * SEC);
+  assert.equal(
+    refusal(() => prepareResumeById(d.deck, S1)),
+    '0b5f3c1e is running (pid 4242)',
+  );
+});
+
 test('prepareResumeById refuses a session for the other reasons of the guard, with no lock', (t) => {
   const d = testDeck(t);
   writeTranscript(d, S1, [
