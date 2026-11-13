@@ -194,6 +194,14 @@ export type Ns = bigint;
 export interface Clock {
   nowNs(): Ns;
   sleep(ms: number): Promise<void>;
+  /**
+   * (Added by fix 4, ruled by the plan owner: the interactive list's background refresh.) Calls `callback` every `ms`
+   * milliseconds (a positive whole number; RangeError otherwise) until the returned function is called (again: no
+   * effect). The real clock uses `setInterval` with `unref()`, so the timer does not keep the process alive by itself;
+   * the fake one calls `callback` from `advanceMs` (and so from `sleep`) once per period that passed, at its time.
+   * `callback` must not throw: a timer has nobody to report to (the real one would end the process).
+   */
+  every(ms: number, callback: () => void): () => void;
 }
 
 export interface FileInfo {
@@ -444,8 +452,10 @@ export class RestoreStoppedError extends SkydeckError {
 /** The constants of section 3, shared by every test. */
 export const T0: Ns, SEC: Ns, S1: string, S2: string, S3: string, BOOT_A: string, BOOT_B: string;
 export interface FakeClock extends Clock {
-  setNs(ns: Ns): void;
-  advanceMs(ms: number): void;      // sleep(ms) calls this and resolves on the next microtask
+  setNs(ns: Ns): void;              // calls no timer of `every`
+  advanceMs(ms: number): void;      // sleep(ms) calls this and resolves on the next microtask; (fix 4) every timer of
+                                    // `every` that falls due on the way is called at its time, in time order
+  timers(): number;                 // (fix 4) the timers of `every` that run: started and not stopped
 }
 export function fakeClock(startNs: Ns): FakeClock;
 
@@ -4828,7 +4838,8 @@ export const command: Command;
   command: when it cannot be found the installation is broken, and it fails as an unknown command
   does, usage on stderr and exit 2); both go through the same error mapping as `command.run` (task
   12); `--help` keeps printing the usage
-- Modify (ruled by the plan owner): `src/platform/types.ts`, `src/platform/real.ts` (`RunOptions.signal`, 2.2),
+- Modify (ruled by the plan owner): `src/platform/types.ts`, `src/platform/real.ts` (`RunOptions.signal`, 2.2; and,
+  added by fix 4, `Clock.every`, 2.2.1, with the fake clock's `every` and `timers()` in `test/helpers/platform.ts`, 2.2.7),
   `src/github.ts` (`signal` of `fetchPrs` / `refreshPrs`, 2.6), `src/cli/context.ts` (`Io.onResize`,
   `Io.onTerminate`, 2.9.1), and the test helpers `test/helpers/platform.ts` (the fake runner honours the signal),
   `test/helpers/capture.ts` and `test/helpers/context.ts` (`resize(size)` triggers `onResize`, `terminate(signal)`
@@ -4856,7 +4867,22 @@ frame (`\x1b[H\x1b[2J` + `render(...).join('\r\n')`), then start a background `r
 refreshMinutes, signal }`; deps include `env: ctx.platform.env`, 2.6); when it settles having fetched or failed
 something, `loadRows` and `withRows(…, reorder false)` and repaint (nothing when it saved nothing; a rejection becomes
 the message, it never rejects). For every chunk from `io.keys()`: `decodeKeys`, then `reduce` per key, run the
-effect, repaint. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
+effect, repaint.
+
+**Background refresh** (added by fix 4, ruled by the plan owner: design 7.3 and 7.4 say the list refreshes "when it
+opens, and in the background"). After the first frame, `clock.every(5000, …)` (one named constant,
+`BACKGROUND_REFRESH_MS`; no configuration key). Each tick: `refresh(deck)` (the refresh every command starts with; not
+`refreshWithProgress`, nothing is written under the list), `loadRows` + `withRows(…, reorder false)` — the order is
+kept, the selection follows its session id, a new session goes to the end of its group (`keepOrder`) — and a frame
+only when it differs from the one on screen; then, unless a fetch of any kind is running, the automatic `refreshPrs`
+of the opening (`force: false`). The deck part is synchronous, so two can never overlap; a fetch still running at
+the next tick is not joined by another one, and an automatic fetch never starts while the fetch of `r` runs. A tick
+does nothing while a key's effect is carried out (a tab being opened), while the list is off screen (the editor, a
+hand-off, after the end) and while an input is open (a reload could close it; the next tick after it refreshes); in
+the filter and the detail it refreshes as usual. A failure (of the refresh, or of an automatic fetch) is the message
+line once: the same failure again says nothing more until that work has succeeded; it never ends the list. Measured
+on 300 sessions with 246 MB of transcripts and 4 live processes: a tick with nothing new costs 18 ms (median; p95
+35 ms), flat over 5,000 ticks. Every model goes through `scrolled(model, size)`: after every key, every `withRows`, and every
 resize (`io.onResize`, which also repaints at once). Nothing is painted while the alternate screen is left.
 
 Effects: `label`/`group` → `cleanLabel`/`cleanGroup` (empty text clears) + `setLabel`/`setGroup`; `note` → leave the
@@ -4889,7 +4915,7 @@ starts no second fetch (the message says one is running); when it settles, `load
 when it saved something, the message taken away, repaint.
 
 Giving the terminal back — on `quit`, the end of `io.keys()`, a `--here` resume, an error, SIGTERM, SIGHUP or an
-outside SIGINT: abort
+outside SIGINT: stop the background refresh's timer (fix 4), abort
 the fetches (one `AbortController` for all: an aborted fetch ends at once and saves nothing), write
 `\x1b[?7h\x1b[?25h\x1b[?1049l` (autowrap, cursor, normal screen), call `return()` on the key iterator, print the
 lines kept for the end on stderr; then (except for a signal, after which the process ends) unsubscribe and return —
@@ -4942,6 +4968,14 @@ parts beyond the first version of this paragraph were ruled by the plan owner af
     (After the re-check of review 2.) A second `r` after the first fetch finished fetches again and the message goes away;
     `r` while a fetch runs still re-reads and reorders; `q` while the fetch of `p` hangs returns at once; a failed
     background fetch is shown in the message line.
+13. (Fix 4, the background refresh; the fake clock's `advanceMs` fires the timer.) After 5 s, not before, a session
+    that started working and a new session are shown, the order and the selected session kept; a tick that changes
+    nothing on screen paints nothing (and still reads the spool); none while an input is open (what is typed stays,
+    the next tick after it refreshes), while the editor runs, or while a tab is being opened; a tick fetches the pull
+    requests that are due and starts no fetch while one runs, nor while the fetch of `r` runs; `q` while a tick's
+    fetch hangs returns at once and nothing is saved or painted after; a failing refresh, and a failing automatic
+    fetch, is said once, the list goes on, and a failure after a refresh that worked is said again. `clock.timers()` is
+    0 after `q`, ctrl-c, the end of the keys, an error, when the handoff is written and at SIGTERM / SIGHUP / SIGINT.
 
 **Steps**
 - [ ] Write both test files; replace the bare-`skydeck` test in `test/cli/main.test.ts`. `npm test` → fails.

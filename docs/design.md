@@ -400,7 +400,8 @@ never received a prompt has no transcript (14).
   given `--refresh`: then they first make an explicit refresh (`ls`: of the sessions it prints,
   `show`: of that session), with the timeout above, and a fetch that fails leaves the pull
   request "can't read" and the command still succeeds. The interactive list paints from the
-  cache, refreshes in the background and repaints. `skydeck pr refresh` fetches now.
+  cache, refreshes in the background (every 5 seconds, 7.4) and repaints. `skydeck pr refresh`
+  fetches now.
 - A pull request that cannot be read is shown as "can't read" with the time of its last
   successful fetch — never as closed.
 - A pull request that has never been fetched and has no failed attempt is shown as "not
@@ -417,7 +418,11 @@ otherwise it behaves like `skydeck ls`.
 - Groups are ordered by the most recent activity of a listed member; "no group" is last; ties by
   name. Inside a group: `waiting`, `working`, `running`, then `not-running` with
   `ended-unexpectedly` first; inside each of those by most recent activity.
-- The order is computed when the list opens or is refreshed, and does not change under the cursor.
+- The order is computed when the list opens or is refreshed with `r`, and does not change under
+  the cursor. While the list is on screen it also refreshes by itself every 5 seconds (5.3, then
+  the automatic pull-request refresh of 7.3) and repaints when what it shows changed; that refresh
+  keeps the order and the selected session (a new session goes to the end of its group) and waits
+  while an input is being typed.
 - A row shows: state, title, time in state, marks, the pull-request chip, a note mark, and the
   short id (first 8 characters of the session id).
 - Every string that comes from a transcript, a live-session file or GitHub passes through the
