@@ -510,6 +510,8 @@ test('n: the outcome comes first in the message line, then the line editNote wro
   assert.ok(message.startsWith('editor exited 1  an earlier edit of this note was not saved'));
   assert.ok(message.length <= 80);
   assert.equal(d.deck.store.meta(S1)?.note ?? null, null);
+  // The editor failed, but the text in the file was never stored: the next edit continues with it.
+  assert.equal(readFileSync(join(d.deck.places.stateDir, `note-${S1}.md`), 'utf8'), 'kept');
 });
 
 test('background refresh: a pull request never fetched gets its new level painted, the order kept', async (t) => {

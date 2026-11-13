@@ -1303,10 +1303,19 @@ export interface SettingsEdit {
 export function addHookEntries(settingsText: string | null, hookPath: string): SettingsEdit;
 
 /**
- * Removes every hook object whose `command` contains hookPath; then drops matcher groups left with
+ * Removes, from each hooked event, the hook objects whose `command` is exactly
+ * hookCommand(hookPath, event) (fix 3: the one test of install, doctor and uninstall; a hook that
+ * only names the path, or sits under another event, is not ours); then drops matcher groups left with
  * no hooks, event arrays left empty, and `hooks` when left empty. Nothing else changes.
  */
 export function removeHookEntries(settingsText: string, hookPath: string): SettingsEdit;
+
+/**
+ * What writing the file back through `serialize(parse(text))` would change besides the entries (fix 3):
+ * `reformatted` when the bytes would differ, `lossyPaths` for the numbers that would not keep their
+ * digits (read with the reviver's `context.source`), each named by its path (`env.ID`, `a.b[1]`).
+ */
+export function rewriteReport(text: string): { reformatted: boolean; lossyPaths: string[] };
 
 /** For each event: does an entry whose command equals hookCommand(hookPath, event) exist? */
 export function hookStatus(settingsText: string | null, hookPath: string): Record<HookEvent, boolean>;
@@ -2006,9 +2015,9 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
 // src/cli/notes.ts (task 15)
 /**
  * Writes the note to <stateDir>/note-<sessionId>.md, runs the editor (D14) through
- * platform.runner.runInteractive, stores what comes back, removes the file (also when the editor
- * fails). The file is created with mode 0o600. UsageError when stdin is not a terminal;
- * SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit; SkydeckError "editor did
+ * platform.runner.runInteractive, stores what comes back, removes the file (when the editor
+ * fails: only a file this edit made and the editor left as it was; fix 3). The file is created with mode 0o600. UsageError when stdin is not a terminal;
+ * SkydeckError "editor exited <code>" (note unchanged) on a non-zero exit, with `; your text is in <path>` appended when the editor changed the file before failing (fix 3); SkydeckError "editor did
  * not finish: <program> could not be run or was killed" when runInteractive returns null; SkydeckError
  * when the editor removed the file (note unchanged: a missing file is not an empty note); SkydeckError
  * "editor could not be run: <program> (<reason>)" when runInteractive rejects (a file that is not
@@ -2224,7 +2233,7 @@ export interface ShowJson extends SessionJson {
 }
 ```
 
-Times are `isoFromNs`. `dir` is `""` when unknown. `sessions` is in list order (groups in order,
+Times are `isoFromNs`. `dir` is `""` when unknown, else `row.session.dir` as stored (not the sanitised `row.dir`; fix 3). `sessions` is in list order (groups in order,
 rows in order). Output is `JSON.stringify(value, null, 2) + "\n"`, written by `jsonText`
 (`src/cli/json.ts`), which also writes DEL, the C1 controls and the bidirectional controls as
 `\uXXXX` escapes (the same value for `JSON.parse`, safe on a terminal). `show --json` adds, after
@@ -2817,7 +2826,7 @@ its cmdline is `'sleep\0' + '30\0'`.
 - Remove keeps foreign: from the foreign-entries result above → exactly the original foreign input structure.
 - A group holding a foreign hook and ours → only ours removed, the group stays with the foreign hook.
 - Nothing ours → `changed false`, `text` identical to the input.
-- An entry whose command merely contains `H` (`"\"/home/dev/.local/share/skydeck/skydeck-hook\" SessionStart"`) → removed.
+- An entry whose command merely contains `H` (`"\"/home/dev/.local/share/skydeck/skydeck-hook\" SessionStart"`), or our command under an event it does not name → not ours, left alone (fix 3).
 - `hookStatus(null, H)` → both false; after add → both true; foreign only → both false.
 - `cleanupPeriodDays(null)` → 30; `'{"cleanupPeriodDays":14}'` → 14; `'{"cleanupPeriodDays":0}'` → 30;
   `'{"cleanupPeriodDays":"9"}'` → 30; `'bad'` → 30.
@@ -4494,7 +4503,9 @@ export const command: Command;   // in each of the three files
   `hookPath` → `<appRoot>/bin/skydeck-hook`, `binLink` → `<appRoot>/bin/skydeck` (creating
   `~/.local/bin`), `nodeLink` → `platform.nodePath`. (3) `addHookEntries(<settings text or null>, hookPath)`;
   when `changed`: print to stderr `skydeck will add these hook entries to <settingsPath>:` and the
-  added groups as JSON, ask `readLine('Add them? [y/N] ')`; anything but `y`/`yes` (or null) →
+  added groups as JSON, then, when `rewriteReport(text).reformatted` (fix 3), the line
+  `the rest of the file will be rewritten in skydeck's formatting[ and <paths> would lose digits]; the file as it is now is kept in <backup>`
+  (the backup's name is fixed at this point), ask `readLine('Add them? [y/N] ')`; anything but `y`/`yes` (or null) →
   print `settings not changed` and return 1. On yes (ruled by the plan owner in pull request #20):
   write a NEW backup of the old content, `<settingsPath>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC,
   from `platform.clock`; when that exact name exists, `-2`, `-3`, …), mode 600, created with
@@ -4504,15 +4515,17 @@ export const command: Command;   // in each of the three files
   `hook entries already present`; no backup is written and kv is left as it is. (4) `refreshWithProgress(ctx, deck)`. (5) Unless kv `first_run_offered`:
   count rows that are listed, not done, not running, with `lastActivityNs` older than
   `firstRunDoneAfterDays`; when > 0 ask `Mark <n> sessions older than <d> days as done? [y/N] `
-  and on yes set their `doneAtNs` with `store.updateMeta(id, { doneAtNs: now }, now)`; set `first_run_offered`. Return `EXIT.ok`.
-- **uninstall** never creates anything: `resolveDeckPlaces`; when `dbPath` exists, it reads and
+  and on yes set their `doneAtNs` with `markDone(deck, id)` (`src/sessions/meta.ts`; it reads the clock for each session); set `first_run_offered`. Return `EXIT.ok`.
+- **uninstall** never creates anything (but the backup just named): `resolveDeckPlaces`; when `dbPath` exists, it reads and
   deletes the kv keys through `openStore(dbPath)` (not `withDeck`, which would re-create
   directories; ruled above), otherwise kv counts as empty.
   When kv `settings_hash` equals the sha256 of the current settings text → restore:
   backup path, when that file still exists → copy it over `settings.json` (the backup stays);
   `none` → remove `settings.json`.
   Otherwise (hash mismatch, or the recorded backup is gone), when the file exists →
-  `removeHookEntries` and write if changed. Remove the three
+  `removeHookEntries` and write if changed; when `rewriteReport(text).reformatted`, first keep the
+  file as it is in a new backup (fix 3: `src/cli/settings-backup.ts`, shared with install) and print
+  where. Remove the three
   links, each only when it is a symlink pointing where install pointed it. Never remove a backup
   file, with or without `--purge`; print one line per `<settingsPath>.skydeck-backup-*` file
   (ruled by the plan owner in pull request #20). Delete kv

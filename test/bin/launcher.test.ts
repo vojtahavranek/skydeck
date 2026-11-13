@@ -3,7 +3,16 @@
 // runs the real thing.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -354,5 +363,85 @@ describe('bin/skydeck with the real node', () => {
     assert.equal(r.status, 2);
     assert.equal(r.stdout, '');
     assert.match(r.stderr, /^Usage:/m);
+  });
+});
+
+describe('bin/skydeck when its standard output or error is closed before it writes', () => {
+  /**
+   * Runs `skydeck <args>` with standard output (`which` 'stdout') or standard error ('stderr') a
+   * pipe nobody reads any more, as in `skydeck ls | true` or `skydeck show x 2>&1 | true`. The reader is a `true` on a fifo that has exited before the launcher starts, so there is
+   * no timing in it: a write cannot succeed. Returns what the launcher printed on stderr, the status
+   * it exited with (as the shell saw it) and the files it left in the data directory.
+   */
+  function withClosedPipe(
+    t: TestContext,
+    args: string[],
+    which: 'stdout' | 'stderr' = 'stdout',
+    input = '',
+  ): { stderr: string; status: string; left: string[] } {
+    const s = launcherSandbox(t);
+    const fifo = join(s.root, 'out.fifo');
+    const statusFile = join(s.root, 'status');
+    const made = spawnSync('mkfifo', [fifo], { encoding: 'utf8' });
+    assert.equal(made.status, 0, made.stderr);
+    const script = [
+      'fifo=$1 statusfile=$2; shift 2',
+      'true <"$fifo" &', // the reader: opens the fifo, exits
+      'reader=$!',
+      'exec 3>"$fifo"', // waits for the reader to open it
+      'wait "$reader"', // gone; this end stays open, so a write fails with EPIPE
+      which === 'stdout' ? '"$@" >&3' : '"$@" 2>&3',
+      'echo $? >"$statusfile"',
+    ].join('\n');
+    const r = spawnSync('/bin/sh', ['-c', script, 'sh', fifo, statusFile, launcher, ...args], {
+      encoding: 'utf8',
+      input,
+      env: s.env({ SKYDECK_NODE: process.execPath }),
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const data = join(s.skydeckHome, 'data');
+    return {
+      // Node 24.12 warns once that node:sqlite is experimental, on every run; that is not ours.
+      stderr: r.stderr
+        .split('\n')
+        .filter((line) => line !== '' && !/ExperimentalWarning|--trace-warnings/.test(line))
+        .join('\n'),
+      status: readFileSync(statusFile, 'utf8').trim(),
+      left: existsSync(data) ? readdirSync(data) : [],
+    };
+  }
+
+  test('ls: no stack trace and nothing on stderr; exit 141 as a process killed by SIGPIPE shows; the database is closed', (t) => {
+    const r = withClosedPipe(t, ['ls']);
+
+    assert.equal(r.stderr, '');
+    assert.equal(r.status, '141');
+    // An open database leaves its -wal and -shm files behind.
+    assert.deepEqual(
+      r.left.filter((name) => name.startsWith('skydeck.db')),
+      ['skydeck.db'],
+    );
+  });
+
+  test('doctor: the same, and its own failing status is kept', (t) => {
+    const r = withClosedPipe(t, ['doctor']);
+
+    assert.equal(r.stderr, '');
+    assert.equal(r.status, '1'); // nothing is installed in the sandbox: doctor reports problems
+  });
+
+  test('standard error closed: the exit code of the command is the one it would have had', (t) => {
+    const r = withClosedPipe(t, ['show', 'nosuch'], 'stderr');
+
+    assert.equal(r.stderr, '');
+    assert.equal(r.status, '3'); // a reference that matches nothing; not 1 from a crash, not 141
+  });
+
+  test('standard error closed: a command that succeeds still exits 0', (t) => {
+    // `install` asks its question on stderr (the header, the entries, the prompt), then goes ahead.
+    const r = withClosedPipe(t, ['install'], 'stderr', 'y\n');
+
+    assert.equal(r.stderr, '');
+    assert.equal(r.status, '0'); // not 141: only a closed stdout changes the status of a success
   });
 });

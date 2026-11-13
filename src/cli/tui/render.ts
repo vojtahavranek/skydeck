@@ -6,7 +6,7 @@ import { isoFromNs } from '../../platform/time.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { clip } from '../clip.ts';
-import { formatPrLine, formatRow } from '../row.ts';
+import { formatNoteLines, formatPrLine, formatRow, stateDetailSuffix } from '../row.ts';
 import { visibleRows } from './model.ts';
 import type { TuiModel } from './model.ts';
 
@@ -14,7 +14,6 @@ const HELP =
   'j/k move  enter detail  l label  g group  n note  d done  p PR  R resume  / filter  a all  r refresh  q quit';
 const MARK_SELECTED = '> ';
 const MARK_OTHER = '  ';
-const NOTE_INDENT = '  ';
 const CURSOR = '_';
 const ELLIPSIS = '…';
 const LOW_SURROGATE_FIRST = 0xdc00;
@@ -148,29 +147,21 @@ function listBody(model: TuiModel, columns: number, height: number): string[] {
   return lines.slice(start, start + height);
 }
 
-/** The lines of a note: split at line breaks and each sanitised on its own, a final break ends a line. */
-function noteLines(note: string): string[] {
-  const lines = note.split(/\r\n|\r|\n/);
-  if (lines[lines.length - 1] === '') {
-    lines.pop();
-  }
-  return lines.map(sanitize);
-}
-
 function detailBody(row: ListRow): string[] {
-  const detail = row.stateDetail === null || row.stateDetail === '' ? '' : ` (${row.stateDetail})`;
   const lines = [
     `title: ${row.title}`,
     `id: ${row.id}`,
-    `state: ${row.state}${detail}`,
+    `state: ${row.state}${stateDetailSuffix(row.stateDetail)}`,
     `since: ${isoFromNs(row.sinceNs)}`,
     `dir: ${row.dir ?? '-'}`,
     `group: ${row.group ?? '-'}`,
     `marks: ${row.marks.length === 0 ? '-' : row.marks.join(',')}`,
     ...row.prs.map((pr) => `pr: ${formatPrLine(pr)}`),
   ];
-  if (row.note !== null) {
-    lines.push('note:', ...noteLines(row.note).map((line) => NOTE_INDENT + line));
+  // A note that has nothing to show gets no heading, as in `show`.
+  const note = row.note === null ? [] : formatNoteLines(row.note);
+  if (note.length > 0) {
+    lines.push('note:', ...note);
   }
   return lines;
 }

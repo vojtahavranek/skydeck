@@ -1,12 +1,13 @@
 // `skydeck uninstall [--purge]` (design 8): undoes install's change to Claude Code's settings file,
-// removes install's links, and with --purge skydeck's own directories. It never creates anything
-// (ruled by the plan owner): the database is opened by itself, without the directories `withDeck`
-// would make again, and with no database there is nothing recorded, so only the entries naming the
-// hook are removed. It never removes a backup install made.
+// removes install's links, and with --purge skydeck's own directories. It creates nothing (ruled
+// by the plan owner) but one file: the database is opened by itself, without the directories
+// `withDeck` would make again, and with no database there is nothing recorded, so only the entries
+// install wrote are removed; when that rewrites more of the settings file than those entries, it
+// keeps the file as it was in a new backup first. It never removes a backup install made.
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 
-import { removeHookEntries, settingsPath } from '../../claude/settings.ts';
+import { removeHookEntries, rewriteReport, settingsPath } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import type { Places } from '../../platform/paths.ts';
 import type { Files, Platform } from '../../platform/types.ts';
@@ -20,15 +21,16 @@ import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
 import { EXIT } from '../exit.ts';
+import { backupBase, createBackup } from '../settings-backup.ts';
 
 const SPEC: ArgSpec = {
   usage:
     'skydeck uninstall [--purge]\n' +
     '\n' +
     "Puts Claude Code's settings file back as it was before install when nobody changed it\n" +
-    'since, otherwise removes only the hook entries that name skydeck-hook, and removes the\n' +
-    'links install made. The database stays. The backups install made of the settings file\n' +
-    'are kept (it names them).\n' +
+    'since, otherwise removes only the two hook entries install wrote (after a new backup of\n' +
+    'the file, when that rewrites more than those entries), and removes the links install\n' +
+    'made. The database stays. The backups of the settings file are kept (it names them).\n' +
     '\n' +
     '  --purge  also remove the data, state and configuration directories\n',
   flags: { purge: { type: 'boolean' } },
@@ -113,8 +115,11 @@ function undo(ctx: Context, places: Places, recorded: Recorded): void {
 /**
  * Design 8: when the file is still exactly what install wrote (its hash) and the recorded backup
  * still exists, the state before install comes back: the backup, or no file at all for `none`. In
- * every other case exactly the hook objects whose command names hookPath are removed, and
- * everything else stays. The backup itself is never removed (ruled by the plan owner).
+ * every other case exactly the entries install wrote are removed (removeHookEntries), and
+ * everything else stays. That goes through parsing and writing the file in skydeck's formatting:
+ * when this changes more than the entries, the file as it is now is kept first in a new backup,
+ * named like install's, and uninstall says where (ruled by the plan owner). The backups
+ * themselves are never removed.
  */
 function restoreSettings(ctx: Context, files: Files, places: Places, recorded: Recorded): void {
   const path = settingsPath(places.claudeHome);
@@ -136,9 +141,42 @@ function restoreSettings(ctx: Context, files: Files, places: Places, recorded: R
     }
   }
   const edit = removeHookEntries(text, places.hookPath);
-  if (edit.changed) {
-    attempt(`cannot write ${path}`, () => files.writeText(path, edit.text));
-    ctx.io.stdout(`removed the hook entries from ${sanitize(path)}\n`);
+  if (!edit.changed) {
+    return;
+  }
+  const rewrite = rewriteReport(text);
+  const backup = rewrite.reformatted
+    ? createBackup(files, path, backupBase(path, ctx.platform.clock), text)
+    : null;
+  attempt(`cannot write ${path}`, () => {
+    try {
+      files.writeText(path, edit.text);
+    } catch (error) {
+      if (backup !== null) {
+        removeQuietly(files, backup); // the file is as it was: this run has nothing to keep
+      }
+      throw error;
+    }
+  });
+  ctx.io.stdout(`removed the hook entries from ${sanitize(path)}\n`);
+  if (backup !== null) {
+    const lost =
+      rewrite.lossyPaths.length === 0 ? '' : ` and ${rewrite.lossyPaths.join(', ')} lost digits`;
+    ctx.io.stdout(
+      sanitize(
+        `the rest of the file was rewritten in skydeck's formatting${lost}; ` +
+          `the file as it was is kept in ${backup}`,
+      ) + '\n',
+    );
+  }
+}
+
+/** Removes a file this run made, for a run that is ending in an error anyway; failing to is not worth a second one. */
+function removeQuietly(files: Files, path: string): void {
+  try {
+    files.remove(path);
+  } catch {
+    // the backup stays; the next lines of the output name every backup
   }
 }
 

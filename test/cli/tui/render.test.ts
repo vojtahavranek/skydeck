@@ -493,7 +493,7 @@ test('the detail: a note is printed line by line, each sanitised, with the break
     'note:',
     '  first red',
     '  second with tab',
-    '  ',
+    '',
     '  last',
   ]);
   for (const line of lines) {
@@ -501,12 +501,25 @@ test('the detail: a note is printed line by line, each sanitised, with the break
   }
 });
 
-test('the detail: a note that is empty has the heading and no lines', () => {
-  const row = listRow({ id: S1, hasNote: true, note: '' });
+test('the detail: a lone carriage return is a line break, and empty lines at the edges are not shown', () => {
+  const row = listRow({ id: S1, hasNote: true, note: '\n\na\rb\n\n' });
   const lines = render(press(initModel([row], T0), 'enter'), { columns: 80, rows: 20 });
   const at = lines.indexOf('note:');
-  assert.ok(at > 0);
-  assert.equal(lines[at + 1], '');
+  assert.deepEqual(lines.slice(at, at + 3), ['note:', '  a', '  b']);
+});
+
+test('the detail: a state detail that is nothing once sanitised has no brackets', () => {
+  const row = listRow({ id: S1, state: 'waiting', stateDetail: '' });
+  const lines = render(press(initModel([row], T0), 'enter'), { columns: 80, rows: 20 });
+  assert.ok(lines.includes('state: waiting'), lines.join('\n'));
+});
+
+test('the detail: a note that has nothing to show, empty or only escape sequences, has no heading', () => {
+  for (const note of ['', '\x1b[2J\n\x07']) {
+    const row = listRow({ id: S1, hasNote: true, note });
+    const lines = render(press(initModel([row], T0), 'enter'), { columns: 80, rows: 20 });
+    assert.ok(!lines.includes('note:'), JSON.stringify(note));
+  }
 });
 
 test('the detail: lines are cut to the width, and a body that is too long is cut at the bottom', () => {

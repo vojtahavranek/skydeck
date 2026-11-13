@@ -17,11 +17,19 @@ nl='
 '
 
 # Appends one line to hook.log, creating the state directory when it is missing. Failing to log is
-# not worth a second error.
+# not worth a second error. The error text of a program can have several lines; each newline in it
+# becomes a space, so that a message is one line and every line of the file starts with its time.
 log() {
   [ -d "$state" ] || mkdir -p -- "$state"
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ) || now=-
-  printf '%s %s %s\n' "$now" "$event" "$1" >>"$state/hook.log"
+  msg=$1
+  while :; do
+    case $msg in
+      *"$nl"*) msg="${msg%%"$nl"*} ${msg#*"$nl"}" ;;
+      *) break ;;
+    esac
+  done
+  printf '%s %s %s\n' "$now" "$event" "$msg" >>"$state/hook.log"
 }
 
 # Sets $state as design 9.1 says (D26): $SKYDECK_HOME/state, else $XDG_STATE_HOME/skydeck, else
