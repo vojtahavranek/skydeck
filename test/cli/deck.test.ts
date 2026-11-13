@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -121,6 +121,30 @@ describe('withDeck', () => {
 
     assert.ok(seen);
     assert.equal(isClosed(seen.store), true);
+  });
+
+  test('a database failure out of the refresh is named too, fn never runs and the store is closed', async (t) => {
+    const c = testContext(t);
+    c.proc.bootId = () => {
+      throw locked(); // reconcile asks for it outside its per-item guard
+    };
+    let ran = false;
+
+    await assert.rejects(
+      withDeck(c.ctx, { refresh: true }, async () => {
+        ran = true;
+      }),
+      (error: unknown) =>
+        error instanceof SkydeckError &&
+        error.message === `the database ${c.places.dbPath} failed: database is locked`,
+    );
+
+    assert.equal(ran, false);
+    assert.equal(
+      existsSync(`${c.places.dbPath}-wal`),
+      false,
+      'SQLite removes the WAL when the last connection closes',
+    );
   });
 
   test('an error of one row, and an error that is not about the database, pass through unchanged', async (t) => {

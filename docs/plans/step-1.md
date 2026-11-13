@@ -1742,8 +1742,8 @@ export async function dispatch(argv: string[], ctx: Context, commandsDir: URL): 
 
 `dispatch` changes exactly twice. **Task 12** wraps `command.run`: a thrown `SkydeckError` →
 `skydeck: <message>\n` on stderr (a `RefError` adds one line `  <shortId>  <title>` per candidate)
-and its `exitCode`; any other error → `skydeck: internal error: <message>\n` and `EXIT.failure`.
-The text goes through the sanitiser (design 7.4) line by line, because a message can carry foreign
+and its `exitCode`; any other error → `skydeck: internal error: <message>\n` and `EXIT.failure` (a thrown value that has no
+text, such as `Object.create(null)`, reads `unprintable value`). The text goes through the sanitiser (design 7.4) line by line, because a message can carry foreign
 text (a path, a label, text from `gh`): the line breaks of a `SkydeckError` message are kept, in an
 internal error's message they become spaces. One trailing newline of a `SkydeckError` message is
 dropped before the final `\n` is added, so a message that ends with a usage text (2.9.3) is not

@@ -80,7 +80,7 @@ describe('parseCommandArgs', () => {
   test('an unknown flag is a usage error that names it and ends with the usage text', () => {
     const error = usageError(['--nope']);
     assert.equal(error.exitCode, 2);
-    assert.ok(error.message.includes('--nope'));
+    assert.match(error.message, /^unknown option '--nope'\n/);
     assert.ok(error.message.endsWith('\nU\n'));
     assert.ok(!error.message.includes("'--'"), 'node:util hint about "--" is not repeated');
   });

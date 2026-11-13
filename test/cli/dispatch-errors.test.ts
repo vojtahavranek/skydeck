@@ -67,6 +67,14 @@ describe('dispatch maps what a command throws', () => {
     });
   });
 
+  test('a thrown value that cannot be printed is still an internal error', async () => {
+    assert.deepEqual(await run('unprintable'), {
+      code: EXIT.failure,
+      stdout: '',
+      stderr: 'skydeck: internal error: unprintable value\n',
+    });
+  });
+
   test('a command that returns its exit code writes nothing to stderr', async () => {
     assert.deepEqual(await run('ok'), { code: EXIT.ok, stdout: '', stderr: '' });
   });

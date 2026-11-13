@@ -67,8 +67,7 @@ async function runCommand(command: Command, args: string[], ctx: Context): Promi
  */
 function failureText(error: unknown): string {
   if (!(error instanceof SkydeckError)) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `skydeck: internal error: ${sanitize(message)}\n`;
+    return `skydeck: internal error: ${sanitize(messageOf(error))}\n`;
   }
   const lines = error.message.replace(/\n$/, '').split('\n');
   if (error instanceof RefError) {
@@ -77,6 +76,18 @@ function failureText(error: unknown): string {
     }
   }
   return `skydeck: ${lines.map(sanitize).join('\n')}\n`;
+}
+
+/** The message of anything that was thrown, also of a value that has no text (`Object.create(null)`). */
+function messageOf(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  try {
+    return String(error);
+  } catch {
+    return 'unprintable value';
+  }
 }
 
 /** Loads `<name>.ts`; undefined when there is no such file. A file that is broken throws. */
