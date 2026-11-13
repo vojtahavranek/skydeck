@@ -1834,15 +1834,16 @@ accepts 1–65535 only, 16.4).
 
 **No Windows program, enforced.** The development machine has a real `msedge.exe`, `wsl.exe` and
 `/run/WSL/1_interop`, so the rule is built in rather than only asked for. The test sandbox's
-environment carries `SKYDECK_TEST_NO_WINDOWS=1`; while it is set — in skydeck's own environment
-or in the one given to the child — the real platform refuses to start a program that is under
-`/mnt/` or ends in `.exe` (any case), also when the name reaches such a file through `PATH` or a
-symbolic link: the start fails with the code `EWINDOWS` and nothing runs. The processes of the
-test platforms refuse them always, whatever any environment says. Every test that starts a server
-gives it a sandbox `config.json` whose `window.edge` is a stub that records its arguments and whose
-`keepAlive` is `off`, unless the test is about them, and points the first interop candidate (6.4)
-into the sandbox. Without the variable nothing is refused: the rule belongs to the tests, not to
-skydeck.
+environment carries `SKYDECK_TEST_NO_WINDOWS=1`; while it is set — in skydeck's own environment or
+in the one given to the child — the real platform refuses to start a program that is under `/mnt/`
+or ends in `.exe` (any case), also when the name reaches such a file through `PATH` or a symbolic
+link: the start fails with the code `EWINDOWS` and nothing runs. Whatever can start a real process
+in the test platforms refuses them always, whatever any environment says; fake processes, which
+start nothing, record such a start like any other, so that a test can check the command line Edge or
+the keep-alive would get. Every test that starts a server gives it a sandbox `config.json` whose
+`window.edge` is a stub that records its arguments and whose `keepAlive` is `off`, unless the test
+is about them, and points the first interop candidate (6.4) into the sandbox. Without the variable
+nothing is refused: the rule belongs to the tests, not to skydeck.
 
 **Two test platforms.** Logic is tested on a platform with a fake clock, a fake `/proc` and fake
 processes. Every test that starts a keeper, the stand-in or a server, or judges a real process

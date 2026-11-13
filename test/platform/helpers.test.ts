@@ -735,28 +735,31 @@ describe('fakeProcesses', () => {
     await assert.rejects(processes.startDetached('missing', [], options), { code: 'ENOENT' });
   });
 
-  test('refuses a Windows program always: EWINDOWS, the handler is not asked, the call is kept in refused', async () => {
-    let asked = 0;
-    const processes = fakeProcesses(() => {
-      asked++;
-      return { pid: 1, exited: new Promise(() => {}) };
+  test('a Windows command is recorded and answered like any other: a fake starts nothing (ruling on A32)', async () => {
+    const asked: string[] = [];
+    const processes = fakeProcesses((call) => {
+      asked.push(call.command);
+      return { pid: 7, exited: new Promise(() => {}) };
     });
+    const keepAlive = [
+      '-d',
+      'Ubuntu',
+      '-u',
+      'tester',
+      '--exec',
+      '/bin/sh',
+      '/s/bin/skydeck-keepalive',
+      '/run',
+    ];
 
-    for (const command of ['wsl.exe', '/mnt/c/x/msedge.exe', 'X.EXE', '/mnt/c/Windows/notepad']) {
-      await assert.rejects(
-        processes.startDetached(command, ['a'], options),
-        { code: 'EWINDOWS' },
-        command,
-      );
-    }
+    const child = await processes.startDetached('wsl.exe', keepAlive, options);
+    await processes.startDetached('/mnt/c/x/msedge.exe', ['--app=x'], options);
+    const unscripted = await fakeProcesses().startDetached('X.EXE', [], options);
 
-    assert.equal(asked, 0);
-    assert.deepEqual(processes.calls, []);
-    assert.deepEqual(
-      processes.refused.map((call) => call.command),
-      ['wsl.exe', '/mnt/c/x/msedge.exe', 'X.EXE', '/mnt/c/Windows/notepad'],
-    );
-    assert.deepEqual(processes.refused[0], { command: 'wsl.exe', args: ['a'], options });
+    assert.equal(child.pid, 7);
+    assert.ok(unscripted.pid > 0);
+    assert.deepEqual(asked, ['wsl.exe', '/mnt/c/x/msedge.exe']);
+    assert.deepEqual(processes.calls[0], { command: 'wsl.exe', args: keepAlive, options });
   });
 
   test('signal answers from the set of live pids and records every call', () => {
@@ -792,21 +795,20 @@ describe('testPlatform: step 2 members', () => {
     assert.equal(platform.userName, 'tester');
   });
 
-  test('the processes are fake and are the ones it returns; they refuse Windows programs', async (t) => {
+  test('the processes are fake, record every call, and are the ones it returns', async (t) => {
     const tp = testPlatform(t);
 
     await tp.platform.processes.startDetached('sh', [], { cwd: '/', env: {} });
-    await assert.rejects(
-      tp.platform.processes.startDetached('/mnt/c/Windows/System32/wsl.exe', [], {
-        cwd: '/',
-        env: {},
-      }),
-      { code: 'EWINDOWS' },
-    );
+    await tp.platform.processes.startDetached('/mnt/c/Windows/System32/wsl.exe', [], {
+      cwd: '/',
+      env: {},
+    });
 
     assert.equal(tp.platform.processes, tp.processes);
-    assert.equal(tp.processes.calls.length, 1);
-    assert.equal(tp.processes.refused.length, 1);
+    assert.deepEqual(
+      tp.processes.calls.map((call) => call.command),
+      ['sh', '/mnt/c/Windows/System32/wsl.exe'],
+    );
   });
 
   test('realProcesses: true gives real processes that still refuse Windows programs, whatever the environment', async (t) => {

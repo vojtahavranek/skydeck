@@ -2,7 +2,7 @@ import type { TestContext } from 'node:test';
 
 import { resolvePlaces } from '../../src/platform/paths.ts';
 import type { Places } from '../../src/platform/paths.ts';
-import { isWindowsCommand, realPlatform } from '../../src/platform/real.ts';
+import { realPlatform } from '../../src/platform/real.ts';
 import { MAX_TIMER_MS, NS_PER_SECOND, nsFromMs } from '../../src/platform/time.ts';
 import type {
   Clock,
@@ -315,49 +315,36 @@ export interface SignalCall {
 }
 
 export interface FakeProcesses extends Processes {
-  /** The startDetached calls the handler answered, in order. */
+  /** Every startDetached call, in order, Windows commands included. */
   calls: DetachedCall[];
-  /** The startDetached calls refused as Windows programs (A32): the handler never saw them. */
-  refused: DetachedCall[];
   /** Every signal call, in order. */
   signals: SignalCall[];
   /** The pids signal() finds alive; the test changes it. signal() itself does not. */
   live: Set<number>;
 }
 
-/** What startDetached rejects with for a Windows program: as the real platform under test. */
-function windowsRefusal(command: string): Error {
-  return Object.assign(new Error(`refused to start a Windows program under test: ${command}`), {
-    code: 'EWINDOWS',
-  });
-}
-
 /**
- * Processes that start nothing. `handler` answers startDetached (a rejection is the rejection);
- * without one each call gets the next pid from 5001 and an `exited` that never settles. A command
- * under /mnt/ or ending in .exe is refused always, with `code` 'EWINDOWS', before the handler is
- * asked (A32). signal() records the call and answers whether `live` holds the pid.
+ * Processes that start nothing. Every startDetached call is recorded and `handler` answers it (a
+ * rejection is the rejection); without one each call gets the next pid from 5001 and an `exited`
+ * that never settles. A Windows command is recorded and answered like any other, so that a test
+ * can assert the command line Edge or the keep-alive would get: only what can start a real
+ * process refuses one (ruling on A32). signal() records the call and answers whether `live` holds
+ * the pid.
  */
 export function fakeProcesses(
   handler?: (call: DetachedCall) => Detached | Promise<Detached>,
   live: Iterable<number> = [],
 ): FakeProcesses {
   const calls: DetachedCall[] = [];
-  const refused: DetachedCall[] = [];
   const signals: SignalCall[] = [];
   const alive = new Set(live);
   let nextPid = 5000;
   return {
     calls,
-    refused,
     signals,
     live: alive,
     startDetached(command, args, options) {
       const call = { command, args, options };
-      if (isWindowsCommand(command)) {
-        refused.push(call);
-        return Promise.reject(windowsRefusal(command));
-      }
       calls.push(call);
       if (handler === undefined) {
         return Promise.resolve({ pid: ++nextPid, exited: new Promise(() => {}) });
@@ -384,7 +371,7 @@ export interface TestPlatformOptions {
   bootId?: string;
   /** Default 8000. */
   memAvailableMb?: number;
-  /** Real processes (still refusing Windows programs, A32) instead of fakeProcesses(). */
+  /** Real processes, which refuse Windows programs always (A32), instead of fakeProcesses(). */
   realProcesses?: boolean;
 }
 

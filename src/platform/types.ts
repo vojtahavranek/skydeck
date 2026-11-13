@@ -153,8 +153,9 @@ export interface Detached {
 
 /**
  * Starting programs that outlive the call, and signalling processes. With SKYDECK_TEST_NO_WINDOWS=1
- * (the test sandbox, A32), and always in the test platforms, a command under /mnt/ or ending in
- * .exe (any case) is refused with an Error whose `code` is 'EWINDOWS', and nothing is started.
+ * (the test sandbox, A32), and always for realPlatform({ refuseWindows: true }) (the real processes
+ * of the test platforms), a command under /mnt/ or ending in .exe (any case) is refused with an
+ * Error whose `code` is 'EWINDOWS', and nothing is started.
  */
 export interface Processes {
   /**

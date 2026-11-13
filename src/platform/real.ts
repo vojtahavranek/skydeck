@@ -375,7 +375,7 @@ function realProc(): Proc {
 }
 
 /** What the Windows guard (A32) looks at: a program under /mnt/ or named *.exe, in any case. */
-export function isWindowsCommand(command: string): boolean {
+function isWindowsCommand(command: string): boolean {
   return command.startsWith('/mnt/') || /\.exe$/i.test(command);
 }
 
