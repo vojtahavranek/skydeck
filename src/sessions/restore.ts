@@ -308,8 +308,8 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       fail(run, row, error.message);
       continue;
     }
-    // The guard's lock, read only: another skydeck is starting this session, and a command run by
-    // hand now would start it twice.
+    // The guard's lock, read only: another skydeck is starting this session. Said now, rather than
+    // a line printed that the guard would refuse when it is run.
     if (isLockHeld(run.deck, row.id)) {
       fail(run, row, `${row.shortId} is being resumed by another skydeck`);
       continue;
