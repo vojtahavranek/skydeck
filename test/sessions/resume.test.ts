@@ -435,6 +435,36 @@ test('a start stored after the lock was taken releases it when it is dated at or
   assert.equal(lockOf(d, S1), `${T0 + 5n * SEC}:${started}`);
 });
 
+test('a scripted run or its end, stored after the lock, neither releases it nor slips past the saw check', (t) => {
+  for (const kind of ['scripted', 'scripted-end'] as const) {
+    const d = testDeck(t);
+    const seen = startEvent(d, S1, T0 - 10n * SEC);
+    acquireLock(d.deck, S1, { latestEventId: seen });
+    d.clock.setNs(T0 + 5n * SEC);
+    const scripted = startEvent(d, S1, T0 + 2n * SEC, {
+      kind,
+      detail: '',
+      pid: 5555,
+      spoolName: `${kind}-${S1}.ev`,
+    });
+    assert.equal(isLockHeld(d.deck, S1), true, kind); // only a real `start` is the resume's own
+    assert.equal(sweepLocks(d.deck), 0, kind);
+    assert.equal(
+      refusal(() => acquireLock(d.deck, S1, { latestEventId: seen })),
+      '0b5f3c1e is being resumed (5 s ago); try again in 55 s',
+      kind,
+    );
+    d.clock.setNs(T0 + 61n * SEC); // the lock has expired: now the saw check speaks
+    assert.equal(
+      refusal(() => acquireLock(d.deck, S1, { latestEventId: seen })),
+      CHANGED,
+      kind,
+    );
+    acquireLock(d.deck, S1, { latestEventId: scripted }); // it counts as the latest event
+    assert.equal(lockOf(d, S1), `${T0 + 61n * SEC}:${scripted}`, kind);
+  }
+});
+
 test('a lock that records no event id (an earlier skydeck wrote it) is released as before', (t) => {
   const d = testDeck(t);
   writeLock(d, S1, `${T0}`);

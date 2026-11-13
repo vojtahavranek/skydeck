@@ -145,11 +145,12 @@ test('a scripted start never releases a resume lock: it is not the claude the re
   const d = testDeck(t);
   resumableSession(d);
   prepareResumeById(d.deck, S1); // the lock, taken at T0
+  const seen = d.deck.store.latestEventIdOfSession(S1);
   scriptedRunHolds(d, 5555, PRINT_RESUME, T0 + 5n * SEC);
   d.clock.setNs(T0 + 10n * SEC);
   refresh(d.deck); // ingests the scripted start, then sweeps the locks
   assert.equal(d.deck.store.events().at(-1)?.kind, 'scripted');
-  assert.equal(lockOf(d, S1), `${T0}`);
+  assert.equal(lockOf(d, S1), `${T0}:${seen}`); // the lock as it was taken
   assert.equal(isLockHeld(d.deck, S1), true);
 });
 
@@ -209,7 +210,9 @@ test('a scripted process that cleared away from the session no longer blocks its
   };
   writeFileSync(join(d.deck.places.spoolDir, spoolName(end, 10)), spoolText(end));
   assert.equal(prepareResumeById(d.deck, S1).sessionId, S1);
-  assert.equal(lockOf(d, S1), `${T0}`);
+  // The scripted start and its end count for the latest event the lock records.
+  assert.equal(lockOf(d, S1), `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`);
+  assert.equal(d.deck.store.events().at(-1)?.kind, 'scripted-end');
 });
 
 test('prepareResumeById refuses a session whose holder an earlier reconcile recorded on the session it left', (t) => {

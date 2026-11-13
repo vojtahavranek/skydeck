@@ -582,6 +582,26 @@ describe('hasProcessStartSince', () => {
     assert.equal(store.hasProcessStartSince(S1, T0 + 5n * SEC, null), false);
   });
 
+  test('a scripted or scripted-end event of a real process does not count: it is not a start', (t) => {
+    const { store } = fresh(t);
+    const before = store.insertEvent(ev({ spoolName: 'first.ev', timeNs: T0 - SEC }));
+    assert.ok(before !== null);
+    store.insertEvent(ev({ spoolName: 's.ev', kind: 'scripted', detail: '', timeNs: T0 + SEC }));
+    store.insertEvent(
+      ev({
+        spoolName: 'e.ev',
+        kind: 'scripted-end',
+        detail: '',
+        timeNs: T0 + 2n * SEC,
+        argv: null,
+      }),
+    );
+
+    assert.equal(store.hasProcessStartSince(S1, T0, null), false);
+    assert.equal(store.hasProcessStartSince(S1, T0, before), false);
+    assert.equal(store.latestEventIdOfSession(S1), before + 2); // they count as the latest event
+  });
+
   test('counts only a start whose id is greater than the given one; null: any id', (t) => {
     const { store } = fresh(t);
     // Dated ten minutes ahead (the clock stepped back since), and stored first.

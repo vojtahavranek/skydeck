@@ -850,6 +850,19 @@ test('a start stored before restore took its lock does not count as started, tho
   assert.notEqual(d.deck.store.getKv(lockKey(sid(1))), null); // its tab may still start it
 });
 
+test('a scripted run on a session restore waits for does not count as started: it times out, keeps its lock', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d, {
+    starts: () => false,
+    // While the tab opens, a script runs `claude -p --resume` on the session (a real process).
+    onOpen: (_count, id) => scriptedEvent(d, BOOT_B, id, d.clock.nowNs(), 5555),
+  });
+  const { outcome } = await run(d, tabs.terminal, entries.slice(0, 1));
+  assert.deepEqual(outcome.started, []);
+  assert.deepEqual(outcome.timedOut, [sid(1)]);
+  assert.notEqual(d.deck.store.getKv(lockKey(sid(1))), null);
+});
+
 test('a lock restore waits on is not renewed once another skydeck has taken it over', async (t) => {
   const { d, entries, sleeps } = fiveToRestore(t, {
     config: { ...TAB_CONFIG, restoreStartTimeoutSeconds: 3 },
