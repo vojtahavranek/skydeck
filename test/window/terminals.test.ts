@@ -440,7 +440,7 @@ describe('registry: slots and input', () => {
     assert.equal(r.registry.nextSlot(), null, 'the tenth gets no slot');
   });
 
-  test('input while the program does not read: full once more than 4 MiB waits, ok again after; no byte lost', async (t) => {
+  test('input while the program does not read: full once more than 4 MiB waits, ok again once the keeper has taken it; no byte lost', async (t) => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const { spec, mirror } = await startStandin(box, r);
@@ -467,6 +467,7 @@ describe('registry: slots and input', () => {
       chunk.set(utf8(`${String(n).padStart(5, '0')}.`));
       return chunk;
     });
+    const stallAsked = performance.now();
     assert.equal(r.registry.input(spec.id, utf8(`/stall ${STALL_S}\r`)), 'ok');
     await until(() => mirror.text().includes(`stalling ${STALL_S} s`), 'the stall began');
     const keeper = box.keeperOf(spec.id);
@@ -497,17 +498,26 @@ describe('registry: slots and input', () => {
       accepted > AT_SERVER && accepted <= AT_SERVER + OUTSIDE,
       `accepted ${accepted}: more than ${AT_SERVER} and at most ${AT_SERVER + OUTSIDE} expected`,
     );
-    // The keeper runs again; the program reads again after its stall.
-    await until(() => r.registry.input(spec.id, new Uint8Array(0)) === 'ok', 'ok again', 15_000);
-    // Everything accepted reaches the program, in order, and nothing else (it records each chunk
-    // it reads; a refused chunk was never sent).
     const record = spec.env['STANDIN_RECORD'] ?? '';
     const typed = Buffer.from(`/stall ${STALL_S}\r`).toString('hex');
-    const expected = typed + Buffer.concat(taken).toString('hex');
     const read = (): string =>
       readRecords(record)
         .flatMap((x) => (x.ev === 'input' ? [x.hex] : []))
         .join('');
+    // `ok` is back once the keeper, running again, has taken what waited at the server (its queue
+    // holds 64 chunks), not once the program reads: the limit is about what waits unwritten at the
+    // server. So at that moment the stalled program has read nothing of it, only its /stall line.
+    await until(() => r.registry.input(spec.id, new Uint8Array(0)) === 'ok', 'ok again', 15_000);
+    const okAt = Math.round(performance.now() - stallAsked);
+    const atOk = read();
+    assert.ok(
+      atOk === typed,
+      `ok was back ${okAt} ms after the ${STALL_S} s stall was asked for, and the program had ` +
+        `read ${atOk.length / 2} bytes, not only its /stall line (${typed.length / 2})`,
+    );
+    // After the stall, everything accepted reaches the program, in order, and nothing else (it
+    // records each chunk it reads; a refused chunk was never sent).
+    const expected = typed + Buffer.concat(taken).toString('hex');
     await until(
       // The file's size first: it is cheap, and it holds at least the hex of what was read.
       () => statSync(record).size >= expected.length && read().length >= expected.length,
