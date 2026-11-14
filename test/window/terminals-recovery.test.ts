@@ -140,20 +140,22 @@ describe('registry: rebuilding after a restart', () => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const { spec, mirror } = await startStandin(box, r);
-    const keeperPid = Number(
-      (box.tp.platform.files.readText(box.files.termPid(spec.id)) ?? '').split(' ')[0],
-    );
-    process.kill(keeperPid, 'SIGSTOP');
+    const keeper = box.keeperOf(spec.id);
+    const hellos = r.events.hello.length;
+    box.signalKeeper(keeper, 'SIGSTOP');
     try {
+      // A stopped keeper keeps its connection open: the registry notices only when it ends.
       r.sockets.at(-1)?.destroy();
       await until(() => info(r.registry, spec.id).state === 'reconnecting', 'reconnecting');
       await sleep(3000);
       assert.equal(info(r.registry, spec.id).state, 'reconnecting');
     } finally {
-      process.kill(keeperPid, 'SIGCONT');
+      box.signalKeeper(keeper, 'SIGCONT');
     }
     await until(() => info(r.registry, spec.id).state === 'running', 'running again', 10_000);
     assert.equal(r.states.get(spec.id)?.includes('lost'), false);
+    assert.equal(r.events.hello.length, hellos + 1, 'one hello for the reconnect');
+    assert.equal(r.events.hello.at(-1)?.origin, 'found', 'a reconnect hello is found');
     await typeLine(r, spec.id, mirror, '/idle');
     assert.deepEqual(r.events.exited, []);
     // The screen went on from where it was: the sink got no record twice.

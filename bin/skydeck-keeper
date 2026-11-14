@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-KEEPER_VERSION = "1"
+KEEPER_VERSION = "2"
 PROTOCOL = 1
 # skydeck keeper: owns one terminal's pty and program (design-step-2 7.1, 7.8, 8.1; plan task 9).
 #

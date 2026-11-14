@@ -26,7 +26,8 @@ import { createRegistry } from '../../src/window/terminals.ts';
 import type { Registry } from '../../src/window/terminals.ts';
 import { loadXterm } from '../../src/window/xterm.ts';
 import type { XtermModules } from '../../src/window/xterm.ts';
-import { KEEPER, keeperSandbox, stillRuns, until } from './keeper.ts';
+import { parsePidLine } from '../../src/window/pidline.ts';
+import { KEEPER, keeperSandbox, procStartOf, stillRuns, until } from './keeper.ts';
 import type { KeeperBox } from './keeper.ts';
 import { killKeepersIn } from './kill.ts';
 
@@ -44,6 +45,8 @@ export interface TestRegistry {
   terminals: Terminal[];
   /** The sockets the registry opened to keepers, in order. */
   sockets: Socket[];
+  /** The pids of the keepers this registry started, in order. */
+  spawned: number[];
   /** Every state each terminal went through, as onChange saw it (consecutive repeats dropped). */
   states: Map<string, string[]>;
   /**
@@ -61,6 +64,17 @@ export interface RegistryBox extends KeeperBox {
   registry(options?: { platform?: Platform }): TestRegistry;
   /** A spec for the stand-in in this box (argv, env, record), as keeperSandbox makes it. */
   spec(overrides?: Partial<KeeperSpec>): KeeperSpec;
+  /**
+   * The keeper of terminal `id`, checked before a test may signal it (hard rule): its .pid line
+   * parses, its pid is a whole number above 1 that is neither this process nor its parent, it is a
+   * keeper a registry of this box started, with the same process start, and it still runs.
+   */
+  keeperOf(id: string): { pid: number; procStart: number };
+  /** Sends `signal` to a keeper `keeperOf` gave, after checking that it is still that process. */
+  signalKeeper(
+    keeper: { pid: number; procStart: number },
+    signal: 'SIGSTOP' | 'SIGCONT' | 'SIGKILL',
+  ): void;
 }
 
 /**
@@ -70,6 +84,8 @@ export interface RegistryBox extends KeeperBox {
 export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
   const registries: TestRegistry[] = [];
   const programs = new Map<number, number>();
+  /** pid → process start of every keeper a registry of this box started. */
+  const keepers = new Map<number, number>();
   let box: KeeperBox | null = null;
   t.after(async () => {
     for (const r of registries) {
@@ -100,9 +116,20 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
   const registry = (options: { platform?: Platform } = {}): TestRegistry => {
     const base = options.platform ?? kb.tp.platform;
     const sockets: Socket[] = [];
+    const spawned: number[] = [];
     let refusing = false;
     const platform: Platform = {
       ...base,
+      processes: {
+        ...base.processes,
+        async startDetached(command, args, options) {
+          const child = await base.processes.startDetached(command, args, options);
+          spawned.push(child.pid);
+          const start = procStartOf(child.pid);
+          if (start !== null) keepers.set(child.pid, start);
+          return child;
+        },
+      },
       net: {
         ...base.net,
         async connectUnix(path) {
@@ -168,6 +195,7 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       log,
       terminals,
       sockets,
+      spawned,
       states,
       drop() {
         refusing = true;
@@ -180,7 +208,26 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
     return tr;
   };
 
-  return { ...kb, files, keeperFile, modules, registry, spec: kb.spec };
+  const keeperOf = (id: string): { pid: number; procStart: number } => {
+    const line = parsePidLine(readFileSync(files.termPid(id), 'utf8'));
+    assert.ok(line, `terminal ${id} has no pid line`);
+    const { pid, procStart } = line;
+    assert.ok(Number.isSafeInteger(pid) && pid > 1, `not a pid to signal: ${pid}`);
+    assert.ok(pid !== process.pid && pid !== process.ppid, 'never this process or its parent');
+    assert.equal(keepers.get(pid), procStart, `pid ${pid} is not a keeper this test started`);
+    assert.ok(stillRuns(pid, procStart), `keeper ${pid} no longer runs`);
+    return { pid, procStart };
+  };
+  const signalKeeper = (
+    keeper: { pid: number; procStart: number },
+    signal: 'SIGSTOP' | 'SIGCONT' | 'SIGKILL',
+  ): void => {
+    assert.equal(keepers.get(keeper.pid), keeper.procStart, 'a keeper this test started');
+    assert.ok(stillRuns(keeper.pid, keeper.procStart), `keeper ${keeper.pid} no longer runs`);
+    process.kill(keeper.pid, signal);
+  };
+
+  return { ...kb, files, keeperFile, modules, registry, spec: kb.spec, keeperOf, signalKeeper };
 }
 
 // ---------------------------------------------------------------------------------------------

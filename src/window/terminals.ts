@@ -43,6 +43,9 @@ export interface RegistryEvents {
    *  through decideFoundKeeper (task 23). */
   hello(term: TerminalInfo, hello: KeeperHello, origin: 'spawned' | 'late' | 'found'): void;
   started(term: TerminalInfo, started: KeeperStarted): void;
+  /** A lost keeper sent no X: its exit is made up (ruled) — a started program
+   *  `{ code: null, signal: 1 }` (SIGHUP, S2 7.8), one never started `{ code: null, signal: null,
+   *  notStarted: 'the keeper ended before the program started' }`. */
   exited(term: TerminalInfo, exit: KeeperExit, lost: boolean): void;
 }
 
@@ -65,11 +68,14 @@ export interface Registry extends TerminalHub {
    *  may still be starting, so the registry KEEPS the terminal, goes on claiming its socket, and
    *  reports its hello through `events.hello` when it comes. Sends no G. */
   spawn(spec: KeeperSpec): Promise<TerminalInfo>;
-  /** S2 7.3: connects to every keeper of terms/ whose .pid line is alive; removes dead ones' files. */
+  /** S2 7.3: connects to every keeper of terms/ whose .pid line is alive or unknown (ruled:
+   *  nothing is removed on unknown); removes dead ones' files. Resolves once each found screen is
+   *  rebuilt. */
   rediscover(): Promise<TerminalInfo[]>;
   start(termId: string): void; // G
   refuse(termId: string, reason: string): void; // N
-  /** The lowest free slot 1–9, or null (S2 7.6). */
+  /** The lowest free slot 1–9, or null (S2 7.6). A slot is held until `close` forgets its
+   *  terminal (ruled), also while the terminal is ended. */
   nextSlot(): number | null;
   /** From the mapping (task 21): the session the terminal shows, and "started, not reported". */
   setSession(termId: string, sessionId: string | null, notReported: boolean): void;
@@ -111,8 +117,6 @@ const MAX_ROWS = 500;
 const SOCKET_PATH_LIMIT = 108;
 /** The forced redraw's two resizes need a pause between them (stand-in review, #40: ≥ 50 ms). */
 const REDRAW_PAUSE_MS = 100;
-/** How long a claim whose snapshot may or may not come waits for it before it does without. */
-const NO_SNAPSHOT_MS = 1000;
 /** How long stopAll waits for a connection to take its park before it is closed anyway. */
 const STOP_WAIT_MS = 2000;
 
@@ -650,13 +654,16 @@ export function createRegistry(deps: RegistryDeps): Registry {
       claim.skipUntil = 0;
       // The rebuilt screen stands for every record up to the tail's start, lost ones included.
       term.keeperSeq = hello.tailFrom - 1;
-      if (hello.seq === 0) {
-        // Nothing written yet: the screen is empty at the hello's size. Park that at once
-        // (record 0), so that every later claim learns the first size from its snapshot.
+      if (hello.snapSeq === 0 && hello.tailFrom > hello.seq) {
+        // Nothing parked but maybe the empty screen of record 0, and an empty tail: the screen
+        // is empty at the hello's size, made at once (no frame needs to follow the hello); an S
+        // that comes can only be that empty screen, at an older size, and is ignored (S2 8.1).
         claim.useS = false;
         newScreen(term, hello.cols, hello.rows, null);
         setSize(term, hello.cols, hello.rows);
-        if (hello.snapSeq === 0) {
+        if (hello.seq === 0) {
+          // A fresh keeper: park its empty screen at once (record 0), so that every later claim
+          // learns the first size from its snapshot (a hello carries only the current one).
           claim.link.send('P', encodeSnapshot(0, hello.cols, hello.rows, ''));
         }
       }
@@ -664,18 +671,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const state: TerminalState = hello.started ? 'running' : 'starting';
     if (!isOver(info.state)) setState(term, state);
     changed();
-    if (claim.phase === 'maybe' && claim.useS && hello.tailFrom > hello.seq) {
-      // An empty tail and maybe no snapshot (never parked, everything dropped): no frame may
-      // follow the hello, so the screen is made at its size unless a snapshot comes first.
-      clock.after(NO_SNAPSHOT_MS, () => {
-        if (term.claim === claim && claim.phase === 'maybe') {
-          claim.phase = 'records';
-          newScreen(term, hello.cols, hello.rows, null);
-          setSize(term, hello.cols, hello.rows);
-          replayed(term, claim);
-        }
-      });
-    }
     if (lost) {
       term.gap = true;
       log(id, 'gap');
@@ -808,6 +803,25 @@ export function createRegistry(deps: RegistryDeps): Registry {
       bootId = null;
     }
     return pidLineState(line, platform.proc, bootId);
+  }
+
+  /** Whether the terminal's .pid line exists and is 'dead' by design 5.5's rule. */
+  function lineIsDead(id: string): boolean {
+    let text: string | null;
+    try {
+      text = platform.files.readText(files.termPid(id));
+    } catch {
+      return false;
+    }
+    const line = text === null ? null : parsePidLine(text);
+    if (line === null) return false;
+    let bootId: string | null;
+    try {
+      bootId = platform.proc.bootId();
+    } catch {
+      bootId = null;
+    }
+    return pidLineState(line, platform.proc, bootId) === 'dead';
   }
 
   function lose(term: Term): void {
@@ -1025,9 +1039,15 @@ export function createRegistry(deps: RegistryDeps): Registry {
   function attach(termId: string, sink: StreamSink): { detach(): void } | null {
     const term = terms.get(termId);
     if (term === undefined) return null;
-    // Not records, but what the terminal shows now: a page that attaches later still sees them.
-    // (An exit that came before the attach is in list(), so it is not repeated; ruled.)
+    const exitNow = (): (() => void)[] => {
+      const exit = term.info.exit;
+      const lost = term.info.state === 'lost';
+      return isOver(term.info.state) && exit !== null ? [() => sink.exit(exit, lost)] : [];
+    };
+    // The state the terminal is in at the attach point follows the snapshot (ruled, amended):
+    // an exit, a gap, a newer keeper.
     const shown = (): (() => void)[] => [
+      ...exitNow(),
       ...(term.info.state === 'newer-keeper'
         ? [() => sink.notice('newer-keeper', NEWER_TEXT)]
         : []),
@@ -1097,7 +1117,19 @@ export function createRegistry(deps: RegistryDeps): Registry {
       const term = terms.get(termId);
       if (term === undefined) return 'unknown';
       if (!isOver(term.info.state)) return 'running';
+      const removeFiles = term.info.state === 'lost' && lineIsDead(termId);
       forget(term);
+      if (removeFiles) {
+        // Ruled (review 1): a lost keeper's files go with its terminal when its line is dead —
+        // never on 'unknown' or 'alive'; otherwise the next rediscover removes them.
+        for (const path of [files.termSock(termId), files.termPid(termId)]) {
+          try {
+            platform.files.remove(path);
+          } catch (error) {
+            log(termId, `keeper file not removed (${errorCode(error) ?? 'error'})`);
+          }
+        }
+      }
       return 'ok';
     },
     setTheme(next) {

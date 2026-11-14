@@ -238,7 +238,8 @@ describe('registry: the end of a program', () => {
     // The last screen stays until close.
     const late = await attachMirror(r.registry, box.modules, a.spec.id);
     await late.settled();
-    assert.deepEqual(late.calls, ['S'], 'an exit before the attach is in list(), not repeated');
+    assert.deepEqual(late.calls, ['S', 'x'], 'the state at the attach point follows the snapshot');
+    assert.deepEqual(late.exits, [{ exit: ended.exit, lost: false }]);
     assert.equal(r.registry.close(a.spec.id), 'ok');
     assert.equal(
       r.registry.list().some((x) => x.id === a.spec.id),
@@ -252,18 +253,26 @@ describe('registry: the end of a program', () => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const { spec, mirror } = await startStandin(box, r);
-    const line = box.tp.platform.files.readText(box.files.termPid(spec.id)) ?? '';
-    const keeperPid = Number(line.split(' ')[0]);
+    const keeper = box.keeperOf(spec.id);
     const program = info(r.registry, spec.id).program;
     assert.ok(program);
-    box.tp.platform.processes.signal(keeperPid, 'SIGKILL');
+    box.signalKeeper(keeper, 'SIGKILL');
     await until(() => r.events.exited.length === 1, 'the loss', 10_000);
     assert.equal(r.events.exited[0]?.lost, true);
     assert.equal(info(r.registry, spec.id).state, 'lost');
     await until(() => mirror.exits.length === 1, 'the sink got the loss');
     assert.equal(mirror.exits[0]?.lost, true);
     await waitForRecord(spec.env['STANDIN_RECORD'] ?? '', (x) => x.ev === 'hup', 10_000);
+    // A late sink gets the snapshot, then the loss.
+    const late = await attachMirror(r.registry, box.modules, spec.id);
+    await until(() => late.calls.length === 2, 'the loss after the snapshot');
+    assert.deepEqual(late.calls, ['S', 'x']);
+    assert.equal(late.exits[0]?.lost, true);
+    // Its files go with it: the keeper's line is dead (ruled, review 1).
+    assert.ok(existsSync(spec.socket) && existsSync(box.files.termPid(spec.id)), 'left by SIGKILL');
     assert.equal(r.registry.close(spec.id), 'ok');
+    assert.equal(existsSync(spec.socket), false);
+    assert.equal(existsSync(box.files.termPid(spec.id)), false);
   });
 });
 
@@ -313,8 +322,7 @@ describe('registry: starts that fail', () => {
     assert.ok(error instanceof KeeperStartError);
     assert.equal(error.kind, 'path-too-long');
     assert.deepEqual(r.registry.list(), []);
-    assert.equal(r.log.length >= 0, true);
-    assert.equal(existsSync(box.keepersLog) ? box.logLines().length : 0, 0, 'no keeper ran');
+    assert.deepEqual(r.spawned, [], 'refused before spawning: no keeper was started');
   });
 
   test('a keeper whose hello comes late → no-hello after 5 s, the terminal kept, its hello reported as late; no G', async (t) => {

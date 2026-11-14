@@ -805,8 +805,9 @@ keeper that is alive but slow to answer is reconnected to, with the bar `reconne
 terminal`, never declared lost. `keepers.log` holds the keeper's own last error, if it wrote one.
 
 Socket files whose connect is refused, and their `.pid` lines (a keeper that died, files from
-another boot under a runtime directory that survives one), are removed by the server; they are
-skydeck's own transient files.
+another boot under a runtime directory that survives one), are removed by the server when it
+starts, and when the user closes a lost terminal whose line is dead; they are skydeck's own
+transient files.
 
 ### 7.9 Sessions running outside the window
 
@@ -830,12 +831,12 @@ keeper). Protocol version 1:
 | Type | Direction | Payload |
 |---|---|---|
 | `C` claim | server → keeper | Empty. The connection becomes the screen side (7.1, step 3). The first frame of every connection. |
-| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers, 0 for none), `tailFrom` (the number of the tail's first record: `snapSeq` + 1, or later when records were dropped, `seq` + 1 for an empty tail), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
+| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers; 0 both for none and for the empty screen parked at record 0, 7.3 — see `S`), `tailFrom` (the number of the tail's first record: `snapSeq` + 1, or later when records were dropped, `seq` + 1 for an empty tail), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
 | `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
 | `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output (when
 `exec` then fails, `X` with code 127 follows); a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
 | `N` do not start | server → keeper | UTF-8 reason, at most 1,024 bytes (a longer one closes the connection, as any frame the keeper cannot parse). The program is never started (7.1, step 2). |
-| `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. |
+| `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. With `snapSeq` above 0 it always comes. With `snapSeq` 0 it comes only when the empty screen was parked at record 0 (7.3), and the server tells by the frame after `H`: `S` (the first size), or the tail's first record (never parked; the screen starts at the hello's size). When the tail is empty as well (`tailFrom` is `seq` + 1) the server makes the empty screen at the hello's size at once and ignores an `S` that follows: it can only be that empty screen, at an older size. |
 | `D` output | keeper → server | One record: bytes as read from the pty, except that a record never ends inside a UTF-8 character: the first bytes of a character the program has not finished writing go with the next record (7.1 step 4). After `H` (and `S`) come the tail's records, then live ones. |
 | `R` resize | keeper → server | One record: JSON `{cols, rows}`, the size the pty was set to. |
 | `X` exit | keeper → server | JSON `{code, signal, atNs, notStarted}`: after the last `D`. `notStarted` is null, or the reason the program was never started (the deadline passed, or `N`). |
