@@ -399,10 +399,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         terminals: message.terminals.map((term) => ({ ...term, ownsSize: false })),
       };
     };
-    // Ruled (review 2): no page is served before the keepers are found and the first tick has
-    // loaded the rows — the hub would list no terminal, so a page could resume a session whose
-    // terminal is about to be found, or attach to a terminal not known yet. Until then an upgrade
-    // is answered 503 (S2 5.2, 8.2.1), and the page tries again.
+    // Ruled (review 2): no page is served before the keepers are found and the first tick has run
+    // — the hub would list no terminal, so a page could resume a session whose terminal is about
+    // to be found, or attach to a terminal not known yet. Until then an upgrade is answered 503
+    // (S2 8.2.1), and the page tries again. (If that tick's refresh failed, the first list comes
+    // with the next one; the registry is complete either way.)
     let ready = false;
     const pages = createPages({
       platform,

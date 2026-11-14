@@ -195,7 +195,7 @@ Each is binding for the implementer. The last column names the task that records
 | A21 | Terminal ids are 12 lowercase hex characters from `platform.randomBytes(6)`; server ids and window ids 16 hex characters from 8 bytes. | S2 3 fixes the terminal id only. | — |
 | A22 | Validators of foreign input (`parsePageMessage`, `parseControlRequest`, the keeper's `hello`) return `{ ok: false, kind }` with a fixed kind string instead of throwing, so that a caller can log the kind and never a message (S2 2, 5.2). | Node's `JSON.parse` error quotes its input. | — |
 | A23 | `skydeck serve` and `skydeck window` share `src/window/lifecycle.ts` (task 22) for finding, starting and stopping a server; `uninstall` uses the same stop. | S2 16.2: "stops it as `skydeck window --stop` does". | — |
-| A24 | The server's tick reuses step 1's refresh rule of the interactive list (fix 4): the rows are reloaded when the refresh saved something, a live file or its trust changed, `Store.dataVersion()` moved, a tick failed, or a minute passed; and (ruled by the plan owner, task 23's review 1) when the server wrote on its own connection, which `dataVersion()` does not show: `tick.reload()` after every action, every found-keeper decision and every pull-request fetch that saved something. | S2 10.1 names that rule. | — |
+| A24 | The server's tick reuses step 1's refresh rule of the interactive list (fix 4): the rows are reloaded when the refresh saved something, a live file or its trust changed, `Store.dataVersion()` moved, a tick failed, or a minute passed; and (ruled by the plan owner, task 23's review 1) when the server wrote on its own connection, which `dataVersion()` does not show: `tick.reload()` after every action, every found-keeper decision and every pull-request fetch that saved something, and after a settled exit (`settleEndedTerminal` ingests and may write; review 2). | S2 10.1 names that rule. | — |
 | A25 | `result` carries `sessionId`: the session a successful `resume` or `new` started, else null. | The page must select the new terminal's row (S2 11.3), and only the server knows a new session's id. | 1 (8.2.3) |
 | A26 | `GET /ping` answers `checkout` too. | S2 5.1 compares "this checkout"; the table of 8.3 omits the field. | 1 (8.3) |
 | A27 | `list` carries two more fields: `selected` — for the session the page's `view` names, what the resume card shows (the exact command, the flags not passed on, how it ended, expiring/expired; 2.7) — and `dirs`, the known project directories, most recent first, for the new form. | S2 12.6 needs both on the page, and the page decides no rule (S2 4.3); the command is built only by `buildResumeCommand` on the server. | 1 (8.2.3) |
@@ -2643,6 +2643,10 @@ export interface PagesDeps {
    *  terminal's `ownsSize` from its own size state, whatever `listFor` put there. */
   listFor(page: PageState): ListMessage;
   log: (line: string) => void;
+  /** Ruled by the plan owner (task 23, review 2): while it returns true the server is still
+   *  starting (its keepers not found, its first tick not run): an upgrade with the right Host is
+   *  answered 503, as after `bye`; a wrong Host still 421. Default: not starting. */
+  starting?: () => boolean;
 }
 export interface Pages {
   /** Host and Origin checks (403), then the WebSocket and the handshake. */
@@ -2780,10 +2784,14 @@ at a live interop socket.
 ```ts
 // src/window/edge.ts
 /** THE one way stage A starts a Windows program (S2 2; ruled, task 19): `args` as an argument
- *  list, detached, stdio /dev/null, cwd /mnt/c, the platform's environment with WSL_INTEROP =
- *  `interop` when given (else unchanged). Rejects, starting nothing, when an argument is empty,
- *  holds a '"' or a control character (S2 2: U+0000–U+001F, U+007F, U+0080–U+009F), or ends
- *  with a backslash; otherwise as startDetached. */
+ *  list, detached, stdio /dev/null, cwd the C: drive — `driveC(platform.env)` of task 24's
+ *  `drive.ts`: /mnt/c, or in a test sandbox the `SKYDECK_TEST_MNT_C` stand-in (ruled, task 23,
+ *  review 2: no test runs a process in /mnt/c); when that is null (a sandbox without the
+ *  stand-in) it rejects with an Error of `code` 'ENOENT' ("the C: drive is not mounted"),
+ *  starting nothing — the platform's environment with WSL_INTEROP = `interop` when given (else
+ *  unchanged). Rejects, starting nothing, when an argument is empty, holds a '"' or a control
+ *  character (S2 2: U+0000–U+001F, U+007F, U+0080–U+009F), or ends with a backslash; otherwise
+ *  as startDetached. */
 export function startWindowsProgram(platform: Platform, command: string, args: readonly string[], interop: string | null): Promise<Detached>;
 /** RangeError (ruled, task 19) for a port outside 1–65535 or a token that is not base64url: the
  *  caller's mistake, nothing started. { ok: false, line } for a missing program (S2 5.3's line),
@@ -3400,11 +3408,18 @@ interop link; a failed tick logged by kind and sent once as `notice tick-failed`
 `keepers.log` at start and once a minute on the tick (the keepers only append to it). `listFor` is
 `buildListMessage` (task 13) with task 32's `selectedPayload` for the page's selected row. The `serve` command
 installs process handlers: an uncaught error is logged by name and stack frames without the
-message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5). Ruled at review 2: until
-`rediscover()` has settled and the first tick has loaded the rows, an upgrade with the right Host
-is answered 503, as after `bye` (`PagesDeps.starting`), so that no page acts on a hub that does not
-list the terminals yet; a `POST /shutdown` or a signal during the start stops the server once the
-start is done, never lost. An exit the registry makes up for a keeper that never sent a hello is
+message — the stack's header removed exactly (`<name>: <message>` however many lines the message
+has; Node.js's `<name> [<code>]: <message>`; the name alone for an empty message), the
+`/^\s+at /` lines after it kept, none when the stack does not begin with that header (ruled at
+review 2) — and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5). Ruled at review
+2: until `rediscover()` has settled and the first tick has run, an upgrade with the right Host is
+answered 503, as after `bye` (`PagesDeps.starting`), so that no page acts on a hub that does not
+list the terminals yet (if that tick's refresh failed, the first list comes with the next tick;
+the registry is complete by then); a `POST /shutdown` or a signal that comes before the server can
+stop is made as soon as it can (one during the first tick starts the orderly stop at once), never
+lost. A start that meets a store another process keeps locked for longer than the server's 250 ms
+fails at once ("the window's server cannot start: skydeck's database is busy (another skydeck
+holds it); try again", exit 1), leaving nothing behind. An exit the registry makes up for a keeper that never sent a hello is
 not settled (accepted): there is no hello to take the lock value from, and the lock expires by
 itself (LOCK_TTL_NS).
 
@@ -3443,12 +3458,31 @@ itself (LOCK_TTL_NS).
   open nothing outside the sandbox (S2 17.3); the keep-alive set to `wsl` on fake processes
   (ruled at review 1): `wsl.exe` is never run, the script it would run runs in its place as a
   process the test started, and the server's signals are recorded, never sent.
+- Added at review 2 (each wire's removal fails one): while the start is held, an upgrade is
+  answered 503, and after it a resume of a session whose terminal runs is refused ("this session
+  is already open in the window"); a `POST /shutdown` during the start stops the server once it
+  can; an exit is settled (a program that ends before it reports a start gives its lock back
+  within two ticks), and one not settled yet when the server stops is settled by the stop; the
+  stop parks every keeper (a claim's hello has `snapSeq` = `seq`); a launch token presented twice
+  raises the alarm; the pull requests of the sessions a page lists are refreshed; the interop
+  link is pointed before the first keep-alive check and again when a terminal opens; the sixth
+  reload trigger after an action and after a late keeper's decision; a store locked by another
+  connection: the event loop is never blocked for long, a terminal's echo keeps flowing, one
+  notice and one log line, an action answers "skydeck's database is busy; try again", a hello is
+  closed with 1013, a found keeper's decision is put off (`{ start: 'later' }`) and made once the
+  store is free, a start fails at once leaving nothing; in `tick.test.ts` a settled exit reloads
+  the rows and a terminal whose own session cannot be judged keeps it.
 - `serve.test.ts` (through `bin/skydeck serve --foreground` as a child, with `SKYDECK_TEST_PORT=0`
   and `SKYDECK_TEST_INTEROP_FIRST` in the sandbox, A31, A32): `CLAUDECODE` set →
   exit 13 and the line; the server process's soft core limit is 1 byte with the old hard limit
   (`/proc/<pid>/limits`) and a keeper's program has the soft limit the launcher found; a
   malformed `hello`, `start` and `input` carrying a marker leave the marker in no line of
-  `server.log`; SIGTERM → exit 0 after S2 5.5.
+  `server.log`; SIGTERM → exit 0 after S2 5.5; added at review 2: an uncaught error → one line
+  with its name and frames only, exit 1, `server.json` and the lock left as a crash leaves them;
+  SIGTERM during the start → exit 0, nothing left; SIGINT as SIGTERM; `uncaughtLine`'s header
+  cases (Node.js's JSON.parse message quoting a frame-like line, a stack without the header, a
+  `[code]` header). Every wait on a child's exit is bounded, and a held start is finished in a
+  `finally` (review 2: no test may hang with a live server).
 
 **Done when:** a server started with `skydeck serve` gives a page everything stage A shows, and
 every failure of S2 14 that can happen inside Linux behaves as the table says.
