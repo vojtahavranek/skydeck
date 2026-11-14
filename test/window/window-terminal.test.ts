@@ -11,6 +11,9 @@ import type { TestContext } from 'node:test';
 import { buildNewCommand, buildResumeCommand } from '../../src/claude/launch.ts';
 import { CLAUDE_CHILD_VARIABLES } from '../../src/claude/terminal.ts';
 import { launchPrepared, launchSpec, startDeadline } from '../../src/sessions/launch.ts';
+import { loadRows } from '../../src/sessions/load.ts';
+import { refresh } from '../../src/sessions/refresh.ts';
+import { runRestore } from '../../src/sessions/restore.ts';
 import { lockKey, prepareNew, readLock } from '../../src/sessions/resume.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import type { KeeperHello } from '../../src/window/frames.ts';
@@ -20,7 +23,7 @@ import { windowTerminal } from '../../src/window/window-terminal.ts';
 import { sleep, startProgram, until, within } from '../helpers/keeper.ts';
 import { info } from '../helpers/registry.ts';
 import type { TestRegistry } from '../helpers/registry.ts';
-import { S1 } from '../helpers/platform.ts';
+import { S1, S2 } from '../helpers/platform.ts';
 import { readRecords, waitForRecord } from '../helpers/standin.ts';
 import type { StandinRecord } from '../helpers/standin.ts';
 import { windowDeck } from '../helpers/window-deck.ts';
@@ -414,9 +417,7 @@ describe('window terminal: starts that fail', () => {
 
 describe('window terminal: a keeper that answers after 5 s', { concurrency: true }, () => {
   /** A resume whose keeper's hello comes after open() answered; its late hello, undecided. */
-  async function lateKeeper(
-    t: TestContext,
-  ): Promise<{
+  async function lateKeeper(t: TestContext): Promise<{
     w: WindowDeck;
     r: TestRegistry;
     record: string;
@@ -486,5 +487,45 @@ describe('window terminal: a keeper that answers after 5 s', { concurrency: true
     await until(() => info(r.registry, id).state === 'not-started', 'not started', 10_000);
     assert.equal(info(r.registry, id).exit?.notStarted, decision.start ? '' : decision.reason);
     assert.deepEqual(readRecords(record), []);
+  });
+});
+
+describe('window terminal: restore', () => {
+  test('runRestore with the window terminal: each session in a keeper of its own, its start seen', async (t) => {
+    const w = await windowDeck(t, { config: { restoreMinFreeMb: 1 } });
+    w.resumable(S1);
+    w.resumable(S2, join(w.s.home, 'other project'));
+    const r = w.registry();
+    const { deps, record } = w.deps(r);
+    refresh(w.deck);
+    const bootId = w.tp.platform.proc.bootId() ?? '';
+    const entries = loadRows(w.deck)
+      .filter((row) => row.id === S1 || row.id === S2)
+      .map((row) => ({ row, bootId, endedAtNs: null, wasWorking: false, preselected: true }));
+    assert.equal(entries.length, 2);
+    const lines: string[] = [];
+    const outcome = await runRestore(
+      { deck: w.deck, terminal: windowTerminal(deps, SIZE), report: (line) => lines.push(line) },
+      entries,
+    );
+    assert.deepEqual([...outcome.started].sort(), [S1, S2].sort(), lines.join('\n'));
+    assert.deepEqual(outcome.failed, []);
+    assert.deepEqual(outcome.timedOut, []);
+    assert.deepEqual(
+      r.registry
+        .list()
+        .map((x) => [x.expectedSessionId, x.state])
+        .sort(),
+      [
+        [S1, 'running'],
+        [S2, 'running'],
+      ].sort(),
+    );
+    const starts = readRecords(record).filter(isStart);
+    assert.deepEqual(
+      starts.map((x) => x.argv[1]).sort(),
+      [S1, S2].sort(),
+      'each stand-in resumed its own session',
+    );
   });
 });
