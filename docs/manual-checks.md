@@ -462,8 +462,9 @@ In the throwaway session:
   it writes the clipboard through the terminal), run it and paste into Notepad. On WSL Claude Code
   may use a Windows program for it instead, so a paste that works says that the copy arrived, not
   which way. The window writes the clipboard only for the terminal it shows, while it has the focus.
-- When the window ever says, after a paste, that not all of what you typed or pasted reached the
-  program (install.md, "Known limits": a paste larger than the program takes), check in that
+- When the window ever says, after a paste, `this terminal is not taking input at the moment: not
+  all of what you typed or pasted reached the program` (install.md, "Known limits": a paste larger
+  than the program takes), check in that
   session what is not known yet: do the next letters and Enter you type arrive as pasted text, and
   does pasting a short text (Ctrl+V) end that, so that Enter sends again? Claude Code reads its
   input all the time, so a throwaway session may never show it.

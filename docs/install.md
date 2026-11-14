@@ -714,8 +714,9 @@ effect.
 - **A flood of output.** When a program writes faster than skydeck can show (megabytes at once), a
   key pressed in that moment can be lost: press it again, Ctrl+C included.
 - **A paste larger than the program takes.** While a program does not read its input, skydeck keeps
-  only a few MiB of it waiting; what comes beyond that is not delivered, and the window says that
-  not all of what you typed or pasted reached the program. After a paste the program can then be
+  only a few MiB of it waiting; what comes beyond that is not delivered, and the window says
+  `this terminal is not taking input at the moment: not all of what you typed or pasted reached the
+  program`. After a paste the program can then be
   left inside a bracketed paste (it takes what follows as pasted text, Enter included). skydeck
   cannot close the open paste. A new paste sends a new end marker, which a program that follows the
   bracketed-paste convention takes as the end; whether Claude Code does is not checked (W6).
