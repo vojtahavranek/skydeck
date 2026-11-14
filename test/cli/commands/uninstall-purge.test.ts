@@ -12,8 +12,8 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -181,16 +181,16 @@ describe('uninstall --purge: a directory that is not only skydeck’s is left al
     // Never write at a link's path: the write would go through to what it points at.
     for (const make of [
       (d: TestPlatform) => {
-        rmSync(d.places.hookPath);
+        unlinkSync(d.places.hookPath); // the link, never what it points to (the checkout's hook)
         mkdirSync(d.places.hookPath); // a directory where skydeck keeps a link
       },
       (d: TestPlatform) => {
-        rmSync(d.places.hookLog, { force: true });
+        if (existsSync(d.places.hookLog)) unlinkSync(d.places.hookLog);
         symlinkSync(join(d.sandbox.root, 'nowhere'), d.places.hookLog);
       },
       (d: TestPlatform) => mkdirSync(join(d.places.configDir, '.config.json.0123456789ab.tmp')),
       (d: TestPlatform) => {
-        rmSync(d.places.nodeLink);
+        unlinkSync(d.places.nodeLink); // the link, never what it points to (node itself)
         mkdirSync(d.places.nodeLink); // a directory where skydeck keeps a link
       },
     ]) {
