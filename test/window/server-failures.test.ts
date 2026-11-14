@@ -589,6 +589,25 @@ describe('what the server wires together', () => {
     assert.match(d.deck.store.getKv('window_alarm') ?? '', /^[1-9][0-9]*$/, 'the alarm is raised');
   });
 
+  test('a launch hello that meets a locked store is closed 1013 and uses up no token: the same token is welcomed at the next hello, and no alarm is raised (ruled, task 26)', async (t) => {
+    const d = serverSandbox(t);
+    const test = await d.start();
+    const client = controlClient(d.platform.net, d.files.serverSock);
+    const minted = await client.token(30);
+    const token = Buffer.from(minted.token, 'base64url');
+    const lock = holdWriteLock(t, d);
+    await lock.held;
+
+    assert.equal(await presentToken(t, test.server.port, token), 1013, 'busy: try again later');
+    assert.equal(await client.tokenState(minted.id), 'waiting', 'the token still waits');
+    lock.release();
+    d.deck.store.transaction(() => {}); // waits until the other skydeck has let go
+
+    assert.equal(await presentToken(t, test.server.port, token), 0, 'the same token is welcomed');
+    assert.equal(await client.tokenState(minted.id), 'used');
+    assert.equal(d.deck.store.getKv('window_alarm'), null, 'no alarm');
+  });
+
   test('the pull requests of the sessions a page lists are refreshed automatically (design 7.3)', async (t) => {
     const d = serverSandbox(t);
     d.resumable(S1);

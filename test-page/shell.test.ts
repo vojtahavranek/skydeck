@@ -8,7 +8,6 @@ import { cpSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { Worker } from 'node:worker_threads';
 
 import type { Browser, CDPSession, Page } from 'playwright';
 
@@ -29,6 +28,7 @@ import {
   after,
   assetBase,
   connection,
+  holdWriteLock,
   honest,
   logOf,
   mark,
@@ -52,7 +52,7 @@ const GONE =
   /^skydeck's server is not answering \(since \d\d:\d\d:\d\d\)\. Sessions in the window keep running unless WSL has stopped\. To get back, open a WSL terminal and run: skydeck window$/;
 const RESTARTED = /^skydeck's server restarted; your sessions kept running$/;
 const WSL_RESTARTED =
-  /^WSL restarted at \d\d:\d\d:\d\d: the sessions that were running have ended\.$/;
+  /^WSL has restarted since \d\d:\d\d:\d\d: the sessions that were running have ended\.$/;
 const PLACEHOLDER = /terminal view comes with task 28/;
 
 interface Launched extends Omit<StartedServer, 'page'> {
@@ -180,27 +180,6 @@ function otherAppRoot(d: ServerSandbox): string {
   cpSync(join(checkout, 'web'), join(root, 'web'), { recursive: true });
   writeFileSync(join(root, 'web', 'another-build.txt'), 'a file that makes another build\n');
   return root;
-}
-
-/** Another skydeck holding the store's write lock (test/fixtures/hold-write-lock.ts). */
-function holdWriteLock(t: TestContext, d: ServerSandbox): { held: Promise<void>; release(): void } {
-  const signal = new SharedArrayBuffer(4);
-  const flag = new Int32Array(signal);
-  const holder = new Worker(new URL('../test/fixtures/hold-write-lock.ts', import.meta.url), {
-    workerData: { path: join(d.s.skydeckHome, 'data', 'skydeck.db'), signal },
-  });
-  const release = (): void => {
-    Atomics.store(flag, 0, 1);
-    Atomics.notify(flag, 0);
-  };
-  t.after(async () => {
-    release();
-    await holder.terminate();
-  });
-  return {
-    held: new Promise<void>((resolve) => holder.once('message', () => resolve())),
-    release,
-  };
 }
 
 /** The build a page was loaded with, from its asset URLs. */
@@ -572,18 +551,21 @@ test('the page shell', async (t) => {
     },
   );
 
-  await t.test('a server with another boot id → "WSL restarted at <time>…"', async (t) => {
+  await t.test('a server with another boot id → "WSL has restarted since <time>…", the time the page lost the old server', async (t) => {
     const l = await launched(t, chromium);
     const port = l.server.port;
     await l.server.stop('the test stops it');
-    await showsText(l.page, '#gone-text', GONE, 4000);
+    const gone = await showsText(l.page, '#gone-text', GONE, 4000);
+    await sleep(1500); // the welcome comes in a later second than the loss
 
     await l.d.start({
       port,
       platform: (p: Platform) => ({ ...p, proc: { ...p.proc, bootId: () => 'another-boot-id' } }),
     });
-    await showsText(l.page, '#info-text', WSL_RESTARTED);
+    const restarted = await showsText(l.page, '#info-text', WSL_RESTARTED);
     await connection(l.page, 'open');
+    const time = (text: string): string | undefined => /\d\d:\d\d:\d\d/.exec(text)?.[0];
+    assert.equal(time(restarted), time(gone), 'the time the page lost the old server');
   });
 
   await t.test(
@@ -660,7 +642,7 @@ test('the page shell', async (t) => {
     l.d.resumable(S1);
     await l.page.locator(`#list [data-id="${S1}"]`).waitFor({ timeout: PAGE_WAIT_MS });
 
-    const lock = holdWriteLock(t, l.d);
+    const lock = holdWriteLock(t, join(l.d.s.skydeckHome, 'data', 'skydeck.db'));
     await lock.held;
     l.d.resumable(S2, join(l.d.s.home, 'other')); // the refresh must write, and meets the lock
     await showsText(l.page, '#tick', /^skydeck could not refresh the list: .+; it tries again$/);

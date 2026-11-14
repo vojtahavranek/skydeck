@@ -4,6 +4,7 @@
 // from stand-in servers (helpers/shell.ts).
 import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import type { Page } from 'playwright';
@@ -17,8 +18,12 @@ import {
   assetBase,
   connection,
   logOf,
+  holdWriteLock,
+  honest,
+  PAGE_WAIT_MS,
   pageUrl,
   RECORDER,
+  shownText,
   showsText,
   standinServer,
   storedKeyIs,
@@ -289,6 +294,86 @@ test('the page and its key (S2 8.2.2)', async (t) => {
         [],
       );
       assert.equal(standin.upgrades(), 0);
+    },
+  );
+
+  await t.test(
+    'mode launch: a hello closed 1013 while the store is locked is tried again with the same token; once the store is free the page is welcomed and keeps its key, and no alarm is raised (ruled, task 26)',
+    async (t) => {
+      const page = await recordedPage(t, chromium);
+      const started = await startTestServer(t);
+      const { id, token } = await mint(started);
+      const lock = holdWriteLock(t, join(started.d.s.skydeckHome, 'data', 'skydeck.db'));
+      await lock.held;
+
+      await page.goto(pageUrl(started.server.port, token));
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (!(await logOf(page)).some((entry) => entry.e === 'close' && entry.code === 1013)) {
+        assert.ok(performance.now() < deadline, 'a close 1013 at the hello');
+        await sleep(100);
+      }
+      lock.release();
+      await connection(page, 'open');
+
+      const modes = hellos(await logOf(page));
+      assert.ok(modes.length >= 2, JSON.stringify(modes));
+      assert.ok(
+        modes.every((mode) => mode === 'launch'),
+        JSON.stringify(modes),
+      );
+      const client = controlClient(started.d.platform.net, started.d.files.serverSock);
+      assert.equal(await client.tokenState(id), 'used');
+      assert.equal(started.d.deck.store.getKv('window_alarm'), null);
+      assert.equal(await shownText(page, '#problem'), '');
+      assert.deepEqual(await storedKeyIs(page, signer(started)), {
+        signs: true,
+        extractable: false,
+        exported: false,
+      });
+    },
+  );
+
+  await t.test(
+    'mode launch: a 503 at the upgrade presented no token, so the page tries again with it and gets its key',
+    async (t) => {
+      const secret = randomBytes(32);
+      const token = randomBytes(32);
+      const page = await recordedPage(t, chromium);
+      const standin = await standinServer(t, {
+        refuse: 2,
+        socket: honest(secret, { token }),
+      });
+
+      await page.goto(pageUrl(standin.port, token.toString('base64url')));
+      await connection(page, 'open');
+
+      assert.equal(standin.upgrades(), 3);
+      assert.deepEqual(hellos(await logOf(page)), ['launch']);
+      assert.deepEqual(
+        await storedKeyIs(page, (data) =>
+          createHmac('sha256', secret).update(data, 'utf8').digest('base64url'),
+        ),
+        { signs: true, extractable: false, exported: false },
+      );
+    },
+  );
+
+  await t.test(
+    'mode launch: a connection that ends after the hello was sent ends it — "run skydeck window again", and the token is never presented again',
+    async (t) => {
+      const token = randomBytes(32);
+      const page = await recordedPage(t, chromium);
+      const standin = await standinServer(t, {
+        socket: honest(randomBytes(32), { token, before: () => 'drop-after-hello' }),
+      });
+
+      await page.goto(pageUrl(standin.port, token.toString('base64url')));
+      await showsText(page, '#problem', new RegExp(`^${escape(NOT_VALID)}$`));
+      await connection(page, 'fatal');
+      await sleep(3000);
+
+      assert.deepEqual(hellos(await logOf(page)), ['launch']);
+      assert.equal(standin.connections.length, 1);
     },
   );
 

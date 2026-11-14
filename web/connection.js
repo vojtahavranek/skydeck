@@ -80,7 +80,7 @@ export const TEXTS = {
   notValid: "this window's key is not valid; run skydeck window again",
   alarm:
     "this window's launch address was used by another program, which may now have skydeck's key; run skydeck window --new-secret",
-  protocol: "skydeck's server speaks another protocol; close this window and run skydeck window",
+  protocol: "skydeck's server speaks another protocol; run skydeck window again",
   /** @param {string} port */
   notSkydeck: (port) =>
     `something answers on port ${port} that is not skydeck's server; nothing was sent to it`,

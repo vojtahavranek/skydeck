@@ -6,12 +6,13 @@ import assert from 'node:assert/strict';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { TestContext } from 'node:test';
+import { Worker } from 'node:worker_threads';
 
 import type { Page } from 'playwright';
 import WebSocket, { WebSocketServer } from 'ws';
 
 import { httpHandler, loadAssets, securityHeaders } from '../../src/window/assets.ts';
-import { isNonce, keyProofMatches, serverProof } from '../../src/window/auth.ts';
+import { isNonce, keyProofMatches, pageProof, serverProof, wrapSecret } from '../../src/window/auth.ts';
 import { testPlatform } from '../../test/helpers/platform.ts';
 
 /** How long a page test waits for something the page or a real server does (a loaded machine). */
@@ -232,6 +233,8 @@ export async function storedKeyIs(
 /** One WebSocket the stand-in accepted: what the page sent on it, in order. */
 export interface StandinConnection {
   ws: WebSocket;
+  /** The stand-in's build: what its page's asset version is. */
+  build: string;
   origin: string;
   received: string[];
   closed: Promise<number>;
@@ -255,6 +258,8 @@ export interface StandinOptions {
 
 export interface Standin {
   port: number;
+  /** The build of the page's files it serves (the page's asset version). */
+  build: string;
   url: string;
   connections: StandinConnection[];
   /** Upgrade requests seen, the refused ones included. */
@@ -330,6 +335,7 @@ export async function standinServer(
           ws.on('error', () => {});
           const conn: StandinConnection = {
             ws,
+            build: assets.build,
             origin: req.headers.origin ?? '',
             received,
             closed,
@@ -358,6 +364,7 @@ export async function standinServer(
   t.after(close);
   return {
     port: bound,
+    build: assets.build,
     url: pageUrl(bound),
     connections,
     upgrades: () => upgrades,
@@ -390,15 +397,18 @@ export function wrongProof(conn: StandinConnection): void {
 
 /**
  * A stand-in's socket that knows the secret and answers as the server does: the challenge, the
- * proof of mode key, then `list`s for `view`s and pongs (unless `pings` is false). `before`
- * may end a connection instead: 'close-1013' at the hello, 'drop' right after the challenge.
+ * proof of mode key — or of mode launch with `token`, the secret wrapped for the page —, then
+ * pongs (unless `pings` is false). `before(n)` may end the n-th connection instead: 'close-1013'
+ * at its hello, 'drop' right after the challenge, 'drop-after-hello' once the hello came.
  */
 export function honest(
   secret: Uint8Array,
   options: {
-    assetVersion: string;
+    /** The welcome's asset version; default the stand-in's own build. */
+    assetVersion?: string;
+    token?: Uint8Array;
     pings?: boolean;
-    before?: (n: number) => 'close-1013' | 'drop' | null;
+    before?: (n: number) => 'close-1013' | 'drop' | 'drop-after-hello' | null;
     serverId?: string;
     bootId?: string;
   },
@@ -420,26 +430,42 @@ export function honest(
           conn.ws.close(1013);
           return;
         }
+        if (plan === 'drop-after-hello') {
+          conn.ws.terminate();
+          return;
+        }
         const cN = message['nonce'];
         const proof = message['proof'];
-        if (
-          message['mode'] !== 'key' ||
-          typeof cN !== 'string' ||
-          !isNonce(cN) ||
-          typeof proof !== 'string' ||
-          !keyProofMatches(secret, proof, sN, cN, conn.origin)
-        ) {
+        const mode = message['mode'];
+        const token = options.token;
+        if (typeof cN !== 'string' || !isNonce(cN) || typeof proof !== 'string') {
+          conn.ws.close(4001);
+          return;
+        }
+        const proven =
+          mode === 'key'
+            ? keyProofMatches(secret, proof, sN, cN, conn.origin)
+            : mode === 'launch' &&
+              token !== undefined &&
+              pageProof(token, 'launch', sN, cN, conn.origin) === proof;
+        if (!proven) {
           conn.ws.close(4003);
           return;
         }
         phase = 'start';
+        const fields = {
+          assetVersion: options.assetVersion ?? conn.build,
+          serverId: options.serverId ?? '0123456789abcdef',
+          bootId: options.bootId ?? 'stand-in-boot',
+        };
         conn.send(
-          welcomeFields({
-            proof: serverProof(secret, 'key', sN, cN, conn.origin),
-            assetVersion: options.assetVersion,
-            serverId: options.serverId ?? '0123456789abcdef',
-            bootId: options.bootId ?? 'stand-in-boot',
-          }),
+          mode === 'launch' && token !== undefined
+            ? welcomeFields({
+                ...fields,
+                proof: serverProof(token, 'launch', sN, cN, conn.origin),
+                key: wrapSecret(secret, token, sN, cN, new Uint8Array(12).fill(3)),
+              })
+            : welcomeFields({ ...fields, proof: serverProof(secret, 'key', sN, cN, conn.origin) }),
         );
         return;
       }
@@ -451,5 +477,29 @@ export function honest(
         conn.send({ t: 'pong', n: message['n'], bootId: 'stand-in-boot', serverId: '0' });
       }
     });
+  };
+}
+
+/** Another skydeck holding the store's write lock (test/fixtures/hold-write-lock.ts). */
+export function holdWriteLock(
+  t: TestContext,
+  databasePath: string,
+): { held: Promise<void>; release(): void } {
+  const signal = new SharedArrayBuffer(4);
+  const flag = new Int32Array(signal);
+  const holder = new Worker(new URL('../../test/fixtures/hold-write-lock.ts', import.meta.url), {
+    workerData: { path: databasePath, signal },
+  });
+  const release = (): void => {
+    Atomics.store(flag, 0, 1);
+    Atomics.notify(flag, 0);
+  };
+  t.after(async () => {
+    release();
+    await holder.terminate();
+  });
+  return {
+    held: new Promise<void>((resolve) => holder.once('message', () => resolve())),
+    release,
   };
 }

@@ -28,8 +28,6 @@ const NO_KEY =
 const RESTARTED = "skydeck's server restarted; your sessions kept running";
 /** How long a line of the key bar stays. */
 const KEY_MESSAGE_MS = 5000;
-/** A re-attach waits this long for its snap before it goes on with the next terminal. */
-const SNAP_WAIT_MS = 5000;
 /** S2 8.2.6's limits of a proposed size. */
 const MAX_COLS = 1000;
 const MAX_ROWS = 500;
@@ -99,8 +97,6 @@ const state = {
   reattach: null,
   /** @type {string | null} */
   waitingSnap: null,
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  snapTimer: null,
   /** The first list after a welcome starts the re-attach. */
   welcomed: false,
   lastFocus: '',
@@ -399,15 +395,14 @@ function dropPending() {
 }
 
 /**
- * S2 8.2.5, 8.2.8: after a reconnect the page attaches again the terminals it had attached, the
- * shown one first, each next one once the previous one's snap has arrived. The proposal is the
- * terminal's size in the new list (the terminal view sends its own fitted size afterwards).
+ * S2 8.2.5, 8.2.8 (ruled, task 26): after a reconnect the page attaches again the terminals it had
+ * attached, the shown one first, each next one once the previous one's snap has arrived. The
+ * proposal is the terminal's size in the new list (the terminal view sends its own fitted size
+ * afterwards). An id the new list does not carry is skipped; when a list comes without the
+ * terminal whose snap the queue waits for (one forgotten before its snapshot never gets a snap),
+ * the queue goes on.
  */
 function nextReattach() {
-  if (state.snapTimer !== null) {
-    clearTimeout(state.snapTimer);
-    state.snapTimer = null;
-  }
   state.waitingSnap = null;
   const queue = state.reattach;
   while (queue !== null && queue.length > 0) {
@@ -417,7 +412,6 @@ function nextReattach() {
       continue;
     }
     state.waitingSnap = id;
-    state.snapTimer = setTimeout(nextReattach, SNAP_WAIT_MS);
     send({ t: 'attach', term: id, cols: term.cols, rows: term.rows });
     return;
   }
@@ -442,8 +436,9 @@ function welcomed(welcome, change, lostSince) {
     showInfo(RESTARTED);
   } else if (change === 'wsl-restarted') {
     // S2 6.3: the terminals of the server that held them are gone.
+    // The welcome carries no boot time: the moment the page lost the old server (ruled, task 26).
     showInfo(
-      `WSL restarted at ${clockTime(lostSince ?? new Date())}: the sessions that were running have ended.`,
+      `WSL has restarted since ${clockTime(lostSince ?? new Date())}: the sessions that were running have ended.`,
     );
     state.exits.clear();
   }
@@ -477,6 +472,11 @@ function received(message) {
       render();
       if (state.welcomed) {
         state.welcomed = false;
+        nextReattach();
+      } else if (
+        state.waitingSnap !== null &&
+        !message.terminals.some((term) => term.id === state.waitingSnap)
+      ) {
         nextReattach();
       }
       return;
