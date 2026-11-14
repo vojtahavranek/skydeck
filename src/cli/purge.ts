@@ -10,9 +10,9 @@
 // path lstat has shown to be a directory (the checks for a late entry list it again later; should
 // it have become a link by then, the rmdir that follows refuses it). Never removeTree or rmSync:
 // on Node.js 24.12.0 rmSync's check of what a path is follows a symbolic link (24.19.0 looks at
-// the link itself), so with `force` it leaves a dangling link in place without an error, and it
-// throws on a link to a directory without `recursive`. The removal itself never follows a link,
-// on either version (ruled, purge-care).
+// the link itself), so it leaves a dangling link in place without an error, with or without
+// `force`, and throws on a link to a directory unless `recursive` is given. The removal itself
+// never follows a link, on either version (ruled, purge-care).
 //
 // THE LISTS BELOW ARE THE ONE PLACE that says what skydeck writes into its directories. Whoever
 // makes skydeck write a new file or directory into one of them adds it here (name and kind), or
