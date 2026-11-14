@@ -224,6 +224,29 @@ for (const [name, profileDir] of [
   });
 }
 
+test('the line for an unsafe window.profileDir shows it as its JSON string, with no control character', async (t) => {
+  const { platform } = setup(t);
+  const cases: [string, string][] = [
+    ['C:\\Users\\Me Name\\x\\', '"C:\\\\Users\\\\Me Name\\\\x\\\\"'],
+    ['C:\\x\u009b2J\\', '"C:\\\\x\\u009b2J\\\\"'], // CSI, a C1 control
+    ['C:\\a\u007fb', '"C:\\\\a\\u007fb"'], // DEL
+    ['C:\\a\u001b[2Jb', '"C:\\\\a\\u001b[2Jb"'], // ESC
+  ];
+  for (const [profileDir, shown] of cases) {
+    const result = await startEdge(
+      platform,
+      windowConfig({ profileDir }),
+      CONFIG_PATH,
+      47613,
+      TOKEN,
+      LINK,
+    );
+    assert.ok(!result.ok);
+    assert.ok(result.line.startsWith(`the Edge profile folder ${shown} cannot`), result.line);
+    assert.doesNotMatch(result.line, /[\x00-\x1f\x7f-\x9f]/);
+  }
+});
+
 test('startEdge throws a RangeError for a port or a token that cannot be part of the address, and starts nothing', async (t) => {
   const { platform, processes } = setup(t);
   for (const port of [0, -1, 65536, 1.5, Number.NaN]) {

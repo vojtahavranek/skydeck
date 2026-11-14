@@ -54,12 +54,23 @@ export async function startWindowsProgram(
 ): Promise<Detached> {
   const unsafe = args.find(unsafeArgument);
   if (unsafe !== undefined) {
-    throw new Error(`${JSON.stringify(unsafe)} cannot be passed to a Windows program`);
+    throw new Error(`${asJsonString(unsafe)} cannot be passed to a Windows program`);
   }
   return platform.processes.startDetached(command, args, {
     cwd: WINDOWS_CWD,
     env: windowsEnvironment(platform.env, interop),
   });
+}
+
+/**
+ * `text` as a JSON string — as it stands in config.json — with DEL and the C1 controls escaped
+ * too (JSON.stringify escapes only U+0000–U+001F), so that no control character reaches a terminal.
+ */
+function asJsonString(text: string): string {
+  return JSON.stringify(text).replace(
+    /[\x7f-\x9f]/g,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
 }
 
 function errorCode(error: unknown): unknown {
@@ -98,7 +109,7 @@ export async function startEdge(
   if (unsafeArgument(profileDir)) {
     return {
       ok: false,
-      line: `the Edge profile folder ${JSON.stringify(profileDir)} cannot be passed to Edge (a '"', a control character or a backslash at the end); set window.profileDir in ${configPath}`,
+      line: `the Edge profile folder ${asJsonString(profileDir)} cannot be passed to Edge (a '"', a control character or a backslash at the end); set window.profileDir in ${configPath}`,
     };
   }
   try {

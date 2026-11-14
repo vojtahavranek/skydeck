@@ -397,8 +397,8 @@ command line (2: a `"`, a control character, a backslash at the end — `C:\User
 not passed: `the Edge profile folder <folder> cannot be passed to Edge (a '"', a control
 character or a backslash at the end); set window.profileDir in <config path>`, exit 1, where
 `<folder>` is shown as the JSON string it is in `config.json`, which is what the user edits
-(backslashes doubled, `"` and control characters escaped, so none reaches the terminal:
-`"C:\\Users\\Me Name\\x\\"`). One that
+(backslashes doubled; `"`, DEL and every control character, C1 included, escaped, so none
+reaches the terminal: `"C:\\Users\\Me Name\\x\\"`). One that
 cannot be derived (5.4) gives the derivation's error followed by ` in <config path>`; another
 failure to start Edge, `Edge could not be started from <path> (<reason>); open the window in any
 browser with skydeck window --print-url`.
