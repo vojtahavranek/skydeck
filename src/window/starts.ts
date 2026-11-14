@@ -113,7 +113,8 @@ export function decideFoundKeeper(
 /**
  * S2 7.8: after an exit, when the session never reported a start for this launch (ingestSpool
  * first, then resumeStarted with the lock's time and event id; for `new`, no event of the id):
- * release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote.
+ * release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote
+ * (only while it is unchanged since: its update time is still its creation time).
  *
  * A resume whose hello carries no lock skydeck wrote took none: nothing is released. Unlike
  * settleFailedLaunch this does not depend on a printed command: nothing was printed for the user to
@@ -125,7 +126,14 @@ export function settleEndedTerminal(deck: Deck, hello: KeeperHello): void {
   const { store } = deck;
   if (kind === 'new') {
     store.transaction(() => {
-      if (store.latestEventIdOfSession(sessionId) === null) {
+      // Only the row prepareNew wrote, untouched since (review 2, principle 6): one the user
+      // changed meanwhile (a note, another label) is theirs and stays.
+      const row = store.meta(sessionId);
+      if (
+        row !== null &&
+        row.updatedNs === row.createdNs &&
+        store.latestEventIdOfSession(sessionId) === null
+      ) {
         store.deleteMeta(sessionId);
       }
     });

@@ -174,7 +174,7 @@ describe('mapTerminals: which session a terminal shows', () => {
     assert.ok(got.elsewhere.has(S1));
   });
 
-  test('a holder whose own process start does not match its stat line is not followed upward', () => {
+  test('a holder whose own process start does not match its stat line is gone: not followed, not elsewhere', () => {
     const proc = procOf([
       [5000, 900, 4000],
       [5001, 999, 5000],
@@ -185,6 +185,8 @@ describe('mapTerminals: which session a terminal shows', () => {
       proc,
     );
     assert.equal(got.shown.get('aaaaaaaaaaaa'), null);
+    assert.equal(got.elsewhere.size, 0);
+    assert.equal(got.unknown.size, 0);
   });
 
   test('a holder of another boot is no live holder: neither the terminal’s nor elsewhere', () => {
@@ -469,6 +471,65 @@ describe('mapTerminals: a /proc read that fails is unknown (ruled)', () => {
   test('a pass in which nothing is unknown has an empty set', () => {
     const got = map([], [ds({ id: S1 })], procOf([]));
     assert.equal(got.unknown.size, 0);
+  });
+});
+
+describe('mapTerminals: a holder that is gone runs nowhere (review 2)', () => {
+  // The sessions were derived a moment before: the holder has ended since, or its pid is another
+  // process's now. By design 5.5 it is dead: not in a terminal, not elsewhere, not unknown.
+  const exit = { code: 0, signal: null, atNs: String(T0), notStarted: null };
+  const terminals = (): TerminalInfo[] => [
+    terminal({ id: 'aaaaaaaaaaaa', state: 'ended', program: PROGRAM, sessionId: S1, exit }),
+    terminal({ id: 'bbbbbbbbbbbb', program: { pid: 6000, procStart: 600 } }),
+  ];
+
+  test('the holder’s process is gone (the terminal’s program that has just ended)', () => {
+    const got = map(
+      terminals(),
+      [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
+      procOf([[6000, 600, 4000]]),
+    );
+    assert.deepEqual([...got.elsewhere], []);
+    assert.deepEqual([...got.unknown], []);
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S1);
+  });
+
+  test('the holder’s pid is another process now: never named as running elsewhere', () => {
+    const proc = procOf([
+      [5000, 999_999, 1],
+      [6000, 600, 4000],
+    ]);
+    proc.setFdTarget(5000, 0, '/dev/pts/42');
+    const got = map(
+      terminals(),
+      [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
+      proc,
+    );
+    assert.deepEqual([...got.elsewhere], []);
+    assert.deepEqual([...got.unknown], []);
+  });
+
+  test('also with no terminal at all: a gone holder is not elsewhere, a live one is', () => {
+    const proc = procOf([[8000, 800, 1]]);
+    const got = map(
+      [],
+      [
+        ds({ id: S1, state: 'running', holders: [holder(5000, 900)] }),
+        ds({ id: S2, state: 'running', holders: [holder(8000, 800)] }),
+      ],
+      proc,
+    );
+    assert.deepEqual([...got.elsewhere.keys()], [S2]);
+  });
+
+  test('of two holders the gone one is skipped: elsewhere names the live one', () => {
+    const proc = procOf([[8100, 810, 1]]);
+    const got = map(
+      [],
+      [ds({ id: S1, state: 'running', holders: [holder(8000, 800), holder(8100, 810)] })],
+      proc,
+    );
+    assert.deepEqual(got.elsewhere.get(S1), { pid: 8100, tty: null });
   });
 });
 

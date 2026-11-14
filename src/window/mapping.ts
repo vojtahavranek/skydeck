@@ -34,9 +34,10 @@ const MAX_STEPS = 8;
 
 /**
  * Where a holder is: in a terminal (its program `steps` parents up, 0 being the holder itself),
- * outside every terminal, or unknown (its chain could not be read).
+ * outside every terminal, gone (it is dead: no holder at all), or unknown (its chain could not be
+ * read).
  */
-type Place = { termId: string; steps: number } | 'outside' | 'unknown';
+type Place = { termId: string; steps: number } | 'outside' | 'gone' | 'unknown';
 
 /**
  * S2 7.5: walks up from the holder's process — the holder itself, then its parent, at most
@@ -44,10 +45,12 @@ type Place = { termId: string; steps: number } | 'outside' | 'unknown';
  * judged alive by design 5.5's rule: its stat line exists and its start is the one known for it (the
  * holder's recorded start; for a parent, the start its own stat line gives, which may not be later
  * than its child's — a parent that started after its child is another process that took a pid
- * freed meanwhile). A step that is gone or not alive, a chain that leaves through init or goes on
- * past MAX_STEPS, is 'outside'. A read that throws, a stat line without a readable process start
- * or parent, or a holder without a recorded start is 'unknown': nothing is decided on it (design
- * 5.5; ruled).
+ * freed meanwhile). The holder itself is judged first, also when there is no terminal: when its
+ * stat line is gone or names another start it is dead by design 5.5 — 'gone', running nowhere
+ * (review 2: sessions derived a moment before the terminals or /proc were read). A parent that is
+ * gone or not alive, a chain that leaves through init or goes on past MAX_STEPS, is 'outside' (the
+ * holder lives). A read that throws, a stat line without a readable process start or parent, or a
+ * holder without a recorded start is 'unknown': nothing is decided on it (design 5.5; ruled).
  */
 function placeOf(
   holder: Holder,
@@ -72,7 +75,7 @@ function placeOf(
     try {
       stat = proc.stat(pid);
       if (stat === null) {
-        return 'outside'; // gone
+        return steps === 0 ? 'gone' : 'outside'; // no such process
       }
       const own = procStartFromStat(stat);
       const parent = parentPidFromStat(stat);
@@ -80,7 +83,10 @@ function placeOf(
         return 'unknown';
       }
       if (own !== start) {
-        return 'outside'; // another process now has the pid
+        return steps === 0 ? 'gone' : 'outside'; // another process now has the pid
+      }
+      if (programs.size === 0) {
+        return 'outside'; // alive, and no terminal to reach
       }
       if (parent <= 1) {
         return 'outside'; // no parent, or init: the chain has left every terminal
@@ -118,10 +124,10 @@ function placeOf(
  *   yet"): between the end and the start of `/clear`, and after its program ended, it stays with
  *   its session — else null.
  * - `notReported`: a terminal with a program, no exit and nothing shown, opened `startTimeoutNs`
- *   or longer before `nowNs` — while `unknown` is not empty, or without a boot id, only one that
- *   was not reported already.
- * - `elsewhere`: a session with a holder outside every terminal, none in one and none unknown, with
- *   the first such holder's pid (holders are latest first) and the target of that process's fd 0,
+ *   or longer before `nowNs`. While `unknown` is not empty, or without a boot id, no terminal is
+ *   added: only one already marked (its input's `notReported`) stays marked.
+ * - `elsewhere`: a session with a live holder outside every terminal, none in one and none unknown,
+ *   with the first such holder's pid (holders are latest first) and the target of that process's fd 0,
  *   null when it cannot be read.
  * - `unknown`: see Mapping (ruled).
  */
@@ -155,12 +161,10 @@ export function mapTerminals(input: {
       if (bootId !== null && holder.process.bootId !== bootId) {
         continue; // of another boot: not alive now
       }
-      const place: Place =
-        bootId === null
-          ? 'unknown'
-          : programs.size === 0
-            ? 'outside'
-            : placeOf(holder, programs, proc);
+      const place: Place = bootId === null ? 'unknown' : placeOf(holder, programs, proc);
+      if (place === 'gone') {
+        continue; // dead since the sessions were derived: it holds nothing
+      }
       if (place === 'unknown') {
         unknown.add(session.id);
       } else if (place === 'outside') {

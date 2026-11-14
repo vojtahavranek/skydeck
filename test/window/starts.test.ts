@@ -303,6 +303,15 @@ describe('settleEndedTerminal', () => {
     assert.equal(d.deck.store.meta(prepared.sessionId), null);
   });
 
+  test('a new session’s row changed since prepareNew wrote it (a note, a new label) is kept (principle 6)', (t) => {
+    const d = testDeck(t);
+    const { prepared, hello } = newLaunch(d);
+    d.clock.advanceMs(1000);
+    d.deck.store.updateMeta(prepared.sessionId, { note: 'keep me' }, d.clock.nowNs());
+    settleEndedTerminal(d.deck, hello);
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.note, 'keep me');
+  });
+
   test('a new session that reported a start (in the spool) keeps its label and group', (t) => {
     const d = testDeck(t);
     const { prepared, hello } = newLaunch(d);
