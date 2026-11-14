@@ -439,3 +439,69 @@ export function info(registry: Registry, termId: string): TerminalInfo {
   assert.ok(found, `terminal ${termId} is not listed`);
   return found;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Keepers a test's server starts (plan task 28): the same checks as registrySandbox's
+
+/** What `serverKeepers` gives: the platform to start a server on, and the checked signal. */
+export interface ServerKeepers {
+  /** `base` with its processes wrapped: every program the server starts is noted (pid, start). */
+  platform(base: Platform): Platform;
+  /** As RegistryBox.keeperOf, for terminal `id` of the server's runtime directory `files`. */
+  keeperOf(files: RuntimeFiles, id: string): { pid: number; procStart: number };
+  /** As RegistryBox.signalKeeper. */
+  signalKeeper(
+    keeper: { pid: number; procStart: number },
+    signal: 'SIGSTOP' | 'SIGCONT' | 'SIGKILL',
+  ): void;
+}
+
+/**
+ * The one way a test signals a keeper that its SERVER started (hard rule; as `keeperOf` and
+ * `signalKeeper` of registrySandbox, which start their keepers themselves): give the server
+ * `platform(…)`; `keeperOf` checks that the terminal's .pid line parses, its pid is a whole number
+ * above 1 that is neither this process nor its parent, that the server started that process (the
+ * same process start) and that it still runs; `signalKeeper` checks the last two again.
+ */
+export function serverKeepers(): ServerKeepers {
+  /** pid → process start of every program the server started. */
+  const started = new Map<number, number>();
+  const keeperOf = (files: RuntimeFiles, id: string): { pid: number; procStart: number } => {
+    const line = parsePidLine(readFileSync(files.termPid(id), 'utf8'));
+    assert.ok(line, `terminal ${id} has no pid line`);
+    const { pid, procStart } = line;
+    assert.ok(Number.isSafeInteger(pid) && pid > 1, `not a pid to signal: ${pid}`);
+    assert.ok(pid !== process.pid && pid !== process.ppid, 'never this process or its parent');
+    assert.equal(
+      started.get(pid),
+      procStart,
+      `pid ${pid} is not a keeper this test's server started`,
+    );
+    assert.ok(stillRuns(pid, procStart), `keeper ${pid} no longer runs`);
+    return { pid, procStart };
+  };
+  return {
+    platform: (base) => ({
+      ...base,
+      processes: {
+        ...base.processes,
+        async startDetached(command, args, options) {
+          const child = await base.processes.startDetached(command, args, options);
+          const start = procStartOf(child.pid);
+          if (start !== null) started.set(child.pid, start);
+          return child;
+        },
+      },
+    }),
+    keeperOf,
+    signalKeeper(keeper, signal) {
+      assert.equal(
+        started.get(keeper.pid),
+        keeper.procStart,
+        "a keeper this test's server started",
+      );
+      assert.ok(stillRuns(keeper.pid, keeper.procStart), `keeper ${keeper.pid} no longer runs`);
+      process.kill(keeper.pid, signal);
+    },
+  };
+}

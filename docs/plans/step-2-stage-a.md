@@ -1367,6 +1367,15 @@ export function createTerminalView(root, deps) {}
 //     find(), copy(), pasteRaw(), focus(), setHidden(hidden), attached(): string[] }
 // The terminal view also shows, from `show(term)`: the `reconnecting` bar (S2 7.8) and "sized by
 // another window" (S2 8.2.6).
+// Optional member (ruled, task 28's review 2, for app.js's `area()`): `fits(width, height)` →
+// `{ cols, rows } | null` — the columns and rows a terminal of the view shows in a terminal area
+// (`#terminal`'s box) of width × height CSS pixels, by the same rule as every proposal of the view
+// (S2 8.2.6: the most that fits, xterm.js's padding and scroll bar counted out), clamped to S2
+// 8.2.6's limits; null while no cell can be measured
+// or for an area that is not a positive size. Its numbers are always whole and at least 1, whatever
+// it is given (app.js sends them to the server, whose validator takes 1–65,535 only; ruled, #70's
+// review). app.js uses it when the view offers it, so that the first size of a terminal is the
+// one its view proposes.
 // After a reconnect (S2 8.2.5) app.js itself sends `attach` for each id of `attached()`, the shown
 // terminal first and the next once the previous one's `snap` arrived, proposing the terminal's
 // size of the new `list`; an id the new `list` lacks is skipped, and a `list` without the terminal
@@ -3847,8 +3856,11 @@ server only, the key mapping of S2 9.1, swallowed queries, links, the clipboard 
 - Modify (replace): `web/terminal-view.js`, `web/terminal-view.css`
 - Test: `test-page/terminal.test.ts`, `test-page/keys.test.ts`
 
-**Behaviour.** xterm.js 6.0.0 with `addon-unicode-graphemes`, `addon-fit` (only to compute the
-proposal sent in `attach` and `resize`), `addon-search` (Ctrl+Shift+F); scrollback 5,000; the
+**Behaviour.** xterm.js 6.0.0 with `addon-unicode-graphemes` and `addon-search` (Ctrl+Shift+F);
+the proposal sent in `attach` and `resize` is computed by the view itself, with xterm.js's own
+rounding of its screen (S2 8.2.6) — not by `addon-fit`, whose division depends on the
+terminal's current size and has no fixed point at some widths (ruled by the plan owner, M4 of
+task 28's review; `addon-fit` stays vendored, its removal a follow-up); scrollback 5,000; the
 DOM renderer; the font list `"Cascadia Mono", "Cascadia Code", Consolas, "Segoe UI Symbol",
 monospace` (W9 checks it). The size is set only from `snap` and `size`; a page that is not the
 owner shows "sized by another window". Up to 8 terminals stay attached, the least recently shown
@@ -3873,7 +3885,8 @@ the target first; OSC 0 and 2 are ignored; the ended terminal is dimmed (the bar
 - Find: Ctrl+Shift+F finds a line printed 3,000 lines up.
 - Notices on the terminal they concern: `input-full` (the stand-in in `/stall` with a large paste),
   `gap` and `newer-keeper` (sent by a test server through the hub), and the `reconnecting` bar
-  (the keeper stopped with `SIGSTOP` for 3 s) — each shown, and gone when it no longer holds.
+  (the keeper stopped with `SIGSTOP` for 3 s and the server's connection to it cut: a stopped
+  keeper keeps its connection, ruled for task 16) — each shown, and gone when it no longer holds.
 - After a server restart the terminal shows the same screen (a fresh `snap`).
 
 **Done when:** the checks of S2 17.4 about keys, queries and colours pass, and switching between

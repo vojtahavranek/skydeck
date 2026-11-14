@@ -1424,10 +1424,18 @@ page last proposed (`attach`, `resize`). The rules:
   it to the screen side and sends `size` to every attached page. A page sets its xterm.js size only
   from `snap` and `size` — never from its own fitting — so page and screen side reflow at the same
   point of the stream. A page that is not the owner shows the terminal at the owner's size (cut off
-  or with a margin) and a hint "sized by another window"; typing makes it the owner. A proposed
-  size is first clamped to at most 1,000 columns and 500 rows (a wider one is not an error): 65,535
-  columns would make the screen side allocate gigabytes of scrollback (ruled, plan task 12's
-  review).
+  or with a margin) and a hint "sized by another window"; typing makes it the owner (and so does a
+  focus change while the program has focus reporting on, 9.2). A proposed size is first clamped
+  to at most 1,000 columns and 500 rows (a wider one is not an error): 65,535 columns would make
+  the screen side allocate gigabytes of scrollback (ruled, plan task 12's review). The page
+  computes its proposal itself (not with the fit addon): the most columns and rows whose screen
+  fits the terminal's area, the screen being cell × count rounded to whole pixels as xterm.js
+  6.0.0 rounds it, and the room the addon gave its scroll bar (14 px) and xterm.js's padding
+  counted out; the answer does not depend on the terminal's current size. The fit addon's does (it
+  divides by the cell of the current size), so at some widths no size proposes itself — 104
+  columns propose 103 and 103 propose 104 — and a terminal shown there was resized every second
+  (ruled by the plan owner, M4 of plan task 28's review). For an unchanged area, pixel ratio and
+  cell the page's answer stays what it was.
 
 The page's xterm.js keeps 5,000 lines of scrollback, as the screen side does (7.2), so that both
 reflow alike and find (9.7) sees what the snapshot holds.
@@ -1514,7 +1522,7 @@ every key in this table, and the page does what the table says:
 | Key | The page | Why |
 |---|---|---|
 | Shift+Enter | sends `\n` and cancels the key | xterm.js 6.0.0 sends `\r` whatever Shift says; Claude Code inserts a newline on Ctrl+J (`\n`) in every terminal without setup (section 21). |
-| Ctrl+V | leaves the key to the browser, which pastes; xterm.js sends the pasted text as a bracketed paste | Pasting text, as in the developer's terminal. No `\x16` is sent (a page test checks it, 17.4). |
+| Ctrl+V | leaves the key to the browser, which pastes; the page takes the paste before xterm.js does (in the capture phase of the terminal's element), cancels the browser's own action, takes every ESC out of the text and hands the rest to xterm.js's paste, which sends it as a bracketed paste (section 21: xterm.js 6.0.0 neither cancels a paste, so the text would stay in its hidden textarea, nor filters it, so a pasted `ESC [ 2 0 1 ~` would end its own bracketed paste) | Pasting text, as in the developer's terminal. No `\x16` is sent (a page test checks it, 17.4). |
 | Ctrl+Shift+V | sends `\x16` (a raw Ctrl+V) and cancels the key | Claude Code's own image paste: on WSL it reads the Windows clipboard itself (6.4); the browser's clipboard is not involved. |
 | Ctrl+Shift+C | copies the selection to the clipboard and cancels the key | Copy. |
 | the window's own chords (12.9) | acts on them and cancels the key | xterm.js would send nothing for them anyway, so the window takes nothing from Claude Code. |
@@ -1529,7 +1537,11 @@ neither; 6.1 is re-evaluated when released (20).
 ### 9.2 Focus and mouse
 
 Focus reports (mode 1004) and mouse reports are what the page's xterm.js produces, sent as
-`input`. They are the user's own events, not query answers (9.3).
+`input`. They are the user's own events, not query answers (9.3): xterm.js 6.0.0 also reports
+the focus by itself the moment it parses `CSI ? 1004 h` (from the program or a snapshot), and
+the page drops that report. With focus reporting on, a real focus change is `input`, so a window
+becomes the size owner (8.2.6) by being clicked, not only by being typed in (ruled for stage A,
+plan task 28's review).
 
 ### 9.3 Terminal queries
 
@@ -1948,6 +1960,22 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
   recently shown detached beyond that; while the window is hidden (minimised) it detaches all but
   the selected one. Switching between attached terminals is instant; switching to another costs one
   snapshot (7.3).
+  What the server says about a terminal is shown over that terminal, as the page's own text and
+  never written into it (so that the page's screen stays the screen side's): the reconnecting bar
+  (7.8) and "sized by another window" (8.2.6) while they hold; a gap or a newer keeper, which the
+  server repeats after every snapshot, until a later snapshot is followed by the terminal's stream
+  without it — and one the user dismissed is not shown again for a repeat; a dismissal is
+  forgotten once a snapshot's repeat ends without that notice, and a notice that comes in the
+  stream shows again (a new occasion). The page cannot tell a new occasion that comes right
+  after a snapshot, before the terminal's stream goes on, from the repeat of one dismissed: it
+  stays hidden then (a named limit). And `input-full` ("this terminal is not taking input at the
+  moment: not all of what you typed or pasted reached the program", true of all three reasons the
+  server takes no input) until input sent after it was taken (the server answers input it
+  refuses at once; plan task 28). Of a paste that is refused in part, the program gets the parts
+  that were taken and may be left inside the bracketed paste (no end marker): the server takes
+  or refuses each `input` message on its own and answers only a refusal, and the page has sent
+  every part of the paste before the first refusal can come, so it cannot hold back the rest or
+  send the end marker later (a named limit).
 - **A session running in another terminal**: the card of 7.9.
 - **A session not running**: the **resume card**: how it ended (exited normally, ended
   unexpectedly, mid-turn), last activity, the directory, the exact command (design 7.6's), the flags
@@ -2847,6 +2875,8 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | `http://127.0.0.1:<port>` is a secure context (verified by the user, 2026-11-13): Notification and the async clipboard are allowed; notification permission is per origin and profile. Whether the managed PC lets notifications and clipboard writes through is not tested yet (W6, W11). | documentation |
 | An app window's taskbar identity is made of an app name generated from the address's host and path (`GenerateApplicationNameFromURL`: host, `_`, path; no port) and the profile path. | verified in Chromium's source (review, 2026-11-13); whether Edge shows skydeck's icon is W3 |
 | xterm.js 6.0.0 sends nothing for Ctrl+Shift with a letter and then does not cancel the key (it builds the control byte only without Shift); for a plain Ctrl+V it sends `\x16` and cancels the key, so the browser does not paste unless the custom key handler returns false. | verified in xterm.js 6.0.0's source (`Keyboard.ts`, `CoreBrowserTerminal`) |
+| xterm.js 6.0.0's paste handler sends the pasted text and empties its hidden textarea, but does not cancel the paste event, so the browser then puts the whole text into that textarea: after a paste of 10 MiB in headless Chromium the page sent its input at about 0.4 MB/s and answered a script in seconds; with the paste cancelled after xterm.js took it (the first fix; the page now takes the paste itself, 9.1), the same paste reached the server in under a second (plan task 28). | verified (headless Chromium 1223; the bundle's `handlePasteEvent`) |
+| xterm.js 6.0.0 wraps pasted text unfiltered (`ESC [ 2 0 0 ~`, the text, `ESC [ 2 0 1 ~`): a pasted text that holds `ESC [ 2 0 1 ~` ends its own bracketed paste, and what follows reaches the program as typed keys, Enter included. | verified (headless Chromium 1223; plan task 28's review 2) |
 | xterm.js 6.0.0's DOM renderer writes its colours, cursor and selection rules into `<style>` elements it creates at run time: under `style-src 'self'` a red cell renders black; with `'unsafe-inline'` it renders red. | verified in headless Chromium (review, 2026-11-13) |
 | On WSL a crashing process's core dump is piped to WSL's crash collector (`core_pattern` is `\|/wsl-capture-crash …`), which keeps up to `maxCrashDumpCount` (default 10) dumps in `crashDumpFolder` (default `%Temp%\wsl-crashes`). A non-dumpable process (`PR_SET_DUMPABLE` 0) produces no dump, piped or not. For a piped dump the kernel ignores a core limit of 0 and aborts only on a soft limit of exactly 1 byte (`fs/coredump.c` of Linux 6.6). | `core_pattern` verified; documentation (learn.microsoft.com/windows/wsl/wsl-config, `prctl(2)`); kernel source read for 6.6 in review; this machine's 6.18 UNVERIFIED (W24) |
 | `/run/user/<uid>` outlives the user's last terminal only when the user lingers; on the development machine the user does. | verified |
