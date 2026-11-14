@@ -1408,7 +1408,7 @@ test('the terminal view', async (t) => {
   );
 
   await t.test(
-    "the rule is xterm.js's own: at the proposed size the real screen fits the box (the addon's 14 px scroll bar and the padding counted out), and one more column or one more row would not; a sample of widths and heights at each pixel ratio",
+    "the rule is xterm.js's own: at the proposed size the real screen ends inside the box (the addon's 14 px scroll bar left free), and one more column or one more row would not; a sample of widths and heights at each pixel ratio, at two font sizes",
     async (t) => {
       const started = await startTestServer(t);
       for (const ratio of [1, 1.25, 1.5, 2]) {
@@ -1501,25 +1501,27 @@ test('the terminal view', async (t) => {
                 if (resize !== undefined) {
                   size = { cols: resize['cols'] as number, rows: resize['rows'] as number };
                 }
-                // The room the fit addon gave: the box, its scroll bar (14 px) and xterm.js's padding
-                // (4 px across, 2 down) counted out.
-                const across = Math.floor(box.getBoundingClientRect().width) - 4 - 14;
-                const down = Math.floor(box.getBoundingClientRect().height) - 2;
+                // Edges, not widths: the screen's right edge leaves the box the room the fit addon
+                // gave its scroll bar (14 px), its bottom edge stays in the box — whatever padding
+                // the page's styles give xterm.js's element (it is not repeated here).
+                const room = box.getBoundingClientRect();
+                const right = room.right - 14;
+                const bottom = room.bottom;
                 const at = await apply(size.cols, size.rows);
                 const wider = await apply(size.cols + 1, size.rows);
                 const higher = await apply(size.cols, size.rows + 1);
                 await apply(size.cols, size.rows);
                 const where = `${width}x${height} → ${size.cols}x${size.rows}`;
-                if (at.width > across || at.height > down) {
+                if (at.right > right + 0.01 || at.bottom > bottom + 0.01) {
                   out.push(
-                    `${where}: the screen ${at.width}x${at.height} is over ${across}x${down}`,
+                    `${where}: the screen ends at ${at.right}, ${at.bottom}; the room ${right}, ${bottom}`,
                   );
                 }
-                if (size.cols < 1000 && wider.width <= across) {
-                  out.push(`${where}: one more column (${wider.width} px) would fit ${across}`);
+                if (size.cols < 1000 && wider.right <= right + 0.01) {
+                  out.push(`${where}: one more column (to ${wider.right}) would fit ${right}`);
                 }
-                if (size.rows < 500 && higher.height <= down) {
-                  out.push(`${where}: one more row (${higher.height} px) would fit ${down}`);
+                if (size.rows < 500 && higher.bottom <= bottom + 0.01) {
+                  out.push(`${where}: one more row (to ${higher.bottom}) would fit ${bottom}`);
                 }
               }
               root.remove();
@@ -1530,6 +1532,97 @@ test('the terminal view', async (t) => {
           assert.deepEqual(bad.slice(0, 5), [], `${ratio}x, ${fontSize}`);
         }
       }
+    },
+  );
+
+  await t.test(
+    "a change of the page's font size brings an open terminal a new proposal, at the new font, whose screen ends inside the box",
+    async (t) => {
+      const l = await launched(t, chromium);
+      const base = await assetBase(l.page);
+      const result = await l.page.evaluate(async (base) => {
+        const module = (await import(`${base}terminal-view.js`)) as {
+          createTerminalView(
+            root: HTMLElement,
+            deps: object,
+          ): { show(term: object): void; snap(message: object): void; size(message: object): void };
+        };
+        const sent: Record<string, unknown>[] = [];
+        const root = document.createElement('div');
+        root.className = 'terminal';
+        root.style.cssText = 'position:fixed;left:0;top:0;width:733px;height:411px';
+        document.body.append(root);
+        const view = module.createTerminalView(root, {
+          send: (message: Record<string, unknown>) => sent.push(message),
+          chord: () => false,
+          openLink: () => {},
+        });
+        const term = 'f0f0f0f0f0f0';
+        const payload = (cols: number, rows: number): object => ({
+          id: term,
+          slot: null,
+          sessionId: null,
+          state: 'running',
+          notReported: false,
+          cols,
+          rows,
+          ownsSize: true,
+        });
+        const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+        view.show(payload(80, 24));
+        await tick();
+        const first = sent.find((message) => message['t'] === 'attach');
+        const cols = first?.['cols'] as number;
+        const rows = first?.['rows'] as number;
+        view.snap({ t: 'snap', term, ch: 7, cols, rows, data: '' });
+        await tick();
+        document.documentElement.style.setProperty('--term-font-size', '18px');
+        const before = sent.length;
+        view.show(payload(cols, rows));
+        await tick();
+        const resize = sent.slice(before).find((message) => message['t'] === 'resize');
+        let end: { right: number; bottom: number; rowHeight: number } | null = null;
+        if (resize !== undefined) {
+          view.size({ t: 'size', term, cols: resize['cols'], rows: resize['rows'], owner: true });
+          for (let i = 0; i < 40; i++) {
+            await tick();
+            if (root.querySelector('.xterm-rows')?.children.length === resize['rows']) break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          const screen = root.querySelector('.xterm-screen')?.getBoundingClientRect();
+          end =
+            screen === undefined
+              ? null
+              : {
+                  right: screen.right,
+                  bottom: screen.bottom,
+                  rowHeight: screen.height / (resize['rows'] as number),
+                };
+        }
+        document.documentElement.style.removeProperty('--term-font-size');
+        const box = root.querySelector('.tv-screen')?.getBoundingClientRect();
+        root.remove();
+        return {
+          first: { cols, rows },
+          resize: resize === undefined ? null : { cols: resize['cols'], rows: resize['rows'] },
+          end,
+          room: box === undefined ? null : { right: box.right - 14, bottom: box.bottom },
+        };
+      }, base);
+      assert.ok(result.resize !== null, 'a new proposal');
+      const resize = result.resize as { cols: number; rows: number };
+      assert.ok(
+        resize.cols < result.first.cols && resize.rows < result.first.rows,
+        'a larger font',
+      );
+      assert.ok(result.end !== null && result.room !== null);
+      assert.ok(result.end.right <= result.room.right + 0.01, 'the screen ends inside the box');
+      assert.ok(result.end.bottom <= result.room.bottom + 0.01);
+      assert.ok(
+        result.end.rowHeight > 18,
+        `drawn at the new font: rows ${result.end.rowHeight} px high`,
+      );
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 

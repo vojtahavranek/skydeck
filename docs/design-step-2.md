@@ -1434,8 +1434,9 @@ page last proposed (`attach`, `resize`). The rules:
   counted out; the answer does not depend on the terminal's current size. The fit addon's does (it
   divides by the cell of the current size), so at some widths no size proposes itself — 104
   columns propose 103 and 103 propose 104 — and a terminal shown there was resized every second
-  (ruled by the plan owner, M4 of plan task 28's review). For an unchanged area, pixel ratio and
-  cell the page's answer stays what it was.
+  (ruled by the plan owner, M4 of plan task 28's review). The proposal is a function of the box,
+  the pixel ratio and the cell only (the terminal takes the page's font size first, so its screen
+  and its proposal are measured at the same font).
 
 The page's xterm.js keeps 5,000 lines of scrollback, as the screen side does (7.2), so that both
 reflow alike and find (9.7) sees what the snapshot holds.

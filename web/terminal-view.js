@@ -1,10 +1,10 @@
 // The terminal view (S2 8.2.4, 8.2.6, 9, 12.6, 15.4; plan task 28, contract 2.9): one xterm.js
 // 6.0.0 per attached terminal, with the vendored addons, fed by the snapshot and the stream of
 // S2 8.2.4 and sized by the server only (S2 8.2.6: the view only computes the proposal sent in
-// `attach` and `resize`, by its own rule of what fits — see `fitIn`). The page's terminal answers no query (S2 9.3), maps the keys of S2
-// 9.1, writes the clipboard only for the shown terminal of a focused window (S2 9.5), opens links
-// only on a Ctrl+click and through the server (S2 9.6), finds in the scrollback (S2 9.7) and
-// ignores the program's window title (S2 15.4).
+// `attach` and `resize`, by its own rule of what fits — see `fitIn`). The page's terminal answers
+// no query (S2 9.3), maps the keys of S2 9.1, writes the clipboard only for the shown terminal of
+// a focused window (S2 9.5), opens links only on a Ctrl+click and through the server (S2 9.6),
+// finds in the scrollback (S2 9.7) and ignores the program's window title (S2 15.4).
 //
 // Up to eight terminals stay attached, the least recently shown detached beyond that; while the
 // window is hidden only the shown one stays attached (S2 12.6). A detached terminal's xterm.js is
@@ -85,8 +85,6 @@ const URL_PATTERN = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&*+,;=%()']+/g;
  * @typedef {object} Term one attached terminal
  * @property {string} id
  * @property {Terminal} xterm
- * @property {{ key: string, size: { cols: number, rows: number } } | null} fitted the area last
- *   measured (its box, the pixel ratio and the cell) and what it holds (R3 of task 28's review)
  * @property {SearchAddon} search
  * @property {HTMLElement} box
  * @property {HTMLElement} bars
@@ -159,7 +157,6 @@ export function createTerminalView(root, deps) {
     const t = {
       id: payload.id,
       xterm: /** @type {Terminal} */ (/** @type {unknown} */ (null)),
-      fitted: null,
       search: new SearchAddon(),
       box,
       bars,
@@ -686,8 +683,9 @@ export function createTerminalView(root, deps) {
   /**
    * What the terminal's area holds at its font, or null when it cannot be measured (not shown):
    * its box measured as the fit addon measures it (the element xterm.js is in, whole pixels),
-   * then `fitIn`. While the box, the pixel ratio and the cell are as they were, the answer is the
-   * one given before (a second bound against a size that flips; R3 of task 28's review).
+   * then `fitIn` — a function of the box, the pixel ratio and the cell only. The terminal takes
+   * the page's font size first (style.css `--term-font-size`), so that the proposal and its
+   * screen are measured at the same font, also after the size changed.
    * @param {Term} t
    * @returns {{ cols: number, rows: number } | null}
    */
@@ -699,17 +697,15 @@ export function createTerminalView(root, deps) {
     const style = getComputedStyle(box);
     const width = parseInt(style.getPropertyValue('width'), 10);
     const height = parseInt(style.getPropertyValue('height'), 10);
-    const cell = measureCell();
+    const size = fontSize();
+    if (t.xterm.options.fontSize !== size) {
+      t.xterm.options.fontSize = size;
+    }
+    const cell = measureCell(size);
     if (!(width > 0) || !(height > 0) || cell === null) {
-      return null; // hidden, or no font yet: nothing is remembered either
+      return null; // hidden, or no font yet
     }
-    const key = `${width}x${height}@${cell.ratio}:${cell.width}x${cell.height}`;
-    if (t.fitted !== null && t.fitted.key === key) {
-      return t.fitted.size;
-    }
-    const size = fitIn(width - PAD_X - SCROLL_BAR, height - PAD_Y, cell);
-    t.fitted = { key, size };
-    return size;
+    return fitIn(width - PAD_X - SCROLL_BAR, height - PAD_Y, cell);
   };
 
   /**
@@ -728,16 +724,16 @@ export function createTerminalView(root, deps) {
     }
   };
 
+  /** The canvas `measureCell` measures with (made at its first call). @type {OffscreenCanvasRenderingContext2D | null | undefined} */
+  let canvas;
   /**
-   * The cell of the terminals' font in device pixels, measured as xterm.js 6.0.0 measures it:
-   * the canvas's metrics of `W` at the font (else 32 × W in a span); the height rounded up to
-   * whole device pixels. Null while it cannot be measured.
+   * The cell of the terminals' font in device pixels at `size` px, measured as xterm.js 6.0.0
+   * measures it: the canvas's metrics of `W` at the font (else 32 × W in a span); the height
+   * rounded up to whole device pixels. Null while it cannot be measured.
+   * @param {number} [size]
    * @returns {{ width: number, height: number, ratio: number } | null}
    */
-  /** @type {OffscreenCanvasRenderingContext2D | null | undefined} */
-  let canvas;
-  const measureCell = () => {
-    const size = fontSize();
+  const measureCell = (size = fontSize()) => {
     let width = 0;
     let height = 0;
     try {
@@ -1184,8 +1180,9 @@ function fitIn(across, down, cell) {
       return room > 0 ? most : least;
     }
     let n = Math.max(least, Math.min(most, Math.floor((room * cell.ratio) / unit)));
+    // From the estimate up: floor(room / cell) cells are at most `room` wide before the rounding,
+    // so for a whole room the estimate fits; only more can.
     while (n < most && screen(n + 1) <= room) n++;
-    while (n > least && screen(n) > room) n--;
     return n;
   };
   return {
