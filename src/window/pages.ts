@@ -29,7 +29,8 @@
  * Backpressure (S2 8.2.8, ruled at review 2): a page is behind once a record or its list finds
  * more than 1 MiB queued after its latest snap; its records are dropped and its list held until
  * the drain, when only the streams that lost something snap again. Above 64 MiB queued the
- * connection is dropped. At most 64 connections may wait for their hello.
+ * connection is dropped, what is still queued of the latest snap not counted. With 64
+ * connections waiting for their hello, a newcomer drops the one that has waited longest.
  *
  * Logs carry fixed text and the validators' kinds, never what a page sent and never a key.
  */
@@ -114,9 +115,10 @@ const HELLO_MS = 5_000;
 /** S2 8.2.8: above this many queued bytes (a snap's own not counted) a page gets no output and
  *  no list until its socket has drained. */
 const BEHIND_BYTES = 1024 * 1024;
-/** S2 8.2.8: above this many queued bytes, whatever they are, the connection is dropped (ruled). */
+/** S2 8.2.8: above this many queued bytes, what is still queued of the latest snap not counted,
+ *  the connection is dropped (ruled). */
 const DROP_BYTES = 64 * 1024 * 1024;
-/** S2 8.2.1: at most this many connections wait for their hello (ruled). */
+/** S2 8.2.1: at most this many connections wait for their hello; a newcomer drops the oldest (ruled). */
 const MAX_WAITING_HELLO = 64;
 /** S2 8.2.3: `list` at most once a second per page. */
 const LIST_MS = 1_000;
@@ -175,9 +177,11 @@ interface Connection extends PageState {
   channels: number;
   /** S2 8.2.8: a record or a list found more than BEHIND_BYTES queued; none goes out until the drain. */
   behind: boolean;
-  /** Bytes of every frame written to the socket so far, and that count after the last snap: a
-   *  snap's own bytes do not count toward BEHIND_BYTES (ruled). */
+  /** Bytes of every frame written to the socket so far, and that count before and after the
+   *  latest snap: a snap's own bytes do not count toward BEHIND_BYTES, and what is still queued
+   *  of the latest one not toward DROP_BYTES (ruled). */
   sent: number;
+  snapStart: number;
   snapEnd: number;
   /** A list was held while behind (S2 8.2.8, ruled): the current one goes out at the drain;
    *  `listForced` when it answered a view (sent even when unchanged). */
@@ -204,12 +208,7 @@ function originOk(origin: string | undefined, port: number): origin is string {
 }
 
 /** The refusal an upgrade request gets, or null when it may become a WebSocket. */
-function refusalOf(
-  req: IncomingMessage,
-  port: number,
-  stopping: boolean,
-  waitingHello: number,
-): number | null {
+function refusalOf(req: IncomingMessage, port: number, stopping: boolean): number | null {
   if (!hostOk(req.headers.host, port)) return 421;
   if (stopping) return 503;
   if (req.method === 'OPTIONS') return 403;
@@ -218,7 +217,6 @@ function refusalOf(
   const query = target.indexOf('?');
   if ((query === -1 ? target : target.slice(0, query)) !== '/ws') return 404;
   if (!originOk(req.headers.origin, port)) return 403;
-  if (waitingHello >= MAX_WAITING_HELLO) return 503;
   return null;
 }
 
@@ -282,10 +280,12 @@ export function createPages(deps: PagesDeps): Pages {
 
   /**
    * Writes one frame (text or binary) and counts its bytes; `snap` marks where the latest snap
-   * ends. Above DROP_BYTES queued the connection is dropped at once (the page reconnects, S2
+   * starts and ends. Above DROP_BYTES queued, what is still queued of the latest snap not counted
+   * (one screen can be that large), the connection is dropped at once (the page reconnects, S2
    * 8.2.5): nothing a page does by not reading can make the server keep more.
    */
   const write = (conn: Connection, frame: string | Uint8Array, snap = false): void => {
+    if (snap) conn.snapStart = conn.sent;
     if (typeof frame === 'string') {
       conn.ws.sendText(frame);
       conn.sent += frameBytes(Buffer.byteLength(frame, 'utf8'));
@@ -294,7 +294,10 @@ export function createPages(deps: PagesDeps): Pages {
       conn.sent += frameBytes(frame.length);
     }
     if (snap) conn.snapEnd = conn.sent;
-    if (conn.phase !== 'closed' && conn.ws.buffered > DROP_BYTES) {
+    const buffered = conn.ws.buffered;
+    const flushed = conn.sent - buffered;
+    const snapQueued = Math.max(0, conn.snapEnd - Math.max(conn.snapStart, flushed));
+    if (conn.phase !== 'closed' && buffered - snapQueued > DROP_BYTES) {
       log('page: more than 64 MiB queued; the connection is dropped');
       conn.ws.destroy();
     }
@@ -725,6 +728,25 @@ export function createPages(deps: PagesDeps): Pages {
     for (const attachment of attachments) attempt(() => sizeEvent(conn, 'detach', attachment.term));
   };
 
+  /**
+   * S2 8.2.1 (ruled): with MAX_WAITING_HELLO connections waiting for their hello, the one that has
+   * waited longest is dropped for the newcomer, so that idle connections that prove nothing cannot
+   * lock a window out (a real page says hello within milliseconds). One that has proven itself is
+   * never dropped.
+   */
+  const dropOldestWaiting = (): void => {
+    let oldest: Connection | null = null;
+    let waiting = 0;
+    for (const conn of connections) {
+      if (conn.phase !== 'hello') continue;
+      waiting++;
+      oldest ??= conn; // the set keeps the order of acceptance
+    }
+    if (waiting < MAX_WAITING_HELLO || oldest === null) return;
+    log('page: 64 connections wait for their hello; the oldest is dropped');
+    oldest.ws.destroy();
+  };
+
   const accept = (ws: WebSocketConnection, origin: string, closed: Promise<void>): void => {
     const attachments = new Map<string, Attachment>();
     const conn: Connection = {
@@ -748,6 +770,7 @@ export function createPages(deps: PagesDeps): Pages {
       channels: 0,
       behind: false,
       sent: 0,
+      snapStart: 0,
       snapEnd: 0,
       listHeld: false,
       listForced: false,
@@ -796,13 +819,12 @@ export function createPages(deps: PagesDeps): Pages {
       // node:http's 'upgrade' listener: a throw here would end the server.
       try {
         const port = deps.port();
-        let waitingHello = 0;
-        for (const conn of connections) if (conn.phase === 'hello') waitingHello++;
-        const refusal = refusalOf(req, port, stopping, waitingHello);
+        const refusal = refusalOf(req, port, stopping);
         if (refusal !== null) {
           refuse(socket, port, refusal);
           return;
         }
+        dropOldestWaiting();
         // For bye: resolves when this socket has closed. A listener only (ruled): every write and
         // every close goes through the WebSocket connection.
         const closed = socket.closed

@@ -2471,9 +2471,11 @@ behind its records are dropped (the streams that lose one are marked) and its `l
 Node.js's `drain` (nothing queued, so below 64 KiB) the current `list` goes out at once and only
 the marked streams are attached again (their fresh `snap` on a new channel follows when the hub
 gives it, then what the hub tells after it).
-Above 64 MiB queued, whatever it is, the connection is destroyed with one fixed log line. At most
-64 connections may be in the hello phase; a further upgrade that passes the checks above is
-answered 503 (the `bye` 503 comes before those checks). The hello reads the
+Above 64 MiB queued, whatever it is but what is still queued of the latest `snap` (one screen of
+image-like output reaches 40–60 MiB), the connection is destroyed with one fixed log line. With 64
+connections in the hello phase, an upgrade that passes the checks above drops the one that has
+waited longest and is accepted; a proven connection is never dropped for it (no 503 for this; the
+`bye` 503 stays). The hello reads the
 secret from the store every time (a named limit, S2 8.2.2: `--new-secret` takes effect at once;
 a held write lock can stall the server up to the 5 s busy timeout). When a page goes, every
 stream is detached before the sizes are handed over; during `bye` no size is handed over.
@@ -2560,8 +2562,11 @@ export function createPages(deps: PagesDeps): Pages;
   idle terminal with a 6 MiB snap gets one snap; four and five terminals attached at once with
   1.4 MiB snaps, idle or busy, get one snap each and every record; a busy terminal with a snap
   above 4 MiB gets its records; a held `list` goes out once, the current one, at the drain;
-  above 64 MiB queued the connection is dropped and its streams detached; a 65th connection
-  waiting for its hello gets 503.
+  snap after snap piling up above 64 MiB drops the connection and detaches its streams, while a
+  single snap above 64 MiB reaches a page that reads; a terminal attached while the page is
+  behind gets its snap at the drain; a `view` that arrives while behind is answered at the drain
+  even when its list is unchanged; with 64 connections waiting for their hello a 65th is
+  accepted and the oldest dropped, never a proven one.
 - `ping` → `pong` with `n`, `bootId`, `serverId`; `view` → a `list` at once; `pushList` sends
   only changed lists and at most once a second per page (fake clock); `act` → the handler's
   `result` with the same `id`; `bye` reaches every page before the sockets close.

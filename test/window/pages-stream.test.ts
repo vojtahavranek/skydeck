@@ -784,6 +784,7 @@ describe('pages: a page that does not read', () => {
     f.hub.setScreen(T1, 's'.repeat(10 * MiB));
     const { client } = await openPage(t, f);
     client.ws.pause();
+    // Snap after snap that the page does not read: only the latest one is not counted.
     for (let i = 0; i < 10; i++) {
       client.send({ t: 'attach', term: T1, cols: 80, rows: 24 });
       await delay(20);
@@ -793,6 +794,70 @@ describe('pages: a page that does not read', () => {
     assert.deepEqual(f.logs, ['page: more than 64 MiB queued; the connection is dropped']);
     client.ws.resume();
     await within('the close', client.closed);
+  });
+
+  test('a single snap above 64 MiB reaches a page that reads: the latest snap is not counted', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.setScreen(T1, 'i'.repeat(70 * MiB));
+    const { client } = await openPage(t, f);
+    const ch = await attach(client, T1);
+    f.hub.output(T1, 'after');
+    assert.deepEqual(await client.nextOutput(), {
+      channel: ch,
+      bytes: new TextEncoder().encode('after'),
+    });
+    assert.equal(f.pages.count(), 1);
+    assert.deepEqual(f.logs, []);
+  });
+
+  test('a terminal attached while the page is behind gets its snap at the drain', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.add(T2);
+    const { client } = await openPage(t, f);
+    await attach(client, T1);
+    client.ws.pause();
+    for (let i = 0; i < 400; i++) f.hub.output(T1, record(i));
+    client.send({ t: 'attach', term: T2, cols: 80, rows: 24 });
+    await until('the attach of T2', () => attachCalls(f) === 2);
+    await delay(50); // its snapshot came while the page was behind
+    client.ws.resume();
+    await until('a snap of T2', () => snapsIn(client).some((m) => m.t === 'snap' && m.term === T2));
+    await roundTrip(client);
+    const snaps2 = snapsIn(client).filter((m) => m.t === 'snap' && m.term === T2);
+    assert.equal(snaps2.length, 1, 'one snap of T2');
+    assert.deepEqual(
+      f.hub.calls.filter((call) => call.kind === 'attach' && call.term === T2).length,
+      2,
+      'T2 attached again at the drain',
+    );
+    const snap2 = snaps2[0];
+    assert.ok(snap2?.t === 'snap');
+    f.hub.output(T2, 'two');
+    assert.deepEqual(await client.nextOutput(), {
+      channel: snap2.ch,
+      bytes: new TextEncoder().encode('two'),
+    });
+  });
+
+  test('a view that arrives while the page is behind is answered at the drain, even unchanged', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    const { client } = await openPage(t, f, { view: true });
+    await attach(client, T1);
+    f.clock.advanceMs(1_000); // the list of the attach's ownership goes out now
+    await roundTrip(client);
+    const lists = (): number => client.all.filter((i) => 'text' in i && i.text.t === 'list').length;
+    const before = lists();
+    client.ws.pause();
+    for (let i = 0; i < 400; i++) f.hub.output(T1, record(i));
+    view(client); // the same view: its list equals the last one sent
+    await delay(50);
+    client.ws.resume();
+    await until('the fresh snap', () => snapsIn(client).length === 2);
+    await roundTrip(client);
+    assert.equal(lists(), before + 1, 'the view got its answer');
   });
 });
 
