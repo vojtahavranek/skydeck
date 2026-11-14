@@ -1150,10 +1150,10 @@ A refused request answers `{ error: <kind> }`: 404 for an unknown route (stage C
 read on; `GET /token/<id>` is 404 for a token the server does not know. When answering a request
 fails inside the server (`ping`, `status` or the tokens throw), the answer is 500
 `{ error: 'failed' }`, the log names the error and its code, never its message (5.2), and the
-server goes on; a failure while stopping is the server's uncaught error. On the command line, `ping` reports a socket that
-refuses or is missing as refused, and no answer in time — or a full queue of connections, of a
-server that lives — as not answering (5.1); `POST /token/drop` for a token the server does not know
-is no error.
+server goes on; a failure while stopping is the server's uncaught error. On the command line,
+`ping` reports a socket that refuses or is missing as refused, and no answer in time — or a full
+queue of connections, of a server that lives — as not answering (5.1); `POST /token/drop` for a
+token the server does not know is no error.
 
 ## 9. Typing into and reading from a terminal
 
