@@ -88,9 +88,12 @@
   font-family: var(--term-font);
 }
 .header-dir,
+.header-id,
 .card-command,
 .card-dir,
 .card-where,
+.card-warning,
+.card-ended,
 .card-lines {
   white-space: pre-wrap;
 }

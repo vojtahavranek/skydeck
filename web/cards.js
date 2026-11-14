@@ -180,7 +180,8 @@ function chipOf(chip) {
  */
 function endedOf(exit) {
   if (exit === null) {
-    return 'claude has ended';
+    // Before the page has the exit: true of an ended, a lost and a not-started terminal alike.
+    return 'claude is not running in this terminal';
   }
   if (exit.notStarted !== null) {
     return `not started: ${exit.notStarted}`;
@@ -206,6 +207,17 @@ function linesOf(result) {
 }
 
 /**
+ * A held Enter never presses a button or submits the form again: its auto-repeats are cancelled
+ * (ruled for tasks 27 and 29). A fresh press acts.
+ * @param {KeyboardEvent} event
+ */
+function refuseHeldEnter(event) {
+  if (event.repeat && event.key === 'Enter') {
+    event.preventDefault();
+  }
+}
+
+/**
  * A button of a card. `run` is not started again while the action it started is pending.
  * @param {string} text
  * @param {string} className
@@ -217,6 +229,7 @@ function actionButton(text, className, run) {
   button.type = 'button';
   button.textContent = text;
   let pending = false;
+  button.addEventListener('keydown', refuseHeldEnter);
   button.addEventListener('click', () => {
     if (pending) {
       return;
@@ -632,6 +645,7 @@ function newFormOf(defaults, deps) {
   const lines = element('div', 'card-lines');
   form.append(actions, lines);
   let pending = false;
+  form.addEventListener('keydown', refuseHeldEnter);
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (pending) {

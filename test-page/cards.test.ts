@@ -416,6 +416,55 @@ test('the right side', async (t) => {
   );
 
   await t.test(
+    'a held Enter never resumes or starts again: its auto-repeats on Resume here and in the new form send nothing; a fresh press does',
+    async (t) => {
+      const s = await scripted(t, chromium);
+      s.answer.act = () => ({ ok: false, lines: ['refused'], error: 'refused', sessionId: null });
+      const acts = (): number => s.sent.filter((message) => message['t'] === 'act').length;
+      const cdp = await s.page.context().newCDPSession(s.page);
+      const enter = async (autoRepeat: boolean): Promise<void> => {
+        for (const type of ['keyDown', 'keyUp'] as const) {
+          if (type === 'keyUp' && autoRepeat) continue; // a held key repeats its keydown only
+          await cdp.send('Input.dispatchKeyEvent', {
+            type,
+            key: 'Enter',
+            code: 'Enter',
+            windowsVirtualKeyCode: 13,
+            nativeVirtualKeyCode: 13,
+            ...(type === 'keyDown' ? { text: '\r', autoRepeat } : {}),
+          });
+        }
+      };
+      s.serve(
+        listWith([[{ id: S1, terminal: null, slot: null }], []], {
+          list: { selected: selectedOf(S1) },
+        }),
+      );
+      await clickRow(s.page, S1);
+      await s.page.focus('#cards button');
+      await enter(false);
+      await showsText(s.page, '#cards .card-lines', /^refused$/);
+      assert.equal(acts(), 1);
+      for (let i = 0; i < 3; i++) await enter(true);
+      await sleep(300);
+      assert.equal(acts(), 1, 'the repeats of a held Enter resume nothing');
+      await enter(false);
+      await sleep(300);
+      assert.equal(acts(), 2, 'a fresh press does');
+
+      await s.page.keyboard.press('Control+Shift+N');
+      await s.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await s.page.focus('#cards input[name="label"]');
+      await enter(false);
+      await showsText(s.page, '#cards .card-new .card-lines', /^refused$/);
+      assert.equal(acts(), 3);
+      for (let i = 0; i < 3; i++) await enter(true);
+      await sleep(300);
+      assert.equal(acts(), 3, 'the repeats of a held Enter start nothing');
+    },
+  );
+
+  await t.test(
     'a list that changes the resume card between the mousedown and the mouseup on its button loses no click',
     async (t) => {
       const s = await scripted(t, chromium);
@@ -522,9 +571,17 @@ test('the right side', async (t) => {
         notStarted: null,
         ...more,
       });
-      s.serve(ended('ended'));
+      s.serve(ended('not-started'));
       await clickRow(s.page, S1);
       await s.page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      // Before the exit arrives: a text true of every terminal whose program is over (this one
+      // never started), and both buttons.
+      await showsText(s.page, '#cards .card-ended', /^claude is not running in this terminal$/);
+      assert.deepEqual(await s.page.locator('#cards .card-bar button').allTextContents(), [
+        'Resume',
+        'Close',
+      ]);
+      s.serve(ended('ended'));
       s.conn().send(exit({ code: 0 }));
       await showsText(
         s.page,
@@ -708,7 +765,7 @@ test('the right side', async (t) => {
               [S1]: { dir },
               [S2]: { state: 'running', elsewhere: { pid: 5, tty: '/dev/pts/7  x', dir } },
             },
-            list: { selected: selectedOf(S1, { command }) },
+            list: { selected: selectedOf(S1, { command, unknownFlags: ['--a  b'] }) },
           },
         ),
       );
@@ -725,6 +782,32 @@ test('the right side', async (t) => {
       assert.deepEqual(await rendered('.card-command'), [command]);
       assert.deepEqual(await rendered('.card-dir'), [dir]);
       assert.deepEqual(await rendered('.header-dir'), [dir]);
+      assert.deepEqual(await rendered('.card-warning'), [
+        'started with flags skydeck does not know, not passed on resume: --a  b',
+      ]);
+      for (const selector of [
+        '.header-dir',
+        '.header-id',
+        '.card-command',
+        '.card-dir',
+        '.card-warning',
+        '.card-lines',
+        '.card-ended',
+        '.card-where',
+      ]) {
+        assert.equal(
+          await s.page.evaluate((selector) => {
+            const probe = document.createElement('span');
+            probe.className = selector.slice(1);
+            document.getElementById('cards')?.append(probe);
+            const space = getComputedStyle(probe).whiteSpace;
+            probe.remove();
+            return space;
+          }, selector),
+          'pre-wrap',
+          `${selector} keeps its spaces`,
+        );
+      }
       await s.page.locator('#cards .card-command').click({ clickCount: 3 });
       assert.equal(
         await s.page.evaluate(() => getSelection()?.toString().replace(/\n$/, '')),
