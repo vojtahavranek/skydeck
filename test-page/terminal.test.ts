@@ -1,7 +1,6 @@
 // The terminal view in a browser (plan task 28; S2 8.2.4, 8.2.6, 9, 12.6, 15.4, 17.4): a real test
 // server whose terminals run the stand-in, and the page's real modules.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import type { Socket } from 'node:net';
 import { test } from 'node:test';
 
@@ -9,16 +8,17 @@ import type { Page } from 'playwright';
 
 import type { Platform } from '../src/platform/types.ts';
 import type { StreamSink } from '../src/window/hub.ts';
-import { parsePidLine } from '../src/window/pidline.ts';
 import type { RunningServer } from '../src/window/server.ts';
-import { procStartOf, sleep, stillRuns } from '../test/helpers/keeper.ts';
+import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
+import { serverKeepers } from '../test/helpers/registry.ts';
 import { readRecords } from '../test/helpers/standin.ts';
 import type { ServerSandbox } from '../test/helpers/window.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
   PAGE_WAIT_MS,
   RECORDER,
+  RESTARTED,
   active,
   after,
   connection,
@@ -27,8 +27,10 @@ import {
   logOf,
   mark,
   scriptedList,
+  showsText,
   standinServer,
   storeKey,
+  zone,
 } from './helpers/shell.ts';
 import {
   hexOf,
@@ -88,29 +90,6 @@ function captureSinks(
     return attach(term, wrapped);
   };
   return sinks;
-}
-
-/**
- * Sends `signal` to the keeper of the terminal `term`, a process this test's server started: its
- * pid line is checked (a whole pid above 1, never this process), the process must be the one the
- * line names (its start) and run with this sandbox on its command line.
- */
-function signalOwnKeeper(
-  d: ServerSandbox,
-  term: string,
-  signal: 'SIGSTOP' | 'SIGCONT',
-): { pid: number; procStart: number } {
-  const line = parsePidLine(readFileSync(d.files.termPid(term), 'utf8'));
-  assert.ok(line !== null, `terminal ${term} has a pid line`);
-  const { pid, procStart } = line;
-  assert.ok(Number.isSafeInteger(pid) && pid > 1, `a pid to signal: ${pid}`);
-  assert.ok(pid !== process.pid && pid !== process.ppid, 'never this process or its parent');
-  assert.equal(procStartOf(pid), procStart, 'the process the pid line names');
-  assert.ok(stillRuns(pid, procStart));
-  const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-  assert.ok(cmdline.includes(d.s.root), 'a keeper of this sandbox');
-  process.kill(pid, signal);
-  return { pid, procStart };
 }
 
 /** Types `line` into the shown terminal and presses Enter. */
@@ -430,10 +409,11 @@ test('the terminal view', async (t) => {
   );
 
   await t.test(
-    'find: Ctrl+Shift+F finds a line printed 3,000 lines up; Esc gives the terminal the keyboard back',
+    'find: Ctrl+Shift+F finds a line printed 3,000 lines up; a paste into its field works and reaches no program; Esc gives the terminal the keyboard back',
     async (t) => {
       const l = await launched(t, chromium);
       const { page, d } = l;
+      await allowClipboard(page, l.server.port);
       d.resumable(S1);
       await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
@@ -455,6 +435,21 @@ test('the terminal view', async (t) => {
           '1 of 1',
         'one match',
       );
+      // The page cancels only a paste xterm.js took: one into the find bar's field is the field's.
+      await page.evaluate(() => navigator.clipboard.writeText('line 2000'));
+      const before = inputOf(d.record, S1);
+      await page.keyboard.press('Control+A');
+      await page.keyboard.press('Control+V');
+      await until(
+        async () =>
+          (await page.evaluate(
+            () => (document.querySelector('.tv-find-input') as HTMLInputElement).value,
+          )) === 'line 2000',
+        'pasted into the field',
+      );
+      await untilScreen(page, /^line 2000$/m);
+      await sleep(300);
+      assert.equal(inputOf(d.record, S1), before, 'the paste reached no program');
       await page.keyboard.press('Escape');
       await untilTerminalOf(page, S1);
       assert.equal(await page.locator('.tv-find').isHidden(), true);
@@ -499,26 +494,29 @@ test('the terminal view', async (t) => {
     'the reconnecting bar while the server cannot reach the keeper (stopped for 3 s), and input-full for a key meanwhile; both gone after',
     async (t) => {
       const sockets: { path: string; socket: Socket }[] = [];
+      const keepers = serverKeepers();
       const l = await launched(t, chromium, {
         server: {
-          platform: (p: Platform) => ({
-            ...p,
-            net: {
-              ...p.net,
-              async connectUnix(path: string) {
-                const socket = await p.net.connectUnix(path);
-                sockets.push({ path, socket });
-                return socket;
+          platform: (p: Platform) =>
+            keepers.platform({
+              ...p,
+              net: {
+                ...p.net,
+                async connectUnix(path: string) {
+                  const socket = await p.net.connectUnix(path);
+                  sockets.push({ path, socket });
+                  return socket;
+                },
               },
-            },
-          }),
+            }),
         },
       });
       const { page, d } = l;
       d.resumable(S1);
       const term = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
-      signalOwnKeeper(d, term, 'SIGSTOP');
+      const keeper = keepers.keeperOf(d.files, term);
+      keepers.signalKeeper(keeper, 'SIGSTOP');
       try {
         // A stopped keeper keeps its connection: the server reconnects only once it ends.
         for (const { path, socket } of sockets) {
@@ -536,7 +534,7 @@ test('the terminal view', async (t) => {
         await sleep(3000);
         assert.equal(await noticeText(page, 'reconnecting'), 'reconnecting to this terminal');
       } finally {
-        signalOwnKeeper(d, term, 'SIGCONT');
+        keepers.signalKeeper(keeper, 'SIGCONT');
       }
       await until(async () => (await noticeText(page, 'reconnecting')) === '', 'reconnected');
       await page.keyboard.press('w');
@@ -547,7 +545,7 @@ test('the terminal view', async (t) => {
   );
 
   await t.test(
-    'gap and newer-keeper notices (sent through the hub) are shown on their terminal; after a server restart the terminal shows the same screen from a fresh snap, a dismissed gap the server repeats is not shown again, and a notice the new server does not repeat goes',
+    'gap and newer-keeper notices (sent through the hub): shown on their terminal; the × by mouse leaves the keyboard in the terminal, by Enter or Space gives it back to the terminal; a new occasion shows again',
     async (t) => {
       const l = await launched(t, chromium);
       const { page, d } = l;
@@ -555,26 +553,72 @@ test('the terminal view', async (t) => {
       d.resumable(S1);
       const term = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
-      await typeLine(page, '/red before the restart');
-      await untilScreen(page, /^before the restart$/m);
+      const sink = sinks.get(term);
+      assert.ok(sink !== undefined, 'the page’s sink');
+      const close = (kind: string): string =>
+        `#terminal .tv-bar[data-kind="${kind}"] .tv-bar-close`;
+      const inTerminal = (): Promise<boolean> =>
+        page.evaluate(() => document.activeElement?.closest('#terminal .xterm') != null);
+
+      sink.notice('gap', GAP);
+      sink.notice('newer-keeper', NEWER);
+      await until(async () => (await noticeText(page, 'gap')) === GAP, 'the gap shown');
+      await until(async () => (await noticeText(page, 'newer-keeper')) === NEWER, 'newer shown');
+      assert.equal(await inTerminal(), true);
+
+      // A mouse click on the × takes no keyboard: it stays in the terminal.
+      await page.locator(close('gap')).click();
+      assert.equal(await noticeText(page, 'gap'), '');
+      assert.equal(await inTerminal(), true, 'the keyboard stayed in the terminal');
+
+      // Enter on a focused ×: the notice goes and the terminal takes the keyboard back.
+      await page.locator(close('newer-keeper')).focus();
+      assert.equal(await inTerminal(), false);
+      await page.keyboard.press('Enter');
+      assert.equal(await noticeText(page, 'newer-keeper'), '');
+      await until(inTerminal, 'the keyboard back in the terminal after Enter');
+      assert.equal(await zone(page), 'Focus: terminal');
+
+      // New occasions (after a record of the stream): shown again although dismissed before.
+      await typeLine(page, '/red a record');
+      await untilScreen(page, /^a record$/m);
+      sink.notice('gap', GAP);
+      sink.notice('newer-keeper', NEWER);
+      await until(async () => (await noticeText(page, 'gap')) === GAP, 'a new gap shown');
+      await until(async () => (await noticeText(page, 'newer-keeper')) === NEWER, 'shown again');
+
+      // Space on a focused ×, the same.
+      await page.locator(close('gap')).focus();
+      await page.keyboard.press('Space');
+      assert.equal(await noticeText(page, 'gap'), '');
+      await until(inTerminal, 'the keyboard back in the terminal after Space');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'after a server restart: a notice the new server does not repeat after its snapshot no longer holds and goes (gap); a dismissed one it repeats is not shown again (newer-keeper)',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      const sinks = captureSinks(l.server);
+      d.resumable(S1);
+      const term = await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
       const sink = sinks.get(term);
       assert.ok(sink !== undefined, 'the page’s sink');
       sink.notice('gap', GAP);
       sink.notice('newer-keeper', NEWER);
       await until(async () => (await noticeText(page, 'gap')) === GAP, 'the gap shown');
       await until(async () => (await noticeText(page, 'newer-keeper')) === NEWER, 'newer shown');
-      // Dismissed: the gap's × (a mouse click leaves the keyboard in the terminal).
-      await page.locator('#terminal .tv-bar[data-kind="gap"] .tv-bar-close').click();
-      assert.equal(await noticeText(page, 'gap'), '');
-      await untilTerminalOf(page, S1);
-      const screen = await screenText(page);
+      await page.locator('#terminal .tv-bar[data-kind="newer-keeper"] .tv-bar-close').click();
 
       const port = l.server.port;
       await mark(page, 'restart');
       await l.server.stop('the test restarts it');
       const again = await d.start({ port });
-      // The new server repeats the gap after the snapshot; it does not hold a newer keeper.
-      captureSinks(again.server, (_, repeated) => repeated.notice('gap', GAP));
+      // The new server repeats the newer keeper after the snapshot; it holds no gap.
+      captureSinks(again.server, (_, repeated) => repeated.notice('newer-keeper', NEWER));
       await until(
         async () =>
           after(await logOf(page), 'restart').some(
@@ -582,18 +626,52 @@ test('the terminal view', async (t) => {
           ),
         'a fresh snap',
       );
-      // The same screen; the "restarted" bar above it then makes the area smaller, and the
-      // program redraws below for the new size.
-      const kept = screen.slice(
-        0,
-        screen.indexOf('before the restart') + 'before the restart'.length,
-      );
-      await until(async () => (await screenText(page)).startsWith(kept), 'the same screen');
       await typeLine(page, '/red after');
       await untilScreen(page, /^after$/m);
-      assert.equal(await noticeText(page, 'newer-keeper'), '', 'not repeated: no longer holds');
-      assert.equal(await noticeText(page, 'gap'), '', 'dismissed: not shown for a repeat');
+      assert.equal(await noticeText(page, 'gap'), '', 'not repeated: no longer holds');
+      assert.equal(await noticeText(page, 'newer-keeper'), '', 'dismissed: not shown again');
       // The connection lost and made again while the server restarted is no problem of the page.
+      assert.deepEqual(
+        l.problems.filter((p) => !/ERR_CONNECTION_REFUSED|WebSocket/.test(p)),
+        [],
+        'the page reports no problem',
+      );
+    },
+  );
+
+  await t.test(
+    'after a server restart the terminal shows the same screen, from a fresh snap',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      d.resumable(S1);
+      const term = await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      const port = l.server.port;
+      // A first restart puts app.js's "restarted" bar above the list and the terminal: the
+      // terminal's area gets smaller and the program redraws at the new size. The second one
+      // shows the same bar, so the area stays as it is and the screens can be compared whole.
+      await l.server.stop('the test restarts it');
+      let server = (await d.start({ port })).server;
+      await showsText(page, '#info-text', RESTARTED);
+      await connection(page, 'open');
+      await typeLine(page, '/red before the second restart');
+      await untilScreen(page, /^before the second restart$/m);
+      await sleep(1000); // nothing more comes: the screen is still
+      const screen = await screenText(page);
+
+      await mark(page, 'restart');
+      await server.stop('the test restarts it again');
+      server = (await d.start({ port })).server;
+      await until(
+        async () =>
+          after(await logOf(page), 'restart').some(
+            (entry) => entry.e === 'in' && entry.t === 'snap' && entry.term === term,
+          ),
+        'a fresh snap',
+      );
+      await until(async () => (await screenText(page)) === screen, 'the same screen, whole', 5000);
+      assert.ok(server.port === port);
       assert.deepEqual(
         l.problems.filter((p) => !/ERR_CONNECTION_REFUSED|WebSocket/.test(p)),
         [],
@@ -656,6 +734,87 @@ test('the terminal view', async (t) => {
       await untilScreen(page, /\/title not the window title/);
       await sleep(300);
       assert.ok(!(await page.title()).includes('not the window title'));
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'a program that ends inside a synchronized update leaves its last screen readable at once, not a second later',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      d.resumable(S1);
+      const term = await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      // In the page: when the exit came (the recorder logs it before app.js gets it) and when the
+      // screen first showed the program's last words.
+      await page.evaluate((term) => {
+        const times: { exit?: number; drawn?: number } = {};
+        Reflect.set(globalThis, 'drawTimes', times);
+        const timer = setInterval(() => {
+          const log = JSON.parse(sessionStorage.getItem('skydeck-test-log') ?? '[]') as {
+            e: string;
+            t?: string;
+            term?: string;
+          }[];
+          if (times.exit === undefined && log.some((e) => e.e === 'in' && e.t === 'exit')) {
+            times.exit = performance.now();
+          }
+          const rows = document.querySelector(
+            `#terminal .tv-term[data-term="${term}"] .xterm-rows`,
+          );
+          if (times.drawn === undefined && rows?.textContent?.includes('the last words') === true) {
+            times.drawn = performance.now();
+          }
+          if (times.exit !== undefined && times.drawn !== undefined) clearInterval(timer);
+        }, 5);
+      }, term);
+      // ESC [ ? 2026 h (synchronized output on) with the last words, and the program ends at once:
+      // both lines in one read, sent from the server's side so that nothing comes between them.
+      l.server.hub.input(term, Buffer.from('/red \x1b[?2026hthe last words\r/fail 3\r'));
+      await page.waitForSelector('#terminal .tv-term.over', { timeout: PAGE_WAIT_MS });
+      await until(
+        async () =>
+          (await page.evaluate(
+            () => (Reflect.get(globalThis, 'drawTimes') as { drawn?: number }).drawn,
+          )) !== undefined,
+        'the last screen drawn',
+      );
+      const times = await page.evaluate(
+        () => Reflect.get(globalThis, 'drawTimes') as { exit?: number; drawn?: number },
+      );
+      assert.ok(times.exit !== undefined && times.drawn !== undefined);
+      // xterm.js on its own draws a held-back screen a second after it held it back.
+      assert.ok(
+        times.drawn - times.exit < 400,
+        `drawn ${Math.round(times.drawn - times.exit)} ms after the exit came`,
+      );
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    "a program's malformed sequence puts nothing into the console (the page's xterm.js logs nothing)",
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      const console: string[] = [];
+      page.on('console', (message) => console.push(`${message.type()}: ${message.text()}`));
+      d.resumable(S1);
+      await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      // ESC é, and é inside an APC: parsing errors that xterm.js logs at its default level.
+      await page.keyboard.type('/red ');
+      await page.keyboard.press('Escape');
+      await page.keyboard.type('é');
+      await page.keyboard.press('Escape');
+      await page.keyboard.type('_é');
+      await page.keyboard.press('Escape');
+      await page.keyboard.type('\\ after');
+      await page.keyboard.press('Enter');
+      await untilScreen(page, /after$/m);
+      await sleep(500);
+      assert.deepEqual(console, [], 'nothing in the console');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
