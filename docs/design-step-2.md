@@ -837,7 +837,11 @@ both in memory: the **expected session**. Which session it shows is decided agai
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
   terminal's program or a descendant of it (parent pids read from `/proc/<pid>/stat`, at most 8
   steps up, each judged alive by design 5.5's rule). The descendant rule covers a `claudeCommand`
-  that is a wrapper;
+  that is a wrapper. A step whose `/proc` file cannot be read (design 5.5's "unknown") decides
+  nothing: that holder's session is neither given to a terminal by it nor listed as running in
+  another terminal (7.9), and while any holder is unknown no terminal newly becomes "started, not
+  reported"; the server keeps the previous tick's answer for that session and acts on nothing that
+  rests on it (stage A's plan, task 21, ruled);
 - a terminal shows the session one of its holders holds. After `/clear` or an in-session `/resume`
   that is the new session; the old one becomes `not-running` (with no mark, design 6.3), and the
   terminal moves to the new session's row with its slot;

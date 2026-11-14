@@ -2968,6 +2968,14 @@ export interface Mapping {
   notReported: ReadonlySet<string>;
   /** Running sessions none of whose holders belongs to a terminal, with the first holder's pid and tty. */
   elsewhere: ReadonlyMap<string, { pid: number; tty: string | null }>;
+  /** Ruled by the plan owner (task 21, review 1): the sessions with a holder whose chain could not
+   *  be read (design 5.5's "unknown": a /proc read that failed, a stat line without a readable
+   *  start or parent, no boot id). Such a session is not put into `elsewhere` by this pass and is
+   *  not given to a terminal by that holder; in a pass where this set is not empty (or without a
+   *  boot id) no terminal is newly put into `notReported`. A consumer keeps the previous pass's
+   *  answer for a session in `unknown` and takes no action that rests on it (task 23's tick: no
+   *  terminal is closed because "its session runs elsewhere", nothing is marked not reported). */
+  unknown: ReadonlySet<string>;
 }
 export function mapTerminals(input: { terminals: readonly TerminalInfo[]; sessions: readonly DerivedSession[]; proc: Proc; bootId: string | null; nowNs: Ns; startTimeoutNs: Ns }): Mapping;
 ```

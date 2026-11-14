@@ -16,16 +16,27 @@ export interface Mapping {
   notReported: ReadonlySet<string>;
   /** Running sessions none of whose holders belongs to a terminal, with the first holder's pid and tty. */
   elsewhere: ReadonlyMap<string, { pid: number; tty: string | null }>;
+  /**
+   * Ruled by the plan owner (task 21, review 1): the sessions with a holder whose chain could not
+   * be read (design 5.5's "unknown": a /proc read that failed, a stat line without a readable
+   * process start or parent, no boot id). Such a session is not put into `elsewhere` by this pass
+   * and is not given to a terminal by that holder; in a pass where this set is not empty no terminal
+   * is newly put into `notReported` (the unread holder may be its holder). A consumer keeps the
+   * previous pass's answer for a session in `unknown` and takes no action that rests on it (task
+   * 23's tick: no terminal is closed because "its session runs elsewhere", nothing is marked not
+   * reported).
+   */
+  unknown: ReadonlySet<string>;
 }
 
 /** S2 7.5: a holder belongs to a terminal when the program is at most this many parents above it. */
 const MAX_STEPS = 8;
 
-/** The terminal a holder belongs to, and how many steps up its program is (0: the holder itself). */
-interface Belonging {
-  termId: string;
-  steps: number;
-}
+/**
+ * Where a holder is: in a terminal (its program `steps` parents up, 0 being the holder itself),
+ * outside every terminal, or unknown (its chain could not be read).
+ */
+type Place = { termId: string; steps: number } | 'outside' | 'unknown';
 
 /**
  * S2 7.5: walks up from the holder's process — the holder itself, then its parent, at most
@@ -33,56 +44,73 @@ interface Belonging {
  * judged alive by design 5.5's rule: its stat line exists and its start is the one known for it (the
  * holder's recorded start; for a parent, the start its own stat line gives, which may not be later
  * than its child's — a parent that started after its child is another process that took a pid
- * freed meanwhile). A stat line that cannot be read, or a step that is not alive, ends the walk:
- * the holder belongs to no terminal.
+ * freed meanwhile). A step that is gone or not alive, a chain that leaves through init or goes on
+ * past MAX_STEPS, is 'outside'. A read that throws, a stat line without a readable process start
+ * or parent, or a holder without a recorded start is 'unknown': nothing is decided on it (design
+ * 5.5; ruled).
  */
-function belongingOf(
+function placeOf(
   holder: Holder,
   programs: ReadonlyMap<number, { procStart: number; termId: string }>,
   proc: Proc,
-): Belonging | null {
+): Place {
   let pid = holder.process.pid;
   let start = holder.process.procStart;
-  for (let steps = 0; start !== null; steps++) {
+  if (start === null) {
+    return 'unknown';
+  }
+  for (let steps = 0; ; steps++) {
     const program = programs.get(pid);
     if (program !== undefined && program.procStart === start) {
       return { termId: program.termId, steps };
     }
     if (steps === MAX_STEPS) {
-      return null;
+      return 'outside';
     }
     let stat: string | null;
     let parentStat: string | null;
-    let parent: number | null;
     try {
       stat = proc.stat(pid);
-      if (stat === null || procStartFromStat(stat) !== start) {
-        return null; // gone, or another process now has the pid
+      if (stat === null) {
+        return 'outside'; // gone
       }
-      parent = parentPidFromStat(stat);
-      if (parent === null || parent <= 1) {
-        return null; // no parent, or init: the chain has left every terminal
+      const own = procStartFromStat(stat);
+      const parent = parentPidFromStat(stat);
+      if (own === null || parent === null) {
+        return 'unknown';
+      }
+      if (own !== start) {
+        return 'outside'; // another process now has the pid
+      }
+      if (parent <= 1) {
+        return 'outside'; // no parent, or init: the chain has left every terminal
       }
       parentStat = proc.stat(parent);
+      if (parentStat === null) {
+        return 'outside'; // the parent is gone (the child is being given to init)
+      }
+      const parentStart = procStartFromStat(parentStat);
+      if (parentStart === null) {
+        return 'unknown';
+      }
+      if (parentStart > start) {
+        return 'outside';
+      }
+      pid = parent;
+      start = parentStart;
     } catch {
-      return null; // a /proc read failed: nothing is decided on it
+      return 'unknown'; // a /proc read failed: nothing is decided on it
     }
-    const parentStart = parentStat === null ? null : procStartFromStat(parentStat);
-    if (parentStart === null || parentStart > start) {
-      return null;
-    }
-    pid = parent;
-    start = parentStart;
   }
-  return null;
 }
 
 /**
  * S2 7.5 and 7.9 for every terminal and every running session:
  *
  * - A terminal's program is the process its keeper reported (`program`), while the terminal has no
- *   exit; a holder of the current boot (`bootId`; none without one) belongs to the terminal whose
- *   program it is or descends from (`belongingOf`).
+ *   exit; a holder of the current boot belongs to the terminal whose program it is or descends from
+ *   (`placeOf`). A holder of another boot is no live holder and is left out. Without a boot id no
+ *   holder can be judged: each is unknown.
  * - `shown`: of the holders that belong to a terminal, the one nearest its program decides (a
  *   scripted run that the program started does not move it), then the latest event, then the
  *   session id. A terminal none of whose holders belongs to it keeps the session it showed
@@ -90,10 +118,12 @@ function belongingOf(
  *   yet"): between the end and the start of `/clear`, and after its program ended, it stays with
  *   its session — else null.
  * - `notReported`: a terminal with a program, no exit and nothing shown, opened `startTimeoutNs`
- *   or longer before `nowNs`.
- * - `elsewhere`: a session with holders none of which belongs to a terminal, with its first
- *   holder's pid (holders are latest first) and the target of that process's fd 0, null when it
- *   cannot be read.
+ *   or longer before `nowNs` — while `unknown` is not empty, or without a boot id, only one that
+ *   was not reported already.
+ * - `elsewhere`: a session with a holder outside every terminal, none in one and none unknown, with
+ *   the first such holder's pid (holders are latest first) and the target of that process's fd 0,
+ *   null when it cannot be read.
+ * - `unknown`: see Mapping (ruled).
  */
 export function mapTerminals(input: {
   terminals: readonly TerminalInfo[];
@@ -117,37 +147,41 @@ export function mapTerminals(input: {
   /** termId → the holder that decides what the terminal shows so far. */
   const best = new Map<string, { sessionId: string; steps: number; sinceNs: Ns }>();
   const elsewhere = new Map<string, { pid: number; tty: string | null }>();
+  const unknown = new Set<string>();
   for (const session of sessions) {
-    if (session.holders.length === 0) {
-      continue;
-    }
     let inTerminal = false;
+    let outside: Holder | null = null;
     for (const holder of session.holders) {
-      if (bootId === null || holder.process.bootId !== bootId || programs.size === 0) {
-        continue;
+      if (bootId !== null && holder.process.bootId !== bootId) {
+        continue; // of another boot: not alive now
       }
-      const belonging = belongingOf(holder, programs, proc);
-      if (belonging === null) {
-        continue;
-      }
-      inTerminal = true;
-      const current = best.get(belonging.termId);
-      const candidate = { sessionId: session.id, steps: belonging.steps, sinceNs: holder.sinceNs };
-      if (current === undefined || nearer(candidate, current)) {
-        best.set(belonging.termId, candidate);
+      const place: Place =
+        bootId === null
+          ? 'unknown'
+          : programs.size === 0
+            ? 'outside'
+            : placeOf(holder, programs, proc);
+      if (place === 'unknown') {
+        unknown.add(session.id);
+      } else if (place === 'outside') {
+        outside ??= holder;
+      } else {
+        inTerminal = true;
+        const current = best.get(place.termId);
+        const candidate = { sessionId: session.id, steps: place.steps, sinceNs: holder.sinceNs };
+        if (current === undefined || nearer(candidate, current)) {
+          best.set(place.termId, candidate);
+        }
       }
     }
-    if (!inTerminal) {
-      const first = session.holders[0];
-      if (first !== undefined) {
-        elsewhere.set(session.id, {
-          pid: first.process.pid,
-          tty: proc.fdTarget(first.process.pid, 0),
-        });
-      }
+    if (!inTerminal && !unknown.has(session.id) && outside !== null) {
+      const { pid } = outside.process;
+      elsewhere.set(session.id, { pid, tty: proc.fdTarget(pid, 0) });
     }
   }
 
+  // Without a boot id derive saw no holder at all, so an empty `unknown` proves nothing either.
+  const decided = unknown.size === 0 && bootId !== null;
   const shown = new Map<string, string | null>();
   const notReported = new Set<string>();
   for (const terminal of terminals) {
@@ -157,12 +191,13 @@ export function mapTerminals(input: {
       sessionId === null &&
       terminal.program !== null &&
       terminal.exit === null &&
-      nowNs - terminal.openedNs >= startTimeoutNs
+      nowNs - terminal.openedNs >= startTimeoutNs &&
+      (decided || terminal.notReported)
     ) {
       notReported.add(terminal.id);
     }
   }
-  return { shown, notReported, elsewhere };
+  return { shown, notReported, elsewhere, unknown };
 }
 
 /** Nearer the program first, then the later event, then the lower session id. */

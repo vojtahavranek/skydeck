@@ -187,9 +187,9 @@ describe('mapTerminals: which session a terminal shows', () => {
     assert.equal(got.shown.get('aaaaaaaaaaaa'), null);
   });
 
-  test('a holder of another boot, or no boot id at all, belongs to no terminal', () => {
+  test('a holder of another boot is no live holder: neither the terminal’s nor elsewhere', () => {
     const proc = procOf([[5000, 900, 4000]]);
-    const other = map(
+    const got = map(
       [terminal({ id: 'aaaaaaaaaaaa', program: PROGRAM })],
       [
         ds({
@@ -200,34 +200,9 @@ describe('mapTerminals: which session a terminal shows', () => {
       ],
       proc,
     );
-    assert.equal(other.shown.get('aaaaaaaaaaaa'), null);
-    const none = map(
-      [terminal({ id: 'aaaaaaaaaaaa', program: PROGRAM })],
-      [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
-      proc,
-      { bootId: null },
-    );
-    assert.equal(none.shown.get('aaaaaaaaaaaa'), null);
-  });
-
-  test('a /proc read that fails while walking up ends the walk: not the terminal, and no throw', () => {
-    const proc = procOf([[5000, 900, 4000]]);
-    const failing: Proc = {
-      ...proc,
-      stat: (pid) => {
-        if (pid === 5001) {
-          throw Object.assign(new Error('denied'), { code: 'EACCES' });
-        }
-        return proc.stat(pid);
-      },
-    };
-    const got = map(
-      [terminal({ id: 'aaaaaaaaaaaa', program: PROGRAM })],
-      [ds({ id: S1, state: 'running', holders: [holder(5001, 901)] })],
-      failing,
-    );
     assert.equal(got.shown.get('aaaaaaaaaaaa'), null);
-    assert.ok(got.elsewhere.has(S1));
+    assert.equal(got.elsewhere.size, 0);
+    assert.equal(got.unknown.size, 0);
   });
 
   test('the holder nearest the program decides: a scripted run below it does not move the terminal', () => {
@@ -364,6 +339,136 @@ describe('mapTerminals: no holder', () => {
       proc,
     );
     assert.equal(got.shown.get('aaaaaaaaaaaa'), S2);
+  });
+});
+
+/** `proc` whose stat throws (EACCES) for `pid`: a process that is there but cannot be read. */
+function unreadable(proc: Proc, pid: number): Proc {
+  return {
+    ...proc,
+    stat: (asked) => {
+      if (asked === pid) {
+        throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      }
+      return proc.stat(asked);
+    },
+  };
+}
+
+describe('mapTerminals: a /proc read that fails is unknown (ruled)', () => {
+  /**
+   * Terminal A (program 5000) shows S3 (its holder is the program); B (program 6000) and C
+   * (program 7000) have no holder and were opened long ago, C already "not reported"; S2 runs
+   * outside (8000); S1's holder is `s1Holder`.
+   */
+  function pass(
+    proc: Proc,
+    s1Holder: Holder,
+    aShowed: string | null = null,
+  ): ReturnType<typeof mapTerminals> {
+    return map(
+      [
+        terminal({ id: 'aaaaaaaaaaaa', program: PROGRAM, sessionId: aShowed }),
+        terminal({ id: 'bbbbbbbbbbbb', program: { pid: 6000, procStart: 600 } }),
+        terminal({ id: 'cccccccccccc', program: { pid: 7000, procStart: 700 }, notReported: true }),
+      ],
+      [
+        ds({ id: S1, state: 'running', holders: [s1Holder] }),
+        ds({ id: S2, state: 'running', holders: [holder(8000, 800)] }),
+        ds({ id: S3, state: 'running', holders: [holder(5000, 900)] }),
+      ],
+      proc,
+      { nowNs: T0 + 10n * TIMEOUT },
+    );
+  }
+  const PROCESSES: [number, number, number][] = [
+    [5000, 900, 4000],
+    [5001, 901, 5000],
+    [5002, 902, 5001],
+    [6000, 600, 4000],
+    [7000, 700, 4000],
+    [8000, 800, 1],
+  ];
+
+  test('at the holder: its session is unknown, not elsewhere; the rest of the pass is decided', () => {
+    const got = pass(unreadable(procOf(PROCESSES), 5002), holder(5002, 902));
+    assert.deepEqual([...got.unknown], [S1]);
+    assert.equal(got.elsewhere.has(S1), false);
+    assert.deepEqual([...got.elsewhere.keys()], [S2]);
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S3);
+    assert.equal(got.shown.get('bbbbbbbbbbbb'), null);
+  });
+
+  test('in such a pass no terminal is newly “not reported”; one that was stays', () => {
+    const got = pass(unreadable(procOf(PROCESSES), 5002), holder(5002, 902));
+    assert.deepEqual([...got.notReported], ['cccccccccccc']);
+    // The same pass with every read working: B is not reported now.
+    const readable = pass(procOf(PROCESSES), holder(8000, 800));
+    assert.deepEqual([...readable.notReported].sort(), ['bbbbbbbbbbbb', 'cccccccccccc']);
+    assert.equal(readable.unknown.size, 0);
+  });
+
+  test('at an ancestor: unknown too; a terminal it may belong to keeps what it showed', () => {
+    const proc = unreadable(procOf(PROCESSES), 5001);
+    const got = pass(proc, holder(5002, 902), S1);
+    assert.deepEqual([...got.unknown], [S1]);
+    assert.equal(got.elsewhere.has(S1), false);
+    // A is shown S3 by its readable holder; with no other holder it would keep S1.
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S3);
+    const alone = map(
+      [terminal({ id: 'aaaaaaaaaaaa', program: PROGRAM, sessionId: S1 })],
+      [ds({ id: S1, state: 'running', holders: [holder(5002, 902)] })],
+      proc,
+    );
+    assert.equal(alone.shown.get('aaaaaaaaaaaa'), S1);
+    assert.deepEqual([...alone.unknown], [S1]);
+  });
+
+  test('a stat line whose process start or parent cannot be read is unknown, not “gone”', () => {
+    const proc = procOf(PROCESSES);
+    proc.setProcess(5001, { stat: '5001 (claude) S', cmdline: [] });
+    const got = pass(proc, holder(5002, 902));
+    assert.deepEqual([...got.unknown], [S1]);
+    assert.equal(got.elsewhere.has(S1), false);
+  });
+
+  test('a session with one unreadable holder and one that is a terminal’s: shown by that one, still unknown', () => {
+    const got = map(
+      [terminal({ id: 'aaaaaaaaaaaa', program: PROGRAM })],
+      [ds({ id: S1, state: 'running', holders: [holder(5002, 902), holder(5000, 900)] })],
+      unreadable(procOf(PROCESSES), 5002),
+    );
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S1);
+    assert.deepEqual([...got.unknown], [S1]);
+    assert.equal(got.elsewhere.size, 0);
+  });
+
+  test('without a boot id every running session is unknown: nothing elsewhere, nothing newly not reported', () => {
+    const got = pass(procOf(PROCESSES), holder(8000, 800));
+    assert.equal(got.unknown.size, 0);
+    const none = map(
+      [terminal({ id: 'bbbbbbbbbbbb', program: { pid: 6000, procStart: 600 } })],
+      [ds({ id: S2, state: 'running', holders: [holder(8000, 800)] })],
+      procOf(PROCESSES),
+      { bootId: null, nowNs: T0 + 10n * TIMEOUT },
+    );
+    assert.deepEqual([...none.unknown], [S2]);
+    assert.equal(none.elsewhere.size, 0);
+    assert.equal(none.notReported.size, 0);
+    assert.equal(none.shown.get('bbbbbbbbbbbb'), null);
+    // Derive sees no holder at all without a boot id: still nothing newly not reported.
+    const empty = map(
+      [terminal({ id: 'bbbbbbbbbbbb', program: { pid: 6000, procStart: 600 } })],
+      [],
+      procOf(PROCESSES),
+      { bootId: null, nowNs: T0 + 10n * TIMEOUT },
+    );
+    assert.equal(empty.notReported.size, 0);
+  });
+
+  test('a pass in which nothing is unknown has an empty set', () => {
+    const got = map([], [ds({ id: S1 })], procOf([]));
+    assert.equal(got.unknown.size, 0);
   });
 });
 
