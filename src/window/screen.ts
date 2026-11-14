@@ -3,6 +3,7 @@
 // replays, and snapshots that rebuild the screen exactly.
 import type { IBufferCell, Terminal } from '@xterm/headless';
 
+import { escapeTail } from './escape-tail.ts';
 import type { XtermModules } from './xterm.ts';
 
 export interface ScreenSide {
@@ -145,14 +146,18 @@ function colourCodes(mode: number, colour: number, base: number): string[] {
   return [];
 }
 
-/** The SGR sequence that gives a cell's attributes from the default ones; '' for none. */
-function sgrOf(cell: IBufferCell): string {
+/**
+ * The SGR sequence that gives a cell's attributes from the default ones; '' for none. `underline`
+ * says whether it is underlined: xterm.js 6.0.0 reports a cell or pen that carries an OSC 8 link
+ * as underlined (the link's dashed underline), which the caller may not want as a real SGR 4.
+ */
+function sgrOf(cell: IBufferCell, underline = cell.isUnderline() !== 0): string {
   const codes: string[] = [];
-  const flags: [number, number][] = [
+  const flags: [number | boolean, number][] = [
     [cell.isBold(), 1],
     [cell.isDim(), 2],
     [cell.isItalic(), 3],
-    [cell.isUnderline(), 4],
+    [underline, 4],
     [cell.isBlink(), 5],
     [cell.isInverse(), 7],
     [cell.isInvisible(), 8],
@@ -212,14 +217,26 @@ function correctSerialized(text: string): string {
     .replaceAll('\x1b[0D', '');
 }
 
+/** The pen as xterm.js keeps it: a cell's attributes, and the real underline apart from a link's. */
+type Pen = IBufferCell & { getUnderlineStyle?: () => number };
+
 /**
  * The pen (the attributes the next character gets), read from the xterm.js internal the vendored
  * serialise addon itself reads for its pen; null if this xterm.js has none (a test pins it).
  */
-function penOf(term: Terminal): IBufferCell | null {
-  const core = (term as unknown as { _core?: { _inputHandler?: { _curAttrData?: IBufferCell } } })
-    ._core;
+function penOf(term: Terminal): Pen | null {
+  const core = (term as unknown as { _core?: { _inputHandler?: { _curAttrData?: Pen } } })._core;
   return core?._inputHandler?._curAttrData ?? null;
+}
+
+/**
+ * The pen's SGR sequence. Its underline is only a real one (SGR 4, which `getUnderlineStyle`
+ * reports): a link is not carried across a snapshot (S2 7.2), and the underline xterm.js reports
+ * for an open link would otherwise go on after the program closes it (ruled on task 33).
+ */
+function penSgr(pen: Pen): string {
+  const style = pen.getUnderlineStyle?.();
+  return sgrOf(pen, style === undefined ? pen.isUnderline() !== 0 : style !== 0);
 }
 
 /** S2 7.2's additions to the serialise addon's snapshot. */
@@ -236,7 +253,7 @@ function additions(term: Terminal, t: Tracked): string {
   out += cursorPosition(term);
   // Last, so that nothing above (the re-printed cell) changes it again.
   const pen = penOf(term);
-  return pen === null ? out : `${out}\x1b[0m${sgrOf(pen)}`;
+  return pen === null ? out : `${out}\x1b[0m${penSgr(pen)}`;
 }
 
 /**
@@ -255,6 +272,9 @@ export function createScreen(
     scrollback: SCROLLBACK,
     // The width addon uses the unicode API, which xterm.js still marks as proposed.
     allowProposedApi: true,
+    // xterm.js's own log quotes the program's output (a parsing error names the character and
+    // the parameters), and the server's stderr goes to server.log (S2 5.2): it logs nothing.
+    logLevel: 'off',
   });
   term.loadAddon(new modules.UnicodeGraphemesAddon());
   const serializer = new modules.SerializeAddon();
@@ -271,10 +291,12 @@ export function createScreen(
 
   /**
    * The snapshot's seam (S2 7.2): the escape sequence the stream stands inside at the chain point,
-   * appended last so that the next record completes it. Empty until plan task 33 follows the
-   * stream; until then a snapshot taken inside an escape sequence is not exact.
+   * appended last so that the next record completes it. The scanner is fed exactly what the
+   * headless terminal parses, one push per write: the snapshot the screen starts from (which can
+   * itself end inside a sequence) and every record, as each is applied.
    */
-  const unfinished = (): string => '';
+  const tail = escapeTail();
+  const unfinished = (): string => tail.unfinished();
 
   /** Runs `step` after everything queued before it; a failed step does not stop the chain. */
   function enqueue<T>(step: () => T | Promise<T>): Promise<T> {
@@ -335,18 +357,21 @@ export function createScreen(
 
   if (init.snapshot !== null) {
     const snapshot = init.snapshot;
-    void enqueue(() => new Promise<void>((resolve) => term.write(snapshot, resolve)));
+    void enqueue(() => {
+      tail.push(encoder.encode(snapshot));
+      return new Promise<void>((resolve) => term.write(snapshot, resolve));
+    });
   }
 
   return {
     output(bytes) {
       // Queued, so applied later: the caller may reuse its buffer at once.
       const record = bytes.slice();
-      return enqueue(() =>
-        disposed
-          ? undefined
-          : new Promise<void>((resolve) => term.write(record, resolve)).then(deliver),
-      );
+      return enqueue(() => {
+        if (disposed) return undefined;
+        tail.push(record);
+        return new Promise<void>((resolve) => term.write(record, resolve)).then(deliver);
+      });
     },
     resize(cols, rows) {
       try {

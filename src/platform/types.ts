@@ -59,7 +59,10 @@ export interface Files {
   /** mkdir -p; `mode` applies to directories it creates. */
   mkdirp(path: string, mode?: number): void;
   rename(from: string, to: string): void;
-  /** Removes a file or symlink; no error when absent. */
+  /**
+   * Removes a file or symlink, never following a symlink (a dangling one is removed too); no error
+   * when absent; a directory is refused.
+   */
   remove(path: string): void;
   /** rm -rf; no error when absent. */
   removeTree(path: string): void;

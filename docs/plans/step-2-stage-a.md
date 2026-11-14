@@ -264,6 +264,12 @@ export interface FileInfo {
   mode: number; // permission bits (stat.mode & 0o7777)
   uid: number;
 }
+export interface Files {
+  // remove() (step 1's) changes (ruled, task 19): it unlinks, so it NEVER FOLLOWS a symbolic link —
+  // a dangling one is removed too (Node.js 24.12's rmSync followed it and left it in place) — and
+  // refuses a directory; a missing path is no error.
+  remove(path: string): void;
+}
 export interface Proc {
   // bootId() and stat() (step 1's) change (ruling, for task 8's three-valued pidLineState): null
   // only when the file is not there (ENOENT, ENOTDIR, ESRCH); any other failure (EACCES, EMFILE …)
@@ -2606,18 +2612,50 @@ at a live interop socket.
 
 ```ts
 // src/window/edge.ts
+/** THE one way stage A starts a Windows program (S2 2; ruled, task 19): `args` as an argument
+ *  list, detached, stdio /dev/null, cwd /mnt/c, the platform's environment with WSL_INTEROP =
+ *  `interop` when given (else unchanged). Rejects, starting nothing, when an argument is empty,
+ *  holds a '"' or a control character (S2 2: U+0000–U+001F, U+007F, U+0080–U+009F), or ends
+ *  with a backslash; otherwise as startDetached. */
+export function startWindowsProgram(platform: Platform, command: string, args: readonly string[], interop: string | null): Promise<Detached>;
+/** RangeError (ruled, task 19) for a port outside 1–65535 or a token that is not base64url: the
+ *  caller's mistake, nothing started. { ok: false, line } for a missing program (S2 5.3's line),
+ *  a profile folder that cannot be derived or cannot be passed to Edge (S2 5.3, 5.4), any other
+ *  start failure. */
 export function startEdge(platform: Platform, window: WindowConfig, configPath: string, port: number, token: string, interop: string | null): Promise<{ ok: true } | { ok: false; line: string }>;
 export function openLink(platform: Platform, window: WindowConfig, url: string, interop: string | null): Promise<boolean>;
 // src/window/interop.ts
+/** refresh(): the link points at the SOCKET a candidate leads to (its realpath; ruled, task 19),
+ *  never at another link or at itself; with no candidate accepting, the link is removed and null. */
 export interface Interop { refresh(): Promise<string | null>; current(): string | null }
 export function createInterop(platform: Platform, files: RuntimeFiles): Interop;
-// src/window/keepalive.ts
+/** createInterop with the first candidate given (ruled, task 19): task 23 passes `interopFirst`
+ *  (A32), tests a path in their sandbox; createInterop is this with '/run/WSL/1_interop'. */
+export function createInteropFrom(platform: Platform, files: RuntimeFiles, first: string): Interop;
+/** One unix connection, closed at once (ruled, task 19's review 2): 'refused' for ECONNREFUSED or
+ *  ENOENT; 'unknown' for another error, no answer within 2 s, or a path that is not an absolute
+ *  one-line path. The interop link and the keep-alive both judge a socket by it. */
+export function probeSocket(platform: Platform, path: string | null): Promise<'accepts' | 'refused' | 'unknown'>;
+// src/window/keepalive.ts — S2 6.1 (ruled, review 2): a keep-alive this server did not start is also
+// judged by keepalive.interop (probeSocket 'refused': its wsl.exe is gone; an accepting socket is
+// asked again after 3 s — 3 s + up to 1 s to a tick + the 5 s retry + up to 1 s to a tick: under
+// 10 s, inside WSL's 15 s (S2 6) — any other
+// answer at the next tick); a script whose wsl.exe is gone is an
+// orphan — its line no longer counts, and ONE SIGTERM when its line is 'alive' (never on
+// 'unknown'), its cmdline has an argument named skydeck-keepalive and one that is files.dir, and
+// the end is known (its line was seen while its wsl.exe ran, or the socket says refused — a line
+// only inferred at the end tick is not signalled on the inference); then the schedule starts a
+// new keep-alive.
 export interface KeepAlive { state(): KeepAlivePayload; tick(): Promise<void>; onChange(listener: (state: KeepAlivePayload) => void): void }
 export function createKeepAlive(deps: { platform: Platform; window: WindowConfig; files: RuntimeFiles; appRoot: string; interop: Interop }): KeepAlive;
 ```
 
 **Files**
 - Create: `src/window/edge.ts`, `src/window/interop.ts`, `src/window/keepalive.ts`
+- Modify (ruled, task 19): `src/platform/real.ts` (`Files.remove` unlinks: Node.js 24.12's
+  `rmSync` left a dangling symbolic link in place), `src/platform/types.ts` (its JSDoc),
+  `test/platform/real.test.ts`; `docs/design-step-2.md`
+  2, 5.3, 6.1, 6.4 (the rulings below)
 - Test: `test/window/edge.test.ts`, `test/window/interop.test.ts`, `test/window/keepalive.test.ts`
   (fake processes; never a Windows program)
 
@@ -2625,19 +2663,40 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
 - Edge: `startDetached` called with `window.edge`, exactly `edgeArgs(...)`, cwd `/mnt/c`, stdio
   ignored, `WSL_INTEROP` = the link when there is one; a missing program → S2 5.3's line naming
   `window.edge`, `<configPath>` and `--print-url`; the profile folder from `window.profileDir`
-  or derived (task 8); derivation failing → the error naming `window.profileDir`.
+  or derived (task 8); derivation failing → the error naming `window.profileDir`; a profile
+  folder that would change how Edge splits its command line → S2 5.3's line naming
+  `window.profileDir`, nothing started; a bad port or token → `RangeError`, nothing started.
+- `startWindowsProgram`: each refused argument (empty, `"`, a control character — C0, DEL and
+  C1 —, a trailing backslash) → rejected, nothing started.
 - `openLink`: an allowed URL → `window.edge` with that URL as the only argument; a refused one
   (task 8's `linkToOpen`) → nothing started, false.
 - Keep-alive: mode `wsl` and no live `keepalive.pid` → `wsl.exe -d <WSL_DISTRO_NAME> -u
-  <userName> --exec /bin/sh <appRoot>/bin/skydeck-keepalive <runtimeDir>`; a live `keepalive.pid`
-  (a process the test started) → nothing started, state `running`; the started process gone at a
-  tick → `notice` through `onChange` and restarts after 5 s, 30 s, then every 5 minutes (fake
-  clock), state `failed` with the error while it is down; mode `off` → never started, state `off`;
-  no `WSL_DISTRO_NAME` → `failed` with a reason.
-- Interop: candidates in S2 6.4's order — `/run/WSL/1_interop` (the path is a parameter of a
-  private helper so the test points it into the sandbox), `keepalive.interop`'s content, the
-  server's own `WSL_INTEROP` — the link points at the first that accepts a unix connection (test
-  sockets); none → no link, `null`; a later refresh moves the link when the first one dies.
+  <userName> --exec /bin/sh <appRoot>/bin/skydeck-keepalive <runtimeDir>` in `/mnt/c`; a live
+  `keepalive.pid` (a process the test started) → nothing started, state `running`; the started
+  process gone at a tick → `notice` through `onChange` and restarts after 5 s, 30 s, then every 5
+  minutes (fake clock), state `failed` with the error while it is down; after 5 minutes running
+  the schedule starts over at 5 s; the line of a `wsl.exe` seen to end does not count as running,
+  also when it is first seen at the tick that sees the end (written, and `wsl.exe` ended, between
+  two ticks) and when it could not be read while `wsl.exe` ran;
+  mode `off` → never started, state `off`; no `WSL_DISTRO_NAME` → `failed` with a reason.
+- Keep-alive, its Windows side (ruled, review 2; fakes only): a keep-alive found running is taken
+  when its `keepalive.interop` socket accepts; an orphan when it is refused or gone; not judged
+  (running) for no file, an empty or relative or several-line one, an unreadable one, another
+  error, no answer in time; exactly one SIGTERM to an orphan whose line is alive, none for an
+  `unknown` line, none for a line of another boot; a found keep-alive whose socket later goes →
+  `failed`, one SIGTERM, restarted after 5 s; an accepting socket asked again after 3 s, after any
+  other answer at the next tick; a found keep-alive's `wsl.exe` gone right after an accepted probe
+  replaced within 9 s on the fake clock (under 10 s with real timers, inside WSL's 15 s); a line only inferred at the end tick signalled only when its
+  socket is refused; a SIGTERM only for a command line naming `skydeck-keepalive` and this runtime
+  directory (none for another program, a keeper, another runtime directory, a script named like
+  it, an empty or unreadable command line); a SIGTERM that throws does not stop the start.
+- Interop: candidates in S2 6.4's order — `/run/WSL/1_interop` (the first candidate is
+  `createInteropFrom`'s parameter, so the test points it into the sandbox), `keepalive.interop`'s
+  content, the server's own `WSL_INTEROP` — the link points at the first that accepts a unix
+  connection (test sockets); none → no link, `null`; a later refresh moves the link when the
+  first one dies; a candidate leading through the link never makes it point at itself.
+- `Files.remove` (`test/platform/real.test.ts`): a dangling symbolic link is removed and a link's
+  target is not; a directory is refused.
 
 **Done when:** every Windows-side start of stage A goes through these functions, and the tests
 start no Windows program.
@@ -2728,18 +2787,22 @@ export function escapeTail(): EscapeTail;
   U+009D), DCS (`ESC P` or U+0090), and SOS, PM and APC (`ESC X`, `ESC ^`, `ESC _`, or U+0098,
   U+009E, U+009F). CAN and SUB abort a sequence, an ESC inside one starts a new one, BEL ends an
   OSC, ST (`ESC \` or U+009C) ends a string, and an ESC at the end of a string is kept (half an
-  ST). Where xterm.js disagrees with the VT500 diagram, xterm.js wins: the rebuilt screen is
-  xterm.js too.
+  ST; xterm.js ends the string at that ESC, so the tail is the ESC alone). Where xterm.js
+  disagrees with the VT500 diagram, xterm.js wins: the rebuilt screen is xterm.js too (S2 21).
 - It keeps exactly the bytes that put a fresh parser into the state of the original: a C0 control
   that xterm.js executes inside a CSI is not kept (its effect is already in the snapshot); the
-  bytes of a string that its handler will receive are.
+  bytes of a string that its handler will receive are. Nor is any byte that changes nothing a
+  later byte can see (a digit that leaves a parameter as it is, an intermediate xterm.js has
+  shifted out, what follows a parameter list it stopped reading, the inside of a sequence it
+  ignores), so an ESC, CSI or DCS head stays under 1 KiB however long the program makes it.
 - The kept bytes are decoded as UTF-8: ESC and CSI sequences are ASCII, and a string sequence
   carries whole characters only (task 9), so the snapshot stays valid UTF-8 and no message
   changes.
 - A string sequence whose kept bytes would pass 64 KiB (an OSC 52 or a DCS payload can be large)
-  is kept as its introducer followed by what makes xterm.js 6.0.0 ignore the sequence, so that
-  the rebuilt screen swallows the rest and no handler acts on a cut payload; the original acts on
-  it (xterm.js's own limit is 10 MB). The tail of a snapshot is therefore at most about 64 KiB.
+  is kept as its introducer followed by what makes xterm.js 6.0.0 ignore the sequence (`!` for an
+  OSC, a number that is no number; `!0` for a DCS, its ignore state), so that the rebuilt screen
+  swallows the rest and no handler acts on a cut payload; the original acts on it (xterm.js's own
+  limit is 10 MB). The tail of a snapshot is therefore at most about 64 KiB.
 - `src/window/screen.ts` keeps one scanner per screen, feeds it each record in the chain as the
   record is applied, and feeds it the snapshot a screen starts from (which can itself end inside a
   sequence); the seam's `unfinished()` returns the scanner's tail, appended last, after the cursor
@@ -2752,7 +2815,8 @@ export function escapeTail(): EscapeTail;
 
 **Files**
 - Create: `src/window/escape-tail.ts`
-- Modify: `src/window/screen.ts` (the seam), `test/window/screen.test.ts`
+- Modify: `src/window/screen.ts` (the seam; the pen's real underline and xterm.js's log level
+  off, ruled), `test/window/screen.test.ts`, `docs/design-step-2.md` 5.2, 7.2 and 21 (ruled)
 - Test: `test/window/escape-tail.test.ts`
 
 **Tests** (platform: none — the vendored modules)
@@ -2766,8 +2830,14 @@ export function escapeTail(): EscapeTail;
   byte) — part of task 12's recorded stream, and one dense with sequences (SGR with
   sub-parameters, DECSET and DECRST, DECSCUSR, OSC 0 titles, OSC 8 links, an OSC 52, DECRQSS, the
   alternate screen) that avoids what S2 7.2 names as not restored — split at every byte that is
-  not inside a UTF-8 character: screen A gets the first part, screen B is built from A's snapshot
-  and gets the rest, and B equals a screen that got the stream whole, by task 12's comparison.
+  not inside a UTF-8 character nor inside a grapheme cluster (`Intl.Segmenter`), leaving out the
+  cuts while an OSC 8 link is open (ruled: both are named limits): screen A gets the first part,
+  screen B is built from A's snapshot and gets the rest, and B equals a screen that got the stream
+  whole, by task 12's comparison.
+- The named limits, pinned so that a change in xterm.js is noticed: a record that ends inside a
+  grapheme cluster leaves the rest of it a cell of its own; the rest of a link still open at a
+  snapshot comes out as plain text. The pen (ruled): after a snapshot inside an open link, what
+  the program prints after closing the link is not underlined; a real SGR 4 still underlines it.
 - A query cut across two records (`ESC [` | `c`): A, live, answers it once when the second
   record is applied; B, built from A's snapshot between the two and live after its replay,
   answers it once too.
@@ -2775,12 +2845,15 @@ export function escapeTail(): EscapeTail;
   rebuilt screen prints none of the rest and equals the original cell for cell.
 - Task 12's tests still pass; the seam's tail is the last thing in every snapshot.
 
-**Done when:** a snapshot taken at any record boundary outside a UTF-8 character rebuilds the
-screen exactly, tested at every such boundary of the sample streams.
+**Done when:** a snapshot taken at any record boundary outside a UTF-8 character and outside a
+grapheme cluster rebuilds the screen exactly, tested at every such boundary of the sample streams
+(ruled by the plan owner; cuts while an OSC 8 link is open are a named limit too).
 
-**Not in it:** UTF-8 boundaries (task 9's keeper); the scroll region, the saved cursor and the
-character sets (S2 7.2's known limits; the scroll region is the option above). No design update:
-S2 7.2 already describes the seam.
+**Not in it:** UTF-8 boundaries (task 9's keeper); grapheme clusters cut across records and the
+rest of a link open at a snapshot (named limits, S2 7.2); the scroll region, the saved cursor and
+the character sets (S2 7.2's known limits; the scroll region is the option above). Design update
+(ruled): S2 7.2 names the two new limits, the pen's real underline, and the underline style,
+underline colour and a link's dashed underline as not kept; S2 21 gets the xterm.js facts.
 
 ---
 
@@ -3598,3 +3671,69 @@ Rulings on task 12's findings (2026-11-13):
     stays for what cannot be corrected from outside. Three smaller differences become named
     limits in S2 7.2 (an alternate-screen line marked wrapped, DECAWM off with a wide character at
     the margin, `38;5;n` below 16).
+
+Rulings on task 33's findings (2026-11-14):
+
+12. **A record that ends inside a grapheme cluster** (between an emoji and its skin tone, inside a
+    ZWJ sequence, before a combining mark or VS16) is not rebuilt exactly: xterm.js keeps its
+    join state across writes and every CSI resets it, so a snapshot always leaves it at its start.
+    Ruled: a named limit in S2 7.2 (it heals at the program's next redraw of the row), not
+    repaired by the seam; task 33's "Done when" excludes those boundaries, its sweep skips them
+    and one test pins the limit. Nothing for the keeper.
+13. **A snapshot taken while an OSC 8 link is open** (a defect of task 12's pen): xterm.js reports
+    a pen with a link as underlined, so the pen restored it as a real SGR 4, which went on after
+    the program closed the link. Ruled: the pen takes only the real underline; the link is not
+    reopened — a link is not carried across a snapshot, whether closed or still open, and the rest
+    of an open link's text comes out as plain text (a named limit, pinned; the sweep leaves out the
+    cuts while a link is open). Also named in S2 7.2: underline style and colour (SGR 4:3, 58) are
+    not kept, and a link's cells come back with a plain, not dashed, underline.
+14. **From task 33's review 2**, two defects of task 12's code. The headless terminal ran at
+    xterm.js's default log level, so a parsing error, which quotes a character and the parameters
+    of the program's output, went to stderr and so to `server.log`. Ruled: fixed in this pull
+    request, `logLevel: 'off'`, tested (S2 5.2, 21). And two more differences of the serialise
+    addon: rows erased with a background colour below the last row with content come back with
+    the default background; an erased cell left in inverse video by overwriting half a wide
+    character comes back without it. Ruled: named limits in S2 7.2, each pinned by a test, no
+    repair; the sweeps' streams avoid both.
+
+Rulings on task 19's review 1 (2026-11-14), each recorded in task 19's contract and in the design:
+
+- `startWindowsProgram` (`src/window/edge.ts`) is the one way stage A starts a Windows program;
+  it refuses an empty argument, a `"`, a control character and a trailing backslash (S2 2).
+- `createInteropFrom(platform, files, first)` is exported: task 23 calls it with `interopFirst`
+  (A32), since `createInterop(platform, files)` cannot take the first candidate.
+- `Files.remove` unlinks and never follows a symbolic link (contract 2.2): Node.js 24.12's
+  `rmSync` left a dangling one in place, which kept a dead interop link; `src/platform/real.ts`
+  joins task 19's files.
+- `startEdge` throws a `RangeError` for a bad port or token, and refuses a profile folder that
+  would change how Edge splits its command line with a line naming `window.profileDir` (S2 5.3).
+- The keep-alive (S2 6.1): the retry schedule starts over once a keep-alive has run for 5
+  minutes; the line of a `wsl.exe` this server saw end does not count as running; `wsl.exe`
+  starts in `/mnt/c`; a started `wsl.exe` stays `starting`, with no timeout, until its script's
+  line appears or it ends; before its first tick a keep-alive in mode `wsl` reports `starting`.
+- The interop link points at the socket a candidate leads to (its realpath), never at another
+  link or at itself (S2 6.4).
+
+Rulings on task 19's review 2 (2026-11-14): a new server adopted, for good, the live line of a
+script whose `wsl.exe` was gone. Ruled (S2 6.1, task 19's contract): a keep-alive this server did
+not start is also judged by its `keepalive.interop` socket (`probeSocket`, shared with the interop
+link: refused or gone means its `wsl.exe` is gone; anything else is no judgement); a script whose
+`wsl.exe` is gone is an orphan, and one whose line is alive (identity known, never `unknown`) gets
+one SIGTERM from the server before the schedule starts a new keep-alive. The remaining limit (an
+orphan that cannot be judged counts as running) is named in S2 6.1; the premise (the socket of a
+`wsl.exe` session goes with it) is for check W14 (task 30). The profile-folder line also escapes
+DEL and the C1 controls (S2 5.3).
+
+Rulings on review 2's re-check (2026-11-14): a line only inferred to be a started `wsl.exe`'s
+script (first seen at the tick that sees its end) is signalled only when its socket says refused;
+before any SIGTERM the process's command line must name `skydeck-keepalive` and this runtime
+directory, so the signal never reaches a keeper, `claude` or anything else; an accepting socket of
+a found keep-alive is asked again only after 30 s (any other answer at the next tick) — superseded
+by N3 below; "a control character" is U+0000–U+001F, U+007F and U+0080–U+009F everywhere (S2 2).
+All in S2 6.1 and task 19's contract.
+
+N3 (2026-11-14, from review 2): 30 s was longer than WSL's 15 s idle timeout, so a found
+keep-alive's end was noticed after WSL had stopped. Ruled: an accepting socket is asked again
+after 3 s (3 s, up to 1 s to the tick that asks, the first 5 s retry, up to 1 s to the tick that
+starts: the new `wsl.exe` starts just under 10 s after the old one ended, inside the 15 s with room
+for the start); S2 6.1 gives that sum, so that the number is not tuned without it.
