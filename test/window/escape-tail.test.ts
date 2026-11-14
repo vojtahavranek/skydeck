@@ -344,13 +344,15 @@ function oracle(): { term: Terminal; log: unknown[][] } {
 }
 
 /**
- * Writes `data` as one parse call, at once: xterm.js's own `writeSync`, which hands each chunk to
- * the parser as `write` does, without the timer (the screen side's chunks are its records).
+ * Writes `data` as one parse call, at once: xterm.js 6.0.0's internal `_core.writeSync`, which hands
+ * each chunk to the parser as `write` does, without the timer (the screen side's chunks are its
+ * records). It warns that it will be removed: screen.test.ts pins it (S2 21).
  */
 function write(term: Terminal, data: string | Uint8Array): void {
-  (term as unknown as { _core: { writeSync(data: string | Uint8Array): void } })._core.writeSync(
-    data,
-  );
+  const core = (term as unknown as { _core?: { writeSync?: (data: string | Uint8Array) => void } })
+    ._core;
+  assert.equal(typeof core?.writeSync, 'function', 'xterm.js has no _core.writeSync: see S2 21');
+  core?.writeSync?.(data);
 }
 
 /**

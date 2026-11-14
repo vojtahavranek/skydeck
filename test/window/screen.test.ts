@@ -49,9 +49,7 @@ function spying(
     }
     override write(data: string | Uint8Array, callback?: () => void): void {
       if (sync) {
-        (
-          this as unknown as { _core: { writeSync(data: string | Uint8Array): void } }
-        )._core.writeSync(data);
+        writeNow(this, data);
         callback?.();
       } else {
         super.write(data, callback);
@@ -60,6 +58,17 @@ function spying(
     }
   }
   return { modules: { ...modules, Terminal: Spy }, terminals };
+}
+
+/**
+ * Parses `data` at once: xterm.js 6.0.0's internal `_core.writeSync` (it warns that it will be
+ * removed; a test pins it, so that an upgrade cannot turn the sweeps into nothing unnoticed).
+ */
+function writeNow(term: Terminal, data: string | Uint8Array): void {
+  const core = (term as unknown as { _core?: { writeSync?: (data: string | Uint8Array) => void } })
+    ._core;
+  assert.equal(typeof core?.writeSync, 'function', 'xterm.js has no _core.writeSync: see S2 21');
+  core?.writeSync?.(data);
 }
 
 /** A screen and the headless terminal inside it. */
@@ -789,6 +798,23 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
     term.dispose();
   });
 
+  test('the sweeps’ synchronous write is an internal the vendored xterm.js has: it parses at once', () => {
+    const term = new modules.Terminal({
+      cols: 10,
+      rows: 2,
+      allowProposedApi: true,
+      logLevel: 'off',
+    });
+
+    writeNow(term, '\x1b[1;31mab');
+    writeNow(term, utf8('\x1b[3'));
+    writeNow(term, utf8('2mc'));
+
+    assert.equal(term.buffer.active.getLine(0)?.translateToString(true), 'abc');
+    assert.equal(term.buffer.active.getLine(0)?.getCell(2)?.getFgColor(), 2);
+    term.dispose();
+  });
+
   // xterm.js 6.0.0 reports a pen or cell that carries an OSC 8 link as underlined (its dashed link
   // underline): the pen's real underline is read from `getUnderlineStyle`, which only a real
   // SGR 4 sets (ruled on task 33).
@@ -1077,9 +1103,10 @@ describe('createScreen: terminal queries', () => {
 const printed = (cp: number): boolean => cp >= 0x20 && !(cp >= 0x7f && cp < 0xa0);
 
 /**
- * Where a record of `out` can end, as byte offsets inside it: at every boundary between two code
- * points (the keeper never ends a record inside a UTF-8 character, S2 7.1) that does not lie
- * inside a grapheme cluster of printed characters (a known limit, S2 7.2).
+ * Where a record of `out` can end, as byte offsets into it: at its start, at its end, and at every
+ * boundary between two code points (the keeper never ends a record inside a UTF-8 character,
+ * S2 7.1) that does not lie inside a grapheme cluster of printed characters (a known limit,
+ * S2 7.2).
  */
 function cutsOf(out: string): number[] {
   const inside = new Set<number>();
@@ -1099,10 +1126,11 @@ function cutsOf(out: string): number[] {
   let bytes = 0;
   let at = 0;
   for (const p of out) {
-    if (at > 0 && !inside.has(at)) cuts.push(bytes);
+    if (!inside.has(at)) cuts.push(bytes);
     bytes += utf8(p).length;
     at += p.length;
   }
+  cuts.push(bytes);
   return cuts;
 }
 
@@ -1151,7 +1179,7 @@ async function sweep(steps: Step[], cols: number, rows: number): Promise<number>
     const bytes = utf8(step.out);
     let done = 0;
     for (const cut of cutsOf(step.out)) {
-      await a.screen.output(bytes.subarray(done, cut));
+      if (cut > done) await a.screen.output(bytes.subarray(done, cut));
       done = cut;
       // A named limit (S2 7.2): the rest of a link still open at a snapshot comes out plain.
       if (linkOpen(a.term)) continue;
