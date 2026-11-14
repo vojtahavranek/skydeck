@@ -744,7 +744,11 @@ export async function toZone(page: Page, wanted: 'list' | 'terminal'): Promise<v
   await showsText(page, '#focus-zone', new RegExp(`^Focus: ${wanted}$`));
 }
 
-/** The session id of the selected row of the list. */
+/**
+ * The session id of the selected row of the list. The hook it needs from the list module (task
+ * 27): the selected row, and only it, is an element inside `#list` with `data-id="<session id>"`
+ * and `data-selected="true"`.
+ */
 export async function selectedRow(page: Page): Promise<string | null> {
   return readPage(
     page,
@@ -766,6 +770,9 @@ export function termOf(started: { server: StartedServer['server'] }, sessionId: 
 /**
  * Clicks the list's row of `sessionId` ONCE, as a user does, and asserts that it is then the
  * selected row: a render never loses a click on a row (contract 2.9), so no second try is made.
+ * The hooks it needs from the list module (task 27): each row is an element inside `#list` with
+ * `data-id="<session id>"`, a click on it selects that session, and the selected row carries
+ * `data-selected="true"` (as selectedRow).
  */
 export async function clickRow(page: Page, sessionId: string): Promise<void> {
   const row = page.locator(`#list [data-id="${sessionId}"]`);
@@ -810,7 +817,11 @@ export async function press(page: Page, cdp: CDPSession, key: string): Promise<v
 
 /**
  * Resumes `sessionId` from the list as a user does: a click selects its row (a session that is
- * not running: the list zone), Enter resumes it, and the pane shows its terminal.
+ * not running: the list zone), Enter resumes it, and the pane shows its terminal with the
+ * keyboard in it. With any modules that follow contract 2.9; the hooks it needs: clickRow's from
+ * the list, and from the terminal view (task 28) that its `focus()` puts the keyboard on an
+ * element inside its root `#terminal`. Everything else it reads is app.js's (`#focus-zone`,
+ * `#right-zone[data-pane]`).
  */
 export async function resumeFromList(page: Page, sessionId: string): Promise<void> {
   await clickRow(page, sessionId);
