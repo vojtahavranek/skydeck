@@ -6,7 +6,6 @@ import type { TestContext } from 'node:test';
 
 import type { Files } from '../../src/platform/types.ts';
 import {
-  deriveProfileDir,
   deriveProfileDirUnder,
   edgeArgs,
   linkToOpen,
@@ -95,7 +94,7 @@ test('windowsPath keeps names Windows allows: inner dots and spaces, a leading s
 });
 
 // ---------------------------------------------------------------------------------------------
-// deriveProfileDir (S2 5.4), with a sandbox folder standing for /mnt/c/Users
+// deriveProfileDirUnder (S2 5.4), with a sandbox folder standing for /mnt/c/Users
 
 const EDGE = ['AppData', 'Local', 'Microsoft', 'Edge'];
 
@@ -112,7 +111,7 @@ function withEdge(root: string, name: string): string {
   return dir;
 }
 
-test('deriveProfileDir: the one user with an Edge folder gives the profile folder', (t) => {
+test('deriveProfileDirUnder: the one user with an Edge folder gives the profile folder', (t) => {
   const { files, root } = usersRoot(t);
   withEdge(root, 'me');
   mkdirSync(join(root, 'Public'));
@@ -124,7 +123,7 @@ test('deriveProfileDir: the one user with an Edge folder gives the profile folde
   });
 });
 
-test('deriveProfileDir: a user name with spaces and non-ASCII letters is kept', (t) => {
+test('deriveProfileDirUnder: a user name with spaces and non-ASCII letters is kept', (t) => {
   const { files, root } = usersRoot(t);
   withEdge(root, 'Jana Nováková');
   assert.deepEqual(deriveProfileDirUnder(files, root), {
@@ -133,7 +132,7 @@ test('deriveProfileDir: a user name with spaces and non-ASCII letters is kept', 
   });
 });
 
-test('deriveProfileDir: no user with an Edge folder is an error naming window.profileDir', (t) => {
+test('deriveProfileDirUnder: no user with an Edge folder is an error naming window.profileDir', (t) => {
   const { files, root } = usersRoot(t);
   mkdirSync(join(root, 'me', 'AppData', 'Local'), { recursive: true });
   const result = deriveProfileDirUnder(files, root);
@@ -141,7 +140,7 @@ test('deriveProfileDir: no user with an Edge folder is an error naming window.pr
   assert.match(result.ok ? '' : result.error, /window\.profileDir/);
 });
 
-test('deriveProfileDir: an Edge path that is a file does not count', (t) => {
+test('deriveProfileDirUnder: an Edge path that is a file does not count', (t) => {
   const { files, root } = usersRoot(t);
   mkdirSync(join(root, 'me', 'AppData', 'Local', 'Microsoft'), { recursive: true });
   writeFileSync(join(root, 'me', ...EDGE), 'not a folder');
@@ -150,14 +149,14 @@ test('deriveProfileDir: an Edge path that is a file does not count', (t) => {
   assert.match(result.ok ? '' : result.error, /window\.profileDir/);
 });
 
-test('deriveProfileDir: a users folder that does not exist is an error naming window.profileDir', (t) => {
+test('deriveProfileDirUnder: a users folder that does not exist is an error naming window.profileDir', (t) => {
   const { files, root } = usersRoot(t);
   const result = deriveProfileDirUnder(files, join(root, 'absent'));
   assert.equal(result.ok, false);
   assert.match(result.ok ? '' : result.error, /window\.profileDir/);
 });
 
-test('deriveProfileDir: two users with an Edge folder is an error naming both and window.profileDir', (t) => {
+test('deriveProfileDirUnder: two users with an Edge folder is an error naming both and window.profileDir', (t) => {
   const { files, root } = usersRoot(t);
   withEdge(root, 'anna');
   withEdge(root, 'bob');
@@ -169,7 +168,7 @@ test('deriveProfileDir: two users with an Edge folder is an error naming both an
   assert.match(error, /bob/);
 });
 
-test('deriveProfileDir: an Edge folder reached through a link to a folder counts', (t) => {
+test('deriveProfileDirUnder: an Edge folder reached through a link to a folder counts', (t) => {
   const { files, root } = usersRoot(t);
   const target = join(root, '..', 'edge-target'); // outside the users folder
   mkdirSync(target);
@@ -181,7 +180,7 @@ test('deriveProfileDir: an Edge folder reached through a link to a folder counts
   });
 });
 
-test('deriveProfileDir: a link to nothing does not count', (t) => {
+test('deriveProfileDirUnder: a link to nothing does not count', (t) => {
   const { files, root } = usersRoot(t);
   withEdge(root, 'me');
   mkdirSync(join(root, 'other', 'AppData', 'Local', 'Microsoft'), { recursive: true });
@@ -192,7 +191,7 @@ test('deriveProfileDir: a link to nothing does not count', (t) => {
   });
 });
 
-test('deriveProfileDir: an unreadable Edge folder does not count', { skip: isRoot }, (t) => {
+test('deriveProfileDirUnder: an unreadable Edge folder does not count', { skip: isRoot }, (t) => {
   const { files, root } = usersRoot(t);
   withEdge(root, 'me');
   const closed = withEdge(root, 'other');
@@ -208,7 +207,7 @@ test('deriveProfileDir: an unreadable Edge folder does not count', { skip: isRoo
 });
 
 test(
-  "deriveProfileDir: another user's folder that cannot be entered does not count",
+  "deriveProfileDirUnder: another user's folder that cannot be entered does not count",
   { skip: isRoot },
   (t) => {
     const { files, root } = usersRoot(t);
@@ -228,7 +227,7 @@ test(
 );
 
 test(
-  'deriveProfileDir: a users folder that cannot be read is an error naming window.profileDir',
+  'deriveProfileDirUnder: a users folder that cannot be read is an error naming window.profileDir',
   { skip: isRoot },
   (t) => {
     const { files, root } = usersRoot(t);
@@ -244,7 +243,7 @@ test(
   },
 );
 
-test('deriveProfileDir: a folder name that has no Windows form is ignored', (t) => {
+test('deriveProfileDirUnder: a folder name that has no Windows form is ignored', (t) => {
   const { files, root } = usersRoot(t);
   withEdge(root, 'me');
   withEdge(root, 'a\\b');
@@ -252,24 +251,6 @@ test('deriveProfileDir: a folder name that has no Windows form is ignored', (t) 
     ok: true,
     dir: 'C:\\Users\\me\\AppData\\Local\\skydeck\\edge-profile',
   });
-});
-
-test('deriveProfileDir looks in /mnt/c/Users', () => {
-  // A Files that records what it is asked and has nothing: no disk is touched.
-  const asked: string[] = [];
-  const files = {
-    list(dir: string): string[] {
-      asked.push(dir);
-      return [];
-    },
-    stat(path: string): null {
-      asked.push(path);
-      return null;
-    },
-  } as unknown as Files;
-  const result = deriveProfileDir(files);
-  assert.equal(result.ok, false);
-  assert.deepEqual(asked, ['/mnt/c/Users']);
 });
 
 // ---------------------------------------------------------------------------------------------

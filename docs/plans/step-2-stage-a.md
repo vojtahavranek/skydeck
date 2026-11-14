@@ -1802,9 +1802,11 @@ export function programEnvironment(serverEnv: Readonly<Record<string, string>>, 
  *  with a segment Windows cannot have: '.' or '..', a control character, " * : < > ? | or a
  *  backslash, a trailing space or dot. */
 export function windowsPath(linuxPath: string): string | null;
-/** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
-export function deriveProfileDir(files: Files): { ok: true; dir: string } | { ok: false; error: string };
-/** For tests: deriveProfileDir with `usersRoot` standing for /mnt/c/Users (a sandbox folder). */
+/** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users),
+ *  found under `usersRoot`, standing for /mnt/c/Users: `<driveC(env)>/Users` (drive.ts), a sandbox
+ *  folder in tests. (`deriveProfileDir(files)`, the same under the real /mnt/c/Users, was removed by
+ *  the follow-up "server-findable": since task 25 nothing called it — startEdge, doctor and
+ *  uninstall all derive under driveC.) */
 export function deriveProfileDirUnder(files: Files, usersRoot: string): { ok: true; dir: string } | { ok: false; error: string };
 /** S2 5.3: the arguments for msedge.exe. */
 export function edgeArgs(port: number, token: string, profileDir: string): string[];
@@ -1829,10 +1831,9 @@ export function parentPidFromStat(line: string): number | null; // field 4, afte
   `unlimited`, `0`, absent.
 - pid lines: round trip with and without the keeper fields; garbled lines → null; `isPidLineAlive`
   with the fake proc: alive, other boot, reused pid, no boot id.
-- `windowsPath`, `deriveProfileDir` with sandbox folders standing for `/mnt/c/Users/*/AppData/Local/Microsoft/Edge`
-  (the function takes the `/mnt/c/Users` root as a parameter in a helper, `deriveProfileDirUnder`,
-  exported for tests only, so the test can point it into the sandbox): one user → the folder;
-  none, two, an unreadable one.
+- `windowsPath`, `deriveProfileDirUnder` with sandbox folders standing for `/mnt/c/Users/*/AppData/Local/Microsoft/Edge`
+  (the function takes the `/mnt/c/Users` root as a parameter, so the test can point it into the
+  sandbox): one user → the folder; none, two, an unreadable one.
 - `edgeArgs(47613, 'abc', 'C:\\x')` → exactly the four arguments of S2 5.3.
 - `linkToOpen`: `https://github.com/a/b/pull/1` → itself; `http://x` → `http://x/`; `file:///etc`,
   `javascript:…`, a 2,049-character URL, `-https://x`, `not a url` → null.
