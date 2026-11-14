@@ -384,6 +384,27 @@ test('the right side', async (t) => {
   );
 
   await t.test(
+    'a list that changes nothing the resume card says leaves the keyboard on its button; one that changes its command gives the keyboard to the zone (an Enter must not resume what the user has not seen)',
+    async (t) => {
+      const s = await scripted(t, chromium);
+      const listFor = (command: string, sinceNs: string): Row =>
+        listWith([[{ id: S1, terminal: null, slot: null }], []], {
+          rows: { [S1]: { sinceNs } },
+          list: { selected: selectedOf(S1, { command }) },
+        });
+      s.serve(listFor('claude --resume one', '1'));
+      await clickRow(s.page, S1);
+      await s.page.focus('#cards button');
+      s.serve(listFor('claude --resume one', '2')); // a field the card does not show
+      await sleep(300);
+      assert.equal(await active(s.page), 'BUTTON');
+      s.serve(listFor('claude --resume two', '2'));
+      await showsText(s.page, '#cards .card-command', /two/);
+      assert.equal(await active(s.page), '#right-zone');
+    },
+  );
+
+  await t.test(
     'a session running in another terminal shows its pid, its terminal device, its directory and that it cannot be shown here',
     async (t) => {
       const s = await scripted(t, chromium);
@@ -497,11 +518,8 @@ test('the right side', async (t) => {
       const s = await scripted(t, chromium);
       s.answer.act = () => ({
         ok: false,
-        lines: [
-          'cannot pass -r (--resume) to claude: it picks an existing session; use skydeck resume',
-        ],
-        error:
-          'cannot pass -r (--resume) to claude: it picks an existing session; use skydeck resume',
+        lines: ['cannot pass -r to claude: it picks an existing session; use skydeck resume'],
+        error: 'cannot pass -r to claude: it picks an existing session; use skydeck resume',
         sessionId: null,
       });
       s.serve(
@@ -542,7 +560,11 @@ test('the right side', async (t) => {
       await s.page.fill('#cards input[name="group"]', 'g');
       await s.page.fill('#cards input[name="flags"]', '-r x');
       await s.page.keyboard.press('Enter');
-      await showsText(s.page, '#cards .card-new', /cannot pass -r \(--resume\) to claude/);
+      await showsText(
+        s.page,
+        '#cards .card-new',
+        /cannot pass -r to claude: it picks an existing session/,
+      );
 
       const acts = s.sent.filter((message) => message['t'] === 'act');
       assert.equal(acts.length, 1);
@@ -646,7 +668,7 @@ function kindOf(e: KeyLike, zone: string): string | null {
     if (windowChord(e, 'terminal') !== null) return null; // the window's, not the terminal's
     const mapped = terminalKey(e);
     if (mapped !== null) return 'terminal';
-    return listKey(e)?.kind === 'reload' ? null : null;
+    return null;
   }
   const action = listKey(e);
   return action === null ? null : action.kind;
@@ -927,7 +949,11 @@ async function realServerCases(
       await l.page.fill('#cards input[name="directory"]', dir);
       await l.page.fill('#cards input[name="flags"]', '-r x');
       await l.page.locator('#cards button', { hasText: 'Start' }).click();
-      await showsText(l.page, '#cards .card-new', /cannot pass -r \(--resume\) to claude/);
+      await showsText(
+        l.page,
+        '#cards .card-new',
+        /cannot pass -r to claude: it picks an existing session/,
+      );
       await sleep(500);
       assert.equal(l.server.hub.list().length, 1, 'nothing more started');
       assert.equal(readRecords(l.d.record).filter((record) => record.ev === 'start').length, 1);
