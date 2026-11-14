@@ -1348,9 +1348,26 @@ export function cancels(e, zone, handled) {}
 // nothing is selected gives it back (no rule acts on the end of a selection: a mousedown's caret
 // would set it off before a drag selects). The user's own actions move it whatever is selected:
 // a zone chord, Esc closing the new form, and a terminal that the page's own resume or new
-// brings (S2 11.3 comes first); a terminal that only a list brought does not. A module that hides or removes its own keyboard holder in its OWN handler
-// (the find bar's Esc, a card's own button) is followed by no call of app.js: it moves the
-// keyboard itself to another element of its own — there is no hook for it. The page's chrome (the
+// brings (S2 11.3 comes first) — until that terminal is shown, another session is selected or the
+// connection is lost; a terminal that only a list brought does not.
+// A key pressed while the keyboard was not on the program's own holder (the element inside
+// `.xterm`: for the real view xterm.js's textarea; not the find bar's field or buttons, nor any
+// other element of the view) reaches the program only when it is pressed again: once the holder
+// has the keyboard, every further event of it (auto-repeat keydowns, keypress, keyup) is
+// swallowed at the window's capture phase, before the view sees it, until it is released. A key
+// the page acted on that moved the keyboard there is such a key; so are a card's button or the
+// form's Enter that starts a terminal (task 29) and the find bar's Esc, Enter or button (task
+// 28). A window chord acts at its first keydown only, not at its auto-repeats.
+// Ctrl+Shift+V reaches `pasteRaw()` only while the keyboard is in `#terminal` and not on a text
+// field — the view's own find field included, whose key events reach `chord(e)` (Z1).
+// `area()` takes off the height of `#cards .card-header` — a hook: cards.js keeps that class on
+// its header (task 29) — as it is while shown, else as last shown: for an act's first size and
+// for every pane but a shown terminal; for `focus` while a terminal is shown, all the cards show
+// above it. Before any header was shown it is 0, and that first terminal is resized once (a
+// known limit, Z1). The columns and rows for that box come from the view's `fits` (its optional
+// member, below). A module that hides or removes its own keyboard holder in its OWN handler (the
+// find bar's Esc, a card's own button) is followed by no call of app.js: it moves the keyboard
+// itself to another element of its own — there is no hook for it. The page's chrome (the
 // title bar, the key bar, a notice's ×) takes no keyboard on a mouse click, so a click there
 // leaves it where the user was (ruled, review 2 of task 26, rounds three to six).
 /** @param {HTMLElement} root
@@ -1364,18 +1381,22 @@ export function createList(root, hooks) {} // → { render(list, selected, zone)
 export function createTerminalView(root, deps) {}
 // → { show(term: TerminalPayload | null), snap(msg), output(channel, bytes), size(msg), exit(msg),
 //     notice(term: string, kind: 'gap' | 'input-full' | 'newer-keeper', text: string),
-//     find(), copy(), pasteRaw(), focus(), setHidden(hidden), attached(): string[] }
+//     find(), copy(), pasteRaw(), focus(), setHidden(hidden), attached(): string[],
+//     fits?(width, height) }
 // The terminal view also shows, from `show(term)`: the `reconnecting` bar (S2 7.8) and "sized by
 // another window" (S2 8.2.6).
 // Optional member (ruled, task 28's review 2, for app.js's `area()`): `fits(width, height)` →
 // `{ cols, rows } | null` — the columns and rows a terminal of the view shows in a terminal area
 // (`#terminal`'s box) of width × height CSS pixels, by the same rule as every proposal of the view
 // (S2 8.2.6: the most that fits, xterm.js's padding and scroll bar counted out), clamped to S2
-// 8.2.6's limits; null while no cell can be measured
-// or for an area that is not a positive size. Its numbers are always whole and at least 1, whatever
-// it is given (app.js sends them to the server, whose validator takes 1–65,535 only; ruled, #70's
-// review). app.js uses it when the view offers it, so that the first size of a terminal is the
-// one its view proposes.
+// 8.2.6's limits; null while no cell can be measured or for an area that is not a positive size.
+// Its numbers are always whole and at least 1, whatever it is given (app.js sends them to the
+// server, whose validator takes 1–65,535 only; ruled, #70's review). app.js's `area()` uses it
+// when the view offers it, so that the first size of a terminal is the one its view proposes: it
+// asks for `#terminal`'s box as it is or will be (the right zone's client box, without its
+// border, less the header or the cards), at least 1 × 1, holds the answer to whole numbers
+// 1…1000 × 1…500 all the same (a second line of defence), and for null, an answer that is no
+// number, or a view without the member counts at the terminal's font itself (Z1).
 // After a reconnect (S2 8.2.5) app.js itself sends `attach` for each id of `attached()`, the shown
 // terminal first and the next once the previous one's `snap` arrived, proposing the terminal's
 // size of the new `list`; an id the new `list` lacks is skipped, and a `list` without the terminal

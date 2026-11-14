@@ -1412,7 +1412,9 @@ A terminal has one size, the pty's. The server remembers, per terminal, the size
 page last proposed (`attach`, `resize`). The rules:
 
 - **First size.** A terminal opened from a page (`act resume`, `act new`) starts at the size that
-  page sent with the action. One opened by the command line or by a restore starts at the `area`
+  page sent with the action: its terminal area less the right side's header, as shown or as last
+  shown. A window that has shown no header yet sends its area whole, and that first terminal is
+  resized once when it is shown (a known limit; ruled, Z1 of plan task 26). One opened by the command line or by a restore starts at the `area`
   the page that had focus last reported in `focus` (8.2.3), or 120 × 40 when no page is connected.
 - **Owner.** The size owner is the page that last sent `input` for the terminal; before any input,
   the first page that attached. A page that attaches to a terminal without an owner becomes it.
@@ -2103,7 +2105,17 @@ selection away, and the Ctrl+C meant to copy it would reach the program. Meanwhi
 be on nothing; the next plain click, a zone chord, or the next render once nothing is selected
 gives it back. The user's own actions move it whatever is selected: a zone chord, Esc closing the
 new form, and the terminal of a resume or new started from the page (11.3), unlike one that only
-a list brought (ruled, plan task 26's review 2).
+a list brought (ruled, plan task 26's review 2). That holds while the user waits for it: once they
+select another session, or the connection is lost, its terminal is like one a list brought. A key
+pressed while the keyboard was not on the program's own holder (in the list, the form, the help, a
+text field, a button — the terminal's find bar too) reaches the program only when it is pressed again:
+when that key moves the keyboard there (Enter on a running row or one that resumes, Esc back to
+the terminal, the new form's Enter, the find bar's Esc or Enter), or anything else does while it
+is held, its repeats and its release are the page's, and the next press is the program's; a held
+Esc on the list with a filter only clears the filter. A held chord acts once, at its first
+keydown. Ctrl+Shift+V sends its raw Ctrl+V only while the terminal has the keyboard — never from
+the list, the form or the help; in a text field the browser's own Ctrl+Shift+V stands (ruled, Z1
+of plan task 26).
 
 ### 12.10 Done
 

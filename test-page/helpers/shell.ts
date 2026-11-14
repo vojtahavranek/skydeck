@@ -22,7 +22,7 @@ import {
   wrapSecret,
 } from '../../src/window/auth.ts';
 import { controlClient } from '../../src/window/client.ts';
-import { testPlatform } from '../../test/helpers/platform.ts';
+import { S1, S2, S3, testPlatform } from '../../test/helpers/platform.ts';
 import { startTestServer } from '../../test/helpers/window.ts';
 import type {
   ServerSandboxOptions,
@@ -611,9 +611,13 @@ export const MINIMAL_MODULES = {
  * The pin cannot stop working unseen: once the page has asked for app.js, every name pinned on it
  * (the last pin of a name counting) must have been asked for through the pin by the end of the
  * case; otherwise the case and the names go into `unservedPins()`, which a pinned file asserts
- * empty in its last case — a renamed file or a changed asset path would otherwise run the real
- * module without a sign. (Recorded, not thrown, in the case's `t.after`: node:test runs no hook
- * after one that throws, and the case's servers and sandbox are cleaned up by later hooks.)
+ * empty in its last case — a file of web/ renamed in index.html or app.js would otherwise run
+ * the real module without a sign. It sees only pages that ask for `app.js` by the
+ * `/assets/<build>/web/` path the pins use: a rename of app.js itself or a change of that path is
+ * not seen here, but assetBase asserts both, so the cases that call it (through storeKey,
+ * storedKeyIs or buildOf) fail then. (Recorded, not thrown, in the case's `t.after`:
+ * node:test runs no hook after one that throws, and the case's servers and sandbox are cleaned up
+ * by later hooks.)
  */
 export async function pinModules(
   t: TestContext,
@@ -672,6 +676,7 @@ export const PLACEHOLDER = /terminal view comes with task 28/;
 export const TERM_A = 'aaaaaaaaaaaa';
 export const TERM_B = 'bbbbbbbbbbbb';
 export const TERM_C = 'cccccccccccc';
+export const TERM_D = 'dddddddddddd';
 
 /** The id of the element that has the keyboard, or its tag. */
 export async function active(page: Page): Promise<string> {
@@ -744,6 +749,122 @@ export function scriptedList(
     selected,
     dirs: [],
   };
+}
+
+/**
+ * A stand-in world for the cases about the page's acts and sizes (Z1 of task 26), opened on
+ * `page` (pinned or not): S1 running in slot 1 (shown first), S2 not running. A resume of S2 and
+ * a new session (S3) each answer ok and list their terminal, at the size the act asked for (its
+ * `snap` and its entry of the list); a resume of a session whose terminal ended opens a new
+ * terminal (`TERM_D`) in place of the ended one, as the server does. `acts`, `focuses` (each
+ * `focus`'s `area`), `attaches` and `resizes` record what the page sent; `terms` is each
+ * session's terminal now; `end(id)` lists the terminal of `id` ended.
+ */
+export async function actsWorld(
+  t: TestContext,
+  page: Page,
+): Promise<{
+  acts: Record<string, unknown>[];
+  focuses: { cols: number; rows: number }[];
+  attaches: Record<string, unknown>[];
+  resizes: Record<string, unknown>[];
+  terms: Readonly<Record<string, string>>;
+  end: (id: string) => void;
+}> {
+  const secret = new Uint8Array(32).fill(23);
+  const terms: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B, [S3]: TERM_C };
+  /** Each terminal's size: the one its act asked for, else 80 × 24. */
+  const sizes: Record<string, { cols: number; rows: number }> = {};
+  const sizeOf = (term: string): { cols: number; rows: number } =>
+    sizes[term] ?? { cols: 80, rows: 24 };
+  const attaches: Record<string, unknown>[] = [];
+  const resizes: Record<string, unknown>[] = [];
+  const listed = [S1, S2];
+  const running = new Set<string>([S1]);
+  const ended = new Set<string>();
+  let sendList: (() => void) | null = null;
+  const acts: Record<string, unknown>[] = [];
+  const focuses: { cols: number; rows: number }[] = [];
+  let shown: string | null = null;
+  const listFor = (selected: string | null): Record<string, unknown> => {
+    const list = scriptedList(
+      listed.map((id) => ({
+        id,
+        terminal: running.has(id) ? (terms[id] ?? null) : null,
+        slot: running.has(id) ? listed.indexOf(id) + 1 : null,
+      })),
+      [...running].map((id) => ({
+        id: terms[id] ?? '',
+        slot: listed.indexOf(id) + 1,
+        sessionId: id,
+      })),
+      selected === null || running.has(selected)
+        ? null
+        : {
+            sessionId: selected,
+            command: `claude --resume ${selected}`,
+            flagsKnown: true,
+            unknownFlags: [],
+            ended: 'exited',
+            expiring: false,
+            expired: false,
+          },
+    );
+    for (const term of list['terminals'] as Record<string, unknown>[]) {
+      if (ended.has(term['sessionId'] as string)) term['state'] = 'ended';
+      Object.assign(term, sizeOf(term['id'] as string));
+    }
+    return list;
+  };
+  const standin = await standinServer(t, {
+    socket: honest(secret, {
+      open: (conn, message) => {
+        sendList = () => conn.send(listFor(shown));
+        if (message['t'] === 'view') {
+          shown = (message['selected'] as string | null) ?? null;
+          conn.send(listFor(shown));
+        } else if (message['t'] === 'focus') {
+          focuses.push(message['area'] as { cols: number; rows: number });
+        } else if (message['t'] === 'attach') {
+          attaches.push(message);
+          const term = message['term'] as string;
+          conn.send({ t: 'snap', term, ch: 1, ...sizeOf(term), data: '' });
+        } else if (message['t'] === 'resize') {
+          resizes.push(message);
+        } else if (message['t'] === 'act') {
+          acts.push(message);
+          const sessionId = message['kind'] === 'new' ? S3 : (message['sessionId'] as string);
+          if (!listed.includes(sessionId)) listed.push(sessionId);
+          if (ended.delete(sessionId)) terms[sessionId] = TERM_D; // a new terminal, as the server's
+          const term = terms[sessionId];
+          if (term !== undefined && typeof message['cols'] === 'number') {
+            sizes[term] = { cols: message['cols'], rows: message['rows'] as number };
+          }
+          running.add(sessionId);
+          conn.send({
+            t: 'result',
+            id: message['id'],
+            ok: true,
+            lines: [],
+            error: null,
+            sessionId,
+          });
+          conn.send(listFor(sessionId));
+        }
+      },
+    }),
+  });
+  await page.goto(standin.url);
+  await storeKey(page, secret);
+  await page.goto(standin.url);
+  await connection(page, 'open');
+  await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+  /** Lists the terminal of `id` ended (its ended bar shows while it is selected). */
+  const end = (id: string): void => {
+    ended.add(id);
+    sendList?.();
+  };
+  return { acts, focuses, attaches, resizes, terms, end };
 }
 
 /** `text` as a regular expression that matches it literally. */
