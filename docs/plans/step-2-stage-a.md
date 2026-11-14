@@ -3135,7 +3135,7 @@ a stale record chooses and records another directory — or for the exit, and ma
 it returns how many keepers keep running — their `.pid` lines alive or unknown, counted before
 the stop, never from `status` (ruled) — for `uninstall`'s line.
 
-**Tests** (platform: `realTestPlatform`; fake serve; timeouts shortened through `LifecycleTimes`, A31)
+**Tests** (platform: `realTestPlatform`, except the retry after a refused ping, which runs on `testPlatform`'s fake clock and `/proc`; fake serve; timeouts shortened through `LifecycleTimes`, A31)
 - `findServer` for each kind; a `server.json` whose pid is alive but whose process start differs
   (a reused pid: the test writes a line naming the test's own pid with another start) → `none`,
   and that process is never signalled.
