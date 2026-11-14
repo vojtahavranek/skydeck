@@ -6,9 +6,10 @@
 //
 // It uses only lstat, readdir (Files.list), unlink (Files.remove) and rmdir (Files.rmdir), which
 // behave alike on symbolic links in every Node.js 24: lstat never follows a link, unlink removes
-// the link itself, rmdir refuses one (ENOTDIR). readdir does follow a link, so it is called only on
-// a path lstat has just shown to be a directory. Never removeTree or rmSync, which Node.js 24.12 let
-// follow a link (ruled, purge-care).
+// the link itself, rmdir refuses one (ENOTDIR). readdir does follow a link, so it is called on a
+// path lstat has shown to be a directory (the checks for a late entry list it again later; should
+// it have become a link by then, the rmdir that follows refuses it). Never removeTree or rmSync,
+// which Node.js 24.12 let follow a link (ruled, purge-care).
 //
 // THE LISTS BELOW ARE THE ONE PLACE that says what skydeck writes into its directories. Whoever
 // makes skydeck write a new file or directory into one of them adds it here (name and kind), or

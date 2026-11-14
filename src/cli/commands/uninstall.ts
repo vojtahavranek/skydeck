@@ -304,14 +304,19 @@ function refuseOnIgnoredVariables(env: Env): void {
   const ignored = PLACE_VARIABLES.flatMap((name) => {
     const value = env[name];
     if (value === undefined || (value !== '' && isAbsolute(value))) return [];
+    const shown = `${name} is set to ${JSON.stringify(value)}`;
+    const why = value === '' ? 'empty' : 'not an absolute path';
+    // HOME is not ignored but taken as it is (os.homedir()): its clause says what that does.
     return [
-      `${name} is set to ${JSON.stringify(value)} but ignored (${value === '' ? 'empty' : 'not an absolute path'})`,
+      name === 'HOME'
+        ? `${shown} (${why}), which skydeck takes as it is, so every place would be relative to the working directory`
+        : `${shown} but ignored (${why}), so skydeck would find the installation it finds without it`,
     ];
   });
   if (ignored.length > 0) {
     throw new SkydeckError(
-      `${BEFORE}: ${ignored.join('; ')}, so skydeck would find the installation it finds without ${ignored.length === 1 ? 'it' : 'them'}; ` +
-        'it does not purge the installation it would then find. Unset the variable, or set it to an absolute path',
+      `${BEFORE}: ${ignored.join('; ')}; it does not purge the installation it would then find. ` +
+        'Unset the variable, or set it to an absolute path',
     );
   }
 }

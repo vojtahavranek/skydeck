@@ -419,11 +419,16 @@ describe('uninstall --purge refuses on a SKYDECK_HOME or XDG_* that is set but i
         assert.equal(r.stdout, '');
         // Nothing changed anywhere: the sandbox, its home (the working directory) included.
         assert.deepEqual(tree(d.sandbox.root), before);
-        assert.match(
+        const shown = `${name} is set to ${JSON.stringify(value)}`;
+        const why = value === '' ? 'empty' : 'not an absolute path';
+        // HOME is not ignored but taken as it is (os.homedir()): its own clause says so.
+        const clause =
+          name === 'HOME'
+            ? `${shown} (${why}), which skydeck takes as it is, so every place would be relative to the working directory`
+            : `${shown} but ignored (${why}), so skydeck would find the installation it finds without it`;
+        assert.ok(
+          r.stderr.startsWith(`skydeck: uninstall --purge removed nothing: ${clause}; `),
           r.stderr,
-          new RegExp(
-            `^skydeck: uninstall --purge removed nothing: ${name} is set to ${JSON.stringify(value).replaceAll('/', '\\/')} but ignored \\(${value === '' ? 'empty' : 'not an absolute path'}\\)`,
-          ),
         );
         assert.match(r.stderr, /it does not purge the installation it would then find/);
         intact(d);
