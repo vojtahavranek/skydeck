@@ -11,6 +11,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -22,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
 import { parentPidFromStat, procStartFromStat } from '../../../src/claude/procstat.ts';
-import { uncaughtLine } from '../../../src/cli/commands/serve.ts';
+import { sandboxLimits, uncaughtLine } from '../../../src/cli/commands/serve.ts';
 import { ensureSecret, pageProof } from '../../../src/window/auth.ts';
 import { readServerJson } from '../../../src/window/runtime.ts';
 import type { ServerJson } from '../../../src/window/runtime.ts';
@@ -401,6 +402,66 @@ describe('skydeck serve (S2 5.2)', () => {
     assert.equal(await within(server.exited, 'serve to exit', WAIT_MS), 0, server.stderr());
     assert.equal(existsSync(d.files.serverJson), false);
     assert.equal(d.deck.store.getKv('window_server'), null);
+  });
+});
+
+describe('a marked test sandbox ends its server by itself (ruled, task 25, review 2; A31)', () => {
+  test('after SKYDECK_TEST_SERVE_MAX_SECONDS: the orderly stop, exit 0, nothing left', async (t) => {
+    const { d, serve, started } = serveSandbox(t);
+    const startedAt = performance.now();
+    const server = await started(serve({ env: { SKYDECK_TEST_SERVE_MAX_SECONDS: '3' } }));
+
+    assert.equal(await within(server.exited, 'serve to exit', WAIT_MS), 0, server.stderr());
+    assert.ok(performance.now() - startedAt >= 2500, 'not before its time');
+    assert.match(server.stderr(), /server: stopping: the test sandbox's 3 s are over/);
+    for (const path of [d.files.serverJson, d.files.serverPid, d.files.serverSock]) {
+      assert.equal(existsSync(path), false, `${path} is gone`);
+    }
+    assert.equal(d.deck.store.getKv('window_server'), null);
+  });
+
+  test('once its SKYDECK_HOME is gone: the orderly stop within a tick or two', async (t) => {
+    const { d, serve, started } = serveSandbox(t);
+    const server = await started(serve());
+    const moved = `${d.s.skydeckHome}.moved`;
+    renameSync(d.s.skydeckHome, moved);
+    let code: number | null;
+    try {
+      code = await within(server.exited, 'serve to exit', WAIT_MS);
+    } finally {
+      renameSync(moved, d.s.skydeckHome); // the sandbox's own cleanup looks there
+    }
+    assert.match(server.stderr(), /server: stopping: the test sandbox is gone/);
+    assert.match(server.stderr(), /server: stopped/, 'the orderly stop of S2 5.5, not an exit');
+    assert.equal(code, 0, server.stderr());
+  });
+
+  test('sandboxLimits: only in a marked sandbox; 600 s by default; a value that is not whole seconds gives the default and says so', () => {
+    assert.equal(sandboxLimits({ SKYDECK_HOME: '/s/home' }), null);
+    assert.equal(
+      sandboxLimits({ SKYDECK_TEST_NO_WINDOWS: '0', SKYDECK_TEST_SERVE_MAX_SECONDS: '2' }),
+      null,
+    );
+    assert.deepEqual(sandboxLimits({ SKYDECK_TEST_NO_WINDOWS: '1', SKYDECK_HOME: '/s/home' }), {
+      maxMs: 600_000,
+      home: '/s/home',
+      invalid: false,
+    });
+    assert.deepEqual(
+      sandboxLimits({ SKYDECK_TEST_NO_WINDOWS: '1', SKYDECK_TEST_SERVE_MAX_SECONDS: '2' }),
+      { maxMs: 2000, home: null, invalid: false },
+    );
+    for (const bad of ['', '0', '-1', '1.5', 'x', '2147484', '01']) {
+      assert.deepEqual(
+        sandboxLimits({
+          SKYDECK_TEST_NO_WINDOWS: '1',
+          SKYDECK_TEST_SERVE_MAX_SECONDS: bad,
+          SKYDECK_HOME: 'relative',
+        }),
+        { maxMs: 600_000, home: null, invalid: true },
+        bad,
+      );
+    }
   });
 });
 

@@ -14,11 +14,18 @@
 //   FAKE_SERVE_RECORD       an absolute path: written first, JSON { argv, cwd, env, stdin,
 //                           sessionLeader }
 //   FAKE_SERVE_DELAY_MS     waits this long before it takes the runtime directory
+//   FAKE_SERVE_JSON_DELAY_MS  waits this long after server.sock answers before it writes
+//                           server.json (the real server's gap between the two, S2 5.2)
 //   FAKE_SERVE_BUILD        the build /ping and server.json report (default: this app root's)
 //   FAKE_SERVE_CHECKOUT     the checkout they report (default: this app root)
 //   FAKE_SERVE_BOOT_ID      the boot id /ping reports (default: the current one; server.json
 //                           always carries the current one, so that its line stays alive)
 //   FAKE_SERVE_TERMINALS    how many terminals /status lists (default 0)
+//   FAKE_SERVE_PAGES        the pages /status reports: a decimal number (default 0), or
+//                           `json:<JSON value>` for a count that is not a whole number
+//                           (`json:"3"`, `json:2.5`, `json:9007199254740993`)
+//   FAKE_SERVE_STATUS       pages-only: /status answers `{ pages }` and nothing else (an old
+//                           server's answer the command line's client cannot read whole)
 //   FAKE_SERVE_ON_SHUTDOWN  exit (default): after answering, removes server.json, server.pid and
 //                           server.sock and exits 0; stay: answers and goes on
 // It writes one line to stdout and one to stderr at start (so that a test sees where they go)
@@ -119,8 +126,11 @@ async function serve(silent: boolean): Promise<void> {
     checkout,
   };
   const terminals = Number(env.FAKE_SERVE_TERMINALS ?? '0');
+  const pagesText = env.FAKE_SERVE_PAGES ?? '0';
   const status: StatusAnswer = {
-    pages: 0,
+    pages: pagesText.startsWith('json:')
+      ? (JSON.parse(pagesText.slice('json:'.length)) as number)
+      : Number(pagesText),
     terminals: Array.from({ length: terminals }, (_, i) => ({
       id: String(i).padStart(12, '0'),
       slot: i + 1,
@@ -141,7 +151,10 @@ async function serve(silent: boolean): Promise<void> {
   let stop = async (): Promise<void> => {};
   const handler = controlHandler({
     ping: () => ping,
-    status: () => status,
+    status: () =>
+      env.FAKE_SERVE_STATUS === 'pages-only'
+        ? ({ pages: status.pages } as unknown as StatusAnswer)
+        : status,
     tokens: createTokens(platform.clock, platform.randomBytes, () => {}),
     shutdown: () => {
       if (env.FAKE_SERVE_ON_SHUTDOWN !== 'stay') {
@@ -161,6 +174,10 @@ async function serve(silent: boolean): Promise<void> {
     platform.files.remove(files.serverPid);
     await listener.close();
   };
+  const jsonDelay = Number(env.FAKE_SERVE_JSON_DELAY_MS ?? '0');
+  if (jsonDelay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, jsonDelay));
+  }
   writeServerJson(platform.files, files.serverJson, {
     pid: platform.pid,
     procStart,

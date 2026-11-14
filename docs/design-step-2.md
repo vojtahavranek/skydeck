@@ -242,7 +242,8 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 skydeck window [--print-url] [--new-window] [--restart] [--stop] [--new-secret]
 ```
 
-Run inside WSL, in a terminal of the user's own. It refuses (exit 1) when `CLAUDECODE` is set —
+Run inside WSL, in a terminal of the user's own. It refuses (exit 1) when `CLAUDECODE` is set, with
+every option (`--stop` included) —
 `the window's server is not started from inside a Claude Code session: every session in the window
 would inherit that session's environment; run skydeck window in a terminal of your own` — because
 the server's environment becomes every program's (5.2, 7.4). Without options it:
@@ -259,23 +260,48 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    answer; skydeck window --restart stops it` (exit 1). A socket that refuses, or a request that
    fails, is tried again every 100 ms within those 5 seconds — a server in its orderly stop (5.5)
    no longer accepts connections but still lives for a moment — and a server that is gone
-   meanwhile counts as none. Otherwise a new one is started.
+   meanwhile counts as none. Otherwise a new one is started, and the command goes on only once
+   that server can be found by the next command, its `server.json` written (5.2; ruled by the plan
+   owner, stage A's plan task 25).
 2. when no page is connected to the server, asks it for a launch token (`POST /token`, 8.3),
    starts Edge with it (5.3), and waits up to 30 seconds — a cold Edge on a managed PC can take
    several (W1 records the real time) — for the token to be used by a page (`GET /token/<id>`).
    Once it is used, the command waits 2 seconds more for a second use (`reused`), so that a window
    that lost its token to another program is not reported as a success. When the wait ends —
    used, the alarm, or the 30 seconds gone — it gives the token up (`POST /token/drop`), so no
-   unused token is left on Edge's command line. On the alarm for its own token it says so, names
+   unused token is left on Edge's command line. A command interrupted meanwhile (Ctrl+C) gives
+   nothing up: its token lives out its 30 seconds (a known limit; ruled by the plan owner, stage
+   A's plan task 25). On the alarm for its own token it says so, names
    `--new-secret` (8.2.2), and exits 1. An alarm set earlier (`window_alarm`) does not stop it: it
    goes on as usual and prints one more line, `skydeck's key may be known to another program since
    <time>; run skydeck window --new-secret`. Only one command starts Edge at a time: it
    holds the `kv` entry `window_launching` (taken in one transaction, stale after 45 seconds, longer than its wait) while
    it starts Edge and waits; a second `skydeck window` meanwhile waits for that one's page instead
-   of starting another window.
+   of starting another window. The entry names its holder — a mark of its own, the time, and the
+   command's pid, process start and boot id — and holds nothing once that command is dead by
+   design 5.5's rule, so that a command interrupted while it waited (Ctrl+C) does not make the next
+   one wait for a page that never comes; a holder that cannot be judged counts as alive, and holds
+   the 45 seconds. A command gives up only the value it wrote itself (ruled by the plan owner,
+   stage A's plan task 25).
 3. prints one line: `skydeck window: http://127.0.0.1:<port>/ (server pid <n>)` — never a key or a
    token — and exits 0. When Edge was started but no page connected in time it says so, names
    `--print-url`, and exits 1.
+
+Standard output carries only the command's one result line (this one, `a window is already open`,
+the address of `--print-url`, the line of `--stop`); every other line — the restart line, the
+earlier alarm, a failure — is printed on standard error with the `skydeck: ` prefix of every
+diagnostic line of skydeck (ruled by the plan owner, stage A's plan task 25).
+
+After a restart (`--restart`, or a server of another build replaced in step 1) the windows of the
+old server come back only once the new server's start is done (8.2.1 answers 503 until then; the
+pages retry, 6.3), so step 2's "no page is connected", looked at right after the start, would open a
+second window at every update. So before it stops a server the command reads that server's `pages`
+(`GET /status`); when the server answered with more than 0 and the run is not `--new-secret` (the
+old windows are refused then), `--new-window` or `--print-url`, it waits up to 7 seconds — the
+page's longest retry interval is 5 (6.3) — for a page on the new server before it asks for a token.
+A page that comes back in that time is "a page is already connected" (below): the same line and
+exit code, no token, no Edge. An old server that did not answer, or whose answer has no page count
+that can be read, counts as none: no wait (ruled by the plan owner, stage A's plan task 25).
 
 When a page is already connected it starts nothing on Windows and says
 `skydeck window: a window is already open`; `--new-window` opens another one anyway (several
@@ -306,6 +332,9 @@ Options:
   alarm (8.2.2), start a server and a window. Windows opened before cannot connect any more and say
   so; their stored key is replaced when the new window's token is used in the same profile.
 
+`--stop` combines with no other option, and `--print-url` not with `--new-window`: either is a
+usage error (ruled by the plan owner, stage A's plan task 25).
+
 Exit codes as design 7.5: 0, 1 (failure), 2 (usage).
 
 ### 5.2 Starting the server; one server only
@@ -335,6 +364,15 @@ it turns into one fixed line:
 | 12 | `the runtime directory <dir> cannot be used: <reason>; see skydeck doctor` (mode, owner, or a socket path of 108 bytes or more) |
 | 13 | `the window's server is not started from inside a Claude Code session` |
 | anything else, or no answer in 10 seconds | `the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log`; after a timeout the process is left running, and the next `skydeck window` finds it or reports it as not answering (5.1) |
+
+A ping counts only once `server.json` names the server that answered it — the same pid, server id
+and boot id, its process alive by design 5.5's rule — within the same 10 seconds: a server answers
+its ping before it writes `server.json`, and every other command (`--stop`, `--restart`,
+`--new-secret`, `doctor`, `uninstall`) finds a server by `server.json`, so a command that returned
+earlier would leave a server that the next command cannot see. One that answers but has not
+recorded itself in that time gives `the window's server (pid <n>) answers, but did not record itself
+in <server.json> within 10 s; see <stateDir>/server.log` (exit 1) and is left running (ruled by the
+plan owner, stage A's plan task 25).
 
 These codes are `serve`'s own; they never reach a user through another command. A store that
 another process keeps write-locked for longer than the server's 250 ms (14) fails the start at
