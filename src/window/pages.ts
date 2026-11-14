@@ -26,6 +26,11 @@
  * hub's first call on it; what follows (a terminal's exit or notice of the state it was already
  * in, then every later record) is forwarded as it comes.
  *
+ * Backpressure (S2 8.2.8, ruled at review 2): a page is behind once a record or its list finds
+ * more than 1 MiB queued after its latest snap; its records are dropped and its list held until
+ * the drain, when only the streams that lost something snap again. Above 64 MiB queued the
+ * connection is dropped. At most 64 connections may wait for their hello.
+ *
  * Logs carry fixed text and the validators' kinds, never what a page sent and never a key.
  */
 import type { IncomingMessage } from 'node:http';
@@ -106,8 +111,13 @@ export interface Pages {
 const PROTOCOL = 1;
 /** S2 8.2.2 step 3: the page's hello comes within 5 seconds. */
 const HELLO_MS = 5_000;
-/** S2 8.2.8: above this many queued bytes a page gets no output until its socket has drained. */
+/** S2 8.2.8: above this many queued bytes (a snap's own not counted) a page gets no output and
+ *  no list until its socket has drained. */
 const BEHIND_BYTES = 1024 * 1024;
+/** S2 8.2.8: above this many queued bytes, whatever they are, the connection is dropped (ruled). */
+const DROP_BYTES = 64 * 1024 * 1024;
+/** S2 8.2.1: at most this many connections wait for their hello (ruled). */
+const MAX_WAITING_HELLO = 64;
 /** S2 8.2.3: `list` at most once a second per page. */
 const LIST_MS = 1_000;
 
@@ -163,8 +173,16 @@ interface Connection extends PageState {
   theme: ThemePayload | null;
   readonly attachments: Map<string, Attachment>;
   channels: number;
-  /** S2 8.2.8: a record found more than BEHIND_BYTES queued; none goes out until the drain. */
+  /** S2 8.2.8: a record or a list found more than BEHIND_BYTES queued; none goes out until the drain. */
   behind: boolean;
+  /** Bytes of every frame written to the socket so far, and that count after the last snap: a
+   *  snap's own bytes do not count toward BEHIND_BYTES (ruled). */
+  sent: number;
+  snapEnd: number;
+  /** A list was held while behind (S2 8.2.8, ruled): the current one goes out at the drain;
+   *  `listForced` when it answered a view (sent even when unchanged). */
+  listHeld: boolean;
+  listForced: boolean;
   /** Lists are sent only after the page's first view. */
   hasView: boolean;
   /** The last list sent, without its time; null before the first. */
@@ -175,13 +193,23 @@ interface Connection extends PageState {
   listDirty: boolean;
 }
 
+/** The bytes a server frame of `payload` bytes takes (RFC 6455 5.2: no mask, one frame). */
+function frameBytes(payload: number): number {
+  return payload + (payload < 126 ? 2 : payload < 65_536 ? 4 : 10);
+}
+
 /** S2 8.2.2 step 1: exactly `http://127.0.0.1:<port>`; for port 80 also `http://127.0.0.1`. */
 function originOk(origin: string | undefined, port: number): origin is string {
   return origin === `http://127.0.0.1:${port}` || (port === 80 && origin === 'http://127.0.0.1');
 }
 
 /** The refusal an upgrade request gets, or null when it may become a WebSocket. */
-function refusalOf(req: IncomingMessage, port: number, stopping: boolean): number | null {
+function refusalOf(
+  req: IncomingMessage,
+  port: number,
+  stopping: boolean,
+  waitingHello: number,
+): number | null {
   if (!hostOk(req.headers.host, port)) return 421;
   if (stopping) return 503;
   if (req.method === 'OPTIONS') return 403;
@@ -190,6 +218,7 @@ function refusalOf(req: IncomingMessage, port: number, stopping: boolean): numbe
   const query = target.indexOf('?');
   if ((query === -1 ? target : target.slice(0, query)) !== '/ws') return 404;
   if (!originOk(req.headers.origin, port)) return 403;
+  if (waitingHello >= MAX_WAITING_HELLO) return 503;
   return null;
 }
 
@@ -251,8 +280,38 @@ export function createPages(deps: PagesDeps): Pages {
     }
   };
 
+  /**
+   * Writes one frame (text or binary) and counts its bytes; `snap` marks where the latest snap
+   * ends. Above DROP_BYTES queued the connection is dropped at once (the page reconnects, S2
+   * 8.2.5): nothing a page does by not reading can make the server keep more.
+   */
+  const write = (conn: Connection, frame: string | Uint8Array, snap = false): void => {
+    if (typeof frame === 'string') {
+      conn.ws.sendText(frame);
+      conn.sent += frameBytes(Buffer.byteLength(frame, 'utf8'));
+    } else {
+      conn.ws.sendBinary(frame);
+      conn.sent += frameBytes(frame.length);
+    }
+    if (snap) conn.snapEnd = conn.sent;
+    if (conn.phase !== 'closed' && conn.ws.buffered > DROP_BYTES) {
+      log('page: more than 64 MiB queued; the connection is dropped');
+      conn.ws.destroy();
+    }
+  };
+
   const send = (conn: Connection, message: ServerMessage): void => {
-    conn.ws.sendText(JSON.stringify(message));
+    write(conn, JSON.stringify(message));
+  };
+
+  /** What is queued behind the latest snap: a snap's own bytes do not count (ruled). */
+  const queuedAfterSnap = (conn: Connection): number =>
+    Math.min(conn.ws.buffered, conn.sent - conn.snapEnd);
+
+  /** Whether the page is behind, once a record or a list finds the queue over the limit. */
+  const isBehind = (conn: Connection): boolean => {
+    if (!conn.behind && queuedAfterSnap(conn) > BEHIND_BYTES) conn.behind = true;
+    return conn.behind;
   };
 
   /**
@@ -262,9 +321,9 @@ export function createPages(deps: PagesDeps): Pages {
    * behind by itself, so a large screen does not snap again and again.
    */
   const mayForward = (conn: Connection, attachment: Attachment): boolean => {
-    if (!conn.behind && conn.ws.buffered > BEHIND_BYTES) conn.behind = true;
-    if (conn.behind) attachment.lost = true;
-    return !conn.behind;
+    if (!isBehind(conn)) return true;
+    attachment.lost = true;
+    return false;
   };
 
   const closeWith = (conn: Connection, code: number, line: string): void => {
@@ -282,8 +341,16 @@ export function createPages(deps: PagesDeps): Pages {
     })),
   });
 
-  /** Sends the page its list when it changed (always when `force`), and starts its second. */
+  /**
+   * Sends the page its list when it changed (always when `force`), and starts its second. While
+   * the page is behind the list is held, and the current one goes out at the drain (ruled).
+   */
   const sendList = (conn: Connection, force: boolean): void => {
+    if (isBehind(conn)) {
+      conn.listHeld = true;
+      conn.listForced ||= force;
+      return;
+    }
     let list: ListMessage;
     try {
       list = withOwnership(deps.listFor(conn), conn);
@@ -354,12 +421,16 @@ export function createPages(deps: PagesDeps): Pages {
           return;
         }
         guard(conn, () =>
-          send(conn, { t: 'snap', term, ch: attachment.channel, cols, rows, data }),
+          write(
+            conn,
+            JSON.stringify({ t: 'snap', term, ch: attachment.channel, cols, rows, data }),
+            true,
+          ),
         );
       },
       output(bytes) {
         if (!attachment.live || !mayForward(conn, attachment)) return;
-        guard(conn, () => conn.ws.sendBinary(encodeOutputFrame(attachment.channel, bytes)));
+        guard(conn, () => write(conn, encodeOutputFrame(attachment.channel, bytes)));
       },
       size(cols, rows) {
         if (!attachment.live || !mayForward(conn, attachment)) return;
@@ -450,6 +521,12 @@ export function createPages(deps: PagesDeps): Pages {
       conn.attachments.delete(attachment.term);
       endStream(attachment);
       if (openStream(conn, attachment.term) === null) sizeEvent(conn, 'detach', attachment.term);
+    }
+    if (conn.listHeld) {
+      const force = conn.listForced;
+      conn.listHeld = false;
+      conn.listForced = false;
+      sendList(conn, force);
     }
   };
 
@@ -670,6 +747,10 @@ export function createPages(deps: PagesDeps): Pages {
       attachments,
       channels: 0,
       behind: false,
+      sent: 0,
+      snapEnd: 0,
+      listHeld: false,
+      listForced: false,
       hasView: false,
       lastList: null,
       stopListTimer: null,
@@ -715,7 +796,9 @@ export function createPages(deps: PagesDeps): Pages {
       // node:http's 'upgrade' listener: a throw here would end the server.
       try {
         const port = deps.port();
-        const refusal = refusalOf(req, port, stopping);
+        let waitingHello = 0;
+        for (const conn of connections) if (conn.phase === 'hello') waitingHello++;
+        const refusal = refusalOf(req, port, stopping, waitingHello);
         if (refusal !== null) {
           refuse(socket, port, refusal);
           return;

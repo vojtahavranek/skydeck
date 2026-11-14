@@ -574,6 +574,43 @@ describe('pages: the checks at the upgrade', () => {
     assert.equal((await client.nextText()).t, 'challenge');
   });
 
+  test('at most 64 connections wait for their hello; a 65th upgrade is refused with 503', async (t) => {
+    const f = await startPages(t);
+    const waiting: PageClient[] = [];
+    let firstNonce = '';
+    for (let i = 0; i < 64; i++) {
+      const client = await connectPage(t, f);
+      const sN = await challengeOf(client);
+      if (i === 0) firstNonce = sN;
+      waiting.push(client);
+    }
+    const refused = await refusedUpgrade(t, f);
+    assert.equal(refused.status, 503);
+    assertSecurityHeaders(refused.headers, '503');
+    // One proves itself: a place is free again.
+    const first = waiting[0] as PageClient;
+    const cN = freshNonce();
+    const proof = pageProof(f.secret, 'key', firstNonce, cN, f.origin);
+    first.send({ t: 'hello', protocol: 1, mode: 'key', nonce: cN, proof });
+    assert.equal((await first.nextText()).t, 'welcome');
+    const next = await connectPage(t, f);
+    assert.equal((await next.nextText()).t, 'challenge');
+    assert.equal((await refusedUpgrade(t, f)).status, 503);
+    // One goes away: a place is free again.
+    (waiting[1] as PageClient).ws.close();
+    await within('the close', (waiting[1] as PageClient).closed);
+    let accepted: PageClient | null = null;
+    for (let i = 0; i < 50 && accepted === null; i++) {
+      try {
+        accepted = await connectPage(t, f);
+      } catch {
+        await delay(20);
+      }
+    }
+    assert.ok(accepted !== null);
+    assert.equal((await accepted.nextText()).t, 'challenge');
+  });
+
   test('after bye an upgrade is refused with 503', async (t) => {
     const f = await startPages(t);
     await f.pages.bye('stopping');

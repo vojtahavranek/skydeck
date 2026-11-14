@@ -2458,6 +2458,18 @@ listener only, to resolve once the socket has really closed (ruled); every write
 through the WebSocket connection. After `bye` an upgrade with the right `Host` is answered 503
 (ruled, S2 8.2.1, 5.5); a wrong `Host` still gets 421.
 
+Backpressure (ruled by the plan owner at review 2, S2 8.2.8): a page is behind once a record
+(output, size, exit) or its `list` finds min(`buffered`, the bytes sent since the end of the last
+`snap`) above 1 MiB — a snap's own bytes do not count, so a large screen never loops; while
+behind its records are dropped (the streams that lose one are marked) and its `list` is held; at
+Node.js's `drain` (nothing queued, so below 64 KiB) only the marked streams are attached again (a
+fresh `snap` on a new channel, then what the hub tells after it) and the current `list` goes out.
+Above 64 MiB queued, whatever it is, the connection is destroyed with one fixed log line. At most
+64 connections may be in the hello phase; a further upgrade is answered 503. The hello reads the
+secret from the store every time (a named limit, S2 8.2.2: `--new-secret` takes effect at once;
+a held write lock can stall the server up to the 5 s busy timeout). When a page goes, every
+stream is detached before the sizes are handed over; during `bye` no size is handed over.
+
 Pages calls `hub.setTheme` with a page's theme (from its `start`) when that page starts focused
 and whenever it reports `focus` with `focused` true: `FocusMessage` carries no theme, so the one
 of `start` is sent again (ruled; S2 7.2's "the last focused page").
@@ -2534,8 +2546,14 @@ export function createPages(deps: PagesDeps): Pages;
   `sizeAfter` says so, and each page's `size.owner` and `list.terminals[].ownsSize` are true for
   the owner only.
 - Backpressure: a page whose socket is not read gets no output while more than 1 MiB is queued;
-  once drained below 64 KiB it gets a fresh `snap` per attached terminal (new channels) and output
-  again; the hub (and so the keeper) was never paused.
+  once drained below 64 KiB it gets a fresh `snap` per attached terminal that lost something (new
+  channels; one that lost nothing keeps its stream) and output again; the hub (and so the keeper)
+  was never paused. A second page that reads gets every record meanwhile. Ruled at review 2: an
+  idle terminal with a 6 MiB snap gets one snap; four and five terminals attached at once with
+  1.4 MiB snaps, idle or busy, get one snap each and every record; a busy terminal with a snap
+  above 4 MiB gets its records; a held `list` goes out once, the current one, at the drain;
+  above 64 MiB queued the connection is dropped and its streams detached; a 65th connection
+  waiting for its hello gets 503.
 - `ping` → `pong` with `n`, `bootId`, `serverId`; `view` → a `list` at once; `pushList` sends
   only changed lists and at most once a second per page (fake clock); `act` → the handler's
   `result` with the same `id`; `bye` reaches every page before the sockets close.

@@ -2,6 +2,7 @@
 // pages, backpressure, the list, actions and bye, against a fake hub and a fake action handler.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import type { TestContext } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { KeeperExit } from '../../src/window/frames.ts';
@@ -643,23 +644,148 @@ describe('pages: backpressure', () => {
     });
   });
 
-  test('five idle terminals with snaps of 1 MiB, attached at once, get one snap each', async (t) => {
+  /**
+   * Attaches `terms` at once (each screen `size` bytes); a busy test then has every terminal write
+   * 100 small records, 5 ms apart, from the moment it was attached. Each terminal must get one
+   * snap and one attach, and a busy one every record, in order, on its snap's channel.
+   */
+  async function attachedAtOnce(
+    t: TestContext,
+    terms: string[],
+    size: number,
+    busy: boolean,
+  ): Promise<void> {
     const f = await startPages(t);
-    const terms = ['00000000000a', '00000000000b', '00000000000c', '00000000000d', '00000000000e'];
     for (const term of terms) {
       f.hub.add(term);
-      f.hub.setScreen(term, term.repeat(MiB / 12));
+      f.hub.setScreen(term, term.repeat(Math.ceil(size / term.length)));
     }
     const { client } = await openPage(t, f);
     for (const term of terms) client.send({ t: 'attach', term, cols: 80, rows: 24 });
-    await until('five snaps', () => snapsIn(client).length >= 5);
-    await delay(500);
-    const snaps = snapsIn(client);
-    assert.deepEqual(
-      snaps.map((m) => m.t === 'snap' && m.term),
-      terms,
+    await until('the attaches', () => attachCalls(f) === terms.length);
+    const RECORDS = busy ? 100 : 0;
+    for (let i = 0; i < RECORDS; i++) {
+      for (const term of terms)
+        f.hub.output(term, `${term} ${String(i).padStart(4, '0')} `.padEnd(100, '.'));
+      await delay(5);
+    }
+    await until('every snap', () => snapsIn(client).length >= terms.length);
+    const channels = new Map(
+      snapsIn(client).map((m) => [m.t === 'snap' ? m.ch : -1, m.t === 'snap' ? m.term : '']),
     );
-    assert.equal(attachCalls(f), 5);
+    const records = (): Map<string, number[]> => {
+      const got = new Map<string, number[]>(terms.map((term) => [term, []]));
+      for (const item of client.all) {
+        if (!('binary' in item)) continue;
+        const view = new DataView(item.binary.buffer, item.binary.byteOffset);
+        const term = channels.get(view.getUint32(1));
+        assert.ok(term !== undefined, 'output on a channel a snap gave');
+        got.get(term)?.push(Number(text(item.binary.subarray(5)).slice(13, 17)));
+      }
+      return got;
+    };
+    await until('every record', () =>
+      [...records().values()].every((list) => list.length === RECORDS),
+    );
+    await delay(300);
+    assert.deepEqual(
+      snapsIn(client).map((m) => m.t === 'snap' && m.term),
+      terms,
+      'one snap each',
+    );
+    assert.equal(attachCalls(f), terms.length, 'no terminal attached again');
+    for (const [term, list] of records()) assert.deepEqual(list, [...list.keys()], term);
+  }
+
+  const FIVE = ['00000000000a', '00000000000b', '00000000000c', '00000000000d', '00000000000e'];
+  for (const count of [4, 5]) {
+    for (const busy of [false, true]) {
+      test(`${count} ${busy ? 'busy' : 'idle'} terminals with snaps of 1.4 MiB, attached at once, get one snap each${busy ? ' and every record' : ''}`, async (t) => {
+        await attachedAtOnce(t, FIVE.slice(0, count), 1.4 * MiB, busy);
+      });
+    }
+  }
+
+  test('a busy terminal whose snap is above 4 MiB gets one snap, and its records arrive', async (t) => {
+    await attachedAtOnce(t, [T1], 6 * MiB, true);
+  });
+});
+
+describe('pages: a page that does not read', () => {
+  test('while behind its lists are held; the current one goes out at the drain', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    const { client } = await openPage(t, f, { view: true });
+    await attach(client, T1);
+    const listsBefore = client.all.filter((i) => 'text' in i && i.text.t === 'list').length;
+    client.ws.pause();
+    for (let i = 0; i < 400; i++) f.hub.output(T1, record(i));
+    for (let i = 0; i < 10; i++) {
+      f.clock.advanceMs(1_000);
+      f.listData.dirs = [`/v${i}`];
+      f.pages.pushList();
+    }
+    client.ws.resume();
+    await until('the fresh snap', () => snapsIn(client).length === 2);
+    await roundTrip(client);
+    const lists = client.all.flatMap((i) => ('text' in i && i.text.t === 'list' ? [i.text] : []));
+    assert.equal(lists.length, listsBefore + 1, 'one list for the time behind');
+    assert.deepEqual(lists.at(-1)?.dirs, ['/v9', 'filter:']);
+  });
+
+  test('a page with no terminal whose lists pile up gets the current one at the drain', async (t) => {
+    let version = 0;
+    const big = 'd'.repeat(MiB);
+    const f = await startPages(t, {
+      listFor: () => ({
+        t: 'list',
+        nowNs: '1',
+        counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
+        sections: [],
+        doneHidden: 0,
+        banner: null,
+        terminals: [],
+        selected: null,
+        dirs: [`/v${version}`, big],
+      }),
+    });
+    const { client } = await openPage(t, f, { view: true });
+    client.ws.pause();
+    const CHANGES = 40;
+    for (let i = 1; i <= CHANGES; i++) {
+      version = i;
+      f.clock.advanceMs(1_000);
+      f.pages.pushList();
+    }
+    client.ws.resume();
+    await until('the current list', () =>
+      client.all.some(
+        (i) => 'text' in i && i.text.t === 'list' && i.text.dirs[0] === `/v${CHANGES}`,
+      ),
+    );
+    await textsUntilPong(client);
+    const lists = client.all.filter((i) => 'text' in i && i.text.t === 'list').length;
+    assert.ok(
+      lists < CHANGES / 2,
+      `${lists} lists of 1 MiB for ${CHANGES} changes: they were held`,
+    );
+  });
+
+  test('more than 64 MiB queued: the connection is dropped, logged, its streams detached', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.setScreen(T1, 's'.repeat(10 * MiB));
+    const { client } = await openPage(t, f);
+    client.ws.pause();
+    for (let i = 0; i < 10; i++) {
+      client.send({ t: 'attach', term: T1, cols: 80, rows: 24 });
+      await delay(20);
+    }
+    await until('the page is dropped', () => f.pages.count() === 0);
+    assert.equal(f.hub.sinks(T1).length, 0);
+    assert.deepEqual(f.logs, ['page: more than 64 MiB queued; the connection is dropped']);
+    client.ws.resume();
+    await within('the close', client.closed);
   });
 });
 
