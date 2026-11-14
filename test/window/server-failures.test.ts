@@ -263,6 +263,43 @@ async function finishStart(held: { open(): void }, starting: Promise<unknown>): 
   );
 }
 
+/** A page's hello in mode launch with `token`: 0 when it is welcomed, else the close code. */
+async function presentToken(t: TestContext, port: number, token: Uint8Array): Promise<number> {
+  const origin = `http://127.0.0.1:${port}`;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin });
+  t.after(() => {
+    ws.terminate();
+  });
+  ws.on('error', () => {});
+  const closed = new Promise<number>((resolve) => ws.once('close', (code) => resolve(code)));
+  const challenge = await new Promise<{ nonce: string }>((resolve) =>
+    ws.once('message', (data) => resolve(JSON.parse(String(data)) as { nonce: string })),
+  );
+  const cN = freshNonce();
+  ws.send(
+    JSON.stringify({
+      t: 'hello',
+      protocol: 1,
+      mode: 'launch',
+      nonce: cN,
+      proof: pageProof(token, 'launch', challenge.nonce, cN, origin),
+    }),
+  );
+  const answer = await within(
+    Promise.race([
+      new Promise<string>((resolve) => ws.once('message', (data) => resolve(String(data)))),
+      closed.then((code) => `closed ${code}`),
+    ]),
+    'the answer to the hello',
+    WAIT_MS,
+  );
+  if (answer.includes('"welcome"')) {
+    ws.close();
+    return 0;
+  }
+  return within(closed, 'the close', WAIT_MS);
+}
+
 describe('python3 missing (S2 14)', () => {
   test("the server runs and lists; a resume answers S2 14's message; status says python3 is not found", async (t) => {
     const d = serverSandbox(t);
@@ -546,40 +583,9 @@ describe('what the server wires together', () => {
     const test = await d.start();
     const minted = await controlClient(d.platform.net, d.files.serverSock).token(30);
     const token = Buffer.from(minted.token, 'base64url');
-    const origin = `http://127.0.0.1:${test.server.port}`;
-    const present = async (): Promise<number> => {
-      const ws = new WebSocket(`ws://127.0.0.1:${test.server.port}/ws`, { origin });
-      t.after(() => {
-        ws.terminate();
-      });
-      ws.on('error', () => {});
-      const closed = new Promise<number>((resolve) => ws.once('close', (code) => resolve(code)));
-      const challenge = await new Promise<{ nonce: string }>((resolve) =>
-        ws.once('message', (data) => resolve(JSON.parse(String(data)) as { nonce: string })),
-      );
-      const cN = freshNonce();
-      ws.send(
-        JSON.stringify({
-          t: 'hello',
-          protocol: 1,
-          mode: 'launch',
-          nonce: cN,
-          proof: pageProof(token, 'launch', challenge.nonce, cN, origin),
-        }),
-      );
-      const answer = await Promise.race([
-        new Promise<string>((resolve) => ws.once('message', (data) => resolve(String(data)))),
-        closed.then((code) => `closed ${code}`),
-      ]);
-      if (answer.includes('"welcome"')) {
-        ws.close();
-        return 0;
-      }
-      return closed;
-    };
-    assert.equal(await present(), 0, 'the first use is welcomed');
+    assert.equal(await presentToken(t, test.server.port, token), 0, 'the first use is welcomed');
     assert.equal(d.deck.store.getKv('window_alarm'), null);
-    assert.equal(await present(), 4004, 'the second is refused');
+    assert.equal(await presentToken(t, test.server.port, token), 4004, 'the second is refused');
     assert.match(d.deck.store.getKv('window_alarm') ?? '', /^[1-9][0-9]*$/, 'the alarm is raised');
   });
 
@@ -728,21 +734,17 @@ describe('the store (S2 10.1, 14)', () => {
     const d = serverSandbox(t);
     d.resumable(S1);
     claudeCommandScript(d, 'claude-sleeps', '#!/bin/sh\nexec sleep 120\n');
-    let lock: ReturnType<typeof holdWriteLock> | null = null;
-    // The keeper's socket refuses connections for 6 s: its hello comes late, through
-    // decideFoundKeeper, while another process holds the store's write lock.
-    let unblockAt: number | null = null;
+    // The keeper's socket refuses connections until the test opens it (after spawn's 5 s): its
+    // hello comes late, through decideFoundKeeper, while another process holds the write lock.
+    let shut = true;
     const test = await d.start({
       platform: (p) => ({
         ...p,
         net: {
           ...p.net,
           async connectUnix(path) {
-            if (path.startsWith(`${d.files.termsDir}/`)) {
-              unblockAt ??= performance.now() + 6000;
-              if (performance.now() < unblockAt) {
-                throw Object.assign(new Error('refused for the test'), { code: 'ECONNREFUSED' });
-              }
+            if (shut && path.startsWith(`${d.files.termsDir}/`)) {
+              throw Object.assign(new Error('refused for the test'), { code: 'ECONNREFUSED' });
             }
             return p.net.connectUnix(path);
           },
@@ -752,9 +754,12 @@ describe('the store (S2 10.1, 14)', () => {
     const page = await connectTestPage(t, d, test.server);
     const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
     assert.equal(result.ok, false, 'no hello within 5 s: answered as a timeout');
-    d.resumable(S2, join(d.s.home, 'other')); // the decision's refresh must write
-    lock = holdWriteLock(t, d);
+    // In this order (review 2): the lock first, then what the decision's refresh must write, then
+    // the socket — so that no refresh can save it before the decision meets the lock.
+    const lock = holdWriteLock(t, d);
     await lock.held;
+    d.resumable(S2, join(d.s.home, 'other'));
+    shut = false;
     await until(
       () => test.logs().some((line) => line.includes('the store is busy; decided later')),
       'the decision put off',
