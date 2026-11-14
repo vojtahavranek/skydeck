@@ -17,5 +17,5 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src", "test", "scripts", "bin/*.mjs"]
+  "include": ["src", "test", "scripts", "bin/*.mjs", "test-page/**/*.ts"]
 }
