@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>skydeck key test</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 12px 16px; background: #14161a; color: #d8dce2; }
+  h1 { font-size: 16px; margin: 0 0 8px; }
+  .env, .row { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 8px; }
+  .env span b { color: #fff; }
+  #chords { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin: 10px 0; }
+  .chord { border: 1px solid #3a3f48; border-radius: 6px; padding: 5px 8px; font-family: ui-monospace, monospace; }
+  .chord.seen { border-color: #2e8b57; background: #17301f; }
+  .chord small { display: block; color: #8b93a0; font-family: system-ui, sans-serif; }
+  button { font: inherit; padding: 3px 10px; margin-right: 6px; }
+  #last, #log { font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  #log { max-height: 160px; overflow: auto; border-top: 1px solid #3a3f48; padding-top: 6px; color: #aab2bf; }
+  #ping.bad { color: #ff7b72; font-weight: bold; }
+  textarea { width: 60%; height: 3em; background: #0e1013; color: #d8dce2; border: 1px solid #3a3f48; }
+</style>
+</head>
+<body>
+<h1>skydeck key test - press each chord; every keydown is cancelled with preventDefault and sent to the WSL server</h1>
+<div class="env">
+  <span>secure context: <b id="secure"></b></span>
+  <span>origin: <b id="origin"></b></span>
+  <span>display-mode: <b id="mode"></b></span>
+  <span>window loads this session: <b id="loads"></b></span>
+  <span>UA: <b id="ua"></b></span>
+</div>
+<div class="env">
+  <span id="ping">ping: ...</span>
+  <span>boot id: <b id="boot"></b></span>
+  <span>WSL uptime: <b id="up"></b></span>
+</div>
+<div id="chords"></div>
+<div class="row">
+  <button id="bNotif">Notification</button>
+  <button id="bClipW">Clipboard write</button>
+  <button id="bClipR">Clipboard read</button>
+  <button id="bKlock">Keyboard Lock</button>
+  <button id="bClear">Reset chords</button>
+</div>
+<div>Type your own keys here (AltGr, accents, backslash, brackets, braces, @, #, euro): <br><textarea id="ta" spellcheck="false"></textarea></div>
+<div>last keydown: <span id="last">-</span></div>
+<div id="log"></div>
+<script src="/keytest.js"></script>
+</body>
+</html>
