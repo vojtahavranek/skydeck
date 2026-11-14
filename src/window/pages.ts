@@ -33,7 +33,14 @@ import type { Duplex } from 'node:stream';
 import type { Platform } from '../platform/types.ts';
 import type { Store } from '../store/store.ts';
 import { hostOk, securityHeaders } from './assets.ts';
-import { ensureSecret, isNonce, keyProofMatches, serverProof, wrapSecret } from './auth.ts';
+import {
+  ensureSecret,
+  failureKind,
+  isNonce,
+  keyProofMatches,
+  serverProof,
+  wrapSecret,
+} from './auth.ts';
 import type { Tokens } from './auth.ts';
 import type { ActionHandler, PageInfo, StreamSink, TerminalHub } from './hub.ts';
 import { encodeOutputFrame, parsePageMessage } from './protocol.ts';
@@ -164,21 +171,6 @@ interface Connection extends PageState {
   listDirty: boolean;
 }
 
-/** An error's name and, when it has one, its string code, for a log line: never its message. */
-function errorKind(error: unknown): string {
-  try {
-    if (!(error instanceof Error)) {
-      return `a thrown ${error === null ? 'null' : typeof error}`;
-    }
-    const name: unknown = error.name;
-    const kind = typeof name === 'string' && /^[A-Za-z][A-Za-z0-9]*$/.test(name) ? name : 'Error';
-    const code: unknown = (error as { code?: unknown }).code;
-    return typeof code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(code) ? `${kind} (${code})` : kind;
-  } catch {
-    return 'an error that cannot be read';
-  }
-}
-
 /** S2 8.2.2 step 1: exactly `http://127.0.0.1:<port>`; for port 80 also `http://127.0.0.1`. */
 function originOk(origin: string | undefined, port: number): origin is string {
   return origin === `http://127.0.0.1:${port}` || (port === 80 && origin === 'http://127.0.0.1');
@@ -237,7 +229,7 @@ export function createPages(deps: PagesDeps): Pages {
     try {
       work();
     } catch (error) {
-      log(`page: ${errorKind(error)}`);
+      log(`page: ${failureKind(error)}`);
       try {
         conn.ws.close(INTERNAL);
       } catch {
@@ -281,7 +273,7 @@ export function createPages(deps: PagesDeps): Pages {
     try {
       list = withOwnership(deps.listFor(conn), conn);
     } catch (error) {
-      log(`page: the list cannot be built: ${errorKind(error)}`);
+      log(`page: the list cannot be built: ${failureKind(error)}`);
       return;
     }
     const key = JSON.stringify({ ...list, nowNs: '' });
@@ -451,7 +443,7 @@ export function createPages(deps: PagesDeps): Pages {
         guard(conn, () => send(conn, { ...result, t: 'result', id: action.id }));
       },
       (error: unknown) => {
-        log(`page: the action ${action.kind} failed: ${errorKind(error)}`);
+        log(`page: the action ${action.kind} failed: ${failureKind(error)}`);
         guard(conn, () =>
           send(conn, {
             t: 'result',
@@ -513,7 +505,7 @@ export function createPages(deps: PagesDeps): Pages {
     try {
       secret = ensureSecret(deps.store, platform.randomBytes);
     } catch (error) {
-      closeWith(conn, INTERNAL, `the secret cannot be read: ${errorKind(error)}`);
+      closeWith(conn, INTERNAL, `the secret cannot be read: ${failureKind(error)}`);
       return;
     }
     if (hello.mode === 'key') {
@@ -706,7 +698,7 @@ export function createPages(deps: PagesDeps): Pages {
         const ws = acceptWebSocket(req, socket, head, clock);
         if (ws !== null) accept(ws, req.headers.origin as string, closed);
       } catch (error) {
-        log(`page: the upgrade failed: ${errorKind(error)}`);
+        log(`page: the upgrade failed: ${failureKind(error)}`);
         socket.destroy();
       }
     },
