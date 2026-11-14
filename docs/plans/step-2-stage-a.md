@@ -2427,6 +2427,18 @@ The handshake checks a proof only through 2.8 (ruled, task 11): mode `key` with 
 mode `launch` with `tokens.check`, never by a comparison of its own; `reused` closes with 4004
 whatever `alarmFailure` says, and a non-null `alarmFailure` is logged by that kind.
 
+Node.js's own answers stay Node.js's (ruled by the plan owner, task 17): no `clientError` hook and
+no platform change. What it answers before any handler — 400 for an HTTP/1.1 request without
+`Host` (its parser), 400 or 431 through its default `clientError` handling (an unknown method, a
+request line it cannot parse, `Content-Length` with `Transfer-Encoding`, an HTTP/2 preface, headers
+above 16 KiB), `CONNECT` closed without an answer — is recorded in S2 8.2.1 and pinned by tests.
+Every request Node.js hands the upgrade listener (any with `Connection: Upgrade` and an `Upgrade`
+header) has its `Host` (421), method (OPTIONS 403, any other but GET 405 with `Allow: GET`) and
+path (`/ws`, query ignored, else 404) checked there, then its `Origin` (403); the refusals carry
+`securityHeaders` and `no-store`. `bye` keeps a `'close'` listener on the raw upgrade socket, as a
+listener only, to resolve once the socket has really closed (ruled); every write and close goes
+through the WebSocket connection.
+
 **Exported API**
 
 ```ts
@@ -2453,6 +2465,8 @@ export interface Pages {
   /** Sends `list` to every page whose list differs from the last one it got, at most once a second each. */
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
+  /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
+   *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS). */
   bye(reason: string): Promise<void>;
 }
 export function createPages(deps: PagesDeps): Pages;
@@ -2474,6 +2488,12 @@ export function createPages(deps: PagesDeps): Pages;
   nonce) → 4003; any message before `hello`, or another before `start`, closes; `Origin`
   `http://localhost:<port>` or missing → 403 at the upgrade; `Host` wrong → 421 (task 14's
   `hostOk`, applied here to the upgrade).
+- The upgrade listener's own checks (ruled): any request with `Connection: Upgrade` reaches it, so
+  a wrong `Host` → 421, OPTIONS → 403, another method than GET → 405 with `Allow: GET`, a path
+  other than `/ws` → 404, each with the security headers and `no-store`; for port 80 `Host`
+  `127.0.0.1` and `Origin` `http://127.0.0.1` are accepted, `localhost` never. Node.js's own
+  answers (above) through the real listener: each a 4xx with an empty body (CONNECT: none), the
+  socket closed, no handler of ours called.
 - No log line and no frame the tests capture contains the secret's base64url, and a malformed
   `hello`, `start` and `input` carrying a marker string leave the marker in no log line.
 - Streams: `attach` → `snap` with a fresh channel, then binary frames `1, ch, bytes` in order, and

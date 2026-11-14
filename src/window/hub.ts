@@ -30,6 +30,9 @@ export interface TerminalInfo {
 }
 
 export interface StreamSink {
+  /** Always the first call on a sink: the screen at the point of the terminal's chain where
+   *  `attach` was called. Never called when the terminal is forgotten before it was made. */
+  snapshot(cols: number, rows: number, data: string): void;
   /** One record of output, after the screen side applied it. */
   output(bytes: Uint8Array): void;
   /** A resize record, in stream order. */
@@ -40,12 +43,11 @@ export interface StreamSink {
 
 export interface TerminalHub {
   list(): readonly TerminalInfo[];
-  /** The snapshot at the current point of the terminal's chain, then every later record to `sink`
-   *  (S2 8.2.4) until `detach`. null for an unknown terminal. */
-  attach(
-    termId: string,
-    sink: StreamSink,
-  ): { cols: number; rows: number; data: string; detach(): void } | null;
+  /** Registers `sink` at the current point of the terminal's chain. The sink gets `snapshot`
+   *  for that point first, then every later record in stream order (S2 8.2.4), until `detach`.
+   *  Nothing is called on the sink before `snapshot` or after `detach`. null for an unknown
+   *  terminal. */
+  attach(termId: string, sink: StreamSink): { detach(): void } | null;
   input(termId: string, data: Uint8Array): 'ok' | 'full' | 'ended' | 'unknown';
   /** Sends Z to the keeper; the size reaches every sink when the R record comes back (S2 8.2.6). */
   resize(termId: string, cols: number, rows: number): void;

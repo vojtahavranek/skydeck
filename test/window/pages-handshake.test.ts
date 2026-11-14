@@ -583,6 +583,69 @@ describe('pages: the checks at the upgrade', () => {
   });
 });
 
+describe("pages: Node.js's own answers (ruled, task 17)", () => {
+  // S2 8.2.1: these never reach a handler of skydeck's; Node.js answers them itself, with no body
+  // and the connection closed. Pinned so that a Node.js release that changes them is noticed.
+  const cases: [string, (f: PagesFixture) => string, RegExp][] = [
+    ['an HTTP/1.1 request without Host', () => 'GET / HTTP/1.1\r\n\r\n', /^HTTP\/1\.1 400 /],
+    [
+      'an unknown method',
+      (f) => `FOO / HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\n\r\n`,
+      /^HTTP\/1\.1 400 /,
+    ],
+    ['a request line that cannot be parsed', () => 'garbage\r\n\r\n', /^HTTP\/1\.1 400 /],
+    [
+      'headers above 16 KiB',
+      (f) => `GET / HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nX: ${'a'.repeat(17_000)}\r\n\r\n`,
+      /^HTTP\/1\.1 431 /,
+    ],
+    [
+      'Content-Length with Transfer-Encoding',
+      (f) =>
+        `POST / HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nContent-Length: 5\r\n` +
+        'Transfer-Encoding: chunked\r\n\r\n',
+      /^HTTP\/1\.1 400 /,
+    ],
+    ['an HTTP/2 preface', () => 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n', /^HTTP\/1\.1 400 /],
+  ];
+  for (const [what, request, status] of cases) {
+    test(`${what}: Node's 4xx with an empty body, the socket closed, no handler called`, async (t) => {
+      const f = await startPages(t);
+      const answer = await rawRequest(t, f.port, request(f));
+      assert.match(answer, status);
+      const end = answer.indexOf('\r\n\r\n');
+      assert.ok(end !== -1, 'a whole head');
+      // Empty: nothing after the head, or (Node's answer to a request without Host) one chunk of
+      // zero bytes.
+      const chunked = /\r\ntransfer-encoding: chunked\r\n/i.test(answer.slice(0, end + 2));
+      assert.equal(answer.slice(end + 4), chunked ? '0\r\n\r\n' : '', 'an empty body');
+      assert.deepEqual(f.served, { requests: 0, upgrades: 0 });
+    });
+  }
+
+  test('CONNECT is closed without an answer, and no handler is called', async (t) => {
+    const f = await startPages(t);
+    const answer = await rawRequest(
+      t,
+      f.port,
+      `CONNECT 127.0.0.1:1 HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\n\r\n`,
+    );
+    assert.equal(answer, '');
+    assert.deepEqual(f.served, { requests: 0, upgrades: 0 });
+  });
+
+  test('a request with Connection: Upgrade and Upgrade reaches the upgrade handler whatever its Host', async (t) => {
+    const f = await startPages(t);
+    const answer = await rawRequest(
+      t,
+      f.port,
+      'GET /x HTTP/1.1\r\nHost: evil.example\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n',
+    );
+    assert.match(answer, /^HTTP\/1\.1 421 /);
+    assert.deepEqual(f.served, { requests: 0, upgrades: 1 });
+  });
+});
+
 describe('pages: nothing secret is logged or sent', () => {
   test("the secret's base64url is in no frame and no log line", async (t) => {
     const f = await startPages(t);

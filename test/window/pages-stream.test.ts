@@ -298,21 +298,50 @@ describe('pages: streams', () => {
     assert.equal(exit.lost, true);
   });
 
-  test('records the hub forwards during attach come after the snap', async (t) => {
+  test('the snap goes out when the hub gives the snapshot, never before, then the records', async (t) => {
     const f = await startPages(t);
     f.hub.add(T1);
-    const attachOf = f.hub.attach.bind(f.hub);
-    f.hub.attach = (term, sink) => {
-      const got = attachOf(term, sink);
-      sink.output(new TextEncoder().encode('early'));
-      return got;
-    };
+    f.hub.holdSnapshots();
     const { client } = await openPage(t, f);
-    const ch = await attach(client, T1);
+    client.send({ t: 'attach', term: T1, cols: 80, rows: 24 });
+    assert.deepEqual(await roundTrip(client), [], 'no snap before the snapshot');
+    f.hub.output(T1, 'after the attach point');
+    f.hub.releaseSnapshots();
+    const snap = await client.nextText('the snap');
+    assert.ok(snap.t === 'snap', snap.t);
     assert.deepEqual(await client.nextOutput(), {
-      channel: ch,
-      bytes: new TextEncoder().encode('early'),
+      channel: snap.ch,
+      bytes: new TextEncoder().encode('after the attach point'),
     });
+  });
+
+  test('a page that detaches before the snapshot is sent nothing', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.holdSnapshots();
+    const { client } = await openPage(t, f);
+    client.send({ t: 'attach', term: T1, cols: 80, rows: 24 });
+    client.send({ t: 'detach', term: T1 });
+    await roundTrip(client);
+    f.hub.releaseSnapshots();
+    f.hub.output(T1, 'x');
+    assert.deepEqual(await roundTrip(client), []);
+  });
+
+  test('an exit between the attach and the snapshot comes after the snap, once', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.holdSnapshots();
+    const { client } = await openPage(t, f);
+    client.send({ t: 'attach', term: T1, cols: 80, rows: 24 });
+    await roundTrip(client);
+    f.hub.exit(T1, EXIT, false);
+    f.hub.releaseSnapshots();
+    const messages = await textsUntilPong(client);
+    assert.deepEqual(
+      messages.map((m) => m.t),
+      ['snap', 'exit'],
+    );
   });
 });
 
@@ -339,11 +368,10 @@ describe('pages: size', () => {
     const expected: { term: string; cols: number; rows: number }[] = [];
     for (const [i, [client, page, message]] of steps.entries()) {
       client.send(message);
-      const items = await roundTrip(client);
-      assert.ok(
-        items.every((item) => 'text' in item && item.text.t === 'snap'),
-        `step ${i}`,
-      );
+      if ((message as { t: string }).t === 'attach') {
+        assert.equal((await client.nextText(`the snap of step ${i}`)).t, 'snap');
+      }
+      assert.deepEqual(await roundTrip(client), [], `step ${i}`);
       const m = message as {
         t: 'attach' | 'resize' | 'input' | 'detach';
         cols?: number;

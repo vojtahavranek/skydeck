@@ -879,6 +879,17 @@ no CORS header ever. `OPTIONS` is answered 403, any other method but `GET` 405. 
 TCP port acts on anything: the static files are not secret, and every action goes through the
 WebSocket after the proof (8.2.2).
 
+**Node.js's own answers.** A few requests never reach a handler of skydeck's: Node.js's HTTP server
+answers them itself, with no body and without the headers above, and closes the connection
+(measured on Node.js 24.19): 400 for an HTTP/1.1 request without `Host` (from its request parser),
+and, through its default `clientError` handling, 400 for an unknown method, a request line it
+cannot parse, `Content-Length` together with `Transfer-Encoding` or an HTTP/2 preface, and 431 for
+headers above 16 KiB; `CONNECT` is closed without an answer. They only refuse, so the headers would
+protect nothing there (ruled, plan task 17); server tests pin them, so that a Node.js release that
+changes them is noticed. Every request with `Connection: Upgrade` and an `Upgrade` header goes to
+the upgrade handler whatever its path, method or `Host`; that handler applies this section's checks
+itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`.
+
 **Why `'unsafe-inline'` for styles, and only for styles.** xterm.js 6.0.0's DOM renderer creates
 `<style>` elements at run time and writes the colour palette, cursor and selection rules into them
 (verified: under `style-src 'self'` a red cell renders black; section 21). Inline styles cannot run

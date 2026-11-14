@@ -10,7 +10,8 @@
  * with `Allow: GET`, a path other than `/ws` (the query ignored) 404, then an Origin other than
  * `http://127.0.0.1:<port>` (for port 80 also `http://127.0.0.1`) 403. Each refusal carries the
  * headers of every answer (`securityHeaders`) and `Cache-Control: no-store`. Once `bye` has run,
- * an upgrade is answered 503.
+ * an upgrade is answered 503. What Node.js answers before any listener (a request without Host, an
+ * unknown method, headers above 16 KiB …) stays Node.js's own (ruled, task 17; S2 8.2.1).
  *
  * The handshake (S2 8.2.2). A proof is checked only through `auth.ts` (ruled, task 11): mode `key`
  * with `keyProofMatches`, mode `launch` with `tokens.check`, never by a comparison of its own; the
@@ -19,6 +20,10 @@
  * protocol; 4003 when no key or token matches; 4004 for a used token presented again (whatever
  * recording the alarm gave; its failure is logged by kind); 1011 when the secret cannot be read.
  * After `start`, a message that is not valid (or binary) closes with 1008.
+ *
+ * Streams (S2 8.2.4, ruling-hub-attach): a page's `snap` goes out from its sink's `snapshot`, the
+ * hub's first call on it; a terminal that had ended before the attach gets its exit from `list()`
+ * after the snap. Each attachment sends one exit at most.
  *
  * Logs carry fixed text and the validators' kinds, never what a page sent and never a key.
  */
@@ -85,6 +90,8 @@ export interface Pages {
   /** Sends `list` to every page whose list differs from the last one it got, at most once a second each. */
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
+  /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
+   *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS). */
   bye(reason: string): Promise<void>;
 }
 
@@ -121,7 +128,7 @@ const REASONS: Readonly<Record<number, string>> = {
   503: 'Service Unavailable',
 };
 
-/** One stream of one terminal to one page (S2 8.2.4), from its snap until it is detached. */
+/** One stream of one terminal to one page (S2 8.2.4), from its attach until it is detached. */
 interface Attachment {
   readonly term: string;
   /** The channel of its output frames, new for every attach. */
@@ -129,8 +136,9 @@ interface Attachment {
   detach: () => void;
   /** False once detached: what the hub still gives its sink is dropped. */
   live: boolean;
-  /** What the hub gave the sink before the snap went out (sent right after it); null after. */
-  early: (() => void)[] | null;
+  /** The exit of a terminal that had ended before the attach, from `list()`: the hub gives the
+   *  sink none then (ruled, ruling-hub-attach), so it is sent after the snap. */
+  readonly endedBefore: { exit: KeeperExit; lost: boolean } | null;
   /** An attachment sends one exit at most (S2 8.2.3). */
   exitSent: boolean;
 }
@@ -352,48 +360,53 @@ export function createPages(deps: PagesDeps): Pages {
 
   const sinkFor = (conn: Connection, attachment: Attachment): StreamSink => {
     const { term } = attachment;
-    /** Whether the call is dropped (detached) or kept for after the snap. */
-    const held = (call: () => void): boolean => {
-      if (!attachment.live) return true;
-      if (attachment.early === null) return false;
-      attachment.early.push(call);
-      return true;
-    };
-    const sink: StreamSink = {
+    // While the page is behind (S2 8.2.8) its snap, output, sizes and exit are dropped: once its
+    // socket has drained it is attached again, and that fresh snap (and exit) holds them.
+    return {
+      snapshot(cols, rows, data) {
+        if (!attachment.live || conn.behind) return;
+        guard(conn, () => {
+          send(conn, { t: 'snap', term, ch: attachment.channel, cols, rows, data });
+          const ended = attachment.endedBefore;
+          if (ended !== null) sendExit(conn, attachment, ended.exit, ended.lost);
+        });
+      },
       output(bytes) {
-        const copy = attachment.early === null ? bytes : Uint8Array.from(bytes);
-        if (held(() => sink.output(copy))) return;
-        // S2 8.2.8: dropped while behind; the fresh snap after the drain holds it.
-        if (conn.behind) return;
+        if (!attachment.live || conn.behind) return;
         guard(conn, () => sendBinary(conn, encodeOutputFrame(attachment.channel, bytes)));
       },
       size(cols, rows) {
-        if (held(() => sink.size(cols, rows)) || conn.behind) return;
+        if (!attachment.live || conn.behind) return;
         guard(conn, () =>
           send(conn, { t: 'size', term, cols, rows, owner: sizes.get(term)?.owner === conn.id }),
         );
       },
       exit(exit, lost) {
-        // While behind the exit waits: the fresh snap is followed by it (openStream).
-        if (held(() => sink.exit(exit, lost)) || conn.behind) return;
+        if (!attachment.live || conn.behind) return;
         guard(conn, () => sendExit(conn, attachment, exit, lost));
       },
       notice(kind, text) {
-        if (held(() => sink.notice(kind, text))) return;
+        if (!attachment.live) return;
         guard(conn, () => send(conn, { t: 'notice', kind, term, text }));
       },
     };
-    return sink;
   };
 
-  /** Attaches the page to the terminal and sends its snap; null when the hub does not know it. */
+  /**
+   * Attaches the page to the terminal; its snap goes out from the sink's `snapshot`, the hub's
+   * first call on it. null when the hub does not know the terminal.
+   */
   const openStream = (conn: Connection, term: string): Attachment | null => {
+    const info = hub.list().find((terminal) => terminal.id === term);
     const attachment: Attachment = {
       term,
       channel: ++conn.channels,
       detach: () => {},
       live: true,
-      early: [],
+      endedBefore:
+        info === undefined || info.exit === null
+          ? null
+          : { exit: info.exit, lost: info.state === 'lost' },
       exitSent: false,
     };
     const got = hub.attach(term, sinkFor(conn, attachment));
@@ -401,26 +414,10 @@ export function createPages(deps: PagesDeps): Pages {
       attachment.live = false;
       return null;
     }
-    attachment.detach = got.detach;
+    attachment.detach = () => {
+      got.detach();
+    };
     conn.attachments.set(term, attachment);
-    send(conn, {
-      t: 'snap',
-      term,
-      ch: attachment.channel,
-      cols: got.cols,
-      rows: got.rows,
-      data: got.data,
-    });
-    const early = attachment.early ?? [];
-    attachment.early = null;
-    for (const call of early) call();
-    // A terminal that has ended (or was never started) gets its exit after the snap, once.
-    if (!attachment.exitSent) {
-      const info = hub.list().find((terminal) => terminal.id === term);
-      if (info !== undefined && info.exit !== null) {
-        sendExit(conn, attachment, info.exit, info.state === 'lost');
-      }
-    }
     return attachment;
   };
 
@@ -727,7 +724,8 @@ export function createPages(deps: PagesDeps): Pages {
           refuse(socket, port, refusal);
           return;
         }
-        // For bye: resolves when this socket is closed. All writes go through the WebSocket.
+        // For bye: resolves when this socket has closed. A listener only (ruled): every write and
+        // every close goes through the WebSocket connection.
         const closed = socket.closed
           ? Promise.resolve()
           : new Promise<void>((resolve) => {

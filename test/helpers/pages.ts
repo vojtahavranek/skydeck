@@ -59,13 +59,20 @@ export interface FakeHub extends TerminalHub {
   calls: HubCall[];
   /** Adds a running terminal (80 × 24, its screen `screen-<id>`), or changes one. */
   add(id: string, info?: Partial<TerminalInfo>): TerminalInfo;
-  /** What `attach` gives as the snapshot from now on. */
+  /** The screen a later `attach` gives in its snapshot. */
   setScreen(id: string, data: string): void;
+  /**
+   * Snapshots go out on a later turn of the event loop after `attach` (as the registry's do);
+   * after holdSnapshots() only when releaseSnapshots() is called, in attach order.
+   */
+  holdSnapshots(): void;
+  releaseSnapshots(): void;
   /** What `input` answers for the terminal from now on (default 'ok'). */
   setInputAnswer(id: string, answer: 'ok' | 'full' | 'ended' | 'unknown'): void;
-  /** The sinks attached to a terminal now. */
+  /** The sinks attached to a terminal now (detached ones are gone). */
   sinks(id: string): readonly StreamSink[];
-  // A record to every attached sink, as the registry forwards one.
+  // A record to every attached sink, as the registry forwards one: to a sink whose snapshot has
+  // not gone out yet, after it.
   output(id: string, bytes: Uint8Array | string): void;
   size(id: string, cols: number, rows: number): void;
   exit(id: string, exit: KeeperExit, lost: boolean): void;
@@ -92,6 +99,13 @@ function terminalInfo(id: string, partial: Partial<TerminalInfo>): TerminalInfo 
   };
 }
 
+/** One sink of the fake hub: its records wait until its snapshot went out. */
+interface FakeAttached {
+  sink: StreamSink;
+  snapped: boolean;
+  waiting: (() => void)[];
+}
+
 export function fakeHub(): FakeHub {
   const calls: HubCall[] = [];
   const terminals = new Map<
@@ -99,13 +113,18 @@ export function fakeHub(): FakeHub {
     {
       info: TerminalInfo;
       screen: string;
-      sinks: StreamSink[];
+      attached: FakeAttached[];
       answer: 'ok' | 'full' | 'ended' | 'unknown';
     }
   >();
   const listeners = new Set<() => void>();
+  let holding = false;
+  const held: (() => void)[] = [];
   const each = (id: string, call: (sink: StreamSink) => void): void => {
-    for (const sink of [...(terminals.get(id)?.sinks ?? [])]) call(sink);
+    for (const entry of [...(terminals.get(id)?.attached ?? [])]) {
+      if (entry.snapped) call(entry.sink);
+      else entry.waiting.push(() => call(entry.sink));
+    }
   };
   return {
     calls,
@@ -115,7 +134,7 @@ export function fakeHub(): FakeHub {
       terminals.set(id, {
         info: merged,
         screen: existing?.screen ?? `screen-${id}`,
-        sinks: existing?.sinks ?? [],
+        attached: existing?.attached ?? [],
         answer: existing?.answer ?? 'ok',
       });
       for (const listener of listeners) listener();
@@ -126,12 +145,19 @@ export function fakeHub(): FakeHub {
       assert.ok(terminal, id);
       terminal.screen = data;
     },
+    holdSnapshots() {
+      holding = true;
+    },
+    releaseSnapshots() {
+      holding = false;
+      for (const deliver of held.splice(0)) deliver();
+    },
     setInputAnswer(id, answer) {
       const terminal = terminals.get(id);
       assert.ok(terminal, id);
       terminal.answer = answer;
     },
-    sinks: (id) => terminals.get(id)?.sinks ?? [],
+    sinks: (id) => (terminals.get(id)?.attached ?? []).map((entry) => entry.sink),
     output: (id, bytes) => {
       const data = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes;
       each(id, (sink) => sink.output(data));
@@ -154,17 +180,24 @@ export function fakeHub(): FakeHub {
       calls.push({ kind: 'attach', term: termId });
       const terminal = terminals.get(termId);
       if (terminal === undefined) return null;
-      terminal.sinks.push(sink);
-      let attached = true;
+      const entry: FakeAttached = { sink, snapped: false, waiting: [] };
+      terminal.attached.push(entry);
+      // The screen at the attach point, given later (the registry's snapshot is asynchronous).
+      const { cols, rows } = terminal.info;
+      const screen = terminal.screen;
+      const deliver = (): void => {
+        if (!terminal.attached.includes(entry)) return; // detached first: never called
+        entry.snapped = true;
+        sink.snapshot(cols, rows, screen);
+        for (const call of entry.waiting.splice(0)) call();
+      };
+      if (holding) held.push(deliver);
+      else setImmediate(deliver);
       return {
-        cols: terminal.info.cols,
-        rows: terminal.info.rows,
-        data: terminal.screen,
         detach: () => {
           calls.push({ kind: 'detach', term: termId });
-          if (!attached) return;
-          attached = false;
-          terminal.sinks.splice(terminal.sinks.indexOf(sink), 1);
+          const at = terminal.attached.indexOf(entry);
+          if (at !== -1) terminal.attached.splice(at, 1);
         },
       };
     },
@@ -239,6 +272,8 @@ export interface PagesFixture {
   /** Part of every list the default listFor builds: change it to change the lists. */
   listData: { dirs: string[] };
   welcome: Omit<WelcomeMessage, 't' | 'proof' | 'key'>;
+  /** How many requests reached the listener's request handler and its upgrade handler. */
+  served: { requests: number; upgrades: number };
 }
 
 export const SERVER_ID = '00112233445566ff';
@@ -280,6 +315,7 @@ export async function startPages(
     nowNs: String(T0),
   };
   let port = 0;
+  const served = { requests: 0, upgrades: 0 };
   const pages = createPages({
     platform: options.platform === undefined ? platform : options.platform(platform),
     port: () => options.portSeen ?? port,
@@ -302,10 +338,12 @@ export async function startPages(
     { host: '127.0.0.1', port: 0 },
     {
       request: (_req, res) => {
+        served.requests++;
         res.statusCode = 404;
         res.end();
       },
       upgrade: (req, socket, head) => {
+        served.upgrades++;
         pages.upgrade(req, socket, head);
       },
     },
@@ -327,6 +365,7 @@ export async function startPages(
     listCalls,
     listData,
     welcome,
+    served,
   };
 }
 
