@@ -504,6 +504,31 @@ describe('real files', () => {
     assert.deepEqual(files.list(dir), []);
   });
 
+  test('remove takes a dangling symlink away, and never what a symlink points to', (t) => {
+    // Node.js 24.12's rmSync follows the link: it left a dangling one in place and said nothing.
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    symlinkSync(join(dir, 'nothing'), join(dir, 'dangling'));
+    writeFileSync(join(dir, 'f'), 'x');
+    symlinkSync(join(dir, 'f'), join(dir, 'l'));
+
+    files.remove(join(dir, 'dangling'));
+    files.remove(join(dir, 'l'));
+
+    assert.deepEqual(files.list(dir), ['f']);
+    assert.equal(files.readText(join(dir, 'f')), 'x');
+  });
+
+  test('remove refuses a directory and leaves it', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'd'));
+    assert.throws(() => {
+      files.remove(join(dir, 'd'));
+    });
+    assert.deepEqual(files.list(dir), ['d']);
+  });
+
   test('removeTree removes a directory with contents and does not mind a missing path', (t) => {
     const { files } = realPlatform();
     const dir = tmp(t);

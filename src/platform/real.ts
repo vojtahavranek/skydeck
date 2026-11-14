@@ -18,6 +18,7 @@ import {
   statSync,
   lstatSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
@@ -184,6 +185,21 @@ function orIfMissing<T, M>(fn: () => T, missing: M): T | M {
   }
 }
 
+/**
+ * Removes a file or a symbolic link (never what it points to); nothing when it is not there. A
+ * directory is refused (EISDIR). unlink, not rmSync: Node.js 24.12's rmSync follows a symbolic
+ * link, so with `force` it left a dangling one in place without an error.
+ */
+function unlinkIfThere(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    if (!isMissing(error)) {
+      throw error;
+    }
+  }
+}
+
 /** A name beside `path` for a file that will be renamed over it. */
 function siblingTemp(path: string): string {
   return join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
@@ -264,9 +280,7 @@ function realFiles(): Files {
     rename: (from, to) => {
       renameSync(from, to);
     },
-    remove: (path) => {
-      rmSync(path, { force: true });
-    },
+    remove: unlinkIfThere,
     removeTree: (path) => {
       rmSync(path, { recursive: true, force: true });
     },
@@ -276,7 +290,7 @@ function realFiles(): Files {
         symlinkSync(target, temp);
         renameSync(temp, path);
       } catch (error) {
-        rmSync(temp, { force: true });
+        unlinkIfThere(temp);
         throw error;
       }
     },
