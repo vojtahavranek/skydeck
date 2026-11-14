@@ -455,16 +455,29 @@ of the distribution alive while the window has anything to keep:
   builtins. A line it cannot judge (the boot id cannot be read; the stat cannot be read or holds
   no process start) counts as alive (4.2); it exits only when every line is known dead or gone,
   and `wsl.exe` with it. So it outlives a server restart (a new
-  server finds `keepalive.pid` alive by the same rule and starts no second one), and it holds WSL
+  server finds `keepalive.pid` alive by the same rule and starts no second one, unless its
+  Windows side is gone, below), and it holds WSL
   while terminals run even after `skydeck window --stop`. A stale file from an earlier boot or of a
   reused pid counts as dead.
 - When the keep-alive ends while the server runs, the server starts it again after 5 s, 30 s, then
   every 5 minutes, and tells every page (`notice keepalive-lost`). A keep-alive that ran for 5
   minutes starts the schedule over at 5 s, so that one that dies right after each start is not
   restarted every 5 seconds for ever. It has ended when its `keepalive.pid` line is dead, or when
-  the `wsl.exe` this server started has ended: the script inside WSL can outlive a `wsl.exe` ended
-  on the Windows side, and then nothing holds WSL, so that script's line no longer counts as a
-  running keep-alive (the next one writes its own).
+  its `wsl.exe` is gone while its script lives on — the script inside WSL can outlive a `wsl.exe`
+  ended on the Windows side, and then nothing holds WSL. A `wsl.exe` this server started is gone
+  when it has ended. A keep-alive this server did not start (one an earlier server started) is
+  also judged by its `keepalive.interop`: when that file names an absolute path and a unix
+  connection to it is refused or the path is not there (the socket of that `wsl.exe` session),
+  its `wsl.exe` is gone; anything else — no file, one that cannot be read, another error, no
+  answer within 2 seconds — is no judgement, and it counts as running. Such a script is an orphan:
+  its line no longer counts as a running keep-alive (the next one writes its own), and when its
+  line is alive by design 5.5's rule — its identity known, never on an unknown line — the server
+  sends it one SIGTERM (it exits at once and removes its files): skydeck ending its own helper (2,
+  principle 6). Then the schedule starts a new keep-alive. The limit that remains: an orphan that
+  cannot be judged (`keepalive.interop` missing or unreadable, a line that is unknown) is left
+  alone and counts as running. That the socket of a `wsl.exe` session goes when that `wsl.exe`
+  ends on the Windows side, and that the Linux side of a `wsl.exe` ends only with it, is
+  **UNVERIFIED** (check W14).
 
 That a `wsl.exe` started from inside WSL counts as a Windows client is **UNVERIFIED** (section 21;
 check W14). The design does not depend on it:

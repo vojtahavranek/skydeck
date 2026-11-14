@@ -2574,7 +2574,14 @@ export function createInterop(platform: Platform, files: RuntimeFiles): Interop;
 /** createInterop with the first candidate given (ruled, task 19): task 23 passes `interopFirst`
  *  (A32), tests a path in their sandbox; createInterop is this with '/run/WSL/1_interop'. */
 export function createInteropFrom(platform: Platform, files: RuntimeFiles, first: string): Interop;
-// src/window/keepalive.ts
+/** One unix connection, closed at once (ruled, task 19's review 2): 'refused' for ECONNREFUSED or
+ *  ENOENT; 'unknown' for another error, no answer within 2 s, or a path that is not an absolute
+ *  one-line path. The interop link and the keep-alive both judge a socket by it. */
+export function probeSocket(platform: Platform, path: string | null): Promise<'accepts' | 'refused' | 'unknown'>;
+// src/window/keepalive.ts — S2 6.1 (ruled, review 2): a keep-alive this server did not start is also
+// judged by keepalive.interop (probeSocket 'refused': its wsl.exe is gone); a script whose wsl.exe
+// is gone is an orphan — its line no longer counts, and ONE SIGTERM when its line is 'alive'
+// (never on 'unknown'); then the schedule starts a new keep-alive.
 export interface KeepAlive { state(): KeepAlivePayload; tick(): Promise<void>; onChange(listener: (state: KeepAlivePayload) => void): void }
 export function createKeepAlive(deps: { platform: Platform; window: WindowConfig; files: RuntimeFiles; appRoot: string; interop: Interop }): KeepAlive;
 ```
@@ -2606,6 +2613,12 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
   minutes (fake clock), state `failed` with the error while it is down; after 5 minutes running
   the schedule starts over at 5 s; the line of a `wsl.exe` seen to end does not count as running;
   mode `off` → never started, state `off`; no `WSL_DISTRO_NAME` → `failed` with a reason.
+- Keep-alive, its Windows side (ruled, review 2; fakes only): a keep-alive found running is taken
+  when its `keepalive.interop` socket accepts; an orphan when it is refused or gone; not judged
+  (running) for no file, an empty or relative or several-line one, an unreadable one, another
+  error, no answer in time; exactly one SIGTERM to an orphan whose line is alive, none for an
+  `unknown` line, none for a line of another boot; a found keep-alive whose socket later goes →
+  `failed`, one SIGTERM, restarted after 5 s.
 - Interop: candidates in S2 6.4's order — `/run/WSL/1_interop` (the first candidate is
   `createInteropFrom`'s parameter, so the test points it into the sandbox), `keepalive.interop`'s
   content, the server's own `WSL_INTEROP` — the link points at the first that accepts a unix
@@ -3591,3 +3604,13 @@ Rulings on task 19's review 1 (2026-11-14), each recorded in task 19's contract 
   line appears or it ends; before its first tick a keep-alive in mode `wsl` reports `starting`.
 - The interop link points at the socket a candidate leads to (its realpath), never at another
   link or at itself (S2 6.4).
+
+Rulings on task 19's review 2 (2026-11-14): a new server adopted, for good, the live line of a
+script whose `wsl.exe` was gone. Ruled (S2 6.1, task 19's contract): a keep-alive this server did
+not start is also judged by its `keepalive.interop` socket (`probeSocket`, shared with the interop
+link: refused or gone means its `wsl.exe` is gone; anything else is no judgement); a script whose
+`wsl.exe` is gone is an orphan, and one whose line is alive (identity known, never `unknown`) gets
+one SIGTERM from the server before the schedule starts a new keep-alive. The remaining limit (an
+orphan that cannot be judged counts as running) is named in S2 6.1; the premise (the socket of a
+`wsl.exe` session goes with it) is for check W14 (task 30). The profile-folder line also escapes
+DEL and the C1 controls (S2 5.3).
