@@ -261,7 +261,7 @@ describe('pages: streams', () => {
     }
   });
 
-  test('attaching a terminal that has ended gives its snap, then its exit, once', async (t) => {
+  test('attaching a terminal that has ended gives its snap, then the exit the hub gives', async (t) => {
     const f = await startPages(t);
     f.hub.add(T1, {
       state: 'not-started',
@@ -269,12 +269,6 @@ describe('pages: streams', () => {
     });
     const { client } = await openPage(t, f);
     await attach(client, T1);
-    // A hub that also forwards the exit to a sink attached after it must not double it.
-    f.hub.exit(
-      T1,
-      { code: null, signal: null, atNs: '9', notStarted: 'the session runs elsewhere' },
-      false,
-    );
     assert.deepEqual(await textsUntilPong(client), [
       {
         t: 'exit',
@@ -328,7 +322,7 @@ describe('pages: streams', () => {
     assert.deepEqual(await roundTrip(client), []);
   });
 
-  test('an exit between the attach and the snapshot comes after the snap, once', async (t) => {
+  test('an exit between the attach and the snapshot comes after the snap', async (t) => {
     const f = await startPages(t);
     f.hub.add(T1);
     f.hub.holdSnapshots();

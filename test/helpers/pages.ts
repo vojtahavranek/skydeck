@@ -182,13 +182,16 @@ export function fakeHub(): FakeHub {
       if (terminal === undefined) return null;
       const entry: FakeAttached = { sink, snapped: false, waiting: [] };
       terminal.attached.push(entry);
-      // The screen at the attach point, given later (the registry's snapshot is asynchronous).
-      const { cols, rows } = terminal.info;
+      // The screen at the attach point, given later (the registry's snapshot is asynchronous);
+      // a terminal that had ended by then gives its exit right after it (ruling-hub-attach,
+      // amended).
+      const { cols, rows, exit, state } = terminal.info;
       const screen = terminal.screen;
       const deliver = (): void => {
         if (!terminal.attached.includes(entry)) return; // detached first: never called
         entry.snapped = true;
         sink.snapshot(cols, rows, screen);
+        if (exit !== null) sink.exit(exit, state === 'lost');
         for (const call of entry.waiting.splice(0)) call();
       };
       if (holding) held.push(deliver);

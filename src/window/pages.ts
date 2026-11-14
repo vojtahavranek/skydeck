@@ -22,8 +22,8 @@
  * After `start`, a message that is not valid (or binary) closes with 1008.
  *
  * Streams (S2 8.2.4, ruling-hub-attach): a page's `snap` goes out from its sink's `snapshot`, the
- * hub's first call on it; a terminal that had ended before the attach gets its exit from `list()`
- * after the snap. Each attachment sends one exit at most.
+ * hub's first call on it; what follows (a terminal's exit or notice of the state it was already
+ * in, then every later record) is forwarded as it comes.
  *
  * Logs carry fixed text and the validators' kinds, never what a page sent and never a key.
  */
@@ -35,7 +35,6 @@ import type { Store } from '../store/store.ts';
 import { hostOk, securityHeaders } from './assets.ts';
 import { ensureSecret, isNonce, keyProofMatches, serverProof, wrapSecret } from './auth.ts';
 import type { Tokens } from './auth.ts';
-import type { KeeperExit } from './frames.ts';
 import type { ActionHandler, PageInfo, StreamSink, TerminalHub } from './hub.ts';
 import { encodeOutputFrame, parsePageMessage } from './protocol.ts';
 import type {
@@ -136,11 +135,6 @@ interface Attachment {
   detach: () => void;
   /** False once detached: what the hub still gives its sink is dropped. */
   live: boolean;
-  /** The exit of a terminal that had ended before the attach, from `list()`: the hub gives the
-   *  sink none then (ruled, ruling-hub-attach), so it is sent after the snap. */
-  readonly endedBefore: { exit: KeeperExit; lost: boolean } | null;
-  /** An attachment sends one exit at most (S2 8.2.3). */
-  exitSent: boolean;
 }
 
 /** A connection from its upgrade; a page (PageState) once it has sent `start`. */
@@ -339,25 +333,6 @@ export function createPages(deps: PagesDeps): Pages {
 
   // --- streams (S2 8.2.4) -----------------------------------------------------------------------
 
-  const sendExit = (
-    conn: Connection,
-    attachment: Attachment,
-    exit: KeeperExit,
-    lost: boolean,
-  ): void => {
-    if (attachment.exitSent) return;
-    attachment.exitSent = true;
-    send(conn, {
-      t: 'exit',
-      term: attachment.term,
-      code: exit.code,
-      signal: exit.signal,
-      atNs: exit.atNs,
-      lost,
-      notStarted: exit.notStarted,
-    });
-  };
-
   const sinkFor = (conn: Connection, attachment: Attachment): StreamSink => {
     const { term } = attachment;
     // While the page is behind (S2 8.2.8) its snap, output, sizes and exit are dropped: once its
@@ -365,11 +340,9 @@ export function createPages(deps: PagesDeps): Pages {
     return {
       snapshot(cols, rows, data) {
         if (!attachment.live || conn.behind) return;
-        guard(conn, () => {
-          send(conn, { t: 'snap', term, ch: attachment.channel, cols, rows, data });
-          const ended = attachment.endedBefore;
-          if (ended !== null) sendExit(conn, attachment, ended.exit, ended.lost);
-        });
+        guard(conn, () =>
+          send(conn, { t: 'snap', term, ch: attachment.channel, cols, rows, data }),
+        );
       },
       output(bytes) {
         if (!attachment.live || conn.behind) return;
@@ -383,7 +356,17 @@ export function createPages(deps: PagesDeps): Pages {
       },
       exit(exit, lost) {
         if (!attachment.live || conn.behind) return;
-        guard(conn, () => sendExit(conn, attachment, exit, lost));
+        guard(conn, () =>
+          send(conn, {
+            t: 'exit',
+            term,
+            code: exit.code,
+            signal: exit.signal,
+            atNs: exit.atNs,
+            lost,
+            notStarted: exit.notStarted,
+          }),
+        );
       },
       notice(kind, text) {
         if (!attachment.live) return;
@@ -397,18 +380,7 @@ export function createPages(deps: PagesDeps): Pages {
    * first call on it. null when the hub does not know the terminal.
    */
   const openStream = (conn: Connection, term: string): Attachment | null => {
-    const info = hub.list().find((terminal) => terminal.id === term);
-    const attachment: Attachment = {
-      term,
-      channel: ++conn.channels,
-      detach: () => {},
-      live: true,
-      endedBefore:
-        info === undefined || info.exit === null
-          ? null
-          : { exit: info.exit, lost: info.state === 'lost' },
-      exitSent: false,
-    };
+    const attachment: Attachment = { term, channel: ++conn.channels, detach: () => {}, live: true };
     const got = hub.attach(term, sinkFor(conn, attachment));
     if (got === null) {
       attachment.live = false;
