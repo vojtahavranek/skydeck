@@ -1509,6 +1509,14 @@ freshly refreshed rows (`prepareResumeById`), the refusal without a boot id, the
 release and renewal rules, the start-event rule (`resumeStarted`), the memory check and batches of
 restore.
 
+One rule is added for the window's own terminals (ruled by the plan owner, review of plan task
+32): a resume from the window is refused — "this session is already open in the window", before
+the lock, nothing opened — while the window has a terminal for the session whose program may still
+run (starting, running, reconnecting, a newer keeper), whatever the lock says. A terminal's session
+is the one it shows, or while it shows none the one it was opened for. The lock alone does not
+cover it: claude can wait at a dialog before its `SessionStart` for longer than the lock holds, and
+the guard then sees no holder; step 1 accepts that hole only for terminals it cannot see.
+
 Four changes to step 1's code make that possible, with no change of behaviour for the commands
 (4.4 lists every change step 2 makes to step 1's code, with its stage):
 

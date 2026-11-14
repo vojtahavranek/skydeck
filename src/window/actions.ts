@@ -12,14 +12,14 @@ import { SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { launchPrepared } from '../sessions/launch.ts';
 import type { LaunchOutcome } from '../sessions/launch.ts';
-import { prepareNew } from '../sessions/resume.ts';
+import { prepareNew, readLock, releaseLock } from '../sessions/resume.ts';
 import type { PreparedLaunch } from '../sessions/resume.ts';
 import { prepareResumeById } from '../sessions/resume-by-id.ts';
 import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { splitFlags } from './flags.ts';
-import type { ActionHandler, TerminalHub } from './hub.ts';
+import type { ActionHandler, TerminalHub, TerminalInfo } from './hub.ts';
 import { parsePageMessage } from './protocol.ts';
 import type { ActMessage, ResultMessage } from './protocol.ts';
 import { MAY_START } from './view/sections.ts';
@@ -51,6 +51,7 @@ const NO_TERMINAL = 'this terminal is no longer there';
 const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 characters';
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
+const ALREADY_OPEN = 'this session is already open in the window';
 
 function refusal(message: string): Answer {
   return { ok: false, lines: [message], error: message, sessionId: null };
@@ -64,11 +65,11 @@ function launched(prepared: PreparedLaunch, outcome: LaunchOutcome): Answer {
 
 /**
  * A SkydeckError as the result's lines, as step 1's command line prints it (failureText): one line
- * per line of the message, each sanitised — a message can quote what the page sent (a flag as
- * typed) — and the same text as one line for `error`.
+ * per line of the message (`act` sanitises each: a message can quote what the page sent, a flag as
+ * typed), and the same text as one line for `error`.
  */
 function refusedBy(error: SkydeckError): Answer {
-  const lines = error.message.replace(/\n$/, '').split('\n').map(sanitize);
+  const lines = error.message.replace(/\n$/, '').split('\n');
   return { ok: false, lines, error: lines.join(' '), sessionId: null };
 }
 
@@ -112,15 +113,18 @@ function orNone(text: string): string | null {
  * lock) → `launchPrepared` with `terminalFor` the action's size; `new` → `splitFlags` →
  * `prepareNew` with the form's directory, label and group → `launchPrepared`. A launch answers its
  * outcome's lines (`ok` when it started, with the session's id); a SkydeckError (the guard, the
- * lock, RefError, prepareNew's refusals) answers its message, sanitised. `close-terminal` → `hub.close`;
- * `open-link` → `linkToOpen`, then `openLink`. Before a resume opens its terminal, the session's
- * terminals that are over (ended, lost, not started) are closed: an ended terminal is dropped when
- * its session runs again (ruled, review of task 13).
+ * lock, RefError, prepareNew's refusals) answers its message. `close-terminal` → `hub.close`;
+ * `open-link` → `linkToOpen`, then `openLink`. A resume is refused while the window has a terminal
+ * of the session whose program may still run (ruled, review 2 of task 32), and before it opens its
+ * terminal it closes the session's terminals that are over (ended, lost, not started): an ended
+ * terminal is dropped when its session runs again (ruled, review of task 13).
  *
  * Never rejects (2.5): an action that is not well formed is refused with one log line (the
  * parser's kind), and an unexpected error is answered `ok: false` and logged by kind (failureKind)
- * — never its message, which can quote what the page sent or a path. A terminal whose `open()` rejects is answered as
- * an open that timed out (`guarded`): no command to run by hand, the lock and the label kept.
+ * — never its message, which can quote what the page sent or a path; when it came after a resume's
+ * lock was taken and before its terminal was opened, the lock is given back. A terminal whose
+ * `open()` rejects is answered as an open that timed out (`guarded`): no command to run by hand,
+ * the lock and the label kept. Every text of a result is sanitised.
  */
 export function createActions(deps: ActionDeps): ActionHandler {
   const { deck, hub, log } = deps;
@@ -132,11 +136,12 @@ export function createActions(deps: ActionDeps): ActionHandler {
    * session twice) and keeps the lock and the label, as after a timeout. Logged once by kind; the
    * error's message goes nowhere.
    */
-  function guarded(terminal: Terminal, kind: 'resume' | 'new'): Terminal {
+  function guarded(terminal: Terminal, kind: 'resume' | 'new', onOpen = (): void => {}): Terminal {
     return {
       name: terminal.name,
       opensTabs: terminal.opensTabs,
       async open(spec) {
+        onOpen();
         try {
           return await terminal.open(spec);
         } catch (error) {
@@ -152,16 +157,33 @@ export function createActions(deps: ActionDeps): ActionHandler {
     };
   }
 
+  /** The window's terminals of the session: the session each shows, or while it shows none the one
+   *  it was opened for — what the terminal itself carries, as the view model places it. */
+  function terminalsOf(sessionId: string): TerminalInfo[] {
+    return hub
+      .list()
+      .filter((terminal) => (terminal.sessionId ?? terminal.expectedSessionId) === sessionId);
+  }
+
+  /**
+   * After a throw before the terminal's `open()` was called (ruled, review 2 of task 32): nothing
+   * can have been started, so the lock prepareResumeById took is given back, and the next resume is
+   * not refused for a minute. The lock read now is that one: it is fresh, and only a stale lock is
+   * swept or taken over.
+   */
+  function giveBackLock(sessionId: string): void {
+    try {
+      const lock = readLock(deck, sessionId);
+      if (lock !== null) releaseLock(deck, sessionId, lock);
+    } catch (error) {
+      log(`act resume: the lock was not given back (${failureKind(error)})`);
+    }
+  }
+
   /** Best effort: a terminal left behind costs a slot and a row's place, never the resume itself. */
   function closeEnded(sessionId: string): void {
     try {
-      const ended = hub
-        .list()
-        .filter(
-          (terminal) =>
-            !MAY_START.has(terminal.state) &&
-            (terminal.sessionId ?? terminal.expectedSessionId) === sessionId,
-        );
+      const ended = terminalsOf(sessionId).filter((terminal) => !MAY_START.has(terminal.state));
       for (const terminal of ended) hub.close(terminal.id);
     } catch (error) {
       log(`act resume: an ended terminal was not closed (${failureKind(error)})`);
@@ -171,16 +193,31 @@ export function createActions(deps: ActionDeps): ActionHandler {
   async function run(action: ActMessage): Promise<Answer> {
     switch (action.kind) {
       case 'resume': {
+        // Ruled (review 2 of task 32): a terminal of the window opened for the session whose
+        // program may still run refuses a second resume, whatever the lock says — claude can wait
+        // at a dialog before its SessionStart for longer than the lock holds.
+        if (terminalsOf(action.sessionId).some((terminal) => MAY_START.has(terminal.state))) {
+          return refusal(ALREADY_OPEN);
+        }
         // The terminal is made before anything is taken, so that a factory that throws leaves no
         // lock behind; prepareResumeById and closeEnded run before the first await, so two
         // resumes of one session meet at the lock.
+        let opened = false;
         const terminal = guarded(
           deps.terminalFor({ cols: action.cols, rows: action.rows }),
           'resume',
+          () => {
+            opened = true;
+          },
         );
         const prepared = prepareResumeById(deck, action.sessionId);
         closeEnded(prepared.sessionId);
-        return launched(prepared, await launchPrepared(deck, prepared, terminal));
+        try {
+          return launched(prepared, await launchPrepared(deck, prepared, terminal));
+        } catch (error) {
+          if (!opened) giveBackLock(prepared.sessionId);
+          throw error;
+        }
       }
       case 'new': {
         const flags = splitFlags(action.flags);
@@ -208,25 +245,36 @@ export function createActions(deps: ActionDeps): ActionHandler {
     }
   }
 
+  async function answer(given: ActMessage): Promise<Answer> {
+    const check = checked(given);
+    if (!check.ok) {
+      log(`act: refused an action that is not valid (${check.kind})`);
+      return refusal(NOT_AN_ACTION);
+    }
+    const action = check.action;
+    try {
+      return await run(action);
+    } catch (error) {
+      if (error instanceof SkydeckError) return refusedBy(error);
+      const kind = failureKind(error);
+      log(`act ${action.kind}: failed (${kind})`);
+      return refusal(`the action failed unexpectedly (${kind})`);
+    }
+  }
+
   return {
     async act(_page, given) {
-      const id = idOf(given);
-      const check = checked(given);
-      if (!check.ok) {
-        log(`act: refused an action that is not valid (${check.kind})`);
-        return { t: 'result', id, ...refusal(NOT_AN_ACTION) };
-      }
-      const action = check.action;
-      try {
-        return { t: 'result', id, ...(await run(action)) };
-      } catch (error) {
-        if (error instanceof SkydeckError) {
-          return { t: 'result', id, ...refusedBy(error) };
-        }
-        const kind = failureKind(error);
-        log(`act ${action.kind}: failed (${kind})`);
-        return { t: 'result', id, ...refusal(`the action failed unexpectedly (${kind})`) };
-      }
+      const { ok, lines, error, sessionId } = await answer(given);
+      // Every text of a result passes the sanitiser step 1 prints with (ruled, review 2 of task
+      // 32): whatever a message quotes, no escape sequence or line break reaches the page.
+      return {
+        t: 'result',
+        id: idOf(given),
+        ok,
+        lines: lines.map(sanitize),
+        error: error === null ? null : sanitize(error),
+        sessionId,
+      };
     },
   };
 }

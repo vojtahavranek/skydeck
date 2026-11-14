@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { buildNewCommand } from '../../src/claude/launch.ts';
+import type { Deck } from '../../src/sessions/deck.ts';
 import { lockKey } from '../../src/sessions/resume.ts';
 import type { LaunchSpec, OpenResult, Terminal } from '../../src/terminals/types.ts';
 import { printableCommand } from '../../src/text/shell.ts';
@@ -11,7 +12,7 @@ import { createActions } from '../../src/window/actions.ts';
 import type { ActionDeps } from '../../src/window/actions.ts';
 import type { PageInfo, TerminalHub, TerminalInfo, TerminalState } from '../../src/window/hub.ts';
 import type { ActMessage, ResultMessage } from '../../src/window/protocol.ts';
-import { testDeck } from '../helpers/deck.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 import { startRunning, userRecord, writeTranscript } from '../helpers/session-files.ts';
@@ -119,6 +120,7 @@ function harness(
     terminals?: TerminalInfo[];
     openLink?: (url: string) => Promise<boolean>;
     terminalFor?: ActionDeps['terminalFor'];
+    deck?: Deck;
   } = {},
 ): Harness {
   const events: Events = [];
@@ -128,7 +130,7 @@ function harness(
   const logs: string[] = [];
   const hub = fakeHub(events, options.terminals);
   const actions = createActions({
-    deck: d.deck,
+    deck: options.deck ?? d.deck,
     hub,
     terminalFor:
       options.terminalFor ??
@@ -308,9 +310,8 @@ test("resume closes the session's ended terminals first, then opens the new one;
     // Not S1's: it showed S3 when it ended (after /clear), and its row is S3's.
     info('aaaaaaaaaaa4', 'ended', { sessionId: S3 }),
     info('aaaaaaaaaaa5', 'ended', { expectedSessionId: S2, sessionId: S2 }),
-    // S1's, but not over: never dropped this way.
-    info('aaaaaaaaaaa6', 'reconnecting', { sessionId: null }),
-    info('aaaaaaaaaaa7', 'newer-keeper', { sessionId: null }),
+    // A running one of another session (S1's own would refuse the resume: the test below).
+    info('aaaaaaaaaaa6', 'running', { expectedSessionId: S2, sessionId: S2 }),
   ];
   const h = harness(d, { terminals });
   assert.equal((await h.act(resume(S1))).ok, true);
@@ -323,8 +324,78 @@ test("resume closes the session's ended terminals first, then opens the new one;
   ]);
   assert.deepEqual(
     terminals.map((terminal) => terminal.id),
-    ['aaaaaaaaaaa4', 'aaaaaaaaaaa5', 'aaaaaaaaaaa6', 'aaaaaaaaaaa7'],
+    ['aaaaaaaaaaa4', 'aaaaaaaaaaa5', 'aaaaaaaaaaa6'],
   );
+});
+
+test('resume is refused while a terminal of the window was opened for the session and may still run, whatever the lock says', async (t) => {
+  // Ruled (review 2 of task 32): claude can wait at a dialog before its SessionStart for longer
+  // than the lock holds; the guard then sees no holder, but the window knows its own terminal.
+  const d = testDeck(t);
+  resumableSession(d);
+  const terminals: TerminalInfo[] = [];
+  const h = harness(d, { terminals });
+  assert.equal((await h.act(resume(S1, 1))).ok, true);
+  terminals.push(info('aaaaaaaaaaa1', 'starting', { sessionId: null }));
+  const lock = d.deck.store.getKv(lockKey(S1));
+  d.clock.advanceMs(61_000); // the lock is stale now
+  for (const state of ['starting', 'running', 'reconnecting', 'newer-keeper'] as const) {
+    terminals[0] = info('aaaaaaaaaaa1', state, { sessionId: state === 'running' ? S1 : null });
+    assert.deepEqual(
+      await h.act(resume(S1, 2)),
+      refused(2, 'this session is already open in the window'),
+      state,
+    );
+  }
+  assert.deepEqual(h.events, ['terminalFor 100x30', `open ${S1}`]); // nothing built, one opened
+  assert.equal(d.deck.store.getKv(lockKey(S1)), lock); // no lock taken
+  assert.deepEqual(h.hub.closed, []);
+});
+
+test('resume is allowed again once that terminal ended, and closes it first; a new session is never refused by it', async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const terminals = [info('aaaaaaaaaaa1', 'starting', { sessionId: null })];
+  const h = harness(d, { terminals });
+  assert.equal((await h.act(newAction({ dir: d.sandbox.home }))).ok, true);
+  terminals[0] = info('aaaaaaaaaaa1', 'ended', { sessionId: null });
+  assert.equal((await h.act(resume(S1))).ok, true);
+  assert.deepEqual(h.hub.closed, ['aaaaaaaaaaa1']);
+  assert.deepEqual(h.events.slice(-2), ['close aaaaaaaaaaa1', `open ${S1}`]);
+});
+
+test("resume is not refused by a running terminal that now shows another session (after /clear), nor by another session's", async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const h = harness(d, {
+    terminals: [
+      info('aaaaaaaaaaa1', 'running', { sessionId: S3 }),
+      info('aaaaaaaaaaa2', 'starting', { expectedSessionId: S2, sessionId: null }),
+    ],
+  });
+  assert.equal((await h.act(resume(S1))).ok, true);
+});
+
+test('an unexpected throw after the lock was taken and before open() gives the lock back', async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  // launchPrepared reads the lock just before it opens; that read fails (the second read of S1's
+  // lock: the first is acquireLock's).
+  let reads = 0;
+  const deck = deckWith(d.deck, {
+    store: {
+      getKv: (key) => {
+        if (key === lockKey(S1) && ++reads === 2) throw new Error(SECRET);
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const h = harness(d, { deck });
+  const result = await h.act(resume(S1));
+  assert.equal(result.ok, false);
+  assert.deepEqual(h.specs, []);
+  assert.deepEqual(h.logs, ['act resume: failed (Error)']);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null);
 });
 
 test('a refused resume leaves the ended terminal in place', async (t) => {
@@ -716,6 +787,7 @@ test('an action that is not one of stage A, or not well formed, is refused witho
     { ...newAction({ dir: d.sandbox.home }), flags: null },
     // The parser's text limits (UTF-8 bytes: paths 4,096, other text 1,024) and well-formed text.
     newAction({ dir: d.sandbox.home, label: 'x'.repeat(1025) }),
+    newAction({ dir: d.sandbox.home, label: 'x'.repeat(5000) }),
     newAction({ dir: d.sandbox.home, label: 'é'.repeat(513) }),
     newAction({ dir: d.sandbox.home, flags: 'x'.repeat(200_000) }),
     newAction({ dir: `/${'d'.repeat(4096)}` }),
@@ -737,6 +809,18 @@ test('an action that is not one of stage A, or not well formed, is refused witho
   for (const line of h.logs) {
     // The parser's kind: fixed text, never what the page sent.
     assert.match(line, /^act: refused an action that is not valid \([\w.-]+: [a-z ]+\)$/);
+  }
+});
+
+test('a refusal naming a hostile directory reaches the page sanitised', async (t) => {
+  const d = testDeck(t);
+  const h = harness(d);
+  for (const dir of [`${d.sandbox.home}/a\x1b[31m\nb\x07`, `rel\x1b]0;x\x07/dir`]) {
+    const result = await h.act(newAction({ dir }));
+    assert.equal(result.ok, false);
+    for (const text of [...result.lines, result.error ?? '']) {
+      assert.ok(!/[\x00-\x1f\x7f-\x9f]/.test(text), JSON.stringify(text));
+    }
   }
 });
 

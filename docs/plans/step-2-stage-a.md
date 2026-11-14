@@ -3169,8 +3169,15 @@ action" with one log line carrying the parser's kind (ruled by the plan owner, r
 an action is what a page asks the server to do). `resume` → `terminalFor({ cols, rows })` → `prepareResumeById` → `launchPrepared(deck,
 prepared, terminal)` → `{ ok: code === 0, lines, error: null, sessionId }` (`sessionId` null unless
 it started, A25); a `SkydeckError` (the guard, the lock, `RefError`) → `{ ok: false, lines:
-[message], error: message, sessionId: null }`, the message sanitised line by line as step 1's
-`failureText` prints it (it can quote a flag as typed; review 2 of task 32). The terminal is built first (ruled, review 1 of task
+[message], error: message, sessionId: null }`. Every line and the error of a result pass the
+sanitiser step 1 prints with (a SkydeckError's message line by line, as `failureText`), so that no
+escape sequence or line break a flag, a directory or a title brings reaches the page (ruled by the
+plan owner, review 2 of task 32). Before anything else a resume is refused — `ok: false`, "this
+session is already open in the window", nothing built, no lock — while the hub lists a terminal of
+the session (`sessionId ?? expectedSessionId`) whose program may still run (`MAY_START`), whatever
+the lock says (ruled, review 2 of task 32; S2 11.1); `new` is never refused by it. A throw after the
+lock was taken and before the terminal's `open()` was called gives the lock back (nothing can have
+started; ruled, review 2 of task 32); after `open()` it stays. The terminal is built first (ruled, review 1 of task
 32), so that a factory that throws leaves no lock and, for `new`, no label behind; a refused
 action builds it and never opens it. Once
 `prepareResumeById` has let it through, and before `launchPrepared`, the resume closes the
@@ -3200,7 +3207,11 @@ exit, else null; `expiring` and `expired` from the marks.
   the guard's message, the terminal built but never opened, no lock; an unknown id → the
   `RefError` message;
   the session's ended, lost and not-started terminals closed before the new one opens, its other
-  terminals and other sessions' kept, nothing closed on a refusal (ruled, S2 7.8).
+  terminals and other sessions' kept, nothing closed on a refusal (ruled, S2 7.8); a second
+  resume while the first one's terminal is starting (or running, reconnecting, newer keeper) with a
+  stale lock → refused, nothing built, one terminal; after that terminal ended → allowed, the ended
+  one closed first; a terminal that now shows another session does not refuse it; a `new` is never
+  refused by it; a throw after the lock and before `open()` → the lock given back.
 - `new` with a directory, label `fix`, group `ABC-1` and flags `--model opus` → `buildNewCommand`'s
   arguments, the meta stored, `sessionId` the new id; flags `-r x`, `--name y`, `'unclosed`, a
   relative or missing directory → `ok: false` with the message, nothing stored, the terminal never
