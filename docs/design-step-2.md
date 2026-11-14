@@ -1514,7 +1514,7 @@ every key in this table, and the page does what the table says:
 | Key | The page | Why |
 |---|---|---|
 | Shift+Enter | sends `\n` and cancels the key | xterm.js 6.0.0 sends `\r` whatever Shift says; Claude Code inserts a newline on Ctrl+J (`\n`) in every terminal without setup (section 21). |
-| Ctrl+V | leaves the key to the browser, which pastes; xterm.js sends the pasted text as a bracketed paste | Pasting text, as in the developer's terminal. No `\x16` is sent (a page test checks it, 17.4). |
+| Ctrl+V | leaves the key to the browser, which pastes; xterm.js sends the pasted text as a bracketed paste, and the page then cancels the paste's own action (section 21: xterm.js 6.0.0 does not, and the text would stay in its hidden textarea) | Pasting text, as in the developer's terminal. No `\x16` is sent (a page test checks it, 17.4). |
 | Ctrl+Shift+V | sends `\x16` (a raw Ctrl+V) and cancels the key | Claude Code's own image paste: on WSL it reads the Windows clipboard itself (6.4); the browser's clipboard is not involved. |
 | Ctrl+Shift+C | copies the selection to the clipboard and cancels the key | Copy. |
 | the window's own chords (12.9) | acts on them and cancels the key | xterm.js would send nothing for them anyway, so the window takes nothing from Claude Code. |
@@ -1937,6 +1937,14 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
   recently shown detached beyond that; while the window is hidden (minimised) it detaches all but
   the selected one. Switching between attached terminals is instant; switching to another costs one
   snapshot (7.3).
+  What the server says about a terminal is shown over that terminal, as the page's own text and
+  never written into it (so that the page's screen stays the screen side's): the reconnecting bar
+  (7.8) and "sized by another window" (8.2.6) while they hold; a gap or a newer keeper, which the
+  server repeats after every snapshot, until a later snapshot is followed by the terminal's stream
+  without it — and one the user dismissed is not shown again for a repeat, only for a new
+  occasion; and `input-full` ("this terminal is not taking input at the moment: what you typed was
+  not sent to the program", true of all three reasons the server takes no input) until input sent
+  after it was taken (the server answers input it refuses at once; plan task 28).
 - **A session running in another terminal**: the card of 7.9.
 - **A session not running**: the **resume card**: how it ended (exited normally, ended
   unexpectedly, mid-turn), last activity, the directory, the exact command (design 7.6's), the flags
@@ -2821,6 +2829,7 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | `http://127.0.0.1:<port>` is a secure context (verified by the user, 2026-11-13): Notification and the async clipboard are allowed; notification permission is per origin and profile. Whether the managed PC lets notifications and clipboard writes through is not tested yet (W6, W11). | documentation |
 | An app window's taskbar identity is made of an app name generated from the address's host and path (`GenerateApplicationNameFromURL`: host, `_`, path; no port) and the profile path. | verified in Chromium's source (review, 2026-11-13); whether Edge shows skydeck's icon is W3 |
 | xterm.js 6.0.0 sends nothing for Ctrl+Shift with a letter and then does not cancel the key (it builds the control byte only without Shift); for a plain Ctrl+V it sends `\x16` and cancels the key, so the browser does not paste unless the custom key handler returns false. | verified in xterm.js 6.0.0's source (`Keyboard.ts`, `CoreBrowserTerminal`) |
+| xterm.js 6.0.0's paste handler sends the pasted text and empties its hidden textarea, but does not cancel the paste event, so the browser then puts the whole text into that textarea: after a paste of 10 MiB in headless Chromium the page sent its input at about 0.4 MB/s and answered a script in seconds; with the paste cancelled after xterm.js took it, the same paste reached the server in under a second (plan task 28). | verified (headless Chromium 1223; the bundle's `handlePasteEvent`) |
 | xterm.js 6.0.0's DOM renderer writes its colours, cursor and selection rules into `<style>` elements it creates at run time: under `style-src 'self'` a red cell renders black; with `'unsafe-inline'` it renders red. | verified in headless Chromium (review, 2026-11-13) |
 | On WSL a crashing process's core dump is piped to WSL's crash collector (`core_pattern` is `\|/wsl-capture-crash …`), which keeps up to `maxCrashDumpCount` (default 10) dumps in `crashDumpFolder` (default `%Temp%\wsl-crashes`). A non-dumpable process (`PR_SET_DUMPABLE` 0) produces no dump, piped or not. For a piped dump the kernel ignores a core limit of 0 and aborts only on a soft limit of exactly 1 byte (`fs/coredump.c` of Linux 6.6). | `core_pattern` verified; documentation (learn.microsoft.com/windows/wsl/wsl-config, `prctl(2)`); kernel source read for 6.6 in review; this machine's 6.18 UNVERIFIED (W24) |
 | `/run/user/<uid>` outlives the user's last terminal only when the user lingers; on the development machine the user does. | verified |

@@ -3873,7 +3873,8 @@ the target first; OSC 0 and 2 are ignored; the ended terminal is dimmed (the bar
 - Find: Ctrl+Shift+F finds a line printed 3,000 lines up.
 - Notices on the terminal they concern: `input-full` (the stand-in in `/stall` with a large paste),
   `gap` and `newer-keeper` (sent by a test server through the hub), and the `reconnecting` bar
-  (the keeper stopped with `SIGSTOP` for 3 s) — each shown, and gone when it no longer holds.
+  (the keeper stopped with `SIGSTOP` for 3 s and the server's connection to it cut: a stopped
+  keeper keeps its connection, ruled for task 16) — each shown, and gone when it no longer holds.
 - After a server restart the terminal shows the same screen (a fresh `snap`).
 
 **Done when:** the checks of S2 17.4 about keys, queries and colours pass, and switching between
