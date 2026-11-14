@@ -286,9 +286,18 @@ function area(forAct = false) {
       ? dom.cards.getBoundingClientRect().height
       : headerHeight();
   const height = box.height - above;
-  const fitted = typeof fitting.fits === 'function' ? fitting.fits(box.width, height) : null;
-  if (fitted !== null) {
-    return fitted;
+  // The view is never asked about an area under 1 px (cards taller than the zone), and its answer
+  // is held to what the server takes, as the page's own is: whole numbers, 1…MAX_COLS ×
+  // 1…MAX_ROWS; one that is no number (a cell not measured yet) leaves the page's own arithmetic.
+  const fitted =
+    typeof fitting.fits === 'function'
+      ? fitting.fits(Math.max(1, box.width), Math.max(1, height))
+      : null;
+  if (fitted && Number.isFinite(fitted.cols) && Number.isFinite(fitted.rows)) {
+    return {
+      cols: Math.max(1, Math.min(MAX_COLS, Math.floor(fitted.cols))),
+      rows: Math.max(1, Math.min(MAX_ROWS, Math.floor(fitted.rows))),
+    };
   }
   const cell = dom.measure.getBoundingClientRect();
   const cellWidth = cell.width / 20 || 8;

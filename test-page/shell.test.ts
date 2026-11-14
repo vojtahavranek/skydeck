@@ -990,7 +990,7 @@ test('the page shell', async (t) => {
       await mark(page, 'held');
 
       const now = await page.evaluate(() => Date.now());
-      await page.clock.pauseAt(now + 100);
+      await page.clock.pauseAt(now + 5000); // a margin a loaded machine cannot eat
       await sleep(2000); // no timer runs
       await page.clock.fastForward(60_000); // one late tick
       await page.clock.resume();
@@ -1022,7 +1022,7 @@ test('the page shell', async (t) => {
       await sleep(1500);
 
       const now = await page.evaluate(() => Date.now());
-      await page.clock.pauseAt(now + 100);
+      await page.clock.pauseAt(now + 5000); // a margin a loaded machine cannot eat
       answering = false;
       await sleep(1000);
       await page.clock.fastForward(60_000);
@@ -2578,6 +2578,88 @@ test('the page shell', async (t) => {
       assert.ok(own !== undefined && own !== null, 'a size is sent');
       assert.notDeepEqual(own, { cols: 66, rows: 22 });
       assert.ok(own.cols >= 1 && own.rows >= 1, JSON.stringify(own));
+    },
+  );
+
+  /** Sizes the server refuses (whole numbers 1–65535 only), as a view's `fits` may answer them. */
+  const refused = [
+    ['0 rows (an area lower than one cell)', { cols: 80, rows: 0 }],
+    ['a fraction', { cols: 80.5, rows: 24.5 }],
+    ['no number (a cell not measured yet)', { cols: Number.NaN, rows: 24 }],
+  ] as const;
+  /** Whether `size` is one the server takes. */
+  const whole = (size: unknown): boolean => {
+    const { cols, rows } = (size ?? {}) as { cols?: unknown; rows?: unknown };
+    return [cols, rows].every((n) => Number.isInteger(n) && (n as number) >= 1);
+  };
+
+  await t.test(
+    'a `fits` answer the server would refuse (0 rows, a fraction, no number) is held to whole numbers from 1 up, in `focus` and in an act; the view is never asked about an area under 1 px (Z1, item 5)',
+    async (t) => {
+      const w = await keysWorld(
+        t,
+        'fits-view.js',
+        '.card-header { height: 60px; overflow: hidden; }\n',
+      );
+      const { page } = w;
+      let width = 1000;
+      for (const [what, answer] of refused) {
+        await page.evaluate((a) => Reflect.set(globalThis, 'fitsAnswer', a), answer);
+        width += 50;
+        await page.setViewportSize({ width, height: 700 }); // the area changed: focus is sent
+        await sleep(700);
+        assert.ok(whole(w.focuses.at(-1)), `${what}: focus ${JSON.stringify(w.focuses.at(-1))}`);
+      }
+
+      await clickRow(page, S2);
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', { cols: 80.5, rows: 0 }));
+      await page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
+        state: 'attached',
+      });
+      const resume = w.acts.find((act) => act['kind'] === 'resume');
+      assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, { cols: 80, rows: 1 });
+
+      // A window lower than the header: the view is asked about 1 px, not less.
+      await page.setViewportSize({ width, height: 40 });
+      await sleep(700);
+      const asked = await page.evaluate(() => Reflect.get(globalThis, 'fitsAsked') as number[][]);
+      const last = asked.at(-1);
+      assert.ok(last !== undefined && last[0]! >= 1 && last[1]! >= 1, JSON.stringify(last));
+      assert.equal(last[1], 1, 'the area under the header is less than 1 px high');
+    },
+  );
+
+  await t.test(
+    'with a real server, a `fits` answer the server would refuse does not close the connection: the page sends the size held to whole numbers (Z1, item 5)',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        modules: {
+          ...MINIMAL_MODULES,
+          'terminal-view.js': fixture('fits-view.js'),
+          'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
+        },
+      });
+      await sleep(500);
+      let width = 1000;
+      for (const [, answer] of refused) {
+        await l.page.evaluate((a) => Reflect.set(globalThis, 'fitsAnswer', a), answer);
+        width += 50;
+        await l.page.setViewportSize({ width, height: 700 });
+        await sleep(1500);
+      }
+      const log = await logOf(l.page);
+      assert.ok(
+        log.filter((e) => e.e === 'out' && e['t'] === 'focus').length >= refused.length,
+        'focus was sent for each answer',
+      );
+      assert.deepEqual(
+        log.filter((e) => e.e === 'close' || e.e === 'ws').map((e) => e.e),
+        ['ws'],
+        'one socket, never closed',
+      );
+      assert.equal(await shownText(l.page, '#gone'), '');
     },
   );
 
