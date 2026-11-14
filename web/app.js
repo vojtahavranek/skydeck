@@ -222,9 +222,15 @@ addEventListener('mouseup', () => {
     keepKeyboard();
   }, 0);
 });
-// The end of a selection gives the keyboard back too, when nothing has it.
+// The end of a selection gives the keyboard back too, when nothing has it — but not while a mouse
+// button is down: a mousedown on text puts a caret there (a selection that is no range yet), and
+// giving the terminal's text control the keyboard then would take away the selection the drag is
+// about to make (review 2 of task 26). The mouseup's own check comes after the drag.
+let buttonDown = false;
+addEventListener('mousedown', () => (buttonDown = true), true);
+addEventListener('mouseup', () => (buttonDown = false), true);
 document.addEventListener('selectionchange', () => {
-  if (!textSelected()) {
+  if (!buttonDown && !textSelected()) {
     keepKeyboard();
   }
 });

@@ -1749,6 +1749,7 @@ test('the page shell', async (t) => {
       assert.ok(box !== null);
       await page.mouse.move(box.x + 2, box.y + box.height / 2);
       await page.mouse.down();
+      await sleep(250); // a person's drag: the button stays down a moment before it moves
       await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 5 });
       await page.mouse.up();
       await sleep(300);
@@ -1768,8 +1769,23 @@ test('the page shell', async (t) => {
       assert.deepEqual(await page.evaluate(() => Reflect.get(globalThis, 'copied')), [text]);
       assert.deepEqual(await page.evaluate(() => Reflect.get(globalThis, 'programGot')), []);
 
-      // A plain click (it selects nothing): the terminal has the keyboard again; the same after a
-      // click on the header above it and into the key help.
+      // The end of a selection (here: the page's selection taken away) gives the keyboard back.
+      await page.evaluate(() => getSelection()?.removeAllRanges());
+      await page.waitForFunction(
+        () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+        null,
+        { timeout: 5000 },
+      );
+      // Select again, by a drag; then a plain click (it selects nothing): the terminal has the
+      // keyboard again; the same after a click on the header above it and into the key help.
+      await page.mouse.move(box.x + 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await sleep(250);
+      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 5 });
+      await page.mouse.up();
+      await sleep(300);
+      assert.match(await selected(), /restarted/);
+      assert.equal(await holderHasIt(), false);
       await page.locator('#info-text').click();
       await page.waitForFunction(
         () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
