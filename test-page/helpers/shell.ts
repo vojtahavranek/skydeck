@@ -3,12 +3,14 @@
 // and stand-in servers — the page's real files on a port of the test's own, with a WebSocket the
 // test scripts (S2 17.4: "a stand-in server").
 import assert from 'node:assert/strict';
+import { cpSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
+import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import type { TestContext } from 'node:test';
 import { Worker } from 'node:worker_threads';
 
-import type { Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import WebSocket, { WebSocketServer } from 'ws';
 
 import { httpHandler, loadAssets, securityHeaders } from '../../src/window/assets.ts';
@@ -19,7 +21,16 @@ import {
   serverProof,
   wrapSecret,
 } from '../../src/window/auth.ts';
+import { controlClient } from '../../src/window/client.ts';
+import { sleep } from '../../test/helpers/keeper.ts';
 import { testPlatform } from '../../test/helpers/platform.ts';
+import { startTestServer } from '../../test/helpers/window.ts';
+import type {
+  ServerSandboxOptions,
+  StartedServer,
+  StartOptions,
+} from '../../test/helpers/window.ts';
+import { newPage } from './browser.ts';
 
 /** How long a page test waits for something the page or a real server does (a loaded machine). */
 export const PAGE_WAIT_MS = 20_000;
@@ -270,6 +281,8 @@ export interface StandinOptions {
   refuse?: number;
   /** A port of the test's choice (default: the system picks). */
   port?: number;
+  /** Files of web/ served in place of the checkout's (a name and its text), e.g. a test's view. */
+  web?: Record<string, string>;
 }
 
 export interface Standin {
@@ -301,8 +314,22 @@ export async function standinServer(
   t: TestContext,
   options: StandinOptions = {},
 ): Promise<Standin> {
-  const { platform } = testPlatform(t);
-  const assets = loadAssets(platform.files, platform.appRoot);
+  const { platform, sandbox: s } = testPlatform(t);
+  let appRoot = platform.appRoot;
+  if (options.web !== undefined) {
+    // An app root of the sandbox: the checkout's bin, src and vendor, a copy of its web/ with the
+    // test's files in it.
+    appRoot = join(s.root, 'app');
+    mkdirSync(appRoot);
+    for (const dir of ['bin', 'src', 'vendor']) {
+      symlinkSync(join(platform.appRoot, dir), join(appRoot, dir));
+    }
+    cpSync(join(platform.appRoot, 'web'), join(appRoot, 'web'), { recursive: true });
+    for (const [name, text] of Object.entries(options.web)) {
+      writeFileSync(join(appRoot, 'web', name), text);
+    }
+  }
+  const assets = loadAssets(platform.files, appRoot);
   const index = assets.get('/');
   assert.ok(index !== null, 'web/index.html is served');
   const page = Buffer.from(index.body).toString('utf8');
@@ -530,4 +557,181 @@ export function holdWriteLock(
     held: new Promise<void>((resolve) => holder.once('message', () => resolve())),
     release,
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The page as a user drives it (shared by the page tests of tasks 26–29)
+
+export const RESTARTED = /^skydeck's server restarted; your sessions kept running$/;
+export const PLACEHOLDER = /terminal view comes with task 28/;
+export const TERM_A = 'aaaaaaaaaaaa';
+export const TERM_B = 'bbbbbbbbbbbb';
+export const TERM_C = 'cccccccccccc';
+
+/** The id of the element that has the keyboard, or its tag. */
+export async function active(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const element = document.activeElement;
+    if (element === null) return 'none';
+    const inTerminal = document.getElementById('terminal')?.contains(element) === true;
+    return inTerminal ? 'in #terminal' : element.id !== '' ? `#${element.id}` : element.tagName;
+  });
+}
+
+/** A `list` of a scripted stand-in: rows of Open with their terminals (S2 8.2.3). */
+export function scriptedList(
+  rows: { id: string; terminal: string | null; slot: number | null }[],
+  terminals: { id: string; slot: number | null; sessionId: string | null }[],
+  selected: Record<string, unknown> | null = null,
+): Record<string, unknown> {
+  return {
+    t: 'list',
+    nowNs: '1794474000000000000',
+    counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
+    sections: [
+      {
+        name: 'open',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: rows.length,
+        rows: rows.map((row) => ({
+          id: row.id,
+          shortId: row.id.slice(0, 8),
+          title: `session ${row.id.slice(0, 8)}`,
+          titleSource: 'summary',
+          group: null,
+          groupSource: null,
+          state: row.terminal === null ? 'not-running' : 'running',
+          stateDetail: null,
+          sinceNs: '1794474000000000000',
+          lastActivityNs: '1794474000000000000',
+          dir: '/home/u/project',
+          marks: [],
+          hasNote: false,
+          noteHead: [],
+          done: false,
+          prs: [],
+          chip: null,
+          terminal: row.terminal,
+          slot: row.slot,
+          elsewhere: null,
+          starting: false,
+          attention: null,
+          stack: null,
+        })),
+      },
+    ],
+    doneHidden: 0,
+    banner: null,
+    terminals: terminals.map((term) => ({
+      ...term,
+      state: 'running',
+      notReported: false,
+      cols: 80,
+      rows: 24,
+      ownsSize: true,
+    })),
+    selected,
+    dirs: [],
+  };
+}
+
+/** `text` as a regular expression that matches it literally. */
+export function escape(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export interface Launched extends Omit<StartedServer, 'page'> {
+  page: Page;
+  problems: string[];
+}
+
+/**
+ * A page with the recorder (made first, so that it closes first), a real test server, and the
+ * page opened with a launch token of that server, as `skydeck window` opens it; connected.
+ */
+export async function launched(
+  t: TestContext,
+  chromium: Browser,
+  options: ServerSandboxOptions & { server?: StartOptions } = {},
+): Promise<Launched> {
+  const page = await newPage(t, chromium);
+  await page.addInitScript(RECORDER);
+  const problems = problemsOf(page);
+  const started = await startTestServer(t, options);
+  const { token } = await controlClient(started.d.platform.net, started.d.files.serverSock).token(
+    30,
+  );
+  await page.goto(pageUrl(started.server.port, token));
+  await connection(page, 'open');
+  return { ...started, page, problems };
+}
+
+/** The page's focus zone, as its key bar says. */
+export async function zone(page: Page): Promise<string> {
+  return shownText(page, '#focus-zone');
+}
+
+/** Puts the page into `wanted` with Ctrl+Shift+L when it is in the other zone. */
+export async function toZone(page: Page, wanted: 'list' | 'terminal'): Promise<void> {
+  if ((await zone(page)) !== `Focus: ${wanted}`) await page.keyboard.press('Control+Shift+L');
+  await showsText(page, '#focus-zone', new RegExp(`^Focus: ${wanted}$`));
+}
+
+/** The session id of the selected row of the list. */
+export async function selectedRow(page: Page): Promise<string | null> {
+  return page.evaluate(
+    () => document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') ?? null,
+  );
+}
+
+/** The terminal of `sessionId` in the server's hub. */
+export function termOf(started: { server: StartedServer['server'] }, sessionId: string): string {
+  const term = started.server.hub.list().find((info) => info.expectedSessionId === sessionId);
+  assert.ok(
+    term !== undefined,
+    `a terminal for ${sessionId} in ${JSON.stringify(started.server.hub.list(), (_, v: unknown) => (typeof v === 'bigint' ? String(v) : v))}`,
+  );
+  return term.id;
+}
+
+/**
+ * Clicks the list's row of `sessionId` until it is the selected one: the minimal list draws its
+ * rows anew for every list, so a click can meet a row that moved.
+ */
+export async function clickRow(page: Page, sessionId: string): Promise<void> {
+  const row = page.locator(`#list [data-id="${sessionId}"]`);
+  const deadline = performance.now() + PAGE_WAIT_MS;
+  for (;;) {
+    await row.waitFor({ timeout: PAGE_WAIT_MS });
+    await row.click().catch(() => {});
+    if ((await selectedRow(page)) === sessionId) return;
+    assert.ok(performance.now() < deadline, `the row of ${sessionId} selected`);
+    await sleep(100);
+  }
+}
+
+/**
+ * Resumes `sessionId` from the list as a user does: a click selects its row (a session that is
+ * not running: the list zone), Enter resumes it, and the pane shows its terminal.
+ */
+export async function resumeFromList(page: Page, sessionId: string): Promise<void> {
+  await clickRow(page, sessionId);
+  await showsText(page, '#focus-zone', /^Focus: list$/);
+  await page.keyboard.press('Enter');
+  await showsText(page, '#terminal', PLACEHOLDER);
+  // S2 11.3: the new terminal is selected, with the keyboard in it.
+  await page.waitForFunction(
+    () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+    null,
+    { timeout: PAGE_WAIT_MS },
+  );
+}
+
+/** The build a page was loaded with, from its asset URLs. */
+export async function buildOf(page: Page): Promise<string> {
+  const match = /\/assets\/([^/]+)\/web\/$/.exec(await assetBase(page));
+  assert.ok(match !== null);
+  return match[1] as string;
 }

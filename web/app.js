@@ -731,6 +731,11 @@ document.addEventListener('focusin', (event) => {
   } else if (dom.rightZone.contains(target) && state.zone !== 'terminal') {
     setZone('terminal', false);
   }
+  // A click on the right side's own surface (the header above a terminal): the shown terminal
+  // keeps the keyboard.
+  if (target === dom.rightZone && state.pane.kind === 'terminal') {
+    terminalView.focus();
+  }
 });
 
 // --- keys (S2 12.9) -----------------------------------------------------------------------------
@@ -892,7 +897,9 @@ function chordOf(event) {
   if (chord === null) {
     return false;
   }
-  if (!actedOn.has(event)) {
+  // xterm.js asks for keydown, keypress and keyup alike: the chord is acted on at its keydown
+  // only, and true tells the view to drop the others too (review 2 of task 26).
+  if (event.type === 'keydown' && !actedOn.has(event)) {
     actedOn.add(event);
     doChord(chord, event);
   }

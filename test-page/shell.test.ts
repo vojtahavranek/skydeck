@@ -5,12 +5,11 @@
 // program (test/helpers/window.ts); stand-in servers come from helpers/shell.ts.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { cpSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import type { TestContext } from 'node:test';
 
-import type { Browser, CDPSession, Page } from 'playwright';
+import type { CDPSession, Page } from 'playwright';
 
 import type { Detached, Platform } from '../src/platform/types.ts';
 import { securityHeaders } from '../src/window/assets.ts';
@@ -18,16 +17,27 @@ import { controlClient } from '../src/window/client.ts';
 import { procStartOf, sleep, stillRuns, until } from '../test/helpers/keeper.ts';
 import { S1, S2, S3 } from '../test/helpers/platform.ts';
 import { startTestServer } from '../test/helpers/window.ts';
-import type {
-  ServerSandbox,
-  ServerSandboxOptions,
-  StartedServer,
-  StartOptions,
-} from '../test/helpers/window.ts';
+import type { ServerSandbox } from '../test/helpers/window.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
+  active,
   after,
   assetBase,
+  buildOf,
+  clickRow,
+  escape,
+  launched,
+  PLACEHOLDER,
+  RESTARTED,
+  resumeFromList,
+  scriptedList,
+  selectedRow,
+  TERM_A,
+  TERM_B,
+  TERM_C,
+  termOf,
+  toZone,
+  zone,
   connection,
   holdWriteLock,
   honest,
@@ -51,10 +61,8 @@ const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
 
 const GONE =
   /^skydeck's server is not answering \(since \d\d:\d\d:\d\d\)\. Sessions in the window keep running unless WSL has stopped\. To get back, open a WSL terminal and run: skydeck window$/;
-const RESTARTED = /^skydeck's server restarted; your sessions kept running$/;
 const WSL_RESTARTED =
   /^WSL has restarted since \d\d:\d\d:\d\d: the sessions that were running have ended\.$/;
-const PLACEHOLDER = /terminal view comes with task 28/;
 const STALE =
   "this window's page is not the one skydeck's server serves, and reloading did not change that; close every skydeck window, delete the window's profile folder and run skydeck window --new-secret";
 
@@ -64,127 +72,6 @@ const STALE_UNSTORED =
   "this window's page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run skydeck window again";
 const UNSTORED =
   "this window's key could not be stored: the window works until it is reloaded or closed, and its reload keys do not reload it; run skydeck window again for a window that keeps its key";
-
-const TERM_A = 'aaaaaaaaaaaa';
-const TERM_B = 'bbbbbbbbbbbb';
-const TERM_C = 'cccccccccccc';
-
-/** The id of the element that has the keyboard, or its tag. */
-async function active(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const element = document.activeElement;
-    if (element === null) return 'none';
-    const inTerminal = document.getElementById('terminal')?.contains(element) === true;
-    return inTerminal ? 'in #terminal' : element.id !== '' ? `#${element.id}` : element.tagName;
-  });
-}
-
-/** A `list` of a scripted stand-in: rows of Open with their terminals (S2 8.2.3). */
-function scriptedList(
-  rows: { id: string; terminal: string | null; slot: number | null }[],
-  terminals: { id: string; slot: number | null; sessionId: string | null }[],
-): Record<string, unknown> {
-  return {
-    t: 'list',
-    nowNs: '1794474000000000000',
-    counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
-    sections: [
-      {
-        name: 'open',
-        folded: false,
-        firstNs: null,
-        lastNs: null,
-        count: rows.length,
-        rows: rows.map((row) => ({
-          id: row.id,
-          shortId: row.id.slice(0, 8),
-          title: `session ${row.id.slice(0, 8)}`,
-          titleSource: 'summary',
-          group: null,
-          groupSource: null,
-          state: row.terminal === null ? 'not-running' : 'running',
-          stateDetail: null,
-          sinceNs: '1794474000000000000',
-          lastActivityNs: '1794474000000000000',
-          dir: '/home/u/project',
-          marks: [],
-          hasNote: false,
-          noteHead: [],
-          done: false,
-          prs: [],
-          chip: null,
-          terminal: row.terminal,
-          slot: row.slot,
-          elsewhere: null,
-          starting: false,
-          attention: null,
-          stack: null,
-        })),
-      },
-    ],
-    doneHidden: 0,
-    banner: null,
-    terminals: terminals.map((term) => ({
-      ...term,
-      state: 'running',
-      notReported: false,
-      cols: 80,
-      rows: 24,
-      ownsSize: true,
-    })),
-    selected: null,
-    dirs: [],
-  };
-}
-
-/** `text` as a regular expression that matches it literally. */
-function escape(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-interface Launched extends Omit<StartedServer, 'page'> {
-  page: Page;
-  problems: string[];
-}
-
-/**
- * A page with the recorder (made first, so that it closes first), a real test server, and the
- * page opened with a launch token of that server, as `skydeck window` opens it; connected.
- */
-async function launched(
-  t: TestContext,
-  chromium: Browser,
-  options: ServerSandboxOptions & { server?: StartOptions } = {},
-): Promise<Launched> {
-  const page = await newPage(t, chromium);
-  await page.addInitScript(RECORDER);
-  const problems = problemsOf(page);
-  const started = await startTestServer(t, options);
-  const { token } = await controlClient(started.d.platform.net, started.d.files.serverSock).token(
-    30,
-  );
-  await page.goto(pageUrl(started.server.port, token));
-  await connection(page, 'open');
-  return { ...started, page, problems };
-}
-
-/** The page's focus zone, as its key bar says. */
-async function zone(page: Page): Promise<string> {
-  return shownText(page, '#focus-zone');
-}
-
-/** Puts the page into `wanted` with Ctrl+Shift+L when it is in the other zone. */
-async function toZone(page: Page, wanted: 'list' | 'terminal'): Promise<void> {
-  if ((await zone(page)) !== `Focus: ${wanted}`) await page.keyboard.press('Control+Shift+L');
-  await showsText(page, '#focus-zone', new RegExp(`^Focus: ${wanted}$`));
-}
-
-/** The session id of the selected row of the list. */
-async function selectedRow(page: Page): Promise<string | null> {
-  return page.evaluate(
-    () => document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') ?? null,
-  );
-}
 
 /** The keyboard's BrowserRefresh key, which Playwright's keyboard does not know: through CDP. */
 async function browserRefresh(
@@ -222,49 +109,6 @@ function reloadedAfterProof(log: Logged[]): boolean {
   );
 }
 
-/** The terminal of `sessionId` in the server's hub. */
-function termOf(started: { server: StartedServer['server'] }, sessionId: string): string {
-  const term = started.server.hub.list().find((info) => info.expectedSessionId === sessionId);
-  assert.ok(
-    term !== undefined,
-    `a terminal for ${sessionId} in ${JSON.stringify(started.server.hub.list(), (_, v: unknown) => (typeof v === 'bigint' ? String(v) : v))}`,
-  );
-  return term.id;
-}
-
-/**
- * Clicks the list's row of `sessionId` until it is the selected one: the minimal list draws its
- * rows anew for every list, so a click can meet a row that moved.
- */
-async function clickRow(page: Page, sessionId: string): Promise<void> {
-  const row = page.locator(`#list [data-id="${sessionId}"]`);
-  const deadline = performance.now() + PAGE_WAIT_MS;
-  for (;;) {
-    await row.waitFor({ timeout: PAGE_WAIT_MS });
-    await row.click().catch(() => {});
-    if ((await selectedRow(page)) === sessionId) return;
-    assert.ok(performance.now() < deadline, `the row of ${sessionId} selected`);
-    await sleep(100);
-  }
-}
-
-/**
- * Resumes `sessionId` from the list as a user does: a click selects its row (a session that is
- * not running: the list zone), Enter resumes it, and the pane shows its terminal.
- */
-async function resumeFromList(page: Page, sessionId: string): Promise<void> {
-  await clickRow(page, sessionId);
-  await showsText(page, '#focus-zone', /^Focus: list$/);
-  await page.keyboard.press('Enter');
-  await showsText(page, '#terminal', PLACEHOLDER);
-  // S2 11.3: the new terminal is selected, with the keyboard in it.
-  await page.waitForFunction(
-    () => document.getElementById('terminal')?.contains(document.activeElement) === true,
-    null,
-    { timeout: PAGE_WAIT_MS },
-  );
-}
-
 /** Another app root for a server: this checkout's bin, src and vendor, and a web/ with one more file. */
 function otherAppRoot(d: ServerSandbox): string {
   const root = join(d.s.root, 'other-app');
@@ -273,13 +117,6 @@ function otherAppRoot(d: ServerSandbox): string {
   cpSync(join(checkout, 'web'), join(root, 'web'), { recursive: true });
   writeFileSync(join(root, 'web', 'another-build.txt'), 'a file that makes another build\n');
   return root;
-}
-
-/** The build a page was loaded with, from its asset URLs. */
-async function buildOf(page: Page): Promise<string> {
-  const match = /\/assets\/([^/]+)\/web\/$/.exec(await assetBase(page));
-  assert.ok(match !== null);
-  return match[1] as string;
 }
 
 test('the page shell', async (t) => {
@@ -1349,6 +1186,41 @@ test('the page shell', async (t) => {
           document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
         S2,
       );
+      // A click on a part of the page that takes no keyboard: nothing has it, and the list zone's
+      // keys still work.
+      await page.locator('.titlebar .logo').click();
+      assert.equal(await active(page), 'BODY');
+      await page.keyboard.press('k');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S1,
+      );
+
+      // A card replaced while its button had the keyboard: the zone takes it back.
+      await clickRow(page, S2); // not running: its resume card
+      await page.focus('#cards button');
+      await showsText(page, '#focus-zone', /^Focus: terminal$/);
+      standin.connections.at(-1)?.send(
+        scriptedList(
+          [
+            { id: S1, terminal: TERM_A, slot: 1 },
+            { id: S2, terminal: null, slot: null },
+          ],
+          [{ id: TERM_A, slot: 1, sessionId: S1 }],
+          {
+            sessionId: S2,
+            command: 'claude --resume another-command',
+            flagsKnown: true,
+            unknownFlags: [],
+            ended: 'exited',
+            expiring: false,
+            expired: false,
+          },
+        ),
+      );
+      await showsText(page, '#cards', /claude --resume another-command/);
+      assert.equal(await active(page), '#right-zone');
 
       // Esc closes the form over the shown terminal: the terminal has the keyboard again.
       await page.keyboard.press('Control+Shift+Digit1');
@@ -1357,6 +1229,9 @@ test('the page shell', async (t) => {
       await page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
       await page.keyboard.press('Escape');
       await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      assert.equal(await active(page), 'in #terminal');
+      // A click on the header above the shown terminal: the terminal keeps the keyboard.
+      await page.locator('#cards .card-header').click();
       assert.equal(await active(page), 'in #terminal');
 
       // The form open, to the list and back: its first field has the keyboard again.
@@ -1379,7 +1254,7 @@ test('the page shell', async (t) => {
       const page = await newPage(t, chromium);
       await page.addInitScript(RECORDER);
       await page.addInitScript(() => {
-        // IndexedDB that opens 800 ms late (a cold profile, a slow disk).
+        // IndexedDB that opens 3 s late (a cold profile, a slow disk).
         const realOpen = IDBFactory.prototype.open;
         IDBFactory.prototype.open = function open(name: string, version?: number) {
           const fake: Record<string, unknown> = { result: null, error: null };
@@ -1397,7 +1272,7 @@ test('the page shell', async (t) => {
               fake['error'] = request.error;
               (fake['onerror'] as (() => void) | undefined)?.();
             };
-          }, 800);
+          }, 3000);
           return fake as unknown as IDBOpenDBRequest;
         };
       });
@@ -1407,8 +1282,9 @@ test('the page shell', async (t) => {
         socket: (conn) => {
           answer(conn);
           conn.ws.on('message', () => {
-            // The launch's hello is answered, and 300 ms later its socket ends.
-            if (++messages === 1) setTimeout(() => conn.ws.terminate(), 300);
+            // The launch's hello is answered, and a second later — the key still being stored —
+            // its socket ends.
+            if (++messages === 1) setTimeout(() => conn.ws.terminate(), 1000);
           });
         },
       });
@@ -1533,6 +1409,115 @@ test('the page shell', async (t) => {
 
       assert.equal(loads, 1, 'no reload of its own');
       assert.equal(standin.connections.length, 1);
+    },
+  );
+
+  await t.test(
+    'one click on a row from the terminal zone selects it, and Enter then resumes that row',
+    async (t) => {
+      const secret = new Uint8Array(32).fill(16);
+      const page = await newPage(t, chromium);
+      const acts: Record<string, unknown>[] = [];
+      const rows = scriptedList(
+        [
+          { id: S1, terminal: null, slot: null },
+          { id: S2, terminal: null, slot: null },
+        ],
+        [],
+      );
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          open: (conn, message) => {
+            if (message['t'] === 'view') conn.send(rows);
+            if (message['t'] === 'act') acts.push(message);
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await page.locator(`#list [data-id="${S2}"]`).waitFor({ timeout: PAGE_WAIT_MS });
+      assert.equal(await selectedRow(page), S1);
+      assert.equal(await zone(page), 'Focus: terminal');
+
+      await page.locator(`#list [data-id="${S2}"]`).click(); // once: no second try
+      assert.equal(await selectedRow(page), S2);
+      await showsText(page, '#focus-zone', /^Focus: list$/);
+      await page.keyboard.press('Enter');
+      await until(() => acts.length > 0, 'an act', PAGE_WAIT_MS);
+
+      assert.deepEqual(
+        acts.map((act) => [act['kind'], act['sessionId']]),
+        [['resume', S2]],
+      );
+    },
+  );
+
+  await t.test(
+    "the view's key handler is also given a chord's keyup: the page acts on the keydown only, and the view drops both (contract 2.9 `chord`, for task 28)",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(17);
+      const page = await newPage(t, chromium);
+      const rows = scriptedList(
+        [
+          { id: S1, terminal: TERM_A, slot: 1 },
+          { id: S2, terminal: TERM_B, slot: 2 },
+        ],
+        [
+          { id: TERM_A, slot: 1, sessionId: S1 },
+          { id: TERM_B, slot: 2, sessionId: S2 },
+        ],
+      );
+      const standin = await standinServer(t, {
+        web: {
+          'terminal-view-real.js': readFileSync(join(checkout, 'web/terminal-view.js'), 'utf8'),
+          'terminal-view.js': readFileSync(
+            join(checkout, 'test-page/fixtures/chord-view.js'),
+            'utf8',
+          ),
+        },
+        socket: honest(secret, {
+          open: (conn, message) => {
+            if (message['t'] === 'view') conn.send(rows);
+            if (message['t'] === 'attach') {
+              conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
+            }
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await page.waitForSelector('#terminal .terminal-placeholder', { timeout: PAGE_WAIT_MS });
+      await page.focus('#terminal .terminal-placeholder');
+      const calls = async (): Promise<{ pasteRaw: number; dropped: string[] }> =>
+        page.evaluate(
+          () => Reflect.get(globalThis, 'viewCalls') as { pasteRaw: number; dropped: string[] },
+        );
+
+      await page.keyboard.press('Control+Shift+H');
+      assert.equal(await page.locator('#help').isHidden(), false, 'the help is shown, once');
+      await page.keyboard.press('Control+Shift+H');
+      await page.waitForSelector('#help[hidden]', { state: 'attached' });
+      await page.keyboard.press('Control+Shift+V');
+      assert.equal((await calls()).pasteRaw, 1, 'one raw Ctrl+V');
+      await page.keyboard.press('Control+Shift+Digit2');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S2,
+      );
+      await page.keyboard.press('Control+Tab');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S1,
+      );
+      await sleep(300);
+      assert.equal(await selectedRow(page), S1, 'back once, not there and back');
+      assert.ok((await calls()).dropped.includes('keyup H'), (await calls()).dropped.join(', '));
     },
   );
 

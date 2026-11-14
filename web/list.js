@@ -54,9 +54,14 @@ export function createList(root, hooks) {
    * @param {Zone} zone
    */
   const render = (list, selectedId, zone) => {
+    root.dataset.zone = zone;
+    // Only the zone changed (a mousedown on a row moved the keyboard here): the rows stay, so that
+    // the row under the pointer is still there for the click (review 2 of task 26).
+    if (list === current && selectedId === selected) {
+      return;
+    }
     current = list;
     selected = selectedId;
-    root.dataset.zone = zone;
     if (list === null) {
       body.replaceChildren();
       return;

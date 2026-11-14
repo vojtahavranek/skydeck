@@ -1274,7 +1274,12 @@ export function cancels(e, zone, handled) {}
 // shown terminal, else to a card's first text field, else to the zone itself, and so does app.js
 // when what had the keyboard goes away (a dismissed notice, a closed form, a replaced card); a
 // refused `open-link` says its error in the key bar; Esc in the new form closes it — app.js takes
-// that Esc in the capture phase, so a list of the form's own cannot keep it (task 29).
+// that Esc in the capture phase, so a list of the form's own cannot keep it (task 29). app.js
+// calls `render` also when only the zone changed — at the focus a mousedown on a row moves, before
+// its mouseup —, so the list keeps the row under the pointer then (or selects on pointerdown):
+// otherwise no click comes (task 27). A module that hides what has the keyboard removes or blurs
+// it before it returns: app.js gives the keyboard back only when it fell to the page's body
+// (an element in a hidden container keeps it for a moment; tasks 28, 29).
 /** @param {HTMLElement} root
  *  @param {{ select(id: string, how: 'click' | 'key'): void, activate(id: string): void,
  *           view(change: { filter?: string, unfolded?: string[], showDone?: boolean }): void }} hooks */
@@ -1297,6 +1302,9 @@ export function createTerminalView(root, deps) {}
 // an id from `attached()` no later than it sends that id's `detach` (task 28). The view then gets a second `snap` for a terminal it shows: it
 // resets that terminal, applies the snap, and sends its own `resize` when its fitted size differs;
 // `attached()` keeps its ids across the reconnect (ruled, task 26).
+// `deps.chord(e)` may be given keydown, keypress and keyup (xterm.js's custom key handler gets
+// all three): app.js acts on a window chord at its keydown only and answers true for each of its
+// events, so the view drops them all and nothing is done twice (review 2 of task 26).
 
 // web/cards.js — replaced by task 29
 /** @param {HTMLElement} root @param {{ act(action: object): Promise<ResultMessage>, select(id: string): void }} deps */

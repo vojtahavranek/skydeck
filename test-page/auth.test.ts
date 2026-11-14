@@ -16,6 +16,7 @@ import type { StartedServer } from '../test/helpers/window.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
   assetBase,
+  escape,
   connection,
   logOf,
   holdWriteLock,
@@ -434,9 +435,4 @@ interface AuthModule {
     cN: string,
     wrapped: string,
   ): Promise<CryptoKey | null>;
-}
-
-/** `text` as a regular expression that matches it literally. */
-function escape(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
