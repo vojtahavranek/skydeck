@@ -248,8 +248,16 @@ test('a keepalive.pid naming a live process the test started (real /proc) starts
     cwd: real.sandbox.home,
     env: real.sandbox.env(),
   });
-  t.after(() => {
-    real.platform.processes.signal(sleep.pid, 'SIGKILL'); // false once it is gone
+  // Signalled only while it has not ended: once reaped, its pid may be another process's.
+  let ended = false;
+  void sleep.exited.then(() => {
+    ended = true;
+  });
+  t.after(async () => {
+    if (!ended) {
+      real.platform.processes.signal(sleep.pid, 'SIGKILL');
+      await sleep.exited;
+    }
   });
   const stat = real.proc.stat(sleep.pid);
   const procStart = stat === null ? null : procStartFromStat(stat);
@@ -278,6 +286,7 @@ test('a keepalive.pid naming a live process the test started (real /proc) starts
   assert.equal(keepAlive.state().state, 'running');
   assert.equal(processes.calls.length, 0);
 
+  assert.equal(ended, false, 'the sleep still runs');
   real.platform.processes.signal(sleep.pid, 'SIGKILL');
   await sleep.exited;
   await keepAlive.tick();
@@ -481,14 +490,15 @@ test('a keep-alive that ran for 5 minutes starts the schedule over at 5 s', asyn
 test('a keep-alive that ran less than 5 minutes goes on with the schedule', async (t) => {
   const s = setup(t);
   await s.keepAlive.tick();
-  scriptWritesItsLine(s);
-  await s.keepAlive.tick();
-  s.clock.advanceMs(299_999);
-  scriptEnds(s);
-  lastChild(s).exit(0);
+  lastChild(s).exit(1); // one end first: a reset would now show as 5 s instead of 30 s
   await settle();
   await s.keepAlive.tick();
   await startsAgainAfter(s, 5_000);
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'running');
+  s.clock.advanceMs(299_999);
+  scriptEnds(s);
   lastChild(s).exit(0);
   await settle();
   await s.keepAlive.tick();
@@ -521,6 +531,33 @@ test("the script's line of a wsl.exe that ended is not taken for a running keep-
   scriptWritesItsLine(s, SCRIPT_PID + 1, SCRIPT_START + 1);
   await s.keepAlive.tick();
   assert.equal(s.keepAlive.state().state, 'running');
+});
+
+test("the script's line first seen at the tick that sees wsl.exe's end is not taken for a running keep-alive", async (t) => {
+  // Ticks come a second apart: the script can write its line and wsl.exe end in between.
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  lastChild(s).exit(null, 'SIGTERM');
+  await settle();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  await startsAgainAfter(s, 5_000);
+});
+
+test("the script's line that could not be read while wsl.exe ran is not taken for a running keep-alive", async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  mkdirSync(s.files.keepalivePid); // unreadable: counts as alive, but names no line
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'running');
+  rmSync(s.files.keepalivePid, { recursive: true });
+  scriptWritesItsLine(s);
+  lastChild(s).exit(null, 'SIGTERM');
+  await settle();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  await startsAgainAfter(s, 5_000);
 });
 
 test("the script's line seen dead ends the keep-alive even before wsl.exe's end is seen", async (t) => {

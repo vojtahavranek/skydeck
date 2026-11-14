@@ -194,11 +194,16 @@ export function createKeepAlive(deps: {
     if (watched !== null) {
       const watch = watched;
       if (watch.ended !== null) {
-        if (watch.line !== null) {
-          orphan = watch.line; // its script may live on: its line no longer means WSL is held
+        // Its script may live on: its line no longer means that WSL is held. A live line seen now
+        // is that script's too, even if no earlier tick saw it (the script wrote it and wsl.exe
+        // ended between two ticks): a start happens only while no live line other than an
+        // orphan's exists, and only the script writes keepalive.pid.
+        const line = watch.line ?? seen;
+        if (line !== null) {
+          orphan = line;
         }
         lost(
-          watch.line === null
+          line === null
             ? `wsl.exe ended before the keep-alive started (${howItEnded(watch.ended)})`
             : `the keep-alive ended (wsl.exe ${howItEnded(watch.ended)})`,
         );
