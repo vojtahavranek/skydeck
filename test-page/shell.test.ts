@@ -9,8 +9,6 @@ import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import type { CDPSession, Page } from 'playwright';
-
 import type { Detached, Platform } from '../src/platform/types.ts';
 import { securityHeaders } from '../src/window/assets.ts';
 import { controlClient } from '../src/window/client.ts';
@@ -28,6 +26,7 @@ import {
   escape,
   launched,
   PLACEHOLDER,
+  press,
   RESTARTED,
   resumeFromList,
   scriptedList,
@@ -72,31 +71,6 @@ const STALE_UNSTORED =
   "this window's page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run skydeck window again";
 const UNSTORED =
   "this window's key could not be stored: the window works until it is reloaded or closed, and its reload keys do not reload it; run skydeck window again for a window that keeps its key";
-
-/** The keyboard's BrowserRefresh key, which Playwright's keyboard does not know: through CDP. */
-async function browserRefresh(
-  cdp: CDPSession,
-  modifiers: 'Shift' | 'Control' | null,
-): Promise<void> {
-  const bits = modifiers === 'Shift' ? 8 : modifiers === 'Control' ? 2 : 0;
-  for (const type of ['rawKeyDown', 'keyUp'] as const) {
-    await cdp.send('Input.dispatchKeyEvent', {
-      type,
-      key: 'BrowserRefresh',
-      code: 'BrowserRefresh',
-      windowsVirtualKeyCode: 168,
-      nativeVirtualKeyCode: 168,
-      modifiers: bits,
-    });
-  }
-}
-
-/** Presses `key` (a Playwright key, or BrowserRefresh with or without a modifier). */
-async function press(page: Page, cdp: CDPSession, key: string): Promise<void> {
-  const refresh = /^(?:(Shift|Control)\+)?BrowserRefresh$/.exec(key);
-  if (refresh === null) await page.keyboard.press(key);
-  else await browserRefresh(cdp, (refresh[1] as 'Shift' | 'Control' | undefined) ?? null);
-}
 
 /** Whether `log` (after a key) reloaded only after a new socket's welcome: [ws s, in welcome s, unload]. */
 function reloadedAfterProof(log: Logged[]): boolean {
@@ -1186,10 +1160,26 @@ test('the page shell', async (t) => {
           document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
         S2,
       );
-      // A click on a part of the page that takes no keyboard: nothing has it, and the list zone's
-      // keys still work.
+      // A click on the page's chrome (the title bar, the key bar) takes no keyboard: the list
+      // keeps it, and its keys work (ruled, review 2 round three).
       await page.locator('.titlebar .logo').click();
+      await page.locator('#focus-zone').click();
+      assert.equal(await active(page), '#list');
+      await page.keyboard.press('k');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S1,
+      );
+      // And while nothing has the keyboard at all, the list zone's keys still apply.
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       assert.equal(await active(page), 'BODY');
+      await page.keyboard.press('j');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S2,
+      );
       await page.keyboard.press('k');
       await page.waitForFunction(
         (id) =>
@@ -1222,6 +1212,22 @@ test('the page shell', async (t) => {
       await showsText(page, '#cards', /claude --resume another-command/);
       assert.equal(await active(page), '#right-zone');
 
+      // A card hidden (not removed) while its button had the keyboard: a list without the
+      // selected session leaves the right side empty, cards.hide() hides the card, and the zone
+      // takes the keyboard at once (ruled, review 2 round three).
+      await page.focus('#cards button');
+      standin.connections
+        .at(-1)
+        ?.send(
+          scriptedList(
+            [{ id: S1, terminal: TERM_A, slot: 1 }],
+            [{ id: TERM_A, slot: 1, sessionId: S1 }],
+          ),
+        );
+      await page.waitForSelector('#right-zone[data-pane="none"]', { state: 'attached' });
+      assert.equal(await active(page), '#right-zone');
+      standin.connections.at(-1)?.send(rows); // S2 back
+
       // Esc closes the form over the shown terminal: the terminal has the keyboard again.
       await page.keyboard.press('Control+Shift+Digit1');
       await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
@@ -1230,8 +1236,11 @@ test('the page shell', async (t) => {
       await page.keyboard.press('Escape');
       await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
       assert.equal(await active(page), 'in #terminal');
-      // A click on the header above the shown terminal: the terminal keeps the keyboard.
+      // A click on the header above the shown terminal, or on the key bar: the terminal keeps the
+      // keyboard.
       await page.locator('#cards .card-header').click();
+      assert.equal(await active(page), 'in #terminal');
+      await page.locator('#focus-zone').click();
       assert.equal(await active(page), 'in #terminal');
 
       // The form open, to the list and back: its first field has the keyboard again.
@@ -1518,6 +1527,61 @@ test('the page shell', async (t) => {
       await sleep(300);
       assert.equal(await selectedRow(page), S1, 'back once, not there and back');
       assert.ok((await calls()).dropped.includes('keyup H'), (await calls()).dropped.join(', '));
+    },
+  );
+
+  await t.test(
+    "a mouse click on the notice's × leaves the keyboard where the user was typing: the filter keeps it, and nothing is resumed",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(18);
+      const page = await newPage(t, chromium);
+      const sent: Record<string, unknown>[] = [];
+      const rows = scriptedList(
+        [
+          { id: S1, terminal: null, slot: null },
+          { id: S2, terminal: null, slot: null },
+        ],
+        [],
+      );
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          serverId: (n) => `${n}`.repeat(16).slice(0, 16),
+          open: (conn, message) => {
+            sent.push(message);
+            if (message['t'] === 'view') conn.send(rows);
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await toZone(page, 'list');
+      await page.keyboard.press('/');
+      await page.keyboard.type('se');
+      standin.connections[0]?.ws.terminate(); // the server restarted: the notice
+      await showsText(page, '#info-text', RESTARTED);
+      await connection(page, 'open');
+      const before = sent.length;
+
+      await page.locator('#info-close').click();
+      await page.waitForSelector('#info[hidden]', { state: 'attached' });
+      assert.equal(
+        await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.value),
+        'se',
+        'the filter still has the keyboard',
+      );
+      await page.keyboard.type('a');
+      await page.keyboard.press('Enter');
+      await sleep(500);
+
+      assert.equal(await page.inputValue('#list input'), 'sea');
+      assert.deepEqual(
+        sent.slice(before).filter((message) => message['t'] === 'act'),
+        [],
+        'nothing resumed',
+      );
+      assert.equal(sent.filter((message) => message['t'] === 'view').at(-1)?.['filter'], 'sea');
     },
   );
 

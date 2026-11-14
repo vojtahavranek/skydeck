@@ -192,8 +192,19 @@ function showInfo(text) {
 }
 byId('info-close').addEventListener('click', () => {
   dom.info.hidden = true;
-  giveKeyboard(); // the button that had it is gone
+  keepKeyboard(); // pressed from the keyboard: its holder is no longer visible
 });
+// The page's chrome takes no keyboard on a mouse click (ruled, review 2 round three): a click on
+// the title bar, the key bar or the notice's × leaves the keyboard where it was — in the filter,
+// say, so that what the user types next does not land on the list. Their buttons still work, and
+// from the keyboard too.
+for (const chrome of [
+  document.querySelector('.titlebar'),
+  document.querySelector('.keybar'),
+  byId('info-close'),
+]) {
+  chrome?.addEventListener('mousedown', (event) => event.preventDefault());
+}
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let keyMessageTimer = null;
@@ -568,12 +579,14 @@ function received(message) {
       return;
     case 'snap':
       terminalView.snap(message);
+      keepKeyboard();
       if (message.term === state.waitingSnap) {
         nextReattach();
       }
       return;
     case 'size':
       terminalView.size(message);
+      keepKeyboard();
       return;
     case 'exit':
       state.exits.set(message.term, message);
@@ -597,6 +610,7 @@ function received(message) {
         dom.tick.hidden = false;
       } else if (message.term !== null) {
         terminalView.notice(message.term, message.kind, message.text);
+        keepKeyboard();
       }
       return;
     default:
@@ -663,10 +677,8 @@ function render() {
   ) {
     terminalView.focus();
   }
-  // What had the keyboard was replaced (a card): the zone takes it back.
-  if (document.activeElement === null || document.activeElement === document.body) {
-    giveKeyboard();
-  }
+  // What had the keyboard was replaced or hidden (a card): the zone takes it back.
+  keepKeyboard();
   focusChanged();
 }
 
@@ -696,6 +708,22 @@ function setZone(zone, moveFocus = true) {
     return;
   }
   giveKeyboard();
+}
+
+/**
+ * When what had the keyboard is gone — removed, or no longer visible because its container was
+ * hidden (ruled, review 2 round three) — the zone takes it: run after every call into a module
+ * that can remove or hide things, so that the modules of tasks 27–29 need no hook of their own.
+ */
+function keepKeyboard() {
+  const element = document.activeElement;
+  if (
+    element === null ||
+    element === document.body ||
+    (element instanceof HTMLElement && !element.checkVisibility())
+  ) {
+    giveKeyboard();
+  }
 }
 
 /**
@@ -920,6 +948,7 @@ function onKeyDown(event) {
     if (!actedOn.has(event)) {
       actedOn.add(event);
       doChord(chord, event);
+      keepKeyboard();
     }
     handled = true;
   } else if (zone === 'list' || !xtermHasKeyboard()) {
@@ -974,7 +1003,10 @@ for (const type of ['dragover', 'drop']) {
 }
 addEventListener('focus', () => focusChanged());
 addEventListener('blur', () => focusChanged());
-document.addEventListener('visibilitychange', () => terminalView.setHidden(document.hidden));
+document.addEventListener('visibilitychange', () => {
+  terminalView.setHidden(document.hidden);
+  keepKeyboard();
+});
 /** @type {ReturnType<typeof setTimeout> | null} */
 let resizeTimer = null;
 new ResizeObserver(() => {

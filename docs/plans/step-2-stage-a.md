@@ -1274,12 +1274,15 @@ export function cancels(e, zone, handled) {}
 // shown terminal, else to a card's first text field, else to the zone itself, and so does app.js
 // when what had the keyboard goes away (a dismissed notice, a closed form, a replaced card); a
 // refused `open-link` says its error in the key bar; Esc in the new form closes it — app.js takes
-// that Esc in the capture phase, so a list of the form's own cannot keep it (task 29). app.js
-// calls `render` also when only the zone changed — at the focus a mousedown on a row moves, before
-// its mouseup —, so the list keeps the row under the pointer then (or selects on pointerdown):
-// otherwise no click comes (task 27). A module that hides what has the keyboard removes or blurs
-// it before it returns: app.js gives the keyboard back only when it fell to the page's body
-// (an element in a hidden container keeps it for a moment; tasks 28, 29).
+// that Esc in the capture phase, so a list of the form's own cannot keep it (task 29).
+// A render never loses a click on a row (task 27): app.js renders when a list arrives and when
+// only the zone changed — at the focus a mousedown on a row moves, before its mouseup —, so the
+// list keeps a row's element across renders (the placeholder does) or selects on pointerdown.
+// After every call into a module that can remove or hide things, app.js gives the keyboard to the
+// zone when its holder is gone or no longer visible (its container hidden), so the modules of
+// tasks 27-29 need no hook. The page's chrome (the title bar, the key bar, a notice's ×) takes no
+// keyboard on a mouse click, so a click there leaves it where the user was (ruled, review 2 of
+// task 26, round three).
 /** @param {HTMLElement} root
  *  @param {{ select(id: string, how: 'click' | 'key'): void, activate(id: string): void,
  *           view(change: { filter?: string, unfolded?: string[], showDone?: boolean }): void }} hooks */
@@ -1299,7 +1302,8 @@ export function createTerminalView(root, deps) {}
 // size of the new `list`; an id the new `list` lacks is skipped, and a `list` without the terminal
 // the queue waits for moves it on; an id the view detached meanwhile (`attached()` lacks it, or
 // the view sent its `detach`) is skipped or moves the queue on in the same way. So the view drops
-// an id from `attached()` no later than it sends that id's `detach` (task 28). The view then gets a second `snap` for a terminal it shows: it
+// an id from `attached()` no later than it sends that id's `detach`, and sends all the detaches
+// of one occasion (the window hidden, a ninth terminal) in the same tick (task 28). The view then gets a second `snap` for a terminal it shows: it
 // resets that terminal, applies the snap, and sends its own `resize` when its fitted size differs;
 // `attached()` keeps its ids across the reconnect (ruled, task 26).
 // `deps.chord(e)` may be given keydown, keypress and keyup (xterm.js's custom key handler gets

@@ -182,9 +182,9 @@ export function createCards(root, deps) {
       dir.focus();
     },
     hide() {
+      // Hidden, not removed: what had the keyboard in it is given back by app.js.
       head.hidden = true;
       card.hidden = true;
-      card.replaceChildren();
     },
   };
 }

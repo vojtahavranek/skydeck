@@ -53,45 +53,78 @@ export function createList(root, hooks) {
    * @param {string | null} selectedId
    * @param {Zone} zone
    */
+  /** The lines drawn, by key ('section:<name>', the row's id, 'footer'): kept across renders. */
+  /** @type {Map<string, HTMLElement>} */
+  const drawn = new Map();
+
+  /**
+   * The line of `key`, made once: a render never replaces the element of a row, so that a click
+   * whose mousedown came before the render (a list arrived, or the zone changed) still reaches it
+   * (review 2 of task 26).
+   * @param {string} key
+   * @param {string} className
+   * @param {string | null} id a row's session id, for its click and double click
+   * @returns {HTMLElement}
+   */
+  const lineFor = (key, className, id) => {
+    let line = drawn.get(key);
+    if (line === undefined) {
+      line = document.createElement('div');
+      line.className = className;
+      if (id !== null) {
+        line.dataset.id = id;
+        line.addEventListener('click', () => hooks.select(id, 'click'));
+        line.addEventListener('dblclick', () => hooks.activate(id));
+      }
+      drawn.set(key, line);
+    }
+    return line;
+  };
+
+  /**
+   * @param {ListMessage | null} list
+   * @param {string | null} selectedId
+   * @param {Zone} zone
+   */
   const render = (list, selectedId, zone) => {
     root.dataset.zone = zone;
-    // Only the zone changed (a mousedown on a row moved the keyboard here): the rows stay, so that
-    // the row under the pointer is still there for the click (review 2 of task 26).
     if (list === current && selectedId === selected) {
-      return;
+      return; // only the zone changed
     }
     current = list;
     selected = selectedId;
-    if (list === null) {
-      body.replaceChildren();
-      return;
-    }
     /** @type {HTMLElement[]} */
     const lines = [];
-    for (const section of list.sections) {
-      const header = document.createElement('div');
-      header.className = 'list-section';
+    for (const section of list?.sections ?? []) {
+      const header = lineFor(`section:${section.name}`, 'list-section', null);
       header.textContent = `${SECTION_TITLES[section.name]} (${section.count})${section.folded ? ' · folded' : ''}`;
       lines.push(header);
       for (const row of section.rows) {
-        const line = document.createElement('div');
-        line.className = 'list-row';
-        line.dataset.id = row.id;
+        const line = lineFor(row.id, 'list-row', row.id);
         line.dataset.selected = String(row.id === selectedId);
         const slot = row.slot === null ? '  ' : `${row.slot} `;
         line.textContent = `${slot}${row.title} · ${row.state}${row.terminal !== null ? ' · in the window' : ''}`;
-        line.addEventListener('click', () => hooks.select(row.id, 'click'));
-        line.addEventListener('dblclick', () => hooks.activate(row.id));
         lines.push(line);
       }
     }
-    if (list.doneHidden > 0) {
-      const footer = document.createElement('div');
-      footer.className = 'list-footer';
+    if (list !== null && list.doneHidden > 0) {
+      const footer = lineFor('footer', 'list-footer', null);
       footer.textContent = `${list.doneHidden} done hidden`;
       lines.push(footer);
     }
-    body.replaceChildren(...lines);
+    // Moved only where the order changed; lines no longer drawn are removed.
+    const keep = new Set(lines);
+    for (const [key, line] of drawn) {
+      if (!keep.has(line)) {
+        line.remove();
+        drawn.delete(key);
+      }
+    }
+    lines.forEach((line, at) => {
+      if (body.children[at] !== line) {
+        body.insertBefore(line, body.children[at] ?? null);
+      }
+    });
   };
 
   /** @param {ListAction} action */

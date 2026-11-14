@@ -10,7 +10,7 @@ import type { Duplex } from 'node:stream';
 import type { TestContext } from 'node:test';
 import { Worker } from 'node:worker_threads';
 
-import type { Browser, Page } from 'playwright';
+import type { Browser, CDPSession, Page } from 'playwright';
 import WebSocket, { WebSocketServer } from 'ws';
 
 import { httpHandler, loadAssets, securityHeaders } from '../../src/window/assets.ts';
@@ -22,7 +22,6 @@ import {
   wrapSecret,
 } from '../../src/window/auth.ts';
 import { controlClient } from '../../src/window/client.ts';
-import { sleep } from '../../test/helpers/keeper.ts';
 import { testPlatform } from '../../test/helpers/platform.ts';
 import { startTestServer } from '../../test/helpers/window.ts';
 import type {
@@ -697,19 +696,48 @@ export function termOf(started: { server: StartedServer['server'] }, sessionId: 
 }
 
 /**
- * Clicks the list's row of `sessionId` until it is the selected one: the minimal list draws its
- * rows anew for every list, so a click can meet a row that moved.
+ * Clicks the list's row of `sessionId` ONCE, as a user does, and asserts that it is then the
+ * selected row: a render never loses a click on a row (contract 2.9), so no second try is made.
  */
 export async function clickRow(page: Page, sessionId: string): Promise<void> {
   const row = page.locator(`#list [data-id="${sessionId}"]`);
-  const deadline = performance.now() + PAGE_WAIT_MS;
-  for (;;) {
-    await row.waitFor({ timeout: PAGE_WAIT_MS });
-    await row.click().catch(() => {});
-    if ((await selectedRow(page)) === sessionId) return;
-    assert.ok(performance.now() < deadline, `the row of ${sessionId} selected`);
-    await sleep(100);
+  await row.waitFor({ timeout: PAGE_WAIT_MS });
+  await row.click();
+  await page.waitForFunction(
+    (id) => document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+    sessionId,
+    { timeout: PAGE_WAIT_MS },
+  );
+}
+
+/** What the key bar's message says ('' when nothing). */
+export async function keyMessage(page: Page): Promise<string> {
+  return shownText(page, '#key-message');
+}
+
+/** The keyboard's BrowserRefresh key, which Playwright's keyboard does not know: through CDP. */
+export async function browserRefresh(
+  cdp: CDPSession,
+  modifiers: 'Shift' | 'Control' | null,
+): Promise<void> {
+  const bits = modifiers === 'Shift' ? 8 : modifiers === 'Control' ? 2 : 0;
+  for (const type of ['rawKeyDown', 'keyUp'] as const) {
+    await cdp.send('Input.dispatchKeyEvent', {
+      type,
+      key: 'BrowserRefresh',
+      code: 'BrowserRefresh',
+      windowsVirtualKeyCode: 168,
+      nativeVirtualKeyCode: 168,
+      modifiers: bits,
+    });
   }
+}
+
+/** Presses `key`: a Playwright key, or BrowserRefresh alone, with Shift or with Control. */
+export async function press(page: Page, cdp: CDPSession, key: string): Promise<void> {
+  const refresh = /^(?:(Shift|Control)\+)?BrowserRefresh$/.exec(key);
+  if (refresh === null) await page.keyboard.press(key);
+  else await browserRefresh(cdp, (refresh[1] as 'Shift' | 'Control' | undefined) ?? null);
 }
 
 /**
