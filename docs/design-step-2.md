@@ -2160,10 +2160,13 @@ integration, that the page's terminal answers no query, the Shift+Enter and Ctrl
 reaching the server as bytes, the CSP not blocking the page's own files, reconnecting after the
 server restarts, notifications asked only on a gesture — is only real in a browser, and the UI
 research already drove its mockup in headless Chromium. The cost is a development dependency and
-a browser download in CI, never at install time. So `playwright` (pinned exactly) drives Chromium
-headless against a real server and keepers running the stand-in, in a small suite
-(`npm run test:page`). Chromium is not Edge: what only Edge decides (keys an app window keeps, its
-policy, notifications on the PC) stays a manual check.
+a browser download in CI, never at install time. So `playwright` (pinned exactly: 1.60.0, the
+version whose Chromium is build 1223, the build already installed on the development machine)
+drives Chromium headless against a real server and keepers running the stand-in, in a small suite
+(`npm run test:page`). The suite is `node:test` files that use the `playwright` library
+(`chromium.launch()`), not `@playwright/test`: the repository keeps one test runner. Chromium is
+not Edge: what only Edge decides (keys an app window keeps, its policy, notifications on the PC)
+stays a manual check.
 
 In the browser suite, besides those:
 
@@ -2192,21 +2195,31 @@ In the browser suite, besides those:
 ### 17.5 Where the tests are, and what CI runs
 
 - `node:test` tests stay under `test/` and are what `npm test` runs (`test/**/*.test.ts`). The
-  browser suite lives in `test-page/`, outside that glob, and runs with `npm run test:page`.
+  browser suite lives in `test-page/`, outside that glob, and runs with `npm run test:page`
+  (`test-page/**/*.test.ts`). Each of its files launches one headless Chromium
+  (`test-page/helpers/browser.ts`) with a test sandbox's environment, in which no host name
+  resolves, so that a page under test reaches nothing but the test's server on `127.0.0.1`. Its
+  TypeScript is type-checked with the root project; the plain JavaScript of the pages it serves
+  (`test-page/fixtures/`) runs in the browser and is not.
 - `web/` has its own `web/tsconfig.json` (the DOM library, `checkJs`, the vendored type
   declarations); `npm run typecheck` runs `tsc` for the root project and for `web/`.
 - `npm run check` runs format check, both type checks, `npm test` and `npm run test:page`. Without
-  an installed Chromium the page suite fails with the one command that installs it (`npx
-  playwright install chromium`), so that a local check does not pass where CI would fail.
+  an installed Chromium the page suite fails with the one command that installs it — exactly
+  `Chromium for Playwright is not installed; run: npx playwright install chromium`, which a test
+  pins — so that a local check does not pass where CI would fail.
 - CI, on every pull request: both legs of the Node matrix run format check, type checks, `npm
   test` (keeper and server tests included; Ubuntu runners have python3), `python3 -m py_compile
   bin/skydeck-keeper`, the vendored-files check (16.6: `test/vendor/vendor.test.ts`, a test in
   `npm test` that needs the packages `npm ci` installed, so it has no step of its own), and
   `shellcheck` on the shell scripts by
   name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
-  bin/skydeck*` would also match the python keeper. Only the newest leg (Node 24) runs the page
-  suite, after `npx playwright install --with-deps chromium` with `~/.cache/ms-playwright` cached
-  under the pinned Playwright version. The job's time limit goes from 10 to 20 minutes.
+  bin/skydeck*` would also match the python keeper. Each is a step of its own: CI does not run
+  `npm run check`, which ends with the page suite. Only the newest leg (Node 24) runs the page
+  suite: it reads the installed Playwright's version, restores `~/.cache/ms-playwright` from the
+  cache keyed by the runner's system and that version, runs `npx playwright install --with-deps
+  chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
+  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 20
+  minutes.
 
 ## 18. Manual checks for step 2
 
