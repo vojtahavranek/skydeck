@@ -685,7 +685,9 @@ export function createTerminalView(root, deps) {
    * its box measured as the fit addon measures it (the element xterm.js is in, whole pixels),
    * then `fitIn` — a function of the box, the pixel ratio and the cell only. The terminal takes
    * the page's font size first (style.css `--term-font-size`), so that the proposal and its
-   * screen are measured at the same font, also after the size changed.
+   * screen are measured at the same font, also after the size changed. Nothing in stage A
+   * changes it; a font-size setting, if one ever comes, needs its own trigger and must reach
+   * every open terminal at once (this reaches one terminal when it is next measured).
    * @param {Term} t
    * @returns {{ cols: number, rows: number } | null}
    */
