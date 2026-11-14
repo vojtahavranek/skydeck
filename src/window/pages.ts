@@ -61,8 +61,9 @@ export interface PageState {
 }
 
 export interface PagesDeps {
-  /** The bound port, read when an upgrade comes (known only after listenHttp resolves). */
+  /** Its clock times the hello and the lists; its random bytes make nonces and IVs. */
   platform: Platform;
+  /** The bound port, read when an upgrade comes (known only after listenHttp resolves). */
   port: () => number;
   store: Store;
   tokens: Tokens;
