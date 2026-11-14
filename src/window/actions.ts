@@ -122,12 +122,38 @@ function orNone(text: string): string | null {
  *
  * Never rejects (2.5): an action that is not well formed is refused with one fixed log line, and
  * an unexpected error is answered `ok: false` and logged by kind (failureKind) — never its message,
- * which can quote what the page sent or a path. A terminal whose `open()` rejects is not such an
- * error: step 1's `launchPrepared` (through `openSafely`) makes it a failed open whose reason line
- * names it, and nothing is logged (ruled, review 1 of task 32).
+ * which can quote what the page sent or a path. A terminal whose `open()` rejects is answered as
+ * an open that timed out (`guarded`): no command to run by hand, the lock and the label kept.
  */
 export function createActions(deps: ActionDeps): ActionHandler {
   const { deck, hub, log } = deps;
+
+  /**
+   * `terminal` with a rejection (or a throw) of its `open()` turned into the result of an open that
+   * timed out (ruled, review 1 of task 32): the window terminal may already have a keeper then, so
+   * launchPrepared must print no command to run by hand (a hand-run claude could resume the
+   * session twice) and keeps the lock and the label, as after a timeout. Logged once by kind; the
+   * error's message goes nowhere.
+   */
+  function guarded(terminal: Terminal, kind: 'resume' | 'new'): Terminal {
+    return {
+      name: terminal.name,
+      opensTabs: terminal.opensTabs,
+      async open(spec) {
+        try {
+          return await terminal.open(spec);
+        } catch (error) {
+          const failure = failureKind(error);
+          log(`act ${kind}: the terminal failed (${failure})`);
+          return {
+            ok: false,
+            error: `the terminal failed unexpectedly (${failure})`,
+            timedOut: true,
+          };
+        }
+      },
+    };
+  }
 
   /** Best effort: a terminal left behind costs a slot and a row's place, never the resume itself. */
   function closeEnded(sessionId: string): void {
@@ -151,7 +177,10 @@ export function createActions(deps: ActionDeps): ActionHandler {
         // The terminal is made before anything is taken, so that a factory that throws leaves no
         // lock behind; prepareResumeById and closeEnded run before the first await, so two
         // resumes of one session meet at the lock.
-        const terminal = deps.terminalFor({ cols: action.cols, rows: action.rows });
+        const terminal = guarded(
+          deps.terminalFor({ cols: action.cols, rows: action.rows }),
+          'resume',
+        );
         const prepared = prepareResumeById(deck, action.sessionId);
         closeEnded(prepared.sessionId);
         return launched(prepared, await launchPrepared(deck, prepared, terminal));
@@ -160,7 +189,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
         const flags = splitFlags(action.flags);
         if (!flags.ok) return refusal(flags.error);
         // Made first for the same reason: a factory that throws leaves no label stored.
-        const terminal = deps.terminalFor({ cols: action.cols, rows: action.rows });
+        const terminal = guarded(deps.terminalFor({ cols: action.cols, rows: action.rows }), 'new');
         const prepared = prepareNew(deck, {
           dir: action.dir,
           label: orNone(action.label),

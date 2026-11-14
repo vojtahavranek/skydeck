@@ -3181,10 +3181,13 @@ which step 1's `cleanLabel` would refuse) → `launchPrepared`. `close-terminal`
 `'running'` → `ok: false` with "the program still runs; end it inside claude" (principle 6);
 `'unknown'` → `ok: false` with "this terminal is no longer there" (ruled, review 1 of task 32).
 `open-link` → `linkToOpen`, then `openLink` with the re-serialised URL; a refused link → `ok:
-false`. An unexpected error is answered `ok: false` and logged by kind (`failureKind`); a terminal
-whose `open()` rejects is not one: step 1's `launchPrepared` (`openSafely`) makes it a failed open
-whose reason line is "cannot open the terminal (…)", and nothing is logged (ruled, review 1 of task
-32; step 1's code unchanged). `selectedPayload`: `ended` is `mid-turn` with the
+false`. An unexpected error is answered `ok: false` and logged by kind (`failureKind`). The
+terminal is wrapped so that a rejection (or a throw) of its `open()` is logged once by kind — `act
+resume: the terminal failed (<kind>)`, likewise for `new` — and becomes the open result `{ ok:
+false, error: 'the terminal failed unexpectedly (<kind>)', timedOut: true }` (ruled by the plan
+owner, review 1 of task 32): the window terminal may already have a keeper then, so
+`launchPrepared` prints no command to run by hand (a hand-run `claude` could resume the session
+twice) and the lock and the label stay, as after a timeout. `selectedPayload`: `ended` is `mid-turn` with the
 mark `was-working`, `unexpectedly` with `ended-unexpectedly`, `exited` after an end event of kind
 exit, else null; `expiring` and `expired` from the marks.
 
@@ -3204,8 +3207,9 @@ exit, else null; `expiring` and `expired` from the marks.
   `https://github.com/a/b/pull/1` → `openLink` with that URL; of `javascript:alert(1)` → not called;
   `close-terminal` of an unknown terminal → `ok: false`.
 - An action whose terminal factory throws something unexpected → `ok: false`, one log line with
-  the kind and no message text, no lock and no label left; a terminal whose `open()` rejects →
-  step 1's "cannot open the terminal (…)" line, `ok: false`, no log line.
+  the kind and no message text, no lock and no label left; a terminal whose `open()` rejects or
+  throws, for `resume` and for `new` → `ok: false`, the timed-out lines, one log line by kind, no
+  message text and no command in any line, the lock and the label kept.
 - An action that is not well formed (an unknown kind, a size of 0, a session id that is not one, a
   terminal id that is not 12 hex) → refused, nothing done, one fixed log line.
 - `selectedPayload`: the command for a session with recorded flags; a directory with a control

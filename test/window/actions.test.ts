@@ -617,30 +617,63 @@ test('a terminal factory that throws: ok false, one log line with the kind and n
   }
 });
 
-test("a terminal whose open() rejects goes through step 1's openSafely: a failed open, its line, no log line", async (t) => {
-  // Ruled (review 1): this path is step 1's (launchPrepared's openSafely), unchanged: the
-  // rejection becomes the reason line of a definite failure, the command follows, nothing is
-  // logged and nothing is thrown on.
+test('a terminal whose open() rejects: one log line by kind, no message, no command, the lock and the label kept', async (t) => {
+  // Ruled (review 1, replaced): a window terminal whose open() rejects may already have a keeper,
+  // so the result is that of a timeout — no command to run by hand, which could resume twice.
+  const cases = [
+    {
+      action: resume(S1),
+      last: `skydeck: run skydeck again to see whether session ${S1} is running`,
+    },
+    {
+      action: newAction({ label: 'fix', group: 'ABC-1' }),
+      last: `skydeck: the new session's id is ${NEW_ID}; running skydeck shows whether it started`,
+    },
+  ];
+  for (const { action, last } of cases) {
+    await t.test(action.kind, async (t) => {
+      const d = testDeck(t);
+      resumableSession(d);
+      const h = harness(d, { answer: () => Promise.reject(new TypeError(`${SECRET} /home/x`)) });
+      const result = await h.act(
+        action.kind === 'new' ? { ...action, dir: d.sandbox.home } : action,
+      );
+      assert.deepEqual(result, {
+        t: 'result',
+        id: action.id,
+        ok: false,
+        lines: ['skydeck: the terminal failed unexpectedly (TypeError)', last],
+        error: null,
+        sessionId: null,
+      });
+      assert.deepEqual(h.logs, [`act ${action.kind}: the terminal failed (TypeError)`]);
+      for (const text of [...h.logs, ...result.lines]) {
+        assert.ok(!text.includes(SECRET), text);
+        assert.ok(!text.includes('cd --') && !text.includes('run:'), text);
+      }
+      if (action.kind === 'resume') {
+        assert.notEqual(d.deck.store.getKv(lockKey(S1)), null); // as after a timeout
+      } else {
+        assert.equal(d.deck.store.meta(NEW_ID)?.label, 'fix');
+      }
+    });
+  }
+});
+
+test('a terminal whose open() throws at once is treated as one that rejects', async (t) => {
   const d = testDeck(t);
   resumableSession(d);
-  const h = harness(d, { answer: () => Promise.reject(new TypeError('it broke')) });
+  const throwing: Terminal = {
+    name: 'window',
+    opensTabs: true,
+    open: () => {
+      throw new RangeError(SECRET); // not a rejected promise: a throw before one is returned
+    },
+  };
+  const h = harness(d, { terminalFor: () => throwing });
   const result = await h.act(resume(S1));
-  const command = printableCommand(d.sandbox.home, ['claude', '--resume', S1, '--model', 'opus']);
-  assert.ok(command !== null);
-  assert.deepEqual(result, {
-    t: 'result',
-    id: 7,
-    ok: false,
-    lines: [
-      'skydeck: cannot open the terminal (TypeError: it broke)',
-      'skydeck: to start it yourself, run:',
-      command,
-    ],
-    error: null,
-    sessionId: null,
-  });
-  assert.deepEqual(h.logs, []);
-  assert.notEqual(d.deck.store.getKv(lockKey(S1)), null); // a printed command may be run by hand
+  assert.equal(result.lines[0], 'skydeck: the terminal failed unexpectedly (RangeError)');
+  assert.deepEqual(h.logs, ['act resume: the terminal failed (RangeError)']);
 });
 
 test('an openLink that rejects, or a hub whose close throws: ok false and one log line by kind', async (t) => {

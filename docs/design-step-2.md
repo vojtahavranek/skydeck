@@ -1566,6 +1566,12 @@ command line to run by hand when that is safe, and none after a timeout.
   `<short> is running (pid <n>)` or `is being resumed (<n> s ago); try again in <m> s`) are shown
   on the card.
 - **New.** The form (12.6) → `act new` → `prepareNew` with the chosen directory → `launchPrepared`.
+- **A window terminal that fails unexpectedly** (its `open()` rejects or throws, for a resume or a
+  new session) is answered as an open that timed out (11.2): the window terminal may already have
+  a keeper, so no command to run by hand is shown — a hand-run `claude` could resume the session
+  twice — and the lock and the label stay. The failure is logged once by its kind ("the terminal
+  failed unexpectedly (<kind>)" on the card), never its message (ruled by the plan owner, review of
+  plan task 32).
 - **Restore.** The banner (12.7) → the shared restore planning (11.1: design 7.8's set and preselection, on rows
   refreshed just before) → `runRestore` with the window terminal: batches of `restoreBatch`, the
   memory check, the wait for start events with lock renewal, exactly as from the command line. Its
