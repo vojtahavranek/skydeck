@@ -374,11 +374,14 @@ describe('uninstall --purge', () => {
 
     const r = await uninstall(m, ['--purge']);
 
-    assert.equal(r.code, 0, r.stderr);
+    // Ruled (purge-care): any directory --purge leaves alone ends the command with the line, exit 1.
+    assert.equal(r.code, 1, r.stdout);
     assert.ok(existsSync(join(recorded, 'notes.txt')));
     assert.ok(
-      r.lines.some((line) => line.startsWith(`left ${recorded} alone: it holds notes.txt`)),
-      r.stdout,
+      r.stderr.includes(
+        `did not remove ${recorded}: it holds notes.txt, which skydeck did not write`,
+      ),
+      r.stderr,
     );
     assert.equal(existsSync(m.places.dataDir), false);
   });
@@ -391,11 +394,11 @@ describe('uninstall --purge', () => {
 
     const r = await uninstall(m, ['--purge']);
 
-    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.code, 1, r.stdout);
     assert.ok(existsSync(join(target, 'terms')), 'the link target stays');
     assert.ok(
-      r.lines.includes(`left ${join(m.s.skydeckHome, 'run')} alone: it is a symbolic link`),
-      r.stdout,
+      r.stderr.includes(`did not remove ${join(m.s.skydeckHome, 'run')}: it is a symbolic link`),
+      r.stderr,
     );
   });
 
@@ -410,10 +413,10 @@ describe('uninstall --purge', () => {
 
     const r = await uninstall(m, ['--purge'], () => [], { files: { ...m.platform.files, lstat } });
 
-    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.code, 1, r.stdout);
     assert.ok(existsSync(files.termsDir));
     const uid = m.platform.uid + 1;
-    assert.ok(r.lines.includes(`left ${files.dir} alone: it belongs to uid ${uid}`), r.stdout);
+    assert.ok(r.stderr.includes(`did not remove ${files.dir}: it belongs to uid ${uid}`), r.stderr);
     assert.equal(existsSync(m.places.dataDir), false, 'the rest of the purge is done');
   });
 
@@ -518,12 +521,12 @@ describe('uninstall --purge: from review 2', () => {
 
     const r = await uninstall(m, ['--purge']);
 
-    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.code, 1, r.stdout);
     assert.ok(existsSync(files.serverJson) && existsSync(files.termsDir), 'the target stays whole');
     // The record is normalised (no trailing slash) before the link check: the link is seen.
     assert.ok(
-      r.lines.includes(`left ${join(m.s.root, 'link')} alone: it is a symbolic link`),
-      r.stdout,
+      r.stderr.includes(`did not remove ${join(m.s.root, 'link')}: it is a symbolic link`),
+      r.stderr,
     );
   });
 
@@ -537,11 +540,11 @@ describe('uninstall --purge: from review 2', () => {
 
     const r = await uninstall(m, ['--purge']);
 
-    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.code, 1, r.stdout);
     assert.ok(existsSync(join(target, 'terms')));
     assert.ok(
-      r.lines.includes(`left ${recorded} alone: it is not a plain path (a . or .. in it)`),
-      r.stdout,
+      r.stderr.includes(`did not remove ${recorded}: it is not a plain path (a . or .. in it)`),
+      r.stderr,
     );
   });
 
@@ -559,12 +562,9 @@ describe('uninstall --purge: from review 2', () => {
 
       const r = await uninstall(m, ['--purge']);
 
-      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.code, 1, r.stdout);
       assert.ok(existsSync(files.termsDir), `${make.toString()}\n${r.stdout}`);
-      assert.ok(
-        r.lines.some((line) => line.startsWith(`left ${files.dir} alone: it holds `)),
-        r.stdout,
-      );
+      assert.ok(r.stderr.includes(`did not remove ${files.dir}: it holds `), r.stderr);
     }
   });
 

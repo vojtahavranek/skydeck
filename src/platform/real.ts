@@ -14,6 +14,7 @@ import {
   readSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   lstatSync,
@@ -281,6 +282,13 @@ function realFiles(): Files {
       renameSync(from, to);
     },
     remove: unlinkIfThere,
+    rmdir(path) {
+      try {
+        rmdirSync(path);
+      } catch (error) {
+        if (errorCode(error) !== 'ENOENT') throw error;
+      }
+    },
     removeTree: (path) => {
       rmSync(path, { recursive: true, force: true });
     },

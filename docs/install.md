@@ -514,10 +514,17 @@ skydeck uninstall --purge
 ```
 
 does the same and then removes the data, state and configuration folders (`<dataDir>`, `<stateDir>`,
-`<configDir>`): the database, the spool, `hook.log` and `config.json`, and a link inside them that
-`uninstall` left alone. It cannot be undone. It leaves the backups (they are in Claude Code's folder)
-and the compile cache (`~/.cache/skydeck`, see "Environment variables"). To remove skydeck
-altogether, delete the checkout last.
+`<configDir>`): from each only what skydeck writes there — the database, the spool, `hook.log`,
+`config.json`, the window's logs and runtime folder, a link inside them that `uninstall` left alone —
+and then the folder. It cannot be undone. A folder that holds anything else (a file of yours, an
+editor's backup), is a symbolic link, is another user's or cannot be read is left alone, whole; the
+others are still purged, and the last line says which folder stayed and why (`skydeck is
+uninstalled, but --purge did not remove …`, exit 1). It refuses, changing nothing, while `HOME`,
+`SKYDECK_HOME` or one of `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR` is
+set but empty or not an absolute path: skydeck ignores such a value (see "Environment variables"),
+or for `HOME` takes it as it is, and would purge the installation it then finds. It leaves the backups (they are in Claude
+Code's folder) and the compile cache (`~/.cache/skydeck`, see "Environment variables"). To remove
+skydeck altogether, delete the checkout last.
 
 An example of the output:
 

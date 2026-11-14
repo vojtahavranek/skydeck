@@ -755,8 +755,23 @@ could not be resumed; see above`).
   links that still point where install pointed them. It never removes a backup, not even with
   `--purge`, and names each one. It creates nothing but that backup: no directory, database or
   file, also none the user removed after install. The database stays unless `--purge` is given,
-  which removes the data, state and configuration folders (the database, the spool, `hook.log` and
-  `config.json`).
+  which also removes the data, state and configuration folders — carefully, since they can be the
+  user's own (`SKYDECK_HOME=$HOME` makes them `~/data`, `~/state`, `~/config`; principle 6): from
+  each it removes only what skydeck itself writes there, each entry of its kind (the database and
+  the files SQLite keeps beside it, the two links, the spool with `bad/`, `locks/`, `hook.log`,
+  notes being edited, the window's logs, a runtime directory of this store, `config.json`, and the
+  temporaries of their writers; one list in `src/cli/purge.ts`, which a new file skydeck writes
+  there must join), then the folder. A folder that is a symbolic link, is another user's, cannot be
+  looked at, or holds anything else — `notes.txt`, an editor's backup, a directory where skydeck
+  keeps a file — is left alone, whole; the others are still purged, and the command ends with
+  `skydeck is uninstalled, but --purge did not remove <folder>: it <why>` (the entry in the way
+  when there is one) and exit 1. The window's runtime folders are purged the same way (S2 16.2). Before
+  anything is undone, `--purge` refuses (exit 1, nothing changed) while `SKYDECK_HOME`,
+  `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` or `XDG_RUNTIME_DIR` is set but ignored by
+  9.1's rule, or `HOME` is set but empty or relative (the home directory is `HOME` as it is, so
+  every place would then be relative to the working directory): it names the variable and does not
+  purge the installation it would find. A relative directory is never purged. A plain `uninstall`
+  is not affected.
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
   resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with
   their ages (they are removed after seven days); age of the last event; the last lines of
@@ -790,7 +805,10 @@ the places above, and `uninstall --purge` leaves it.
 An environment variable (`SKYDECK_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`,
 `CLAUDE_CONFIG_DIR`) counts only when it is non-empty and an absolute path; otherwise it is treated
 as unset. The program, the hook and the launcher all apply this rule. A path in `config.json`
-(`claudeHome`) must be absolute.
+(`claudeHome`) must be absolute. Because of it, `SKYDECK_HOME=sandbox` reaches the real
+installation; so `uninstall --purge`, the one command that removes folders, refuses while
+`SKYDECK_HOME` or an `XDG_*` variable it reads is set but ignored, or `HOME` is set but empty or
+relative (8).
 
 Configuration keys, all optional: `terminal` (`here` or `wezterm`; default `here`), `wezterm.domain`,
 `groupPattern`, `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,

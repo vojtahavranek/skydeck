@@ -2149,12 +2149,16 @@ stays, and the command says exactly that (`skydeck is uninstalled, but --purge r
 directory: …`, exit 1). Otherwise it also removes every one of those directories that exists —
 the recorded one with repeated and trailing slashes dropped, so that a symbolic link is seen as
 one (`<link>/` would be followed) — one that is not a plain path (a `.` or `..` in it), is a
-symbolic link, is another user's, or holds anything a runtime directory does not (4.2) or an
-entry of another kind than skydeck writes there, is left alone and named (`left <dir> alone: it
-…`), and the purge goes on, since the store's record is only a path and nothing of the user's is
-destroyed (2, principle 6). One that cannot be looked at (a look fails) is a refusal of that
-directory's removal only: the rest goes on, and the command ends with `skydeck is uninstalled, but
---purge did not remove <dir>: it cannot be looked at (<reason>)` (exit 1).
+symbolic link, is another user's, holds a subdirectory (`terms/`) of another user, holds anything
+a runtime directory does not (4.2) or an entry of another kind than skydeck writes there, or
+cannot be looked at, is left alone, since the store's record is only a path and nothing of the
+user's is destroyed (2, principle 6). Its removal goes entry by entry, each directory once it is
+empty: one that fails, or an entry that came while it was purged (it stays), leaves that directory
+too. The rest of the purge goes on, and the command ends with one line naming each directory left
+and why — the entry in the way when there is one (`skydeck is uninstalled, but --purge did not
+remove <dir>: it holds notes.txt, which skydeck did not write`) — and exit 1, as for skydeck's own
+directories (design 8; ruled by the plan owner, purge-care). The list of what a runtime directory
+holds is `RUNTIME_DIR` in `src/cli/purge.ts`.
 
 ### 16.3 Doctor
 
