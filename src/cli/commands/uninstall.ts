@@ -76,13 +76,13 @@ export const command: Command = {
     if (platform.files.stat(places.dbPath) === null) {
       // No database: no record, and no server of this installation (a server opens it first).
       runtimeDirs = runtimeDirsOf(platform, places, null);
-      if (purge) refuseWhileKeepersMayLive(platform, runtimeDirs);
+      if (purge) refuseWhileKeepersMayLive(platform, runtimeDirs, 'removed nothing');
       showProfileFolder(ctx, config);
       undo(ctx, places, { hash: null, backup: null });
     } else {
       runtimeDirs = await withStoreAt(places.dbPath, async (store) => {
         const dirs = runtimeDirsOf(platform, places, store.getKv('window_runtime_dir'));
-        if (purge) refuseWhileKeepersMayLive(platform, dirs);
+        if (purge) refuseWhileKeepersMayLive(platform, dirs, 'removed nothing');
         await stopTheServer(ctx, { platform, places, config, store });
         showProfileFolder(ctx, config);
         undo(ctx, places, {
@@ -98,8 +98,8 @@ export const command: Command = {
       });
     }
     if (purge) {
-      // Once more: the server may have started a keeper before it stopped.
-      refuseWhileKeepersMayLive(platform, runtimeDirs);
+      // Once more: the server may have started a keeper before it stopped. Step 1's part is done.
+      refuseWhileKeepersMayLive(platform, runtimeDirs, 'removed no directory');
       const own = [places.dataDir, places.stateDir, places.configDir];
       for (const dir of runtimeDirs) {
         // One inside skydeck's own directories goes with them.
@@ -199,12 +199,17 @@ function runtimeDirsOf(platform: Platform, places: Places, recorded: string | nu
 }
 
 /**
- * S2 16.2: `--purge` refuses (exit 1), before it changes anything, while a keeper may live in any
+ * S2 16.2: `--purge` refuses (exit 1), before it changes anything (and once more before it removes
+ * a directory, `done` saying what was done by then), while a keeper may live in any
  * of `dirs` — by its `.pid` line and design 5.5's rule, never by connecting to it; a line that
  * cannot be told dead, or a `.pid` file that cannot be read, counts as alive — naming them. A
  * terms/ that cannot be listed refuses too: what is in it cannot be told.
  */
-function refuseWhileKeepersMayLive(platform: Platform, dirs: readonly string[]): void {
+function refuseWhileKeepersMayLive(
+  platform: Platform,
+  dirs: readonly string[],
+  done: 'removed nothing' | 'removed no directory',
+): void {
   const open: string[] = [];
   for (const dir of dirs) {
     const files = runtimeFiles(dir);
@@ -213,7 +218,7 @@ function refuseWhileKeepersMayLive(platform: Platform, dirs: readonly string[]):
       lines = listKeeperLines(platform, files);
     } catch (error) {
       throw new SkydeckError(
-        `uninstall --purge removed nothing: the terminals in ${files.termsDir} cannot be listed (${describeError(error)})`,
+        `uninstall --purge ${done}: the terminals in ${files.termsDir} cannot be listed (${describeError(error)})`,
       );
     }
     for (const { id, line, state } of lines) {
@@ -225,7 +230,7 @@ function refuseWhileKeepersMayLive(platform: Platform, dirs: readonly string[]):
   }
   if (open.length > 0) {
     throw new SkydeckError(
-      `uninstall --purge removed nothing: terminals of the window may still run: ${open.join(', ')}; ` +
+      `uninstall --purge ${done}: terminals of the window may still run: ${open.join(', ')}; ` +
         'purging would remove their keeper sockets, and their screens could not be shown again; ' +
         'end those sessions first, then run skydeck uninstall --purge again',
     );

@@ -295,6 +295,37 @@ describe('uninstall --purge', () => {
     stillInstalled(m);
   });
 
+  test('a keeper that appears while the server stops: no directory is removed, and the message says what was done', async (t) => {
+    const m = await installed(t);
+    const fake = await startFakeServe(t, m);
+    const files = m.runtime();
+    const keeper = await liveProcess(t, m);
+    // The keeper's line appears once the server has been asked to stop (a server that was
+    // starting a keeper as the stop came).
+    let looks = 0;
+    const list = (dir: string): string[] => {
+      if (dir === files.termsDir && ++looks === 2) {
+        writeKeeperLine(files, ID_A, keeper.line);
+      }
+      return m.platform.files.list(dir);
+    };
+
+    const r = await uninstall(m, ['--purge'], () => [fake.pid], {
+      files: { ...m.platform.files, list },
+    });
+
+    assert.equal(r.code, 1, r.stdout);
+    assert.match(
+      r.stderr,
+      /uninstall --purge removed no directory: terminals of the window may still run: aaaaaaaaaaaa/,
+    );
+    assert.ok(existsSync(files.termPid(ID_A)));
+    for (const dir of [m.places.dataDir, m.places.stateDir, m.places.configDir]) {
+      assert.ok(existsSync(dir), dir);
+    }
+    assert.equal(existsSync(settingsFile(m.places)), false, 'the step 1 part was done');
+  });
+
   test('without live keepers: every candidate directory and skydeck’s directories are removed', async (t) => {
     const m = await installed(t, xdg);
     const all = candidates(m);
