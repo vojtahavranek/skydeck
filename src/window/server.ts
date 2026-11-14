@@ -6,7 +6,9 @@
  * S2 5.5. The command `skydeck serve` (src/cli/commands/serve.ts) runs it in a process of its own;
  * tests run it in theirs (A19), so nothing here touches the process itself (signals, exit).
  */
+import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
+import type { Duplex } from 'node:stream';
 
 import pkg from '../../package.json' with { type: 'json' };
 import { procStartFromStat } from '../claude/procstat.ts';
@@ -103,6 +105,8 @@ const IN_CLAUDE_CODE =
 const SERVER_ID_BYTES = 8;
 /** How long the python3 check at start may take. */
 const PYTHON_CHECK_MS = 5000;
+/** At most this many upgrades wait while the server starts (as pages' hello cap); the oldest goes. */
+const MAX_HELD_UPGRADES = 64;
 
 /**
  * S2 6.1, 8.2.3: the notices a keep-alive state change gives the pages. `keepalive-lost` when it
@@ -195,7 +199,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
   let lockTaken = false;
   const listeners: HttpListener[] = [];
   let registry: Registry | null = null;
+  /** Upgrades that came while the server starts: handed to pages once it is ready. */
+  const held: { req: IncomingMessage; socket: Duplex; head: Buffer }[] = [];
   const giveBack = async (): Promise<void> => {
+    for (const { socket } of held.splice(0)) socket.destroy();
     await registry?.stopAll().catch(() => {});
     for (const listener of listeners.reverse()) await listener.close().catch(() => {});
     if (lockTaken) {
@@ -391,8 +398,18 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       }
     });
 
-    // Set below, before anything can call it (the shutdown route, the tick, the store).
-    let stop: (reason: string) => Promise<void> = () => Promise.resolve();
+    // The real stop is set below. Until then a stop asked for (the shutdown route while the
+    // server starts, a store migrated under the first tick) is kept, and made once it is set.
+    let asked: string | null = null;
+    let stop: (reason: string) => Promise<void> = (reason) => {
+      asked ??= reason;
+      return Promise.resolve();
+    };
+    // Pages are let in once the keepers are found and the first tick has loaded the rows (review
+    // 2): before that the hub lists no terminal, so a page could resume a session whose terminal
+    // is about to be found and open a second one, or attach to a terminal not known yet. An
+    // upgrade that comes earlier waits; nothing of the page protocol changes.
+    let ready = false;
     const startedTick = createTick({
       deck,
       hub: created,
@@ -416,7 +433,13 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         {
           request: httpHandler(assets, () => boundPort),
           upgrade: (req, socket, head) => {
-            pages.upgrade(req, socket, head);
+            if (ready) {
+              pages.upgrade(req, socket, head);
+              return;
+            }
+            socket.on('error', () => {}); // a peer's reset while it waits must not end the server
+            held.push({ req, socket, head });
+            if (held.length > MAX_HELD_UPGRADES) held.shift()?.socket.destroy();
           },
         },
       );
@@ -503,6 +526,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       resolveDone = resolve;
     });
     let stopping: Promise<void> | null = null;
+    const askedBefore = (): string | null => asked;
     stop = (reason) => {
       stopping ??= orderlyStop(reason).then(
         () => {
@@ -555,6 +579,17 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     fs.writeText(files.serverPid, formatPidLine(own), 0o600);
     await startedTick.start();
     log(`server: ${serverId} listening on 127.0.0.1:${boundPort} (build ${build})`);
+    ready = true;
+    const early = askedBefore();
+    if (early !== null) {
+      // Asked to stop while it started: no page is let in; the pages that waited try again.
+      for (const { socket } of held.splice(0)) socket.destroy();
+      void stop(early);
+    } else {
+      for (const { req, socket, head } of held.splice(0)) {
+        if (!socket.destroyed) pages.upgrade(req, socket, head);
+      }
+    }
 
     return {
       port: boundPort,

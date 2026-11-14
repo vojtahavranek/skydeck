@@ -3,7 +3,7 @@
 // a store migrated under the server, a locked store, a keep-alive that cannot start. In the test
 // process (A19) on realTestPlatform, with real keepers running the stand-in.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
@@ -11,14 +11,22 @@ import type { TestContext } from 'node:test';
 import { Worker } from 'node:worker_threads';
 
 import type { Terminal } from '@xterm/headless';
+import WebSocket from 'ws';
 
+import type { Platform } from '../../src/platform/types.ts';
+import { attachManualPr } from '../../src/sessions/meta.ts';
+import { readLock } from '../../src/sessions/resume.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
+import { pageProof } from '../../src/window/auth.ts';
 import { controlClient } from '../../src/window/client.ts';
+import { encodeFrame, frameReader, parseHello } from '../../src/window/frames.ts';
+import type { KeeperHello } from '../../src/window/frames.ts';
 import type { ListMessage, SnapMessage } from '../../src/window/protocol.ts';
 import { listKeeperLines } from '../../src/window/runtime.ts';
 import { keepAliveNotices } from '../../src/window/server.ts';
 import { loadXterm } from '../../src/window/xterm.ts';
-import { sleep, until } from '../helpers/keeper.ts';
+import { sleep, until, within } from '../helpers/keeper.ts';
+import { freshNonce } from '../helpers/pages.ts';
 import { S1, S2 } from '../helpers/platform.ts';
 import { assertSameScreen } from '../helpers/registry.ts';
 import { connectTestPage, rowsOf, serverSandbox, WAIT_MS } from '../helpers/window.ts';
@@ -87,6 +95,76 @@ async function rediscovered(
   assertSameScreen(screen, await screenOf(snap, ''));
 }
 
+/** One claim of a keeper as the server makes it (C, then its H), closed again; the hello. */
+async function claimHello(d: ServerSandbox, termId: string): Promise<KeeperHello> {
+  const socket = await d.platform.net.connectUnix(d.files.termSock(termId));
+  try {
+    const reader = frameReader();
+    socket.write(encodeFrame('C', new Uint8Array(0)));
+    return await new Promise<KeeperHello>((resolve, reject) => {
+      socket.on('error', reject);
+      socket.on('data', (chunk: Buffer) => {
+        const frames = reader.push(chunk);
+        if ('error' in frames) {
+          reject(new Error(frames.error));
+          return;
+        }
+        const frame = frames.find((f) => f.type === 'H');
+        if (frame === undefined) return;
+        const hello = parseHello(frame.payload);
+        if (hello.ok) resolve(hello.value);
+        else reject(new Error(hello.kind));
+      });
+    });
+  } finally {
+    socket.destroy();
+  }
+}
+
+/** A platform change whose python3 check (runServer's, at start) waits until `open()`. */
+function heldStart(): {
+  change: (p: Platform) => Platform;
+  reached: Promise<void>;
+  open: () => void;
+  port: () => number;
+} {
+  let open = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let reach = (): void => {};
+  const reached = new Promise<void>((resolve) => {
+    reach = resolve;
+  });
+  let port = 0;
+  return {
+    reached,
+    open,
+    port: () => port,
+    change: (p) => ({
+      ...p,
+      runner: {
+        ...p.runner,
+        async run(command, args, options) {
+          if (command === 'python3') {
+            reach();
+            await gate;
+          }
+          return p.runner.run(command, args, options);
+        },
+      },
+      net: {
+        ...p.net,
+        async listenHttp(where, handlers) {
+          const listener = await p.net.listenHttp(where, handlers);
+          if (!('path' in where)) port = listener.port;
+          return listener;
+        },
+      },
+    }),
+  };
+}
+
 describe('python3 missing (S2 14)', () => {
   test("the server runs and lists; a resume answers S2 14's message; status says python3 is not found", async (t) => {
     const d = serverSandbox(t);
@@ -134,6 +212,11 @@ describe('stopping (S2 5.5) and starting again (S2 7.3, 14)', () => {
     }
     assert.equal(d.deck.store.getKv('window_server'), null, 'the lock is released');
     assert.equal(await controlClient(d.platform.net, d.files.serverSock).ping(), 'refused');
+    // S2 5.5: every keeper was parked before its connection closed — a claim's hello says the
+    // snapshot covers every record.
+    const hello = await claimHello(d, termId);
+    assert.equal(hello.snapSeq, hello.seq, 'the park covers the whole stream');
+    assert.ok(hello.seq > 0);
 
     await rediscovered(t, d, termId, screen);
   });
@@ -162,6 +245,155 @@ describe('stopping (S2 5.5) and starting again (S2 7.3, 14)', () => {
   });
 });
 
+describe('while the server starts (S2 5.2, 7.3)', () => {
+  test('a page that connects before the keepers are found waits for them: no second terminal of a session', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    // A terminal of S1 an earlier server opened: its program runs and holds no live file (claude
+    // at a dialog before SessionStart), and no resume lock is left.
+    const keeper = await d.box.start({ spec: { argv: ['sh', '-c', 'exec sleep 120'] } });
+    const { client } = await keeper.claim();
+    client.send('G');
+    await client.next('T', WAIT_MS);
+    client.socket.destroy();
+
+    const held = heldStart();
+    const starting = d.start({ platform: held.change });
+    await held.reached;
+    assert.ok(held.port() > 0, 'the port is bound');
+    let connected = false;
+    const connecting = connectTestPage(t, d, { port: held.port() }).then((page) => {
+      connected = true;
+      return page;
+    });
+    await sleep(500);
+    assert.equal(connected, false, 'the page waits while the server starts');
+    held.open();
+    const test = await starting;
+    const page = await connecting;
+    const list = await page.next('list', 'the first list');
+    assert.deepEqual(
+      list.terminals.map((term) => [term.id, term.state]),
+      [[keeper.spec.id, 'running']],
+      'the first list has the terminal found',
+    );
+    const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.error, 'this session is already open in the window');
+    assert.equal(test.server.hub.list().length, 1, 'no second terminal');
+  });
+
+  test('POST /shutdown while the server starts: it stops once the start is done', async (t) => {
+    const d = serverSandbox(t);
+    const held = heldStart();
+    const starting = d.start({ platform: held.change });
+    await held.reached;
+    await controlClient(d.platform.net, d.files.serverSock).shutdown();
+    held.open();
+    const test = await starting;
+    assert.equal(await within(test.server.done, 'the stop asked for during the start', WAIT_MS), 0);
+    assert.equal(existsSync(d.files.serverJson), false);
+    assert.equal(d.deck.store.getKv('window_server'), null);
+  });
+});
+
+describe('what the server wires together', () => {
+  test('an exit is settled: a resumed program that ends before it reports a start gives its lock back', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    const script = join(d.s.bin, 'claude-fails');
+    writeFileSync(script, '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+    const configPath = join(d.s.skydeckHome, 'config', 'config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, claudeCommand: script }));
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    await until(
+      () => test.server.hub.list().some((term) => term.exit?.code === 3),
+      'the program ended',
+      WAIT_MS,
+    );
+    // Two ticks; the lock itself would hold for 60 s.
+    await until(() => readLock(d.deck, S1) === null, 'the lock given back', 6000);
+  });
+
+  test('a launch token presented a second time raises the alarm (window_alarm)', async (t) => {
+    const d = serverSandbox(t);
+    const test = await d.start();
+    const minted = await controlClient(d.platform.net, d.files.serverSock).token(30);
+    const token = Buffer.from(minted.token, 'base64url');
+    const origin = `http://127.0.0.1:${test.server.port}`;
+    const present = async (): Promise<number> => {
+      const ws = new WebSocket(`ws://127.0.0.1:${test.server.port}/ws`, { origin });
+      t.after(() => {
+        ws.terminate();
+      });
+      ws.on('error', () => {});
+      const closed = new Promise<number>((resolve) => ws.once('close', (code) => resolve(code)));
+      const challenge = await new Promise<{ nonce: string }>((resolve) =>
+        ws.once('message', (data) => resolve(JSON.parse(String(data)) as { nonce: string })),
+      );
+      const cN = freshNonce();
+      ws.send(
+        JSON.stringify({
+          t: 'hello',
+          protocol: 1,
+          mode: 'launch',
+          nonce: cN,
+          proof: pageProof(token, 'launch', challenge.nonce, cN, origin),
+        }),
+      );
+      const answer = await Promise.race([
+        new Promise<string>((resolve) => ws.once('message', (data) => resolve(String(data)))),
+        closed.then((code) => `closed ${code}`),
+      ]);
+      if (answer.includes('"welcome"')) {
+        ws.close();
+        return 0;
+      }
+      return closed;
+    };
+    assert.equal(await present(), 0, 'the first use is welcomed');
+    assert.equal(d.deck.store.getKv('window_alarm'), null);
+    assert.equal(await present(), 4004, 'the second is refused');
+    assert.match(d.deck.store.getKv('window_alarm') ?? '', /^[1-9][0-9]*$/, 'the alarm is raised');
+  });
+
+  test('the pull requests of the sessions a page lists are refreshed automatically (design 7.3)', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    d.resumable(S2, join(d.s.home, 'other'));
+    attachManualPr(d.deck, S1, 'https://github.com/o/r/pull/1');
+    const asked: (readonly string[])[] = [];
+    const test = await d.start({
+      platform: (p) => ({
+        ...p,
+        runner: {
+          ...p.runner,
+          run(command, args, options) {
+            if (command !== 'gh') return p.runner.run(command, args, options);
+            asked.push(args);
+            return Promise.resolve({
+              code: 1,
+              stdout: '',
+              stderr: 'not here',
+              timedOut: false,
+              notFound: false,
+            });
+          },
+        },
+      }),
+    });
+    assert.equal(asked.length, 0, 'nothing is asked while no page lists anything');
+    const page = await connectTestPage(t, d, test.server);
+    await page.list((list) => rowsOf(list).length === 2, 'both sessions listed');
+    await until(() => asked.length > 0, 'gh asked', WAIT_MS);
+    assert.ok(asked[0]?.includes('n0=1'), JSON.stringify(asked[0]));
+  });
+});
+
 describe('the store (S2 10.1, 14)', () => {
   test('migrated by another connection: the next write is refused, every page gets bye with the update text, done is 0, nothing written', async (t) => {
     const d = serverSandbox(t);
@@ -178,7 +410,7 @@ describe('the store (S2 10.1, 14)', () => {
     d.resumable(S2); // a transcript the next refresh must save
     const bye = await page.next('bye', 'the bye', WAIT_MS);
     assert.equal(bye.reason, 'skydeck was updated; run skydeck window');
-    assert.equal(await test.server.done, 0);
+    assert.equal(await within(test.server.done, 'the stop', WAIT_MS), 0);
     assert.equal(
       d.deck.store.transcripts().some((row) => row.sessionId === S2),
       false,

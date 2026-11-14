@@ -722,8 +722,9 @@ export class ServeExit extends Error { readonly code: 0 | 10 | 11 | 12 | 13 }
 export function keepAliveNotices(): (state: KeepAlivePayload) => { kind: 'keepalive-lost' | 'keepalive-back'; text: string } | null;
 
 // src/cli/commands/serve.ts, exported for its test (ruled, task 23): an uncaught error for the
-// log — its name and code (failureKind) and the stack lines that are frames (/^\s+at /), never
-// its message.
+// log — its name and code (failureKind) and the stack lines that are frames (/^\s+at /), taken
+// only from the stack after the message's own text (review 2: a message line can look like a
+// frame), never its message; no frame when the message is not found in the stack.
 export function uncaughtLine(error: unknown): string;
 ```
 
@@ -3376,7 +3377,11 @@ interop link; a failed tick logged by kind and sent once as `notice tick-failed`
 `keepers.log` at start and once a minute on the tick (the keepers only append to it). `listFor` is
 `buildListMessage` (task 13) with task 32's `selectedPayload` for the page's selected row. The `serve` command
 installs process handlers: an uncaught error is logged by name and stack frames without the
-message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5).
+message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5). (Review 2:) an
+upgrade that comes while the server starts waits — at most 64, the oldest dropped — until the
+keepers are found and the first tick has loaded the rows, and is then handed to the pages, so that
+no page acts on a hub that does not list the terminals yet; a `POST /shutdown` or a signal during
+the start stops the server once the start is done.
 
 **Tests** (platform: `realTestPlatform`; in process through `startTestServer` and `TestPage` unless marked)
 - Start: `server.json` (mode 0o600, every field of 2.8), `server.pid`, `server.sock`, the keeper

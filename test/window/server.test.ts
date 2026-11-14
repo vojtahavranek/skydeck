@@ -451,15 +451,17 @@ describe('Windows programs (A32)', () => {
   test('open-link starts the Edge stub with the link; nothing is run under /mnt/', async (t) => {
     const d = serverSandbox(t);
     const started: string[] = [];
+    const asked: string[] = [];
     const recording = (p: Platform): Platform => ({
       ...p,
       processes: {
         ...p.processes,
         startDetached(command, args, options) {
           started.push(command);
-          // CI has no /mnt/c: the stub runs in the sandbox there (where it runs changes nothing).
-          const cwd = options.cwd === '/mnt/c' && !existsSync('/mnt/c') ? d.s.root : options.cwd;
-          return p.processes.startDetached(command, args, { ...options, cwd });
+          asked.push(options.cwd);
+          // The stub runs in the sandbox, never in /mnt/c (which CI does not have either); the
+          // directory asked for is checked below.
+          return p.processes.startDetached(command, args, { ...options, cwd: d.s.root });
         },
       },
       runner: {
@@ -479,6 +481,7 @@ describe('Windows programs (A32)', () => {
     assert.equal(result.ok, true, JSON.stringify(result));
     await until(() => d.edgeCalls().length === 1, 'the Edge stub ran', WAIT_MS);
     assert.deepEqual(d.edgeCalls(), [['https://example.com/a?b=c']]);
+    assert.deepEqual(asked, ['/mnt/c'], 'Edge is asked to start in /mnt/c (S2 5.3)');
     assert.ok(started.length > 0);
     for (const command of started) {
       assert.ok(!command.startsWith('/mnt/') && !/\.exe$/i.test(command), command);

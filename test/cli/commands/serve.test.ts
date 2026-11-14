@@ -5,7 +5,15 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -18,7 +26,7 @@ import { uncaughtLine } from '../../../src/cli/commands/serve.ts';
 import { ensureSecret, pageProof } from '../../../src/window/auth.ts';
 import { readServerJson } from '../../../src/window/runtime.ts';
 import type { ServerJson } from '../../../src/window/runtime.ts';
-import { procStartOf, stillRuns, until } from '../../helpers/keeper.ts';
+import { procStartOf, sleep, stillRuns, until } from '../../helpers/keeper.ts';
 import { killKeepersIn } from '../../helpers/kill.ts';
 import { freshNonce } from '../../helpers/pages.ts';
 import { readRecords, waitForRecord } from '../../helpers/standin.ts';
@@ -59,12 +67,29 @@ function serveSandbox(t: TestContext): {
   const children: Omit<Serve, 'json'>[] = [];
   let sandboxed: ServerSandbox | null = null;
   t.after(async () => {
-    for (const child of children) {
-      if (child.child.exitCode === null && child.child.signalCode === null) {
-        const server = sandboxed === null ? null : ownServer(sandboxed, child.child);
-        if (server !== null) process.kill(server.pid, 'SIGTERM');
-        await Promise.race([child.exited, new Promise((resolve) => setTimeout(resolve, 15_000))]);
+    // Every child's server is ended, also one whose start is not through (review 2): the node
+    // process the launcher runs is found as the launcher's own child, identity-checked, and gets
+    // SIGTERM (serve stops once its start is done); one that does not end gets SIGKILL, and so
+    // does the launcher, the test's own child.
+    for (const entry of children) {
+      const { child } = entry;
+      if (!alive(child)) continue;
+      const deadline = performance.now() + WAIT_MS;
+      let node = serveNode(child);
+      while (node === null && alive(child) && performance.now() < deadline) {
+        await sleep(50);
+        node = serveNode(child);
       }
+      if (node !== null) process.kill(node, 'SIGTERM');
+      await Promise.race([entry.exited, sleep(15_000)]);
+      if (alive(child)) {
+        const left = serveNode(child);
+        if (left !== null) process.kill(left, 'SIGKILL');
+        child.kill('SIGKILL');
+        await Promise.race([entry.exited, sleep(5_000)]);
+      }
+      child.stdout?.destroy();
+      child.stderr?.destroy();
     }
     if (sandboxed === null) return;
     killKeepersIn(sandboxed.s, sandboxed.box.runtimeDir);
@@ -130,6 +155,44 @@ function serveSandbox(t: TestContext): {
     return { ...entry, json: json as unknown as ServerJson };
   };
   return { d, serve, started };
+}
+
+function alive(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+/**
+ * The node process of a `bin/skydeck serve` child: the launcher's own child (its parent pid is
+ * the child's, read again from its stat line) whose command line runs bootstrap.mjs serve. null
+ * while there is none (the launcher's python3 has not exec'd node yet) — never another process.
+ */
+function serveNode(child: ChildProcess): number | null {
+  const pid = child.pid;
+  if (pid === undefined) return null;
+  let text: string;
+  try {
+    text = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8');
+  } catch {
+    return null;
+  }
+  for (const word of text.split(/\s+/)) {
+    if (!/^[1-9][0-9]*$/.test(word)) continue;
+    const sub = Number(word);
+    try {
+      const stat = readFileSync(`/proc/${sub}/stat`, 'utf8');
+      const args = readFileSync(`/proc/${sub}/cmdline`, 'utf8').split('\0');
+      if (
+        parentPidFromStat(stat) === pid &&
+        args.some((arg) => arg.endsWith('bootstrap.mjs')) &&
+        args.includes('serve')
+      ) {
+        return sub;
+      }
+    } catch {
+      // gone meanwhile
+    }
+  }
+  return null;
 }
 
 /**
@@ -280,11 +343,72 @@ describe('skydeck serve (S2 5.2)', () => {
     }
     assert.equal(d.deck.store.getKv('window_server'), null);
   });
+  test('an error nobody caught: one log line with its name and frames only, exit 1, its files left as a crash leaves them', async (t) => {
+    const { d, serve } = serveSandbox(t);
+    // A module loaded into the server's node (and only there) that throws once the server runs.
+    const preload = join(d.s.root, 'preload-uncaught.mjs');
+    writeFileSync(
+      preload,
+      [
+        "import { existsSync } from 'node:fs';",
+        "if (process.argv.includes('serve')) {",
+        '  const timer = setInterval(() => {',
+        `    if (!existsSync(${JSON.stringify(d.files.serverJson)})) return;`,
+        '    clearInterval(timer);',
+        `    throw new Error(${JSON.stringify(`typed ${MARKER}\n    at pasted ${MARKER} (trace.js:1:2)\nend`)});`,
+        '  }, 50);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const entry = serve({ env: { NODE_OPTIONS: `--import=${preload}` } });
+    assert.equal(await entry.exited, 1, entry.stderr());
+    const lines = entry
+      .stderr()
+      .split('\n')
+      .filter((line) => line.includes('uncaught error'));
+    assert.equal(lines.length, 1, entry.stderr());
+    assert.match(lines[0] ?? '', /server: uncaught error: Error at /);
+    assert.equal(entry.stderr().includes(MARKER), false, entry.stderr());
+    assert.equal(existsSync(d.files.serverJson), true, 'server.json is left');
+    assert.notEqual(d.deck.store.getKv('window_server'), null, 'the lock is left');
+  });
+
+  test('SIGTERM while the server starts: the start is finished, then the stop; exit 0, nothing left', async (t) => {
+    const { d, serve } = serveSandbox(t);
+    // The server's python3 check (on its PATH) takes 3 s: the signal comes in the middle.
+    const python = join(d.s.bin, 'python3');
+    rmSync(python);
+    writeFileSync(python, '#!/bin/sh\nsleep 3\nexec /usr/bin/python3 "$@"\n', { mode: 0o755 });
+    const entry = serve();
+    await until(() => d.deck.store.getKv('window_server') !== null, 'the lock taken', WAIT_MS);
+    assert.equal(existsSync(d.files.serverJson), false, 'still starting');
+    const node = serveNode(entry.child);
+    assert.ok(node !== null, "the child's node process");
+    process.kill(node, 'SIGTERM');
+    assert.equal(await entry.exited, 0, entry.stderr());
+    for (const path of [d.files.serverJson, d.files.serverPid, d.files.serverSock]) {
+      assert.equal(existsSync(path), false, `${path} is gone`);
+    }
+    assert.equal(d.deck.store.getKv('window_server'), null);
+  });
+
+  test('SIGINT stops it as SIGTERM does', async (t) => {
+    const { d, serve, started } = serveSandbox(t);
+    const server = await started(serve());
+    assert.ok(ownServer(d, server.child) !== null);
+    process.kill(server.json.pid, 'SIGINT');
+    assert.equal(await server.exited, 0, server.stderr());
+    assert.equal(existsSync(d.files.serverJson), false);
+    assert.equal(d.deck.store.getKv('window_server'), null);
+  });
 });
 
 describe('uncaughtLine (S2 5.2)', () => {
   test("an error's name and stack frames, never its message, also one of several lines", () => {
-    const error = new SyntaxError(`Unexpected token in JSON\n  "${MARKER}"\nat position 3`);
+    const error = new SyntaxError(
+      `Unexpected token in JSON\n  "${MARKER}"\n    at ${MARKER} (pasted.js:1:2)\nat position 3`,
+    );
     const line = uncaughtLine(error);
     assert.match(line, /^SyntaxError/);
     assert.match(line, / at /, 'the frames');

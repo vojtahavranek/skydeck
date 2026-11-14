@@ -104,9 +104,19 @@ function savedSomething({ ingest, observed, scan }: RefreshResult): boolean {
   return ingest.ingested + observed + scan.read + scan.missing + scan.prsAttached > 0;
 }
 
+/**
+ * The session a terminal shows after this pass: the mapping's; but a terminal whose own session the
+ * mapping could not judge keeps it — another session's holder in it that could be judged must not
+ * move it for one pass (review 2; ruled in task 21: the previous answer is kept for `unknown`).
+ */
+function shownBy(term: TerminalInfo, mapping: Mapping): string | null {
+  if (term.sessionId !== null && mapping.unknown.has(term.sessionId)) return term.sessionId;
+  return mapping.shown.get(term.id) ?? null;
+}
+
 /** The session a terminal stands for: the one it shows, or the one it was opened for. */
 function sessionOf(term: TerminalInfo, mapping: Mapping): string {
-  return mapping.shown.get(term.id) ?? term.sessionId ?? term.expectedSessionId;
+  return shownBy(term, mapping) ?? term.sessionId ?? term.expectedSessionId;
 }
 
 export function createTick(deps: TickDeps): Tick {
@@ -154,6 +164,9 @@ export function createTick(deps: TickDeps): Tick {
       try {
         settleEndedTerminal(deck, hello);
         unsettled.delete(id);
+        // It ingested the spool and may have written, on the server's own connection after the
+        // refresh's result was made: the rows are loaded again (review 2).
+        reloadOwed = true;
       } catch (error) {
         if (isDatabaseFailure(error)) throw error;
         unsettled.delete(id);
@@ -205,7 +218,7 @@ export function createTick(deps: TickDeps): Tick {
       startTimeoutNs: BigInt(deck.config.restoreStartTimeoutSeconds) * NS_PER_SECOND,
     });
     for (const term of terminals) {
-      hub.setSession(term.id, mapping.shown.get(term.id) ?? null, mapping.notReported.has(term.id));
+      hub.setSession(term.id, shownBy(term, mapping), mapping.notReported.has(term.id));
     }
     const next = new Map(mapping.elsewhere);
     for (const sessionId of mapping.unknown) {
@@ -223,7 +236,7 @@ export function createTick(deps: TickDeps): Tick {
           (other) =>
             other.id !== term.id &&
             MAY_START.has(other.state) &&
-            mapping.shown.get(other.id) === sessionId,
+            shownBy(other, mapping) === sessionId,
         );
       if (runsAgain) hub.close(term.id);
     }

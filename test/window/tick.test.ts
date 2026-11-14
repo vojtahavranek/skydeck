@@ -475,6 +475,18 @@ describe('ended terminals (S2 7.8; plan task 21)', () => {
     assert.equal(d.deck.store.getKv(lockKey(S1)), null);
   });
 
+  test("a settled exit loads the rows again (the settle ingests and writes on the server's own connection)", async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const f = fixture(t, { d });
+    await ticks(f, 2);
+    const before = f.tick.rows();
+    f.tick.ended(helloOf({ lock: `${T0}:0`, started: false }));
+    await ticks(f, 1);
+    await ticks(f, 2);
+    assert.notEqual(f.tick.rows(), before);
+  });
+
   test('a settle that meets a failure of the database is tried again at the next refresh', async (t) => {
     const d = testDeck(t);
     writeTranscript(d, S1);
@@ -570,6 +582,37 @@ describe('the mapping (S2 7.5, 7.9; plan task 21)', () => {
     await ticks(f, 2);
     assert.deepEqual([...f.tick.elsewhere().keys()], [S1], 'the previous answer is kept');
     assert.deepEqual(f.closed, [], 'nothing is closed on an unknown');
+  });
+});
+
+describe('a terminal whose own session cannot be judged (review 2)', () => {
+  test("keeps that session, also when another session's holder in it can be judged", async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    writeTranscript(d, S2);
+    startRunning(d, S1, PID);
+    startRunning(d, S2, PID + 1);
+    // The terminal's program 9000; S1's holder is its child, S2's holder a grandchild through 9100.
+    d.proc.setProcess(9000, { stat: statLine(9000, 1), cmdline: ['claude'] });
+    d.proc.setProcess(9100, {
+      stat: statLine(9100, 2).replace(') S 1 ', ') S 9000 '),
+      cmdline: ['sh'],
+    });
+    const child = (pid: number, parent: number): string =>
+      statLine(pid, START).replace(') S 1 ', `) S ${parent} `);
+    d.proc.setProcess(PID, { stat: child(PID, 9000), cmdline: ['claude'] });
+    d.proc.setProcess(PID + 1, { stat: child(PID + 1, 9100), cmdline: ['claude'] });
+    const term = terminal({ id: 'aaaaaaaaaaaa', program: { pid: 9000, procStart: 1 } });
+    const f = fixture(t, { d, terminals: [term] });
+    await ticks(f, 1);
+    assert.equal(f.terminals[0]?.sessionId, S1, 'the nearer holder decides');
+    // S1's holder can no longer be judged (its parent cannot be read): S2's would win this pass.
+    d.proc.setProcess(PID, {
+      stat: statLine(PID, START).replace(') S 1 ', ') S x '),
+      cmdline: ['claude'],
+    });
+    await ticks(f, 2);
+    assert.equal(f.terminals[0]?.sessionId, S1, 'the previous answer is kept');
   });
 });
 
