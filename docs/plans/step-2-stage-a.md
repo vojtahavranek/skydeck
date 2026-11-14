@@ -158,6 +158,7 @@ more than one task edits, and who edits them, never two tasks of one wave:
 | `src/sessions/resume.ts`, `src/sessions/restore.ts`, `src/cli/launching.ts` | 4 (1) |
 | `src/window/terminals.ts` | 16 (3) creates it; 21 (4) uses only the `Registry` API task 16 exports |
 | `src/window/screen.ts`, `test/window/screen.test.ts` | 12 (2) creates them; 33 (3) edits them; 16 (3) only calls `createScreen` |
+| `test/keeper/limits.test.ts` | 9 (2) creates it; 20 (3) edits it (ruled on #51) |
 | `web/index.html`, `web/app.js`, `web/style.css` | 26 (6) only; tasks 27–29 own `web/list.*`, `web/terminal-view.*`, `web/cards.*`/`web/help.js` |
 | `docs/design-step-2.md` | several tasks record a decision of 1a in the sections named for them, disjoint within every wave; a conflict is rebased keeping both edits |
 | `docs/manual-checks.md`, `docs/install.md`, `README.md` | 30 (8) only |
