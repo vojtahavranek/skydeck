@@ -170,9 +170,14 @@ describe('skydeck serve (S2 5.2)', () => {
       }),
     });
     assert.equal(result.status, 13, result.stderr);
-    assert.equal(
-      result.stderr,
-      "skydeck: the window's server is not started from inside a Claude Code session: every session in the window would inherit that session's environment; run skydeck window in a terminal of your own\n",
+    // Node.js 24.12 warns that SQLite is experimental: its own lines (S2 5.2) are left out.
+    assert.deepEqual(
+      result.stderr
+        .split('\n')
+        .filter((line) => line !== '' && !/ExperimentalWarning|--trace-warnings/.test(line)),
+      [
+        "skydeck: the window's server is not started from inside a Claude Code session: every session in the window would inherit that session's environment; run skydeck window in a terminal of your own",
+      ],
     );
     assert.equal(existsSync(d.files.serverJson), false);
     assert.equal(d.deck.store.getKv('window_server'), null);
