@@ -2104,8 +2104,9 @@ Before what it does in step 1:
   terminals in the window keep running`, where `<n>` counts the keepers whose `.pid` line is alive
   or cannot be judged (4.2), read before the stop: a server that does not answer cannot say how
   many it has. Keepers and their sessions are never stopped (2).
-- it names the Edge profile folder when one is configured or can be derived: `the window's Edge
-  profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
+- it names the Edge profile folder — the configured one, or the derived one (5.4) — when that
+  folder exists (Edge creates it at the window's first start): `the window's Edge profile is in
+  <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
 `--purge` refuses (exit 1) while any keeper is alive — by its `.pid` line and design 5.5's rule,
 never by connecting to it (7.1); a line that cannot be told dead counts as alive (4.2) — naming the
@@ -2114,27 +2115,40 @@ directory that can be the runtime directory: the one the store records and each 
 4.2 can give (`$SKYDECK_HOME/run`, `$XDG_RUNTIME_DIR/skydeck-<store id>`, `<stateDir>/run-<store
 id>`), because the command may run with another environment than the server did. Purging
 `<stateDir>` can remove keeper sockets under it, and the screens of those sessions could not be
-shown again; the user ends those sessions first. Otherwise it also removes every one of those
-directories that exists.
+shown again; the user ends those sessions first. The refusal comes before anything is done: the
+settings file, the links and a running server are left as they are. Otherwise it also removes every
+one of those directories that exists — one that is a symbolic link, is another user's or holds
+anything a runtime directory does not (4.2) is left alone and named, since the store's record is
+only a path.
 
 ### 16.3 Doctor
 
 New lines, with `ok`, `info` or `problem` as in design 8. It still starts no program but those it
-already runs (`gh`, `wezterm`) and `python3 --version`; it starts nothing on Windows.
+already runs (`gh`, `wezterm`) and `python3 --version`; it starts nothing on Windows, signals
+nothing and creates nothing. While the window has never been used — no `window_secret`, or no
+database to read it from — every line below that would be a `problem` is `info`, so that `doctor`
+judges an installation that uses only the commands as step 1's did; once the window was used they
+are problems.
 
 | Check | `problem` when |
 |---|---|
-| python3 | `python3` is not found or is older than 3.9 (`info` instead when the window has never been used: no `window_secret`). |
+| python3 | `python3` is not found or is older than 3.9 (`info` instead when the window has never been used: no `window_secret`). A second line: `/usr/bin/python3`, through which the launcher sets the server's core limit (2), is missing or not executable. |
 | server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, or is alive but does not answer. |
-| port | something that is not this installation's server answers on `127.0.0.1:<window.port>`. |
+| port | something that is not this installation's server answers on `127.0.0.1:<window.port>`: `/proc/net/tcp` or `tcp6` lists a listener on that port and no server of this installation that answers `GET /ping` holds it. `doctor` never binds the port, not even for an instant (a server starting at that moment would exit 10), and sends nothing to a foreign program. |
 | launch alarm | `window_alarm` is set: a launch token was presented twice at <time>, so another program may have skydeck's key (8.2.2); `run skydeck window --new-secret`. |
 | keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. |
 | interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. |
+| C: drive | the C: drive is not mounted at `/mnt/c`, where all of the window expects it (Edge's working directory, the keep-alive's `wsl.exe`, the users' folders of 5.4). |
 | Edge | `window.edge` does not exist (`info` when the window has never been used). |
 | profile folder | it cannot be derived (5.4) and `window.profileDir` is not set. |
 | runtime directory | it is not mode 700 or not the user's, or a socket path would be 108 bytes or longer. The line names the directory the store records, or else which rule chose it (4.2), and says `info` when `XDG_RUNTIME_DIR` was passed over because the user does not linger (systemd would remove it when the last terminal closes). |
 | vendored files | a file of `vendor/MANIFEST.json` is missing or its hash differs (a broken checkout). |
-| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start). |
+| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start); a `.pid` file that cannot be read is named on its own, as one whose keeper cannot be judged. |
+
+In a test sandbox (`SKYDECK_TEST_NO_WINDOWS=1`, 17) `doctor` and `uninstall` read nothing under
+`/mnt/`: the directory `SKYDECK_TEST_MNT_C` names stands for `/mnt/c`, and without it the C: drive
+counts as not mounted; the `/usr/bin/python3` line honours `SKYDECK_TEST_PYTHON3` as the launcher
+does.
 
 ### 16.4 Configuration
 

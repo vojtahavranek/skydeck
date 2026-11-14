@@ -4,18 +4,32 @@
 // `withDeck` would make again, and with no database there is nothing recorded, so only the entries
 // install wrote are removed; when that rewrites more of the settings file than those entries, it
 // keeps the file as it was in a new backup first. It never removes a backup install made.
+//
+// Before that (S2 16.2): a running window server is stopped as `skydeck window --stop` stops it
+// (lifecycle.ts), and the line says how many terminals keep running; the window's Edge profile
+// folder is named when it exists (ruled by the plan owner, task 24), never removed. Keepers and
+// their sessions are never stopped and never connected to (S2 7.1): `--purge` judges them by their
+// `.pid` lines in every directory that can be the runtime directory and refuses, before it does
+// anything, while one may live; otherwise it also removes those directories.
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 
 import { removeHookEntries, rewriteReport, settingsPath } from '../../claude/settings.ts';
+import type { Config } from '../../platform/config.ts';
 import { SkydeckError } from '../../platform/errors.ts';
+import { runtimeDirCandidates, storeId } from '../../platform/paths.ts';
 import type { Places } from '../../platform/paths.ts';
 import type { Files, Platform } from '../../platform/types.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
+import type { Deck } from '../../sessions/deck.ts';
 import { describeError } from '../../sessions/problems.ts';
 import { isDatabaseFailure, openStore } from '../../store/store.ts';
 import type { Store } from '../../store/store.ts';
 import { sanitize } from '../../text/sanitize.ts';
+import { driveC, readableWindowsPath } from '../../window/drive.ts';
+import { stopServer } from '../../window/lifecycle.ts';
+import { listKeeperLines, runtimeFiles } from '../../window/runtime.ts';
+import { deriveProfileDirUnder } from '../../window/windows.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -31,8 +45,10 @@ const SPEC: ArgSpec = {
     'since, otherwise removes only the two hook entries install wrote (after a new backup of\n' +
     'the file, when that rewrites more than those entries), and removes the links install\n' +
     'made. The database stays. The backups of the settings file are kept (it names them).\n' +
+    "First it stops the window's server; the terminals in the window keep running.\n" +
     '\n' +
-    '  --purge  also remove the data, state and configuration directories\n',
+    '  --purge  also remove the data, state and configuration directories and the runtime\n' +
+    '           directory; refused while a terminal of the window may still run\n',
   flags: { purge: { type: 'boolean' } },
   min: 0,
   max: 0,
@@ -54,11 +70,21 @@ export const command: Command = {
       return EXIT.ok;
     }
     const { platform } = ctx;
-    const { places } = resolveDeckPlaces(platform);
+    const { places, config } = resolveDeckPlaces(platform);
+    const purge = parsed.flags['purge'] === true;
+    let runtimeDirs: string[];
     if (platform.files.stat(places.dbPath) === null) {
+      // No database: no record, and no server of this installation (a server opens it first).
+      runtimeDirs = runtimeDirsOf(platform, places, null);
+      if (purge) refuseWhileKeepersMayLive(platform, runtimeDirs);
+      showProfileFolder(ctx, config);
       undo(ctx, places, { hash: null, backup: null });
     } else {
-      withStoreAt(places.dbPath, (store) => {
+      runtimeDirs = await withStoreAt(places.dbPath, async (store) => {
+        const dirs = runtimeDirsOf(platform, places, store.getKv('window_runtime_dir'));
+        if (purge) refuseWhileKeepersMayLive(platform, dirs);
+        await stopTheServer(ctx, { platform, places, config, store });
+        showProfileFolder(ctx, config);
         undo(ctx, places, {
           hash: store.getKv('settings_hash'),
           backup: store.getKv('settings_backup'),
@@ -68,11 +94,21 @@ export const command: Command = {
           store.deleteKv('settings_hash');
           store.deleteKv('settings_backup');
         });
+        return dirs;
       });
     }
-    if (parsed.flags['purge'] === true) {
+    if (purge) {
+      // Once more: the server may have started a keeper before it stopped.
+      refuseWhileKeepersMayLive(platform, runtimeDirs);
+      const own = [places.dataDir, places.stateDir, places.configDir];
+      for (const dir of runtimeDirs) {
+        // One inside skydeck's own directories goes with them.
+        if (!own.some((parent) => dir === parent || dir.startsWith(`${parent}/`))) {
+          removeRuntimeDir(ctx, platform, dir);
+        }
+      }
       // The store is closed by now.
-      for (const dir of [places.dataDir, places.stateDir, places.configDir]) {
+      for (const dir of own) {
         if (platform.files.lstat(dir) !== null) {
           attempt(`cannot remove ${dir}`, () => platform.files.removeTree(dir));
           ctx.io.stdout(`removed ${sanitize(dir)}\n`);
@@ -87,10 +123,10 @@ export const command: Command = {
  * fn(store) on the existing database, closed afterwards. As in withDeck, a failure of the database
  * as a whole is an error naming it, not an internal error.
  */
-function withStoreAt(path: string, fn: (store: Store) => void): void {
+async function withStoreAt<T>(path: string, fn: (store: Store) => Promise<T>): Promise<T> {
   const store = openStore(path);
   try {
-    fn(store);
+    return await fn(store);
   } catch (error) {
     if (isDatabaseFailure(error)) {
       throw new SkydeckError(`the database ${path} failed: ${describeError(error)}`);
@@ -103,6 +139,143 @@ function withStoreAt(path: string, fn: (store: Store) => void): void {
       // Each write is committed already; an error here would hide the one that ended the command.
     }
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The window (S2 16.2)
+
+/**
+ * S2 16.2: the server stopped as `skydeck window --stop` stops it. `keepers` is what keeps running
+ * in the window: the keepers whose `.pid` line is alive or cannot be judged, read before the stop
+ * (stopServer). A server that cannot be stopped is the command's error: nothing is undone.
+ */
+async function stopTheServer(ctx: Context, deck: Deck): Promise<void> {
+  const { stopped, keepers } = await stopServer(deck);
+  if (stopped) {
+    const terminals =
+      keepers === 1
+        ? '1 terminal in the window keeps running'
+        : `${keepers} terminals in the window keep running`;
+    ctx.io.stdout(`stopped skydeck's window server; ${terminals}\n`);
+  }
+}
+
+/**
+ * S2 16.2, 5.4: the Edge profile folder — window.profileDir, else derived — named when it exists
+ * (ruled by the plan owner, task 24: Edge creates it at the window's first start). skydeck never
+ * removes it. Nothing is said when it cannot be found or looked at.
+ */
+function showProfileFolder(ctx: Context, config: Config): void {
+  const { env, files } = ctx.platform;
+  let folder = config.window.profileDir;
+  if (folder === null) {
+    const drive = driveC(env);
+    const derived = drive === null ? null : deriveProfileDirUnder(files, join(drive, 'Users'));
+    if (derived?.ok !== true) return;
+    folder = derived.dir;
+  }
+  const path = readableWindowsPath(env, folder);
+  try {
+    if (path === null || files.stat(path)?.kind !== 'dir') return;
+  } catch {
+    return;
+  }
+  ctx.io.stdout(
+    `the window's Edge profile is in ${sanitize(folder)}; Edge wrote it and skydeck leaves it (delete it yourself)\n`,
+  );
+}
+
+/**
+ * S2 16.2: every directory that can be the runtime directory — the one the store records and each
+ * one the rule of 4.2 can give — since this command may run with another environment than the
+ * server did.
+ */
+function runtimeDirsOf(platform: Platform, places: Places, recorded: string | null): string[] {
+  const dirs = [
+    ...(recorded !== null && recorded.startsWith('/') ? [recorded] : []),
+    ...runtimeDirCandidates(platform.env, places.stateDir, storeId(places.dbPath)),
+  ];
+  return [...new Set(dirs)];
+}
+
+/**
+ * S2 16.2: `--purge` refuses (exit 1), before it changes anything, while a keeper may live in any
+ * of `dirs` — by its `.pid` line and design 5.5's rule, never by connecting to it; a line that
+ * cannot be told dead, or a `.pid` file that cannot be read, counts as alive — naming them. A
+ * terms/ that cannot be listed refuses too: what is in it cannot be told.
+ */
+function refuseWhileKeepersMayLive(platform: Platform, dirs: readonly string[]): void {
+  const open: string[] = [];
+  for (const dir of dirs) {
+    const files = runtimeFiles(dir);
+    let lines: ReturnType<typeof listKeeperLines>;
+    try {
+      lines = listKeeperLines(platform, files);
+    } catch (error) {
+      throw new SkydeckError(
+        `uninstall --purge removed nothing: the terminals in ${files.termsDir} cannot be listed (${describeError(error)})`,
+      );
+    }
+    for (const { id, line, state } of lines) {
+      if (state !== 'dead') {
+        const which = line === null ? 'its .pid file cannot be read' : `pid ${line.pid}`;
+        open.push(`${id} (${which}) in ${dir}`);
+      }
+    }
+  }
+  if (open.length > 0) {
+    throw new SkydeckError(
+      `uninstall --purge removed nothing: terminals of the window may still run: ${open.join(', ')}; ` +
+        'purging would remove their keeper sockets, and their screens could not be shown again; ' +
+        'end those sessions first, then run skydeck uninstall --purge again',
+    );
+  }
+}
+
+/** What a runtime directory holds (S2 4.2), and the temporaries its writers leave (`.<name>.tmp`). */
+const RUNTIME_ENTRY =
+  /^(?:server\.json|server\.sock|server\.pid|keepalive\.pid|keepalive\.interop|interop|terms|keeper-[A-Za-z0-9_-]+\.py|\..+\.tmp)$/;
+const TERMS_ENTRY = /^(?:[0-9a-f]{12}\.(?:sock|pid)|\..+\.tmp)$/;
+
+/**
+ * Removes a runtime directory, only when it is a directory of the user's (never a symbolic link
+ * followed) holding nothing but what a runtime directory holds: the store's record is only a path,
+ * and a directory it names that holds anything else is not skydeck's to remove.
+ */
+function removeRuntimeDir(ctx: Context, platform: Platform, dir: string): void {
+  const { files } = platform;
+  const info = files.lstat(dir);
+  if (info === null) return;
+  let foreign: string | null;
+  if (info.kind !== 'dir') {
+    foreign = info.kind === 'symlink' ? 'is a symbolic link' : 'is not a directory';
+  } else if (info.uid !== platform.uid) {
+    foreign = `belongs to uid ${info.uid}`;
+  } else {
+    const other = foreignEntry(files, dir);
+    foreign = other === null ? null : `holds ${other}, which skydeck does not write`;
+  }
+  if (foreign !== null) {
+    ctx.io.stdout(`left ${sanitize(dir)} alone: it ${sanitize(foreign)}\n`);
+    return;
+  }
+  attempt(`cannot remove ${dir}`, () => files.removeTree(dir));
+  ctx.io.stdout(`removed ${sanitize(dir)}\n`);
+}
+
+/** The first entry of a runtime directory that is not one of its own (`terms/<name>` inside terms/). */
+function foreignEntry(files: Files, dir: string): string | null {
+  for (const name of files.list(dir)) {
+    if (!RUNTIME_ENTRY.test(name)) return name;
+  }
+  const terms = join(dir, 'terms');
+  const info = files.lstat(terms);
+  if (info === null) return null;
+  if (info.kind !== 'dir') return 'terms';
+  for (const name of files.list(terms)) {
+    if (!TERMS_ENTRY.test(name)) return `terms/${name}`;
+  }
+  return null;
 }
 
 /** The settings first (they name the hook link), then the links; last, where the backups are. */
