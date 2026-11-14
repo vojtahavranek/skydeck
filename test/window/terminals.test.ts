@@ -440,7 +440,7 @@ describe('registry: slots and input', () => {
     assert.equal(r.registry.nextSlot(), null, 'the tenth gets no slot');
   });
 
-  test('input while the program does not read: full once more than 4 MiB waits, ok again once the keeper has taken it; no byte lost', async (t) => {
+  test('input while the program does not read: full once more than 4 MiB waits, ok again as soon as no more than 4 MiB wait; no byte lost', async (t) => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const { spec, mirror } = await startStandin(box, r);
@@ -504,9 +504,10 @@ describe('registry: slots and input', () => {
       readRecords(record)
         .flatMap((x) => (x.ev === 'input' ? [x.hex] : []))
         .join('');
-    // `ok` is back once the keeper, running again, has taken what waited at the server (its queue
-    // holds 64 chunks), not once the program reads: the limit is about what waits unwritten at the
-    // server. So at that moment the stalled program has read nothing of it, only its /stall line.
+    // `ok` is back as soon as no more than 4 MiB wait at the server: once the keeper, running
+    // again, has taken the frame in flight (63 frames may still wait then; its queue has room for
+    // them all) — not once it has taken everything, and not once the program reads. So at that
+    // moment the stalled program has read nothing of what was sent, only its /stall line.
     await until(() => r.registry.input(spec.id, new Uint8Array(0)) === 'ok', 'ok again', 15_000);
     const okAt = Math.round(performance.now() - stallAsked);
     const atOk = read();
