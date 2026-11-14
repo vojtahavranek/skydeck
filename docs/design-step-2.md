@@ -1979,7 +1979,13 @@ back to the terminal). Enter changes meaning: it shows a running session's termi
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a
-coloured top edge, and the key bar says `Focus: list` or `Focus: terminal`.
+coloured top edge, and the key bar says `Focus: list` or `Focus: terminal`. The keyboard follows
+the zone: where what had it goes away, or a click selects nothing, the page gives it to the zone's
+holder (the terminal, else a form's first field, else the zone itself; never a button). But the
+page never moves the keyboard while text of the page is selected (a bar's command, a notice, the
+header): giving the terminal's text control the keyboard would take the selection away, and the
+Ctrl+C meant to copy it would reach the program. Meanwhile the keyboard may be on nothing; a plain
+click, a zone chord or the end of the selection gives it back (ruled, plan task 26's review 2).
 
 ### 12.10 Done
 

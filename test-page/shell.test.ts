@@ -1267,10 +1267,14 @@ test('the page shell', async (t) => {
       await page.keyboard.press('Escape');
       await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
       assert.equal(await active(page), 'in #terminal');
-      // A click on the header above the shown terminal, or on the key bar: the terminal keeps the
-      // keyboard.
+      // A click on the header above the shown terminal, or on the key bar: the terminal has the
+      // keyboard (the header's click gives it back once the click is done).
       await page.locator('#cards .card-header').click();
-      assert.equal(await active(page), 'in #terminal');
+      await page.waitForFunction(
+        () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+        null,
+        { timeout: 5000 },
+      );
       await page.locator('#focus-zone').click();
       assert.equal(await active(page), 'in #terminal');
 
@@ -1686,15 +1690,27 @@ test('the page shell', async (t) => {
   );
 
   await t.test(
-    "a click on a notice's text leaves the keyboard on nothing no longer: the zone takes it back, and the text can still be selected",
+    "with a terminal whose keyboard holder is a text control (as xterm.js's is): a drag over a notice's text keeps the selection and Ctrl+C copies it, reaching no program; a list that arrives meanwhile takes nothing; a plain click gives the terminal the keyboard again (ruled, review 2 of task 26)",
     async (t) => {
       const secret = new Uint8Array(32).fill(20);
       const page = await newPage(t, chromium);
+      await page.addInitScript(() => {
+        const copied: string[] = [];
+        Reflect.set(globalThis, 'copied', copied);
+        document.addEventListener('copy', () => copied.push(getSelection()?.toString() ?? ''));
+      });
       const rows = scriptedList(
         [{ id: S1, terminal: TERM_A, slot: 1 }],
         [{ id: TERM_A, slot: 1, sessionId: S1 }],
       );
       const standin = await standinServer(t, {
+        web: {
+          'terminal-view-real.js': readFileSync(join(checkout, 'web/terminal-view.js'), 'utf8'),
+          'terminal-view.js': readFileSync(
+            join(checkout, 'test-page/fixtures/textarea-view.js'),
+            'utf8',
+          ),
+        },
         socket: honest(secret, {
           serverId: (n) => `${n}`.repeat(16).slice(0, 16),
           open: (conn, message) => {
@@ -1709,23 +1725,67 @@ test('the page shell', async (t) => {
       await storeKey(page, secret);
       await page.goto(standin.url);
       await connection(page, 'open');
-      await page.waitForSelector('#terminal .terminal-placeholder', { timeout: PAGE_WAIT_MS });
+      await page.waitForSelector('#terminal .xterm-helper-textarea', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      await page.waitForFunction(
+        () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+        null,
+        { timeout: 5000 },
+      );
       standin.connections[0]?.ws.terminate(); // the server restarted: the notice
       await showsText(page, '#info-text', RESTARTED);
       await connection(page, 'open');
       assert.equal(await zone(page), 'Focus: terminal');
+      const selected = (): Promise<string> => page.evaluate(() => getSelection()?.toString() ?? '');
+      const holderHasIt = (): Promise<boolean> =>
+        page.evaluate(
+          () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+        );
 
-      await page.locator('#info-text').dblclick(); // selects a word of the notice
+      // A drag over the notice's text.
+      const box = await page.locator('#info-text').boundingBox();
+      assert.ok(box !== null);
+      await page.mouse.move(box.x + 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 5 });
+      await page.mouse.up();
+      await sleep(300);
+      const text = await selected();
+      assert.match(text, /restarted/, 'the text stays selected');
+      assert.equal(await holderHasIt(), false, 'the terminal did not take the keyboard');
+
+      // A list that arrives meanwhile (a render) takes nothing.
+      standin.connections.at(-1)?.send(rows);
+      await sleep(500);
+      assert.equal(await selected(), text);
+      assert.equal(await holderHasIt(), false);
+
+      // Ctrl+C copies the selection and reaches no program.
+      await page.keyboard.press('Control+c');
+      await sleep(200);
+      assert.deepEqual(await page.evaluate(() => Reflect.get(globalThis, 'copied')), [text]);
+      assert.deepEqual(await page.evaluate(() => Reflect.get(globalThis, 'programGot')), []);
+
+      // A plain click (it selects nothing): the terminal has the keyboard again; the same after a
+      // click on the header above it and into the key help.
+      await page.locator('#info-text').click();
       await page.waitForFunction(
-        () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+        () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
         null,
         { timeout: 5000 },
       );
-      assert.notEqual(await page.evaluate(() => getSelection()?.toString() ?? ''), '');
-      await page.keyboard.press('Control+Shift+H'); // the key help, then a click into it
+      await page.locator('#cards .card-header').click();
+      await page.waitForFunction(
+        () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+        null,
+        { timeout: 5000 },
+      );
+      await page.keyboard.press('Control+Shift+H');
       await page.locator('#help').click();
       await page.waitForFunction(
-        () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+        () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
         null,
         { timeout: 5000 },
       );

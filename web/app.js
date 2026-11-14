@@ -205,11 +205,28 @@ for (const chrome of [
 ]) {
   chrome?.addEventListener('mousedown', (event) => event.preventDefault());
 }
-// Any other click that leaves the keyboard on nothing — on a notice's text, on the key help —
-// gives it back to the zone once the click is done (ruled, review 2 of task 26): without
-// preventDefault, so that such text can still be selected with the mouse.
+// A click that selected nothing gives the keyboard to the zone's holder once it is done: on a
+// notice's text, on the key help (nothing had it then), on the header above a terminal (the zone
+// itself had it). A click or drag that selected text of the page moves nothing, so that the text
+// can be copied (ruled, review 2 of task 26: replaces the earlier rule, which took the selection
+// away from a terminal whose holder is a text control, as xterm.js's is).
 addEventListener('mouseup', () => {
-  setTimeout(keepKeyboard, 0);
+  setTimeout(() => {
+    if (textSelected()) {
+      return;
+    }
+    if (document.activeElement === dom.rightZone && state.pane.kind === 'terminal') {
+      terminalView.focus();
+      return;
+    }
+    keepKeyboard();
+  }, 0);
+});
+// The end of a selection gives the keyboard back too, when nothing has it.
+document.addEventListener('selectionchange', () => {
+  if (!textSelected()) {
+    keepKeyboard();
+  }
 });
 
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -680,7 +697,8 @@ function render() {
     pane.kind === 'terminal' &&
     pane.term.id !== before &&
     state.zone === 'terminal' &&
-    !isTextField(document.activeElement)
+    !isTextField(document.activeElement) &&
+    !textSelected()
   ) {
     terminalView.focus();
   }
@@ -718,11 +736,26 @@ function setZone(zone, moveFocus = true) {
 }
 
 /**
+ * Whether text of the page is selected (a range, not a caret). While it is, app.js moves the
+ * keyboard nowhere by itself (ruled, review 2 of task 26); a zone chord still does.
+ * @returns {boolean}
+ */
+function textSelected() {
+  const selection = getSelection();
+  return selection !== null && selection.rangeCount > 0 && !selection.isCollapsed;
+}
+
+/**
  * When what had the keyboard is gone — removed, or no longer visible because its container was
  * hidden (ruled, review 2 round three) — the zone takes it: run after every call into a module
  * that can remove or hide things, so that the modules of tasks 27–29 need no hook of their own.
  */
 function keepKeyboard() {
+  // Never while text of the page is selected: giving a text control (xterm.js's) the keyboard
+  // would take the selection away, and a Ctrl+C meant to copy it would reach the program.
+  if (textSelected()) {
+    return;
+  }
   const element = document.activeElement;
   if (
     element === null ||
@@ -765,11 +798,6 @@ document.addEventListener('focusin', (event) => {
     setZone('list', false);
   } else if (dom.rightZone.contains(target) && state.zone !== 'terminal') {
     setZone('terminal', false);
-  }
-  // A click on the right side's own surface (the header above a terminal): the shown terminal
-  // keeps the keyboard.
-  if (target === dom.rightZone && state.pane.kind === 'terminal') {
-    terminalView.focus();
   }
 });
 
