@@ -134,7 +134,7 @@ function momentOf(ns) {
 }
 
 /**
- * S2 7.8's "at <time>": "14:02:11", with " on 13 Nov" when it was not today.
+ * S2 7.8's "at <time>": "14:02:11", "14:02:11 yesterday", "14:02:11 on 13 Nov".
  * @param {string | null | undefined} ns
  */
 function exitTimeOf(ns) {
@@ -143,7 +143,8 @@ function exitTimeOf(ns) {
     return '';
   }
   const day = dayOf(date);
-  return ` at ${clockOf(date, true)}${day === 'today' ? '' : ` on ${day}`}`;
+  const when = day === 'today' ? '' : day === 'yesterday' ? ' yesterday' : ` on ${day}`;
+  return ` at ${clockOf(date, true)}${when}`;
 }
 
 /**
@@ -413,7 +414,8 @@ export function createCards(root, deps) {
         setText(where.value, row.dir ?? 'not known');
         // `selected` comes with the list that answers the page's view: until then nothing is said
         // about the command.
-        setHidden(command.line, selected === null);
+        // Nothing will run for an expired session, whatever command the server could build.
+        setHidden(command.line, selected === null || expired);
         setText(
           command.value,
           selected?.command ??

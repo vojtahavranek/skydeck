@@ -14,7 +14,7 @@ import type { Page } from 'playwright';
 
 import { prepareResumeById } from '../src/sessions/resume-by-id.ts';
 import { sleep } from '../test/helpers/keeper.ts';
-import { S1, S2 } from '../test/helpers/platform.ts';
+import { S1, S2, S3 } from '../test/helpers/platform.ts';
 import { readRecords } from '../test/helpers/standin.ts';
 import { connectTestPage } from '../test/helpers/window.ts';
 import { listKey, terminalKey, windowChord } from '../web/keys.js';
@@ -38,9 +38,10 @@ import {
 } from './helpers/shell.ts';
 import type { Launched, StandinConnection } from './helpers/shell.ts';
 
-/** 2026-11-13T09:00:00Z, the stand-in's `nowNs`. */
+/** 2026-11-12T09:00:00Z, the stand-in's `nowNs`. */
 const NOW_NS = 1794474000000000000n;
 const MINUTE_NS = 60_000_000_000n;
+const DAY_NS = 1440n * MINUTE_NS;
 
 type Row = Record<string, unknown>;
 
@@ -352,7 +353,9 @@ test('the right side', async (t) => {
       await showsText(s.page, '#cards .card-ended', /transcript is gone/);
       assert.equal(await button.isDisabled(), true, 'an expired session cannot be resumed');
       assert.deepEqual(await texts(s.page, '.card-hint'), [''], 'nothing opens: no hint');
-      assert.match((await texts(s.page, '.card-command'))[0] ?? '', /cannot/);
+      assert.deepEqual(await texts(s.page, '.card-command'), [''], 'nothing will run');
+      show({ command: null });
+      await showsText(s.page, '#cards .card-command', /cannot/);
     },
   );
 
@@ -676,6 +679,204 @@ test('the right side', async (t) => {
         assert.ok(performance.now() < deadline, 'a start on the new connection');
         await sleep(50);
       }
+    },
+  );
+
+  await t.test(
+    'the exact command, the directories, the terminal device and the lines are shown and copied with every space they have',
+    async (t) => {
+      const s = await scripted(t, chromium);
+      const dir = '/home/u/My  Project';
+      const command = `cd '${dir}' && claude --resume ${S1}  -n 'a  b'`;
+      s.answer.act = () => ({
+        ok: false,
+        lines: ['two  spaces'],
+        error: 'two  spaces',
+        sessionId: null,
+      });
+      s.serve(
+        listWith(
+          [
+            [
+              { id: S1, terminal: null, slot: null },
+              { id: S2, terminal: null, slot: null },
+            ],
+            [],
+          ],
+          {
+            rows: {
+              [S1]: { dir },
+              [S2]: { state: 'running', elsewhere: { pid: 5, tty: '/dev/pts/7  x', dir } },
+            },
+            list: { selected: selectedOf(S1, { command }) },
+          },
+        ),
+      );
+      await clickRow(s.page, S1);
+      await showsText(s.page, '#cards .card-command', /claude/);
+      const rendered = (selector: string): Promise<string[]> =>
+        s.page.evaluate(
+          (selector) =>
+            [...document.querySelectorAll(`#cards ${selector}`)].map((element) =>
+              element instanceof HTMLElement ? element.innerText : '',
+            ),
+          selector,
+        );
+      assert.deepEqual(await rendered('.card-command'), [command]);
+      assert.deepEqual(await rendered('.card-dir'), [dir]);
+      assert.deepEqual(await rendered('.header-dir'), [dir]);
+      await s.page.locator('#cards .card-command').click({ clickCount: 3 });
+      assert.equal(
+        await s.page.evaluate(() => getSelection()?.toString().replace(/\n$/, '')),
+        command,
+      );
+      await s.page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await showsText(s.page, '#cards .card-lines', /two/);
+      assert.deepEqual(await rendered('.card-lines'), ['two  spaces']);
+      await clickRow(s.page, S2);
+      await showsText(s.page, '#cards .card-where', /pid 5/);
+      assert.deepEqual(await rendered('.card-where'), ['pid 5 · /dev/pts/7  x']);
+    },
+  );
+
+  await t.test(
+    "the times on the right side by the page's clock: today, yesterday, an older day, another year",
+    async (t) => {
+      const s = await scripted(t, chromium);
+      await s.page.clock.setFixedTime(new Date(Number(NOW_NS / 1_000_000n)));
+      const card = (lastActivityNs: bigint): void =>
+        s.serve(
+          listWith([[{ id: S1, terminal: null, slot: null }], []], {
+            rows: { [S1]: { lastActivityNs: String(lastActivityNs) } },
+            list: { selected: selectedOf(S1) },
+          }),
+        );
+      card(NOW_NS - 90n * MINUTE_NS);
+      await clickRow(s.page, S1);
+      await showsText(s.page, '#cards .card-activity', /^today at 07:30$/);
+      card(NOW_NS - DAY_NS);
+      await showsText(s.page, '#cards .card-activity', /^yesterday at 09:00$/);
+      card(NOW_NS - 3n * DAY_NS);
+      await showsText(s.page, '#cards .card-activity', /^9 Nov at 09:00$/);
+      card(NOW_NS - 366n * DAY_NS);
+      await showsText(s.page, '#cards .card-activity', /^11 Nov 2025 at 09:00$/);
+
+      s.serve(
+        listWith(
+          [[{ id: S1, terminal: TERM_A, slot: null }], [{ id: TERM_A, slot: null, sessionId: S1 }]],
+          { terminals: { [TERM_A]: { state: 'ended' } } },
+        ),
+      );
+      await s.page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      const exit = (atNs: bigint): void =>
+        s.conn().send({
+          t: 'exit',
+          term: TERM_A,
+          code: 0,
+          signal: null,
+          atNs: String(atNs),
+          lost: false,
+          notStarted: null,
+        });
+      exit(NOW_NS + 5n * MINUTE_NS + 7_000_000_000n);
+      await showsText(s.page, '#cards .card-ended', /^claude exited \(status 0\) at 09:05:07$/);
+      exit(NOW_NS - DAY_NS);
+      await showsText(
+        s.page,
+        '#cards .card-ended',
+        /^claude exited \(status 0\) at 09:00:00 yesterday$/,
+      );
+      exit(NOW_NS - 3n * DAY_NS);
+      await showsText(
+        s.page,
+        '#cards .card-ended',
+        /^claude exited \(status 0\) at 09:00:00 on 9 Nov$/,
+      );
+    },
+  );
+
+  await t.test(
+    'every server string of the header and the cards reaches the page as text, never as markup',
+    async (t) => {
+      const s = await scripted(t, chromium);
+      const img = '<img src=x>';
+      s.answer.act = () => ({
+        ok: false,
+        lines: [`no ${img}`],
+        error: `no ${img}`,
+        sessionId: null,
+      });
+      const noMarkup = async (where: string): Promise<void> => {
+        assert.equal(await s.page.locator('#cards img, #cards b').count(), 0, where);
+      };
+      s.serve(
+        listWith(
+          [
+            [
+              { id: S1, terminal: null, slot: null },
+              { id: S2, terminal: null, slot: null },
+              { id: S3, terminal: TERM_A, slot: 1 },
+            ],
+            [{ id: TERM_A, slot: 1, sessionId: S3 }],
+          ],
+          {
+            rows: {
+              [S1]: {
+                title: `t ${img}`,
+                group: `<b>g</b>`,
+                stateDetail: `<b>d</b>`,
+                dir: `/d/${img}`,
+                chip: { level: `<b>x</b>`, count: 2 },
+              },
+              [S2]: {
+                state: 'running',
+                elsewhere: { pid: 9, tty: `/dev/${img}`, dir: `/e/${img}` },
+              },
+              [S3]: { title: `t3 ${img}` },
+            },
+            terminals: { [TERM_A]: { state: 'not-started' } },
+            list: {
+              selected: selectedOf(S1, { command: `claude ${img}`, unknownFlags: [`--${img}`] }),
+              dirs: [`/dirs/${img}`],
+            },
+          },
+        ),
+      );
+      await clickRow(s.page, S1);
+      await showsText(s.page, '#cards .card-command', /img/);
+      await noMarkup('the header and the resume card');
+      await s.page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await showsText(s.page, '#cards .card-lines', /no <img src=x>/);
+      await noMarkup('a refusal on the card');
+      await clickRow(s.page, S2);
+      await showsText(s.page, '#cards .card-where', /img/);
+      await noMarkup('the elsewhere card');
+      await clickRow(s.page, S3);
+      await s.page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      s.conn().send({
+        t: 'exit',
+        term: TERM_A,
+        code: null,
+        signal: null,
+        atNs: String(NOW_NS),
+        lost: false,
+        notStarted: `no ${img}`,
+      });
+      await showsText(s.page, '#cards .card-ended', /^not started: no <img src=x>$/);
+      await noMarkup('the ended bar');
+      await s.page.keyboard.press('Control+Shift+N');
+      await s.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await s.page.locator('#cards button', { hasText: 'Start' }).click();
+      await showsText(s.page, '#cards .card-new', /no <img src=x>/);
+      await noMarkup('the new form');
+      assert.deepEqual(
+        await s.page.evaluate(() =>
+          [...document.querySelectorAll('#cards datalist option')].map(
+            (o) => (o as HTMLOptionElement).value,
+          ),
+        ),
+        ['/dirs/<img src=x>'],
+      );
     },
   );
 
