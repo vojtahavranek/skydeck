@@ -761,9 +761,9 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   closes the connection at its send cap and goes on reading the pty; the server reconnects and
   takes the rest from the tail (gap and redraw if the tail overflowed meanwhile). The memory of a
   terminal stays bounded, and the program is never paused (stage A's plan, task 16, review 2).
-  Reconnections to one keeper are at most one a second, except after a connection the server had
-  stopped reading (the keeper closed it because the server fell behind): that one is claimed again
-  at once. A claim whose tail stops coming (no frame for 10 s while the server reads) counts as a
+  Reconnections to one keeper are at most one a second, except after a claim that fell behind (the
+  server had stopped reading it, and did not end it itself for a frame it refuses): that one is
+  claimed again at once. A claim whose tail stops coming (no frame for 10 s while the server reads) counts as a
   lost connection. A gap found after such a cycle is shown as "part of this terminal's output was
   skipped: it came faster than skydeck could show it". Known limit: input written in the short
   moment between the keeper closing a claim and the server noticing it is lost, and `full` is

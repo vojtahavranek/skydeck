@@ -1043,14 +1043,20 @@ describe('registry: a claim that fell behind a flood (ruled, K1)', () => {
         conn.send('G', ''); // a frame no keeper sends: this claim fails at once
       else conn.send('D', 'one\r\n');
     });
-    const r = box.registry({ platform: marked(box), slowWriteMs: 100 });
+    // Fast enough that the fell-behind claim's end is seen well inside the second.
+    const r = box.registry({ platform: marked(box), slowWriteMs: 10 });
     await r.registry.rediscover();
     await until(() => fb.conns.length === 2 && fo.conns.length === 2, 'both claimed again', 10_000);
     const again = (f: { conns: FakeConn[] }): number =>
       (f.conns[1]?.at ?? 0) - (f.conns[0]?.at ?? 0);
-    assert.ok(again(fb) < 900, `fell behind: claimed again after ${Math.round(again(fb))} ms`);
+    // Decided by the order and by a wide margin on each side, never by a narrow band.
     assert.ok(
-      again(fo) >= 950,
+      (fb.conns[1]?.at ?? 0) < (fo.conns[1]?.at ?? 0),
+      'the claim that fell behind is claimed again first',
+    );
+    assert.ok(again(fb) < 600, `fell behind: claimed again after ${Math.round(again(fb))} ms`);
+    assert.ok(
+      again(fo) >= 900,
       `failed otherwise: claimed again after ${Math.round(again(fo))} ms`,
     );
   });
@@ -1126,5 +1132,32 @@ describe('registry: waiting while the server does not read (K3)', () => {
     await r.registry.stopAll();
     const took = performance.now() - began;
     assert.ok(took < 1500, `stopAll took ${Math.round(took)} ms`);
+  });
+});
+
+describe('registry: a keeper that lies about falling behind (review 2, X1)', () => {
+  test('a claim the server drops itself is reclaimed at most once a second, even after a pause', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000014';
+    const high = 128 * 1024;
+    const fake = await scriptedKeeper(t, box, id, (conn, n) => {
+      // Every claim: four new records (256 KiB, past the mark, so reading pauses), then a frame no
+      // keeper sends, so that the server drops the claim itself.
+      const first = 4 * n + 1;
+      conn.send('H', helloOf(box, id, { seq: 4 * n + 4, tailFrom: first, gap: n > 0 }));
+      for (let i = first; i < first + 4; i++) {
+        conn.send('D', `rec ${i}\r\n${'x'.repeat(64 * 1024)}`);
+      }
+      conn.send('G', '');
+    });
+    const platform: Platform = {
+      ...box.tp.platform,
+      env: { ...box.tp.platform.env, SKYDECK_TEST_BACKLOG_BYTES: String(high) },
+    };
+    const r = box.registry({ platform, slowWriteMs: 5 });
+    await r.registry.rediscover();
+    await sleep(3000);
+    assert.ok(fake.conns.length <= 5, `${fake.conns.length} claims in 3 s`);
+    assert.ok(fake.conns.length >= 2, 'it is claimed again');
   });
 });

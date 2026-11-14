@@ -254,6 +254,17 @@ export function createRegistry(deps: RegistryDeps): Registry {
   const log = (id: string, kind: string): void => {
     deps.log(`terminal ${id}: ${kind}`);
   };
+  /**
+   * The server ends a claim itself (a frame it refuses, no hello, a stalled tail): logged once
+   * while it repeats, and never reconnected to at once as a claim that fell behind is (ruled,
+   * review 2: a keeper that lies must not get many claims a second that way).
+   */
+  const drop = (term: Term, claim: Claim | null, kind: string): void => {
+    if (claim === null) return;
+    claim.fellBehind = false;
+    note(term, kind);
+    claim.link.destroy();
+  };
   /** A claim's problem, logged once while the same one repeats (a keeper that keeps failing). */
   const note = (term: Term, kind: string): void => {
     if (term.note !== kind) {
@@ -356,8 +367,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
       const parsed = parseResize(frame.payload);
       if (!parsed.ok || parsed.value.cols > MAX_COLS || parsed.value.rows > MAX_ROWS) {
         // The keeper is only ever given clamped sizes: a larger one is not its record.
-        note(term, parsed.ok ? 'resize record too large' : `bad resize record (${parsed.kind})`);
-        term.claim?.link.destroy();
+        drop(
+          term,
+          term.claim,
+          parsed.ok ? 'resize record too large' : `bad resize record (${parsed.kind})`,
+        );
         return;
       }
       size = parsed.value;
@@ -561,6 +575,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
           if (claim !== null) onFrame(term, claim, frame);
         },
         refused: (kind) => {
+          if (claim !== null) claim.fellBehind = false; // the server ends it, as in drop()
           note(term, `keeper sent a frame the codec refuses (${kind})`);
         },
         closed: () => {
@@ -614,9 +629,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
           arm(helloMs);
           return;
         }
-        note(term, 'no hello');
         settle(false);
-        link.destroy();
+        drop(term, claim, 'no hello');
       });
     };
     arm(helloMs);
@@ -630,14 +644,12 @@ export function createRegistry(deps: RegistryDeps): Registry {
     claim.frames += 1;
     if (claim.phase === 'hello') {
       if (frame.type !== 'H') {
-        note(term, 'first frame not a hello');
-        claim.link.destroy();
+        drop(term, claim, 'first frame not a hello');
         return;
       }
       const parsed = parseHello(frame.payload);
       if (!parsed.ok) {
-        note(term, `bad hello (${parsed.kind})`);
-        claim.link.destroy();
+        drop(term, claim, `bad hello (${parsed.kind})`);
         return;
       }
       onHello(term, claim, parsed.value);
@@ -652,8 +664,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
         snap.cols > MAX_COLS ||
         snap.rows > MAX_ROWS
       ) {
-        note(term, 'bad snapshot');
-        claim.link.destroy();
+        drop(term, claim, 'bad snapshot');
         return;
       }
       claim.phase = 'records';
@@ -665,8 +676,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       return;
     }
     if (claim.phase === 'snapshot') {
-      note(term, 'snapshot missing');
-      claim.link.destroy();
+      drop(term, claim, 'snapshot missing');
       return;
     }
     if (claim.phase === 'maybe') {
@@ -710,22 +720,19 @@ export function createRegistry(deps: RegistryDeps): Registry {
         return;
       }
       default:
-        note(term, `unexpected frame ${frame.type}`);
-        claim.link.destroy();
+        drop(term, claim, `unexpected frame ${frame.type}`);
     }
   }
 
   function onHello(term: Term, claim: Claim, hello: KeeperHello): void {
     const id = term.info.id;
     if (hello.id !== id) {
-      note(term, 'hello of another terminal');
-      claim.link.destroy();
+      drop(term, claim, 'hello of another terminal');
       return;
     }
     if (hello.cols > MAX_COLS || hello.rows > MAX_ROWS) {
       // The keeper is only ever given clamped sizes (ruled): a larger one is not its own.
-      note(term, 'hello with a size above 1000 x 500');
-      claim.link.destroy();
+      drop(term, claim, 'hello with a size above 1000 x 500');
       return;
     }
     claim.hello = hello;
@@ -842,11 +849,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
       seen = claim.frames;
       if (idle >= TAIL_STALL_MS) {
         stop();
-        note(term, 'the tail stopped coming');
         const settle = claim.settle;
         claim.settle = null;
         settle(false);
-        claim.link.destroy();
+        drop(term, claim, 'the tail stopped coming');
       }
     });
     claim.stopIdle = stop;
