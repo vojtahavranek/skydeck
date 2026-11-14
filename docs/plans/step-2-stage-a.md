@@ -3011,7 +3011,9 @@ export function windowTerminal(deps: WindowTerminalDeps, size: { cols: number; r
 // src/window/starts.ts
 /** S2 7.3: for a keeper found with started false — refresh, then the guard (checkResumable on the
  *  refreshed row; for `new`, no live process holds the id) and the lock (still exactly the hello's
- *  `lock`), and the deadline. */
+ *  `lock`), and the deadline. Ruled by the plan owner (task 21, review 1): it never throws (a failure
+ *  while checking is a refusal naming it); a hello whose `started` is true or whose `exited` is set
+ *  is never started; a `new` is refused when the boot id cannot be read (checkResumable's words). */
 export function decideFoundKeeper(deck: Deck, hello: KeeperHello): { start: true } | { start: false; reason: string };
 /** S2 7.8: after an exit, when the session never reported a start for this launch (ingestSpool
  *  first, then resumeStarted with the lock's time and event id; for `new`, no event of the id):
@@ -3047,8 +3049,9 @@ which keeps each terminal's latest `hello` so that `settleEndedTerminal` gets it
 **Files**
 - Create: `src/window/window-terminal.ts`, `src/window/starts.ts`, `src/window/mapping.ts`
 - Test: `test/window/window-terminal.test.ts`, `test/window/starts.test.ts`, `test/window/mapping.test.ts`
+- Test helper (ruled by the plan owner, task 21): `test/helpers/window-deck.ts` — a deck and registries in one sandbox
 
-**Tests** (platform: `testDeck(t, { real: true })`; the stand-in as `claudeCommand`, real keepers through a registry)
+**Tests** (platform: `testDeck(t, { real: true })`; the stand-in as `claudeCommand`, real keepers through a registry; the pure cases of `mapTerminals` and of `decideFoundKeeper` / `settleEndedTerminal` on `testDeck(t)` with a fake `/proc`, ruled by the plan owner, task 21)
 - `launchPrepared(deck, prepareResumeById(deck, S1), windowTerminal(deps, { cols: 100, rows: 30 }))`
   → `{ code: 0 }`; the stand-in's `argv` is `buildResumeCommand`'s, its `cwd` the session's
   directory, its size 100 × 30; `prepareNew` with a directory and a label → `buildNewCommand`'s
