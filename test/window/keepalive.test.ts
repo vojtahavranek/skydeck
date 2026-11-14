@@ -1,0 +1,625 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import type { TestContext } from 'node:test';
+
+import { procStartFromStat } from '../../src/claude/procstat.ts';
+import { DEFAULT_CONFIG } from '../../src/platform/config.ts';
+import type { Detached, Platform, Proc } from '../../src/platform/types.ts';
+import type { Interop } from '../../src/window/interop.ts';
+import { createKeepAlive } from '../../src/window/keepalive.ts';
+import type { KeepAlive } from '../../src/window/keepalive.ts';
+import { formatPidLine } from '../../src/window/pidline.ts';
+import type { KeepAlivePayload } from '../../src/window/protocol.ts';
+import { runtimeFiles } from '../../src/window/runtime.ts';
+import type { RuntimeFiles } from '../../src/window/runtime.ts';
+import {
+  BOOT_A,
+  BOOT_B,
+  T0,
+  fakeClock,
+  fakeProcesses,
+  realTestPlatform,
+  statLine,
+  testPlatform,
+} from '../helpers/platform.ts';
+import type {
+  DetachedCall,
+  FakeClock,
+  FakeProc,
+  FakeProcesses,
+  TestPlatform,
+} from '../helpers/platform.ts';
+
+// The pure fake processes record wsl.exe's command line and start nothing (A32): no test here can
+// reach a Windows program, whatever the code under test does.
+
+const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
+const DISTRO = 'Ubuntu-24.04';
+const APP_ROOT = '/opt/skydeck';
+const LINK = '/run/user/1000/skydeck-0a1b2c3d/interop';
+/** The keep-alive script's pid inside WSL, and its process start. */
+const SCRIPT_PID = 777;
+const SCRIPT_START = 4242;
+
+/** A started wsl.exe whose end the test decides. */
+interface Child {
+  detached: Detached;
+  exit(code: number | null, signal?: string | null): void;
+}
+
+function child(pid: number): Child {
+  let settle: (value: { code: number | null; signal: string | null }) => void = () => {};
+  const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
+    settle = resolve;
+  });
+  return {
+    detached: { pid, exited },
+    exit: (code, signal = null) => {
+      settle({ code, signal });
+    },
+  };
+}
+
+/** An interop link that always holds `link`. */
+function fixedInterop(link: string | null): Interop {
+  return { refresh: () => Promise.resolve(link), current: () => link };
+}
+
+interface Setup {
+  tp: TestPlatform;
+  platform: Platform;
+  clock: FakeClock;
+  proc: FakeProc;
+  processes: FakeProcesses;
+  files: RuntimeFiles;
+  children: Child[];
+  keepAlive: KeepAlive;
+  /** Every state onChange gave, in order. */
+  changes: KeepAlivePayload[];
+}
+
+function setup(
+  t: TestContext,
+  options: {
+    mode?: 'wsl' | 'off';
+    env?: Record<string, string | undefined>;
+    /** Answers startDetached; default: a new Child each time, pids from 5001. */
+    handler?: (call: DetachedCall) => Detached | Promise<Detached>;
+    proc?: (proc: FakeProc) => Proc;
+  } = {},
+): Setup {
+  const tp = testPlatform(t, { env: { WSL_DISTRO_NAME: DISTRO, ...options.env } });
+  const children: Child[] = [];
+  const processes = fakeProcesses(
+    options.handler ??
+      (() => {
+        const started = child(5001 + children.length);
+        children.push(started);
+        return started.detached;
+      }),
+  );
+  const platform: Platform = {
+    ...tp.platform,
+    processes,
+    proc: options.proc?.(tp.proc) ?? tp.proc,
+  };
+  const dir = join(tp.sandbox.root, 'run');
+  mkdirSync(join(dir, 'terms'), { recursive: true, mode: 0o700 });
+  const files = runtimeFiles(dir);
+  const keepAlive = createKeepAlive({
+    platform,
+    window: { ...DEFAULT_CONFIG.window, keepAlive: options.mode ?? 'wsl' },
+    files,
+    appRoot: APP_ROOT,
+    interop: fixedInterop(LINK),
+  });
+  const changes: KeepAlivePayload[] = [];
+  keepAlive.onChange((state) => {
+    changes.push(state);
+  });
+  return {
+    tp,
+    platform,
+    clock: tp.clock,
+    proc: tp.proc,
+    processes,
+    files,
+    children,
+    keepAlive,
+    changes,
+  };
+}
+
+/** What the keep-alive script writes when it starts: its own live line. */
+function scriptWritesItsLine(s: Setup, pid = SCRIPT_PID, procStart = SCRIPT_START): void {
+  s.proc.setProcess(pid, { stat: statLine(pid, procStart, 'sh'), cmdline: ['/bin/sh'] });
+  writeFileSync(s.files.keepalivePid, formatPidLine({ pid, procStart, bootId: BOOT_A }));
+}
+
+/** The script ends: its process is gone and it removed its line. */
+function scriptEnds(s: Setup, pid = SCRIPT_PID): void {
+  s.proc.setProcess(pid, null);
+  rmSync(s.files.keepalivePid, { force: true });
+}
+
+/** Lets the callbacks of a settled `exited` run, as they would between two ticks. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
+function now(s: Setup): string {
+  return String(s.clock.nowNs());
+}
+
+function lastChild(s: Setup): Child {
+  const last = s.children.at(-1);
+  assert.ok(last !== undefined, 'a wsl.exe was started');
+  return last;
+}
+
+/** Advances to just before `ms` and ticks (no start), then to `ms` and ticks (a start). */
+async function startsAgainAfter(s: Setup, ms: number): Promise<void> {
+  const before = s.processes.calls.length;
+  s.clock.advanceMs(ms - 1);
+  await s.keepAlive.tick();
+  assert.equal(s.processes.calls.length, before, `no start before ${ms} ms`);
+  s.clock.advanceMs(1);
+  await s.keepAlive.tick();
+  assert.equal(s.processes.calls.length, before + 1, `a start after ${ms} ms`);
+  assert.equal(s.keepAlive.state().state, 'starting');
+}
+
+// ---------------------------------------------------------------------------------------------
+// Starting
+
+test('mode wsl with no keepalive.pid starts wsl.exe with the design arguments, detached, in /mnt/c', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  assert.equal(s.processes.calls.length, 1);
+  const [call] = s.processes.calls;
+  assert.ok(call !== undefined);
+  assert.equal(call.command, WSL_EXE);
+  assert.deepEqual(call.args, [
+    '-d',
+    DISTRO,
+    '-u',
+    'tester',
+    '--exec',
+    '/bin/sh',
+    `${APP_ROOT}/bin/skydeck-keepalive`,
+    s.files.dir,
+  ]);
+  assert.deepEqual(Object.keys(call.options).sort(), ['cwd', 'env']); // stdio ignored
+  assert.equal(call.options.cwd, '/mnt/c');
+  assert.equal(call.options.env.WSL_INTEROP, LINK);
+  assert.deepEqual(s.keepAlive.state(), {
+    mode: 'wsl',
+    state: 'starting',
+    since: now(s),
+    error: null,
+  });
+});
+
+test('a started keep-alive is running once its script has written a live line, and nothing more is started', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  await s.keepAlive.tick(); // no line yet: still starting, no second start
+  assert.equal(s.keepAlive.state().state, 'starting');
+  s.clock.advanceMs(1000);
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  assert.deepEqual(s.keepAlive.state(), {
+    mode: 'wsl',
+    state: 'running',
+    since: now(s),
+    error: null,
+  });
+  s.clock.advanceMs(60_000);
+  await s.keepAlive.tick();
+  assert.equal(s.processes.calls.length, 1);
+  assert.deepEqual(
+    s.changes.map((c) => c.state),
+    ['running'],
+  );
+});
+
+test('a live keepalive.pid (a keep-alive started before) starts nothing: running', async (t) => {
+  const s = setup(t);
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  await s.keepAlive.tick();
+  assert.deepEqual(s.processes.calls, []);
+  assert.deepEqual(s.keepAlive.state(), {
+    mode: 'wsl',
+    state: 'running',
+    since: now(s),
+    error: null,
+  });
+});
+
+test('a keepalive.pid naming a live process the test started (real /proc) starts nothing; its end does', async (t) => {
+  // The keep-alive's own processes stay the pure fake: only the test's `sleep` is real.
+  const real = realTestPlatform(t);
+  const sleep = await real.platform.processes.startDetached('sleep', ['30'], {
+    cwd: real.sandbox.home,
+    env: real.sandbox.env(),
+  });
+  t.after(() => {
+    real.platform.processes.signal(sleep.pid, 'SIGKILL'); // false once it is gone
+  });
+  const stat = real.proc.stat(sleep.pid);
+  const procStart = stat === null ? null : procStartFromStat(stat);
+  const bootId = real.proc.bootId();
+  assert.ok(procStart !== null && bootId !== null);
+
+  const dir = join(real.sandbox.root, 'run');
+  mkdirSync(join(dir, 'terms'), { recursive: true, mode: 0o700 });
+  const files = runtimeFiles(dir);
+  writeFileSync(files.keepalivePid, formatPidLine({ pid: sleep.pid, procStart, bootId }));
+  const processes = fakeProcesses();
+  const clock = fakeClock(T0);
+  const keepAlive = createKeepAlive({
+    platform: {
+      ...real.platform,
+      clock,
+      processes,
+      env: { ...real.platform.env, WSL_DISTRO_NAME: DISTRO },
+    },
+    window: { ...DEFAULT_CONFIG.window, keepAlive: 'wsl' },
+    files,
+    appRoot: APP_ROOT,
+    interop: fixedInterop(LINK),
+  });
+  await keepAlive.tick();
+  assert.equal(keepAlive.state().state, 'running');
+  assert.equal(processes.calls.length, 0);
+
+  real.platform.processes.signal(sleep.pid, 'SIGKILL');
+  await sleep.exited;
+  await keepAlive.tick();
+  assert.equal(keepAlive.state().state, 'failed');
+  clock.advanceMs(5_000);
+  await keepAlive.tick();
+  assert.equal(processes.calls.length, 1);
+  assert.equal(processes.calls[0]?.command, WSL_EXE);
+});
+
+test('a keepalive.pid that cannot be judged counts as alive: nothing is started', async (t) => {
+  const cases: [string, (proc: FakeProc) => Proc][] = [
+    ['no boot id', (proc) => ({ ...proc, bootId: () => null })],
+    [
+      'a stat that cannot be read',
+      (proc) => ({
+        ...proc,
+        stat: () => {
+          throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+        },
+      }),
+    ],
+    ['a stat without a process start', (proc) => ({ ...proc, stat: () => '777 (sh) S 1' })],
+  ];
+  for (const [name, proc] of cases) {
+    const s = setup(t, { proc });
+    scriptWritesItsLine(s);
+    await s.keepAlive.tick();
+    assert.deepEqual(s.processes.calls, [], name);
+    assert.equal(s.keepAlive.state().state, 'running', name);
+  }
+});
+
+test('a keepalive.pid that cannot be read counts as alive: nothing is started', async (t) => {
+  const s = setup(t);
+  mkdirSync(s.files.keepalivePid); // reading it fails with EISDIR, not "missing"
+  await s.keepAlive.tick();
+  assert.deepEqual(s.processes.calls, []);
+  assert.equal(s.keepAlive.state().state, 'running');
+});
+
+test('a dead or garbled keepalive.pid does not hold a start back', async (t) => {
+  const cases: [string, (s: Setup) => void][] = [
+    [
+      'another boot',
+      (s) => {
+        s.proc.setProcess(SCRIPT_PID, { stat: statLine(SCRIPT_PID, SCRIPT_START), cmdline: [] });
+        writeFileSync(
+          s.files.keepalivePid,
+          formatPidLine({ pid: SCRIPT_PID, procStart: SCRIPT_START, bootId: BOOT_B }),
+        );
+      },
+    ],
+    [
+      'a gone pid',
+      (s) => {
+        writeFileSync(
+          s.files.keepalivePid,
+          formatPidLine({ pid: SCRIPT_PID, procStart: SCRIPT_START, bootId: BOOT_A }),
+        );
+      },
+    ],
+    [
+      'a reused pid',
+      (s) => {
+        s.proc.setProcess(SCRIPT_PID, { stat: statLine(SCRIPT_PID, 99), cmdline: [] });
+        writeFileSync(
+          s.files.keepalivePid,
+          formatPidLine({ pid: SCRIPT_PID, procStart: SCRIPT_START, bootId: BOOT_A }),
+        );
+      },
+    ],
+    [
+      'a garbled line',
+      (s) => {
+        writeFileSync(s.files.keepalivePid, 'not a pid line\n');
+      },
+    ],
+  ];
+  for (const [name, arrange] of cases) {
+    const s = setup(t);
+    arrange(s);
+    await s.keepAlive.tick();
+    assert.equal(s.processes.calls.length, 1, name);
+    assert.equal(s.keepAlive.state().state, 'starting', name);
+  }
+});
+
+test('a second tick while wsl.exe is being started starts no second one', async (t) => {
+  const answers: ((detached: Detached) => void)[] = [];
+  const s = setup(t, {
+    handler: () =>
+      new Promise<Detached>((resolve) => {
+        answers.push(resolve);
+      }),
+  });
+  const first = s.keepAlive.tick();
+  const second = s.keepAlive.tick();
+  for (const [i, answer] of answers.entries()) {
+    answer(child(5001 + i).detached);
+  }
+  await Promise.all([first, second]);
+  await s.keepAlive.tick();
+  assert.equal(s.processes.calls.length, 1);
+});
+
+// ---------------------------------------------------------------------------------------------
+// When it ends: notices and the retry schedule
+
+test('the started keep-alive gone at a tick: failed with the error through onChange', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  s.clock.advanceMs(10_000);
+  scriptEnds(s);
+  lastChild(s).exit(0);
+  await settle();
+  await s.keepAlive.tick();
+  const failed = s.keepAlive.state();
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.mode, 'wsl');
+  assert.equal(failed.since, now(s));
+  assert.ok(failed.error !== null && failed.error.includes('wsl.exe'), String(failed.error));
+  assert.deepEqual(
+    s.changes.map((c) => c.state),
+    ['running', 'failed'],
+  );
+  assert.deepEqual(s.changes.at(-1), failed);
+  // A tick while it is down changes nothing and says nothing.
+  s.clock.advanceMs(1000);
+  await s.keepAlive.tick();
+  assert.deepEqual(s.keepAlive.state(), failed);
+  assert.equal(s.changes.length, 2);
+});
+
+test('a keep-alive is restarted after 5 s, then 30 s, then every 5 minutes (fake clock)', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+
+  const endNow = async (): Promise<void> => {
+    scriptEnds(s);
+    lastChild(s).exit(1);
+    await settle();
+    await s.keepAlive.tick();
+    assert.equal(s.keepAlive.state().state, 'failed');
+  };
+
+  await endNow();
+  await startsAgainAfter(s, 5_000);
+  await endNow();
+  await startsAgainAfter(s, 30_000);
+  await endNow();
+  await startsAgainAfter(s, 300_000);
+  await endNow();
+  await startsAgainAfter(s, 300_000);
+  await endNow();
+  await startsAgainAfter(s, 300_000);
+  assert.equal(s.processes.calls.length, 6);
+});
+
+test('the error while it is down says how wsl.exe ended', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  lastChild(s).exit(1);
+  await settle();
+  await s.keepAlive.tick();
+  const { error } = s.keepAlive.state();
+  assert.ok(error !== null && error.includes('exit 1'), String(error));
+
+  await startsAgainAfter(s, 5_000);
+  lastChild(s).exit(null, 'SIGKILL');
+  await settle();
+  await s.keepAlive.tick();
+  const signalled = s.keepAlive.state().error;
+  assert.ok(signalled !== null && signalled.includes('SIGKILL'), String(signalled));
+});
+
+test('a keep-alive that ran for 5 minutes starts the schedule over at 5 s', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  for (const delay of [5_000, 30_000]) {
+    lastChild(s).exit(1);
+    await settle();
+    await s.keepAlive.tick();
+    await startsAgainAfter(s, delay);
+  }
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'running');
+  s.clock.advanceMs(300_000);
+  scriptEnds(s);
+  lastChild(s).exit(0);
+  await settle();
+  await s.keepAlive.tick();
+  await startsAgainAfter(s, 5_000);
+});
+
+test('a keep-alive that ran less than 5 minutes goes on with the schedule', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  s.clock.advanceMs(299_999);
+  scriptEnds(s);
+  lastChild(s).exit(0);
+  await settle();
+  await s.keepAlive.tick();
+  await startsAgainAfter(s, 5_000);
+  lastChild(s).exit(0);
+  await settle();
+  await s.keepAlive.tick();
+  await startsAgainAfter(s, 30_000);
+});
+
+test('a keep-alive found running whose line goes dead is restarted after 5 s', async (t) => {
+  const s = setup(t);
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'running');
+  scriptEnds(s);
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  await startsAgainAfter(s, 5_000);
+});
+
+test("the script's line of a wsl.exe that ended is not taken for a running keep-alive", async (t) => {
+  // wsl.exe ended (killed on the Windows side) while its script lives on: WSL is no longer held.
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  lastChild(s).exit(null, 'SIGTERM');
+  await settle();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  await startsAgainAfter(s, 5_000);
+  // The new script writes its own line; that one counts.
+  scriptWritesItsLine(s, SCRIPT_PID + 1, SCRIPT_START + 1);
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'running');
+});
+
+test("the script's line seen dead ends the keep-alive even before wsl.exe's end is seen", async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  scriptEnds(s);
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  await startsAgainAfter(s, 5_000);
+});
+
+test('a start that fails is failed with the reason and retried on the same schedule', async (t) => {
+  let fail = true;
+  const s = setup(t, {
+    handler: () => {
+      if (fail) {
+        throw Object.assign(new Error('spawn wsl.exe ENOENT'), { code: 'ENOENT' });
+      }
+      return child(6000).detached;
+    },
+  });
+  await s.keepAlive.tick();
+  const { state, error } = s.keepAlive.state();
+  assert.equal(state, 'failed');
+  assert.ok(error !== null && error.includes('ENOENT'), String(error));
+  assert.deepEqual(
+    s.changes.map((c) => c.state),
+    ['failed'],
+  );
+
+  /** Ticks just before `ms` (no start) and at `ms` (one start). */
+  const triesAgainAfter = async (ms: number): Promise<void> => {
+    const before = s.processes.calls.length;
+    s.clock.advanceMs(ms - 1);
+    await s.keepAlive.tick();
+    assert.equal(s.processes.calls.length, before, `no start before ${ms} ms`);
+    s.clock.advanceMs(1);
+    await s.keepAlive.tick();
+    assert.equal(s.processes.calls.length, before + 1, `a start after ${ms} ms`);
+  };
+  await triesAgainAfter(5_000); // fails again, with the same reason: nothing new to say
+  assert.equal(s.keepAlive.state().state, 'failed');
+  fail = false;
+  await triesAgainAfter(30_000);
+  assert.equal(s.keepAlive.state().state, 'starting');
+  assert.deepEqual(
+    s.changes.map((c) => c.state),
+    ['failed', 'starting'],
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Off, and no distribution
+
+test('mode off never starts anything and is off', async (t) => {
+  const s = setup(t, { mode: 'off' });
+  const off = { mode: 'off', state: 'off', since: null, error: null };
+  assert.deepEqual(s.keepAlive.state(), off);
+  for (let i = 0; i < 5; i++) {
+    await s.keepAlive.tick();
+    s.clock.advanceMs(300_000);
+  }
+  assert.deepEqual(s.processes.calls, []);
+  assert.deepEqual(s.keepAlive.state(), off);
+  assert.deepEqual(s.changes, []);
+});
+
+for (const [name, value] of [
+  ['unset', undefined],
+  ['empty', ''],
+] as const) {
+  test(`WSL_DISTRO_NAME ${name}: failed with a reason, nothing started, never retried`, async (t) => {
+    const s = setup(t, { env: { WSL_DISTRO_NAME: value } });
+    await s.keepAlive.tick();
+    const failed = s.keepAlive.state();
+    assert.equal(failed.mode, 'wsl');
+    assert.equal(failed.state, 'failed');
+    assert.ok(
+      failed.error !== null && failed.error.includes('WSL_DISTRO_NAME'),
+      failed.error ?? '',
+    );
+    for (let i = 0; i < 5; i++) {
+      s.clock.advanceMs(300_000);
+      await s.keepAlive.tick();
+    }
+    assert.deepEqual(s.processes.calls, []);
+    assert.deepEqual(s.keepAlive.state(), failed);
+  });
+}
+
+test('the state a listener gets is a copy: changing it changes nothing', async (t) => {
+  const s = setup(t);
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  const given = s.changes.at(-1);
+  assert.ok(given !== undefined);
+  given.state = 'off';
+  s.keepAlive.state().state = 'off';
+  assert.equal(s.keepAlive.state().state, 'running');
+});
