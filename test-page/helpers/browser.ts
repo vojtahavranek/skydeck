@@ -61,7 +61,9 @@ export async function browser(t: TestContext): Promise<Browser> {
   try {
     launched = await chromium.launch({
       headless: true,
-      env: s.env({ TMPDIR: tmp }),
+      // A time zone and a language no machine is likely to have: a page that is not made by
+      // newPage, which pins both, shows them at once.
+      env: s.env({ TMPDIR: tmp, TZ: 'Pacific/Kiritimati', LANG: 'cs_CZ.UTF-8' }),
       args: ISOLATION,
     });
   } catch (error) {

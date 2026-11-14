@@ -2656,7 +2656,8 @@ closes it in `t.after`; when Chromium is not installed it fails with exactly `Ch
 Playwright is not installed; run: npx playwright install chromium`. Ruled on #51, for tasks
 26–29: the file also exports that message as `NOT_INSTALLED` and `newPage(t, chromium)` (a page
 in a fresh browser context with `timezoneId: 'UTC'` and `locale: 'en-US'`, closed in `t.after`);
-Chromium runs with a sandbox's environment, `TMPDIR` points into the sandbox while Playwright
+Chromium runs with a sandbox's environment (with `TZ=Pacific/Kiritimati` and `LANG=cs_CZ.UTF-8`,
+so that a page made without `newPage` shows), `TMPDIR` points into the sandbox while Playwright
 launches it (so the profile and the artifacts are made there), and a page reaches nothing but
 `127.0.0.1` (`--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1` and
 `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`; section 0). A close that fails is
@@ -2680,16 +2681,17 @@ real — ruled on #51; Playwright)
   with the message above (checked by hand once; say so in the pull request), and `smoke.test.ts`
   pins it: `test-page/fixtures/launch.ts` run as a child `node --test` with the TAP reporter and
   that variable fails, its one `error:` line is exactly the message (ruled on #51).
-- Ruled on #51 (review 2): while Chromium runs, and after the whole file, no new name of
-  Playwright's or Chromium's (`playwright-…`, `playwright_…`, `.org.chromium.…`) is in the real
-  temporary directory (a listing compared with the one taken when the file started; nothing there
-  is removed), and the children's temporary directory stays empty; the browser process's
-  environment (read from `/proc`) has a sandbox's home and `TMPDIR` and no `DISPLAY` or
-  `WAYLAND_DISPLAY`; a page's time zone is UTC and its language `en-US`; a page served from
+- Ruled on #51 (review 2): the browser process (its pid from CDP `SystemInfo.getProcessInfo`)
+  has a sandbox's home and `TMPDIR` and no `DISPLAY` or `WAYLAND_DISPLAY` in its environment
+  (`/proc/<pid>/environ`), and its `--user-data-dir=` (`/proc/<pid>/cmdline`) lies in the
+  sandbox's temporary directory; a child run's `TMPDIR`, inside the test's sandbox, stays empty,
+  also when the launch fails; a page's time zone is UTC and its language `en-US` while Chromium
+  itself runs with `TZ=Pacific/Kiritimati` and `LANG=cs_CZ.UTF-8`; a page served from
   `127.0.0.1` cannot reach `localhost` by name nor listeners on `127.0.0.2` by `fetch`, a
   WebSocket or a STUN server of an `RTCPeerConnection` (nothing reaches the listeners);
   `test-page/fixtures/close-fails.ts`, a browser whose close fails, run as a child: its sandbox
-  is removed and the test fails with the close's error.
+  is removed and the test fails with the close's error. No test reads the real temporary
+  directory: a listing there failed whenever another program ran Playwright meanwhile (ruled).
 
 **Done when:** CI is green on both legs with the page leg on Node 24 only, and `npm run check`
 runs the page suite locally.

@@ -2227,8 +2227,11 @@ In the browser suite, besides those:
   (`chromium.launch()`), not `@playwright/test`: the repository keeps one test runner. Each of its
   files launches one headless Chromium (`test-page/helpers/browser.ts`) with a test sandbox's
   environment (another home, no display), with its and Playwright's temporary files (the
-  profile, the artifacts) inside the sandbox, so that even a killed run leaves them nowhere else,
-  and with its pages in the UTC time zone and the language `en-US`. A page under test reaches
+  profile, the artifacts) inside the sandbox, so that even a killed run leaves them nowhere else
+  (the tests read the browser's home, temporary directory and profile from `/proc`, and a launch
+  that fails leaves nothing outside its sandbox), and with its pages in the UTC time zone and the
+  language `en-US` (Chromium itself runs with another zone and language, so that a page made
+  otherwise shows). A page under test reaches
   nothing but `127.0.0.1`: no host name resolves, not even `localhost`, and neither `fetch`, a
   WebSocket nor WebRTC reaches another loopback address; the smoke test proves it against
   listeners on `127.0.0.2`. Its TypeScript is type-checked with the root project; the plain

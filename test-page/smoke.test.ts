@@ -7,7 +7,7 @@ import { createSocket } from 'node:dgram';
 import { mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -24,22 +24,14 @@ import { browser, newPage, NOT_INSTALLED } from './helpers/browser.ts';
 const checkout = fileURLToPath(new URL('../', import.meta.url)).replace(/\/$/, '');
 const FIXTURE = join(checkout, 'test-page/fixtures/xterm-smoke');
 
-/**
- * The temporary directory of this process, and what Playwright's and Chromium's names in it were
- * when this file started: the browser must add nothing there (another program on the machine
- * that adds such a name meanwhile would fail this file too; nothing here is ever removed).
- */
-const REAL_TMP = tmpdir();
-const browserTemporaries = (): string[] =>
-  readdirSync(REAL_TMP).filter((name) => /^(playwright[-_]|\.org\.chromium\.)/.test(name));
-const TEMPORARIES_BEFORE = browserTemporaries();
-const newTemporaries = (): string[] =>
-  browserTemporaries().filter((name) => !TEMPORARIES_BEFORE.includes(name));
+/** Where test/helpers/sandbox.ts makes a sandbox: the start of its root. */
+const SANDBOX_ROOTS = join(realpathSync(tmpdir()), 'skydeck-test-');
 
 /** Where Playwright finds its browsers for this process: a child in a sandbox has another home. */
-const BROWSERS =
+const BROWSERS = resolve(
   process.env.PLAYWRIGHT_BROWSERS_PATH ??
-  join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'ms-playwright');
+    join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'ms-playwright'),
+);
 
 /** What the page's main.js leaves in `window.smoke` once its terminal has taken the write. */
 interface Smoke {
@@ -145,12 +137,8 @@ test('the page suite: headless Chromium', async (t) => {
     assert.equal(await page.evaluate(() => 1 + 1), 2);
   });
 
-  await t.test('while Chromium runs, nothing of it is in the real temporary directory', () => {
-    assert.deepEqual(newTemporaries(), []);
-  });
-
   await t.test(
-    "Chromium runs with a sandbox's environment: another home, no display, its temporary directory in the sandbox",
+    "Chromium runs with a sandbox's environment: another home, no display, its temporary directory and its profile in the sandbox",
     async () => {
       const cdp = await chromium.newBrowserCDPSession();
       const { processInfo } = await cdp.send('SystemInfo.getProcessInfo');
@@ -169,11 +157,20 @@ test('the page suite: headless Chromium', async (t) => {
 
       const home = env.get('HOME') ?? '';
       assert.notEqual(home, homedir());
-      assert.ok(home.startsWith(join(realpathSync(REAL_TMP), 'skydeck-test-')), home);
+      assert.ok(home.startsWith(SANDBOX_ROOTS), home);
       assert.equal(env.get('SKYDECK_TEST_NO_WINDOWS'), '1');
       assert.equal(env.get('TMPDIR'), join(dirname(home), 'tmp'));
       assert.equal(env.get('DISPLAY'), undefined);
       assert.equal(env.get('WAYLAND_DISPLAY'), undefined);
+      // The profile Playwright made for it (in this process's temporary directory at the launch).
+      const profile = readFileSync(`/proc/${main.id}/cmdline`, 'utf8')
+        .split('\0')
+        .filter((arg) => arg.startsWith('--user-data-dir='));
+      assert.equal(profile.length, 1, String(profile));
+      assert.ok(
+        profile[0]?.startsWith(`--user-data-dir=${join(dirname(home), 'tmp')}/`),
+        String(profile),
+      );
     },
   );
 
@@ -328,8 +325,4 @@ test('a browser that fails to close: its sandbox is removed all the same, and th
   assert.equal(code, 1);
   assert.deepEqual(errorLines(stdout), ["error: 'the close failed on purpose'"]);
   assert.deepEqual(readdirSync(tmp), []);
-});
-
-test('the suite left nothing in the real temporary directory', () => {
-  assert.deepEqual(newTemporaries(), []);
 });
