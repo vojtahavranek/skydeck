@@ -2504,7 +2504,7 @@ test('the page shell', async (t) => {
   );
 
   await t.test(
-    'a held chord acts once, at its first keydown: Ctrl+Shift+L and Ctrl+Shift+H do not flip again at their auto-repeats (Z1, C2)',
+    'a held chord acts once, at its first keydown: Ctrl+Shift+L and Ctrl+Shift+H, from the terminal and from the list, do not flip again at their auto-repeats (Z1, C2)',
     async (t) => {
       const w = await keysWorld(t, 'textarea-view.js');
       const { page } = w;
@@ -2519,11 +2519,19 @@ test('the page shell', async (t) => {
         await page.keyboard.up('Control');
         await sleep(200);
       };
+      const help = page.locator('#help');
       await toZone(page, 'terminal');
       await hold('KeyL');
-      assert.equal(await zone(page), 'Focus: list', 'the zone flipped once');
+      assert.equal(await zone(page), 'Focus: list', 'from the terminal: the zone flipped once');
+      await hold('KeyL');
+      assert.equal(await zone(page), 'Focus: terminal', 'from the list: the zone flipped once');
       await hold('KeyH');
-      assert.equal(await page.locator('#help').isHidden(), false, 'the help opened once');
+      assert.equal(await help.isHidden(), false, 'from the terminal: the help opened once');
+      await page.keyboard.press('Control+Shift+H');
+      await page.waitForSelector('#help[hidden]', { state: 'attached' });
+      await toZone(page, 'list');
+      await hold('KeyH');
+      assert.equal(await help.isHidden(), false, 'from the list: the help opened once');
     },
   );
 
