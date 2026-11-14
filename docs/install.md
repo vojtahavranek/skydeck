@@ -715,8 +715,9 @@ effect.
 - **A paste larger than the program takes.** While a program does not read its input, skydeck keeps
   only a few MiB of it waiting; what comes beyond that is not delivered, and the window says that
   not all of what you typed or pasted reached the program. After a paste the program can then be
-  left inside a bracketed paste (it takes what follows as pasted text, Enter included): paste a
-  short text again (its end closes the open paste), or end the input as that program allows.
+  left inside a bracketed paste (it takes what follows as pasted text, Enter included). skydeck
+  cannot close the open paste. A new paste sends a new end marker, which a program that follows the
+  bracketed-paste convention takes as the end; whether Claude Code does is not checked (W6).
 - **The command line does not use the window yet.** `skydeck resume`, `new` and `restore` start
   `claude` in the terminal you are in. After a WSL restart, resume the sessions one by one in the
   window (or run `skydeck restore` in a terminal, which brings them back there). A `skydeck resume`
