@@ -259,10 +259,19 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    that does not answer within 5 seconds is reported: `the window's server (pid <n>) does not
    answer; skydeck window --restart stops it` (exit 1). A socket that refuses, or a request that
    fails, is tried again every 100 ms within those 5 seconds — a server in its orderly stop (5.5)
-   no longer accepts connections but still lives for a moment — and a server that is gone
-   meanwhile counts as none. Otherwise a new one is started, and the command goes on only once
+   no longer accepts connections but still lives for a moment, and one that is starting listens a
+   moment after it writes `server.json` — and a server that is gone meanwhile counts as none. A
+   server that is **starting** holds the `window_server` lock (5.2) before it writes `server.json`:
+   while `server.json` is missing or names a dead process, a holder of the lock alive by design
+   5.5's rule is that server, and its `server.json` is waited for within the same 5 seconds, then
+   it is pinged in what is left of them; one that has not recorded itself by then is reported,
+   `the window's server (pid <n>) is starting and did not finish within 5 s; run skydeck window
+   again, or skydeck window --restart to replace it` (exit 1), never as "not running". A holder
+   that cannot be judged stops the command with the error of a `server.json` that cannot be
+   judged (`cannot tell whether the window's server (pid <n>) still runs: …`); nothing is signalled
+   or taken over on it. Otherwise a new one is started, and the command goes on only once
    that server can be found by the next command, its `server.json` written (5.2; ruled by the plan
-   owner, stage A's plan task 25).
+   owner, stage A's plan task 25 and the follow-up "server-findable").
 2. when no page is connected to the server, asks it for a launch token (`POST /token`, 8.3),
    starts Edge with it (5.3), and waits up to 30 seconds — a cold Edge on a managed PC can take
    several (W1 records the real time) — for the token to be used by a page (`GET /token/<id>`).
@@ -299,6 +308,12 @@ second window at every update. So before it stops a server the command reads tha
 (`GET /status`); when the server answered with more than 0 and the run is not `--new-secret` (the
 old windows are refused then), `--new-window` or `--print-url`, it waits up to 7 seconds — the
 page's longest retry interval is 5 (6.3) — for a page on the new server before it asks for a token.
+The new server answers, and has written `server.json`, before its start is done (5.2), so the 7
+seconds count from the end of its start: first the command waits while its `GET /status` says
+`starting`, at most until the start wait (10 seconds, begun when it started that server) is over —
+a server still starting then is not waited for any longer, and a new window's page waits out the
+503 with its token (8.2.2) — and only then for the page (ruled by the plan owner, follow-up
+"server-findable").
 A page that comes back in that time is "a page is already connected" (below): the same line and
 exit code, no token, no Edge. An old server that did not answer, or whose answer has no page count
 that can be read, counts as none: no wait (ruled by the plan owner, stage A's plan task 25).
@@ -323,14 +338,26 @@ Options:
   either, and SIGTERM is the same orderly stop, 5.5); one that does not end in time gets SIGTERM
   too. Either one, still running 5 seconds after SIGTERM, gets SIGKILL — each signal only once its pid, process start
   and boot id from `server.json` are confirmed alive at that moment, so no other process is ever
-  signalled. A `server.json` whose process cannot be judged (5.5's "unknown") stops the command
+  signalled. A server that is starting (step 1) is stopped the same way once it has recorded
+  itself within the 5 seconds — it gets the request, and makes its stop as soon as its start is
+  done (5.5); one that has not recorded itself by then, or that step 1 has just reported as
+  starting, gets SIGTERM at once and SIGKILL 5 seconds later, each only once the pid, process
+  start and boot id its `window_server` lock names are confirmed alive at that moment (ruled by
+  the plan owner, follow-up "server-findable"). A `server.json` whose process cannot be judged (5.5's "unknown") stops the command
   with that error: nothing is signalled or given up on it. The server is skydeck's own process
   (2); keepers and their programs are never signalled and keep running.
 - `--stop`: stop the server the same way and start nothing. Sessions in the window keep running in
   their keepers; windows say that the server is gone (6.3).
 - `--new-secret`: stop the server (which forgets every token), replace the secret (15.2), clear the
   alarm (8.2.2), start a server and a window. Windows opened before cannot connect any more and say
-  so; their stored key is replaced when the new window's token is used in the same profile.
+  so; their stored key is replaced when the new window's token is used in the same profile. The
+  secret is never replaced while a server of this installation lives: the replace, in one store
+  transaction, first reads the `window_server` lock, and while it names a holder alive by design
+  5.5's rule — a server another command started after the stop, whose tokens would outlive the
+  key — or one that cannot be judged, nothing changes, neither the secret nor the alarm: `skydeck's
+  key was not replaced: a window server (pid <n>) started meanwhile; run skydeck window
+  --new-secret again` (or, for one that cannot be judged, `…: cannot tell whether the window's
+  server (pid <n>) still runs: …`), exit 1 (ruled by the plan owner, follow-up "server-findable").
 
 `--stop` combines with no other option, and `--print-url` not with `--new-window`: either is a
 usage error (ruled by the plan owner, stage A's plan task 25).
@@ -366,13 +393,15 @@ it turns into one fixed line:
 | anything else, or no answer in 10 seconds | `the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log`; after a timeout the process is left running, and the next `skydeck window` finds it or reports it as not answering (5.1) |
 
 A ping counts only once `server.json` names the server that answered it — the same pid, server id
-and boot id, its process alive by design 5.5's rule — within the same 10 seconds: a server answers
-its ping before it writes `server.json`, and every other command (`--stop`, `--restart`,
-`--new-secret`, `doctor`, `uninstall`) finds a server by `server.json`, so a command that returned
-earlier would leave a server that the next command cannot see. One that answers but has not
-recorded itself in that time gives `the window's server (pid <n>) answers, but did not record itself
-in <server.json> within 10 s; see <stateDir>/server.log` (exit 1) and is left running (ruled by the
-plan owner, stage A's plan task 25).
+and boot id, its process alive by design 5.5's rule — within the same 10 seconds: every other
+command (`--stop`, `--restart`, `--new-secret`, `doctor`, `uninstall`) finds a server by
+`server.json`, so a command that returned earlier would leave a server that the next command cannot
+see. One that answers but has not recorded itself in that time gives `the window's server (pid <n>)
+answers, but did not record itself in <server.json> within 10 s; see <stateDir>/server.log` (exit 1)
+and is left running (ruled by the plan owner, stage A's plan task 25). Since a server writes
+`server.json` before `server.sock` answers (below), a server of this build has always recorded
+itself by the time it answers; the check stays for any server that does not (ruled by the plan
+owner, follow-up "server-findable").
 
 These codes are `serve`'s own; they never reach a user through another command. A store that
 another process keeps write-locked for longer than the server's 250 ms (14) fails the start at
@@ -403,10 +432,23 @@ names is not alive by design 5.5's rule; so a second server of the same installa
 port, `serve --foreground`, another checkout — does not start (`a window server already runs (pid
 <n>, from <checkout>)` on stderr; exit 0 when the running one is of the same checkout, 11
 otherwise), and only one server ever talks to the keepers of one runtime directory, which belongs
-to one store (4.2). Holding the lock, it takes its runtime directory (the record first, 4.2) and records it, binds the port, removes a
-`server.sock` that refuses connections (left by a dead server) and listens there, writes
-`server.json`, and removes the lock when it stops. A port held by anything else makes it release
-the lock and exit 10.
+to one store (4.2). Holding the lock, it takes its runtime directory (the record first, 4.2) and records it, binds the port, writes
+`server.json` and `server.pid`, removes a `server.sock` that refuses connections (left by a dead
+server) and listens there, and removes the lock when it stops. A port held by anything else makes
+it release the lock and exit 10; a start that fails after `server.json` was written removes it and
+`server.pid` before it gives the lock back.
+
+**A server that is starting can be found** from the moment it can answer (ruled by the plan owner,
+follow-up "server-findable"). It writes `server.json` before `server.sock` answers — everything the
+file holds is known once the port is bound — so a server that answers is always findable by its
+`server.json`; the rest of its start (the python3 check, the keepers found, the interop link, the
+first tick) follows, and pages are answered 503 until it is done (8.2.1). Before `server.json` is
+written only the lock names it, so every command — `skydeck window` with any option, `doctor`,
+`uninstall` — that finds no live process in `server.json` reads the lock: a holder alive by design
+5.5's rule is a server that is starting, and is waited for within the command's ping wait (5.1);
+one that cannot be judged is never taken for "no server" (the command stops with its error); a
+holder that is dead, of another boot, or a value skydeck does not write is no server. No command
+says that no server runs while a live server of this installation holds the lock.
 
 The port (configuration `window.port`, default 47613) is fixed because what a page keeps is kept
 per origin, and the origin includes the port: the notification permission (13) and the
@@ -488,13 +530,18 @@ page `bye` with the reason and then closes the port — after `bye` an upgrade w
 is answered 503 (8.2.1); parks a snapshot in every keeper (7.3) and closes its keeper connections
 (the keepers and their programs keep running); settles the terminals that ended since the last tick
 (7.8); removes `server.json` and `server.pid`; releases the `window_server` lock (5.2); and exits 0.
+A server whose start failed after it wrote `server.json` removes it and `server.pid` too before it
+releases the lock (ruled by the plan owner, follow-up "server-findable").
 The pages go before the park so that no page can type between the park and the close (ruled, plan
 task 23). A stop asked for before the server can stop is made as soon as it can, and one asked during
 its first tick starts the orderly stop at once; a second one during a stop is the same stop. It does not stop the keep-alive, which ends by itself
 (6.1). The three are the same stop, so a command that stops a server (5.1 `--restart`) sends
 SIGTERM instead of the request to one that does not answer `GET /ping`. A server that crashes
 leaves `server.json` and its lock behind: whoever reads them checks the pid, process start and
-boot id they name by design 5.5's rule before believing them.
+boot id they name by design 5.5's rule before believing them. A server that is still starting is
+stopped like one that runs (5.1 `--restart`): the request or SIGTERM it gets during its start is
+made as soon as its start is done; one that has not written `server.json` yet is found, and
+signalled, by the identity its lock names.
 
 ## 6. WSL lifetime
 
@@ -1379,7 +1426,7 @@ absolute and existing, no flag that picks a session or names it). The program is
 | Request | Answer |
 |---|---|
 | `GET /ping` | `{ serverId, bootId, build, protocol, pid, port, checkout }` (`checkout`: the checkout the server runs from, which 5.1 compares). |
-| `GET /status` | `{ pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin }` (`envOrigin`: where the server's environment came from and when, 5.2), for `skydeck window` and `doctor`. |
+| `GET /status` | `{ starting, pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin }` (`envOrigin`: where the server's environment came from and when, 5.2; `starting`: true while the server's start is not done and a page's upgrade is answered 503 (8.2.1) — a server answers before then, 5.2; a server of an older build sends none, which means false; ruled by the plan owner, follow-up "server-findable"), for `skydeck window` and `doctor`. |
 | `POST /resume` | `{ sessionId }` → `prepareResumeById` and the window terminal (11.2) → `{ code, lines }`: the exit code and the lines `skydeck resume` prints (design 7.6), refusals included. |
 | `POST /new` | `{ dir, label, group, flags }` (`flags` an array of strings) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
 | `POST /restore` | `{ sessionIds, all }` → 11.4. The answer is a stream of JSON lines: one per report line of the run, the last one the outcome. |
@@ -2210,11 +2257,11 @@ are problems.
 | Check | `problem` when |
 |---|---|
 | python3 | `python3` is not found or is older than 3.9 (`info` instead when the window has never been used: no `window_secret`). A second line: `/usr/bin/python3`, through which the launcher sets the server's core limit (2), is missing or not executable. |
-| server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, is alive but does not answer, or answers `GET /ping` but not `GET /status`. |
+| server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2), or, while its `GET /status` says `starting`, `the window's server (pid <n>) is starting, from <checkout>, build <build>; run skydeck doctor again once it has started` (ruled by the plan owner, follow-up "server-findable"); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, is alive but does not answer, answers `GET /ping` but not `GET /status`, or is starting but has not written `server.json` within the 5 seconds of the ping wait (5.2: its `window_server` lock names it; `the window's server (pid <n>) is starting: it holds the window_server lock but has not written <server.json> within 5 s; see <stateDir>/server.log; skydeck window --restart stops it`; ruled by the plan owner, follow-up "server-findable"). |
 | port | something that is not this installation's server answers on `127.0.0.1:<window.port>`: `/proc/net/tcp` or `tcp6` lists a listener on that port and no server of this installation is alive: one that answers `GET /ping` holds it, and while one is alive but does not answer, or cannot be judged, the port is most likely its own (`info`; the server's own line is the problem). `doctor` never binds the port, not even for an instant (a server starting at that moment would exit 10), and sends nothing to a foreign program. |
 | launch alarm | `window_alarm` is set: a launch token was presented twice at <time>, so another program may have skydeck's key (8.2.2); `run skydeck window --new-secret`. |
 | keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. Whether the keep-alive runs is the server's word when it answers; otherwise `doctor` judges it as the server judges one it did not start (6.1): its `keepalive.pid` line (one that cannot be read or judged is "cannot be told", never "not running"), and one connection, sending nothing, to the socket `keepalive.interop` names (refused or gone: its `wsl.exe` is gone; never a socket inside the runtime directory). The problem line names the setting and that it takes effect at the next WSL restart; it names `wsl --shutdown` only with what it does (6.1). |
-| interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. |
+| interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. While the server's `GET /status` says `starting` the link is pointed later in that start, so a link that is missing or points at nothing that answers is `info` then (ruled by the plan owner, follow-up "server-findable"). |
 | C: drive | the C: drive is not mounted at `/mnt/c`, where all of the window expects it (Edge's working directory, the keep-alive's `wsl.exe`, the users' folders of 5.4). |
 | Edge | `window.edge` does not exist or is not a file (`info` when the window has never been used). |
 | profile folder | it cannot be derived (5.4) and `window.profileDir` is not set. |
