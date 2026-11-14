@@ -2582,7 +2582,8 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
 **Files**
 - Create: `src/window/edge.ts`, `src/window/interop.ts`, `src/window/keepalive.ts`
 - Modify (ruled, task 19): `src/platform/real.ts` (`Files.remove` unlinks: Node.js 24.12's
-  `rmSync` left a dangling symbolic link in place), `test/platform/real.test.ts`; `docs/design-step-2.md`
+  `rmSync` left a dangling symbolic link in place), `src/platform/types.ts` (its JSDoc),
+  `test/platform/real.test.ts`; `docs/design-step-2.md`
   2, 5.3, 6.1, 6.4 (the rulings below)
 - Test: `test/window/edge.test.ts`, `test/window/interop.test.ts`, `test/window/keepalive.test.ts`
   (fake processes; never a Windows program)

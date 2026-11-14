@@ -394,8 +394,10 @@ When the program does not exist, `skydeck window` says `Edge was not found at <p
 window.edge in <config path>, or open the window in any browser with skydeck window --print-url`
 and exits 1. The server keeps running. A profile folder that would change how Edge splits its
 command line (2: a `"`, a control character, a backslash at the end — `C:\Users\Me Name\x\`) is
-not passed: `the Edge profile folder "<folder>" cannot be passed to Edge (a '"', a control
-character or a backslash at the end); set window.profileDir in <config path>`, exit 1. One that
+not passed: `the Edge profile folder <folder> cannot be passed to Edge (a '"', a control
+character or a backslash at the end); set window.profileDir in <config path>`, exit 1, where
+`<folder>` is written as a JSON string (backslashes doubled, `"` and control characters escaped,
+so that the line stays one line: `"C:\\Users\\Me Name\\x\\"`). One that
 cannot be derived (5.4) gives the derivation's error followed by ` in <config path>`; another
 failure to start Edge, `Edge could not be started from <path> (<reason>); open the window in any
 browser with skydeck window --print-url`.
