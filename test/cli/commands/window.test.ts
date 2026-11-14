@@ -40,6 +40,10 @@ import type { ServerSandbox } from '../../helpers/window.ts';
 
 const FAKE_EDGE = fileURLToPath(new URL('../../fixtures/fake-edge/msedge', import.meta.url));
 const FAKE_SERVE = fileURLToPath(new URL('../../fixtures/fake-serve/bin/skydeck', import.meta.url));
+/** The fixture app root whose bin/skydeck is the fake `serve` (task 22). */
+const FAKE_ROOT = realpathSync(
+  fileURLToPath(new URL('../../fixtures/fake-serve', import.meta.url)),
+);
 const REPOSITORY = realpathSync(fileURLToPath(new URL('../../../', import.meta.url)));
 /** window.profileDir of every test: nothing is derived from a Windows folder. */
 const PROFILE = 'C:\\Users\\me\\AppData\\Local\\skydeck\\edge-profile';
@@ -534,6 +538,33 @@ describe('skydeck window: no server running (S2 5.1, 5.2, 5.3)', () => {
     assert.equal(h.asked('POST', '/token/drop').length, 1, 'the token is given up');
     const ping = await h.client().ping();
     assert.ok(typeof ping === 'object', 'the server keeps running');
+  });
+
+  test("a serve that exits: S2 5.2's line for its code, exit 1, Edge not started", async (t) => {
+    const h = windowHarness(t);
+    const config = `${h.d.s.skydeckHome}/config/config.json`;
+    const cases: [string, string][] = [
+      ['10', `port 47613 on 127.0.0.1 is used by another program; set window.port in ${config}`],
+      ['13', "the window's server is not started from inside a Claude Code session"],
+      [
+        '7',
+        `the window's server did not start (exit 7); see ${h.d.s.skydeckHome}/state/server.log`,
+      ],
+    ];
+    for (const [code, line] of cases) {
+      const r = await h.run([], {
+        env: { FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: code },
+        appRoot: FAKE_ROOT,
+      });
+      assert.equal(r.code, 1, code);
+      assert.equal(r.stderr, `skydeck: ${line}\n`, code);
+    }
+    assert.equal(h.edgeRuns().length, 0);
+    assert.deepEqual(
+      h.requests.filter((r) => r.path !== '/ping'),
+      [],
+      'no token asked for',
+    );
   });
 
   test('CLAUDECODE set: the refusal, exit 1, nothing started', async (t) => {
