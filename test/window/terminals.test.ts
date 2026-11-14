@@ -349,7 +349,13 @@ describe('registry: starts that fail', () => {
     assert.equal(error.kind, 'stopping');
     assert.deepEqual(r.registry.list(), []);
     assert.equal(r.spawned.length, 1, 'its keeper was started');
-    await until(() => existsSync(spec.socket), 'the keeper came up after all', 10_000);
+    // Its pid line, not only its socket (bound first): the cleanup's killKeepersIn finds keepers
+    // by their pid lines, and must not miss this one.
+    await until(
+      () => existsSync(box.files.termPid(spec.id)),
+      'the keeper came up after all (its pid line)',
+      10_000,
+    );
     // Before anything is spawned, a stopped registry still answers spawn-failed.
     const late = await r.registry.spawn(box.spec()).then(
       () => null,

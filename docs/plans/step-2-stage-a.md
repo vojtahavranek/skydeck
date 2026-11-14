@@ -158,7 +158,7 @@ more than one task edits, and who edits them, never two tasks of one wave:
 | `test/helpers/platform.ts`, `test/helpers/sandbox.ts` (A32), `test/helpers/deck.ts` | 5 (1) |
 | `src/claude/procstat.ts` | 8 (1) |
 | `src/sessions/resume.ts`, `src/sessions/restore.ts`, `src/cli/launching.ts` | 4 (1) |
-| `src/window/terminals.ts` | 16 (3) creates it; 21 (4) uses only the `Registry` API task 16 exports |
+| `src/window/terminals.ts`, `test/window/terminals.test.ts` | 16 (3) creates them; 21 (4) adds the `KeeperStartError` kind `'stopping'` and its test case (ruled, task 21's review 2) and otherwise only uses the `Registry` API task 16 exports |
 | `src/window/screen.ts`, `test/window/screen.test.ts` | 12 (2) creates them; 33 (3) edits them; 16 (3) only calls `createScreen` |
 | `test/keeper/limits.test.ts` | 9 (2) creates it; 20 (3) edits it (ruled on #51) |
 | `web/index.html`, `web/app.js`, `web/style.css` | 26 (6) only; tasks 27–29 own `web/list.*`, `web/terminal-view.*`, `web/cards.*`/`web/help.js` |
