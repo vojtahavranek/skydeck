@@ -156,7 +156,9 @@ interface Harness {
   /**
    * server.json once the server answering on server.sock has written it and its start is done
    * (untilStartDone: server.json comes before server.sock answers and pages are served only once
-   * the start is done; ruled, server-findable).
+   * the start is done; ruled, server-findable). For a REAL server only: it waits for the start's
+   * "listening on" line in server.log, which the fake serve never writes — a test of a fake serve
+   * waits for it with fakeServe() instead.
    */
   running(): Promise<ServerJson>;
   client(): ControlClient;
@@ -1959,6 +1961,27 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     );
     assert.deepEqual(tokensAsked(r), [], 'no token minted');
     assert.equal(h.edgeRuns().length, 1, 'Edge not started again');
+  });
+
+  test('--restart --new-window with a window open while the new server still starts: no wait for the start (it waits for no page either) — a token and Edge at once', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
+    assert.equal(first.code, 0, first.stderr);
+    slowServerStart(h, 12); // the start goes on at least 5 s after server.json
+
+    const r = await h.run(['--restart', '--new-window'], { env: { FAKE_EDGE_PAGE: 'once' } });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, SUCCESS);
+    assert.equal(h.edgeRuns().length, 2);
+    const stop = r.requests.findIndex((q) => q.method === 'POST' && q.path === '/shutdown');
+    const token = r.requests.findIndex((q) => q.method === 'POST' && q.path === '/token');
+    assert.ok(stop >= 0 && token > stop);
+    assert.deepEqual(
+      r.requests.slice(stop + 1, token).filter((q) => q.path === '/status'),
+      [],
+      'the new server was not asked whether its start is done',
+    );
   });
 
   test('--restart onto a server of an older build, whose /status says nothing of `starting`: done when it answers — no wait for its start', async (t) => {
