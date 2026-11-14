@@ -986,6 +986,43 @@ test('stopServer: a server that gives no ping answer gets SIGTERM at once, not a
   assert.ok(term.atMs - before < START_MS / 2, `SIGTERM after ${term.atMs - before} ms`);
 });
 
+test('stopServer with hungPid (ruled, task 25): the server the caller just found not answering gets no ping, SIGTERM at once', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  h.onSignal = (call) => {
+    if (call.signal === 'SIGTERM') fake.child.kill('SIGTERM');
+  };
+  const before = performance.now();
+  assert.deepEqual(
+    await stopServer(
+      h.deck,
+      { pingMs: 10_000, stopMs: START_MS, killMs: START_MS },
+      { hungPid: fake.pid },
+    ),
+    { stopped: true, keepers: 0 },
+  );
+  const [term] = h.signals;
+  assert.ok(term !== undefined && term.signal === 'SIGTERM');
+  assert.ok(term.atMs - before < 5000, `SIGTERM after ${term.atMs - before} ms, not after a ping`);
+});
+
+test('stopServer with a hungPid that server.json does not name: the server is pinged as without it', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  h.onSignal = (call) => {
+    if (call.signal === 'SIGTERM') fake.child.kill('SIGTERM');
+  };
+  const before = performance.now();
+  await stopServer(
+    h.deck,
+    { pingMs: 1000, stopMs: START_MS, killMs: START_MS },
+    { hungPid: fake.pid + 1 },
+  );
+  const [term] = h.signals;
+  assert.ok(term !== undefined);
+  assert.ok(term.atMs - before >= 900, `SIGTERM after the ping (${term.atMs - before} ms)`);
+});
+
 test('stopServer: a /status that cannot be read and a /shutdown cut off still stop a server that ends', async (t) => {
   const h = harness(t);
   const { child, line } = await liveSleep(t, h);

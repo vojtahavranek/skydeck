@@ -108,8 +108,9 @@ interface Result {
   stderr: string;
   /** The control requests of this run. */
   requests: Request[];
-  /** How long it took, in ms. */
+  /** How long it took, in ms, and when it started (performance.now()). */
   ms: number;
+  startedAt: number;
 }
 
 interface RunOptions {
@@ -130,8 +131,8 @@ interface Harness {
   started: StartedProgram[];
   /** Every control request the commands made, with its answer. */
   requests: Request[];
-  /** Every signal the commands sent, with whether it was allowed. */
-  signals: { pid: number; signal: string }[];
+  /** Every signal the commands sent, and when (performance.now()). */
+  signals: { pid: number; signal: string; atMs: number }[];
   run(args: string[], options?: RunOptions): Promise<Result>;
   edgeRuns(): EdgeRun[];
   presentations(): Presentation[];
@@ -269,7 +270,7 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
       return child;
     },
     signal(pid, signal) {
-      signals.push({ pid, signal });
+      signals.push({ pid, signal, atMs: performance.now() });
       if (!allowed(pid)) {
         throw new Error(`this test signals only its own processes, not ${pid}`);
       }
@@ -342,6 +343,7 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
         stderr: r.stderr,
         requests: requests.slice(before),
         ms: performance.now() - startedAt,
+        startedAt,
       };
     },
     edgeRuns: () =>
@@ -974,10 +976,30 @@ describe('--restart replaces any server (S2 5.1)', () => {
     assert.equal(r.stderr, restartLine(h));
     assert.match(r.stdout, SUCCESS);
     await exited;
-    assert.deepEqual(h.signals, [{ pid: fake.pid, signal: 'SIGTERM' }]);
+    assert.deepEqual(
+      h.signals.map(({ pid, signal }) => ({ pid, signal })),
+      [{ pid: fake.pid, signal: 'SIGTERM' }],
+    );
     assert.notEqual(h.server()?.pid, fake.pid);
     assert.ok(r.ms < 30_000, 'no wait for a page of a server that did not answer');
     assert.equal(h.edgeRuns().length, 1);
+  });
+
+  test('--restart: a server found not answering is not pinged again — SIGTERM within one ping wait (ruled, task 25)', async (t) => {
+    const h = windowHarness(t);
+    const fake = await h.fakeServe({ FAKE_SERVE_MODE: 'silent', FAKE_SERVE_CHECKOUT: REPOSITORY });
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { pingMs: 4000 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    const [term] = h.signals;
+    assert.ok(term !== undefined && term.pid === fake.pid && term.signal === 'SIGTERM');
+    const after = term.atMs - r.startedAt;
+    assert.ok(after >= 3900, `SIGTERM after findServer's ping (${after} ms)`);
+    assert.ok(after < 7000, `SIGTERM without a second ping (${after} ms; two would be 8000)`);
   });
 
   test('--restart replaces a server of another checkout', async (t) => {
@@ -1033,6 +1055,40 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     assert.ok(r.ms >= 3000, `waited for the page to come back (${r.ms} ms)`);
     assert.equal(tokensAsked(r).length, 1);
     assert.equal(h.edgeRuns().length, 2);
+  });
+
+  test('the old server answered /status with no page count that can be read: 0 pages, no wait; one with a page count: the wait', async (t) => {
+    const h = windowHarness(t);
+    await h.fakeServe({ FAKE_SERVE_CHECKOUT: REPOSITORY, FAKE_SERVE_PAGES: 'unreadable' });
+
+    const unreadable = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { reconnectMs: 60_000 },
+    });
+
+    assert.equal(unreadable.code, 0, unreadable.stderr);
+    assert.ok(unreadable.ms < 30_000, `no wait (${unreadable.ms} ms)`);
+    assert.equal(h.edgeRuns().length, 1);
+    const status = unreadable.requests.find((q) => q.path === '/status');
+    assert.equal(
+      (status?.answer?.body as { pages?: unknown } | undefined)?.pages,
+      -1,
+      'the fake answered a count the client refuses',
+    );
+  });
+
+  test('a fake old server with pages (the control for the case above): the command waits for them', async (t) => {
+    const h = windowHarness(t);
+    await h.fakeServe({ FAKE_SERVE_CHECKOUT: REPOSITORY, FAKE_SERVE_PAGES: '2' });
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { reconnectMs: 2500 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.ms >= 2500, `waited for the pages to come back (${r.ms} ms)`);
+    assert.equal(h.edgeRuns().length, 1);
   });
 
   test('no wait: an old server with no page, --new-window, --print-url, --new-secret', async (t) => {

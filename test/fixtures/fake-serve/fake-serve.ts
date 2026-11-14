@@ -19,6 +19,8 @@
 //   FAKE_SERVE_BOOT_ID      the boot id /ping reports (default: the current one; server.json
 //                           always carries the current one, so that its line stays alive)
 //   FAKE_SERVE_TERMINALS    how many terminals /status lists (default 0)
+//   FAKE_SERVE_PAGES        the pages /status reports (default 0); `unreadable`: -1, a count
+//                           the command line's client refuses
 //   FAKE_SERVE_ON_SHUTDOWN  exit (default): after answering, removes server.json, server.pid and
 //                           server.sock and exits 0; stay: answers and goes on
 // It writes one line to stdout and one to stderr at start (so that a test sees where they go)
@@ -119,8 +121,9 @@ async function serve(silent: boolean): Promise<void> {
     checkout,
   };
   const terminals = Number(env.FAKE_SERVE_TERMINALS ?? '0');
+  const pagesText = env.FAKE_SERVE_PAGES ?? '0';
   const status: StatusAnswer = {
-    pages: 0,
+    pages: pagesText === 'unreadable' ? -1 : Number(pagesText),
     terminals: Array.from({ length: terminals }, (_, i) => ({
       id: String(i).padStart(12, '0'),
       slot: i + 1,

@@ -407,10 +407,15 @@ function refusalReason(platform: Platform, dir: string): string | null {
  * Rejects with a SkydeckError when server.json cannot be read or its process cannot be judged,
  * when it names a process that is not the server's, when the keepers cannot be listed or the
  * system refuses a signal, and when the server outlives SIGKILL by `killMs`.
+ * `options.hungPid` (ruled, task 25): the pid of the server the caller has just found not
+ * answering (findServer's 'hung'); when server.json still names that pid, it is not pinged again
+ * and gets SIGTERM at once (S2 5.1), so that a command's stop does not wait the ping twice.
+ * Without it, or for another pid, the server is pinged as above.
  */
 export async function stopServer(
   deck: Deck,
   times: LifecycleTimes = {},
+  options: { hungPid?: number } = {},
 ): Promise<{ stopped: boolean; keepers: number }> {
   const { platform } = deck;
   const { pingMs, stopMs, killMs } = timesOf(times);
@@ -422,7 +427,8 @@ export async function stopServer(
   }
   const { line } = server;
   const client = controlClient(platform.net, files.serverSock);
-  if (typeof (await pingOnce(client, pingMs)) === 'object') {
+  const knownHung = options.hungPid !== undefined && options.hungPid === line.pid;
+  if (!knownHung && typeof (await pingOnce(client, pingMs)) === 'object') {
     await client.shutdown().catch((error: unknown) => {
       if (!(error instanceof SkydeckError)) throw error;
     });

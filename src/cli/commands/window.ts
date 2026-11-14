@@ -282,7 +282,8 @@ async function serverToUse(
     ctx.io.stderr(
       `skydeck: restarting the window's server for the new build; new sessions in the window get the environment of this shell (${sanitize(platform.cwd)})\n`,
     );
-    await stopServer(deck, times);
+    // One found not answering is not pinged again: SIGTERM at once (S2 5.1; ruled, task 25).
+    await stopServer(deck, times, found.kind === 'hung' ? { hungPid: found.pid } : {});
   }
   const started = await startServe(deck, times);
   if (!started.ok) {

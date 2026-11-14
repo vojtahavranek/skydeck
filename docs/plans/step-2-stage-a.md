@@ -1207,7 +1207,10 @@ export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: tr
  *  'alive' or 'unknown' (listKeeperLines), counted before the stop whether or not a server runs or
  *  answers — never the server's GET /status, which a hung server does not answer and which lists
  *  ended terminals. Task 24's "<n> terminals in the window keep running" (S2 16.2) shows it. */
-export function stopServer(deck: Deck, times?: LifecycleTimes): Promise<{ stopped: boolean; keepers: number }>;
+/** `options.hungPid` (ruled by the plan owner, task 25): the pid of the server the caller has just
+ *  found not answering (findServer's 'hung'); when server.json still names it, no ping is sent and
+ *  SIGTERM comes at once. Left out, or another pid: as above. */
+export function stopServer(deck: Deck, times?: LifecycleTimes, options?: { hungPid?: number }): Promise<{ stopped: boolean; keepers: number }>;
 
 // src/window/build.ts (task 14)
 /** sha256 over the sorted paths and contents of every file under bin/, src/, web/, vendor/ (A12), first 16 hex. */
