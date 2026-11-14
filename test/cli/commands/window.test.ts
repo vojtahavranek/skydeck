@@ -1158,7 +1158,10 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(r.ms >= 2500, `waited for the pages to come back (${r.ms} ms)`);
+    // Counted, not timed: without the wait a run looks at /status twice (the old server's pages,
+    // one look at the new one's), with it every 100 ms for 2.5 s.
+    const looks = r.requests.filter((q) => q.path === '/status').length;
+    assert.ok(looks >= 10, `waited for the pages to come back: ${looks} looks at /status`);
     assert.equal(h.edgeRuns().length, 1);
   });
 
@@ -1304,7 +1307,10 @@ describe('foreign text, test seams and fixtures (review 2 of task 25)', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.requests.find((q) => q.path === '/status')?.answer?.body, { pages: 2 });
-    assert.ok(r.ms >= 2500, `waited for the 2 pages (${r.ms} ms)`);
+    // Counted, not timed: without the wait a run looks at /status twice (the old server's pages,
+    // one look at the new one's), with it every 100 ms for 2.5 s.
+    const looks = r.requests.filter((q) => q.path === '/status').length;
+    assert.ok(looks >= 10, `waited for the 2 pages: ${looks} looks at /status`);
   });
 
   test("the fake Edge never knocks at the default port 47613 (the user's real server may listen there)", async (t) => {
