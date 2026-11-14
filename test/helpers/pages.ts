@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import WebSocket from 'ws';
 
+import type { Platform } from '../../src/platform/types.ts';
 import type { Store } from '../../src/store/store.ts';
 import {
   createTokens,
@@ -251,6 +252,8 @@ export async function startPages(
     portSeen?: number;
     /** Replaces the deck's store (e.g. one whose transaction throws). */
     store?: (store: Store) => Store;
+    /** Replaces the platform pages is given (the test platform's otherwise). */
+    platform?: (platform: Platform) => Platform;
   } = {},
 ): Promise<PagesFixture> {
   const d = testDeck(t);
@@ -278,7 +281,7 @@ export async function startPages(
   };
   let port = 0;
   const pages = createPages({
-    platform,
+    platform: options.platform === undefined ? platform : options.platform(platform),
     port: () => options.portSeen ?? port,
     store,
     tokens,

@@ -553,6 +553,27 @@ describe('pages: the checks at the upgrade', () => {
     assert.equal(welcome.proof, serverProof(f.secret, 'key', sN, cN, 'http://127.0.0.1'));
   });
 
+  test('an upgrade that fails inside is dropped and logged; the next one works', async (t) => {
+    let fail = true;
+    const f = await startPages(t, {
+      platform: (platform) => ({
+        ...platform,
+        randomBytes: (count) => {
+          if (fail) {
+            fail = false;
+            throw new RangeError('no randomness');
+          }
+          return platform.randomBytes(count);
+        },
+      }),
+    });
+    const broken = await connectPage(t, f);
+    assert.equal((await within('the close', broken.closed)).code, 1006);
+    assert.deepEqual(f.logs, ['page: the upgrade failed: RangeError']);
+    const client = await connectPage(t, f);
+    assert.equal((await client.nextText()).t, 'challenge');
+  });
+
   test('after bye an upgrade is refused with 503', async (t) => {
     const f = await startPages(t);
     await f.pages.bye('stopping');

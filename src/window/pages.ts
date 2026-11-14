@@ -718,20 +718,26 @@ export function createPages(deps: PagesDeps): Pages {
 
   return {
     upgrade(req, socket, head) {
-      const port = deps.port();
-      const refusal = refusalOf(req, port, stopping);
-      if (refusal !== null) {
-        refuse(socket, port, refusal);
-        return;
+      // node:http's 'upgrade' listener: a throw here would end the server.
+      try {
+        const port = deps.port();
+        const refusal = refusalOf(req, port, stopping);
+        if (refusal !== null) {
+          refuse(socket, port, refusal);
+          return;
+        }
+        // For bye: resolves when this socket is closed. All writes go through the WebSocket.
+        const closed = socket.closed
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              socket.once('close', () => resolve());
+            });
+        const ws = acceptWebSocket(req, socket, head, clock);
+        if (ws !== null) accept(ws, req.headers.origin as string, closed);
+      } catch (error) {
+        log(`page: the upgrade failed: ${errorKind(error)}`);
+        socket.destroy();
       }
-      // For bye: resolves when this socket is closed. All writes go through the WebSocket.
-      const closed = socket.closed
-        ? Promise.resolve()
-        : new Promise<void>((resolve) => {
-            socket.once('close', () => resolve());
-          });
-      const ws = acceptWebSocket(req, socket, head, clock);
-      if (ws !== null) accept(ws, req.headers.origin as string, closed);
     },
     count: () => open.size,
     lastFocused() {
