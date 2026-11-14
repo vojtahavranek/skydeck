@@ -762,7 +762,11 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   takes the rest from the tail (gap and redraw if the tail overflowed meanwhile). The memory of a
   terminal stays bounded, and the program is never paused (stage A's plan, task 16, review 2).
   Reconnections to one keeper are at most one a second; a claim whose tail stops coming (no frame
-  for 10 s while the server reads) counts as a lost connection.
+  for 10 s while the server reads) counts as a lost connection. Known limit: while it does not
+  read, the server cannot see that the keeper has closed the connection, so what it writes
+  meanwhile (input, a resize) is lost although `input` answered `ok`, until its next read or write
+  shows the close. It takes a burst of about 12 MiB faster than the screen side applies (the
+  4 MiB mark and the keeper's 8 MiB send cap).
 - **A claim that rebuilds.** A hello whose tail does not follow the screen the server holds (a
   first claim, or records lost for that screen) drops that screen at once; a page that attaches
   before the snapshot or the first record has made the new one waits for it, and gets the empty

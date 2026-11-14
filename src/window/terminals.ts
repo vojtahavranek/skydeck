@@ -588,13 +588,22 @@ export function createRegistry(deps: RegistryDeps): Registry {
       // A claim that settled and still stands a second later: a later problem is news again.
       if (term.claim === claim && claim.settle === null && claim.hello !== null) term.note = null;
     });
-    const cancel = clock.after(helloMs, () => {
-      if (claim !== null && claim.hello === null && term.claim === claim) {
+    // The hello's wait counts only time while the server reads: a claim started paused (the
+    // screen side still behind) cannot see its hello before the backlog drained.
+    let cancel = (): void => {};
+    const arm = (ms: number): void => {
+      cancel = clock.after(ms, () => {
+        if (claim === null || claim.hello !== null || term.claim !== claim) return;
+        if (term.paused) {
+          arm(helloMs);
+          return;
+        }
         note(term, 'no hello');
         settle(false);
         link.destroy();
-      }
-    });
+      });
+    };
+    arm(helloMs);
     const ok = await answered;
     cancel();
     return ok;
@@ -728,10 +737,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
       info.cols = hello.cols;
       info.rows = hello.rows;
       claim.phase = 'records';
-      setState(term, 'newer-keeper');
+      // The sinks get the notice before the change is announced: one that attaches inside the
+      // announcement has it from the state already, and must not get it twice.
+      info.state = 'newer-keeper';
       toAllSinks(term, (sink) => {
         sink.notice('newer-keeper', NEWER_TEXT);
       });
+      changed();
       term.claim = null;
       claim.link.destroy();
       emit('hello', () => events.hello(copy(term), hello, origin));
@@ -890,12 +902,14 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.forgotten) return;
       term.info.state = exit.notStarted === null ? 'ended' : 'not-started';
-      changed();
+      // The sinks first, then the announcement: a sink attached inside it has the exit from the
+      // state already (shown), and must not get it twice.
       toAllSinks(term, (sink) => {
         sink.exit(exit, false);
       });
-      emit('exited', () => events.exited(copy(term), exit, false));
       for (const restart of term.waiting.splice(0)) restart(); // over: attaches wait no more
+      changed();
+      emit('exited', () => events.exited(copy(term), exit, false));
       replayed(term, claim);
       // S2 8.1: the server has the exit; the keeper may end (7.8). Sent once the exit is applied
       // and the claim settled, so that the keeper's closing cannot cut the claim short.
@@ -1006,14 +1020,14 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.forgotten) return;
       term.info.state = 'lost';
-      changed();
       toAllSinks(term, (sink) => {
         sink.exit(exit, true);
       });
-      emit('exited', () => events.exited(copy(term), exit, true));
       // Attaches that waited for a screen this terminal will never get: the empty snapshot at
       // the known size, then the exit (restarted after the exit went out, so it comes once).
       for (const restart of term.waiting.splice(0)) restart();
+      changed(); // after the sinks, as in onExit
+      emit('exited', () => events.exited(copy(term), exit, true));
     });
   }
 
@@ -1387,6 +1401,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
             const cancel = clock.after(STOP_WAIT_MS, () => {
               claim.link.destroy();
             });
+            claim.link.resume(); // a socket that is not read never sees the keeper's close
             await claim.link.end();
             cancel();
           }

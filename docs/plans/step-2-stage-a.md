@@ -2442,7 +2442,10 @@ of records waiting for the screen side it pauses that socket, below 1 MiB it rea
 it); reconnect attempts to one keeper are at most one a second, the claim that just ended
 counting as one; a claim whose tail stops coming (no frame for 10 s while the server reads) is
 given up as a lost connection, so `rediscover` always settles; one exit per terminal (a second
-`X` only gets its `A`, sent once the exit is applied); an attach while a claim rebuilds the screen
+`X` only gets its `A`, at once, while the first `X`'s `A` follows the applied exit); a claim's
+wait for its hello, like the stall, counts only time while the server reads, and `stopAll`
+reads again before it closes; a sink attached inside the change that announces an exit or a
+newer keeper gets that exit or notice once; an attach while a claim rebuilds the screen
 waits for that screen, and a terminal that is over without one gives the empty screen at the
 known size, then its `exit`. Also ruled (review 1's check of the review-2 commit): a keeper's
 `hello`, `S` or `R` with a size above 1000 × 500 is refused and the claim closed (S2 8.1); the gap

@@ -926,3 +926,88 @@ describe('registry: after the exit, and a keeper lost before its screen', () => 
     assert.equal(r.log.filter((line) => line.endsWith('codec refuses (unknown-type)')).length, 1);
   });
 });
+
+describe('registry: what a sink attached inside a change gets', () => {
+  /** Attaches a mirror inside the first onChange call in which `when` holds for the terminal. */
+  function attachWhen(
+    r: TestRegistry,
+    box: RegistryBox,
+    id: string,
+    when: (state: string) => boolean,
+  ): () => Mirror | null {
+    let m: Mirror | null = null;
+    r.registry.onChange(() => {
+      const term = r.registry.list().find((x) => x.id === id);
+      if (m === null && term !== undefined && when(term.state)) {
+        m = mirror(box.modules);
+        assert.ok(r.registry.attach(id, m));
+      }
+    });
+    return () => m;
+  }
+
+  for (const end of ['ended', 'lost', 'newer-keeper'] as const) {
+    test(`a sink attached inside the change to ${end} gets the ${end === 'newer-keeper' ? 'notice' : 'exit'} once`, async (t) => {
+      const box = await registrySandbox(t);
+      const id =
+        end === 'ended' ? 'c0000000000c' : end === 'lost' ? 'c0000000000d' : 'c0000000000e';
+      let fake: { stop(): Promise<void> } | null = null;
+      fake = await scriptedKeeper(t, box, id, (conn) => {
+        if (end === 'newer-keeper') {
+          conn.send('H', helloOf(box, id, { protocol: 2 }));
+          return;
+        }
+        conn.send('H', helloOf(box, id));
+        setTimeout(() => {
+          if (end === 'ended') {
+            conn.send('D', 'bye\r\n');
+            conn.send('X', JSON.stringify({ code: 0, signal: null, atNs: '5', notStarted: null }));
+          } else {
+            void fake?.stop(); // the socket refuses from now on
+          }
+        }, 200);
+      });
+      const r = box.registry();
+      const got = attachWhen(r, box, id, (state) => state === end);
+      await r.registry.rediscover();
+      await until(() => (got()?.calls.length ?? 0) >= 2, `the sink attached at ${end}`, 10_000);
+      await sleep(300);
+      assert.deepEqual(got()?.calls, ['S', end === 'newer-keeper' ? 'n' : 'x']);
+    });
+  }
+});
+
+describe('registry: a claim that starts while the screen side is behind', () => {
+  test('starts without reading: the backlog stays within one read of the mark across the reconnect', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c0000000000f';
+    const high = 128 * 1024;
+    const record = (i: number): string => `rec ${i}\r\n${'x'.repeat(64 * 1024)}\r\n`;
+    await scriptedKeeper(t, box, id, (conn, n) => {
+      // Like a keeper: every claim gets the whole tail; the second one goes on to 12 records.
+      const last = n === 0 ? 10 : 12;
+      conn.send('H', helloOf(box, id, { seq: last }));
+      for (let i = 1; i <= last; i++) conn.send('D', record(i));
+    });
+    const platform: Platform = {
+      ...box.tp.platform,
+      env: { ...box.tp.platform.env, SKYDECK_TEST_BACKLOG_BYTES: String(high) },
+    };
+    // Slow enough that the backlog is still above the low mark when the reconnect comes (its
+    // attempt waits out the one-a-second rule).
+    const r = box.registry({ platform, slowWriteMs: 700 });
+    void r.registry.rediscover();
+    await until(() => r.maxBacklog() > high, 'past the mark: reading paused');
+    // The connection ends while the screen side is still behind: the next claim must not read.
+    r.sockets.at(-1)?.destroy();
+    await until(() => r.events.hello.length === 2, 'the reconnect');
+    const screen = r.terminals.at(-1);
+    assert.ok(screen);
+    await until(() => screenLines(screen).includes('rec 12'), 'all 12 records applied', 30_000);
+    assert.equal(r.terminals.length, 1, 'the screen went on');
+    assert.ok(
+      r.maxBacklog() <= high + 64 * 1024 + 8 * 1024,
+      `at most one read above the mark: ${r.maxBacklog()} bytes waited`,
+    );
+  });
+});
