@@ -1,0 +1,4 @@
+/* Test fixture: a copy of the placeholder web/terminal-view.css at 40f7886, kept so that the
+   page shell's tests do not change when the real file arrives; not developed further.
+   pinModules (test-page/helpers/shell.ts) serves it in its place. */
+/* The terminal view (S2 9, 12.6): task 28 fills this file. */

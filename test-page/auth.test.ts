@@ -13,7 +13,7 @@ import { controlClient } from '../src/window/client.ts';
 import { sleep } from '../test/helpers/keeper.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import type { StartedServer } from '../test/helpers/window.ts';
-import { browser, newPage } from './helpers/browser.ts';
+import { browser } from './helpers/browser.ts';
 import {
   assetBase,
   escape,
@@ -23,6 +23,8 @@ import {
   honest,
   PAGE_WAIT_MS,
   pageUrl,
+  pinnedPage,
+  unservedPins,
   RECORDER,
   shownText,
   showsText,
@@ -32,6 +34,10 @@ import {
   wrongProof,
 } from './helpers/shell.ts';
 import type { Logged } from './helpers/shell.ts';
+
+// ONE place for the whole file: these tests of the page's key run on the pinned minimal modules
+// (test-page/fixtures/minimal-*), so that the real modules of tasks 27–29 change nothing here.
+const newPage = pinnedPage;
 
 /** The vector of S2 8.2.2 (pinned by test/window/auth.test.ts with Node.js's crypto). */
 const VECTOR = {
@@ -412,6 +418,11 @@ test('the page and its key (S2 8.2.2)', async (t) => {
       },
     );
   }
+
+  // Last: every module this file pinned was served through the pin (helpers/shell.ts pinModules).
+  await t.test('every pinned module was served through the pin', () => {
+    assert.deepEqual(unservedPins(), []);
+  });
 });
 
 /** The functions of web/auth.js these tests call in the page. */
