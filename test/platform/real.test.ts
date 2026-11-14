@@ -1385,6 +1385,96 @@ describe('real net', () => {
     assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
   });
 
+  test('requestUnix with a signal that fires: the request is ended, its timer gone, an AbortError', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    let arrived = (): void => {};
+    const request = new Promise<void>((resolve) => (arrived = resolve));
+    let serverSide: import('node:net').Socket | null = null;
+    const listener = await net.listenHttp(
+      { path },
+      {
+        request: (req) => {
+          serverSide = req.socket;
+          arrived();
+        },
+      },
+    );
+    t.after(() => listener.close());
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    t.after(() => {
+      process.off('unhandledRejection', onUnhandled);
+    });
+    const timers = (): number =>
+      process.getActiveResourcesInfo().filter((kind) => kind === 'Timeout').length;
+    const before = timers();
+    const controller = new AbortController();
+    const pending = net.requestUnix(path, {
+      method: 'GET',
+      path: '/',
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    await request;
+    assert.equal(timers(), before + 1); // the request's timeout
+    assert.ok(serverSide !== null);
+    const closed = once(serverSide as import('node:net').Socket, 'close');
+    controller.abort();
+    await assert.rejects(pending, { name: 'AbortError' });
+    // The connection is gone on the server's side too; a request left open fails here, not hangs.
+    let guard: NodeJS.Timeout | undefined;
+    await Promise.race([
+      closed,
+      new Promise((_resolve, reject) => {
+        guard = setTimeout(() => reject(new Error('the connection was not closed')), 5000);
+      }),
+    ]);
+    clearTimeout(guard);
+    assert.equal(timers(), before);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  });
+
+  test('requestUnix with a signal already aborted sends nothing and rejects at once; one that fires after the answer changes nothing', async (t) => {
+    const s = sandbox(t);
+    const path = join(s.root, 'server.sock');
+    const { net } = realPlatform();
+    let requests = 0;
+    const listener = await net.listenHttp(
+      { path },
+      {
+        request: (_req, res) => {
+          requests += 1;
+          res.end('{"ok":true}');
+        },
+      },
+    );
+    t.after(() => listener.close());
+    const aborted = new AbortController();
+    aborted.abort();
+    await assert.rejects(
+      net.requestUnix(path, { method: 'GET', path: '/', timeoutMs: 5000, signal: aborted.signal }),
+      { name: 'AbortError' },
+    );
+    assert.equal(requests, 0);
+
+    const later = new AbortController();
+    const answer = await net.requestUnix(path, {
+      method: 'GET',
+      path: '/',
+      timeoutMs: 5000,
+      signal: later.signal,
+    });
+    later.abort();
+    assert.deepEqual(answer, { status: 200, body: { ok: true } });
+    assert.equal(requests, 1);
+  });
+
   test('onLine gets each line of a streamed body as it comes, and the body is then null', async (t) => {
     const s = sandbox(t);
     const path = join(s.root, 'server.sock');

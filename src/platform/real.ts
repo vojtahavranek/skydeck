@@ -505,9 +505,12 @@ function windowsGuard(always: boolean, ownEnv: Env): WindowsGuard {
 /** After a timeout with the child already gone: how long its last output may still take to arrive. */
 const PIPE_GRACE_MS = 100;
 
-/** What `run` rejects with when its signal fires: an Error named AbortError, as Node's own APIs use. */
-function abortError(): Error {
-  return new DOMException('the run was aborted', 'AbortError');
+/**
+ * What `run` and `requestUnix` reject with when their signal fires: an Error named AbortError, as
+ * Node's own APIs use.
+ */
+function abortError(what = 'run'): Error {
+  return new DOMException(`the ${what} was aborted`, 'AbortError');
 }
 
 function realRunner(guard: WindowsGuard): Runner {
@@ -817,12 +820,15 @@ function realNet(): Net {
       });
     },
     requestUnix(path, request) {
-      const { timeoutMs } = request;
+      const { timeoutMs, signal } = request;
       if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMER_MS) {
         // Node would wait 1 ms for such a timer: refused as Clock.after refuses it.
         return Promise.reject(
           new RangeError(`not a whole number of milliseconds a timer can wait: ${timeoutMs}`),
         );
+      }
+      if (signal?.aborted === true) {
+        return Promise.reject(abortError('request')); // nothing is sent
       }
       return new Promise((resolve, reject) => {
         const payload = request.body === undefined ? undefined : JSON.stringify(request.body);
@@ -842,10 +848,14 @@ function realNet(): Net {
         });
         let settled = false;
         let timer: NodeJS.Timeout | undefined;
+        const abort = (): void => {
+          fail(abortError('request'));
+        };
         const fail = (error: unknown): void => {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
             req.destroy();
             reject(error instanceof Error ? error : new Error(String(error)));
           }
@@ -854,9 +864,11 @@ function realNet(): Net {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
             resolve(answer);
           }
         };
+        signal?.addEventListener('abort', abort, { once: true });
         const arm = (): void => {
           clearTimeout(timer);
           timer = setTimeout(() => {

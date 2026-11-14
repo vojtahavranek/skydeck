@@ -625,6 +625,38 @@ test("ping against a server that never answers is 'timeout' after the given time
   assert.ok(elapsed >= 250 && elapsed < 4000, `${elapsed} ms`);
 });
 
+test("ping with a signal that fires is 'timeout' at once, and its connection is ended", async (t) => {
+  const c = await startControl(t);
+  const hung = join(c.files.dir, 'hung.sock');
+  const sockets: import('node:net').Socket[] = [];
+  const listener = await c.d.platform.net.listenHttp(
+    { path: hung },
+    { request: (req) => void sockets.push(req.socket) },
+  );
+  t.after(() => listener.close());
+  const controller = new AbortController();
+  const start = performance.now();
+  const pinged = controlClient(c.d.platform.net, hung).ping(10_000, controller.signal);
+  while (sockets.length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+  const closed = once(sockets[0] as import('node:net').Socket, 'close');
+  controller.abort();
+  assert.equal(await pinged, 'timeout');
+  let guard: NodeJS.Timeout | undefined;
+  await Promise.race([
+    closed,
+    new Promise((_resolve, reject) => {
+      guard = setTimeout(() => reject(new Error('the connection was not closed')), 5000);
+    }),
+  ]);
+  clearTimeout(guard);
+  assert.ok(performance.now() - start < 9000, `${performance.now() - start} ms`);
+
+  const aborted = new AbortController();
+  aborted.abort();
+  assert.equal(await controlClient(c.d.platform.net, hung).ping(5000, aborted.signal), 'timeout');
+  assert.equal(sockets.length, 1); // nothing was sent for the signal that had fired already
+});
+
 // ---------------------------------------------------------------------------------------------
 // The client alone (a fake Net)
 

@@ -256,7 +256,10 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    `the window's server runs from <checkout>; run skydeck window there, or skydeck window --restart
    here to replace it` (exit 1). One whose process is alive (`server.json`, design 5.5's rule) but
    that does not answer within 5 seconds is reported: `the window's server (pid <n>) does not
-   answer; skydeck window --restart stops it` (exit 1). Otherwise a new one is started.
+   answer; skydeck window --restart stops it` (exit 1). A socket that refuses, or a request that
+   fails, is tried again every 100 ms within those 5 seconds — a server in its orderly stop (5.5)
+   no longer accepts connections but still lives for a moment — and a server that is gone
+   meanwhile counts as none. Otherwise a new one is started.
 2. when no page is connected to the server, asks it for a launch token (`POST /token`, 8.3),
    starts Edge with it (5.3), and waits up to 30 seconds — a cold Edge on a managed PC can take
    several (W1 records the real time) — for the token to be used by a page (`GET /token/<id>`).
@@ -288,10 +291,14 @@ Options:
   keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab and their Shift forms (section 21), so the page shows a
   hint naming Ctrl+Shift+O for "previous session" and the "+ New" button.
 - `--restart`: stop the running server and start a new one; also a server of another checkout or
-  one that does not answer. Stopping: `POST /shutdown` (5.5), then wait until its process is gone
-  (at most 10 seconds); a server that does not answer, or does not end in time, gets SIGTERM and,
-  after 5 more seconds, SIGKILL — only once its pid, process start and boot id from `server.json`
-  are confirmed alive, so no other process is ever signalled. The server is skydeck's own process
+  one that does not answer. Stopping: a server that answers `GET /ping` is sent `POST /shutdown`
+  (5.5) and waited for until its process is gone (at most 10 seconds); a server that does not
+  answer the ping is sent no request and gets SIGTERM at once (it would not answer the request
+  either, and SIGTERM is the same orderly stop, 5.5); one that does not end in time gets SIGTERM
+  too. Either one, still running 5 seconds after SIGTERM, gets SIGKILL — each signal only once its pid, process start
+  and boot id from `server.json` are confirmed alive at that moment, so no other process is ever
+  signalled. A `server.json` whose process cannot be judged (5.5's "unknown") stops the command
+  with that error: nothing is signalled or given up on it. The server is skydeck's own process
   (2); keepers and their programs are never signalled and keep running.
 - `--stop`: stop the server the same way and start nothing. Sessions in the window keep running in
   their keepers; windows say that the server is gone (6.3).
@@ -316,7 +323,8 @@ tests may themselves run under Claude Code.
 
 **How `skydeck window` learns what happened.** It keeps the handle of the `serve` process it
 started and waits, at most 10 seconds, for the first of: `server.sock` answering `GET /ping` with
-the current boot id and build — started; or the process exiting, whose code says why, and which
+the current boot id, this checkout and the current build, as 5.1 compares them (two checkouts at
+the same commit have the same build) — started; or the process exiting, whose code says why, and which
 it turns into one fixed line:
 
 | `serve` exits | `skydeck window` says (exit 1) |
@@ -433,8 +441,10 @@ snapshot in every keeper (7.3); closes its keeper connections (the keepers and t
 running); sends every page `bye` with the reason; removes `server.json`, `server.pid` and
 `server.sock`; releases the `window_server` lock (5.2); and exits 0. After `bye`, an upgrade with
 the right `Host` is answered 503 (8.2.1). It does not stop the keep-alive, which ends by itself
-(6.1). A server that crashes leaves `server.json` and its lock behind: whoever reads them checks
-the pid, process start and boot id they name by design 5.5's rule before believing them.
+(6.1). The three are the same stop, so a command that stops a server (5.1 `--restart`) sends
+SIGTERM instead of the request to one that does not answer `GET /ping`. A server that crashes
+leaves `server.json` and its lock behind: whoever reads them checks the pid, process start and
+boot id they name by design 5.5's rule before believing them.
 
 ## 6. WSL lifetime
 
@@ -2095,7 +2105,9 @@ code allows; it is tested on 3.12, which Ubuntu 24.04 and the CI runners have.)
 Before what it does in step 1:
 
 - when a server runs, it stops it as `skydeck window --stop` does (5.1) and says `stopped skydeck's window server; <n>
-  terminals in the window keep running`. Keepers and their sessions are never stopped (2).
+  terminals in the window keep running`, where `<n>` counts the keepers whose `.pid` line is alive
+  or cannot be judged (4.2), read before the stop: a server that does not answer cannot say how
+  many it has. Keepers and their sessions are never stopped (2).
 - it names the Edge profile folder when one is configured or can be derived: `the window's Edge
   profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
