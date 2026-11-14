@@ -905,7 +905,8 @@ test('the right side', async (t) => {
           {
             rows: {
               [S1]: {
-                title: `t ${img}`,
+                title: `t \u0007 ${img}`,
+                shortId: '<b>s</b>',
                 group: `<b>g</b>`,
                 stateDetail: `<b>d</b>`,
                 dir: `/d/${img}`,
@@ -928,12 +929,20 @@ test('the right side', async (t) => {
       await clickRow(s.page, S1);
       await showsText(s.page, '#cards .card-command', /img/);
       await noMarkup('the header and the resume card');
+      // A control character reaches the page as the text it is (the server sanitises; the page
+      // never interprets).
+      assert.deepEqual(await texts(s.page, '.header-title'), [`t \u0007 ${img}`]);
+      assert.deepEqual(await texts(s.page, '.header-id'), ['<b>s</b>']);
       await s.page.locator('#cards button', { hasText: 'Resume here' }).click();
       await showsText(s.page, '#cards .card-lines', /no <img src=x>/);
       await noMarkup('a refusal on the card');
       await clickRow(s.page, S2);
       await showsText(s.page, '#cards .card-where', /img/);
       await noMarkup('the elsewhere card');
+      // The refusal app.js keeps for S1's card, shown again when S1 is selected again.
+      await clickRow(s.page, S1);
+      await showsText(s.page, '#cards .card-lines', /no <img src=x>/);
+      await noMarkup('the refusal kept for the card');
       await clickRow(s.page, S3);
       await s.page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
       s.conn().send({
@@ -947,6 +956,9 @@ test('the right side', async (t) => {
       });
       await showsText(s.page, '#cards .card-ended', /^not started: no <img src=x>$/);
       await noMarkup('the ended bar');
+      await s.page.locator('#cards .card-bar button', { hasText: 'Resume' }).click();
+      await showsText(s.page, '#cards .card-lines', /no <img src=x>/);
+      await noMarkup("the ended bar's refusal");
       await s.page.keyboard.press('Control+Shift+N');
       await s.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
       await s.page.locator('#cards button', { hasText: 'Start' }).click();
