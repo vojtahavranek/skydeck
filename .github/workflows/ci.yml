@@ -24,8 +24,8 @@ jobs:
           # The oldest Node the launcher accepts, on the newest Ubuntu.
           - node: '24.12'
             os: ubuntu-latest
-          # The newest 24.x, with the page suite: Playwright 1.60.0 installs Chromium's system
-          # libraries up to Ubuntu 24.04 (the development machine's) and refuses 26.04.
+          # The newest 24.x, with the page suite, on Ubuntu 24.04 (the development machine's):
+          # Playwright 1.60.0 has no Chromium for 26.04. Drop the pin when Playwright is upgraded.
           - node: '24'
             os: ubuntu-24.04
     name: check (node ${{ matrix.node }})
@@ -44,16 +44,18 @@ jobs:
       - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive
       - run: python3 -m py_compile bin/skydeck-keeper
       # The page suite (S2 17.4, 17.5): Node 24 only, with Chromium cached under the pinned
-      # Playwright's version.
-      - name: Read the Playwright version
+      # Playwright's version and the runner's system.
+      - name: Read the Playwright version and the system
         if: matrix.node == '24'
         id: playwright
-        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "system=$(. /etc/os-release && echo "$ID-$VERSION_ID")" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: matrix.node == '24'
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.system }}-${{ steps.playwright.outputs.version }}
       - if: matrix.node == '24'
         run: npx playwright install --with-deps chromium
       - if: matrix.node == '24'
