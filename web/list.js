@@ -48,11 +48,6 @@ export function createList(root, hooks) {
   /** @returns {RowPayload[]} */
   const rows = () => current?.sections.flatMap((section) => section.rows) ?? [];
 
-  /**
-   * @param {ListMessage | null} list
-   * @param {string | null} selectedId
-   * @param {Zone} zone
-   */
   /** The lines drawn, by key ('section:<name>', the row's id, 'footer'): kept across renders. */
   /** @type {Map<string, HTMLElement>} */
   const drawn = new Map();

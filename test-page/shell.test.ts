@@ -482,6 +482,8 @@ test('the page shell', async (t) => {
       await l.page.focus('#info-close');
       await l.page.keyboard.press('Enter');
       await l.page.waitForSelector('#info[hidden]', { state: 'attached' });
+      // Pressed from the keyboard, the × hid itself: the zone has the keyboard again.
+      assert.equal(await active(l.page), '#list');
     },
   );
 
@@ -1569,6 +1571,14 @@ test('the page shell', async (t) => {
       standin.connections[0]?.ws.terminate(); // the server restarted: the notice
       await showsText(page, '#info-text', RESTARTED);
       await connection(page, 'open');
+      // The page's view after the welcome has landed: only what the click and the typing cause
+      // comes after `before`.
+      await until(
+        () => standin.connections[1]?.received.some((text) => text.includes('"t":"view"')) === true,
+        "the second connection's view",
+        PAGE_WAIT_MS,
+      );
+      await sleep(300);
       const before = sent.length;
 
       await page.locator('#info-close').click();
@@ -1593,6 +1603,102 @@ test('the page shell', async (t) => {
         views.map((view) => [view['filter'], view['showDone']]),
         [['sea', false]],
         "only the filter's own view: no show-done toggled",
+      );
+    },
+  );
+
+  await t.test(
+    'a list that arrives between the mousedown and the mouseup on a row loses no click (contract 2.9, for task 27)',
+    async (t) => {
+      const secret = new Uint8Array(32).fill(19);
+      const page = await newPage(t, chromium);
+      const lists = (title: string): Record<string, unknown> =>
+        scriptedList(
+          [
+            { id: S1, terminal: null, slot: null, title },
+            { id: S2, terminal: null, slot: null },
+          ],
+          [],
+        );
+      let views = 0;
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          open: (conn, message) => {
+            if (message['t'] === 'view') {
+              views++;
+              conn.send(lists('first'));
+            }
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await until(() => views >= 2, 'the second view', PAGE_WAIT_MS);
+      await toZone(page, 'list');
+      const row = page.locator(`#list [data-id="${S2}"]`);
+      const box = await row.boundingBox();
+      assert.ok(box !== null);
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      standin.connections.at(-1)?.send(lists('changed while the button is down'));
+      await showsText(page, '#list', /changed while the button is down/);
+      await page.mouse.up();
+
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S2,
+        { timeout: 5000 },
+      );
+    },
+  );
+
+  await t.test(
+    "a click on a notice's text leaves the keyboard on nothing no longer: the zone takes it back, and the text can still be selected",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(20);
+      const page = await newPage(t, chromium);
+      const rows = scriptedList(
+        [{ id: S1, terminal: TERM_A, slot: 1 }],
+        [{ id: TERM_A, slot: 1, sessionId: S1 }],
+      );
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          serverId: (n) => `${n}`.repeat(16).slice(0, 16),
+          open: (conn, message) => {
+            if (message['t'] === 'view') conn.send(rows);
+            if (message['t'] === 'attach') {
+              conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
+            }
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await page.waitForSelector('#terminal .terminal-placeholder', { timeout: PAGE_WAIT_MS });
+      standin.connections[0]?.ws.terminate(); // the server restarted: the notice
+      await showsText(page, '#info-text', RESTARTED);
+      await connection(page, 'open');
+      assert.equal(await zone(page), 'Focus: terminal');
+
+      await page.locator('#info-text').dblclick(); // selects a word of the notice
+      await page.waitForFunction(
+        () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+        null,
+        { timeout: 5000 },
+      );
+      assert.notEqual(await page.evaluate(() => getSelection()?.toString() ?? ''), '');
+      await page.keyboard.press('Control+Shift+H'); // the key help, then a click into it
+      await page.locator('#help').click();
+      await page.waitForFunction(
+        () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+        null,
+        { timeout: 5000 },
       );
     },
   );

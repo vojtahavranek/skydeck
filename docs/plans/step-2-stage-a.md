@@ -1278,11 +1278,14 @@ export function cancels(e, zone, handled) {}
 // A render never loses a click on a row (task 27): app.js renders when a list arrives and when
 // only the zone changed — at the focus a mousedown on a row moves, before its mouseup —, so the
 // list keeps a row's element across renders (the placeholder does) or selects on pointerdown.
-// After every call into a module that can remove or hide things, app.js gives the keyboard to the
-// zone when its holder is gone or no longer visible (its container hidden), so the modules of
-// tasks 27-29 need no hook. The page's chrome (the title bar, the key bar, a notice's ×) takes no
-// keyboard on a mouse click, so a click there leaves it where the user was (ruled, review 2 of
-// task 26, round three).
+// At every render, and after each call it makes into a module, app.js gives the keyboard to the
+// zone when its holder is gone or no longer visible (its container hidden); so does a mouse click
+// that leaves it on nothing (a notice's text, the key help: checked after the click, so that text
+// stays selectable). A module that hides or removes its own keyboard holder in its OWN handler
+// (the find bar's Esc, a card's own button) is followed by no call of app.js: it moves the
+// keyboard itself to another element of its own — there is no hook for it. The page's chrome (the
+// title bar, the key bar, a notice's ×) takes no keyboard on a mouse click, so a click there
+// leaves it where the user was (ruled, review 2 of task 26, rounds three and four).
 /** @param {HTMLElement} root
  *  @param {{ select(id: string, how: 'click' | 'key'): void, activate(id: string): void,
  *           view(change: { filter?: string, unfolded?: string[], showDone?: boolean }): void }} hooks */

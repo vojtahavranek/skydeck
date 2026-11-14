@@ -205,6 +205,12 @@ for (const chrome of [
 ]) {
   chrome?.addEventListener('mousedown', (event) => event.preventDefault());
 }
+// Any other click that leaves the keyboard on nothing — on a notice's text, on the key help —
+// gives it back to the zone once the click is done (ruled, review 2 of task 26): without
+// preventDefault, so that such text can still be selected with the mouse.
+addEventListener('mouseup', () => {
+  setTimeout(keepKeyboard, 0);
+});
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let keyMessageTimer = null;
@@ -633,6 +639,7 @@ function render() {
   const key = JSON.stringify(pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines]);
   state.pane = pane;
   if (key === state.paneKey) {
+    keepKeyboard(); // the list may have dropped what had the keyboard
     return;
   }
   state.paneKey = key;

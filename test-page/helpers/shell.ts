@@ -100,20 +100,30 @@ export const RECORDER = `(() => {
 })();`;
 
 /**
- * What the recorder logged so far (across reloads). A read that meets a navigation (the page
- * reloading itself) is made again on the next document.
+ * `page.evaluate(fn, arg)`, made again on the next document when it meets a navigation (the page
+ * reloading itself: "Execution context was destroyed"), at most 50 times, 100 ms apart. Every
+ * helper here that reads the page goes through it, so that a test may poll across a reload.
  */
-export async function logOf(page: Page): Promise<Logged[]> {
+export async function readPage<A, R>(page: Page, fn: (arg: A) => R, arg: A): Promise<R> {
+  // Playwright's PageFunction unboxes its argument's type; these reads pass plain values.
+  const evaluate = page.evaluate.bind(page) as unknown as (f: (a: A) => R, a: A) => Promise<R>;
   for (let attempt = 0; ; attempt++) {
     try {
-      return await page.evaluate(
-        () => JSON.parse(sessionStorage.getItem('skydeck-test-log') ?? '[]') as Logged[],
-      );
+      return await evaluate(fn, arg);
     } catch (error) {
       if (attempt >= 50 || !/context was destroyed|navigat/i.test(String(error))) throw error;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
+}
+
+/** What the recorder logged so far (across reloads). */
+export async function logOf(page: Page): Promise<Logged[]> {
+  return readPage(
+    page,
+    () => JSON.parse(sessionStorage.getItem('skydeck-test-log') ?? '[]') as Logged[],
+    null,
+  );
 }
 
 /** Puts a mark into the log, so that a test can look at what came after it. */
@@ -146,11 +156,15 @@ export async function connection(
 
 /** The text of the element `selector`, '' when it is hidden or absent. */
 export async function shownText(page: Page, selector: string): Promise<string> {
-  return page.evaluate((selector) => {
-    const element = document.querySelector(selector);
-    if (!(element instanceof HTMLElement) || element.closest('[hidden]') !== null) return '';
-    return element.textContent ?? '';
-  }, selector);
+  return readPage(
+    page,
+    (selector) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement) || element.closest('[hidden]') !== null) return '';
+      return element.textContent ?? '';
+    },
+    selector,
+  );
 }
 
 /** Waits until the element `selector` is shown and its text matches `pattern`. */
@@ -569,17 +583,21 @@ export const TERM_C = 'cccccccccccc';
 
 /** The id of the element that has the keyboard, or its tag. */
 export async function active(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const element = document.activeElement;
-    if (element === null) return 'none';
-    const inTerminal = document.getElementById('terminal')?.contains(element) === true;
-    return inTerminal ? 'in #terminal' : element.id !== '' ? `#${element.id}` : element.tagName;
-  });
+  return readPage(
+    page,
+    () => {
+      const element = document.activeElement;
+      if (element === null) return 'none';
+      const inTerminal = document.getElementById('terminal')?.contains(element) === true;
+      return inTerminal ? 'in #terminal' : element.id !== '' ? `#${element.id}` : element.tagName;
+    },
+    null,
+  );
 }
 
 /** A `list` of a scripted stand-in: rows of Open with their terminals (S2 8.2.3). */
 export function scriptedList(
-  rows: { id: string; terminal: string | null; slot: number | null }[],
+  rows: { id: string; terminal: string | null; slot: number | null; title?: string }[],
   terminals: { id: string; slot: number | null; sessionId: string | null }[],
   selected: Record<string, unknown> | null = null,
 ): Record<string, unknown> {
@@ -597,7 +615,7 @@ export function scriptedList(
         rows: rows.map((row) => ({
           id: row.id,
           shortId: row.id.slice(0, 8),
-          title: `session ${row.id.slice(0, 8)}`,
+          title: row.title ?? `session ${row.id.slice(0, 8)}`,
           titleSource: 'summary',
           group: null,
           groupSource: null,
@@ -680,8 +698,10 @@ export async function toZone(page: Page, wanted: 'list' | 'terminal'): Promise<v
 
 /** The session id of the selected row of the list. */
 export async function selectedRow(page: Page): Promise<string | null> {
-  return page.evaluate(
+  return readPage(
+    page,
     () => document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') ?? null,
+    null,
   );
 }
 
