@@ -236,7 +236,8 @@ describe('keeper: caps', { concurrency: true }, () => {
     // holds a claim's live records, and a claim made while the flood still runs gets the rest of
     // the flood live: a loaded test process can read it too slowly, and the keeper then closes
     // that claim too. So the test claims again until one sees the whole flood; once the flood is
-    // over, a claim gets all of it in its tail, which the cap does not hold (the test above).
+    // over, a claim gets all of it in its tail, which the cap does not hold (the test above). That
+    // a claim which reads is not closed while output flows live is the 8 MiB paste test's.
     const last = 'flood 00050000';
     const wholeFlood = (output: string): boolean => {
       const at = output.indexOf(last);

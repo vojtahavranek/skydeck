@@ -2207,10 +2207,13 @@ In the browser suite, besides those:
   (`test-page/**/*.test.ts`). It is `node:test` files that use the `playwright` library
   (`chromium.launch()`), not `@playwright/test`: the repository keeps one test runner. Each of its
   files launches one headless Chromium (`test-page/helpers/browser.ts`) with a test sandbox's
-  environment, in which no host name or address other than `127.0.0.1` resolves, so that a page
-  under test reaches nothing but the test's server on `127.0.0.1` (never `localhost`). Its
-  TypeScript is type-checked with the root project; the plain JavaScript of the pages it serves
-  (`test-page/fixtures/`) runs in the browser and is not.
+  environment (another home, no display), with its and Playwright's temporary files (the
+  profile, the artifacts) inside the sandbox, so that even a killed run leaves them nowhere else,
+  and with its pages in the UTC time zone and the language `en-US`. A page under test reaches
+  nothing but `127.0.0.1`: no host name resolves, not even `localhost`, and neither `fetch`, a
+  WebSocket nor WebRTC reaches another loopback address; the smoke test proves it against
+  listeners on `127.0.0.2`. Its TypeScript is type-checked with the root project; the plain
+  JavaScript of the pages it serves (`test-page/fixtures/`) runs in the browser and is not.
 - `web/` has its own `web/tsconfig.json` (the DOM library, `checkJs`, the vendored type
   declarations); `npm run typecheck` runs `tsc` for the root project and for `web/`.
 - `npm run check` runs format check, both type checks, `npm test` and `npm run test:page`. Without

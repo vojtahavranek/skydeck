@@ -77,9 +77,11 @@ server, or judges a real process alive: the tests of tasks 9, 15 (the lock with 
 real past and its pid lines count as dead. A test that starts keepers kills them in `t.after` through
 `killKeepersIn` (task 5), which first asserts that the directory lies under the sandbox's root
 (skydeck itself never stops a keeper; the test owns its own). **Page tests** (task 20's
-`test-page/helpers/browser.ts`, ruled on #51): Chromium runs with a sandbox's environment, and no
-host name or address other than `127.0.0.1` resolves in it, so a page under test reaches nothing
-but the test's server on `127.0.0.1` (never `localhost`).
+`test-page/helpers/browser.ts`, ruled on #51): Chromium runs with a sandbox's environment (another
+home, no display) and keeps its and Playwright's temporary files in the sandbox; its pages run in
+the UTC time zone with the language `en-US`; a page reaches nothing but `127.0.0.1` — no host name
+resolves, not even `localhost`, and neither `fetch`, a WebSocket nor WebRTC reaches another
+loopback address (the smoke test proves it against listeners on `127.0.0.2`).
 
 **Local prerequisites.** Node 24 first on `PATH`; python3 ≥ 3.9 (3.12 on the development machine);
 after task 20, a Chromium for Playwright in `~/.cache/ms-playwright`: Playwright 1.60.0 uses
@@ -2630,7 +2632,8 @@ Chromium with a cache and runs the page suite on Node 24 only, within 20 minutes
 - Create: `test-page/helpers/browser.ts`, `test-page/smoke.test.ts`, `test-page/fixtures/xterm-smoke/`
   (an `index.html` and a `main.js` that open an xterm.js terminal from the vendored modules and
   write `ESC[31mred`), `test-page/fixtures/launch.ts` (one test that asks for the browser, run as a
-  child `node --test` by the smoke test; ruled on #51)
+  child `node --test` by the smoke test; ruled on #51), `test-page/fixtures/close-fails.ts` (a
+  browser whose close fails, run the same way; ruled on #51)
 - Modify: `test/keeper/limits.test.ts` (ruled on #51, a CI-reliability fix: task 9's send-queue-cap
   test failed on loaded runners because its second claim gets the rest of the flood live under the
   test's 256 KiB send cap and is closed itself when the test process reads too slowly; it claims
@@ -2652,8 +2655,12 @@ stays on `ubuntu-latest` (Ubuntu 26.04), because Playwright 1.60.0 has no Chromi
 closes it in `t.after`; when Chromium is not installed it fails with exactly `Chromium for
 Playwright is not installed; run: npx playwright install chromium`. Ruled on #51, for tasks
 26–29: the file also exports that message as `NOT_INSTALLED` and `newPage(t, chromium)` (a page
-in a fresh browser context, closed in `t.after`); Chromium runs with a sandbox's environment, and
-nothing but `127.0.0.1` resolves in it (section 0).
+in a fresh browser context with `timezoneId: 'UTC'` and `locale: 'en-US'`, closed in `t.after`);
+Chromium runs with a sandbox's environment, `TMPDIR` points into the sandbox while Playwright
+launches it (so the profile and the artifacts are made there), and a page reaches nothing but
+`127.0.0.1` (`--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1` and
+`--force-webrtc-ip-handling-policy=disable_non_proxied_udp`; section 0). A close that fails is
+thrown only after the sandbox is removed (node:test runs no `t.after` hook after one that throws).
 
 ```ts
 export const NOT_INSTALLED: string;
@@ -2673,6 +2680,16 @@ real — ruled on #51; Playwright)
   with the message above (checked by hand once; say so in the pull request), and `smoke.test.ts`
   pins it: `test-page/fixtures/launch.ts` run as a child `node --test` with the TAP reporter and
   that variable fails, its one `error:` line is exactly the message (ruled on #51).
+- Ruled on #51 (review 2): while Chromium runs, and after the whole file, no new name of
+  Playwright's or Chromium's (`playwright-…`, `playwright_…`, `.org.chromium.…`) is in the real
+  temporary directory (a listing compared with the one taken when the file started; nothing there
+  is removed), and the children's temporary directory stays empty; the browser process's
+  environment (read from `/proc`) has a sandbox's home and `TMPDIR` and no `DISPLAY` or
+  `WAYLAND_DISPLAY`; a page's time zone is UTC and its language `en-US`; a page served from
+  `127.0.0.1` cannot reach `localhost` by name nor listeners on `127.0.0.2` by `fetch`, a
+  WebSocket or a STUN server of an `RTCPeerConnection` (nothing reaches the listeners);
+  `test-page/fixtures/close-fails.ts`, a browser whose close fails, run as a child: its sandbox
+  is removed and the test fails with the close's error.
 
 **Done when:** CI is green on both legs with the page leg on Node 24 only, and `npm run check`
 runs the page suite locally.
