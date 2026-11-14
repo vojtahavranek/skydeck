@@ -1145,6 +1145,16 @@ absolute and existing, no flag that picks a session or names it). The program is
 | `POST /token/drop` | `{ id }` → `{ ok }`: the token is given up; a later proof with it fails with 4003 (or 4004 when it had been used). |
 | `POST /shutdown` | `{ ok: true }`, then 5.5. |
 
+A refused request answers `{ error: <kind> }`: 404 for an unknown route (stage C's `/resume`,
+`/new`, `/restore` until that stage), 400 for a bad body, 413 for a body over 64 KiB, which is not
+read on; `GET /token/<id>` is 404 for a token the server does not know. When answering a request
+fails inside the server (`ping`, `status` or the tokens throw), the answer is 500
+`{ error: 'failed' }`, the log names the error and its code, never its message (5.2), and the
+server goes on; a failure while stopping is the server's uncaught error. On the command line,
+`ping` reports a socket that refuses or is missing as refused, and no answer in time — or a full
+queue of connections, of a server that lives — as not answering (5.1); `POST /token/drop` for a
+token the server does not know is no error.
+
 ## 9. Typing into and reading from a terminal
 
 ### 9.1 Keys the page maps

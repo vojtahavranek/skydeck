@@ -394,7 +394,7 @@ export function createTokens(
 }
 
 /** An error's name and, when it has one, its code, for a log line; never its message. */
-function failureKind(error: unknown): string {
+export function failureKind(error: unknown): string {
   try {
     if (!(error instanceof Error)) {
       return `a thrown ${error === null ? 'null' : typeof error}`;
