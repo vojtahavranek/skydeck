@@ -6,13 +6,7 @@ import { describe, test } from 'node:test';
 
 import { sanitize as serverSanitize } from '../../src/text/sanitize.ts';
 import type { RowPayload, SectionPayload, TerminalPayload } from '../../src/window/protocol.ts';
-import {
-  countsText,
-  footerText,
-  rowText,
-  sanitize,
-  sectionText,
-} from '../../web/list-text.js';
+import { countsText, footerText, rowText, sanitize, sectionText } from '../../web/list-text.js';
 
 const SEC = 1_000_000_000n;
 const MIN = 60n * SEC;
@@ -82,7 +76,12 @@ function pr(level: string, number: number, error: string | null = null): RowPayl
 describe('rowText: a running row has two lines', () => {
   test('working, in slot 1: the state line is the state and its time; no age on the first line', () => {
     const text = rowText(
-      row({ state: 'working', sinceNs: ago(4n * MIN + 10n * SEC), terminal: 'aaaaaaaaaaaa', slot: 1 }),
+      row({
+        state: 'working',
+        sinceNs: ago(4n * MIN + 10n * SEC),
+        terminal: 'aaaaaaaaaaaa',
+        slot: 1,
+      }),
       now,
       terminal(),
     );
@@ -140,7 +139,10 @@ describe('rowText: a running row has two lines', () => {
 
   test('a row running in another terminal: "running in another terminal", the icon of its state', () => {
     const text = rowText(
-      row({ state: 'working', elsewhere: { pid: 4242, tty: '/dev/pts/3', dir: '/home/u/project' } }),
+      row({
+        state: 'working',
+        elsewhere: { pid: 4242, tty: '/dev/pts/3', dir: '/home/u/project' },
+      }),
       now,
       null,
     );
@@ -355,7 +357,7 @@ describe('rowText: text from the server is shown as text, sanitised', () => {
   });
 });
 
-describe('sanitize (web/list-text.js): the server\'s rule (src/text/sanitize.ts)', () => {
+describe("sanitize (web/list-text.js): the server's rule (src/text/sanitize.ts)", () => {
   const inputs: readonly string[] = [
     '',
     'plain text',
