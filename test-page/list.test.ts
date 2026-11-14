@@ -428,7 +428,7 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    '`/` filters: the field takes the keyboard and what is typed there is only text (no list key, no resume); Enter gives the keyboard back to the list; Esc clears the filter, the next Esc goes back to the terminal',
+    '`/` filters: the field takes the keyboard and what is typed there is only text (no list key, no resume); Enter gives the keyboard back to the list; Esc clears the filter, the next Esc goes back to the terminal; Esc in the field always ends the entry',
     async (t) => {
       const l = await launched(t, chromium);
       const { page, d } = l;
@@ -501,6 +501,18 @@ test('the list', async (t) => {
       await page.keyboard.press('Escape');
       await untilDrawn(page, (rows) => rows.length === 2, 'cleared from the field');
       assert.equal(await page.inputValue('#list .list-filter'), '');
+      assert.equal(await active(page), '#list');
+      assert.equal(await zone(page), 'Focus: list');
+      await page.keyboard.press('Escape');
+      await showsText(page, '#focus-zone', /^Focus: terminal$/);
+      assert.equal(await inRight(), true);
+
+      // Esc in the EMPTY field ends the entry too (ruled, plan task 27): the keyboard on the
+      // list, and the next Esc goes back to the terminal — two Escs from an empty field.
+      await toZone(page, 'list');
+      await page.keyboard.press('/');
+      assert.equal(await inField(), true);
+      await page.keyboard.press('Escape');
       assert.equal(await active(page), '#list');
       assert.equal(await zone(page), 'Focus: list');
       await page.keyboard.press('Escape');

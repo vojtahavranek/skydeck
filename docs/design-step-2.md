@@ -2039,7 +2039,10 @@ never leaves the terminal — while xterm.js has the keyboard; Esc in the page's
 the form (12.6). In the list: as in step 1's interactive list, ↑ ↓ `j` `k` move, `/`
 filters, `l` label, `g` group, `n` note, `p` attach a pull request, `d` done, `a` show done; new in
 the window, Home, End, PgUp, PgDn, ← → (fold, unfold), F2 (label) and Esc (clear the filter, then
-back to the terminal). Enter changes meaning: it shows a running session's terminal, or resumes one
+back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
+Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
+clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
+plan task 27). Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a
