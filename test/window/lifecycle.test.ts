@@ -1281,6 +1281,19 @@ test('findServer: a refused ping is tried again every 100 ms; still refused at p
   assert.ok(d.clock.nowNs() - before >= 1_000_000_000n);
 });
 
+test('findServer: refused to the end of pingMs, the process gone in its last 100 ms → none', async (t) => {
+  const { d } = fakeServerDeck(t);
+  d.clock.after(950, () => d.proc.setProcess(4242, null));
+  const asked = withRequests(d.deck, refused);
+  assert.deepEqual(
+    await findServer(asked.deck, '/checkout', '0123456789abcdef', { pingMs: 1000 }),
+    {
+      kind: 'none',
+    },
+  );
+  assert.equal(asked.attempts(), 10);
+});
+
 test('findServer: refused, then the process is gone → none', async (t) => {
   const { d } = fakeServerDeck(t);
   const asked = withRequests(d.deck, (attempt) => {

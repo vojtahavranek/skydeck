@@ -1426,7 +1426,15 @@ describe('real net', () => {
     const closed = once(serverSide as import('node:net').Socket, 'close');
     controller.abort();
     await assert.rejects(pending, { name: 'AbortError' });
-    await closed; // the connection is gone on the server's side too
+    // The connection is gone on the server's side too; a request left open fails here, not hangs.
+    let guard: NodeJS.Timeout | undefined;
+    await Promise.race([
+      closed,
+      new Promise((_resolve, reject) => {
+        guard = setTimeout(() => reject(new Error('the connection was not closed')), 5000);
+      }),
+    ]);
+    clearTimeout(guard);
     assert.equal(timers(), before);
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(unhandled, []);

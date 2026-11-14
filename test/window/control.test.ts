@@ -641,7 +641,14 @@ test("ping with a signal that fires is 'timeout' at once, and its connection is 
   const closed = once(sockets[0] as import('node:net').Socket, 'close');
   controller.abort();
   assert.equal(await pinged, 'timeout');
-  await closed;
+  let guard: NodeJS.Timeout | undefined;
+  await Promise.race([
+    closed,
+    new Promise((_resolve, reject) => {
+      guard = setTimeout(() => reject(new Error('the connection was not closed')), 5000);
+    }),
+  ]);
+  clearTimeout(guard);
   assert.ok(performance.now() - start < 9000, `${performance.now() - start} ms`);
 
   const aborted = new AbortController();
