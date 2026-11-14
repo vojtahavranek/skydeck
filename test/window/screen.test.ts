@@ -31,9 +31,15 @@ before(async () => {
 /**
  * The modules with a `Terminal` that remembers every instance, so that a test can read the cells
  * of the headless terminal a screen keeps without the screen exporting anything for tests.
- * `afterWrite` runs right after each `write` was handed to xterm.js, before it parses it.
+ * `afterWrite` runs right after each `write` was handed to xterm.js, before it parses it. With
+ * `sync`, a write is parsed at once through xterm.js's own `writeSync` — the same parse of the same
+ * chunk as `write`, without the timer `write` waits for (about a millisecond each): the sweeps take
+ * thousands of snapshots.
  */
-function spying(afterWrite?: () => void): { modules: XtermModules; terminals: Terminal[] } {
+function spying(
+  afterWrite?: () => void,
+  sync = false,
+): { modules: XtermModules; terminals: Terminal[] } {
   const terminals: Terminal[] = [];
   const Base = modules.Terminal;
   class Spy extends Base {
@@ -42,11 +48,27 @@ function spying(afterWrite?: () => void): { modules: XtermModules; terminals: Te
       terminals.push(this);
     }
     override write(data: string | Uint8Array, callback?: () => void): void {
-      super.write(data, callback);
+      if (sync) {
+        writeNow(this, data);
+        callback?.();
+      } else {
+        super.write(data, callback);
+      }
       afterWrite?.();
     }
   }
   return { modules: { ...modules, Terminal: Spy }, terminals };
+}
+
+/**
+ * Parses `data` at once: xterm.js 6.0.0's internal `_core.writeSync` (it warns that it will be
+ * removed; a test pins it, so that an upgrade cannot turn the sweeps into nothing unnoticed).
+ */
+function writeNow(term: Terminal, data: string | Uint8Array): void {
+  const core = (term as unknown as { _core?: { writeSync?: (data: string | Uint8Array) => void } })
+    ._core;
+  assert.equal(typeof core?.writeSync, 'function', 'xterm.js has no _core.writeSync: see S2 21');
+  core?.writeSync?.(data);
 }
 
 /** A screen and the headless terminal inside it. */
@@ -58,9 +80,9 @@ interface Opened {
 
 function open(
   init: { cols: number; rows: number; snapshot: string | null },
-  options: { live?: boolean; afterWrite?: () => void } = {},
+  options: { live?: boolean; afterWrite?: () => void; sync?: boolean } = {},
 ): Opened {
-  const spy = spying(options.afterWrite);
+  const spy = spying(options.afterWrite, options.sync);
   const answers: string[] = [];
   const screen = createScreen(spy.modules, init, (bytes) => {
     assert.ok(bytes instanceof Uint8Array);
@@ -776,6 +798,51 @@ describe('createScreen: snapshots rebuild the screen exactly', () => {
     term.dispose();
   });
 
+  test('the sweeps’ synchronous write is an internal the vendored xterm.js has: it parses at once', () => {
+    const term = new modules.Terminal({
+      cols: 10,
+      rows: 2,
+      allowProposedApi: true,
+      logLevel: 'off',
+    });
+
+    writeNow(term, '\x1b[1;31mab');
+    writeNow(term, utf8('\x1b[3'));
+    writeNow(term, utf8('2mc'));
+
+    assert.equal(term.buffer.active.getLine(0)?.translateToString(true), 'abc');
+    assert.equal(term.buffer.active.getLine(0)?.getCell(2)?.getFgColor(), 2);
+    term.dispose();
+  });
+
+  // xterm.js 6.0.0 reports a pen or cell that carries an OSC 8 link as underlined (its dashed link
+  // underline): the pen's real underline is read from `getUnderlineStyle`, which only a real
+  // SGR 4 sets (ruled on task 33).
+  test('the pen’s real underline is read from internals the vendored xterm.js has', async () => {
+    const term = new modules.Terminal({ cols: 10, rows: 2, allowProposedApi: true });
+    const pen = (): IBufferCell & { getUnderlineStyle?: () => number } => {
+      const found = (
+        term as unknown as {
+          _core?: {
+            _inputHandler?: { _curAttrData?: IBufferCell & { getUnderlineStyle?: () => number } };
+          };
+        }
+      )._core?._inputHandler?._curAttrData;
+      assert.ok(found);
+      return found;
+    };
+
+    await new Promise<void>((resolve) => term.write('\x1b]8;;https://example.com/\x1b\\', resolve));
+    assert.equal(typeof pen().getUnderlineStyle, 'function', 'getUnderlineStyle');
+    assert.ok(pen().isUnderline(), 'a link reports as underlined');
+    assert.equal(pen().getUnderlineStyle?.(), 0, 'a link alone is no real underline');
+    await new Promise<void>((resolve) => term.write('\x1b[4m', resolve));
+    assert.notEqual(pen().getUnderlineStyle?.(), 0, 'SGR 4 inside a link');
+    await new Promise<void>((resolve) => term.write('\x1b]8;;\x1b\\\x1b[4:3m', resolve));
+    assert.notEqual(pen().getUnderlineStyle?.(), 0, 'SGR 4:3 without a link');
+    term.dispose();
+  });
+
   for (const endInAlternate of [false, true]) {
     test(`a snapshot at every record boundary plus the records after it equals the whole stream (${endInAlternate ? 'alternate' : 'normal'} screen at the end)`, async () => {
       const steps = recordedStream(endInAlternate, 40);
@@ -1030,6 +1097,372 @@ describe('createScreen: terminal queries', () => {
   });
 });
 
+// --- The snapshot's seam (S2 7.2; plan task 33) -------------------------------------------------
+
+/** Printed, not a control: what xterm.js puts in a cell. */
+const printed = (cp: number): boolean => cp >= 0x20 && !(cp >= 0x7f && cp < 0xa0);
+
+/**
+ * Where a record of `out` can end, as byte offsets into it: at its start, at its end, and at every
+ * boundary between two code points (the keeper never ends a record inside a UTF-8 character,
+ * S2 7.1) that does not lie inside a grapheme cluster of printed characters (a known limit,
+ * S2 7.2).
+ */
+function cutsOf(out: string): number[] {
+  const inside = new Set<number>();
+  for (const { segment, index } of new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(
+    out,
+  )) {
+    const points = [...segment];
+    if (points.length > 1 && points.every((p) => printed(p.codePointAt(0) ?? 0))) {
+      let at = index;
+      for (const p of points.slice(0, -1)) {
+        at += p.length;
+        inside.add(at);
+      }
+    }
+  }
+  const cuts: number[] = [];
+  let bytes = 0;
+  let at = 0;
+  for (const p of out) {
+    if (!inside.has(at)) cuts.push(bytes);
+    bytes += utf8(p).length;
+    at += p.length;
+  }
+  cuts.push(bytes);
+  return cuts;
+}
+
+/** The terminal's pen carries an OSC 8 link (read from the internal the pen is read from). */
+function linkOpen(term: Terminal): boolean {
+  const pen = (
+    term as unknown as {
+      _core: { _inputHandler: { _curAttrData: { extended: { urlId: number } } } };
+    }
+  )._core._inputHandler._curAttrData;
+  assert.equal(typeof pen.extended.urlId, 'number', 'xterm.js internals moved');
+  return pen.extended.urlId !== 0;
+}
+
+/** `steps` with every run of output records joined into one record. */
+function merged(steps: Step[]): Step[] {
+  const out: Step[] = [];
+  for (const step of steps) {
+    const last = out.at(-1);
+    if ('out' in step && last !== undefined && 'out' in last) {
+      out[out.length - 1] = { out: last.out + step.out };
+    } else {
+      out.push(step);
+    }
+  }
+  return out;
+}
+
+/**
+ * The plan's sweep: every output record of `steps` is cut at every place a record can end; screen
+ * A gets the stream up to the cut, screen B is built from A's snapshot there and gets the rest, and
+ * B equals a screen that got the stream whole. Cuts while an OSC 8 link is open are left out (a
+ * named limit, pinned by its own test). Returns the number of cuts compared.
+ */
+async function sweep(steps: Step[], cols: number, rows: number): Promise<number> {
+  const sync = { sync: true };
+  const whole = open({ cols, rows, snapshot: null }, sync);
+  await applyAll(whole.screen, steps);
+  const a = open({ cols, rows, snapshot: null }, sync);
+  let count = 0;
+  for (const [i, step] of steps.entries()) {
+    if (!('out' in step)) {
+      await apply(a.screen, step);
+      continue;
+    }
+    const bytes = utf8(step.out);
+    let done = 0;
+    for (const cut of cutsOf(step.out)) {
+      if (cut > done) await a.screen.output(bytes.subarray(done, cut));
+      done = cut;
+      // A named limit (S2 7.2): the rest of a link still open at a snapshot comes out plain.
+      if (linkOpen(a.term)) continue;
+      const snap = await a.screen.snapshot();
+      const b = open({ cols: snap.cols, rows: snap.rows, snapshot: snap.data }, sync);
+      await applyAll(b.screen, merged([{ out: text(bytes.subarray(cut)) }, ...steps.slice(i + 1)]));
+      try {
+        assertSameScreen(whole.term, b.term);
+      } catch (error) {
+        const at = JSON.stringify([
+          text(bytes.subarray(0, cut)).slice(-24),
+          text(bytes.subarray(cut)).slice(0, 24),
+        ]);
+        assert.fail(`record ${i} cut at byte ${cut} ${at}: ${String(error)}`);
+      }
+      b.screen.dispose();
+      count++;
+    }
+    await a.screen.output(bytes.subarray(done));
+  }
+  whole.screen.dispose();
+  a.screen.dispose();
+  return count;
+}
+
+/**
+ * A stream dense with sequences, one record per line: SGR with sub-parameters, DECSET and DECRST,
+ * DECSCUSR, OSC 0 titles, OSC 8 links, an OSC 52, DECRQSS, synchronized output, SOS and APC, C1
+ * introducers, controls inside a CSI, aborted sequences, and the alternate screen. It avoids what
+ * S2 7.2 names as not restored: the scroll region, the saved cursor, character sets, tab stops; a
+ * wrapped line in the alternate screen, autowrap off, `38;5;n` below 16; rows erased with a
+ * background below the last row with content; half a wide character overwritten in inverse
+ * video. (Its SGR 4:3 and 58 are named as not kept too, but task 12's comparison does not look at
+ * an underline's style or colour.)
+ */
+function denseStream(): Step[] {
+  const clip = Buffer.from('a clipboard of a few hundred bytes '.repeat(8)).toString('base64');
+  const lines = [
+    '\x1b[?2004h\x1b[?1004h\x1b[?1000h\x1b[?1006h\x1b]0;skydeck – a title 漢字\x07',
+    '\x1b[38:2::255:100:0mrgb\x1b[0m \x1b[4:3mcurly\x1b[4:0m \x1b[58:5:200;4munder\x1b[59;24m\r\n',
+    '\x1b[38;5;208;48;5;17mcolours\x1b[39;49m \x1b[1;2;3mbold dim italic\x1b[22;23m\r\n',
+    '\x1b]8;id=1;https://example.com/path?q=1\x1b\\a link\x1b]8;;\x1b\\ after\r\n',
+    '\x1b[5 q\x1b[?25l\x1b[?12h\x1bP$qm\x1b\\\x1b[?2026h\x1b[2Kframe\x1b[?2026l\r\n',
+    `\x1b]52;c;${clip}\x07copied\r\n`,
+    '\x1b[3\x081mcontrol in a CSI\x1b[0m \x1b[31\x1b[32maborted\x1b[0m \x1b[1\x18cancelled\r\n',
+    '\x1b_an APC\x1b\\\x1bXan SOS\x1b\\\u009b33mC1 CSI\u009b0m\u009d0;C1 title\u009c\u009d8;;https://x.example/\u009cC1 link\u009d8;;\u009c\r\n',
+    '\x1b[?1049h\x1b[H\x1b[2J\x1b[44;97m full screen 🙂 \x1b[0m\r\n\x1b[3;5H\x1b[1;31mred bold\x1b[0m\x1b[K',
+    '\x1b]0;in the alternate screen\x1b\\\x1b[5;1H\x1b[7m reverse \x1b[27m',
+    '\x1b[?1049l\x1b[?1000l\x1b[?1006l\x1b[0 q\x1b[?25h',
+    '> prompt \x1b[2mhint\x1b[22m \x1b[38;2;10;200;30m漢字\x1b[0m\x1b[5D',
+  ];
+  return lines.map((out) => ({ out }));
+}
+
+describe('createScreen: the snapshot’s seam (S2 7.2, task 33)', () => {
+  test('a record that ends inside a CSI: the next record completes it on the rebuilt screen', async () => {
+    const a = open({ cols: 20, rows: 3, snapshot: null });
+    await a.screen.output(utf8('ab\x1b[3'));
+
+    const b = await rebuilt(a.screen);
+    await a.screen.output(utf8('1mX'));
+    await b.screen.output(utf8('1mX'));
+
+    assert.equal(b.term.buffer.active.getLine(0)?.translateToString(true), 'abX');
+    assertSameScreen(a.term, b.term);
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
+  for (const [name, record, tail] of [
+    ['a CSI', 'ab\x1b[38;5', '\x1b[38;5'],
+    ['an ESC', 'ab\x1b', '\x1b'],
+    ['an OSC', 'ab\x1b]0;tit', '\x1b]0;tit'],
+    ['a DCS', 'ab\x1bP$q', '\x1bP$q'],
+    ['a CSI, the cursor past the last column', '0123456789\x1b[1', '\x1b[1'],
+    ['the alternate screen', '\x1b[?1049hab\x1b[1;3', '\x1b[1;3'],
+  ] as const) {
+    test(`the tail is the last thing in the snapshot: ${name}`, async () => {
+      const a = open({ cols: 10, rows: 3, snapshot: null });
+      await a.screen.output(utf8(record));
+      const ground = open({ cols: 10, rows: 3, snapshot: null });
+      await ground.screen.output(utf8(record.slice(0, record.length - tail.length)));
+
+      const snap = await a.screen.snapshot();
+
+      assert.equal(snap.data, (await ground.screen.snapshot()).data + tail);
+      a.screen.dispose();
+      ground.screen.dispose();
+    });
+  }
+
+  test('outside a sequence the snapshot is task 12’s, ending with the pen', async () => {
+    const a = open({ cols: 10, rows: 3, snapshot: null });
+    await a.screen.output(utf8('ab\x1b[1;31mc\x1b]0;t\x07'));
+
+    const snap = await a.screen.snapshot();
+
+    assert.ok(snap.data.endsWith('\x1b[0m\x1b[1;31m'), JSON.stringify(snap.data.slice(-20)));
+    a.screen.dispose();
+  });
+
+  test('a screen built from a snapshot that ends inside a sequence keeps it in its own snapshot', async () => {
+    const a = open({ cols: 20, rows: 3, snapshot: null });
+    await a.screen.output(utf8('ab\x1b]0;ti'));
+    const b = await rebuilt(a.screen);
+
+    const c = await rebuilt(b.screen);
+    for (const screen of [a.screen, c.screen]) {
+      await screen.output(utf8('tle\x07\x1b[3'));
+      await screen.output(utf8('1mX'));
+    }
+
+    assert.ok((await b.screen.snapshot()).data.endsWith('\x1b]0;ti'));
+    assertSameScreen(a.term, c.term);
+    a.screen.dispose();
+    b.screen.dispose();
+    c.screen.dispose();
+  });
+
+  test('task 12’s recorded stream, cut at every byte outside a UTF-8 character: rebuilt exactly', async () => {
+    for (const endInAlternate of [false, true]) {
+      const count = await sweep(recordedStream(endInAlternate, 12), 80, 24);
+      assert.ok(count > 800, `${count} cuts`);
+    }
+  });
+
+  test('a stream dense with sequences, cut at every byte outside a UTF-8 character: rebuilt exactly', async () => {
+    const count = await sweep(denseStream(), 40, 8);
+    assert.ok(count > 800, `${count} cuts`);
+  });
+
+  for (const [name, first, second, reply] of [
+    ['DA1 (ESC [ | c)', '\x1b[', 'c', '\x1b[?1;2c'],
+    ['DECRQSS (ESC P $ q | m ST)', '\x1bP$q', 'm\x1b\\', '\x1bP1$r0m\x1b\\'],
+    ['OSC 11 (ESC ] 1 | 1 ; ? BEL)', '\x1b]1', '1;?\x07', '\x1b]11;rgb:0000/0000/0000\x1b\\'],
+  ] as const) {
+    test(`a query cut across two records, ${name}: the original and the rebuilt screen each answer once`, async () => {
+      const a = open({ cols: 80, rows: 24, snapshot: null }, { live: true });
+      await a.screen.output(utf8(first));
+      const snap = await a.screen.snapshot();
+      const b = open({ cols: snap.cols, rows: snap.rows, snapshot: snap.data });
+      b.screen.goLive();
+
+      await a.screen.output(utf8(second));
+      await b.screen.output(utf8(second));
+
+      assert.deepEqual(a.answers, [reply]);
+      assert.deepEqual(b.answers, [reply]);
+      a.screen.dispose();
+      b.screen.dispose();
+    });
+  }
+
+  /** Which of the cells `from` to `to` (exclusive) of row 0 are underlined, as `_` and `.`. */
+  const underlined = (term: Terminal, from: number, to: number): string => {
+    const row = term.buffer.active.getLine(0);
+    let out = '';
+    for (let x = from; x < to; x++) out += row?.getCell(x)?.isUnderline() ? '_' : '.';
+    return out;
+  };
+  const LINK = '\x1b]8;;https://example.com/\x1b\\';
+  const UNLINK = '\x1b]8;;\x1b\\';
+
+  test('a snapshot inside an open link: what the program prints after closing it is not underlined', async () => {
+    const a = open({ cols: 30, rows: 2, snapshot: null });
+    await a.screen.output(utf8(`${LINK}a link`));
+    const b = await rebuilt(a.screen);
+
+    for (const screen of [a.screen, b.screen]) await screen.output(utf8(`${UNLINK} after`));
+
+    assert.equal(underlined(a.term, 6, 12), '......');
+    assert.equal(underlined(b.term, 6, 12), '......');
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
+  test('a snapshot inside an open link with a real underline: the underline goes on after the link closes', async () => {
+    const a = open({ cols: 30, rows: 2, snapshot: null });
+    await a.screen.output(utf8(`\x1b[4m${LINK}a link`));
+    const b = await rebuilt(a.screen);
+
+    for (const screen of [a.screen, b.screen]) await screen.output(utf8(`${UNLINK} after`));
+
+    assert.equal(underlined(a.term, 0, 12), '____________');
+    assert.equal(underlined(b.term, 0, 12), '____________');
+    assertSameScreen(a.term, b.term);
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
+  test('named limit (S2 7.2): the rest of a link still open at a snapshot comes out as plain text', async () => {
+    const a = open({ cols: 30, rows: 2, snapshot: null });
+    await a.screen.output(utf8(`${LINK}a li`));
+    const b = await rebuilt(a.screen);
+
+    for (const screen of [a.screen, b.screen]) await screen.output(utf8(`nk${UNLINK} after`));
+
+    // What came before the snapshot is underlined on both (the rebuilt cells plainly, by SGR 4).
+    assert.equal(underlined(a.term, 0, 12), '______......');
+    assert.equal(underlined(b.term, 0, 12), '____........');
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
+  test('named limit (S2 7.2): a record that ends inside a grapheme cluster: the rest of the cluster gets a cell of its own', async () => {
+    const a = open({ cols: 20, rows: 2, snapshot: null });
+    await a.screen.output(utf8('ab👍'));
+    const b = await rebuilt(a.screen);
+
+    for (const screen of [a.screen, b.screen]) await screen.output(utf8('🏽cd'));
+
+    const cells = (term: Terminal): string[] => {
+      const row = term.buffer.active.getLine(0);
+      return Array.from({ length: 8 }, (_, x) => row?.getCell(x)?.getChars() ?? '');
+    };
+    assert.deepEqual(cells(a.term), ['a', 'b', '👍🏽', '', 'c', 'd', '', '']);
+    assert.deepEqual(cells(b.term), ['a', 'b', '👍', '', '🏽', '', 'c', 'd']);
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
+  test('named limit (S2 7.2): rows erased with a background colour below the last row with content come back without it', async () => {
+    for (const bytes of ['ab\x1b[48;5;200m\x1b[J', '\x1b[48;5;200m\x1b[2J']) {
+      const a = open({ cols: 6, rows: 3, snapshot: null });
+      await a.screen.output(utf8(bytes));
+
+      const b = await rebuilt(a.screen);
+
+      const background = (term: Terminal, y: number): number[] =>
+        Array.from(
+          { length: 6 },
+          (_, x) => term.buffer.active.getLine(y)?.getCell(x)?.getBgColor() ?? 0,
+        );
+      assert.deepEqual(background(b.term, 0), background(a.term, 0), JSON.stringify(bytes));
+      assert.deepEqual(
+        background(a.term, 1),
+        [200, 200, 200, 200, 200, 200],
+        JSON.stringify(bytes),
+      );
+      assert.equal(
+        b.term.buffer.active.getLine(1)?.getCell(0)?.getBgColorMode(),
+        0,
+        JSON.stringify(bytes),
+      );
+      a.screen.dispose();
+      b.screen.dispose();
+    }
+  });
+
+  test('named limit (S2 7.2): an erased cell left in inverse video by overwriting half a wide character comes back without it', async () => {
+    const a = open({ cols: 6, rows: 3, snapshot: null });
+    await a.screen.output(utf8('x\x1b[7m🙂\x1b[D \x1b[0m'));
+
+    const b = await rebuilt(a.screen);
+
+    const cell = (term: Terminal, x: number): IBufferCell | undefined =>
+      term.buffer.active.getLine(0)?.getCell(x);
+    assert.deepEqual([cell(a.term, 1)?.getChars(), cell(a.term, 1)?.isInverse()], ['', 0x4000000]);
+    assert.deepEqual([cell(b.term, 1)?.getChars(), cell(b.term, 1)?.isInverse()], ['', 0]);
+    assert.ok(cell(b.term, 2)?.isInverse(), 'the space written after it keeps its inverse');
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
+  test('an OSC 52 cut after more than 64 KiB: the tail is bounded, and the rebuilt screen prints none of the rest', async () => {
+    const a = open({ cols: 20, rows: 3, snapshot: null });
+    await a.screen.output(utf8(`ab\x1b]52;c;${'QUJD'.repeat(20_000)}`));
+
+    const snap = await a.screen.snapshot();
+    const b = open({ cols: snap.cols, rows: snap.rows, snapshot: snap.data });
+    for (const screen of [a.screen, b.screen]) {
+      await screen.output(utf8(`${'QUJD'.repeat(5_000)}\x07cd`));
+    }
+
+    assert.ok(snap.data.endsWith('\x1b]!'), JSON.stringify(snap.data.slice(-12)));
+    assert.ok(snap.data.length < 1024, `${snap.data.length} characters`);
+    assert.equal(b.term.buffer.active.getLine(0)?.translateToString(true), 'abcd');
+    assertSameScreen(a.term, b.term);
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+});
+
 describe('createScreen: widths (S2 9.4)', () => {
   for (const [name, chars] of [
     ['🙂', '🙂'],
@@ -1047,6 +1480,32 @@ describe('createScreen: widths (S2 9.4)', () => {
       screen.dispose();
     });
   }
+});
+
+describe('createScreen: logging (S2 5.2)', () => {
+  test('the headless terminal logs nothing: a parsing error does not reach the console', async (t) => {
+    const calls: string[] = [];
+    for (const method of ['error', 'warn', 'info', 'log', 'debug', 'trace'] as const) {
+      t.mock.method(console, method, (...args: unknown[]) => {
+        calls.push(`${method}: ${String(args[0])}`);
+      });
+    }
+    t.mock.method(process.stderr, 'write', (chunk: unknown) => {
+      calls.push(`stderr: ${String(chunk)}`);
+      return true;
+    });
+    const { screen } = open({ cols: 20, rows: 3, snapshot: null }, { live: true });
+
+    // xterm.js reports both as a parsing error, with the character and the parameters.
+    await screen.output(utf8('\x1b_an APC é\x1b\\\x1b[1;2\x1bé\x1b[99;99zsecret'));
+    const b = await rebuilt(screen);
+    await b.screen.output(utf8('\x1b_é'));
+    t.mock.restoreAll();
+
+    assert.deepEqual(calls, []);
+    screen.dispose();
+    b.screen.dispose();
+  });
 });
 
 describe('createScreen: dispose', () => {

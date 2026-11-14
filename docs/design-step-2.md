@@ -362,8 +362,10 @@ peer's data — a frame, a message, a request body that does not parse or does n
 by its kind and where it came from (`page <window id>: malformed message`), never by its message,
 because a message can quote the data: Node.js's `JSON.parse` error quotes its input, which could be
 a proof, a typed prompt or a pasted text. An uncaught error is logged by its name and its stack
-frames without the message line, and ends the server (exit 1). What reaches the log through
-stdout and stderr is only what Node.js itself writes there (its warnings).
+frames without the message line, and ends the server (exit 1). The headless terminals of the
+screen sides (7.2) log nothing: xterm.js's own log is turned off, because its messages quote the
+program's output (a parsing error names the character and the parameters; section 21). What
+reaches the log through stdout and stderr is only what Node.js itself writes there (its warnings).
 
 `skydeck serve [--foreground]` is a command of its own, listed in `skydeck --help` as "the window's
 server (started by skydeck window)". `--foreground` runs it in the terminal, logging to stderr, for
@@ -642,8 +644,11 @@ corrected on its output, exactly, since no cell holds ESC: it serialises the alt
 if the pen were the default, so SGR 0 goes before the alternate screen; and above a blank row
 followed by a wrapped one it writes cursor moves of 0 columns, which move one and left a stray
 `-`, so those moves are dropped.
-Hyperlinks (OSC 8) written before a snapshot are not clickable after it; plain URLs still are
-(9.6).
+A link (OSC 8) is not carried across a snapshot, whether it was closed or is still open: what was
+written before the snapshot is not clickable after it (plain URLs still are, 9.6), and the rest of
+a link still open at the snapshot comes out as plain text. xterm.js reports a cell or pen that
+carries a link as underlined, so the pen takes only a real underline (SGR 4): a link's underline
+never goes on after the program closes the link.
 
 Known limits: a snapshot does not restore the scroll region (DECSTBM), the saved cursor (DECSC,
 and so where leaving the alternate screen puts the cursor), the character sets (`ESC ( 0`) or tab
@@ -654,14 +659,28 @@ stops set by the program (HTS, TBC); xterm.js's API does not show them, and Clau
   alternate screen never reflows);
 - with autowrap off (DECAWM), a wide character overwritten at the right margin leaves a cell pair
   that is serialised one column too wide (Claude Code keeps autowrap on);
-- a colour set as `38;5;n` with n below 16 comes back in its 16-colour form (it renders the same).
+- a colour set as `38;5;n` with n below 16 comes back in its 16-colour form (it renders the same);
+- the underline's style and colour (SGR 4:3, 58) are not kept, by the addon nor by the pen the
+  screen side adds: an underlined cell, and what the program prints next, come back with a plain
+  underline in the text's colour;
+- the cells of a link come back with a plain underline, not the link's dashed one;
+- rows erased with a background colour below the last row that has content (`CSI 48;5;n m CSI J`)
+  come back with the default background: the addon writes rows only up to the last one with
+  content or the cursor's row, whichever is lower;
+- an erased cell left in inverse video by overwriting half of a wide character comes back without
+  it: the addon steps over it with a cursor move.
 
 A record can end inside an escape sequence or inside a UTF-8 character, and a snapshot taken
 there would cut it: the next record's continuation would reach a screen rebuilt from the snapshot
 as text. The keeper never ends a record inside a UTF-8 character (7.1; stage A's plan, task 9),
 and the screen side follows the stream far enough to keep the escape sequence it stands inside
 and appends it to every snapshot, last, so that the next record completes it (the snapshot's
-seam; closed by task 33 of stage A's plan).
+seam; closed by task 33 of stage A's plan). A record that ends inside a grapheme cluster (between
+an emoji and its skin tone, inside a ZWJ sequence, before a combining mark or VS16) is a known
+limit: after a rebuild the rest of the cluster gets a cell of its own, until the program redraws
+that row. xterm.js joins a character to the cluster before it through a state its parser keeps
+across writes, and every CSI resets that state, so a snapshot (which ends with CUP and SGR) always
+leaves it at its start; the keeper cuts records only between UTF-8 characters.
 
 ### 7.3 Attaching, parking, rebuilding
 
@@ -2382,7 +2401,12 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | When the owner of a pty's master ends, the program gets SIGHUP and exits; for Claude Code that fires `SessionEnd` with reason `other`. | verified with a stand-in (terminal research T6); Claude Code's side observed in step 1 (design 14) |
 | A python3 keeper's output equals node-pty's cell for cell; snapshot plus tail rebuilds the screen exactly (every viewport cell, colour, attribute, 119 scrollback lines, wrap flags, modes, after two resizes; after SIGKILL of the screen side with 9 unparked records including a resize, no query answered twice, exit status delivered). Keeper about 12 MB. | verified (T1, T4, T10) |
 | `@xterm/addon-serialize` 0.14.0 restores modes 1, 66, 2004, 4, 6, 45, 1004, 7 and mouse modes 9/1000/1002/1003, but not cursor visibility (25), SGR mouse encoding (1006), the cursor style or OSC 8 link ids; the cursor lands one column left when the last row is full width. | verified |
-| `@xterm/addon-serialize` 0.14.0's `_diffStyle` writes SGR 22 both for "bold off" and for "dim off", and 22 turns off both: a dim cell followed by a bold one serialises as `1;22` and the bold is lost; bold and dim followed by only one of them loses that one too. It serialises the alternate screen as if the pen were the default, so after a pen is set the alternate screen's cells take it; above a blank row before a wrapped one its wrap trick writes CUF 0 and CUB 0, which move one column, and leaves a stray `-`. All three unfixed on xterm.js's master on 2026-11-13 (the first patched in the vendored bundle, the other two corrected on the addon's output, 7.2). An alternate-screen line marked wrapped comes back unwrapped; with DECAWM off a wide character overwritten at the right margin is serialised one column too wide; `38;5;n` with n below 16 comes back as the 16-colour form. Nor does it restore modes 2026, 20 and 1016, mode 12, the scroll region, the saved cursor, the character sets or tab stops. | verified (task 12) |
+| `@xterm/addon-serialize` 0.14.0's `_diffStyle` writes SGR 22 both for "bold off" and for "dim off", and 22 turns off both: a dim cell followed by a bold one serialises as `1;22` and the bold is lost; bold and dim followed by only one of them loses that one too. It serialises the alternate screen as if the pen were the default, so after a pen is set the alternate screen's cells take it; above a blank row before a wrapped one its wrap trick writes CUF 0 and CUB 0, which move one column, and leaves a stray `-`. All three unfixed on xterm.js's master on 2026-11-13 (the first patched in the vendored bundle, the other two corrected on the addon's output, 7.2). An alternate-screen line marked wrapped comes back unwrapped; with DECAWM off a wide character overwritten at the right margin is serialised one column too wide; `38;5;n` with n below 16 comes back as the 16-colour form. Nor does it restore modes 2026, 20 and 1016, mode 12, the scroll region, the saved cursor, the character sets or tab stops. Rows erased with a background colour below the last row with content come back with the default background (it serialises rows only up to the last with content or the cursor's row); an erased cell left in inverse video by overwriting half a wide character comes back without it (it writes `CSI 1 C` for it); the underline's style and colour are not kept. | verified (task 12; the last three in task 33) |
+| xterm.js 6.0.0's parser keeps the state that joins a character to the grapheme cluster before it (`precedingJoinState`) across writes; an executed control, a CSI, an ESC sequence and the end of an OSC or DCS reset it. | read in xterm.js 6.0.0's source, verified with the vendored bundle (task 33) |
+| xterm.js 6.0.0 logs to the console (`console.error` and the rest, prefixed `xterm.js: `) at its default log level `info`: a parsing error, which a program's malformed sequence causes (a character above U+009F inside an APC, after ESC), prints the character's code, the parser's state and the parameters. With `logLevel: 'off'` it prints nothing. | verified with the vendored bundle (task 33) |
+| xterm.js 6.0.0's terminal has an internal `_core.writeSync` that parses a write at once, the same chunk as `write` without its timer; it warns that it "will be removed soon". The tests of the snapshot's seam (stage A's plan, task 33) parse through it, thousands of snapshots per sweep; a test fails clearly when an upgrade removes it. | verified with the vendored bundle (task 33) |
+| xterm.js 6.0.0 reports a cell or pen that carries an OSC 8 link as underlined (`isUnderline`, for its dashed link underline); `getUnderlineStyle` is non-zero only for a real SGR 4. | read in xterm.js 6.0.0's source, verified with the vendored bundle (task 33) |
+| xterm.js 6.0.0's parser, where it differs from the VT500 diagram: an ESC ends an OSC or a DCS at once (its handler runs) and begins a new sequence; a C1 control inside a string leaves for the ground state or a new sequence without ending the string; a character above U+009F ends an ESC sequence, a CSI or DCS head and SOS, PM or APC; a DEL in a DCS payload reaches the handler only inside a run that began in the same write (its read-ahead loop), although its table ignores DEL there. Its UTF-8 decoder loses a character cut between two writes after a continuation byte 0x80. | read in xterm.js 6.0.0's source; the parser verified against the vendored bundle (task 33) |
 | xterm.js 6.0.0 in the browser leaves synchronized output (mode 2026) by itself: a held-back refresh starts a 1-second timer that turns the mode off and renders. The headless terminal has no renderer and keeps the mode until `?2026l`, RIS or DECSTR. | read in the vendored bundles (task 12) |
 | A headless terminal with 10,000 lines of 120 columns is about 25 MB; serialising it 145–166 ms (1.24 MB); the last 1,000 lines 18–41 ms; parsing about 10 MB/s. | verified |
 | The headless terminal answers DA1, DA2, DECRQM 2026, CPR, DSR and DECRQSS; it cannot answer OSC 10/11; xterm.js 6.0.0 has no XTVERSION answer. Starting the program before a screen side is connected makes its first probe time out and swallow the first keys. | verified (T9) |
