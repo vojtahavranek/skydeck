@@ -256,7 +256,10 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    `the window's server runs from <checkout>; run skydeck window there, or skydeck window --restart
    here to replace it` (exit 1). One whose process is alive (`server.json`, design 5.5's rule) but
    that does not answer within 5 seconds is reported: `the window's server (pid <n>) does not
-   answer; skydeck window --restart stops it` (exit 1). Otherwise a new one is started.
+   answer; skydeck window --restart stops it` (exit 1). A socket that refuses, or a request that
+   fails, is tried again every 100 ms within those 5 seconds — a server in its orderly stop (5.5)
+   no longer accepts connections but still lives for a moment — and a server that is gone
+   meanwhile counts as none. Otherwise a new one is started.
 2. when no page is connected to the server, asks it for a launch token (`POST /token`, 8.3),
    starts Edge with it (5.3), and waits up to 30 seconds — a cold Edge on a managed PC can take
    several (W1 records the real time) — for the token to be used by a page (`GET /token/<id>`).

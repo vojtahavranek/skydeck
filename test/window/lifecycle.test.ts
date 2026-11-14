@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import { procStartFromStat } from '../../src/claude/procstat.ts';
 import { SkydeckError } from '../../src/platform/errors.ts';
-import type { Detached, Processes, Proc } from '../../src/platform/types.ts';
+import type { Detached, Net, Processes, Proc } from '../../src/platform/types.ts';
 import { openDeck } from '../../src/sessions/deck.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import { computeBuild } from '../../src/window/build.ts';
@@ -27,8 +27,8 @@ import { formatPidLine } from '../../src/window/pidline.ts';
 import type { PingAnswer, StatusAnswer } from '../../src/window/protocol.ts';
 import { resolveRuntimeDir, runtimeFiles, writeServerJson } from '../../src/window/runtime.ts';
 import type { RuntimeFiles } from '../../src/window/runtime.ts';
-import { deckWith } from '../helpers/deck.ts';
-import { realTestPlatform, statLine } from '../helpers/platform.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
+import { BOOT_A, realTestPlatform, statLine } from '../helpers/platform.ts';
 import type { RealTestPlatform } from '../helpers/platform.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
 import { writeWindowConfig } from '../helpers/window-config.ts';
@@ -337,7 +337,7 @@ test('findServer: an answer that cannot be read is no answer: hung, and nothing 
   t.after(() => {
     garbage.close();
   });
-  assert.deepEqual(await findServer(h.deck, FAKE_ROOT, h.build), {
+  assert.deepEqual(await findServer(h.deck, FAKE_ROOT, h.build, { pingMs: 500 }), {
     kind: 'hung',
     pid: process.pid,
   });
@@ -1028,39 +1028,80 @@ test('startServe: serve exiting 0 while only a server answering with another boo
   });
 });
 
-test('startServe: each ping of the start waits at most 1 s, so none is left open long after it gave up', async (t) => {
-  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'silent' }));
-  const real = h.deck.platform.net;
-  const timeouts: number[] = [];
-  let pending = 0;
-  let lastSettled = 0;
-  const net = {
+/**
+ * `net` whose requests to `sock` are recorded and never answered: each ends only by its own
+ * timeout (ETIMEDOUT) or its signal (AbortError), as a request to a server that does not answer.
+ * Requests to any other path go to the real net.
+ */
+function silentNet(
+  real: Net,
+  sock: () => string,
+): { net: Net; outcomes: string[]; pending: () => number } {
+  const outcomes: string[] = [];
+  let open = 0;
+  const net: Net = {
     ...real,
-    requestUnix: (path: string, request: Parameters<typeof real.requestUnix>[1]) => {
-      timeouts.push(request.timeoutMs);
-      pending += 1;
-      const done = (): void => {
-        pending -= 1;
-        lastSettled = performance.now();
-      };
-      const answer = real.requestUnix(path, request);
-      answer.then(done, done);
-      return answer;
+    requestUnix: (path, request) => {
+      if (path !== sock()) return real.requestUnix(path, request);
+      open += 1;
+      return new Promise((_resolve, reject) => {
+        const end = (outcome: string, error: Error): void => {
+          clearTimeout(timer);
+          request.signal?.removeEventListener('abort', aborted);
+          open -= 1;
+          outcomes.push(outcome);
+          reject(error);
+        };
+        const aborted = (): void => {
+          end('aborted', new DOMException('aborted', 'AbortError'));
+        };
+        const timer = setTimeout(() => {
+          end('timed out', Object.assign(new Error('no answer'), { code: 'ETIMEDOUT' }));
+        }, request.timeoutMs);
+        if (request.signal?.aborted === true) aborted();
+        else request.signal?.addEventListener('abort', aborted, { once: true });
+      });
+    },
+  };
+  return { net, outcomes, pending: () => open };
+}
+
+test('startServe leaves no ping open when it gives up: the one in flight is aborted', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'idle' }));
+  const silent = silentNet(h.deck.platform.net, () => h.files().serverSock);
+  const deck = { ...h.deck, platform: { ...h.deck.platform, net: silent.net } };
+  assert.deepEqual(await startServe(deck, { startMs: 1500 }), {
+    ok: false,
+    line: `the window's server did not start (no answer in 1.5 s); see ${logPath(h)}`,
+  });
+  assert.equal(silent.pending(), 0);
+  // The attempts wait at most 1 s each: the first timed out, the one open at 1.5 s was aborted.
+  assert.deepEqual(silent.outcomes, ['timed out', 'aborted']);
+});
+
+test('findServer leaves no ping open: the one in flight at the end of pingMs is aborted', async (t) => {
+  const h = harness(t);
+  writeServer(h, ownLine(h));
+  const files = h.files();
+  const silent = silentNet(h.deck.platform.net, () => files.serverSock);
+  let calls = 0;
+  const net: Net = {
+    ...silent.net,
+    requestUnix: (path, request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.reject(Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }));
+      }
+      return silent.net.requestUnix(path, request);
     },
   };
   const deck = { ...h.deck, platform: { ...h.deck.platform, net } };
-  assert.deepEqual(await startServe(deck, { startMs: 2500 }), {
-    ok: false,
-    line: `the window's server did not start (no answer in 2.5 s); see ${logPath(h)}`,
+  assert.deepEqual(await findServer(deck, FAKE_ROOT, h.build, { pingMs: 1000 }), {
+    kind: 'hung',
+    pid: process.pid,
   });
-  const returned = performance.now();
-  assert.ok(timeouts.length > 0);
-  assert.ok(
-    timeouts.every((ms) => ms <= 1000),
-    `ping timeouts ${timeouts.join(', ')}`,
-  );
-  while (pending > 0) await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.ok(lastSettled - returned < 2500, `a ping settled ${lastSettled - returned} ms later`);
+  assert.equal(silent.pending(), 0);
+  assert.deepEqual(silent.outcomes, ['aborted']);
 });
 
 test('startServe: a boot id that cannot be read is an error before anything is started', async (t) => {
@@ -1170,4 +1211,110 @@ test('stopServer without a live server still counts the keepers', async (t) => {
   writeServer(h, await endedLine(h));
   assert.deepEqual(await stopServer(h.deck), { stopped: false, keepers: 1 });
   assert.deepEqual(h.signals, []);
+});
+
+// ---------------------------------------------------------------------------------------------
+// findServer after a refused or failed ping (ruled, review 2 C2), on the fake clock
+
+/** A fake-clock deck whose server.json names pid 4242 (alive in the fake /proc until removed). */
+function fakeServerDeck(t: TestContext): {
+  d: ReturnType<typeof testDeck>;
+  files: RuntimeFiles;
+  ping: PingAnswer;
+} {
+  const d = testDeck(t);
+  d.proc.setProcess(4242, { stat: statLine(4242, 777, 'node'), cmdline: [] });
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  mkdirSync(files.dir, { recursive: true, mode: 0o700 });
+  writeServerJson(d.platform.files, files.serverJson, {
+    pid: 4242,
+    procStart: 777,
+    bootId: BOOT_A,
+    port: PORT,
+    serverId: '0011223344556677',
+    build: '0123456789abcdef',
+    checkout: '/checkout',
+    startedAt: '1794474000000000000',
+    envOrigin: { dir: '/checkout', atNs: '1794474000000000000' },
+  });
+  const ping: PingAnswer = {
+    serverId: '0011223344556677',
+    bootId: BOOT_A,
+    build: '0123456789abcdef',
+    protocol: 1,
+    pid: 4242,
+    port: PORT,
+    checkout: '/checkout',
+  };
+  return { d, files, ping };
+}
+
+/** The deck with its net's requestUnix replaced; `attempts` counts the calls. */
+function withRequests(
+  deck: Deck,
+  answer: (attempt: number, real: Net['requestUnix']) => ReturnType<Net['requestUnix']>,
+): { deck: Deck; attempts: () => number } {
+  let attempts = 0;
+  const real = deck.platform.net;
+  const net: Net = {
+    ...real,
+    requestUnix: (path, request) => answer(++attempts, () => real.requestUnix(path, request)),
+  };
+  return { deck: { ...deck, platform: { ...deck.platform, net } }, attempts: () => attempts };
+}
+
+const refused = (): Promise<never> =>
+  Promise.reject(Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }));
+
+test('findServer: a refused ping is tried again every 100 ms; still refused at pingMs → hung', async (t) => {
+  const { d } = fakeServerDeck(t);
+  const asked = withRequests(d.deck, refused);
+  const before = d.clock.nowNs();
+  assert.deepEqual(
+    await findServer(asked.deck, '/checkout', '0123456789abcdef', { pingMs: 1000 }),
+    {
+      kind: 'hung',
+      pid: 4242,
+    },
+  );
+  assert.equal(asked.attempts(), 10); // at 0, 100, …, 900 ms; the one due at 1000 ms is the end
+  assert.ok(d.clock.nowNs() - before >= 1_000_000_000n);
+});
+
+test('findServer: refused, then the process is gone → none', async (t) => {
+  const { d } = fakeServerDeck(t);
+  const asked = withRequests(d.deck, (attempt) => {
+    if (attempt === 3) d.proc.setProcess(4242, null);
+    return refused();
+  });
+  assert.deepEqual(await findServer(asked.deck, '/checkout', '0123456789abcdef'), { kind: 'none' });
+  assert.equal(asked.attempts(), 3);
+});
+
+test('findServer: refused or failed, then an answer → classified by it', async (t) => {
+  const { d, ping } = fakeServerDeck(t);
+  const asked = withRequests(d.deck, (attempt) => {
+    if (attempt === 1) return refused();
+    if (attempt === 2) {
+      return Promise.reject(Object.assign(new Error('reset'), { code: 'ECONNRESET' }));
+    }
+    return Promise.resolve({ status: 200, body: ping });
+  });
+  assert.deepEqual(await findServer(asked.deck, '/checkout', '0123456789abcdef'), {
+    kind: 'ours',
+    ping,
+  });
+  assert.equal(asked.attempts(), 3);
+});
+
+test('findServer: a ping that timed out is not tried again → hung at once', async (t) => {
+  const { d } = fakeServerDeck(t);
+  const asked = withRequests(d.deck, () =>
+    Promise.reject(Object.assign(new Error('no answer'), { code: 'ETIMEDOUT' })),
+  );
+  assert.deepEqual(await findServer(asked.deck, '/checkout', '0123456789abcdef'), {
+    kind: 'hung',
+    pid: 4242,
+  });
+  assert.equal(asked.attempts(), 1);
 });

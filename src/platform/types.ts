@@ -224,6 +224,9 @@ export interface Net {
    * Otherwise `body` is the answer parsed as JSON, its text when it is not JSON, null when empty.
    * The timeout counts from the request; with `onLine` it starts again with every chunk received.
    * A `timeoutMs` that is not a whole number from 0 to 2^31 − 1 rejects with a RangeError.
+   * When `signal` fires, the request is destroyed, its timer cleared, and it rejects with an Error
+   * named `AbortError` (as Runner.run); already aborted: nothing is sent; one that fires after the
+   * answer changes nothing.
    */
   requestUnix(
     path: string,
@@ -233,6 +236,7 @@ export interface Net {
       body?: unknown;
       timeoutMs: number;
       onLine?: (line: string) => void;
+      signal?: AbortSignal;
     },
   ): Promise<{ status: number; body: unknown }>;
 }

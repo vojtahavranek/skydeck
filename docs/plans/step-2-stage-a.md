@@ -337,8 +337,10 @@ export interface Net {
    *  refusal or a missing socket. `onLine` receives a streamed body line by line when given; `body`
    *  is then null, and the timeout starts again with every chunk. Without `onLine`, `body` is the
    *  answer parsed as JSON, its text when it is not JSON, null when empty. A `timeoutMs` that is not
-   *  a whole number from 0 to MAX_TIMER_MS rejects with a RangeError. */
-  requestUnix(path: string, request: { method: 'GET' | 'POST'; path: string; body?: unknown; timeoutMs: number; onLine?: (line: string) => void }): Promise<{ status: number; body: unknown }>;
+   *  a whole number from 0 to MAX_TIMER_MS rejects with a RangeError. `signal` (ruled, task 22): when it
+   *  fires the request is destroyed, its timer cleared, and it rejects with an AbortError (as Runner.run);
+   *  already aborted, nothing is sent; one that fires after the answer changes nothing. */
+  requestUnix(path: string, request: { method: 'GET' | 'POST'; path: string; body?: unknown; timeoutMs: number; onLine?: (line: string) => void; signal?: AbortSignal }): Promise<{ status: number; body: unknown }>;
 }
 export interface Platform {
   processes: Processes;
@@ -1101,7 +1103,7 @@ export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null)
 // token the server does not know (404); dropToken resolves for one (`{ ok: false }`: nothing to
 // give up). Every answer is checked against its type; a field a newer server adds is left out.
 export interface ControlClient {
-  ping(timeoutMs?: number): Promise<PingAnswer | 'refused' | 'timeout'>; // 5 s default
+  ping(timeoutMs?: number, signal?: AbortSignal): Promise<PingAnswer | 'refused' | 'timeout'>; // 5 s default; `signal` is passed to requestUnix and an abort is 'timeout' (ruled, task 22)
   status(): Promise<StatusAnswer>;
   token(seconds: 30 | 600): Promise<TokenAnswer>;
   tokenState(id: string): Promise<TokenState>;
@@ -1123,14 +1125,18 @@ export type FoundServer =
 export interface LifecycleTimes { pingMs?: number; startMs?: number; stopMs?: number; killMs?: number }
 /** Ruled (task 22): a server.json line that cannot be judged ('unknown', design 5.5) rejects with a
  *  SkydeckError — the command says it cannot tell whether the server runs; nothing is given up on
- *  it. After a ping without an answer the line is judged again: dead meanwhile → none, else hung.
+ *  it. After a ping without an answer the line is judged again: dead meanwhile → none, else hung. A
+ *  refused or failed ping (a server in its orderly stop no longer accepts) is tried again every 100 ms
+ *  until pingMs is over — an answer is classified, a process still alive then is hung; a ping that
+ *  timed out is not tried again (ruled, task 22, review 2). The ping open at the end is aborted.
  *  All three functions reject with a SkydeckError, never another error, for a server.json, a
  *  terms/ directory or a signal the system refuses (task 22, review 2). */
 export function findServer(deck: Deck, checkout: string, build: string, times?: LifecycleTimes): Promise<FoundServer>;
 /** Starts `<appRoot>/bin/skydeck serve` detached (S2 5.2) and waits at most 10 s for a ping of this
  *  checkout (ruled, task 22), the current build and boot id; one fixed line per exit code. Each
- *  ping of that wait waits at most 1 s, so none outlives the wait by more (task 22, review 2); a
- *  boot id that cannot be read rejects with a SkydeckError before anything is started. */
+ *  ping of that wait waits at most 1 s (then the runtime directory is looked up again), and the one
+ *  open when the wait ends is aborted: nothing outlives the call (ruled, task 22, review 2). A boot
+ *  id that cannot be read rejects with a SkydeckError before anything is started. */
 export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }>;
 /** A server that answers ping: POST /shutdown, wait 10 s; then SIGTERM and after 5 s SIGKILL. A server that gives no
  *  ping answer gets no POST /shutdown and SIGTERM at once, without the 10 s (ruled, task 22). Each
@@ -3104,6 +3110,9 @@ one safely. Shared by `skydeck window` (task 25), `doctor` and `uninstall` (task
 
 **Files**
 - Create: `src/window/lifecycle.ts`
+- Modify (ruled, review 2): `src/platform/types.ts` and `src/platform/real.ts` (`requestUnix`'s
+  `signal`, 2.2), `src/window/client.ts` (`ping`'s `signal`, 2.8) — that addition only, with its
+  tests in `test/platform/real.test.ts` and `test/window/control.test.ts`
 - Test: `test/window/lifecycle.test.ts`, with `test/fixtures/fake-serve/` (a `bin/skydeck` stub in
   a fixture `appRoot` that exits with the code the test asks for, or listens on `server.sock` and
   answers `/ping`, `/status` and `/shutdown` like a server — with the server's own
@@ -3113,7 +3122,8 @@ one safely. Shared by `skydeck window` (task 25), `doctor` and `uninstall` (task
 
 **Behaviour.** `findServer`: `server.json` read; the process dead by design 5.5's rule → `none`;
 alive → `ping` within 5 s: no answer → `hung` (unless a second look finds the process dead
-meanwhile → `none`; ruled); another `checkout` → `other-checkout`; another
+meanwhile → `none`; a refused or failed ping is tried again every 100 ms within the 5 s; ruled);
+another `checkout` → `other-checkout`; another
 `build` or boot → `other-build`; else `ours`. `startServe`: `<appRoot>/bin/skydeck serve` through
 `processes.startDetached`, cwd `/`, stdin `/dev/null`, stdout and stderr appended to
 `<stateDir>/server.log`, the environment of the command with `SKYDECK_ENV_ORIGIN` = its working

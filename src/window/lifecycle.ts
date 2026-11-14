@@ -63,7 +63,7 @@ const DEFAULT_TIMES: Required<LifecycleTimes> = {
 
 /** How often a wait looks again: for the server's answer, or for its process to be gone. */
 const POLL_MS = 100;
-/** The longest a single ping of startServe's wait waits, whatever `pingMs` says. */
+/** The longest a single ping of startServe's wait waits, whatever `pingMs` says: then it looks again. */
 const START_PING_MS = 1000;
 
 /** S2 5.2's exit codes of `serve` that have a line of their own. */
@@ -149,16 +149,20 @@ function recordedServer(
 }
 
 /**
- * `GET /ping`, or null when it gives no answer: refused, not in time, or failed (EPIPE or
- * ECONNRESET from a server that is closing, an answer that cannot be read). Anything that is not
- * a SkydeckError (a RangeError, a mistake of the caller) passes on.
+ * `GET /ping`: the answer; 'timeout' when none came in time (or `signal` fired); 'refused' when it
+ * was refused or failed — EPIPE or ECONNRESET from a server that is closing, an answer that cannot
+ * be read — which a later attempt can still get past. Anything that is not a SkydeckError (a
+ * RangeError, a mistake of the caller) passes on.
  */
-async function pingOnce(client: ControlClient, timeoutMs: number): Promise<PingAnswer | null> {
+async function pingOnce(
+  client: ControlClient,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<PingAnswer | 'refused' | 'timeout'> {
   try {
-    const answer = await client.ping(timeoutMs);
-    return typeof answer === 'string' ? null : answer;
+    return await client.ping(timeoutMs, signal);
   } catch (error) {
-    if (error instanceof SkydeckError) return null;
+    if (error instanceof SkydeckError) return 'refused';
     throw error;
   }
 }
@@ -169,9 +173,12 @@ async function pingOnce(client: ControlClient, timeoutMs: number): Promise<PingA
 /**
  * S2 5.1 step 1: server.json read; none when it is missing or its process is dead by design
  * 5.5's rule; otherwise `GET /ping` within `pingMs`: another checkout → other-checkout, another
- * build or boot → other-build, else ours. A process that is alive but gives no answer is hung —
- * unless a second look finds it gone meanwhile, which is none. Rejects with a SkydeckError when
- * the process cannot be judged.
+ * build or boot → other-build, else ours. After a ping that gets no answer the process is judged
+ * again: gone meanwhile → none. A refused or failed ping (a server in its orderly stop no longer
+ * accepts, S2 5.5) is tried again every 100 ms until `pingMs` is over (ruled); one that timed
+ * out has waited already: a process still alive is then hung. The ping open when `pingMs` is
+ * over is aborted, so nothing outlives the call. Rejects with a SkydeckError when server.json
+ * cannot be read or the process cannot be judged.
  */
 export async function findServer(
   deck: Deck,
@@ -185,17 +192,52 @@ export async function findServer(
   if (server === null || judge(deck.platform, server.line) === 'dead') {
     return { kind: 'none' };
   }
-  const ping = await pingOnce(controlClient(deck.platform.net, files.serverSock), pingMs);
-  if (ping === null) {
-    return judge(deck.platform, server.line) === 'dead'
-      ? { kind: 'none' }
-      : { kind: 'hung', pid: server.line.pid };
-  }
+  const ping = await pingWithin(deck, files, server.line, pingMs);
+  if (ping === 'dead') return { kind: 'none' };
+  if (ping === 'hung') return { kind: 'hung', pid: server.line.pid };
   if (ping.checkout !== checkout) return { kind: 'other-checkout', ping };
   if (ping.build !== build || ping.bootId !== server.line.bootId) {
     return { kind: 'other-build', ping };
   }
   return { kind: 'ours', ping };
+}
+
+/**
+ * findServer's ping (ruled): the answer, 'dead' when the process is gone by a look after a ping
+ * without an answer, 'hung' when it still lives after a ping that timed out or once `pingMs` is
+ * over. Refused and failed pings are tried again every POLL_MS; the one open at the end is aborted.
+ */
+async function pingWithin(
+  deck: Deck,
+  files: RuntimeFiles,
+  line: PidLine,
+  pingMs: number,
+): Promise<PingAnswer | 'dead' | 'hung'> {
+  const { platform } = deck;
+  const client = controlClient(platform.net, files.serverSock);
+  const controller = new AbortController();
+  let late = false;
+  let cancel = (): void => {};
+  const over = new Promise<void>((resolve) => {
+    cancel = platform.clock.after(pingMs, () => {
+      late = true;
+      controller.abort();
+      resolve();
+    });
+  });
+  try {
+    for (;;) {
+      const answer = await pingOnce(client, pingMs, controller.signal);
+      if (typeof answer === 'object') return answer;
+      if (judge(platform, line) === 'dead') return 'dead';
+      if (answer === 'timeout' || late) return 'hung';
+      await Promise.race([platform.clock.sleep(POLL_MS), over]);
+      if (late) return judge(platform, line) === 'dead' ? 'dead' : 'hung';
+    }
+  } finally {
+    cancel();
+    controller.abort();
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -210,9 +252,10 @@ export async function findServer(
  * that found a stale record chooses and records another directory — or the process's exit, which
  * becomes S2 5.2's line for its code. Exit 0 means a server of this checkout holds the lock: that
  * one is waited for within the same time. After the time is up the process is left running.
- * Each attempt's ping waits at most `pingMs` and never more than 1 s: attempts follow each other
- * every 100 ms, and a ping still open when the time is up would keep the command's process alive
- * after its line. Rejects with a SkydeckError, starting nothing, when the boot id cannot be read
+ * Each attempt's ping waits at most `pingMs` and never more than 1 s, so that the runtime
+ * directory is looked up again soon (a socket that accepts and does not answer must not hide a
+ * server that records another directory); the ping open when the wait ends is aborted, so nothing
+ * outlives the call. Rejects with a SkydeckError, starting nothing, when the boot id cannot be read
  * (no server could ever be confirmed), and when the program cannot be started.
  */
 export async function startServe(
@@ -265,6 +308,7 @@ export async function startServe(
     });
   });
   const never = new Promise<void>(() => {});
+  const controller = new AbortController();
   /** Settles at the deadline, and at the exit while the exit is not known yet. */
   const interrupted = (): Promise<null> =>
     Promise.race([deadline, seen.exit === null ? exited : never]).then(() => null);
@@ -278,8 +322,12 @@ export async function startServe(
         return { ok: false, line: didNotStart(`no answer in ${startMs / 1000} s`, log) };
       }
       const client = controlClient(platform.net, serverFiles(deck).serverSock);
-      const ping = await Promise.race([pingOnce(client, attemptMs), interrupted()]);
+      const ping = await Promise.race([
+        pingOnce(client, attemptMs, controller.signal),
+        interrupted(),
+      ]);
       if (
+        typeof ping === 'object' &&
         ping !== null &&
         ping.checkout === checkout &&
         ping.build === build &&
@@ -291,6 +339,7 @@ export async function startServe(
     }
   } finally {
     cancelDeadline();
+    controller.abort(); // the ping still open, if any
   }
 }
 
@@ -373,7 +422,7 @@ export async function stopServer(
   }
   const { line } = server;
   const client = controlClient(platform.net, files.serverSock);
-  if ((await pingOnce(client, pingMs)) !== null) {
+  if (typeof (await pingOnce(client, pingMs)) === 'object') {
     await client.shutdown().catch((error: unknown) => {
       if (!(error instanceof SkydeckError)) throw error;
     });

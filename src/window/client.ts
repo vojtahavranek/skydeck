@@ -16,8 +16,10 @@ export interface ControlClient {
    * that cannot be read (one that is not HTTP included), and passes on the RangeError of a time no
    * timer can wait. An answer of another `protocol` cannot be read: whoever adds protocol 2 makes
    * ping accept both, since ping is how S2 5.1 recognises another build to restart it.
+   * `signal` ends the request when it fires (Net.requestUnix): an abort is 'timeout', the server
+   * not having answered in the time the caller gave it.
    */
-  ping(timeoutMs?: number): Promise<PingAnswer | 'refused' | 'timeout'>;
+  ping(timeoutMs?: number, signal?: AbortSignal): Promise<PingAnswer | 'refused' | 'timeout'>;
   /** The others wait 5 s and reject with a SkydeckError that says what went wrong. */
   status(): Promise<StatusAnswer>;
   /** RangeError, and nothing sent, for seconds other than 30 and 600. */
@@ -73,11 +75,19 @@ export function controlClient(net: Net, sockPath: string): ControlClient {
   };
 
   return {
-    async ping(timeoutMs = PING_TIMEOUT_MS) {
+    async ping(timeoutMs = PING_TIMEOUT_MS, signal) {
       let answer: { status: number; body: unknown };
       try {
-        answer = await net.requestUnix(sockPath, { method: 'GET', path: '/ping', timeoutMs });
+        answer = await net.requestUnix(sockPath, {
+          method: 'GET',
+          path: '/ping',
+          timeoutMs,
+          signal,
+        });
       } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return 'timeout';
+        }
         const code = systemCode(error);
         if (code === 'ECONNREFUSED' || code === 'ENOENT') {
           return 'refused';
