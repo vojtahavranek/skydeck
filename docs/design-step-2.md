@@ -432,12 +432,12 @@ under `/mnt/<letter>/` maps to `<LETTER>:\`). None or several is an error that n
 On `POST /shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connections; parks a
 snapshot in every keeper (7.3); closes its keeper connections (the keepers and their programs keep
 running); sends every page `bye` with the reason; removes `server.json`, `server.pid` and
-`server.sock`; releases the `window_server` lock (5.2); and exits 0. It does not stop the
-keep-alive, which ends by itself (6.1). The three are the same stop, so a command that stops a
-server (5.1 `--restart`) sends SIGTERM instead of the request to one that does not answer
-`GET /ping`. A server that crashes leaves `server.json` and its lock
-behind: whoever reads them checks the pid, process start and boot id they name by design 5.5's
-rule before believing them.
+`server.sock`; releases the `window_server` lock (5.2); and exits 0. After `bye`, an upgrade with
+the right `Host` is answered 503 (8.2.1). It does not stop the keep-alive, which ends by itself
+(6.1). The three are the same stop, so a command that stops a server (5.1 `--restart`) sends
+SIGTERM instead of the request to one that does not answer `GET /ping`. A server that crashes
+leaves `server.json` and its lock behind: whoever reads them checks the pid, process start and
+boot id they name by design 5.5's rule before believing them.
 
 ## 6. WSL lifetime
 
@@ -989,6 +989,23 @@ no CORS header ever. `OPTIONS` is answered 403, any other method but `GET` 405. 
 TCP port acts on anything: the static files are not secret, and every action goes through the
 WebSocket after the proof (8.2.2).
 
+**Node.js's own answers.** A few requests never reach a handler of skydeck's: Node.js's HTTP server
+answers them itself, with no body and without the headers above, and closes the connection
+(measured on Node.js 24.19): 400 for an HTTP/1.1 request without `Host` (from its request parser),
+and, through its default `clientError` handling, 400 for an unknown method, a request line it
+cannot parse, `Content-Length` together with `Transfer-Encoding` or an HTTP/2 preface, and 431 for
+headers above 16 KiB; `CONNECT` is closed without an answer. They only refuse, so the headers would
+protect nothing there (ruled, plan task 17); server tests pin them, so that a Node.js release that
+changes them is noticed. Every request with `Connection: Upgrade` and an `Upgrade` header goes to
+the upgrade handler whatever its path, method or `Host`; that handler applies this section's checks
+itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`. After `bye`
+(5.5), an upgrade with the right `Host` is answered 503 (ruled, plan task 17). When 64
+connections are waiting for their `hello` (8.2.2) and another upgrade passes the checks above, the
+server drops the one that has waited longest and accepts the newcomer: a local process that holds
+idle connections which prove nothing can neither use up the server's descriptors nor lock a new or
+reconnecting window out, since a real page's `hello` takes milliseconds; a connection that has
+proven itself is never dropped for this (ruled, plan task 17).
+
 **Why `'unsafe-inline'` for styles, and only for styles.** xterm.js 6.0.0's DOM renderer creates
 `<style>` elements at run time and writes the colour palette, cursor and selection rules into them
 (verified: under `style-src 'self'` a red cell renders black; section 21). Inline styles cannot run
@@ -1063,6 +1080,11 @@ the server's proof.
    "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
    connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server).
+
+**Reading the secret, a named limit.** The server reads the secret from the store at every
+`hello`, so `--new-secret` takes effect at once. While another skydeck command holds the store's
+write lock, that read can wait up to the store's 5-second busy timeout, and the whole server
+waits with it (ruled, plan task 17).
 
 **Encodings.** Keys (the secret, a launch token) are 32 raw bytes, written as base64url without
 padding wherever they are stored or printed; HMAC and HKDF take the raw bytes. Nonces, proofs and
@@ -1227,12 +1249,27 @@ page's `view` state is its own. Notifications go to one page only (13).
 #### 8.2.8 Backpressure
 
 The server never pauses a program; it may stop reading a keeper's connection (7.3, Reading), which
-only fills the keeper's send queue until the keeper closes that connection. When more than 1 MiB is
-queued on a page's
-socket, the server stops forwarding output to that page and marks its attached terminals
-**behind**; when the queue has drained below 64 KiB, it sends a fresh `snap` for each of them and
-forwards again. A page attaches only to terminals it shows or has shown recently (12.6), so a
-hidden terminal costs nothing.
+only fills the keeper's send queue until the keeper closes that connection. When a record for a
+page (output, a size, an exit) or its `list` finds more than 1 MiB queued on the page's socket,
+the server stops forwarding records to that page, marks the terminals whose records it drops
+**behind**, and holds the page's `list`. A `snap`'s own bytes do not count toward the 1 MiB: a
+large screen is not a slow page, and counting it would make the fresh snap put the page behind
+again. When the queue has drained (Node.js's `drain`: nothing is left queued, so below 64 KiB),
+the server sends the page's current `list` at once and attaches each terminal that is behind
+again: its fresh `snap` follows when the hub gives it, then the state the terminal is in (its
+`exit`, a `gap` or `newer-keeper` notice), and records are forwarded again; a terminal that lost
+nothing keeps its stream. With more than 64 MiB queued, not counting what is still queued of the
+latest `snap`, the server drops the connection, and the page reconnects (6.3, 8.2.5). The latest
+snap is left out because one screen can be that large: 5,000 lines of image-like output (each
+cell its own colours) give a snap of about 40 MiB at 200 columns and 60 MiB at 300 (measured
+with the screen side, 7.2), and counting it would make such a screen a reconnect loop; a page
+that lets snap after snap pile up without reading is still cut. The snaps of several terminals
+attached at the same moment count, all but the latest, so a page that attached about nine screens
+of 7.5 MiB, or three of the image-like ones of 40–60 MiB, at once would be cut: the page therefore
+attaches its visible terminal first and the others one at a time, each after the previous `snap`
+has arrived (a named limit). These rules
+were ruled in plan task 17. A page attaches only to terminals it shows or has shown recently
+(12.6), so a hidden terminal costs nothing.
 
 ### 8.3 Command line and server
 

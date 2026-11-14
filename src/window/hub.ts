@@ -53,7 +53,8 @@ export interface TerminalHub {
   resize(termId: string, cols: number, rows: number): void;
   /** S2 8.2.3 `close-terminal`: forgets an ended, lost or not-started terminal. */
   close(termId: string): 'ok' | 'running' | 'unknown';
-  /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). */
+  /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). Pages calls it when
+   *  a page starts focused and when a page reports focus (with the theme of its start; ruled). */
   setTheme(theme: ThemePayload): void;
   /** Called after any change of `list()`; returns the function that unsubscribes. */
   onChange(listener: () => void): () => void;
