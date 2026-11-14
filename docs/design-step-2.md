@@ -889,7 +889,13 @@ The server, on `exit`:
 
 - keeps the terminal's last screen in memory and shows it in the terminal pane dimmed, under a bar
   `claude exited (status <n>) at <time> · Resume · Close` (12.6), until the user closes it,
-  resumes the session, or the server restarts;
+  resumes the session, or the server restarts. When its session runs again the ended terminal is
+  dropped — forgotten as `close-terminal` forgets it, its slot freed, its keeper allowed to end
+  (ruled by the plan owner, review of plan task 13): a resume from the window closes the
+  session's terminals whose program is over (ended, lost, not started) once the guard and the
+  lock have let it through and before it opens the new one (a refused resume leaves them), and
+  the tick closes an ended terminal whose session is seen running anywhere else. A terminal whose
+  program may still run is never dropped this way;
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
   and the session's lock is still the one this launch took, releases that lock, and for a new
@@ -1181,7 +1187,11 @@ An unknown kind or field is refused, and so is a string over its limit (in UTF-8
 URLs 4,096, `input.data` 64 KiB, other text 1,024; the action of 9.6 then opens a URL only up to
 2,048 characters) or a size that is not a whole number from 1 to 65,535. No action carries a program or an argument list to run (8.3):
 `resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
-fields that become part of a launch, checked as `skydeck new` checks them.
+fields that become part of a launch, checked as `skydeck new` checks them. The actions check every
+action again where they act on it, with the same parser — its kind, the types and limits of its
+fields, well-formed text — and refuse one that does not pass ("skydeck cannot do that action", one
+log line with the parser's kind; ruled by the plan owner, review of plan task 32). A refusal's
+message is sanitised line by line, as the command line prints it: it can quote what the page sent.
 
 Server → page:
 
@@ -1509,6 +1519,14 @@ freshly refreshed rows (`prepareResumeById`), the refusal without a boot id, the
 release and renewal rules, the start-event rule (`resumeStarted`), the memory check and batches of
 restore.
 
+One rule is added for the window's own terminals (ruled by the plan owner, review of plan task
+32): a resume from the window is refused — "this session is already open in the window", before
+the lock, nothing opened — while the window has a terminal for the session whose program may still
+run (starting, running, reconnecting, a newer keeper), whatever the lock says. A terminal's session
+is the one it shows, or while it shows none the one it was opened for. The lock alone does not
+cover it: claude can wait at a dialog before its `SessionStart` for longer than the lock holds, and
+the guard then sees no holder; step 1 accepts that hole only for terminals it cannot see.
+
 Four changes to step 1's code make that possible, with no change of behaviour for the commands
 (4.4 lists every change step 2 makes to step 1's code, with its stage):
 
@@ -1567,6 +1585,12 @@ command line to run by hand when that is safe, and none after a timeout.
   `<short> is running (pid <n>)` or `is being resumed (<n> s ago); try again in <m> s`) are shown
   on the card.
 - **New.** The form (12.6) → `act new` → `prepareNew` with the chosen directory → `launchPrepared`.
+- **A window terminal that fails unexpectedly** (its `open()` rejects or throws, for a resume or a
+  new session) is answered as an open that timed out (11.2): the window terminal may already have
+  a keeper, so no command to run by hand is shown — a hand-run `claude` could resume the session
+  twice — and the lock and the label stay. The failure is logged once by its kind ("the terminal
+  failed unexpectedly (<kind>)" on the card), never its message (ruled by the plan owner, review of
+  plan task 32).
 - **Restore.** The banner (12.7) → the shared restore planning (11.1: design 7.8's set and preselection, on rows
   refreshed just before) → `runRestore` with the window terminal: batches of `restoreBatch`, the
   memory check, the wait for start events with lock renewal, exactly as from the command line. Its
@@ -1735,7 +1759,9 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 - **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close).
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
-  the label, the group and extra flags. A label that starts with a ticket key gives the group
+  the label, the group and extra flags. A label or group left empty, or holding only white space,
+  is none (ruled by the plan owner, review of plan task 32: `skydeck new --label ' '` is refused,
+  a blank form field is not). A label that starts with a ticket key gives the group
   through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by
   any whitespace (spaces, tabs, line breaks, the no-break space of a pasted text: nothing can hide
   inside one word);
