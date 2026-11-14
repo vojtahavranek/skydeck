@@ -228,6 +228,23 @@ export function createList(root, hooks) {
   footerAction.addEventListener('click', () => toggleDone());
   root.replaceChildren(filterBar, body, footer);
 
+  /**
+   * The row of the click that began the current click sequence (makeRow: a double click acts
+   * only when both its clicks were on one row). Every first click anywhere in the list forgets
+   * it before a row's own listener may set it again (capture phase), so that a sequence begun
+   * off a row — on blank space, on a header — never matches an older click on a row.
+   */
+  const clicks = { first: /** @type {string | null} */ (null) };
+  root.addEventListener(
+    'click',
+    (event) => {
+      if (event.detail <= 1) {
+        clicks.first = null;
+      }
+    },
+    true,
+  );
+
   /** @type {ListMessage | null} */
   let current = null;
   /** @type {string | null} */
@@ -237,8 +254,6 @@ export function createList(root, hooks) {
   let receivedAt = 0;
   /** The section the selected row was drawn in, to scroll to it when it moves to another. */
   let selectedSection = '';
-  /** The row of the last click that began a click sequence (makeRow: double clicks). */
-  const clicks = { first: /** @type {string | null} */ (null) };
   /**
    * An Enter of the list's is down and not yet released. app.js hands the list its action, not
    * the event, so the list tells an auto-repeated Enter from a press by the release: a held Enter

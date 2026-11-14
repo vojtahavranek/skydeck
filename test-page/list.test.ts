@@ -887,6 +887,84 @@ test('the list', async (t) => {
   );
 
   await t.test(
+    'a double click begun off a row forgets an earlier click on a row: first click on blank space or on the Earlier header, a list moves that row under the pointer, the second click resumes nothing',
+    async (t) => {
+      const press2 = async (page: Page): Promise<void> => {
+        // The second click of a double click, alone: Chromium makes it a dblclick by its count.
+        await page.mouse.down({ clickCount: 2 });
+        await page.mouse.up({ clickCount: 2 });
+      };
+      const underPointer = (page: Page, x: number, y: number): Promise<string | null> =>
+        page.evaluate(
+          ({ x, y }) =>
+            document.elementFromPoint(x, y)?.closest('[data-id]')?.getAttribute('data-id') ?? null,
+          { x, y },
+        );
+
+      // Blank space under the last row.
+      const week = [fullRow(S1), fullRow(S2), fullRow(S3)];
+      let current = fullList({ week });
+      const s = await scripted(t, chromium, () => current, 42);
+      await untilDrawn(s.page, (rows) => rows.length === 3, 'three rows');
+      await s.page.locator(`#list [data-id="${S3}"]`).click(); // an earlier single click on S3
+      await sleep(300);
+      const box = await s.page.locator(`#list [data-id="${S3}"]`).boundingBox();
+      assert.ok(box !== null);
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height + 12;
+      assert.equal(await underPointer(s.page, x, y), null, 'blank space below S3');
+      await s.page.mouse.click(x, y); // the first click of a double click, off any row
+      current = fullList({ week: [fullRow(S4, { lastActivityNs: ago(SEC) }), ...week] });
+      s.send(current);
+      await untilDrawn(s.page, (rows) => rows.length === 4, 'a row joined');
+      assert.equal(await underPointer(s.page, x, y), S3, 'S3 moved under the pointer');
+      let before = s.sent.length;
+      await press2(s.page);
+      await sleep(500);
+      assert.deepEqual(
+        s.sent.slice(before).filter((message) => message['t'] === 'act'),
+        [],
+        'no resume after a first click on blank space',
+      );
+
+      // The Earlier header: its first click unfolds Earlier, the list that answers moves the row
+      // clicked before under the pointer.
+      const t2 = await scripted(
+        t,
+        chromium,
+        (view) =>
+          Array.isArray(view['unfolded']) && view['unfolded'].includes('earlier')
+            ? fullList({
+                week: [fullRow(S4, { lastActivityNs: ago(SEC) }), fullRow(S1), fullRow(S2)],
+                earlier: [fullRow(S3, { lastActivityNs: ago(9n * DAY) })],
+              })
+            : fullList({ week: [fullRow(S1), fullRow(S2)], earlier: 'folded' }),
+        43,
+      );
+      await untilDrawn(t2.page, (rows) => rows.length === 2, 'two rows, Earlier folded');
+      await t2.page.locator(`#list [data-id="${S2}"]`).click(); // an earlier single click on S2
+      await sleep(300);
+      const header = await t2.page
+        .locator('#list .list-section[data-section="earlier"]')
+        .boundingBox();
+      assert.ok(header !== null);
+      const hx = header.x + header.width / 2;
+      const hy = header.y + header.height / 2;
+      await t2.page.mouse.click(hx, hy); // the first click, on the header: Earlier unfolds
+      await untilDrawn(t2.page, (rows) => rows.length === 4, 'Earlier unfolded, a row joined');
+      assert.equal(await underPointer(t2.page, hx, hy), S2, 'S2 moved under the pointer');
+      before = t2.sent.length;
+      await press2(t2.page);
+      await sleep(500);
+      assert.deepEqual(
+        t2.sent.slice(before).filter((message) => message['t'] === 'act'),
+        [],
+        'no resume after a first click on the header',
+      );
+    },
+  );
+
+  await t.test(
     'a held Enter (auto-repeat) resumes nothing more: from the filter field nothing, on the list once; the next press acts again',
     async (t) => {
       const list = fullList({ week: [fullRow(S1), fullRow(S2)] });
