@@ -141,6 +141,11 @@ export function keepAliveNotices(): (state: KeepAlivePayload) => {
   };
 }
 
+/** S2 5.2: a server.sock that a process answers on (found by the probe, or at the listen). */
+function sockInUse(files: RuntimeFiles): string {
+  return `${files.serverSock} is in use by a process that answers on it; see skydeck doctor`;
+}
+
 /** Whether `error` says the address is taken (listenHttp's EADDRINUSE). */
 function addressInUse(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === 'EADDRINUSE';
@@ -186,9 +191,10 @@ async function pythonOf(platform: Platform): Promise<StatusAnswer['python']> {
  * S2 5.2 in this order: the refusal under Claude Code (13); the server's environment; the deck
  * (its connection guarded, S2 10.1); the lock (0 or 11); the runtime directory, taken and
  * prepared (12); the assets, the keeper file and the vendored xterm modules (A35); the secret; the
- * port (10, the lock released); `server.json` and `server.pid` — before `server.sock` answers, so
+ * port (10, the lock released); `server.sock` probed (one that refuses removed, one a process
+ * answers on fails the start); `server.json` and `server.pid` — before `server.sock` answers, so
  * that every server that answers can be found by them (ruled, server-findable; until then the lock
- * names it); `server.sock` (one that refuses removed); the keepers found (`rediscover`, each one
+ * names it); `server.sock` listened on; the keepers found (`rediscover`, each one
  * not started through decideFoundKeeper); the interop link; the tick, whose first run makes the
  * first keep-alive check. A failure on the way gives back everything taken so far, server.json and
  * server.pid included.
@@ -500,6 +506,12 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     if (options.startDelayMs !== undefined && options.startDelayMs > 0) {
       await clock.sleep(options.startDelayMs); // A31's seam: this step made slow
     }
+    // server.sock (S2 5.2, 8.3): one a dead server left behind refuses connections, and goes; one
+    // that a process answers on fails the start before server.json is written, so that the record
+    // of whatever answers there is left as it is (review 2).
+    const sock = await probeSocket(platform, files.serverSock);
+    if (sock === 'refused') fs.remove(files.serverSock);
+    if (sock === 'accepts') throw new SkydeckError(sockInUse(files));
     const record: ServerJson = {
       pid: own.pid,
       procStart: own.procStart,
@@ -517,10 +529,6 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     writeServerJson(fs, files.serverJson, record);
     fs.writeText(files.serverPid, formatPidLine(own), 0o600);
 
-    // server.sock (S2 5.2, 8.3): one a dead server left behind refuses connections.
-    if ((await probeSocket(platform, files.serverSock)) === 'refused') {
-      fs.remove(files.serverSock);
-    }
     let python: StatusAnswer['python'] = { found: false, version: null };
     const ping = (): PingAnswer => ({
       serverId,
@@ -564,11 +572,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         },
       );
     } catch (error) {
-      if (addressInUse(error)) {
-        throw new SkydeckError(
-          `${files.serverSock} is in use by a process that answers on it; see skydeck doctor`,
-        );
-      }
+      if (addressInUse(error)) throw new SkydeckError(sockInUse(files));
       throw error;
     }
     listeners.push(control);

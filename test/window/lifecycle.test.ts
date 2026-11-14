@@ -20,6 +20,7 @@ import type { Detached, Net, Processes, Proc } from '../../src/platform/types.ts
 import { openDeck } from '../../src/sessions/deck.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import { computeBuild } from '../../src/window/build.ts';
+import { controlClient } from '../../src/window/client.ts';
 import { controlHandler } from '../../src/window/control.ts';
 import { createTokens } from '../../src/window/auth.ts';
 import { findServer, startServe, stopServer } from '../../src/window/lifecycle.ts';
@@ -1480,10 +1481,16 @@ test('findServer: a starting server that writes server.json within pingMs is fou
   assert.ok(ms >= 300 && ms < 1000, `${ms} ms`);
 });
 
-test('findServer: a starting server that writes server.json too late for the ping: hung, not starting', async (t) => {
+test('findServer: a starting server that writes server.json too late for the ping: hung and still starting (review 2) — one found at the first look is hung alone', async (t) => {
   const { d, record } = startingDeck(t);
   d.clock.after(950, record);
   const asked = withRequests(d.deck, refused);
+  assert.deepEqual(await findServer(asked.deck, '/checkout', BUILD, { pingMs: 1000 }), {
+    kind: 'hung',
+    pid: 4242,
+    starting: true,
+  });
+  // Recorded at the first look and refused to the end: hung, as before.
   assert.deepEqual(await findServer(asked.deck, '/checkout', BUILD, { pingMs: 1000 }), {
     kind: 'hung',
     pid: 4242,
@@ -1814,4 +1821,49 @@ test('findServer and stopServer look where the store records the runtime directo
       assert.deepEqual(paths, [`GET /ping ${files.serverSock}`]);
     }
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// startServe when the server it started is gone (ruled, server-findable, review 2): another
+// command can now stop a server while it starts.
+
+const STOPPED = "the window's server stopped while it was starting; run skydeck window again";
+
+test('startServe: serve exiting 0 while no server of this installation may live (no server.json, no live lock): the stopped line at once, not after startMs', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '0' }));
+  const before = performance.now();
+  assert.deepEqual(await startServe(h.deck, { startMs: START_MS }), { ok: false, line: STOPPED });
+  assert.ok(performance.now() - before < START_MS / 2, `${performance.now() - before} ms`);
+  writeServer(h, await endedLine(h)); // a stale server.json and lock of a dead process: the same
+  h.deck.store.setKv('window_server', `${(await endedLine(h)).pid}:1:${ownLine(h).bootId}:/x`);
+  assert.deepEqual(await startServe(h.deck, { startMs: START_MS }), { ok: false, line: STOPPED });
+});
+
+test('startServe: serve exiting 0 while a live holder of the lock has not recorded itself (it is starting): waited for, never the stopped line', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '0' }));
+  const holder = await liveSleep(t, h);
+  const { pid, procStart, bootId } = holder.line;
+  h.deck.store.setKv('window_server', `${pid}:${procStart}:${bootId}:${FAKE_ROOT}`);
+  const before = performance.now();
+  assert.deepEqual(await startServe(h.deck, { startMs: 1500 }), {
+    ok: false,
+    line: `the window's server did not start (no answer in 1.5 s); see ${logPath(h)}`,
+  });
+  assert.ok(performance.now() - before >= 1400);
+});
+
+test('startServe: a server that answered, then stopped before it recorded itself: the stopped line, never "answers, but did not record itself"', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_JSON_DELAY_MS: '60000' })); // answers, never records
+  const starting = startServe(h.deck, { startMs: START_MS });
+  // Once it answers, another command stops it: POST /shutdown — it removes its files and exits 0.
+  const client = controlClient(h.base.platform.net, h.files().serverSock);
+  const deadline = performance.now() + START_MS;
+  while (typeof (await client.ping(1000).catch(() => null)) !== 'object') {
+    assert.ok(performance.now() < deadline, 'the fake serve never answered');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await client.shutdown();
+  const before = performance.now();
+  assert.deepEqual(await starting, { ok: false, line: STOPPED });
+  assert.ok(performance.now() - before < START_MS / 2, `${performance.now() - before} ms`);
 });

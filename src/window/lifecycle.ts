@@ -71,6 +71,14 @@ const POLL_MS = 100;
 /** The longest a single ping of startServe's wait waits, whatever `pingMs` says: then it looks again. */
 const START_PING_MS = 1000;
 
+/**
+ * Ruled (server-findable, review 2): the server this command started is gone and none of this
+ * installation may live — another command stopped it during its start, or it ended. It says not
+ * who stopped it.
+ */
+const STOPPED_WHILE_STARTING =
+  "the window's server stopped while it was starting; run skydeck window again";
+
 /** S2 5.2's exit codes of `serve` that have a line of their own. */
 const PORT_USED = 10;
 const OTHER_CHECKOUT = 11;
@@ -213,6 +221,8 @@ type Found =
       line: PidLine;
       checkout: string;
       files: RuntimeFiles;
+      /** Found only after a wait: it was starting (review 2: a 'hung' of it is still starting). */
+      waited: boolean;
     }
   | { kind: 'starting'; line: PidLine; checkout: string };
 
@@ -221,7 +231,7 @@ type Found =
  * alive by design 5.5's rule; otherwise the holder of the window_server lock, when it is alive — a
  * server that is starting: server.json is looked at again every POLL_MS (where the store's record
  * says, looked up again: the start records its directory) until it names a live process (then
- * that one), or until `deadline` is over or `stopWaiting` says so for the holder's line
+ * that one, `waited` when it was not found at the first look), or until `deadline` is over or `stopWaiting` says so for the holder's line
  * (then 'starting', with the identity the lock names). null when neither names a live process:
  * no lock, a value skydeck does not write, its holder dead — also when that comes about during
  * the wait. Rejects with judge's SkydeckError for a server.json line or a holder that cannot be
@@ -233,11 +243,11 @@ async function serverWithin(
   stopWaiting: (line: PidLine) => boolean = () => false,
 ): Promise<Found | null> {
   const { platform } = deck;
-  for (;;) {
+  for (let waited = false; ; waited = true) {
     const files = serverFiles(deck);
     const server = recordedServer(deck, files);
     if (server !== null && judge(platform, server.line) === 'alive') {
-      return { kind: 'recorded', ...server, files };
+      return { kind: 'recorded', ...server, files, waited };
     }
     const holder = readServerLock(deck.store);
     if (holder === null || judge(platform, holder.line) === 'dead') return null;
@@ -250,7 +260,8 @@ async function serverWithin(
  * S2 5.1 step 1: server.json read; none when it is missing or its process is dead by design
  * 5.5's rule — unless the window_server lock names a live holder: a server that is starting
  * (ruled, server-findable), whose server.json is waited for within `pingMs`; one that has not
- * recorded itself by then is `hung` with `starting: true` and the pid the lock names. Then
+ * recorded itself by then is `hung` with `starting: true` and the pid the lock names, and so is
+ * one that recorded itself during that wait but gives no answer in what is left (review 2). Then
  * `GET /ping` within what is left of `pingMs`: another checkout → other-checkout, another build or
  * boot → other-build, else ours. After a ping that gets no answer the process is judged again:
  * gone meanwhile → none. A refused or failed ping (a server in its orderly stop no longer accepts,
@@ -274,7 +285,12 @@ export async function findServer(
     if (found.kind === 'starting') return { kind: 'hung', pid: found.line.pid, starting: true };
     const ping = await pingWithin(deck, found.files, found.line, pingMs, deadline);
     if (ping === 'dead') return { kind: 'none' };
-    if (ping === 'hung') return { kind: 'hung', pid: found.line.pid };
+    if (ping === 'hung') {
+      // Found starting, recorded during the wait, and no answer in what was left: still starting.
+      return found.waited
+        ? { kind: 'hung', pid: found.line.pid, starting: true }
+        : { kind: 'hung', pid: found.line.pid };
+    }
     if (ping.checkout !== checkout) return { kind: 'other-checkout', ping };
     if (ping.build !== build || ping.bootId !== found.line.bootId) {
       return { kind: 'other-build', ping };
@@ -331,8 +347,12 @@ async function pingWithin(
  * a matching ping counts only once server.json (where the store's record says, looked up again)
  * names that server — its pid, server id and boot id, its process alive by design 5.5's rule —
  * within the same `startMs`. A server that answers but has not recorded itself by then gives its
- * own line. A server of this build writes server.json before server.sock answers (ruled,
- * server-findable), so for it the check passes at its first answer; it stays for any that does not.
+ * own line — only while it still answers: one that answered and is gone (it stopped while it was
+ * starting) gives STOPPED_WHILE_STARTING. A server of this build writes server.json before
+ * server.sock answers (ruled, server-findable), so for it the check passes at its first answer
+ * while it lives; it stays for any server that answers before it records itself. Exit 0 with no
+ * server of this installation alive or impossible to judge (server.json, the lock) gives
+ * STOPPED_WHILE_STARTING at once, not after `startMs` (ruled, server-findable, review 2).
  */
 export async function startServe(
   deck: Deck,
@@ -398,16 +418,28 @@ export async function startServe(
       if (seen.exit !== null && seen.exit.code !== 0) {
         return { ok: false, line: exitLine(deck, seen.exit, log) };
       }
-      if (seen.late) {
-        const answered = seen.answered;
-        return answered === null
-          ? { ok: false, line: didNotStart(`no answer in ${startMs / 1000} s`, log) }
-          : {
-              ok: false,
-              line: `the window's server (pid ${answered.pid}) answers, but did not record itself in ${sanitize(serverFiles(deck).serverJson)} within ${startMs / 1000} s; see ${sanitize(log)}`,
-            };
+      // Ruled (server-findable, review 2): its own serve ended with 0 — after a whole start and
+      // stop, or because another server held the lock — and no server of this installation may
+      // live: nothing is coming any more.
+      if (seen.exit !== null && !serverMayLive(deck)) {
+        return { ok: false, line: STOPPED_WHILE_STARTING };
       }
       const client = controlClient(platform.net, serverFiles(deck).serverSock);
+      if (seen.late) {
+        const answered = seen.answered;
+        if (answered === null) {
+          return { ok: false, line: didNotStart(`no answer in ${startMs / 1000} s`, log) };
+        }
+        // Only of a server that still answers (review 2): one that answered while it was
+        // stopping has removed its server.json, which it had written before it answered.
+        const again = await pingOnce(client, attemptMs, controller.signal);
+        return typeof again === 'object' && again.serverId === answered.serverId
+          ? {
+              ok: false,
+              line: `the window's server (pid ${answered.pid}) answers, but did not record itself in ${sanitize(serverFiles(deck).serverJson)} within ${startMs / 1000} s; see ${sanitize(log)}`,
+            }
+          : { ok: false, line: STOPPED_WHILE_STARTING };
+      }
       const ping = await Promise.race([
         pingOnce(client, attemptMs, controller.signal),
         interrupted(),
@@ -427,6 +459,33 @@ export async function startServe(
   } finally {
     cancelDeadline();
     controller.abort(); // the ping still open, if any
+  }
+}
+
+/**
+ * Whether server.json or the window_server lock names a process that is alive or cannot be judged
+ * (design 5.5's rule); a file or lock that cannot be read counts as one: nothing is concluded on
+ * what cannot be read.
+ */
+function serverMayLive(deck: Deck): boolean {
+  const { platform } = deck;
+  const bootId = currentBootId(platform);
+  try {
+    const json = readServerJson(platform.files, serverFiles(deck).serverJson);
+    if (
+      json !== null &&
+      pidLineState(
+        { pid: json.pid, procStart: json.procStart, bootId: json.bootId },
+        platform.proc,
+        bootId,
+      ) !== 'dead'
+    ) {
+      return true;
+    }
+    const holder = readServerLock(deck.store);
+    return holder !== null && pidLineState(holder.line, platform.proc, bootId) !== 'dead';
+  } catch {
+    return true;
   }
 }
 

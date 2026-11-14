@@ -264,14 +264,18 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    server that is **starting** holds the `window_server` lock (5.2) before it writes `server.json`:
    while `server.json` is missing or names a dead process, a holder of the lock alive by design
    5.5's rule is that server, and its `server.json` is waited for within the same 5 seconds, then
-   it is pinged in what is left of them; one that has not recorded itself by then is reported,
+   it is pinged in what is left of them; one that has not recorded itself by then — or has, but
+   gives no answer in what is left — is reported,
    `the window's server (pid <n>) is starting and did not finish within 5 s; run skydeck window
    again, or skydeck window --restart to replace it` (exit 1), never as "not running". A holder
    that cannot be judged stops the command with the error of a `server.json` that cannot be
    judged (`cannot tell whether the window's server (pid <n>) still runs: …`); nothing is signalled
    or taken over on it. Otherwise a new one is started, and the command goes on only once
    that server can be found by the next command, its `server.json` written (5.2; ruled by the plan
-   owner, stage A's plan task 25 and the follow-up "server-findable").
+   owner, stage A's plan task 25 and the follow-up "server-findable"). A server it started that
+   another command stops during its start (`--stop`, `uninstall`) gives, at once, `the window's
+   server stopped while it was starting; run skydeck window again` (exit 1; 5.2; ruled by the plan
+   owner, follow-up "server-findable", review 2).
 2. when no page is connected to the server, asks it for a launch token (`POST /token`, 8.3),
    starts Edge with it (5.3), and waits up to 30 seconds — a cold Edge on a managed PC can take
    several (W1 records the real time) — for the token to be used by a page (`GET /token/<id>`).
@@ -389,7 +393,7 @@ it turns into one fixed line:
 
 | `serve` exits | `skydeck window` says (exit 1) |
 |---|---|
-| 0 | nothing: a server of this checkout holds the lock — another `skydeck window` started it at the same moment — and that one is used (it is waited for within the same 10 seconds) |
+| 0 | nothing: a server of this checkout holds the lock — another `skydeck window` started it at the same moment — and that one is used (it is waited for within the same 10 seconds). When neither `server.json` nor the lock names a process that is alive or cannot be judged — the server it started was stopped during its start by another command (`--stop`, `uninstall`), or ended — it does not wait: `the window's server stopped while it was starting; run skydeck window again` (ruled by the plan owner, follow-up "server-findable", review 2) |
 | 10 | `port <n> on 127.0.0.1 is used by another program; set window.port in <config path>` |
 | 11 | `a window server already runs (pid <n>, from <checkout>)` (from `server.json`, or — while that server is starting and has written none yet — from its `window_server` lock; ruled by the plan owner, follow-up "server-findable"): a server of another checkout |
 | 12 | `the runtime directory <dir> cannot be used: <reason>; see skydeck doctor` (mode, owner, or a socket path of 108 bytes or more) |
@@ -402,7 +406,9 @@ command (`--stop`, `--restart`, `--new-secret`, `doctor`, `uninstall`) finds a s
 `server.json`, so a command that returned earlier would leave a server that the next command cannot
 see. One that answers but has not recorded itself in that time gives `the window's server (pid <n>)
 answers, but did not record itself in <server.json> within 10 s; see <stateDir>/server.log` (exit 1)
-and is left running (ruled by the plan owner, stage A's plan task 25). Since a server writes
+and is left running (ruled by the plan owner, stage A's plan task 25) — said only of a server
+that still answers (it is asked once more); one that is gone meanwhile stopped while it was
+starting, and gives that line instead (follow-up "server-findable", review 2). Since a server writes
 `server.json` before `server.sock` answers (below), a server of this build has always recorded
 itself by the time it answers; the check stays for any server that does not (ruled by the plan
 owner, follow-up "server-findable").
@@ -436,9 +442,10 @@ names is not alive by design 5.5's rule; so a second server of the same installa
 port, `serve --foreground`, another checkout — does not start (`a window server already runs (pid
 <n>, from <checkout>)` on stderr; exit 0 when the running one is of the same checkout, 11
 otherwise), and only one server ever talks to the keepers of one runtime directory, which belongs
-to one store (4.2). Holding the lock, it takes its runtime directory (the record first, 4.2) and records it, binds the port, writes
-`server.json` and `server.pid`, removes a `server.sock` that refuses connections (left by a dead
-server) and listens there, and removes the lock when it stops. A port held by anything else makes
+to one store (4.2). Holding the lock, it takes its runtime directory (the record first, 4.2) and records it, binds the port, removes
+a `server.sock` that refuses connections (left by a dead server) — one that a process answers on
+fails the start before anything is recorded — writes `server.json` and `server.pid`, listens on
+`server.sock`, and removes the lock when it stops. A port held by anything else makes
 it release the lock and exit 10; a start that fails after `server.json` was written removes it and
 `server.pid` before it gives the lock back.
 
@@ -2264,7 +2271,7 @@ are problems.
 | server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2), or, while its `GET /status` says `starting`, `the window's server (pid <n>) is starting, from <checkout>, build <build>; run skydeck doctor again once it has started` (ruled by the plan owner, follow-up "server-findable"); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, is alive but does not answer, answers `GET /ping` but not `GET /status`, or is starting but has not written `server.json` within the 5 seconds of the ping wait (5.2: its `window_server` lock names it; `the window's server (pid <n>) is starting: it holds the window_server lock but has not written <server.json> within 5 s; see <stateDir>/server.log; skydeck window --restart stops it`; ruled by the plan owner, follow-up "server-findable"). |
 | port | something that is not this installation's server answers on `127.0.0.1:<window.port>`: `/proc/net/tcp` or `tcp6` lists a listener on that port and no server of this installation is alive: one that answers `GET /ping` holds it, and while one is alive but does not answer, or cannot be judged, the port is most likely its own (`info`; the server's own line is the problem). `doctor` never binds the port, not even for an instant (a server starting at that moment would exit 10), and sends nothing to a foreign program. |
 | launch alarm | `window_alarm` is set: a launch token was presented twice at <time>, so another program may have skydeck's key (8.2.2); `run skydeck window --new-secret`. |
-| keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. Whether the keep-alive runs is the server's word when it answers; otherwise `doctor` judges it as the server judges one it did not start (6.1): its `keepalive.pid` line (one that cannot be read or judged is "cannot be told", never "not running"), and one connection, sending nothing, to the socket `keepalive.interop` names (refused or gone: its `wsl.exe` is gone; never a socket inside the runtime directory). The problem line names the setting and that it takes effect at the next WSL restart; it names `wsl --shutdown` only with what it does (6.1). |
+| keep-alive | a server or a keeper runs and neither protection is in effect — while the server's `GET /status` says `starting` and `window.keepAlive` is not `off`, its first check has not started the keep-alive yet, and the line is `info` (`WSL is not kept running yet: the window's server is starting, and its first check starts the keep-alive`; ruled by the plan owner, follow-up "server-findable", review 2). The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. Whether the keep-alive runs is the server's word when it answers; otherwise `doctor` judges it as the server judges one it did not start (6.1): its `keepalive.pid` line (one that cannot be read or judged is "cannot be told", never "not running"), and one connection, sending nothing, to the socket `keepalive.interop` names (refused or gone: its `wsl.exe` is gone; never a socket inside the runtime directory). The problem line names the setting and that it takes effect at the next WSL restart; it names `wsl --shutdown` only with what it does (6.1). |
 | interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. While the server's `GET /status` says `starting` the link is pointed later in that start, so a link that is missing or points at nothing that answers is `info` then (ruled by the plan owner, follow-up "server-findable"). |
 | C: drive | the C: drive is not mounted at `/mnt/c`, where all of the window expects it (Edge's working directory, the keep-alive's `wsl.exe`, the users' folders of 5.4). |
 | Edge | `window.edge` does not exist or is not a file (`info` when the window has never been used). |

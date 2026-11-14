@@ -520,7 +520,7 @@ describe('the start seam SKYDECK_TEST_SERVE_START_DELAY_MS (A31; ruled, server-f
     const server = await started(serve({ env: { SKYDECK_TEST_SERVE_START_DELAY_MS: '2s' } }));
     assert.match(
       server.stderr(),
-      /server: SKYDECK_TEST_SERVE_START_DELAY_MS is not a whole number of milliseconds; the start is not delayed/,
+      /server: SKYDECK_TEST_SERVE_START_DELAY_MS is not a whole number of milliseconds up to 60000; the start is not delayed/,
     );
   });
 
@@ -537,7 +537,7 @@ describe('the start seam SKYDECK_TEST_SERVE_START_DELAY_MS (A31; ruled, server-f
     for (const [text, ms] of [
       ['0', 0],
       ['2500', 2500],
-      ['2147483647', 2_147_483_647],
+      ['60000', 60_000],
     ] as const) {
       assert.deepEqual(
         startDelayOf({ SKYDECK_TEST_NO_WINDOWS: '1', SKYDECK_TEST_SERVE_START_DELAY_MS: text }),
@@ -545,7 +545,7 @@ describe('the start seam SKYDECK_TEST_SERVE_START_DELAY_MS (A31; ruled, server-f
         text,
       );
     }
-    for (const bad of ['', '-1', '1.5', 'x', '2147483648', '01', ' 5']) {
+    for (const bad of ['', '-1', '1.5', 'x', '60001', '2147483647', '01', ' 5']) {
       assert.deepEqual(
         startDelayOf({ SKYDECK_TEST_NO_WINDOWS: '1', SKYDECK_TEST_SERVE_START_DELAY_MS: bad }),
         { ms: 0, invalid: true },

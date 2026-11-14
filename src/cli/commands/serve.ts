@@ -111,9 +111,16 @@ export function sandboxLimits(
 }
 
 /**
+ * The start seam's bound (review 2): during the delay a SIGTERM is only kept and the sandbox's own
+ * end (sandboxLimits) is not armed yet, so a mistyped value must not hold the lock and the port for
+ * days.
+ */
+const START_DELAY_MAX_MS = 60_000;
+
+/**
  * A31, the start seam (ruled, server-findable): in a marked test sandbox
- * (SKYDECK_TEST_NO_WINDOWS=1) SKYDECK_TEST_SERVE_START_DELAY_MS, a whole number of ms a timer can
- * wait, is how long the start waits between binding the port and writing server.json — the step in
+ * (SKYDECK_TEST_NO_WINDOWS=1) SKYDECK_TEST_SERVE_START_DELAY_MS, a whole number of ms up to 60000,
+ * is how long the start waits between binding the port and writing server.json — the step in
  * which only the window_server lock names the server, made slow for the tests of commands that
  * meet a server while it starts. 0 outside a marked sandbox and when unset; a value that is not
  * such a number is 0 and `invalid` (one log line). Exported for its test.
@@ -121,7 +128,7 @@ export function sandboxLimits(
 export function startDelayOf(env: Env): { ms: number; invalid: boolean } {
   const text = env.SKYDECK_TEST_SERVE_START_DELAY_MS;
   if (env.SKYDECK_TEST_NO_WINDOWS !== '1' || text === undefined) return { ms: 0, invalid: false };
-  const valid = /^(0|[1-9][0-9]{0,9})$/.test(text) && Number(text) <= MAX_TIMER_MS;
+  const valid = /^(0|[1-9][0-9]{0,4})$/.test(text) && Number(text) <= START_DELAY_MAX_MS;
   return valid ? { ms: Number(text), invalid: false } : { ms: 0, invalid: true };
 }
 
@@ -214,7 +221,7 @@ export const command: Command = {
     const delay = startDelayOf(platform.env);
     if (delay.invalid) {
       log(
-        'server: SKYDECK_TEST_SERVE_START_DELAY_MS is not a whole number of milliseconds; the start is not delayed',
+        'server: SKYDECK_TEST_SERVE_START_DELAY_MS is not a whole number of milliseconds up to 60000; the start is not delayed',
       );
     }
     try {

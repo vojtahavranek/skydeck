@@ -365,6 +365,15 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
       report('info', 'keep-alive: keepalive.pid cannot be read, so whether it runs cannot be told');
       return;
   }
+  if (stillStarting(server) && config.window.keepAlive !== 'off') {
+    // Its first check starts the keep-alive (S2 6.1) — until then none runs (ruled, server-findable,
+    // review 2). With window.keepAlive off none will: that stays the problem below.
+    report(
+      'info',
+      "WSL is not kept running yet: the window's server is starting, and its first check starts the keep-alive",
+    );
+    return;
+  }
   const serverRuns = server.kind !== 'none';
   const terminals = view.keepers().some((keeper) => keeper.state !== 'dead');
   if (!serverRuns && !terminals) {

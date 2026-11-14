@@ -12,6 +12,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -253,15 +254,44 @@ describe('starting (S2 5.2)', () => {
     assert.equal(readServerJson(d.platform.files, d.files.serverJson)?.serverId, server.serverId);
   });
 
-  test('a start that fails once server.json is written (server.sock held by a process that answers) removes server.json and server.pid and gives the lock back', async (t) => {
+  test('server.sock held by a process that answers: the start fails before it writes server.json — what was there is left as it is — and gives the lock back (review 2)', async (t) => {
     const d = serverSandbox(t);
     const other = createServer();
     await new Promise<void>((resolve) => other.listen(d.files.serverSock, resolve));
     t.after(() => new Promise<void>((resolve) => other.close(() => resolve())));
+    const theirs = '{"written": "by whatever answers on server.sock"}\n';
+    writeFileSync(d.files.serverJson, theirs, { mode: 0o600 });
     await assert.rejects(d.start(), {
       name: 'SkydeckError',
       message: `${d.files.serverSock} is in use by a process that answers on it; see skydeck doctor`,
     });
+    assert.equal(readFileSync(d.files.serverJson, 'utf8'), theirs, 'server.json left as it was');
+    assert.equal(existsSync(d.files.serverPid), false, 'no server.pid written');
+    assert.equal(d.deck.store.getKv('window_server'), null, 'the lock released');
+  });
+
+  test('a start that fails once server.json is written (server.sock cannot be listened on) removes server.json and server.pid and gives the lock back', async (t) => {
+    const d = serverSandbox(t);
+    let recorded = false;
+    await assert.rejects(
+      d.start({
+        platform: (p) => ({
+          ...p,
+          net: {
+            ...p.net,
+            listenHttp(where, handlers) {
+              if ('path' in where) {
+                recorded = existsSync(d.files.serverJson) && existsSync(d.files.serverPid);
+                return Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+              }
+              return p.net.listenHttp(where, handlers);
+            },
+          },
+        }),
+      }),
+      /EACCES/,
+    );
+    assert.ok(recorded, 'server.json and server.pid were written before server.sock');
     assert.equal(existsSync(d.files.serverJson), false, 'server.json removed');
     assert.equal(existsSync(d.files.serverPid), false, 'server.pid removed');
     assert.equal(d.deck.store.getKv('window_server'), null, 'the lock released');
