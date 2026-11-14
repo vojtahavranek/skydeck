@@ -729,10 +729,10 @@ export function createPages(deps: PagesDeps): Pages {
   };
 
   /**
-   * S2 8.2.1 (ruled): with MAX_WAITING_HELLO connections waiting for their hello, the one that has
-   * waited longest is dropped for the newcomer, so that idle connections that prove nothing cannot
-   * lock a window out (a real page says hello within milliseconds). One that has proven itself is
-   * never dropped.
+   * S2 8.2.1 (ruled): once a newcomer was accepted, if more than MAX_WAITING_HELLO connections
+   * wait for their hello, the one that has waited longest is dropped, so that idle connections
+   * that prove nothing cannot lock a window out (a real page says hello within milliseconds). One
+   * that has proven itself is never dropped; an upgrade that is no WebSocket drops nobody.
    */
   const dropOldestWaiting = (): void => {
     let oldest: Connection | null = null;
@@ -742,7 +742,7 @@ export function createPages(deps: PagesDeps): Pages {
       waiting++;
       oldest ??= conn; // the set keeps the order of acceptance
     }
-    if (waiting < MAX_WAITING_HELLO || oldest === null) return;
+    if (waiting <= MAX_WAITING_HELLO || oldest === null) return;
     log('page: 64 connections wait for their hello; the oldest is dropped');
     oldest.ws.destroy();
   };
@@ -824,7 +824,6 @@ export function createPages(deps: PagesDeps): Pages {
           refuse(socket, port, refusal);
           return;
         }
-        dropOldestWaiting();
         // For bye: resolves when this socket has closed. A listener only (ruled): every write and
         // every close goes through the WebSocket connection.
         const closed = socket.closed
@@ -833,7 +832,9 @@ export function createPages(deps: PagesDeps): Pages {
               socket.once('close', () => resolve());
             });
         const ws = acceptWebSocket(req, socket, head, clock);
-        if (ws !== null) accept(ws, req.headers.origin as string, closed);
+        if (ws === null) return; // not a WebSocket request: answered 400, nobody is dropped
+        accept(ws, req.headers.origin as string, closed);
+        dropOldestWaiting();
       } catch (error) {
         log(`page: the upgrade failed: ${failureKind(error)}`);
         socket.destroy();

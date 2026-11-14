@@ -596,6 +596,24 @@ describe('pages: the checks at the upgrade', () => {
     assert.equal((await within('the next oldest', (waiting[1] as PageClient).closed)).code, 1006);
   });
 
+  test('with 64 connections waiting, an upgrade that is no WebSocket drops nobody', async (t) => {
+    const f = await startPages(t);
+    const waiting: PageClient[] = [];
+    for (let i = 0; i < 64; i++) {
+      const client = await connectPage(t, f);
+      await challengeOf(client);
+      waiting.push(client);
+    }
+    const request = upgradeTo(f, 'GET', '/ws').replace('Upgrade: websocket', 'Upgrade: h2c');
+    assert.match(await rawRequest(t, f.port, request), /^HTTP\/1\.1 400 /);
+    await delay(50);
+    assert.ok(
+      waiting.every((client) => !client.isClosed()),
+      'all 64 still wait',
+    );
+    assert.deepEqual(f.logs, []);
+  });
+
   test('a connection that has proven itself is never dropped for a newcomer', async (t) => {
     const f = await startPages(t);
     const proven = await openPage(t, f);

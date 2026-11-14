@@ -2523,7 +2523,9 @@ export function createPages(deps: PagesDeps): Pages;
 - Create: `src/window/pages.ts`, `src/window/size.ts`
 - Test: `test/window/pages-handshake.test.ts`, `test/window/pages-stream.test.ts`,
   `test/window/size.test.ts` (`ws` as the client; a fake hub over in-memory terminals; a fake
-  action handler)
+  action handler), with `test/helpers/pages.ts` for both pages files
+- Modify: `test/keeper/limits.test.ts` (ruled on #53: a flaky assertion; only what the keeper
+  logs after the final claim counts), `src/window/hub.ts` (the attach ruling, as task 16)
 
 **Tests** (platform: `testPlatform` (fake clock, real sockets))
 - Handshake: `challenge` first with a 43-character nonce; a correct `hello` in mode `key` →
@@ -2566,7 +2568,8 @@ export function createPages(deps: PagesDeps): Pages;
   single snap above 64 MiB reaches a page that reads; a terminal attached while the page is
   behind gets its snap at the drain; a `view` that arrives while behind is answered at the drain
   even when its list is unchanged; with 64 connections waiting for their hello a 65th is
-  accepted and the oldest dropped, never a proven one.
+  accepted and the oldest dropped, never a proven one, and an upgrade that is no WebSocket
+  (answered 400) drops nobody.
 - `ping` → `pong` with `n`, `bootId`, `serverId`; `view` → a `list` at once; `pushList` sends
   only changed lists and at most once a second per page (fake clock); `act` → the handler's
   `result` with the same `id`; `bye` reaches every page before the sockets close.
