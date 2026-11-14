@@ -368,10 +368,11 @@ Ctrl+Shift+W and Alt+F4 close a whole Edge window with all its tabs. So open a n
 this check (Ctrl+N in your Edge), with `http://127.0.0.1:8765/` as its only tab, and press the chords
 on the page: each one it received turns green; some close the tab or open a window (that is what is
 looked at). What the page received, in another W (`sudo apt install jq` when `jq` is missing; `jq`
-prints the names quoted, so that no byte of the log reaches the terminal raw):
+prints the names quoted, so that no byte of the log reaches the terminal raw; with `-a` a letter
+beyond ASCII shows as its code, `é` as `\u00e9`):
 
 ```sh
-jq 'select(.kind=="keydown").chord' ~/skydeck/docs/check-kit/keylog.jsonl | sort -u
+jq -a 'select(.kind=="keydown").chord' ~/skydeck/docs/check-kit/keylog.jsonl | sort -u
 ```
 
 To compare with an app window, `sh docs/check-kit/edge-app.sh` opens the same page in one (it

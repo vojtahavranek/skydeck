@@ -32,7 +32,7 @@ Delete it when the check is done:
    pane, reload? "window loads this session" going up means a reload got through. Type
    \ [ ] { } @ # ~ | and your accented letters in the text box (AltGr, dead keys).
    What the page received (quoted, so that no byte of the log reaches your terminal raw):
-     jq 'select(.kind=="keydown").chord' docs/check-kit/keylog.jsonl | sort -u
+     jq -a 'select(.kind=="keydown").chord' docs/check-kit/keylog.jsonl | sort -u
    The buttons Notification, Clipboard write, Clipboard read and Keyboard Lock say whether the
    browser allows them on http://127.0.0.1 (the log line under the buttons).
 
