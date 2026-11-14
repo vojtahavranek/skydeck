@@ -2445,7 +2445,10 @@ given up as a lost connection, so `rediscover` always settles; one exit per term
 `X` only gets its `A`, at once, while the first `X`'s `A` follows the applied exit); a claim's
 wait for its hello, like the stall, counts only time while the server reads, and `stopAll`
 reads again before it closes; a sink attached inside the change that announces an exit or a
-newer keeper gets that exit or notice once; an attach while a claim rebuilds the screen
+newer keeper gets that exit or notice once. Ruled (K1): a claim the server had stopped reading
+when it ended is claimed again at once (exempt from the one-a-second rule), and a gap found after
+it carries the text "part of this terminal's output was skipped: it came faster than skydeck could
+show it"; the input lost in the moment before the close is noticed is a named limit (S2 7.3). An attach while a claim rebuilds the screen
 waits for that screen, and a terminal that is over without one gives the empty screen at the
 known size, then its `exit`. Also ruled (review 1's check of the review-2 commit): a keeper's
 `hello`, `S` or `R` with a size above 1000 × 500 is refused and the claim closed (S2 8.1); the gap

@@ -446,6 +446,8 @@ describe('registry: closing a lost terminal', () => {
 // A keeper played by the test, frame by frame (review 2 of #52)
 
 interface FakeConn {
+  /** performance.now() when its claim came. */
+  at: number;
   /** Frames the registry sent on this connection, after its C. */
   received: Frame[];
   send(type: FrameType, payload?: Uint8Array | string): void;
@@ -508,6 +510,7 @@ async function scriptedKeeper(
       for (const frame of frames) {
         if (conn === null && frame.type === 'C') {
           conn = {
+            at: performance.now(),
             received: [],
             send(type, payload) {
               if (!socket.destroyed) {
@@ -1009,5 +1012,119 @@ describe('registry: a claim that starts while the screen side is behind', () => 
       r.maxBacklog() <= high + 64 * 1024 + 8 * 1024,
       `at most one read above the mark: ${r.maxBacklog()} bytes waited`,
     );
+  });
+});
+
+describe('registry: a claim that fell behind a flood (ruled, K1)', () => {
+  const high = 128 * 1024;
+  const record = (i: number): string => `rec ${i}\r\n${'x'.repeat(64 * 1024)}\r\n`;
+  const marked = (box: RegistryBox): Platform => ({
+    ...box.tp.platform,
+    env: { ...box.tp.platform.env, SKYDECK_TEST_BACKLOG_BYTES: String(high) },
+  });
+
+  test('is claimed again at once; a claim that fails otherwise still waits a second', async (t) => {
+    const box = await registrySandbox(t);
+    const behind = 'c00000000010';
+    const fb = await scriptedKeeper(t, box, behind, (conn, n) => {
+      if (n === 0) {
+        conn.send('H', helloOf(box, behind, { seq: 3 }));
+        for (let i = 1; i <= 3; i++) conn.send('D', record(i));
+        conn.end(); // as a keeper closes a claim that fell behind (S2 7.1 step 7)
+        return;
+      }
+      conn.send('H', helloOf(box, behind, { seq: 3 }));
+      for (let i = 1; i <= 3; i++) conn.send('D', record(i));
+    });
+    const other = 'c00000000011';
+    const fo = await scriptedKeeper(t, box, other, (conn, n) => {
+      conn.send('H', helloOf(box, other, { seq: 1 }));
+      if (n === 0)
+        conn.send('G', ''); // a frame no keeper sends: this claim fails at once
+      else conn.send('D', 'one\r\n');
+    });
+    const r = box.registry({ platform: marked(box), slowWriteMs: 100 });
+    await r.registry.rediscover();
+    await until(() => fb.conns.length === 2 && fo.conns.length === 2, 'both claimed again', 10_000);
+    const again = (f: { conns: FakeConn[] }): number =>
+      (f.conns[1]?.at ?? 0) - (f.conns[0]?.at ?? 0);
+    assert.ok(again(fb) < 900, `fell behind: claimed again after ${Math.round(again(fb))} ms`);
+    assert.ok(
+      again(fo) >= 950,
+      `failed otherwise: claimed again after ${Math.round(again(fo))} ms`,
+    );
+  });
+
+  test('the gap that follows has its own text', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000012';
+    await scriptedKeeper(t, box, id, (conn, n) => {
+      if (n === 0) {
+        conn.send('H', helloOf(box, id, { seq: 3 }));
+        for (let i = 1; i <= 3; i++) conn.send('D', record(i));
+        conn.end();
+        return;
+      }
+      // Meanwhile the tail overflowed: records 4 to 9 are gone.
+      conn.send('H', helloOf(box, id, { seq: 12, tailFrom: 10, gap: true }));
+      for (let i = 10; i <= 12; i++) conn.send('D', record(i));
+    });
+    const r = box.registry({ platform: marked(box), slowWriteMs: 100 });
+    await r.registry.rediscover();
+    await until(() => r.events.hello.length === 2, 'the claim after the flood', 10_000);
+    const late = await attachMirror(r.registry, box.modules, id);
+    await until(() => late.notices.length === 1, 'the notice');
+    assert.deepEqual(late.notices, [
+      {
+        kind: 'gap',
+        text: "part of this terminal's output was skipped: it came faster than skydeck could show it",
+      },
+    ]);
+    assert.ok(r.log.some((line) => line.endsWith('gap (skipped)')));
+  });
+});
+
+describe('registry: waiting while the server does not read (K3)', () => {
+  const high = 128 * 1024;
+  const record = (i: number): string => `rec ${i}\r\n${'x'.repeat(64 * 1024)}\r\n`;
+
+  /** A claim that fell behind and was dropped; the next claim starts paused for about 6 s. */
+  async function pausedClaim(
+    t: TestContext,
+  ): Promise<{ box: RegistryBox; r: TestRegistry; id: string; fake: { conns: FakeConn[] } }> {
+    const box = await registrySandbox(t);
+    const id = 'c00000000013';
+    const fake = await scriptedKeeper(t, box, id, (conn) => {
+      conn.send('H', helloOf(box, id, { seq: 3 }));
+      for (let i = 1; i <= 3; i++) conn.send('D', record(i));
+    });
+    const platform: Platform = {
+      ...box.tp.platform,
+      env: { ...box.tp.platform.env, SKYDECK_TEST_BACKLOG_BYTES: String(high) },
+    };
+    const r = box.registry({ platform, slowWriteMs: 3000 });
+    void r.registry.rediscover();
+    await until(() => r.maxBacklog() > high, 'past the mark: reading paused');
+    r.sockets.at(-1)?.destroy();
+    await until(() => fake.conns.length === 2, 'the next claim, made while paused');
+    return { box, r, id, fake };
+  }
+
+  test('a claim started paused is not dropped for its hello while the backlog drains', async (t) => {
+    const { r, id, fake } = await pausedClaim(t);
+    await sleep(5500); // beyond the hello's 5 s, all of it paused
+    assert.equal(r.events.hello.length, 1, 'its hello is still unread');
+    await until(() => r.events.hello.length === 2, 'its hello once reading resumed', 10_000);
+    assert.equal(r.log.filter((line) => line.endsWith('no hello')).length, 0);
+    assert.equal(fake.conns.length, 2, 'no claim was dropped');
+    await until(() => info(r.registry, id).state === 'running', 'running');
+  });
+
+  test('stopAll does not wait out its 2 s on a paused connection', async (t) => {
+    const { r } = await pausedClaim(t);
+    const began = performance.now();
+    await r.registry.stopAll();
+    const took = performance.now() - began;
+    assert.ok(took < 1500, `stopAll took ${Math.round(took)} ms`);
   });
 });

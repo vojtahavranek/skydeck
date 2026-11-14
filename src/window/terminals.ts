@@ -131,6 +131,9 @@ const STOP_WAIT_MS = 2000;
 const PYTHON_MISSING =
   'python3 3.9 or newer is needed to open terminals in the window (sudo apt install python3)';
 const GAP_TEXT = "part of this terminal's output was lost while skydeck's server was not running";
+/** Ruled (review 2, K1): the gap after the server fell behind a flood is not the server's absence. */
+const SKIPPED_TEXT =
+  "part of this terminal's output was skipped: it came faster than skydeck could show it";
 const NEWER_TEXT = 'this terminal was started by a newer skydeck; run skydeck window --restart';
 /** A lost keeper that had not started its program: nothing ran (S2 7.8). */
 const LOST_BEFORE_START = 'the keeper ended before the program started';
@@ -191,6 +194,8 @@ interface Claim {
   /** Frames read on this connection, for the idle check while the tail is replayed. */
   frames: number;
   stopIdle: (() => void) | null;
+  /** The server stopped reading this connection (its screen side fell behind) at some point. */
+  fellBehind: boolean;
 }
 
 interface Term {
@@ -212,7 +217,10 @@ interface Term {
   parkedAt: number;
   /** The park in progress, if any. */
   parking: Promise<void> | null;
-  gap: boolean;
+  /** The gap notice the terminal shows (also to a page that attaches later), or null. */
+  gap: string | null;
+  /** The claim that ended last had fallen behind: a gap the next claim finds is the flood's. */
+  behind: boolean;
   reconnect: (() => void) | null;
   forgotten: boolean;
   /** The 'late' or 'found' origin the next hello is reported with ('spawned' while spawn waits). */
@@ -400,7 +408,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     term.backlog += length;
     if (!term.paused && term.backlog > backlogHigh) {
       term.paused = true;
-      term.claim?.link.pause();
+      if (term.claim !== null) {
+        term.claim.link.pause();
+        term.claim.fellBehind = true;
+      }
     }
   }
 
@@ -509,7 +520,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
       bytes: 0,
       parkedAt: 0,
       parking: null,
-      gap: false,
+      gap: null,
+      behind: false,
       reconnect: null,
       forgotten: false,
       origin: 'found',
@@ -573,6 +585,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       settle,
       frames: 0,
       stopIdle: null,
+      fellBehind: false,
     };
     if (stopped || term.forgotten) {
       link.destroy();
@@ -581,7 +594,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const previous = term.claim;
     term.claim = claim;
     previous?.link.destroy();
-    if (term.paused) link.pause(); // the screen side is still behind: wait before reading on
+    if (term.paused) {
+      link.pause(); // the screen side is still behind: wait before reading on
+      claim.fellBehind = true;
+    }
     term.cooling = true;
     clock.after(RECONNECT_MS, () => {
       term.cooling = false;
@@ -791,11 +807,15 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const state: TerminalState = hello.started ? 'running' : 'starting';
     if (!isOver(info.state)) setState(term, state);
     changed();
+    // A gap after a claim that fell behind a flood is the flood's, not the server's absence.
+    const behind = term.behind;
+    term.behind = false;
     if (lost) {
-      term.gap = true;
-      log(id, 'gap');
+      const text = behind ? SKIPPED_TEXT : GAP_TEXT;
+      term.gap = text;
+      log(id, behind ? 'gap (skipped)' : 'gap');
       toAllSinks(term, (sink) => {
-        sink.notice('gap', GAP_TEXT);
+        sink.notice('gap', text);
       });
       redraw(term, claim, hello.cols, hello.rows);
     }
@@ -927,27 +947,33 @@ export function createRegistry(deps: RegistryDeps): Registry {
     // The exit came (it may still be on its way through the screen side): nothing to reconnect to.
     if (term.info.exit !== null) return;
     if (term.hello === null) return; // a spawn or a find still waits for its first hello
-    startReconnecting(term);
+    term.behind = claim.fellBehind;
+    // Ruled (review 2, K1): a claim the keeper closed because the server fell behind is claimed
+    // again at once, so that input is refused for milliseconds, not a second.
+    startReconnecting(term, claim.fellBehind);
   }
 
   /**
    * Ruled (review 2): attempts to one keeper are at most one a second (S2 7.8), the claim that just
    * ended counting as one: a keeper whose stream keeps failing after its hello is not claimed
-   * again and again. After a claim that lived a second or more the first attempt is at once.
+   * again and again. After a claim that lived a second or more the first attempt is at once, and
+   * after one that fell behind a flood too (`now`, ruled: K1).
    */
-  function startReconnecting(term: Term): void {
+  function startReconnecting(term: Term, now: boolean): void {
     if (term.reconnect !== null) return;
     setState(term, 'reconnecting');
     let busy = false;
-    const attempt = (): void => {
-      if (busy || term.cooling || term.forgotten || stopped) return;
+    const attempt = (force = false): void => {
+      if (busy || (term.cooling && !force) || term.forgotten || stopped) return;
       busy = true;
       void tryReconnect(term).finally(() => {
         busy = false;
       });
     };
-    term.reconnect = clock.every(RECONNECT_MS, attempt);
-    attempt();
+    term.reconnect = clock.every(RECONNECT_MS, () => {
+      attempt();
+    });
+    attempt(now);
   }
 
   function stopReconnecting(term: Term): void {
@@ -1246,12 +1272,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
     };
     // The state the terminal is in at the attach point follows the snapshot (ruled, amended):
     // an exit, a gap, a newer keeper.
+    const gapText = (): string | null => term.gap;
     const shown = (): (() => void)[] => [
       ...exitNow(),
       ...(term.info.state === 'newer-keeper'
         ? [() => sink.notice('newer-keeper', NEWER_TEXT)]
         : []),
-      ...(term.gap ? [() => sink.notice('gap', GAP_TEXT)] : []),
+      ...((text) => (text !== null ? [() => sink.notice('gap', text)] : []))(gapText()),
     ];
     const entry: Attached = { sink, from: term.count, held: shown() };
     term.sinks.add(entry);
