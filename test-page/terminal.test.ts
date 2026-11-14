@@ -331,6 +331,26 @@ test('the terminal view', async (t) => {
       await until(() => asked.slice(before).includes('attach 1'), 'slot 1 attached again');
       await until(() => asked.slice(before).includes('detach 3'), 'now slot 3 is the oldest');
       assert.deepEqual(asked.slice(before).sort(), ['attach 1', 'detach 3']);
+
+      // The window hidden (S2 12.6): all but the shown one detached at once; shown again, a
+      // terminal that was detached costs one snap.
+      const hide = async (hidden: boolean): Promise<void> => {
+        await page.evaluate((hidden) => {
+          Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+          document.dispatchEvent(new Event('visibilitychange'));
+        }, hidden);
+      };
+      const hiddenAt = asked.length;
+      await hide(true);
+      await until(() => asked.length - hiddenAt === 7, 'seven detached');
+      assert.ok(asked.slice(hiddenAt).every((what) => what.startsWith('detach')));
+      assert.ok(!asked.slice(hiddenAt).includes('detach 1'), 'the shown one stays');
+      assert.deepEqual(await attached(), [terms[0]]);
+      await hide(false);
+      await sleep(300);
+      assert.equal(asked.length - hiddenAt, 7, 'nothing attached again by itself');
+      await show(5);
+      assert.deepEqual(asked.slice(hiddenAt + 7), ['attach 5']);
     },
   );
 
@@ -562,6 +582,63 @@ test('the terminal view', async (t) => {
       await untilScreen(page, /^after$/m);
       assert.equal(await noticeText(page, 'newer-keeper'), '', 'not repeated: no longer holds');
       assert.equal(await noticeText(page, 'gap'), '', 'dismissed: not shown for a repeat');
+    },
+  );
+
+  await t.test(
+    "text of a notice selected with the mouse stays selected while the terminal's output and sizes arrive, and Ctrl+C copies it; Ctrl+Shift+C copies the terminal's selection; the program's window title is ignored",
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      await allowClipboard(page, l.server.port);
+      const sinks = captureSinks(l.server);
+      d.resumable(S1);
+      const term = await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      sinks.get(term)?.notice('gap', GAP);
+      await until(async () => (await noticeText(page, 'gap')) === GAP, 'the gap shown');
+      // A drag over the notice's text at a person's pace.
+      const text = page.locator('#terminal .tv-bar[data-kind="gap"] .tv-bar-text');
+      const box = await text.boundingBox();
+      assert.ok(box !== null);
+      await page.mouse.move(box.x + 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await sleep(250);
+      for (const x of [box.x + 40, box.x + 120, box.x + box.width - 2]) {
+        await page.mouse.move(x, box.y + box.height / 2);
+        await sleep(100);
+      }
+      await page.mouse.up();
+      const selected = (): Promise<string> => page.evaluate(() => getSelection()?.toString() ?? '');
+      assert.match(await selected(), /^part of this terminal/);
+      // Output and a resize arrive meanwhile (the program is driven from the server's side).
+      const keeperInput = l.server.hub.input.bind(l.server.hub);
+      keeperInput(term, Buffer.from('/lines 30\r'));
+      await untilScreen(page, /^line 30$/m);
+      await page.setViewportSize({ width: 1100, height: 650 });
+      await until(
+        () => recordsOf(d.record, S1).some((entry) => entry.ev === 'resize' && entry.rows !== 40),
+        'resized',
+      );
+      await sleep(500);
+      assert.match(await selected(), /^part of this terminal/, 'the selection is kept');
+      const before = inputOf(d.record, S1);
+      await page.keyboard.press('Control+C');
+      await until(async () => /^part of this terminal/.test(await clipboardText(page)), 'copied');
+      assert.equal(inputOf(d.record, S1), before, 'no interrupt reached the program');
+
+      // Ctrl+Shift+C: the terminal's own selection (a double click in it selects a word; the
+      // terminal takes the keyboard on the click).
+      const word = await whereIs(page, 'line 30');
+      await page.mouse.dblclick(word.x, word.y);
+      await untilTerminalOf(page, S1);
+      await page.keyboard.press('Control+Shift+C');
+      await until(async () => /^(line|30)$/.test(await clipboardText(page)), 'the word copied');
+
+      await typeLine(page, '/title not the window title');
+      await untilScreen(page, /\/title not the window title/);
+      await sleep(300);
+      assert.ok(!(await page.title()).includes('not the window title'));
     },
   );
 
