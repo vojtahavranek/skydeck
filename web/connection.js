@@ -86,6 +86,9 @@ export const TEXTS = {
   /** S2 8.2.2 step 6, after the one reload (ruled, task 26); the recovery of S2 15.3. */
   stale:
     "this window's page is not the one skydeck's server serves, and reloading did not change that; close every skydeck window, delete the window's profile folder and run skydeck window --new-secret",
+  /** The same, for a page that cannot remember a reload (no session storage): it does not reload. */
+  staleUnknown:
+    "this window's page is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press F5 to reload it, or close it and run skydeck window",
   /** @param {string} port */
   notSkydeck: (port) =>
     `something answers on port ${port} that is not skydeck's server; nothing was sent to it`,
@@ -421,10 +424,11 @@ export function createConnection(options) {
   /**
    * S2 8.2.2 step 6: a page whose asset version is not the server's reloads itself — once per
    * version of the server's (ruled, task 26): a page that has reloaded and still differs would
-   * otherwise reload for ever. 'same'; 'reload'; or 'stuck' when it reloaded for that version
-   * already (or cannot remember that it did).
+   * otherwise reload for ever. 'same'; 'reload'; 'stuck' when it reloaded for that version
+   * already; 'unknown' when it cannot remember a reload (session storage throws), so that it
+   * does not reload on its own.
    * @param {string} version the server's
-   * @returns {'same' | 'reload' | 'stuck'}
+   * @returns {'same' | 'reload' | 'stuck' | 'unknown'}
    */
   const versionStep = (version) => {
     try {
@@ -438,7 +442,7 @@ export function createConnection(options) {
       sessionStorage.setItem(RELOADED_FOR, version);
       return 'reload';
     } catch {
-      return version === options.assetVersion ? 'same' : 'stuck';
+      return version === options.assetVersion ? 'same' : 'unknown';
     }
   };
 
@@ -483,11 +487,11 @@ export function createConnection(options) {
       location.reload();
       return;
     }
-    if (step === 'stuck') {
+    if (step === 'stuck' || step === 'unknown') {
       socket = null;
       ws.onclose = null;
       ws.close();
-      fail(TEXTS.stale);
+      fail(step === 'stuck' ? TEXTS.stale : TEXTS.staleUnknown);
       return;
     }
     /** @type {Change} */

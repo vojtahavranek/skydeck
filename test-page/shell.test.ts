@@ -57,6 +57,9 @@ const PLACEHOLDER = /terminal view comes with task 28/;
 const STALE =
   "this window's page is not the one skydeck's server serves, and reloading did not change that; close every skydeck window, delete the window's profile folder and run skydeck window --new-secret";
 
+const STALE_UNKNOWN =
+  "this window's page is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press F5 to reload it, or close it and run skydeck window";
+
 /** `text` as a regular expression that matches it literally. */
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -841,6 +844,37 @@ test('the page shell', async (t) => {
         'no start for a server of another version',
       );
       assert.equal(standin.connections.length, 2);
+    },
+  );
+
+  await t.test(
+    'a page without session storage that meets another asset version does not reload on its own, and says so truthfully',
+    async (t) => {
+      const secret = new Uint8Array(32).fill(6);
+      const page = await newPage(t, chromium);
+      const standin = await standinServer(t, {
+        socket: honest(secret, { assetVersion: 'another-build' }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      // The page cannot remember that it reloaded: every use of session storage throws.
+      await page.addInitScript(() => {
+        Object.defineProperty(globalThis, 'sessionStorage', {
+          get() {
+            throw new DOMException('session storage is not available', 'SecurityError');
+          },
+        });
+      });
+      let loads = 0;
+      page.on('load', () => loads++);
+
+      await page.goto(standin.url);
+      await showsText(page, '#problem', new RegExp(`^${escape(STALE_UNKNOWN)}$`));
+      await connection(page, 'fatal');
+      await sleep(2000);
+
+      assert.equal(loads, 1, 'no reload of its own');
+      assert.equal(standin.connections.length, 1);
     },
   );
 

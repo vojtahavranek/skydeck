@@ -1145,7 +1145,10 @@ the server's proof.
    page's loads (15.3) — and reloading again would loop for ever, so it sends nothing more and says
    `this window's page is not the one skydeck's server serves, and reloading did not change that;
    close every skydeck window, delete the window's profile folder and run skydeck window
-   --new-secret` (ruled, plan task 26).
+   --new-secret` (ruled, plan task 26). A page that cannot remember a reload (its session storage
+   is not available) does not reload on its own: it sends nothing more and says `this window's page
+   is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press F5
+   to reload it, or close it and run skydeck window` (ruled, plan task 26's review 1).
 
 **Reading the secret.** The server reads the secret from the store at every `hello`, so
 `--new-secret` takes effect at once (ruled, plan task 17). While another process holds the store's
