@@ -1236,12 +1236,16 @@ export function findServer(deck: Deck, checkout: string, build: string, times?: 
  *  records itself (ruled by the plan owner, follow-up "server-findable"). One fixed line per exit
  *  code; for exit 11 the running server of another checkout is named from server.json or, while
  *  that server is starting and has written none yet, from the window_server lock (sanitised;
- *  ruled, follow-up "server-findable"). Ruled at the follow-up's review 2: exit 0 while neither
+ *  ruled, follow-up "server-findable"). Settled at the follow-up's review 2: exit 0 while neither
  *  server.json nor the lock names a process that is alive or cannot be judged — the server this
  *  command started was stopped by another command during its start, or ended — gives at once
- *  "the window's server stopped while it was starting; run skydeck window again", not the
- *  no-answer line after the wait; and "answers, but did not record itself" is given only of a
- *  server that still answers (it is pinged once more), else that same line. Each
+ *  "the window's server stopped before this command could use it; run skydeck window again (its
+ *  log: <stateDir>/server.log)" (the path sanitised), not the no-answer line after the wait; and
+ *  "answers, but did not record itself" is given only of a server that still answers (it is
+ *  pinged once more) — of one that is gone (its identity dead by design 5.5's rule where
+ *  server.json or the lock names it, else no /proc entry for its pid) that same stopped line, of
+ *  one that lives but answers no more "the window's server (pid N) does not answer; skydeck window
+ *  --restart stops it". Each
  *  ping of that wait waits at most 1 s (then the runtime directory is looked up again), and the one
  *  open when the wait ends is aborted: nothing outlives the call (ruled, task 22, review 2). A boot
  *  id that cannot be read rejects with a SkydeckError before anything is started. */

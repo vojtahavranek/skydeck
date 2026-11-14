@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -1827,16 +1827,26 @@ test('findServer and stopServer look where the store records the runtime directo
 // startServe when the server it started is gone (ruled, server-findable, review 2): another
 // command can now stop a server while it starts.
 
-const STOPPED = "the window's server stopped while it was starting; run skydeck window again";
+/** The settled line (ruled, server-findable, review 2): the server is gone before this command
+ *  could use it. */
+function stopped(h: Harness): string {
+  return `the window's server stopped before this command could use it; run skydeck window again (its log: ${logPath(h)})`;
+}
 
 test('startServe: serve exiting 0 while no server of this installation may live (no server.json, no live lock): the stopped line at once, not after startMs', async (t) => {
   const h = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '0' }));
   const before = performance.now();
-  assert.deepEqual(await startServe(h.deck, { startMs: START_MS }), { ok: false, line: STOPPED });
+  assert.deepEqual(await startServe(h.deck, { startMs: START_MS }), {
+    ok: false,
+    line: stopped(h),
+  });
   assert.ok(performance.now() - before < START_MS / 2, `${performance.now() - before} ms`);
   writeServer(h, await endedLine(h)); // a stale server.json and lock of a dead process: the same
   h.deck.store.setKv('window_server', `${(await endedLine(h)).pid}:1:${ownLine(h).bootId}:/x`);
-  assert.deepEqual(await startServe(h.deck, { startMs: START_MS }), { ok: false, line: STOPPED });
+  assert.deepEqual(await startServe(h.deck, { startMs: START_MS }), {
+    ok: false,
+    line: stopped(h),
+  });
 });
 
 test('startServe: serve exiting 0 while a live holder of the lock has not recorded itself (it is starting): waited for, never the stopped line', async (t) => {
@@ -1864,6 +1874,69 @@ test('startServe: a server that answered, then stopped before it recorded itself
   }
   await client.shutdown();
   const before = performance.now();
-  assert.deepEqual(await starting, { ok: false, line: STOPPED });
+  assert.deepEqual(await starting, { ok: false, line: stopped(h) });
   assert.ok(performance.now() - before < START_MS / 2, `${performance.now() - before} ms`);
+});
+
+/**
+ * The command's deck with a net whose GET /ping is answered as the real net answers it until one
+ * answer came through, then times out (ETIMEDOUT): a server that answered once and went silent.
+ */
+function goesSilent(h: Harness): { deck: Deck; answered: () => boolean } {
+  const real = h.deck.platform.net;
+  let answered = false;
+  const net: Net = {
+    ...real,
+    async requestUnix(path, request) {
+      if (request.path !== '/ping') return real.requestUnix(path, request);
+      if (answered) throw Object.assign(new Error('no answer'), { code: 'ETIMEDOUT' });
+      const answer = await real.requestUnix(path, request);
+      answered = true;
+      return answer;
+    },
+  };
+  return { deck: { ...h.deck, platform: { ...h.deck.platform, net } }, answered: () => answered };
+}
+
+test('startServe: a server that answered, did not record itself, and lives on silent at the end of the wait: "does not answer", never "stopped"', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_JSON_DELAY_MS: '60000' })); // answers, never records
+  const silent = goesSilent(h);
+  const result = await startServe(silent.deck, { startMs: 3000 });
+  assert.ok(silent.answered(), 'it answered once');
+  const pid = h.started[0]?.child.pid;
+  assert.ok(pid !== undefined && h.started[0]?.exited === false, 'it lives');
+  assert.deepEqual(result, {
+    ok: false,
+    line: `the window's server (pid ${pid}) does not answer; skydeck window --restart stops it`,
+  });
+});
+
+test('startServe: the server that answered is gone at the end of the wait while the lock names another live process: the stopped line', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '0' }));
+  const holder = await liveSleep(t, h); // keeps "a server may live": the wait goes on to its end
+  const { pid, procStart, bootId } = holder.line;
+  h.deck.store.setKv('window_server', `${pid}:${procStart}:${bootId}:${FAKE_ROOT}`);
+  const answerer = await startFake(t, h, {}); // a fake serve of this checkout that records itself
+  // It records itself, so its record is removed: one that answers before it records itself.
+  let seenAnswer = false;
+  const real = h.deck.platform.net;
+  const net: Net = {
+    ...real,
+    async requestUnix(path, request) {
+      const answer = await real.requestUnix(path, request);
+      if (request.path === '/ping' && !seenAnswer) {
+        seenAnswer = true;
+        unlinkSync(h.files().serverJson); // not recorded (as the guard of task 25 sees it)
+        answerer.child.kill('SIGKILL'); // and then gone
+        await answerer.exited;
+      }
+      return answer;
+    },
+  };
+  const result = await startServe(
+    { ...h.deck, platform: { ...h.deck.platform, net } },
+    { startMs: 2000 },
+  );
+  assert.ok(seenAnswer);
+  assert.deepEqual(result, { ok: false, line: stopped(h) });
 });

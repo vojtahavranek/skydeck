@@ -72,12 +72,13 @@ const POLL_MS = 100;
 const START_PING_MS = 1000;
 
 /**
- * Ruled (server-findable, review 2): the server this command started is gone and none of this
- * installation may live — another command stopped it during its start, or it ended. It says not
- * who stopped it.
+ * Settled (server-findable, review 2): the server this command started, or the one it waited for,
+ * is gone before this command could use it — and none of this installation may live. It says not
+ * who stopped it. `log` is server.log.
  */
-const STOPPED_WHILE_STARTING =
-  "the window's server stopped while it was starting; run skydeck window again";
+function stoppedBeforeUse(log: string): string {
+  return `the window's server stopped before this command could use it; run skydeck window again (its log: ${sanitize(log)})`;
+}
 
 /** S2 5.2's exit codes of `serve` that have a line of their own. */
 const PORT_USED = 10;
@@ -347,12 +348,13 @@ async function pingWithin(
  * a matching ping counts only once server.json (where the store's record says, looked up again)
  * names that server — its pid, server id and boot id, its process alive by design 5.5's rule —
  * within the same `startMs`. A server that answers but has not recorded itself by then gives its
- * own line — only while it still answers: one that answered and is gone (it stopped while it was
- * starting) gives STOPPED_WHILE_STARTING. A server of this build writes server.json before
- * server.sock answers (ruled, server-findable), so for it the check passes at its first answer
- * while it lives; it stays for any server that answers before it records itself. Exit 0 with no
- * server of this installation alive or impossible to judge (server.json, the lock) gives
- * STOPPED_WHILE_STARTING at once, not after `startMs` (ruled, server-findable, review 2).
+ * own line — only while it still answers (asked once more): one that answered and is gone gives
+ * stoppedBeforeUse's line, one that lives but answers no more "does not answer". A server of this
+ * build writes server.json before server.sock answers (ruled, server-findable), so for it the
+ * check passes at its first answer while it lives; it stays for any server that answers before it
+ * records itself. Exit 0 with no server of this installation alive or impossible to judge
+ * (server.json, the lock) gives stoppedBeforeUse's line at once, not after `startMs` (settled,
+ * server-findable, review 2).
  */
 export async function startServe(
   deck: Deck,
@@ -422,7 +424,7 @@ export async function startServe(
       // stop, or because another server held the lock — and no server of this installation may
       // live: nothing is coming any more.
       if (seen.exit !== null && !serverMayLive(deck)) {
-        return { ok: false, line: STOPPED_WHILE_STARTING };
+        return { ok: false, line: stoppedBeforeUse(log) };
       }
       const client = controlClient(platform.net, serverFiles(deck).serverSock);
       if (seen.late) {
@@ -431,14 +433,21 @@ export async function startServe(
           return { ok: false, line: didNotStart(`no answer in ${startMs / 1000} s`, log) };
         }
         // Only of a server that still answers (review 2): one that answered while it was
-        // stopping has removed its server.json, which it had written before it answered.
+        // stopping has removed its server.json, which it had written before it answered. One
+        // that answers no more is gone ("stopped"), or lives silent ("does not answer").
         const again = await pingOnce(client, attemptMs, controller.signal);
-        return typeof again === 'object' && again.serverId === answered.serverId
-          ? {
+        if (typeof again === 'object' && again.serverId === answered.serverId) {
+          return {
+            ok: false,
+            line: `the window's server (pid ${answered.pid}) answers, but did not record itself in ${sanitize(serverFiles(deck).serverJson)} within ${startMs / 1000} s; see ${sanitize(log)}`,
+          };
+        }
+        return answererGone(deck, answered.pid)
+          ? { ok: false, line: stoppedBeforeUse(log) }
+          : {
               ok: false,
-              line: `the window's server (pid ${answered.pid}) answers, but did not record itself in ${sanitize(serverFiles(deck).serverJson)} within ${startMs / 1000} s; see ${sanitize(log)}`,
-            }
-          : { ok: false, line: STOPPED_WHILE_STARTING };
+              line: `the window's server (pid ${answered.pid}) does not answer; skydeck window --restart stops it`,
+            };
       }
       const ping = await Promise.race([
         pingOnce(client, attemptMs, controller.signal),
@@ -486,6 +495,31 @@ function serverMayLive(deck: Deck): boolean {
     return holder !== null && pidLineState(holder.line, platform.proc, bootId) !== 'dead';
   } catch {
     return true;
+  }
+}
+
+/**
+ * Whether the process `pid` that answered a ping is gone — only a line's wording rests on it,
+ * never a signal. Judged by design 5.5's rule when server.json or the lock names that pid (pid,
+ * process start, boot id: 'dead' only); otherwise by the pid alone: no /proc entry. Anything that
+ * cannot be read or judged counts as not gone.
+ */
+function answererGone(deck: Deck, pid: number): boolean {
+  const { platform } = deck;
+  const bootId = currentBootId(platform);
+  try {
+    const json = readServerJson(platform.files, serverFiles(deck).serverJson);
+    const holder = readServerLock(deck.store);
+    const named = [
+      ...(json?.pid === pid ? [{ pid, procStart: json.procStart, bootId: json.bootId }] : []),
+      ...(holder?.line.pid === pid ? [holder.line] : []),
+    ];
+    if (named.length > 0) {
+      return named.every((line) => pidLineState(line, platform.proc, bootId) === 'dead');
+    }
+    return platform.proc.stat(pid) === null;
+  } catch {
+    return false;
   }
 }
 

@@ -1591,6 +1591,10 @@ describe('the test seam SKYDECK_TEST_WINDOW_TIMES (A31)', () => {
 // answers. The start seam SKYDECK_TEST_SERVE_START_DELAY_MS (A31) widens the time in which only
 // the lock names it.
 
+/** The start wait of the command that starts a server in these tests: short, so that a starter
+ *  waiting for a server that is gone shows (review 2), and long enough for a start with the seam. */
+const STARTER_MS = 12_000;
+
 interface Starting {
   /** The command that started the server, not waited for. */
   done: Promise<Result>;
@@ -1612,6 +1616,7 @@ async function startingServer(
 ): Promise<Starting> {
   const done = h.run(args, {
     ...more,
+    times: { startMs: STARTER_MS, ...more.times },
     env: { SKYDECK_TEST_SERVE_START_DELAY_MS: String(delayMs), ...env },
   });
   done.catch(() => {}); // awaited by the test; never an unhandled rejection meanwhile
@@ -1627,24 +1632,26 @@ async function startingServer(
   }
 }
 
-const STOPPED_LINE =
-  "skydeck: the window's server stopped while it was starting; run skydeck window again\n";
+/** The settled line (ruled, server-findable, review 2), on standard error. */
+function stoppedLine(h: Harness): string {
+  return `skydeck: the window's server stopped before this command could use it; run skydeck window again (its log: ${join(h.d.s.skydeckHome, 'state', 'server.log')})\n`;
+}
 
 /**
  * What the command that started a server may truthfully say when another command stopped that
  * server while it started (ruled, server-findable, review 2): its address (it was in time), that
- * the server stopped while it was starting, or that the server could not be asked any more — and
- * it says it well before its 30 s start wait is over.
+ * the server stopped before it could use it, or that the server could not be asked any more — and
+ * it says it before its start wait (startingServer's 12 s) is over: never "did not start".
  */
-function assertTruthfulStarter(r: Result): void {
+function assertTruthfulStarter(h: Harness, r: Result): void {
   const ok =
     r.code === 0 && /^http:\/\/127\.0\.0\.1:[0-9]+\/#t=[A-Za-z0-9_-]{43}\n$/.test(r.stdout);
-  const stopped = r.code === 1 && r.stderr === STOPPED_LINE;
+  const stopped = r.code === 1 && r.stderr === stoppedLine(h);
   const gone =
     r.code === 1 &&
     /^skydeck: the window's server cannot be asked on \S+ \(E[A-Z]+\)\n$/.test(r.stderr);
   assert.ok(ok || stopped || gone, `code ${r.code}: ${r.stdout}${r.stderr}`);
-  assert.ok(r.ms < 20_000, `not after the start wait: ${r.ms} ms`);
+  assert.ok(r.ms < STARTER_MS, `not after the start wait: ${r.ms} ms`);
 }
 
 /** A net whose GET /ping is refused: the command never gets to use the server it started. */
@@ -1713,7 +1720,7 @@ describe('a server that is starting is found by every command (ruled, server-fin
     const first = await startingServer(h, 2000);
 
     const r = await h.run(['--stop'], { times: { pingMs: 20_000 } });
-    assertTruthfulStarter(await first.done);
+    assertTruthfulStarter(h, await first.done);
 
     assert.equal(r.code, 0, r.stderr);
     assert.equal(
@@ -1732,7 +1739,7 @@ describe('a server that is starting is found by every command (ruled, server-fin
     const first = await startingServer(h, 5000);
 
     const r = await h.run(['--stop'], { times: { pingMs: 1000, killMs: 30_000 } });
-    assertTruthfulStarter(await first.done);
+    assertTruthfulStarter(h, await first.done);
 
     assert.equal(r.code, 0, r.stderr);
     assert.equal(
@@ -1752,7 +1759,7 @@ describe('a server that is starting is found by every command (ruled, server-fin
     const first = await startingServer(h, 2000);
 
     const r = await h.run(['--restart', '--print-url'], { times: { pingMs: 20_000 } });
-    assertTruthfulStarter(await first.done);
+    assertTruthfulStarter(h, await first.done);
 
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.stderr, restartLine(h));
@@ -1778,7 +1785,7 @@ describe('a server that is starting is found by every command (ruled, server-fin
     const r = await h.run(['--new-secret', '--print-url'], { times: { pingMs: 20_000 } });
     sampling = false;
     await sampler;
-    assertTruthfulStarter(await first.done);
+    assertTruthfulStarter(h, await first.done);
 
     assert.equal(r.code, 0, r.stderr);
     const old = samples.find((sample) => sample.alive && sample.secret !== null)?.secret;
@@ -1882,7 +1889,7 @@ describe('a server that is starting is found by every command (ruled, server-fin
     const first = await startingServer(h, 2000);
 
     const r = await h.exec(['uninstall']);
-    assertTruthfulStarter(await first.done);
+    assertTruthfulStarter(h, await first.done);
 
     assert.ok(
       r.stdout.includes(
@@ -1895,7 +1902,7 @@ describe('a server that is starting is found by every command (ruled, server-fin
   });
 
   for (const stopper of [['window', '--stop'], ['uninstall']]) {
-    test(`${stopper.join(' ')} during another command's start, which never got to use that server: the starter ends at once with the line that it stopped while it was starting`, async (t) => {
+    test(`${stopper.join(' ')} during another command's start, which never got to use that server: the starter ends at once with the line that the server stopped before it could use it`, async (t) => {
       const h = windowHarness(t);
       const first = await startingServer(h, 2000, ['--print-url'], {}, { net: pingsRefused });
 
@@ -1910,7 +1917,7 @@ describe('a server that is starting is found by every command (ruled, server-fin
       );
       assert.equal(a.code, 1);
       assert.equal(a.stdout, '');
-      assert.equal(a.stderr, STOPPED_LINE);
+      assert.equal(a.stderr, stoppedLine(h));
       const lag = a.startedAt + a.ms - (stop.startedAt + stop.ms);
       assert.ok(lag < 5000, `at once after the stop, not after the start wait: ${lag} ms`);
       assert.ok(ended(first));
