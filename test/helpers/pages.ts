@@ -292,6 +292,8 @@ export async function startPages(
     store?: (store: Store) => Store;
     /** Replaces the platform pages is given (the test platform's otherwise). */
     platform?: (platform: Platform) => Platform;
+    /** PagesDeps.starting (task 23). */
+    starting?: () => boolean;
   } = {},
 ): Promise<PagesFixture> {
   const d = testDeck(t);
@@ -336,6 +338,7 @@ export async function startPages(
     log: (line) => {
       logs.push(line);
     },
+    ...(options.starting === undefined ? {} : { starting: options.starting }),
   });
   const listener = await platform.net.listenHttp(
     { host: '127.0.0.1', port: 0 },

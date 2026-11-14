@@ -1123,10 +1123,11 @@ the server's proof.
    connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server).
 
-**Reading the secret, a named limit.** The server reads the secret from the store at every
-`hello`, so `--new-secret` takes effect at once. While another skydeck command holds the store's
-write lock, that read can wait up to the store's 5-second busy timeout, and the whole server
-waits with it (ruled, plan task 17).
+**Reading the secret.** The server reads the secret from the store at every `hello`, so
+`--new-secret` takes effect at once (ruled, plan task 17). While another process holds the store's
+write lock, the server's connection waits at most 250 ms (14); a `hello` whose secret cannot be
+read then is closed with 1013 (try again later) — never taken for a wrong proof, no 4003 and no
+alarm — and the page tries again (ruled, plan task 23).
 
 **Encodings.** Keys (the secret, a launch token) are 32 raw bytes, written as base64url without
 padding wherever they are stored or printed; HMAC and HKDF take the raw bytes. Nonces, proofs and
@@ -1966,7 +1967,7 @@ taskbar button show it is check W3. Low priority: stage E (19).
 | **The keep-alive cannot start or dies** | The server retries (6.1), pages show `WSL is not kept running`, and `doctor` reports it. The window keeps working while any WSL terminal is open. |
 | **A page falls behind** | 8.2.8: it gets a fresh snapshot instead of the bytes it missed. |
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
-| **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. |
+| **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |

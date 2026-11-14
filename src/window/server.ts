@@ -101,6 +101,8 @@ const IN_CLAUDE_CODE =
   "the window's server is not started from inside a Claude Code session: every session in the window would inherit that session's environment; run skydeck window in a terminal of your own";
 /** A21: a server id is 16 hex characters from 8 random bytes. */
 const SERVER_ID_BYTES = 8;
+/** The server's own store connection waits this long for another process's write lock (ruled). */
+const BUSY_TIMEOUT_MS = 250;
 /** How long the python3 check at start may take. */
 const PYTHON_CHECK_MS = 5000;
 
@@ -189,7 +191,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
   }
   const environment = serverEnvironment(platform.env);
   const startedNs = clock.nowNs();
-  const deck = openDeck(platform, { guardSchema: true });
+  // Ruled (review 2): a store another process keeps locked fails a piece of the server's work
+  // after 250 ms instead of freezing every terminal for the commands' 5 s (S2 14).
+  const deck = openDeck(platform, { guardSchema: true, busyTimeoutMs: BUSY_TIMEOUT_MS });
 
   // What is taken, to give back when the start fails.
   let lockTaken = false;
@@ -262,7 +266,42 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
 
     // The latest hello of each terminal: what its exit is settled with (S2 7.8).
     const hellos = new Map<string, KeeperHello>();
+    // Found keepers whose decision met a busy store (ruled, review 2): decided again after each
+    // refresh that worked, while the clock is before their startBy.
+    const postponed = new Map<string, KeeperHello>();
     let tick: Tick | null = null;
+    /**
+     * S2 7.3: a keeper this server did not just spawn starts its program only when the guard, the
+     * exact lock and the deadline still allow it (task 21); a busy store decides nothing yet.
+     */
+    const decide = (termId: string, hello: KeeperHello): void => {
+      const decision = decideFoundKeeper(deck, hello);
+      if (decision.start === 'later') {
+        if (!postponed.has(termId)) log(`terminal ${termId}: the store is busy; decided later`);
+        postponed.set(termId, hello);
+        return;
+      }
+      postponed.delete(termId);
+      if (decision.start) {
+        created.start(termId);
+      } else if (hello.exited === null) {
+        created.refuse(termId, decision.reason);
+      }
+      log(`terminal ${termId}: a found keeper was ${decision.start ? 'started' : 'refused'}`);
+      tick?.reload(); // the decision refreshed on the server's own connection
+    };
+    /** After a refresh that worked: the postponed decisions, each while its terminal waits for one. */
+    const decidePostponed = (): void => {
+      for (const [termId, hello] of [...postponed]) {
+        const term = created.list().find((candidate) => candidate.id === termId);
+        const waiting = term !== undefined && term.exit === null && term.program === null;
+        if (!waiting || clock.nowNs() >= BigInt(hello.startBy)) {
+          postponed.delete(termId); // ended, forgotten, started — or the keeper refuses by itself
+          continue;
+        }
+        decide(termId, hello);
+      }
+    };
     const created = createRegistry({
       platform,
       files,
@@ -273,17 +312,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       events: {
         hello(term, hello, origin) {
           hellos.set(term.id, hello);
-          if (origin === 'spawned' || hello.started) return;
-          // S2 7.3: a keeper this server did not just spawn starts its program only when the
-          // guard, the exact lock and the deadline still allow it (task 21).
-          const decision = decideFoundKeeper(deck, hello);
-          if (decision.start) {
-            created.start(term.id);
-          } else if (hello.exited === null) {
-            created.refuse(term.id, decision.reason);
+          if (origin === 'spawned' || hello.started) {
+            postponed.delete(term.id);
+            return;
           }
-          log(`terminal ${term.id}: a found keeper was ${decision.start ? 'started' : 'refused'}`);
-          tick?.reload(); // the decision refreshed on the server's own connection
+          decide(term.id, hello);
         },
         started() {},
         exited(term) {
@@ -292,6 +325,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
           // hello to take the lock value from, and the lock expires by itself.
           const hello = hellos.get(term.id);
           hellos.delete(term.id);
+          postponed.delete(term.id);
           if (hello !== undefined) tick?.ended(hello);
         },
       },
@@ -414,6 +448,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       interop,
       keepersLog,
       log,
+      afterRefresh: decidePostponed,
       storeNewer: (reason) => {
         log('server: the store was migrated by a newer skydeck; the server stops');
         void stop(reason);

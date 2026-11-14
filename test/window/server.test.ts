@@ -459,9 +459,7 @@ describe('Windows programs (A32)', () => {
         startDetached(command, args, options) {
           started.push(command);
           asked.push(options.cwd);
-          // The stub runs in the sandbox, never in /mnt/c (which CI does not have either); the
-          // directory asked for is checked below.
-          return p.processes.startDetached(command, args, { ...options, cwd: d.s.root });
+          return p.processes.startDetached(command, args, options);
         },
       },
       runner: {
@@ -481,7 +479,8 @@ describe('Windows programs (A32)', () => {
     assert.equal(result.ok, true, JSON.stringify(result));
     await until(() => d.edgeCalls().length === 1, 'the Edge stub ran', WAIT_MS);
     assert.deepEqual(d.edgeCalls(), [['https://example.com/a?b=c']]);
-    assert.deepEqual(asked, ['/mnt/c'], 'Edge is asked to start in /mnt/c (S2 5.3)');
+    // S2 5.3: in the C: drive — here task 24's stand-in for /mnt/c (no test runs in /mnt/c).
+    assert.deepEqual(asked, [d.cDrive]);
     assert.ok(started.length > 0);
     for (const command of started) {
       assert.ok(!command.startsWith('/mnt/') && !/\.exe$/i.test(command), command);
@@ -553,10 +552,11 @@ describe('places (S2 4.2, 17.3)', () => {
             if (command !== WSL_EXE) return p.processes.startDetached(command, args, options);
             windows.push([command, ...args]);
             const at = args.indexOf('--exec');
-            const child = await p.processes.startDetached(args[at + 1] ?? '', args.slice(at + 2), {
-              ...options,
-              cwd: d.s.root, // for /mnt/c, which CI does not have
-            });
+            const child = await p.processes.startDetached(
+              args[at + 1] ?? '',
+              args.slice(at + 2),
+              options, // in the stand-in C: drive of the sandbox
+            );
             script = { child, procStart: procStartOf(child.pid) };
             return child;
           },

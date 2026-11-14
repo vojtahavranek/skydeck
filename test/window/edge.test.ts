@@ -60,6 +60,9 @@ interface Setup {
   sandbox: Sandbox;
 }
 
+/** The C: drive in these tests: task 24's stand-in for /mnt/c (only a path: the processes are fakes). */
+const C_DRIVE = '/stand-in/c';
+
 function setup(
   t: TestContext,
   options: {
@@ -69,7 +72,9 @@ function setup(
     env?: Record<string, string | undefined>;
   } = {},
 ): Setup {
-  const tp = testPlatform(t, { env: { WSL_INTEROP: OWN_INTEROP, ...options.env } });
+  const tp = testPlatform(t, {
+    env: { WSL_INTEROP: OWN_INTEROP, SKYDECK_TEST_MNT_C: C_DRIVE, ...options.env },
+  });
   const processes = fakeProcesses(options.handler);
   const usersRoot = options.usersRoot?.(tp.sandbox);
   const platform: Platform = {
@@ -115,7 +120,7 @@ test('startEdge starts window.edge detached with exactly edgeArgs, in /mnt/c, st
   assert.deepEqual(call.args, edgeArgs(47613, TOKEN, PROFILE));
   // No input, stdoutTo or stderrTo: stdin, stdout and stderr are /dev/null.
   assert.deepEqual(Object.keys(call.options).sort(), ['cwd', 'env']);
-  assert.equal(call.options.cwd, '/mnt/c');
+  assert.equal(call.options.cwd, C_DRIVE);
 });
 
 test('startEdge gives Edge the platform environment with WSL_INTEROP pointing at the link', async (t) => {
@@ -276,7 +281,7 @@ test('openLink opens an allowed URL with window.edge, the URL its only argument'
   assert.equal(call.command, DEFAULT_CONFIG.window.edge);
   assert.deepEqual(call.args, [url]); // no profile folder: the user's own Edge profile (S2 9.6)
   assert.deepEqual(Object.keys(call.options).sort(), ['cwd', 'env']);
-  assert.equal(call.options.cwd, '/mnt/c');
+  assert.equal(call.options.cwd, C_DRIVE);
   assert.equal(call.options.env.WSL_INTEROP, LINK);
 });
 
@@ -322,7 +327,7 @@ test('startWindowsProgram starts the program detached in /mnt/c with stdio ignor
   assert.equal(call.command, '/mnt/c/x.exe');
   assert.deepEqual(call.args, ['a b', 'C:\\d']);
   assert.deepEqual(Object.keys(call.options).sort(), ['cwd', 'env']);
-  assert.equal(call.options.cwd, '/mnt/c');
+  assert.equal(call.options.cwd, C_DRIVE);
   assert.equal(call.options.env.WSL_INTEROP, LINK);
 });
 
@@ -354,4 +359,16 @@ test('startWindowsProgram passes a rejection of the start on', async (t) => {
   await assert.rejects(startWindowsProgram(platform, '/mnt/c/x.exe', [], LINK), {
     code: 'ENOENT',
   });
+});
+
+test('startWindowsProgram in a test sandbox without the C: drive stand-in starts nothing (ENOENT)', async (t) => {
+  const { platform, processes } = setup(t, { env: { SKYDECK_TEST_MNT_C: undefined } });
+  await assert.rejects(startWindowsProgram(platform, '/mnt/c/x.exe', [], LINK), { code: 'ENOENT' });
+  assert.deepEqual(processes.calls, []);
+});
+
+test('startWindowsProgram outside a test sandbox starts in /mnt/c (S2 5.3)', async (t) => {
+  const { platform, processes } = setup(t, { env: { SKYDECK_TEST_NO_WINDOWS: undefined } });
+  await startWindowsProgram(platform, '/mnt/c/x.exe', [], LINK);
+  assert.equal(onlyCall(processes).options.cwd, '/mnt/c');
 });

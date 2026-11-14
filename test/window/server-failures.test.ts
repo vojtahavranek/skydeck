@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
 
 import type { Terminal } from '@xterm/headless';
@@ -197,6 +198,54 @@ async function listeningSocket(t: TestContext, path: string): Promise<{ path: st
   await new Promise<void>((resolve) => server.listen(path, resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   return { path };
+}
+
+/** Another process's write lock on the sandbox's store (the fixture's BEGIN IMMEDIATE in a worker). */
+function holdWriteLock(t: TestContext, d: ServerSandbox): { held: Promise<void>; release(): void } {
+  const signal = new SharedArrayBuffer(4);
+  const flag = new Int32Array(signal);
+  const holder = new Worker(new URL('../fixtures/hold-write-lock.ts', import.meta.url), {
+    workerData: { path: join(d.s.skydeckHome, 'data', 'skydeck.db'), signal },
+  });
+  const release = (): void => {
+    Atomics.store(flag, 0, 1);
+    Atomics.notify(flag, 0);
+  };
+  t.after(async () => {
+    release();
+    await holder.terminate();
+  });
+  return {
+    held: new Promise<void>((resolve) => holder.once('message', () => resolve())),
+    release,
+  };
+}
+
+/** The close code a page gets when it sends a proper hello in mode key (the stored secret). */
+async function helloCloseCode(t: TestContext, d: ServerSandbox, port: number): Promise<number> {
+  const secret = d.deck.store.getKv('window_secret');
+  assert.ok(secret !== null);
+  const origin = `http://127.0.0.1:${port}`;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin });
+  t.after(() => {
+    ws.terminate();
+  });
+  ws.on('error', () => {});
+  const closed = new Promise<number>((resolve) => ws.once('close', (code) => resolve(code)));
+  const challenge = await new Promise<{ nonce: string }>((resolve) =>
+    ws.once('message', (data) => resolve(JSON.parse(String(data)) as { nonce: string })),
+  );
+  const cN = freshNonce();
+  ws.send(
+    JSON.stringify({
+      t: 'hello',
+      protocol: 1,
+      mode: 'key',
+      nonce: cN,
+      proof: pageProof(Buffer.from(secret, 'base64url'), 'key', challenge.nonce, cN, origin),
+    }),
+  );
+  return closed;
 }
 
 describe('python3 missing (S2 14)', () => {
@@ -568,43 +617,112 @@ describe('the store (S2 10.1, 14)', () => {
     assert.equal(existsSync(d.files.serverJson), false);
   });
 
-  test('locked by another skydeck: one notice tick-failed, not repeated; once it is free the list updates again', async (t) => {
+  test('locked by another skydeck: the server never freezes, terminals keep flowing; one notice tick-failed; an action and a hello are told to try again; once free the list updates', async (t) => {
     const d = serverSandbox(t);
     d.resumable(S1);
     const test = await d.start();
-    const page = await connectTestPage(t, d, test.server);
+    const { page, termId } = await resumedAndTyped(t, d, test);
     await page.list((list) => listed(list, S1), 'the first list');
 
-    const signal = new SharedArrayBuffer(4);
-    const flag = new Int32Array(signal);
-    const holder = new Worker(new URL('../fixtures/hold-write-lock.ts', import.meta.url), {
-      workerData: { path: join(d.s.skydeckHome, 'data', 'skydeck.db'), signal },
-    });
-    const release = (): void => {
-      Atomics.store(flag, 0, 1);
-      Atomics.notify(flag, 0);
-    };
-    t.after(async () => {
-      release();
-      await holder.terminate();
-    });
-    await new Promise<void>((resolve) => holder.once('message', () => resolve()));
-    d.resumable(S2); // the refresh must write, and waits out the busy timeout
-    const notice = await page.next('notice', 'the tick-failed notice', 30_000);
+    const lock = holdWriteLock(t, d);
+    await lock.held;
+    const delay = monitorEventLoopDelay({ resolution: 10 });
+    delay.enable();
+    d.resumable(S2); // the refresh must write, and meets the lock
+    const notice = await page.next('notice', 'the tick-failed notice', WAIT_MS);
     assert.equal(notice.kind, 'tick-failed');
     assert.equal(notice.term, null);
     assert.match(notice.text, /^skydeck could not refresh the list: .+; it tries again$/);
-    await sleep(12_000); // two more refreshes fail (each waits out the 5 s busy timeout)
-    release();
-    await page.list((list) => listed(list, S2), 'the list with the new session', 30_000);
+
+    // The terminals do not depend on the store (S2 14): typing is echoed at once.
+    const before = page.all.length;
+    const sent = performance.now();
+    page.send({ t: 'input', term: termId, data: 'flowing' });
+    await until(
+      () =>
+        page.all
+          .slice(before)
+          .some((item) => 'binary' in item && Buffer.from(item.binary).includes('flowing')),
+      'the echo while the store is locked',
+      WAIT_MS,
+    );
+    assert.ok(performance.now() - sent < 2000, 'echoed within 2 s');
+
+    // An action and a hello that need the store are told to try again.
+    const result = await page.act({ kind: 'resume', sessionId: S2, cols: 80, rows: 24 });
+    assert.deepEqual(
+      { ok: result.ok, error: result.error },
+      { ok: false, error: "skydeck's database is busy; try again" },
+    );
+    assert.equal(
+      await helloCloseCode(t, d, test.server.port),
+      1013,
+      'a page that cannot read the secret now',
+    );
+
+    await sleep(4000); // two more refreshes meet the lock
+    delay.disable();
+    lock.release();
+    // Ruled (review 2): never blocked for long — 250 ms per piece of work, not the 5 s of commands.
+    assert.ok(delay.max / 1e6 < 1500, `the loop was blocked ${Math.round(delay.max / 1e6)} ms`);
+    await page.list((list) => listed(list, S2), 'the list with the new session', WAIT_MS);
     assert.equal(
       page.all.filter((item) => 'text' in item && item.text.t === 'notice').length,
       1,
       'one notice only',
     );
-    assert.ok(
-      test.logs().some((line) => line.includes('tick: the refresh failed')),
-      test.logs().join('\n'),
+    assert.equal(
+      test.logs().filter((line) => line.includes('tick: the refresh failed')).length,
+      1,
+      'one log line while it lasts',
+    );
+  });
+
+  test('a found keeper whose decision meets a locked store is not refused: it is decided again once the store is free', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    claudeCommandScript(d, 'claude-sleeps', '#!/bin/sh\nexec sleep 120\n');
+    let lock: ReturnType<typeof holdWriteLock> | null = null;
+    // The keeper's socket refuses connections for 6 s: its hello comes late, through
+    // decideFoundKeeper, while another process holds the store's write lock.
+    let unblockAt: number | null = null;
+    const test = await d.start({
+      platform: (p) => ({
+        ...p,
+        net: {
+          ...p.net,
+          async connectUnix(path) {
+            if (path.startsWith(`${d.files.termsDir}/`)) {
+              unblockAt ??= performance.now() + 6000;
+              if (performance.now() < unblockAt) {
+                throw Object.assign(new Error('refused for the test'), { code: 'ECONNREFUSED' });
+              }
+            }
+            return p.net.connectUnix(path);
+          },
+        },
+      }),
+    });
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
+    assert.equal(result.ok, false, 'no hello within 5 s: answered as a timeout');
+    d.resumable(S2, join(d.s.home, 'other')); // the decision's refresh must write
+    lock = holdWriteLock(t, d);
+    await lock.held;
+    await until(
+      () => test.logs().some((line) => line.includes('the store is busy; decided later')),
+      'the decision put off',
+      WAIT_MS,
+    );
+    const [term] = test.server.hub.list();
+    assert.ok(term !== undefined);
+    assert.equal(term.exit, null, 'not refused');
+    assert.equal(term.program, null, 'not started either');
+    lock.release();
+    await until(
+      () => test.server.hub.list().some((candidate) => candidate.program !== null),
+      'started once the store is free',
+      WAIT_MS,
     );
   });
 });

@@ -95,6 +95,8 @@ export interface ServerSandbox {
   edgeCalls(): string[][];
   /** The first interop candidate the servers are given: inside the sandbox, nothing there. */
   interopFirst: string;
+  /** `SKYDECK_TEST_MNT_C` of the servers (task 24): the directory that stands for /mnt/c. */
+  cDrive: string;
   /**
    * Makes `sessionId` resumable: a transcript with one user record a minute ago whose directory is
    * `dir` (created; default a project directory in the sandbox's home). Returns the directory.
@@ -131,7 +133,10 @@ export function serverSandbox(t: TestContext, options: ServerSandboxOptions = {}
   const kb = box;
   const { s, tp } = kb;
   const record = join(s.root, 'records', 'server-programs.jsonl');
-  const env = s.env({ STANDIN_RECORD: record, ...options.env });
+  // Task 24's stand-in for /mnt/c (drive.ts): a Windows program is started in it, never in /mnt/c.
+  const cDrive = join(s.root, 'c-drive');
+  mkdirSync(cDrive);
+  const env = s.env({ STANDIN_RECORD: record, SKYDECK_TEST_MNT_C: cDrive, ...options.env });
   const realProc = tp.platform.proc;
   const bootId = options.bootId;
   const platform: Platform = {
@@ -226,6 +231,7 @@ export function serverSandbox(t: TestContext, options: ServerSandboxOptions = {}
     standin,
     edgeCalls,
     interopFirst,
+    cDrive,
     resumable,
     start,
     serverLog,

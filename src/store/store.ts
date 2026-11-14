@@ -389,8 +389,23 @@ function migrate(db: DatabaseSync, path: string): void {
  * a write sent through a read helper. A function handed the database object directly is not
  * covered (pragma() builds its statement from a name it is given: only fixed names may reach it).
  * Commands do not pass it: a command that migrates is the newer one.
+ *
+ * `busyTimeoutMs` (the server's connection, 250 ms; ruled, plan task 23): the connection's busy
+ * timeout once it is open, so that a store another process keeps locked fails a piece of the
+ * server's work quickly instead of freezing it for 5 s; the migrations at open still wait 5000.
+ * Default 5000, the commands' value. A value that is not a whole number 0–2^31−1 is a RangeError.
  */
-export function openStore(path: string, options: { guardSchema?: boolean } = {}): Store {
+export function openStore(
+  path: string,
+  options: { guardSchema?: boolean; busyTimeoutMs?: number } = {},
+): Store {
+  const busyTimeoutMs = options.busyTimeoutMs;
+  if (
+    busyTimeoutMs !== undefined &&
+    (!Number.isSafeInteger(busyTimeoutMs) || busyTimeoutMs < 0 || busyTimeoutMs > 2 ** 31 - 1)
+  ) {
+    throw new RangeError(`not a busy timeout in ms: ${busyTimeoutMs}`);
+  }
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { readBigInts: true });
@@ -401,6 +416,10 @@ export function openStore(path: string, options: { guardSchema?: boolean } = {})
     db.exec('PRAGMA synchronous = FULL');
     db.exec('PRAGMA foreign_keys = ON');
     migrate(db, path);
+    if (busyTimeoutMs !== undefined) {
+      // After the migrations, which wait the full 5 s for a command that holds the lock.
+      db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
+    }
   } catch (error) {
     db?.close();
     if (error instanceof SkydeckError) {

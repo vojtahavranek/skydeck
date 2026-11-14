@@ -746,7 +746,9 @@ REAL server in the test process (A19) on `realTestPlatform` (A36): there is no f
   (the sandbox's, with `STANDIN_RECORD` set); `deck` — the test's own connection to the store, as
   a command has one; `files` — `runtimeFiles(<SKYDECK_HOME>/run)`; `record` — the record file of
   every stand-in the servers' keepers start; `standin` — `claudeCommand`; `edgeCalls()` — the Edge
-  stub's runs; `interopFirst` — the first interop candidate, inside the sandbox; `resumable(id,
+  stub's runs; `interopFirst` — the first interop candidate, inside the sandbox; `cDrive` — the
+  servers' `SKYDECK_TEST_MNT_C` (task 24's stand-in for `/mnt/c`, where `startWindowsProgram`
+  starts a Windows program: no test runs one in `/mnt/c`); `resumable(id,
   dir?)` — a transcript that makes a session resumable; `serverLog()` — `server.log`'s lines;
   `start(options?)` → `TestServer`, a server on this sandbox (port 0, `foreground` false,
   `interopFirst` in the sandbox; `options.platform` changes the platform, e.g. to record or fake
@@ -834,11 +836,14 @@ export class StoreNewerError extends SkydeckError {}
  *  store.ts checks that only the write helpers prepare SQL themselves. That guards against the
  *  usual mistake, a write sent through a read helper; a function handed the database object
  *  directly is not covered. */
-export function openStore(path: string, options?: { guardSchema?: boolean }): Store;
+/** busyTimeoutMs (ruled by the plan owner, task 23, review 2; the server's connection: 250): the
+ *  connection's busy timeout once it is open — default 5000, the commands' value; the migrations at
+ *  open keep 5000. RangeError for a value that is not a whole number 0–2^31−1. */
+export function openStore(path: string, options?: { guardSchema?: boolean; busyTimeoutMs?: number }): Store;
 /** Prepares a SELECT; throws Error "not a read statement: …" for anything else. Exported for its test. */
 export function prepareRead(db: DatabaseSync, sql: string): StatementSync;
 // src/sessions/deck.ts
-export function openDeck(platform: Platform, options?: { guardSchema?: boolean }): Deck;
+export function openDeck(platform: Platform, options?: { guardSchema?: boolean; busyTimeoutMs?: number }): Deck; // passed to openStore
 // src/store/types.ts — KvKey gains:
 //   'window_secret' | 'window_server' | 'window_runtime_dir' | 'window_alarm' | 'window_launching'
 ```
@@ -2612,8 +2617,9 @@ snaps of terminals attached at the same moment count, all but the latest (a name
 connections in the hello phase, an upgrade that passes the checks above drops the one that has
 waited longest and is accepted; a proven connection is never dropped for it (no 503 for this; the
 `bye` 503 stays). The hello reads the
-secret from the store every time (a named limit, S2 8.2.2: `--new-secret` takes effect at once;
-a held write lock can stall the server up to the 5 s busy timeout). When a page goes, every
+secret from the store every time (S2 8.2.2: `--new-secret` takes effect at once; ruled at task
+23's review 2: the server's connection waits at most 250 ms for a held write lock, and a hello
+that cannot read the secret then is closed with 1013). When a page goes, every
 stream is detached before the sizes are handed over; during `bye` no size is handed over.
 
 Pages calls `hub.setTheme` with a page's theme (from its `start`) when that page starts focused
@@ -3096,7 +3102,11 @@ export function windowTerminal(deps: WindowTerminalDeps, size: { cols: number; r
  *  owner (task 21, reviews 1 and 2): it never throws (a failure
  *  while checking is a refusal naming it); a hello whose `started` is true or whose `exited` is set
  *  is never started; a `new` is refused when the boot id cannot be read (checkResumable's words). */
-export function decideFoundKeeper(deck: Deck, hello: KeeperHello): { start: true } | { start: false; reason: string };
+/** Ruled by the plan owner (task 23, review 2): a busy or locked database (SQLITE_BUSY, LOCKED)
+ *  is `{ start: 'later' }` — the keeper is not refused; the server decides again after each
+ *  refresh that worked while the clock is before the hello's `startBy`, and drops the hello when
+ *  its terminal ends, starts or is forgotten (after the deadline the keeper refuses by itself). */
+export function decideFoundKeeper(deck: Deck, hello: KeeperHello): { start: true } | { start: false; reason: string } | { start: 'later' };
 /** S2 7.8: after an exit, when the session never reported a start for this launch (ingestSpool
  *  first, then resumeStarted with the lock's time and event id; for `new`, no event of the id):
  *  release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote.
@@ -3359,9 +3369,19 @@ status answers and the stop of S2 5.5.
 **Files**
 - Create: `src/window/server.ts`, `src/window/tick.ts`, `src/cli/commands/serve.ts`,
   `test/helpers/window.ts`
-- Modify: `docs/design-step-2.md` 5.2 (A29)
+- Create (ruled at review 2): `src/window/busy.ts` (`isBusy`)
+- Modify: `docs/design-step-2.md` 5.2 (A29); ruled at review 2, exactly these edits of merged
+  files: `src/store/store.ts` (`openStore`'s `busyTimeoutMs`), `src/sessions/deck.ts` (`openDeck`
+  passes it), `src/window/starts.ts` (`decideFoundKeeper`'s `{ start: 'later' }`),
+  `src/window/actions.ts` (a busy store answers "skydeck's database is busy; try again"),
+  `src/window/pages.ts` (`PagesDeps.starting`: 503 while the server starts; 1013 for a hello
+  whose secret cannot be read because the store is busy), `src/window/edge.ts` (the Windows
+  working directory from `drive.ts`, task 24's seam); design S2 5.5, 8.2.1, 8.2.2, 14
 - Test: `test/window/server.test.ts`, `test/window/server-failures.test.ts`,
-  `test/window/tick.test.ts`, `test/cli/commands/serve.test.ts`
+  `test/window/tick.test.ts`, `test/cli/commands/serve.test.ts`; and for the edits above
+  `test/store/store.test.ts`, `test/sessions/deck.test.ts`, `test/window/starts.test.ts`,
+  `test/window/actions.test.ts`, `test/window/pages-handshake.test.ts`, `test/helpers/pages.ts`
+  (`startPages`' `starting`), `test/window/edge.test.ts`, `test/window/keepalive.test.ts`
 
 **Behaviour.** `runServer` in this order: refuse with `CLAUDECODE` set (13); `serverEnvironment`;
 `openDeck(platform, { guardSchema: true })`; take the lock (0 or 11); the runtime directory

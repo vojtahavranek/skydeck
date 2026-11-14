@@ -52,6 +52,8 @@ export interface TickDeps {
   log: (line: string) => void;
   /** S2 10.1: the store was migrated under the server; told once, with the text of `bye`. */
   storeNewer: (reason: string) => void;
+  /** Called after each refresh that worked (the server's postponed found-keeper decisions). */
+  afterRefresh?: () => void;
 }
 
 export interface Tick {
@@ -281,6 +283,7 @@ export function createTick(deps: TickDeps): Tick {
       reloadIfDue(result);
       map();
       fetchPrs();
+      deps.afterRefresh?.();
       failing = null;
       told = false;
     } catch (error) {

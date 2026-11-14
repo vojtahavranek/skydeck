@@ -407,6 +407,45 @@ describe('pages: what closes the connection before start', () => {
     );
   });
 
+  test('a busy store while the secret is read closes with 1013 (try again later), no alarm, no token used (ruled, task 23)', async (t) => {
+    const f = await startPages(t, {
+      store: (store) =>
+        new Proxy(store, {
+          get(target, key) {
+            if (key === 'transaction') {
+              return () => {
+                throw Object.assign(new Error('database is locked'), {
+                  code: 'ERR_SQLITE_ERROR',
+                  errcode: 5,
+                });
+              };
+            }
+            const value: unknown = Reflect.get(target, key, target);
+            return typeof value === 'function' ? (value as () => unknown).bind(target) : value;
+          },
+        }) as Store,
+    });
+    const minted = f.tokens.mint(30);
+    const client = await connectPage(t, f);
+    await hello(client, f, 'launch', minted.token);
+    assert.equal(await closedWith(client), 1013);
+    assert.equal(f.tokens.state(minted.id), 'waiting');
+    assert.ok(
+      f.logs.some((line) => line.includes('busy')),
+      JSON.stringify(f.logs),
+    );
+  });
+
+  test('starting: an upgrade with the right Host is answered 503, a wrong Host still 421 (ruled, task 23)', async (t) => {
+    let starting = true;
+    const f = await startPages(t, { starting: () => starting });
+    assert.equal((await refusedUpgrade(t, f)).status, 503);
+    assert.equal((await refusedUpgrade(t, f, { host: 'localhost' })).status, 421);
+    starting = false;
+    const client = await connectPage(t, f);
+    assert.equal((await client.nextText('the challenge')).t, 'challenge');
+  });
+
   test('after start the page counts; before it, it does not', async (t) => {
     const f = await startPages(t);
     assert.equal(f.pages.count(), 0);

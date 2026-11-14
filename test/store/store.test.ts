@@ -128,6 +128,27 @@ describe('migrations', () => {
 });
 
 describe('openStore', () => {
+  test("busyTimeoutMs sets the connection's busy timeout (the server's 250 ms, ruled, task 23); the default stays 5000", (t) => {
+    const { path } = fresh(t);
+    const short = openStore(path, { busyTimeoutMs: 250 });
+    t.after(() => {
+      short.close();
+    });
+    assert.equal(short.connectionSettings().busyTimeout, 250);
+    const plain = openStore(path);
+    t.after(() => {
+      plain.close();
+    });
+    assert.equal(plain.connectionSettings().busyTimeout, 5000);
+  });
+
+  test('busyTimeoutMs that is not a whole number 0 to 2^31 - 1 is a RangeError, and nothing is opened', (t) => {
+    const { path } = fresh(t);
+    for (const bad of [-1, 1.5, Number.NaN, 2 ** 31]) {
+      assert.throws(() => openStore(path, { busyTimeoutMs: bad }), RangeError, String(bad));
+    }
+  });
+
   test('a new database has the connection settings, mode 600, version 1 and every table', (t) => {
     const { store, path } = fresh(t);
 

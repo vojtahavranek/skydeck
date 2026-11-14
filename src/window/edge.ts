@@ -9,10 +9,9 @@
 import type { WindowConfig } from '../platform/config.ts';
 import type { Detached, Env, Platform } from '../platform/types.ts';
 import { describeError } from '../sessions/problems.ts';
+import { driveC } from './drive.ts';
 import { deriveProfileDir, edgeArgs, linkToOpen } from './windows.ts';
 
-/** A Windows directory, so that the program starts without a "UNC path" warning (S2 5.3). */
-const WINDOWS_CWD = '/mnt/c';
 /** A launch token as the address carries it: base64url (S2 8.2.2). */
 const TOKEN = /^[A-Za-z0-9_-]+$/;
 /**
@@ -44,7 +43,7 @@ function windowsEnvironment(env: Env, interop: string | null): Record<string, st
 
 /**
  * Starts a Windows program as S2 2 says: `args` as an argument list, detached, stdin, stdout and
- * stderr /dev/null, in /mnt/c, with the platform's environment and `WSL_INTEROP` = `interop` when
+ * stderr /dev/null, in the C: drive (`driveC`: /mnt/c, or a test sandbox's stand-in), with the platform's environment and `WSL_INTEROP` = `interop` when
  * given. Rejects, starting nothing, when an argument is empty or holds a '"' or a control
  * character or ends with a backslash; otherwise as `processes.startDetached` (ENOENT: the program
  * or /mnt/c does not exist).
@@ -59,8 +58,16 @@ export async function startWindowsProgram(
   if (unsafe !== undefined) {
     throw new Error(`${asJsonString(unsafe)} cannot be passed to a Windows program`);
   }
+  // A Windows directory, so that the program starts without a "UNC path" warning (S2 5.3): the
+  // C: drive, which in a test sandbox is task 24's stand-in or not there at all (ruled, task 23's
+  // review 2: no test runs a process in /mnt/c) — then nothing is started, as on a machine
+  // without /mnt/c.
+  const cwd = driveC(platform.env);
+  if (cwd === null) {
+    throw Object.assign(new Error('the C: drive is not mounted'), { code: 'ENOENT' });
+  }
   return platform.processes.startDetached(command, args, {
-    cwd: WINDOWS_CWD,
+    cwd,
     env: windowsEnvironment(platform.env, interop),
   });
 }
