@@ -505,9 +505,9 @@ describe('registry: slots and input', () => {
         .flatMap((x) => (x.ev === 'input' ? [x.hex] : []))
         .join('');
     // `ok` is back as soon as no more than 4 MiB wait at the server: once the keeper, running
-    // again, has taken the frame in flight (63 frames may still wait then; its queue has room for
-    // them all) — not once it has taken everything, and not once the program reads. So at that
-    // moment the stalled program has read nothing of what was sent, only its /stall line.
+    // again, has taken the frame in flight (63 frames may still wait then) — not once it has taken
+    // everything, and not once the program reads. So at that moment the stalled program has read
+    // nothing of what was sent, only its /stall line.
     await until(() => r.registry.input(spec.id, new Uint8Array(0)) === 'ok', 'ok again', 15_000);
     const okAt = Math.round(performance.now() - stallAsked);
     const atOk = read();
