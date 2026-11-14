@@ -2367,30 +2367,44 @@ test('the page shell', async (t) => {
         page.evaluate(
           () => (Reflect.get(globalThis, 'viewCalls') as { pasteRaw: number }).pasteRaw,
         );
-      // Whether the next keydown of V (not of the modifiers before it) was cancelled.
-      const prevented = (): Promise<boolean> =>
-        page.evaluate(
-          () =>
-            new Promise<boolean>((resolve) => {
-              const onV = (event: KeyboardEvent): void => {
-                if (event.code !== 'KeyV') {
-                  return;
-                }
-                removeEventListener('keydown', onV, true);
-                setTimeout(() => resolve(event.defaultPrevented), 0);
-              };
-              addEventListener('keydown', onV, true);
-            }),
-        );
+      /**
+       * Watches for the next keydown of V (not of the modifiers before it): the listener is in
+       * place when this resolves, and the function it gives says whether that keydown was
+       * cancelled, failing when none came within 5 s.
+       */
+      const watchV = async (): Promise<() => Promise<boolean>> => {
+        await page.evaluate(() => {
+          const seen = new Promise<boolean>((resolve) => {
+            const onV = (event: KeyboardEvent): void => {
+              if (event.code !== 'KeyV') {
+                return;
+              }
+              removeEventListener('keydown', onV, true);
+              setTimeout(() => resolve(event.defaultPrevented), 0);
+            };
+            addEventListener('keydown', onV, true);
+          });
+          Reflect.set(globalThis, 'keyVPrevented', seen);
+        });
+        return () =>
+          page.evaluate(() =>
+            Promise.race([
+              Reflect.get(globalThis, 'keyVPrevented') as Promise<boolean>,
+              new Promise<boolean>((_resolve, reject) =>
+                setTimeout(() => reject(new Error('no keydown of V came')), 5000),
+              ),
+            ]),
+          );
+      };
 
       await toZone(page, 'list');
       await page.keyboard.press('Control+Shift+V');
       assert.equal(await pastes(), 0, 'not from the list');
 
       await page.keyboard.press('/');
-      const inField = prevented();
+      const inField = await watchV();
       await page.keyboard.press('Control+Shift+V');
-      assert.equal(await inField, false, "the filter field keeps the browser's own key");
+      assert.equal(await inField(), false, "the filter field keeps the browser's own key");
       assert.equal(await pastes(), 0, 'not from the filter field');
 
       await page.keyboard.press('Escape'); // the filter closes; the list has the keyboard
@@ -2403,9 +2417,9 @@ test('the page shell', async (t) => {
         document.querySelector('#terminal')?.append(field);
       });
       await page.focus('#terminal .own-find');
-      const inOwnField = prevented();
+      const inOwnField = await watchV();
       await page.keyboard.press('Control+Shift+V');
-      assert.equal(await inOwnField, false, "the view's own field keeps the browser's own key");
+      assert.equal(await inOwnField(), false, "the view's own field keeps the browser's own key");
       assert.equal(await pastes(), 0, "not from the view's own field");
 
       await page.focus('#terminal .terminal-placeholder');
