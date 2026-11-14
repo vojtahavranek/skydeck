@@ -187,6 +187,29 @@ async function sentAfter(page: Page, name: string): Promise<string[]> {
     .map((entry) => entry.t ?? '');
 }
 
+/**
+ * The page of a real server with the real web/ reports no problem — no console error, nothing
+ * uncaught, no failed load (notes, shell-pinned #66: nothing else catches a real module that
+ * does) —, and the list keeps the hooks the shared helpers rely on: exactly one element per
+ * session id carries `data-id` (only the rows do), and `data-selected="true"` is on one row at
+ * most.
+ */
+async function healthy(page: Page, problems: readonly string[]): Promise<void> {
+  assert.deepEqual(problems, [], 'the page reports no problem');
+  const hooks = await readPage(
+    page,
+    () => ({
+      ids: [...document.querySelectorAll('#list [data-id]')].map((e) => e.getAttribute('data-id')),
+      rows: document.querySelectorAll('#list .list-row').length,
+      selected: document.querySelectorAll('#list [data-selected="true"]').length,
+    }),
+    null,
+  );
+  assert.equal(new Set(hooks.ids).size, hooks.ids.length, 'one element per session id');
+  assert.equal(hooks.ids.length, hooks.rows, 'only the rows carry data-id');
+  assert.ok(hooks.selected <= 1, 'data-selected on one row at most');
+}
+
 // ---------------------------------------------------------------------------------------------
 // A scripted stand-in server
 
@@ -344,6 +367,7 @@ test('the list', async (t) => {
 
       // This week most recent first; Earlier folded: its header only, with its count and span.
       await untilDrawn(page, (rows) => rows.length === 2, 'two rows of This week');
+      await healthy(page, l.problems);
       assert.deepEqual(await drawnIds(page), [S1, S2]);
       assert.deepEqual(
         (await drawn(page)).map((row) => row.section),
@@ -386,7 +410,7 @@ test('the list', async (t) => {
         'week This week 2',
         'earlier Earlier 2 20d–30d ago',
       ]);
-      assert.deepEqual(l.problems, []);
+      await healthy(page, l.problems);
     },
   );
 
@@ -400,6 +424,7 @@ test('the list', async (t) => {
       markDone(d.deck, S2);
 
       await untilDrawn(page, (rows) => rows.length === 1, 'the done session hidden');
+      await healthy(page, l.problems);
       assert.deepEqual(await drawnIds(page), [S1]);
       await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
 
@@ -424,6 +449,7 @@ test('the list', async (t) => {
       await untilDrawn(page, (rows) => rows.length === 1, 'done hidden by the footer');
       assert.equal(await active(page), '#list');
       assert.equal(await zone(page), 'Focus: list');
+      await healthy(page, l.problems);
     },
   );
 
@@ -438,6 +464,7 @@ test('the list', async (t) => {
       session(d, S4, 4n * MIN, [{ type: 'custom-title', customTitle: 'beta done' }]);
       markDone(d.deck, S4);
       await untilDrawn(page, (rows) => rows.length === 2, 'This week');
+      await healthy(page, l.problems);
       const inField = (): Promise<boolean> =>
         page.evaluate(() => document.activeElement?.classList.contains('list-filter') === true);
       const inRight = (): Promise<boolean> =>
@@ -519,6 +546,7 @@ test('the list', async (t) => {
       await showsText(page, '#focus-zone', /^Focus: terminal$/);
       assert.equal(await inRight(), true);
       assert.deepEqual(l.server.hub.list(), [], 'nothing resumed');
+      await healthy(page, l.problems);
     },
   );
 
@@ -531,6 +559,7 @@ test('the list', async (t) => {
       session(d, S2, 2n * MIN);
       session(d, S3, 3n * MIN);
       await untilDrawn(page, (rows) => rows.length === 3, 'three rows');
+      await healthy(page, l.problems);
       await toZone(page, 'list');
       assert.equal(await selectedRow(page), S1, 'the first row is selected by itself');
 
@@ -564,6 +593,7 @@ test('the list', async (t) => {
         }
         assert.equal(await zone(page), 'Focus: list', `${key} keeps the list`);
       }
+      await healthy(page, l.problems);
     },
   );
 
@@ -575,6 +605,7 @@ test('the list', async (t) => {
       session(d, S1, 2n * MIN);
       session(d, S2, 3n * MIN);
       await untilDrawn(page, (rows) => rows.length === 2, 'two rows');
+      await healthy(page, l.problems);
       await showsText(page, '#counts', /^2 not running$/);
 
       await clickRow(page, S2);
@@ -589,6 +620,7 @@ test('the list', async (t) => {
       assert.equal(rows[0]?.age, '', 'no age on its first line');
       termOf(l, S2);
       await showsText(page, '#counts', /^1 (starting|running|working|waiting) · 1 not running$/);
+      await healthy(page, l.problems);
     },
   );
 
