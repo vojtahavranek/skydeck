@@ -557,6 +557,23 @@ test("an orphan's line still there when the next wsl.exe ends before its script 
   assert.deepEqual(s.processes.signals, [{ pid: SCRIPT_PID, signal: 'SIGTERM' }]);
 });
 
+test('the error says whether the keep-alive ran: an orphan left in keepalive.pid is not the next wsl.exe script', async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  lastChild(s).exit(null, 'SIGTERM');
+  await settle();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().error, 'the keep-alive ended (wsl.exe signal SIGTERM)');
+  await startsAgainAfter(s, 5_000);
+  lastChild(s).exit(1); // before its own script ran; the orphan's line is still in the file
+  await settle();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().error, 'wsl.exe ended before the keep-alive started (exit 1)');
+  await startsAgainAfter(s, 30_000);
+});
+
 test('an orphan whose line cannot be judged gets no SIGTERM', async (t) => {
   let unreadable = false;
   const s = setup(t, {

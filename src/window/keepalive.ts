@@ -154,10 +154,11 @@ export function createKeepAlive(deps: {
   /**
    * `line`'s script holds nothing (its wsl.exe is gone): from now on its line does not count, and
    * when its identity is known alive — never on 'unknown' — it gets ONE SIGTERM (its trap removes
-   * its own files at once). A line that is already the orphan is left as it is.
+   * its own files at once). Called only with a live line that is not the orphan already — a line
+   * that is the orphan is never live (see `check`) — so each orphan gets one SIGTERM at most.
    */
   const orphaned = (line: PidLine | null): void => {
-    if (line === null || (orphan !== null && sameLine(line, orphan))) {
+    if (line === null) {
       return;
     }
     orphan = line;
@@ -237,10 +238,11 @@ export function createKeepAlive(deps: {
     if (watch !== null && watch.child !== null) {
       // A wsl.exe this server started: its end counts, and its script's line.
       if (watch.ended !== null) {
-        // Its script may live on. A live line seen now is that script's too, even if no earlier
-        // tick saw it (the script wrote it and wsl.exe ended between two ticks): a start happens
-        // only while no live line other than an orphan's exists, and only the script writes it.
-        const line = watch.line ?? seen;
+        // Its script may live on. A live line seen now that is not an earlier orphan's is that
+        // script's too, even if no earlier tick saw it (the script wrote it and wsl.exe ended
+        // between two ticks): a start happens only while no live line other than an orphan's
+        // exists, and only the script writes it.
+        const line = watch.line ?? (live ? seen : null);
         orphaned(line);
         lost(
           line === null
