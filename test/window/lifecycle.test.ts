@@ -1771,3 +1771,47 @@ test('stopServer: a ping that times out is not tried again — SIGTERM at once',
   assert.deepEqual(d.processes.signals, [{ pid: 4242, signal: 'SIGTERM' }]);
   assert.ok(msSince(d, before) < 100, `${msSince(d, before)} ms`);
 });
+
+test('findServer and stopServer look where the store records the runtime directory on every look while a server starts (it records its own directory during its start)', async (t) => {
+  for (const stop of [false, true]) {
+    const { d, files, ping, record } = startingDeck(t);
+    d.processes.live.add(4242);
+    // The record names a directory left from an earlier server; the starting one records its own
+    // and writes server.json there, at 300 ms.
+    d.deck.store.setKv('window_runtime_dir', join(d.sandbox.root, 'an-earlier-run'));
+    d.clock.after(300, () => {
+      d.deck.store.setKv('window_runtime_dir', files.dir);
+      record();
+    });
+    const paths: string[] = [];
+    const net: Net = {
+      ...d.deck.platform.net,
+      requestUnix(path, request) {
+        paths.push(`${request.method} ${request.path} ${path}`);
+        if (request.path === '/ping') return Promise.resolve({ status: 200, body: ping });
+        d.clock.after(200, () => {
+          d.proc.setProcess(4242, null);
+        });
+        return Promise.resolve({ status: 200, body: { ok: true } });
+      },
+    };
+    const deck = { ...d.deck, platform: { ...d.deck.platform, net } };
+    if (stop) {
+      assert.deepEqual(await stopServer(deck, { pingMs: 1000, stopMs: 10_000, killMs: 500 }), {
+        stopped: true,
+        keepers: 0,
+      });
+      assert.deepEqual(paths, [
+        `GET /ping ${files.serverSock}`,
+        `POST /shutdown ${files.serverSock}`,
+      ]);
+      assert.deepEqual(d.processes.signals, []);
+    } else {
+      assert.deepEqual(await findServer(deck, '/checkout', BUILD, { pingMs: 1000 }), {
+        kind: 'ours',
+        ping,
+      });
+      assert.deepEqual(paths, [`GET /ping ${files.serverSock}`]);
+    }
+  }
+});

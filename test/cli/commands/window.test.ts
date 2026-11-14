@@ -15,7 +15,15 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -2003,6 +2011,26 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     for (const look of statuses) {
       assert.equal((look.answer?.body as { starting?: unknown }).starting, undefined);
     }
+  });
+
+  test('doctor while a server finishes its start and the link of an earlier server points at a socket that is gone (as after a WSL restart): info, not the problem', async (t) => {
+    const h = windowHarness(t);
+    mkdirSync(h.d.files.dir, { recursive: true, mode: 0o700 });
+    const gone = join(h.d.s.root, 'an-earlier-boot', '1_interop');
+    symlinkSync(gone, h.d.files.interop);
+    slowServerStart(h, 8);
+    const url = await h.run(['--print-url']); // done once the server answers; its start goes on
+    assert.equal(url.code, 0, url.stderr);
+
+    const r = await h.exec(['doctor']);
+
+    assert.ok(
+      r.stdout.includes(
+        `info     ${h.d.files.interop} -> ${gone} points at nothing that answers yet: the window's server is starting and points it again\n`,
+      ),
+      r.stdout,
+    );
+    assert.doesNotMatch(r.stdout, /points at nothing that answers: Windows programs/);
   });
 
   test('doctor with a server of an older build, whose /status says nothing of `starting`: it runs, and its missing interop link is a problem as before', async (t) => {
