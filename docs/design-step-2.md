@@ -336,7 +336,11 @@ it turns into one fixed line:
 | 13 | `the window's server is not started from inside a Claude Code session` |
 | anything else, or no answer in 10 seconds | `the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log`; after a timeout the process is left running, and the next `skydeck window` finds it or reports it as not answering (5.1) |
 
-These codes are `serve`'s own; they never reach a user through another command.
+These codes are `serve`'s own; they never reach a user through another command. A store that
+another process keeps write-locked for longer than the server's 250 ms (14) fails the start at
+once — `the window's server cannot start: skydeck's database is busy (another skydeck holds it);
+try again`, exit 1 (the table's last row), nothing left behind — rather than a server that would
+freeze (ruled, plan task 23).
 
 **Its environment** is that of the `skydeck window` command that started it, without
 `SKYDECK_HANDOFF` and without the compile-cache variable the launcher sets for Node.js alone. When
@@ -350,7 +354,10 @@ The programs of the terminals inherit it (7.4), so it matters which shell starte
 with a project's `direnv`, virtual environment or `AWS_PROFILE` gives them to every session.
 `server.json`, `GET /status` and `doctor` say where it came from (`environment of skydeck window
 run in <directory> at <time>`), and a change reaches new terminals only after `skydeck window
---restart`.
+--restart`. `serve` itself runs in `/`, so `skydeck window` passes its own working directory in
+`SKYDECK_ENV_ORIGIN`; `serve` takes the variable out of its environment (no program inherits it)
+and records that directory, with its own start time, as where its environment came from. A `serve`
+started by hand, without the variable, records its own working directory.
 
 **One server per installation.** The lock is the `kv` entry `window_server`
 (`<pid>:<process start>:<boot id>:<checkout>`), taken in one store transaction when the server it
@@ -374,7 +381,12 @@ peer's data — a frame, a message, a request body that does not parse or does n
 by its kind and where it came from (`page <window id>: malformed message`), never by its message,
 because a message can quote the data: Node.js's `JSON.parse` error quotes its input, which could be
 a proof, a typed prompt or a pasted text. An uncaught error is logged by its name and its stack
-frames without the message line, and ends the server (exit 1). The headless terminals of the
+frames without the message, and ends the server (exit 1). A message can span several lines and
+hold a line that looks like a frame (a pasted stack trace), so the stack's header —
+`<name>: <message>` with as many lines as the message has, Node.js's `<name> [<code>]: <message>`,
+or the name alone for an empty message — is removed exactly and only the lines after it that are
+frames (`    at …`) are kept; a stack that does not begin with that header gives no frames at all
+(ruled, plan task 23). The headless terminals of the
 screen sides (7.2) log nothing: xterm.js's own log is turned off, because its messages quote the
 program's output (a parsing error names the character and the parameters; section 21). What
 reaches the log through stdout and stderr is only what Node.js itself writes there (its warnings).
@@ -432,11 +444,15 @@ under `/mnt/<letter>/` maps to `<LETTER>:\`). None or several is an error that n
 
 ### 5.5 Stopping the server
 
-On `POST /shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connections; parks a
-snapshot in every keeper (7.3); closes its keeper connections (the keepers and their programs keep
-running); sends every page `bye` with the reason; removes `server.json`, `server.pid` and
-`server.sock`; releases the `window_server` lock (5.2); and exits 0. After `bye`, an upgrade with
-the right `Host` is answered 503 (8.2.1). It does not stop the keep-alive, which ends by itself
+On `POST /shutdown` (8.3), SIGTERM or SIGINT the server, in this order: stops its tick; closes
+`server.sock` (no command reaches a server that is stopping; the file goes with it); sends every
+page `bye` with the reason and then closes the port — after `bye` an upgrade with the right `Host`
+is answered 503 (8.2.1); parks a snapshot in every keeper (7.3) and closes its keeper connections
+(the keepers and their programs keep running); settles the terminals that ended since the last tick
+(7.8); removes `server.json` and `server.pid`; releases the `window_server` lock (5.2); and exits 0.
+The pages go before the park so that no page can type between the park and the close (ruled, plan
+task 23). A stop asked for before the server can stop is made as soon as it can, and one asked during
+its first tick starts the orderly stop at once; a second one during a stop is the same stop. It does not stop the keep-alive, which ends by itself
 (6.1). The three are the same stop, so a command that stops a server (5.1 `--restart`) sends
 SIGTERM instead of the request to one that does not answer `GET /ping`. A server that crashes
 leaves `server.json` and its lock behind: whoever reads them checks the pid, process start and
@@ -1026,8 +1042,12 @@ headers above 16 KiB; `CONNECT` is closed without an answer. They only refuse, s
 protect nothing there (ruled, plan task 17); server tests pin them, so that a Node.js release that
 changes them is noticed. Every request with `Connection: Upgrade` and an `Upgrade` header goes to
 the upgrade handler whatever its path, method or `Host`; that handler applies this section's checks
-itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`. After `bye`
-(5.5), an upgrade with the right `Host` is answered 503 (ruled, plan task 17). When 64
+itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`. While the
+server starts — until it has found its keepers (7.3) and run its first tick (10.1) — and after
+`bye` (5.5), an upgrade with the right `Host` is answered 503 (ruled, plan tasks 17 and 23): no page
+acts on a server that does not know its terminals yet, and a page tries again on a 503 as on any
+lost connection. If that first tick's refresh failed (a busy database, 14), the first list comes
+with the next tick; what matters is the terminals, which are all known by then. When 64
 connections are waiting for their `hello` (8.2.2) and another upgrade passes the checks above, the
 server drops the one that has waited longest and accepts the newcomer: a local process that holds
 idle connections which prove nothing can neither use up the server's descriptors nor lock a new or
@@ -1109,10 +1129,11 @@ the server's proof.
    connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server).
 
-**Reading the secret, a named limit.** The server reads the secret from the store at every
-`hello`, so `--new-secret` takes effect at once. While another skydeck command holds the store's
-write lock, that read can wait up to the store's 5-second busy timeout, and the whole server
-waits with it (ruled, plan task 17).
+**Reading the secret.** The server reads the secret from the store at every `hello`, so
+`--new-secret` takes effect at once (ruled, plan task 17). While another process holds the store's
+write lock, the server's connection waits at most 250 ms (14); a `hello` whose secret cannot be
+read then is closed with 1013 (try again later) — never taken for a wrong proof, no 4003 and no
+alarm — and the page tries again (ruled, plan task 23).
 
 **Encodings.** Keys (the secret, a launch token) are 32 raw bytes, written as base64url without
 padding wherever they are stored or printed; HMAC and HKDF take the raw bytes. Nonces, proofs and
@@ -1952,7 +1973,7 @@ taskbar button show it is check W3. Low priority: stage E (19).
 | **The keep-alive cannot start or dies** | The server retries (6.1), pages show `WSL is not kept running`, and `doctor` reports it. The window keeps working while any WSL terminal is open. |
 | **A page falls behind** | 8.2.8: it gets a fresh snapshot instead of the bytes it missed. |
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
-| **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. |
+| **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |

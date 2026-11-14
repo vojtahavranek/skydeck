@@ -195,7 +195,7 @@ Each is binding for the implementer. The last column names the task that records
 | A21 | Terminal ids are 12 lowercase hex characters from `platform.randomBytes(6)`; server ids and window ids 16 hex characters from 8 bytes. | S2 3 fixes the terminal id only. | — |
 | A22 | Validators of foreign input (`parsePageMessage`, `parseControlRequest`, the keeper's `hello`) return `{ ok: false, kind }` with a fixed kind string instead of throwing, so that a caller can log the kind and never a message (S2 2, 5.2). | Node's `JSON.parse` error quotes its input. | — |
 | A23 | `skydeck serve` and `skydeck window` share `src/window/lifecycle.ts` (task 22) for finding, starting and stopping a server; `uninstall` uses the same stop. | S2 16.2: "stops it as `skydeck window --stop` does". | — |
-| A24 | The server's tick reuses step 1's refresh rule of the interactive list (fix 4): the rows are reloaded when the refresh saved something, a live file or its trust changed, `Store.dataVersion()` moved, a tick failed, or a minute passed. | S2 10.1 names that rule. | — |
+| A24 | The server's tick reuses step 1's refresh rule of the interactive list (fix 4): the rows are reloaded when the refresh saved something, a live file or its trust changed, `Store.dataVersion()` moved, a tick failed, or a minute passed; and (ruled by the plan owner, task 23's review 1) when the server wrote on its own connection, which `dataVersion()` does not show: `tick.reload()` after every action, every found-keeper decision and every pull-request fetch that saved something, and after a settled exit (`settleEndedTerminal` ingests and may write; review 2). | S2 10.1 names that rule. | — |
 | A25 | `result` carries `sessionId`: the session a successful `resume` or `new` started, else null. | The page must select the new terminal's row (S2 11.3), and only the server knows a new session's id. | 1 (8.2.3) |
 | A26 | `GET /ping` answers `checkout` too. | S2 5.1 compares "this checkout"; the table of 8.3 omits the field. | 1 (8.3) |
 | A27 | `list` carries two more fields: `selected` — for the session the page's `view` names, what the resume card shows (the exact command, the flags not passed on, how it ended, expiring/expired; 2.7) — and `dirs`, the known project directories, most recent first, for the new form. | S2 12.6 needs both on the page, and the page decides no rule (S2 4.3); the command is built only by `buildResumeCommand` on the server. | 1 (8.2.3) |
@@ -707,24 +707,75 @@ export interface RunningServer {
   serverId: string;
   build: string;
   hub: TerminalHub;
-  /** S2 5.5; resolves when everything is closed. */
+  /** S2 5.5; resolves when everything is closed. A second call (a SIGTERM on top of a stop) is
+   *  the same stop. */
   stop(reason: string): Promise<void>;
-  /** The exit code `serve` ends with (S2 5.2): 0, 10, 11, 12, 13, or 1 after an uncaught error. */
+  /** Ruled by the plan owner (task 23, review 1): 0 once the stop has closed everything, 1 when
+   *  the stop itself failed. The codes of S2 5.2 come from three places: 0 (another server of this
+   *  checkout), 10, 11, 12 and 13 from runServer's start (ServeExit); 0 or 1 from `done`; 1 after
+   *  an uncaught error from the `serve` command's process handler, which ends the process at once
+   *  (runServer runs in test processes too, A19, and installs no process-wide handler). */
   done: Promise<number>;
 }
 /** Resolves once the server listens and server.json is written; rejects with a ServeExit(code) for
  *  10, 11, 12, 13 and for 0 (another server of this checkout holds the lock). */
 export function runServer(options: ServerOptions): Promise<RunningServer>;
 export class ServeExit extends Error { readonly code: 0 | 10 | 11 | 12 | 13 }
+/** Exported for its test (ruled, task 23): the notices a keep-alive state gives the pages —
+ *  `keepalive-lost` when it fails with a reason not told since it last ran, `keepalive-back`
+ *  when it runs again after one was told, else null. */
+export function keepAliveNotices(): (state: KeepAlivePayload) => { kind: 'keepalive-lost' | 'keepalive-back'; text: string } | null;
+
+// src/cli/commands/serve.ts, exported for its test (ruled, task 23): an uncaught error for the
+// log — its name and code (failureKind) and its stack frames, never its message (ruled at review
+// 2, replacing task 15's rule): the stack's header (`<name>: <message>` however many lines the
+// message has; Node.js's `<name> [<code>]: <message>`; the name alone for an empty message) is
+// removed exactly and the lines after it matching /^\s+at / are kept; a stack that does not begin
+// with that header gives no frames.
+export function uncaughtLine(error: unknown): string;
 ```
 
-`test/helpers/window.ts` (task 23), built on `realTestPlatform` (A36; `options.bootId` passes
-through): `startTestServer(t, options?)` → `{ server, d (a TestDeck-like
-context with the sandbox), page(): Promise<TestPage> }`, where `TestPage` is a `ws` client that has
-done the handshake in mode `key` and offers `send`, `next(t)`, `nextBinary()`, `close()`. It always
-calls `writeWindowConfig` first (the Edge stub, keep-alive off, A32) and passes `interopFirst`
-inside the sandbox; at `t.after` it stops the server and calls `killKeepersIn` for the sandbox's
-runtime directory (A34).
+`test/helpers/window.ts` (task 23; its shape ruled by the plan owner at task 23's review 1). A
+REAL server in the test process (A19) on `realTestPlatform` (A36): there is no fake clock, no fake
+`/proc` and no `places`, and `d` is not a TestDeck — it has no `sandbox`, `clock`, `proc`,
+`runner` or `places` member.
+
+- `serverSandbox(t, options?)` → `ServerSandbox`, none started yet; call it first in a test (its
+  cleanup must run before the keeper sandbox's). `options`: `env` (over the sandbox's
+  environment of the servers), `bootId` (what their `/proc` reports, A36), `config` (more keys of
+  `config.json`; `claudeCommand` is the stand-in), `window` (`window` keys over
+  `writeWindowConfig`'s Edge stub and keep-alive `off`, A32). Its members: `box` — the keeper
+  sandbox (`test/helpers/keeper.ts`: `tp`, `runtimeDir`, `keepersLog`, `spec()`, `start()` for a
+  keeper the test starts itself); `s` — the sandbox; `platform` — the platform every server gets
+  (the sandbox's, with `STANDIN_RECORD` set); `deck` — the test's own connection to the store, as
+  a command has one; `files` — `runtimeFiles(<SKYDECK_HOME>/run)`; `record` — the record file of
+  every stand-in the servers' keepers start; `standin` — `claudeCommand`; `edgeCalls()` — the Edge
+  stub's runs; `interopFirst` — the first interop candidate, inside the sandbox; `cDrive` — the
+  servers' `SKYDECK_TEST_MNT_C` (task 24's stand-in for `/mnt/c`, where `startWindowsProgram`
+  starts a Windows program: no test runs one in `/mnt/c`); `resumable(id,
+  dir?)` — a transcript that makes a session resumable; `serverLog()` — `server.log`'s lines;
+  `start(options?)` → `TestServer`, a server on this sandbox (port 0, `foreground` false,
+  `interopFirst` in the sandbox; `options.platform` changes the platform, e.g. to record or fake
+  processes).
+- `TestServer`: `server` (the `RunningServer`), `logs()` (the lines it logged), `drop()` — the
+  server as a crash leaves it: every timer stopped, every listener and socket closed (pages and
+  keeper connections cut, nothing parked), `server.json` and `server.pid` left, and its
+  `window_server` lock rewritten to name a dead process start, which is how a dead server is
+  played inside one process (the pid itself lives on; ruled). Its store connection is NOT closed:
+  `runServer`'s contract gives no handle to it and a seam for tests alone would change that
+  contract; with every timer and connection gone nothing calls it any more, and an idle WAL
+  connection holds no lock, so the next server sees what it would see after a crash.
+- `startTestServer(t, options?)` → `{ server, test, d, page(options?) }`: `serverSandbox` and one
+  server started on it (`options.server` are its start options).
+- `connectTestPage(t, d, server, options?)` / `page()` → `TestPage`, a `ws` client of
+  `server.port` (in this process or a child) that has done the handshake in mode `key` with the
+  stored secret and sent `start` (focused unless told; a `view` unless `view: null`). It offers
+  `send`, `sendRaw`, `next(t)` (the next message of that type; others stay for their own `next`),
+  `nextBinary()`, `list(test, what)`, `view(view?)`, `act(action)` (a fresh id; its `result`),
+  `output(channel)`, `all`, `closed`, `close()`.
+- At `t.after` every server still running is stopped, `killKeepersIn` runs for the sandbox's
+  runtime directory (A34) and every program the servers' keepers started is waited for, before
+  the sandbox is removed.
 
 ### 2.6 Step 1 changes: `src/terminals/`, `src/sessions/`, `src/store/` (task 4)
 
@@ -789,11 +840,14 @@ export class StoreNewerError extends SkydeckError {}
  *  store.ts checks that only the write helpers prepare SQL themselves. That guards against the
  *  usual mistake, a write sent through a read helper; a function handed the database object
  *  directly is not covered. */
-export function openStore(path: string, options?: { guardSchema?: boolean }): Store;
+/** busyTimeoutMs (ruled by the plan owner, task 23, review 2; the server's connection: 250): the
+ *  connection's busy timeout once it is open — default 5000, the commands' value; the migrations at
+ *  open keep 5000. RangeError for a value that is not a whole number 0–2^31−1. */
+export function openStore(path: string, options?: { guardSchema?: boolean; busyTimeoutMs?: number }): Store;
 /** Prepares a SELECT; throws Error "not a read statement: …" for anything else. Exported for its test. */
 export function prepareRead(db: DatabaseSync, sql: string): StatementSync;
 // src/sessions/deck.ts
-export function openDeck(platform: Platform, options?: { guardSchema?: boolean }): Deck;
+export function openDeck(platform: Platform, options?: { guardSchema?: boolean; busyTimeoutMs?: number }): Deck; // passed to openStore
 // src/store/types.ts — KvKey gains:
 //   'window_secret' | 'window_server' | 'window_runtime_dir' | 'window_alarm' | 'window_launching'
 ```
@@ -2567,8 +2621,9 @@ snaps of terminals attached at the same moment count, all but the latest (a name
 connections in the hello phase, an upgrade that passes the checks above drops the one that has
 waited longest and is accepted; a proven connection is never dropped for it (no 503 for this; the
 `bye` 503 stays). The hello reads the
-secret from the store every time (a named limit, S2 8.2.2: `--new-secret` takes effect at once;
-a held write lock can stall the server up to the 5 s busy timeout). When a page goes, every
+secret from the store every time (S2 8.2.2: `--new-secret` takes effect at once; ruled at task
+23's review 2: the server's connection waits at most 250 ms for a held write lock, and a hello
+that cannot read the secret then is closed with 1013). When a page goes, every
 stream is detached before the sizes are handed over; during `bye` no size is handed over.
 
 Pages calls `hub.setTheme` with a page's theme (from its `start`) when that page starts focused
@@ -2592,6 +2647,10 @@ export interface PagesDeps {
    *  terminal's `ownsSize` from its own size state, whatever `listFor` put there. */
   listFor(page: PageState): ListMessage;
   log: (line: string) => void;
+  /** Ruled by the plan owner (task 23, review 2): while it returns true the server is still
+   *  starting (its keepers not found, its first tick not run): an upgrade with the right Host is
+   *  answered 503, as after `bye`; a wrong Host still 421. Default: not starting. */
+  starting?: () => boolean;
 }
 export interface Pages {
   /** Host and Origin checks (403), then the WebSocket and the handshake. */
@@ -2729,10 +2788,14 @@ at a live interop socket.
 ```ts
 // src/window/edge.ts
 /** THE one way stage A starts a Windows program (S2 2; ruled, task 19): `args` as an argument
- *  list, detached, stdio /dev/null, cwd /mnt/c, the platform's environment with WSL_INTEROP =
- *  `interop` when given (else unchanged). Rejects, starting nothing, when an argument is empty,
- *  holds a '"' or a control character (S2 2: U+0000–U+001F, U+007F, U+0080–U+009F), or ends
- *  with a backslash; otherwise as startDetached. */
+ *  list, detached, stdio /dev/null, cwd the C: drive — `driveC(platform.env)` of task 24's
+ *  `drive.ts`: /mnt/c, or in a test sandbox the `SKYDECK_TEST_MNT_C` stand-in (ruled, task 23,
+ *  review 2: no test runs a process in /mnt/c); when that is null (a sandbox without the
+ *  stand-in) it rejects with an Error of `code` 'ENOENT' ("the C: drive is not mounted"),
+ *  starting nothing — the platform's environment with WSL_INTEROP = `interop` when given (else
+ *  unchanged). Rejects, starting nothing, when an argument is empty, holds a '"' or a control
+ *  character (S2 2: U+0000–U+001F, U+007F, U+0080–U+009F), or ends with a backslash; otherwise
+ *  as startDetached. */
 export function startWindowsProgram(platform: Platform, command: string, args: readonly string[], interop: string | null): Promise<Detached>;
 /** RangeError (ruled, task 19) for a port outside 1–65535 or a token that is not base64url: the
  *  caller's mistake, nothing started. { ok: false, line } for a missing program (S2 5.3's line),
@@ -3051,7 +3114,11 @@ export function windowTerminal(deps: WindowTerminalDeps, size: { cols: number; r
  *  owner (task 21, reviews 1 and 2): it never throws (a failure
  *  while checking is a refusal naming it); a hello whose `started` is true or whose `exited` is set
  *  is never started; a `new` is refused when the boot id cannot be read (checkResumable's words). */
-export function decideFoundKeeper(deck: Deck, hello: KeeperHello): { start: true } | { start: false; reason: string };
+/** Ruled by the plan owner (task 23, review 2): a busy or locked database (SQLITE_BUSY, LOCKED)
+ *  is `{ start: 'later' }` — the keeper is not refused; the server decides again after each
+ *  refresh that worked while the clock is before the hello's `startBy`, and drops the hello when
+ *  its terminal ends, starts or is forgotten (after the deadline the keeper refuses by itself). */
+export function decideFoundKeeper(deck: Deck, hello: KeeperHello): { start: true } | { start: false; reason: string } | { start: 'later' };
 /** S2 7.8: after an exit, when the session never reported a start for this launch (ingestSpool
  *  first, then resumeStarted with the lock's time and event id; for `new`, no event of the id):
  *  release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote.
@@ -3314,9 +3381,19 @@ status answers and the stop of S2 5.5.
 **Files**
 - Create: `src/window/server.ts`, `src/window/tick.ts`, `src/cli/commands/serve.ts`,
   `test/helpers/window.ts`
-- Modify: `docs/design-step-2.md` 5.2 (A29)
+- Create (ruled at review 2): `src/window/busy.ts` (`isBusy`)
+- Modify: `docs/design-step-2.md` 5.2 (A29); ruled at review 2, exactly these edits of merged
+  files: `src/store/store.ts` (`openStore`'s `busyTimeoutMs`), `src/sessions/deck.ts` (`openDeck`
+  passes it), `src/window/starts.ts` (`decideFoundKeeper`'s `{ start: 'later' }`),
+  `src/window/actions.ts` (a busy store answers "skydeck's database is busy; try again"),
+  `src/window/pages.ts` (`PagesDeps.starting`: 503 while the server starts; 1013 for a hello
+  whose secret cannot be read because the store is busy), `src/window/edge.ts` (the Windows
+  working directory from `drive.ts`, task 24's seam); design S2 5.5, 8.2.1, 8.2.2, 14
 - Test: `test/window/server.test.ts`, `test/window/server-failures.test.ts`,
-  `test/window/tick.test.ts`, `test/cli/commands/serve.test.ts`
+  `test/window/tick.test.ts`, `test/cli/commands/serve.test.ts`; and for the edits above
+  `test/store/store.test.ts`, `test/sessions/deck.test.ts`, `test/window/starts.test.ts`,
+  `test/window/actions.test.ts`, `test/window/pages-handshake.test.ts`, `test/helpers/pages.ts`
+  (`startPages`' `starting`), `test/window/edge.test.ts`, `test/window/keepalive.test.ts`
 
 **Behaviour.** `runServer` in this order: refuse with `CLAUDECODE` set (13); `serverEnvironment`;
 `openDeck(platform, { guardSchema: true })`; take the lock (0 or 11); the runtime directory
@@ -3335,7 +3412,20 @@ interop link; a failed tick logged by kind and sent once as `notice tick-failed`
 `keepers.log` at start and once a minute on the tick (the keepers only append to it). `listFor` is
 `buildListMessage` (task 13) with task 32's `selectedPayload` for the page's selected row. The `serve` command
 installs process handlers: an uncaught error is logged by name and stack frames without the
-message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5).
+message — the stack's header removed exactly (`<name>: <message>` however many lines the message
+has; Node.js's `<name> [<code>]: <message>`; the name alone for an empty message), the
+`/^\s+at /` lines after it kept, none when the stack does not begin with that header (ruled at
+review 2) — and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5). Ruled at review
+2: until `rediscover()` has settled and the first tick has run, an upgrade with the right Host is
+answered 503, as after `bye` (`PagesDeps.starting`), so that no page acts on a hub that does not
+list the terminals yet (if that tick's refresh failed, the first list comes with the next tick;
+the registry is complete by then); a `POST /shutdown` or a signal that comes before the server can
+stop is made as soon as it can (one during the first tick starts the orderly stop at once), never
+lost. A start that meets a store another process keeps locked for longer than the server's 250 ms
+fails at once ("the window's server cannot start: skydeck's database is busy (another skydeck
+holds it); try again", exit 1), leaving nothing behind. An exit the registry makes up for a keeper that never sent a hello is
+not settled (accepted): there is no hello to take the lock value from, and the lock expires by
+itself (LOCK_TTL_NS).
 
 **Tests** (platform: `realTestPlatform`; in process through `startTestServer` and `TestPage` unless marked)
 - Start: `server.json` (mode 0o600, every field of 2.8), `server.pid`, `server.sock`, the keeper
@@ -3345,7 +3435,8 @@ message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5
 - A page connects with the stored secret; `view` → `list` with the sandbox's sessions in sections;
   `act resume` of a session that is not running → `result` ok with its `sessionId`; the next `list`
   has a terminal in slot 1 and the row's `terminal`; `attach` → `snap`; `input "/busy\r"` → within
-  two ticks the row is `working`; `act new` with a directory, label `fix` and flags `--model opus`
+  8 s the row is `working` (two ticks are 4 s; ruled at review 1: the bound allows a loaded
+  machine); `act new` with a directory, label `fix` and flags `--model opus`
   → the stand-in's arguments are `buildNewCommand`'s and the row titled `fix` appears (starting,
   then running); `act new` with flags `-r x`, a relative directory, an unclosed quote → `ok: false`
   with the message, nothing started.
@@ -3360,19 +3451,42 @@ message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5
 - `stop` → every page gets `bye`, keepers keep running, `server.json`, `server.pid`,
   `server.sock` and the lock are gone; a new `runServer` rediscovers the terminals, a page
   reconnects and its `snap` equals the screen before. The server dropped without `stop` (the
-  test destroys its sockets and closes its store) → the same after `runServer`.
+  test stops its timers, closes its sockets and listeners and makes its lock a dead process's;
+  its store connection stays open and idle, ruled — see `test/helpers/window.ts` in 2.5) → the
+  same after `runServer`.
 - A migration by another connection (`schema_version` raised) → the next write refused, `bye`
   with the update text, `done` resolves 0, nothing written.
 - A tick whose refresh throws (the store locked by `test/fixtures/hold-write-lock.ts`) → one
   `notice tick-failed`, not repeated; after the lock is gone the list updates again.
 - Places: with `SKYDECK_HOME` set, the server, its keepers and the keep-alive script create and
-  open nothing outside the sandbox (S2 17.3).
+  open nothing outside the sandbox (S2 17.3); the keep-alive set to `wsl` on fake processes
+  (ruled at review 1): `wsl.exe` is never run, the script it would run runs in its place as a
+  process the test started, and the server's signals are recorded, never sent.
+- Added at review 2 (each wire's removal fails one): while the start is held, an upgrade is
+  answered 503, and after it a resume of a session whose terminal runs is refused ("this session
+  is already open in the window"); a `POST /shutdown` during the start stops the server once it
+  can; an exit is settled (a program that ends before it reports a start gives its lock back
+  within two ticks), and one not settled yet when the server stops is settled by the stop; the
+  stop parks every keeper (a claim's hello has `snapSeq` = `seq`); a launch token presented twice
+  raises the alarm; the pull requests of the sessions a page lists are refreshed; the interop
+  link is pointed before the first keep-alive check and again when a terminal opens; the sixth
+  reload trigger after an action and after a late keeper's decision; a store locked by another
+  connection: the event loop is never blocked for long, a terminal's echo keeps flowing, one
+  notice and one log line, an action answers "skydeck's database is busy; try again", a hello is
+  closed with 1013, a found keeper's decision is put off (`{ start: 'later' }`) and made once the
+  store is free, a start fails at once leaving nothing; in `tick.test.ts` a settled exit reloads
+  the rows and a terminal whose own session cannot be judged keeps it.
 - `serve.test.ts` (through `bin/skydeck serve --foreground` as a child, with `SKYDECK_TEST_PORT=0`
   and `SKYDECK_TEST_INTEROP_FIRST` in the sandbox, A31, A32): `CLAUDECODE` set →
   exit 13 and the line; the server process's soft core limit is 1 byte with the old hard limit
   (`/proc/<pid>/limits`) and a keeper's program has the soft limit the launcher found; a
   malformed `hello`, `start` and `input` carrying a marker leave the marker in no line of
-  `server.log`; SIGTERM → exit 0 after S2 5.5.
+  `server.log`; SIGTERM → exit 0 after S2 5.5; added at review 2: an uncaught error → one line
+  with its name and frames only, exit 1, `server.json` and the lock left as a crash leaves them;
+  SIGTERM during the start → exit 0, nothing left; SIGINT as SIGTERM; `uncaughtLine`'s header
+  cases (Node.js's JSON.parse message quoting a frame-like line, a stack without the header, a
+  `[code]` header). Every wait on a child's exit is bounded, and a held start is finished in a
+  `finally` (review 2: no test may hang with a live server).
 
 **Done when:** a server started with `skydeck serve` gives a page everything stage A shows, and
 every failure of S2 14 that can happen inside Linux behaves as the table says.

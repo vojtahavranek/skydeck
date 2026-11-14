@@ -19,7 +19,8 @@
  * page's nonce passes `isNonce` before any proof function sees it. Close codes: 4001 for a missing
  * hello (5 s), a bad nonce, or anything else than `hello` and then `start`; 4426 for another
  * protocol; 4003 when no key or token matches; 4004 for a used token presented again (whatever
- * recording the alarm gave; its failure is logged by kind); 1011 when the secret cannot be read.
+ * recording the alarm gave; its failure is logged by kind); 1013 when the secret cannot be read
+ * because another process keeps the store locked (ruled, task 23), else 1011.
  * After `start`, a message that is not valid (or binary) closes with 1008.
  *
  * Streams (S2 8.2.4, ruling-hub-attach): a page's `snap` goes out from its sink's `snapshot`, the
@@ -49,6 +50,7 @@ import {
   wrapSecret,
 } from './auth.ts';
 import type { Tokens } from './auth.ts';
+import { isBusy } from './busy.ts';
 import type { ActionHandler, PageInfo, StreamSink, TerminalHub } from './hub.ts';
 import { encodeOutputFrame, parsePageMessage } from './protocol.ts';
 import type {
@@ -92,6 +94,9 @@ export interface PagesDeps {
    *  terminal's `ownsSize` from its own size state, whatever `listFor` put there. */
   listFor(page: PageState): ListMessage;
   log: (line: string) => void;
+  /** While it returns true the server is still starting (S2 5.2: its keepers not found yet): an
+   *  upgrade with the right Host is answered 503, as after `bye` (ruled, task 23). Default false. */
+  starting?: () => boolean;
 }
 
 export interface Pages {
@@ -126,6 +131,7 @@ const LIST_MS = 1_000;
 const GOING_AWAY = 1001;
 const POLICY = 1008;
 const INTERNAL = 1011;
+const TRY_LATER = 1013;
 const NO_HELLO = 4001;
 const NOT_VALID = 4003;
 const REUSED = 4004;
@@ -616,7 +622,17 @@ export function createPages(deps: PagesDeps): Pages {
     try {
       secret = ensureSecret(deps.store, platform.randomBytes);
     } catch (error) {
-      closeWith(conn, INTERNAL, `the secret cannot be read: ${failureKind(error)}`);
+      // Ruled (task 23, review 2): a store another process keeps locked is no wrong proof: 1013
+      // (try again later), and the page tries again.
+      if (isBusy(error)) {
+        closeWith(
+          conn,
+          TRY_LATER,
+          `the secret cannot be read: the database is busy (${failureKind(error)})`,
+        );
+      } else {
+        closeWith(conn, INTERNAL, `the secret cannot be read: ${failureKind(error)}`);
+      }
       return;
     }
     if (hello.mode === 'key') {
@@ -819,7 +835,7 @@ export function createPages(deps: PagesDeps): Pages {
       // node:http's 'upgrade' listener: a throw here would end the server.
       try {
         const port = deps.port();
-        const refusal = refusalOf(req, port, stopping);
+        const refusal = refusalOf(req, port, stopping || deps.starting?.() === true);
         if (refusal !== null) {
           refuse(socket, port, refusal);
           return;

@@ -110,6 +110,42 @@ function newLaunch(d: TestDeck): { prepared: PreparedLaunch; hello: KeeperHello 
   return { prepared, hello: helloOf(d, prepared, null) };
 }
 
+describe('decideFoundKeeper: a busy store (ruled, task 23 review 2)', () => {
+  /** The deck with its write transactions failing as SQLite does, with `errcode`. */
+  const failing = (d: TestDeck, errcode: number) =>
+    deckWith(d.deck, {
+      store: {
+        transaction: () => {
+          throw Object.assign(new Error('database is locked'), {
+            code: 'ERR_SQLITE_ERROR',
+            errcode,
+          });
+        },
+      },
+    });
+
+  test('a busy or locked database → later: the keeper is not refused', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    spoolStart(d, '1c6a4d2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e', 4343, T0 + SEC, 1); // the refresh writes
+    assert.deepEqual(decideFoundKeeper(failing(d, 5), hello), { start: 'later' }, 'SQLITE_BUSY');
+    assert.deepEqual(decideFoundKeeper(failing(d, 6), hello), { start: 'later' }, 'SQLITE_LOCKED');
+    assert.deepEqual(
+      decideFoundKeeper(failing(d, 517), hello),
+      { start: 'later' },
+      'BUSY_SNAPSHOT',
+    );
+  });
+
+  test('any other failure of the database is still a refusal', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    spoolStart(d, '1c6a4d2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e', 4343, T0 + SEC, 1);
+    const decision = decideFoundKeeper(failing(d, 10), hello); // SQLITE_IOERR
+    assert.equal(decision.start, false);
+  });
+});
+
 describe('decideFoundKeeper: a resume', () => {
   test('guard, lock and deadline all hold → start', (t) => {
     const d = testDeck(t);

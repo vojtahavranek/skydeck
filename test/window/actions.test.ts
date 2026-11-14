@@ -897,3 +897,27 @@ test("a refusal's message reaches the page sanitised: a flag quoted as typed car
   }
   assert.deepEqual(h.specs, []);
 });
+
+test('an action that meets a busy database answers that it is busy, logged by kind (ruled, task 23)', async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const deck = deckWith(d.deck, {
+    store: {
+      transaction: () => {
+        throw Object.assign(new Error('database is locked (marker-busy)'), {
+          code: 'ERR_SQLITE_ERROR',
+          errcode: 5,
+        });
+      },
+    },
+  });
+  const h = harness(d, { deck });
+  const result = await h.act(resume(S1));
+  assert.deepEqual(result, refused(7, "skydeck's database is busy; try again"));
+  assert.deepEqual(h.specs, [], 'nothing opened');
+  assert.ok(
+    h.logs.some((line) => line.includes('ERR_SQLITE_ERROR')),
+    JSON.stringify(h.logs),
+  );
+  assert.ok(h.logs.every((line) => !line.includes('marker-busy')));
+});

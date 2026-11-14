@@ -21,6 +21,7 @@ import {
 } from '../sessions/resume.ts';
 import type { DerivedSession } from '../sessions/types.ts';
 import { sanitize } from '../text/sanitize.ts';
+import { isBusy } from './busy.ts';
 import type { KeeperHello } from './frames.ts';
 
 /** The keeper's own words for the same case (bin/skydeck-keeper), so that both read alike. */
@@ -84,13 +85,14 @@ function newRefusal(deck: Deck, hello: KeeperHello): string | null {
  *
  * Never throws: a refusal of the guard is the reason (its message); a failure while checking (the
  * store, /proc) is "cannot check whether <short> may start (<the failure>)" — nothing is started
- * on what could not be checked. A hello whose program started or whose terminal ended already is
+ * on what could not be checked — except a busy or locked database (isBusy), which is `later`: not
+ * refused, decided again (ruled, task 23's review 2). A hello whose program started or whose terminal ended already is
  * never started again. Every reason is sanitised (it is shown on the terminal, "not started: …").
  */
 export function decideFoundKeeper(
   deck: Deck,
   hello: KeeperHello,
-): { start: true } | { start: false; reason: string } {
+): { start: true } | { start: false; reason: string } | { start: 'later' } {
   const sessionId = hello.meta.sessionId;
   if (hello.started) {
     return { start: false, reason: 'the program was started already' };
@@ -105,6 +107,9 @@ export function decideFoundKeeper(
       reason = DEADLINE_PASSED;
     }
   } catch (error) {
+    // Ruled (task 23, review 2): a store another process keeps locked decides nothing — the
+    // server decides again at its next refresh while the deadline allows.
+    if (isBusy(error)) return { start: 'later' };
     reason =
       error instanceof ResumeRefusedError || error instanceof RefError
         ? error.message

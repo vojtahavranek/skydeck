@@ -116,3 +116,12 @@ test('resolveDeckPlaces returns the places of openDeck and creates nothing', (t)
   });
   assert.deepEqual(resolved.places, deck.places);
 });
+
+test('openDeck passes busyTimeoutMs to the store (ruled, task 23)', (t) => {
+  const d = testDeck(t);
+  const deck = openDeck(d.platform, { guardSchema: true, busyTimeoutMs: 250 });
+  t.after(() => {
+    deck.store.close();
+  });
+  assert.equal(deck.store.connectionSettings().busyTimeout, 250);
+});

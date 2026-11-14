@@ -18,6 +18,7 @@ import { prepareResumeById } from '../sessions/resume-by-id.ts';
 import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
+import { isBusy } from './busy.ts';
 import { splitFlags } from './flags.ts';
 import type { ActionHandler, TerminalHub, TerminalInfo } from './hub.ts';
 import { parsePageMessage } from './protocol.ts';
@@ -52,6 +53,7 @@ const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 cha
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
 const ALREADY_OPEN = 'this session is already open in the window';
+const BUSY = "skydeck's database is busy; try again";
 
 function refusal(message: string): Answer {
   return { ok: false, lines: [message], error: message, sessionId: null };
@@ -257,6 +259,11 @@ export function createActions(deps: ActionDeps): ActionHandler {
     } catch (error) {
       if (error instanceof SkydeckError) return refusedBy(error);
       const kind = failureKind(error);
+      if (isBusy(error)) {
+        // Ruled (task 23, review 2): another process keeps the store locked; nothing was done.
+        log(`act ${action.kind}: the database is busy (${kind})`);
+        return refusal(BUSY);
+      }
       log(`act ${action.kind}: failed (${kind})`);
       return refusal(`the action failed unexpectedly (${kind})`);
     }

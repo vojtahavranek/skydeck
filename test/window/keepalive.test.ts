@@ -80,6 +80,9 @@ interface Setup {
   changes: KeepAlivePayload[];
 }
 
+/** The C: drive in these tests: task 24's stand-in for /mnt/c (only a path: the processes are fakes). */
+const C_DRIVE = '/stand-in/c';
+
 function setup(
   t: TestContext,
   options: {
@@ -93,7 +96,9 @@ function setup(
     signal?: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => boolean;
   } = {},
 ): Setup {
-  const tp = testPlatform(t, { env: { WSL_DISTRO_NAME: DISTRO, ...options.env } });
+  const tp = testPlatform(t, {
+    env: { WSL_DISTRO_NAME: DISTRO, SKYDECK_TEST_MNT_C: C_DRIVE, ...options.env },
+  });
   const children: Child[] = [];
   const processes = fakeProcesses(
     options.handler ??
@@ -218,7 +223,7 @@ test('mode wsl with no keepalive.pid starts wsl.exe with the design arguments, d
     s.files.dir,
   ]);
   assert.deepEqual(Object.keys(call.options).sort(), ['cwd', 'env']); // stdio ignored
-  assert.equal(call.options.cwd, '/mnt/c');
+  assert.equal(call.options.cwd, C_DRIVE);
   assert.equal(call.options.env.WSL_INTEROP, LINK);
   assert.deepEqual(s.keepAlive.state(), {
     mode: 'wsl',
@@ -299,7 +304,7 @@ test('a keepalive.pid naming a live process the test started (real /proc) starts
       ...real.platform,
       clock,
       processes,
-      env: { ...real.platform.env, WSL_DISTRO_NAME: DISTRO },
+      env: { ...real.platform.env, WSL_DISTRO_NAME: DISTRO, SKYDECK_TEST_MNT_C: C_DRIVE },
     },
     window: { ...DEFAULT_CONFIG.window, keepAlive: 'wsl' },
     files,
