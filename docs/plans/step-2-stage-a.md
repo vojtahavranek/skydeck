@@ -2750,18 +2750,22 @@ export function escapeTail(): EscapeTail;
   U+009D), DCS (`ESC P` or U+0090), and SOS, PM and APC (`ESC X`, `ESC ^`, `ESC _`, or U+0098,
   U+009E, U+009F). CAN and SUB abort a sequence, an ESC inside one starts a new one, BEL ends an
   OSC, ST (`ESC \` or U+009C) ends a string, and an ESC at the end of a string is kept (half an
-  ST). Where xterm.js disagrees with the VT500 diagram, xterm.js wins: the rebuilt screen is
-  xterm.js too.
+  ST; xterm.js ends the string at that ESC, so the tail is the ESC alone). Where xterm.js
+  disagrees with the VT500 diagram, xterm.js wins: the rebuilt screen is xterm.js too (S2 21).
 - It keeps exactly the bytes that put a fresh parser into the state of the original: a C0 control
   that xterm.js executes inside a CSI is not kept (its effect is already in the snapshot); the
-  bytes of a string that its handler will receive are.
+  bytes of a string that its handler will receive are. Nor is any byte that changes nothing a
+  later byte can see (a digit that leaves a parameter as it is, an intermediate xterm.js has
+  shifted out, what follows a parameter list it stopped reading, the inside of a sequence it
+  ignores), so an ESC, CSI or DCS head stays under 1 KiB however long the program makes it.
 - The kept bytes are decoded as UTF-8: ESC and CSI sequences are ASCII, and a string sequence
   carries whole characters only (task 9), so the snapshot stays valid UTF-8 and no message
   changes.
 - A string sequence whose kept bytes would pass 64 KiB (an OSC 52 or a DCS payload can be large)
-  is kept as its introducer followed by what makes xterm.js 6.0.0 ignore the sequence, so that
-  the rebuilt screen swallows the rest and no handler acts on a cut payload; the original acts on
-  it (xterm.js's own limit is 10 MB). The tail of a snapshot is therefore at most about 64 KiB.
+  is kept as its introducer followed by what makes xterm.js 6.0.0 ignore the sequence (`!` for an
+  OSC, a number that is no number; `!0` for a DCS, its ignore state), so that the rebuilt screen
+  swallows the rest and no handler acts on a cut payload; the original acts on it (xterm.js's own
+  limit is 10 MB). The tail of a snapshot is therefore at most about 64 KiB.
 - `src/window/screen.ts` keeps one scanner per screen, feeds it each record in the chain as the
   record is applied, and feeds it the snapshot a screen starts from (which can itself end inside a
   sequence); the seam's `unfinished()` returns the scanner's tail, appended last, after the cursor
@@ -2774,7 +2778,8 @@ export function escapeTail(): EscapeTail;
 
 **Files**
 - Create: `src/window/escape-tail.ts`
-- Modify: `src/window/screen.ts` (the seam), `test/window/screen.test.ts`
+- Modify: `src/window/screen.ts` (the seam; the pen's real underline and xterm.js's log level
+  off, ruled), `test/window/screen.test.ts`, `docs/design-step-2.md` 5.2, 7.2 and 21 (ruled)
 - Test: `test/window/escape-tail.test.ts`
 
 **Tests** (platform: none — the vendored modules)
@@ -2788,8 +2793,14 @@ export function escapeTail(): EscapeTail;
   byte) — part of task 12's recorded stream, and one dense with sequences (SGR with
   sub-parameters, DECSET and DECRST, DECSCUSR, OSC 0 titles, OSC 8 links, an OSC 52, DECRQSS, the
   alternate screen) that avoids what S2 7.2 names as not restored — split at every byte that is
-  not inside a UTF-8 character: screen A gets the first part, screen B is built from A's snapshot
-  and gets the rest, and B equals a screen that got the stream whole, by task 12's comparison.
+  not inside a UTF-8 character nor inside a grapheme cluster (`Intl.Segmenter`), leaving out the
+  cuts while an OSC 8 link is open (ruled: both are named limits): screen A gets the first part,
+  screen B is built from A's snapshot and gets the rest, and B equals a screen that got the stream
+  whole, by task 12's comparison.
+- The named limits, pinned so that a change in xterm.js is noticed: a record that ends inside a
+  grapheme cluster leaves the rest of it a cell of its own; the rest of a link still open at a
+  snapshot comes out as plain text. The pen (ruled): after a snapshot inside an open link, what
+  the program prints after closing the link is not underlined; a real SGR 4 still underlines it.
 - A query cut across two records (`ESC [` | `c`): A, live, answers it once when the second
   record is applied; B, built from A's snapshot between the two and live after its replay,
   answers it once too.
@@ -2797,12 +2808,15 @@ export function escapeTail(): EscapeTail;
   rebuilt screen prints none of the rest and equals the original cell for cell.
 - Task 12's tests still pass; the seam's tail is the last thing in every snapshot.
 
-**Done when:** a snapshot taken at any record boundary outside a UTF-8 character rebuilds the
-screen exactly, tested at every such boundary of the sample streams.
+**Done when:** a snapshot taken at any record boundary outside a UTF-8 character and outside a
+grapheme cluster rebuilds the screen exactly, tested at every such boundary of the sample streams
+(ruled by the plan owner; cuts while an OSC 8 link is open are a named limit too).
 
-**Not in it:** UTF-8 boundaries (task 9's keeper); the scroll region, the saved cursor and the
-character sets (S2 7.2's known limits; the scroll region is the option above). No design update:
-S2 7.2 already describes the seam.
+**Not in it:** UTF-8 boundaries (task 9's keeper); grapheme clusters cut across records and the
+rest of a link open at a snapshot (named limits, S2 7.2); the scroll region, the saved cursor and
+the character sets (S2 7.2's known limits; the scroll region is the option above). Design update
+(ruled): S2 7.2 names the two new limits, the pen's real underline, and the underline style,
+underline colour and a link's dashed underline as not kept; S2 21 gets the xterm.js facts.
 
 ---
 
@@ -3621,6 +3635,30 @@ Rulings on task 12's findings (2026-11-13):
     limits in S2 7.2 (an alternate-screen line marked wrapped, DECAWM off with a wide character at
     the margin, `38;5;n` below 16).
 
+Rulings on task 33's findings (2026-11-14):
+
+12. **A record that ends inside a grapheme cluster** (between an emoji and its skin tone, inside a
+    ZWJ sequence, before a combining mark or VS16) is not rebuilt exactly: xterm.js keeps its
+    join state across writes and every CSI resets it, so a snapshot always leaves it at its start.
+    Ruled: a named limit in S2 7.2 (it heals at the program's next redraw of the row), not
+    repaired by the seam; task 33's "Done when" excludes those boundaries, its sweep skips them
+    and one test pins the limit. Nothing for the keeper.
+13. **A snapshot taken while an OSC 8 link is open** (a defect of task 12's pen): xterm.js reports
+    a pen with a link as underlined, so the pen restored it as a real SGR 4, which went on after
+    the program closed the link. Ruled: the pen takes only the real underline; the link is not
+    reopened — a link is not carried across a snapshot, whether closed or still open, and the rest
+    of an open link's text comes out as plain text (a named limit, pinned; the sweep leaves out the
+    cuts while a link is open). Also named in S2 7.2: underline style and colour (SGR 4:3, 58) are
+    not kept, and a link's cells come back with a plain, not dashed, underline.
+14. **From task 33's review 2**, two defects of task 12's code. The headless terminal ran at
+    xterm.js's default log level, so a parsing error, which quotes a character and the parameters
+    of the program's output, went to stderr and so to `server.log`. Ruled: fixed in this pull
+    request, `logLevel: 'off'`, tested (S2 5.2, 21). And two more differences of the serialise
+    addon: rows erased with a background colour below the last row with content come back with
+    the default background; an erased cell left in inverse video by overwriting half a wide
+    character comes back without it. Ruled: named limits in S2 7.2, each pinned by a test, no
+    repair; the sweeps' streams avoid both.
+
 Rulings on task 19's review 1 (2026-11-14), each recorded in task 19's contract and in the design:
 
 - `startWindowsProgram` (`src/window/edge.ts`) is the one way stage A starts a Windows program;
@@ -3654,9 +3692,8 @@ script (first seen at the tick that sees its end) is signalled only when its soc
 before any SIGTERM the process's command line must name `skydeck-keepalive` and this runtime
 directory, so the signal never reaches a keeper, `claude` or anything else; an accepting socket of
 a found keep-alive is asked again only after 30 s (any other answer at the next tick) — superseded
-by N3 below; "a control
-character" is U+0000–U+001F, U+007F and U+0080–U+009F everywhere (S2 2). All in S2 6.1 and task
-19's contract.
+by N3 below; "a control character" is U+0000–U+001F, U+007F and U+0080–U+009F everywhere (S2 2).
+All in S2 6.1 and task 19's contract.
 
 N3 (2026-11-14, from review 2): 30 s was longer than WSL's 15 s idle timeout, so a found
 keep-alive's end was noticed after WSL had stopped. Ruled: an accepting socket is asked again
