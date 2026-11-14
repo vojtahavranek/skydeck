@@ -1061,6 +1061,13 @@ export function pidLineState(line: PidLine, proc: Proc, bootId: string | null): 
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean;
 
 // src/window/client.ts (task 18): the command line's side of server.sock
+// Ruled by the plan owner (task 18): ping is 'refused' for ECONNREFUSED and ENOENT (a missing
+// socket) and 'timeout' for ETIMEDOUT and EAGAIN (a full accept queue: the server lives but does
+// not answer now); any other system error, another status or an answer that cannot be read is a
+// SkydeckError, and a RangeError from requestUnix passes unchanged. The other methods wait 5 s and
+// reject with a SkydeckError that says what went wrong (never a token). tokenState rejects for a
+// token the server does not know (404); dropToken resolves for one (`{ ok: false }`: nothing to
+// give up). Every answer is checked against its type; a field a newer server adds is left out.
 export interface ControlClient {
   ping(timeoutMs?: number): Promise<PingAnswer | 'refused' | 'timeout'>; // 5 s default
   status(): Promise<StatusAnswer>;
@@ -2514,6 +2521,13 @@ talk to it.
 export interface ControlDeps { ping(): PingAnswer; status(): StatusAnswer; tokens: Tokens; shutdown(): void; log: (line: string) => void }
 export function controlHandler(deps: ControlDeps): (req: IncomingMessage, res: ServerResponse) => void;
 ```
+
+Ruled by the plan owner (task 18): a route whose dependency (`ping`, `status`, `tokens`) throws
+answers 500 `{ error: 'failed' }`, logs the error's name only (never its message), and the server
+goes on; a throw from `shutdown` is not caught and becomes the server's uncaught error (S2 5.2).
+A refusal answers `{ error: <kind> }` and is logged by its kind. `POST /shutdown` calls
+`deps.shutdown` once, after its answer was handed to the socket; a later one gets `{ ok: true }`
+and calls nothing.
 
 **Files**
 - Create: `src/window/control.ts`, `src/window/client.ts`
