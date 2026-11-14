@@ -1132,14 +1132,17 @@ export function findServer(deck: Deck, checkout: string, build: string, times?: 
  *  ping of that wait waits at most 1 s, so none outlives the wait by more (task 22, review 2); a
  *  boot id that cannot be read rejects with a SkydeckError before anything is started. */
 export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }>;
-/** A server that answers ping: GET /status (`terminals`: every terminal it lists, ended ones
- *  included), POST /shutdown, wait 10 s; then SIGTERM and after 5 s SIGKILL. A server that gives no
+/** A server that answers ping: POST /shutdown, wait 10 s; then SIGTERM and after 5 s SIGKILL. A server that gives no
  *  ping answer gets no POST /shutdown and SIGTERM at once, without the 10 s (ruled, task 22). Each
  *  signal only after server.json's pid, process start and boot id are confirmed alive at that moment
  *  (S2 5.1 --restart). Never signals a keeper (an identity a keeper's .pid line holds), this process
  *  or pid 1: rejects with a SkydeckError instead, as for an 'unknown' line and for a server that
- *  outlives SIGKILL by 5 s (ruled, task 22). `stopped` false: no live server was found. */
-export function stopServer(deck: Deck, times?: LifecycleTimes): Promise<{ stopped: boolean; terminals: number }>;
+ *  outlives SIGKILL by 5 s (ruled, task 22). `stopped` false: no live server was found.
+ *  `keepers` (ruled, task 22, review 2): the keepers whose .pid line in the runtime directory is
+ *  'alive' or 'unknown' (listKeeperLines), counted before the stop whether or not a server runs or
+ *  answers — never the server's GET /status, which a hung server does not answer and which lists
+ *  ended terminals. Task 24's "<n> terminals in the window keep running" (S2 16.2) shows it. */
+export function stopServer(deck: Deck, times?: LifecycleTimes): Promise<{ stopped: boolean; keepers: number }>;
 
 // src/window/build.ts (task 14)
 /** sha256 over the sorted paths and contents of every file under bin/, src/, web/, vendor/ (A12), first 16 hex. */
@@ -3119,8 +3122,8 @@ it) with the current boot id and build — resolving
 the runtime directory again (`follow`) before each attempt, because a starting server that found
 a stale record chooses and records another directory — or for the exit, and maps the exit code to S2 5.2's lines (0: wait for the other server within the same
 10 s). `stopServer`: as 2.8 says (a server that gives no ping answer gets SIGTERM at once, ruled);
-it returns how many terminals the server had (from `status`, ended ones included)
-for `uninstall`'s line.
+it returns how many keepers keep running — their `.pid` lines alive or unknown, counted before
+the stop, never from `status` (ruled) — for `uninstall`'s line.
 
 **Tests** (platform: `realTestPlatform`; fake serve; timeouts shortened through `LifecycleTimes`, A31)
 - `findServer` for each kind; a `server.json` whose pid is alive but whose process start differs

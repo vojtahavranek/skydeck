@@ -199,6 +199,20 @@ function writeServer(
   return files;
 }
 
+/** terms/<id>.pid in the directory a command looks in, as a keeper of version 2 writes it. */
+function writeKeeperLine(
+  h: Harness,
+  id: string,
+  line: { pid: number; procStart: number; bootId: string },
+): void {
+  const files = h.files();
+  mkdirSync(files.termsDir, { recursive: true, mode: 0o700 });
+  h.base.platform.files.writeText(
+    files.termPid(id),
+    formatPidLine({ ...line, keeper: { version: '2', started: true } }),
+  );
+}
+
 /** This test process as server.json would name it: pid, its real process start, the boot id. */
 function ownLine(h: Harness): { pid: number; procStart: number; bootId: string } {
   const procStart = startOf(h.base.proc, process.pid);
@@ -592,7 +606,7 @@ test('startServe: an app root without bin/skydeck is an error naming it', async 
 
 test('stopServer without server.json: nothing to stop, nothing signalled', async (t) => {
   const h = harness(t);
-  assert.deepEqual(await stopServer(h.deck), { stopped: false, terminals: 0 });
+  assert.deepEqual(await stopServer(h.deck), { stopped: false, keepers: 0 });
   assert.deepEqual(h.signals, []);
 });
 
@@ -607,16 +621,19 @@ test('stopServer: a server.json naming an ended process, another boot or a reuse
     { ...own, procStart: own.procStart + 1 },
   ]) {
     writeServer(h, line);
-    assert.deepEqual(await stopServer(h.deck), { stopped: false, terminals: 0 });
+    assert.deepEqual(await stopServer(h.deck), { stopped: false, keepers: 0 });
   }
   assert.deepEqual(h.signals, []);
   assert.equal(kill.calls(), 0);
 });
 
-test('stopServer: a server that ends on /shutdown is stopped without a signal, with its terminal count', async (t) => {
+test('stopServer: a server that ends on /shutdown is stopped without a signal; keepers are counted by their lines, not by /status', async (t) => {
   const h = harness(t);
-  const fake = await startFake(t, h, { FAKE_SERVE_TERMINALS: '2' });
-  assert.deepEqual(await stopServer(h.deck, { stopMs: START_MS }), { stopped: true, terminals: 2 });
+  const fake = await startFake(t, h, { FAKE_SERVE_TERMINALS: '5' });
+  writeKeeperLine(h, '0000000000a1', (await liveSleep(t, h)).line);
+  writeKeeperLine(h, '0000000000a2', (await liveSleep(t, h)).line);
+  writeKeeperLine(h, '0000000000a3', await endedLine(h)); // an ended terminal's keeper: dead
+  assert.deepEqual(await stopServer(h.deck, { stopMs: START_MS }), { stopped: true, keepers: 2 });
   assert.deepEqual(h.signals, []);
   await fake.exited;
   assert.equal(existsSync(h.files().serverJson), false);
@@ -624,14 +641,14 @@ test('stopServer: a server that ends on /shutdown is stopped without a signal, w
 
 test('stopServer: a server that answers but does not end gets SIGTERM after stopMs, then SIGKILL after killMs', async (t) => {
   const h = harness(t);
-  const fake = await startFake(t, h, { FAKE_SERVE_TERMINALS: '1', FAKE_SERVE_ON_SHUTDOWN: 'stay' });
+  const fake = await startFake(t, h, { FAKE_SERVE_ON_SHUTDOWN: 'stay' });
   h.onSignal = (call) => {
     if (call.signal === 'SIGKILL') fake.child.kill('SIGKILL'); // the test's own child
   };
   const before = performance.now();
   assert.deepEqual(await stopServer(h.deck, { stopMs: 400, killMs: 400 }), {
     stopped: true,
-    terminals: 1,
+    keepers: 0,
   });
   assert.deepEqual(
     h.signals.map(({ pid, signal, startAtCall }) => ({ pid, signal, startAtCall })),
@@ -654,7 +671,7 @@ test('stopServer: a server that does not answer at all gets SIGTERM, then SIGKIL
   };
   assert.deepEqual(await stopServer(h.deck, { pingMs: 300, stopMs: 400, killMs: 400 }), {
     stopped: true,
-    terminals: 0,
+    keepers: 0,
   });
   assert.deepEqual(
     h.signals.map(({ pid, signal, startAtCall }) => ({ pid, signal, startAtCall })),
@@ -673,7 +690,7 @@ test('stopServer: a server that ends on SIGTERM gets no SIGKILL', async (t) => {
   };
   assert.deepEqual(await stopServer(h.deck, { pingMs: 300, stopMs: 400, killMs: START_MS }), {
     stopped: true,
-    terminals: 0,
+    keepers: 0,
   });
   assert.deepEqual(
     h.signals.map(({ signal }) => signal),
@@ -698,7 +715,7 @@ test('stopServer: a server gone after SIGTERM (its pid has another process start
   });
   assert.deepEqual(await stopServer(deck, { pingMs: 300, stopMs: 400, killMs: 400 }), {
     stopped: true,
-    terminals: 0,
+    keepers: 0,
   });
   assert.deepEqual(
     h.signals.map(({ signal }) => signal),
@@ -797,7 +814,7 @@ test('a time given as undefined is the default, for every function (ruled, revie
   const h = harness(t);
   const unset = { pingMs: undefined, startMs: undefined, stopMs: undefined, killMs: undefined };
   assert.deepEqual(await findServer(h.deck, FAKE_ROOT, h.build, unset), { kind: 'none' });
-  assert.deepEqual(await stopServer(h.deck, unset), { stopped: false, terminals: 0 });
+  assert.deepEqual(await stopServer(h.deck, unset), { stopped: false, keepers: 0 });
   const quick = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '7' }));
   assert.deepEqual(await startServe(quick.deck, unset), {
     ok: false,
@@ -857,7 +874,7 @@ test('stopServer: an identity that changed after the first look gets no SIGTERM'
   });
   assert.deepEqual(await stopServer(deck, { pingMs: 300, stopMs: 400, killMs: 400 }), {
     stopped: true,
-    terminals: 0,
+    keepers: 0,
   });
   assert.deepEqual(h.signals, []);
 });
@@ -866,7 +883,8 @@ for (const at of ['SIGTERM', 'SIGKILL'] as const) {
   test(`stopServer judges the identity right before ${at}: one gone while the keepers are listed gets none`, async (t) => {
     const h = harness(t);
     const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
-    // The keeper listing is the last thing before the identity check of each signal.
+    // The first keeper listing counts the keepers (before the stop); each later one is the last
+    // thing before the identity check of a signal: the second SIGTERM's, the third SIGKILL's.
     let listings = 0;
     let reused = false;
     const files = h.files();
@@ -875,7 +893,7 @@ for (const at of ['SIGTERM', 'SIGKILL'] as const) {
         list: (dir) => {
           if (dir === files.termsDir) {
             listings += 1;
-            if (listings === (at === 'SIGTERM' ? 1 : 2)) reused = true;
+            if (listings === (at === 'SIGTERM' ? 2 : 3)) reused = true;
           }
           return h.base.platform.files.list(dir);
         },
@@ -889,7 +907,7 @@ for (const at of ['SIGTERM', 'SIGKILL'] as const) {
     });
     assert.deepEqual(await stopServer(deck, { pingMs: 300, stopMs: 300, killMs: 300 }), {
       stopped: true,
-      terminals: 0,
+      keepers: 0,
     });
     assert.deepEqual(
       h.signals.map(({ signal }) => signal),
@@ -961,7 +979,7 @@ test('stopServer: a server that gives no ping answer gets SIGTERM at once, not a
   const before = performance.now();
   assert.deepEqual(await stopServer(h.deck, { pingMs: 300, stopMs: START_MS, killMs: START_MS }), {
     stopped: true,
-    terminals: 0,
+    keepers: 0,
   });
   const [term] = h.signals;
   assert.ok(term !== undefined);
@@ -997,7 +1015,7 @@ test('stopServer: a /status that cannot be read and a /shutdown cut off still st
     },
   );
   t.after(() => listener.close());
-  assert.deepEqual(await stopServer(h.deck, { stopMs: START_MS }), { stopped: true, terminals: 0 });
+  assert.deepEqual(await stopServer(h.deck, { stopMs: START_MS }), { stopped: true, keepers: 0 });
   assert.deepEqual(h.signals, []);
 });
 
@@ -1105,4 +1123,51 @@ test('stopServer: keepers that cannot be listed, or a signal the system refuses,
       return true;
     },
   );
+});
+
+test('stopServer counts the keepers alive or unknown by their lines, also for a hung server; a dead line is not counted', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  writeKeeperLine(h, '0000000000b1', (await liveSleep(t, h)).line);
+  writeKeeperLine(h, '0000000000b2', (await liveSleep(t, h)).line);
+  writeKeeperLine(h, '0000000000b3', await endedLine(h));
+  h.onSignal = (call) => {
+    if (call.signal === 'SIGTERM') fake.child.kill('SIGTERM');
+  };
+  assert.deepEqual(await stopServer(h.deck, { pingMs: 300, stopMs: 300, killMs: START_MS }), {
+    stopped: true,
+    keepers: 2,
+  });
+  assert.deepEqual(
+    h.signals.map(({ pid }) => pid),
+    [fake.pid],
+  );
+});
+
+test('stopServer counts a keeper line that cannot be read (unknown: it may keep running)', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, {});
+  writeKeeperLine(h, '0000000000c1', (await liveSleep(t, h)).line);
+  writeKeeperLine(h, '0000000000c2', await endedLine(h));
+  const unreadable = h.files().termPid('0000000000c2');
+  const deck = deckWith(h.deck, {
+    files: {
+      readText: (path) => {
+        if (path === unreadable) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        return h.base.platform.files.readText(path);
+      },
+    },
+  });
+  assert.deepEqual(await stopServer(deck, { stopMs: START_MS }), { stopped: true, keepers: 2 });
+  await fake.exited;
+});
+
+test('stopServer without a live server still counts the keepers', async (t) => {
+  const h = harness(t);
+  writeKeeperLine(h, '0000000000d1', (await liveSleep(t, h)).line);
+  writeServer(h, await endedLine(h));
+  assert.deepEqual(await stopServer(h.deck), { stopped: false, keepers: 1 });
+  assert.deepEqual(h.signals, []);
 });

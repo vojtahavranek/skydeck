@@ -72,8 +72,6 @@ const OTHER_CHECKOUT = 11;
 const RUNTIME_DIR = 12;
 const IN_CLAUDE_CODE = 13;
 
-const NOT_RUNNING = { stopped: false, terminals: 0 } as const;
-
 /** How a started `serve` ended. */
 type Exit = Awaited<Detached['exited']>;
 
@@ -135,8 +133,8 @@ function judge(platform: Platform, line: PidLine): 'alive' | 'dead' {
  */
 function recordedServer(
   deck: Deck,
-): { files: RuntimeFiles; line: PidLine; checkout: string } | null {
-  const files = serverFiles(deck);
+  files: RuntimeFiles,
+): { line: PidLine; checkout: string } | null {
   let json: ReturnType<typeof readServerJson>;
   try {
     json = readServerJson(deck.platform.files, files.serverJson);
@@ -145,7 +143,6 @@ function recordedServer(
   }
   if (json === null) return null;
   return {
-    files,
     line: { pid: json.pid, procStart: json.procStart, bootId: json.bootId },
     checkout: json.checkout,
   };
@@ -183,11 +180,12 @@ export async function findServer(
   times: LifecycleTimes = {},
 ): Promise<FoundServer> {
   const { pingMs } = timesOf(times);
-  const server = recordedServer(deck);
+  const files = serverFiles(deck);
+  const server = recordedServer(deck, files);
   if (server === null || judge(deck.platform, server.line) === 'dead') {
     return { kind: 'none' };
   }
-  const ping = await pingOnce(controlClient(deck.platform.net, server.files.serverSock), pingMs);
+  const ping = await pingOnce(controlClient(deck.platform.net, files.serverSock), pingMs);
   if (ping === null) {
     return judge(deck.platform, server.line) === 'dead'
       ? { kind: 'none' }
@@ -302,7 +300,7 @@ function exitLine(deck: Deck, exit: Exit, log: string): string {
     case PORT_USED:
       return `port ${deck.config.window.port} on 127.0.0.1 is used by another program; set window.port in ${sanitize(deck.places.configPath)}`;
     case OTHER_CHECKOUT: {
-      const server = recordedServer(deck);
+      const server = recordedServer(deck, serverFiles(deck));
       return server !== null && judge(deck.platform, server.line) === 'alive'
         ? `a window server already runs (pid ${server.line.pid}, from ${sanitize(server.checkout)})`
         : didNotStart(`exit ${exit.code}`, log);
@@ -349,39 +347,41 @@ function refusalReason(platform: Platform, dir: string): string | null {
 // Stopping it
 
 /**
- * S2 5.1 `--restart` and `--stop`, 16.2: a server that answers `GET /ping` is asked for its
- * terminals (`GET /status`) and to stop (`POST /shutdown`), and is given `stopMs` to end. One that
- * does not answer, or does not end in time, gets SIGTERM and, `killMs` later, SIGKILL; each only
- * after server.json's pid, process start and boot id were confirmed alive at that moment, and
- * never when they name a keeper of the runtime directory, this process or pid 1. `stopped` is
- * true when a server was running and is gone; `terminals` is how many the server listed (0 when
- * it did not answer). Rejects with a SkydeckError when server.json cannot be read or its process
- * cannot be judged, when it names a process that is not the server's, when the keepers cannot be
- * listed or the system refuses a signal, and when the server outlives SIGKILL by `killMs`.
+ * S2 5.1 `--restart` and `--stop`, 16.2: a server that answers `GET /ping` is asked to stop
+ * (`POST /shutdown`) and is given `stopMs` to end. One that does not answer, or does not end in
+ * time, gets SIGTERM and, `killMs` later, SIGKILL; each only after server.json's pid, process start
+ * and boot id were confirmed alive at that moment, and never when they name a keeper of the
+ * runtime directory, this process or pid 1. `stopped` is true when a server was running and is
+ * gone. `keepers` is what keeps running in the window (ruled): the keepers whose .pid line in the
+ * runtime directory is alive or cannot be judged, counted before the stop whether or not a server
+ * runs or answers — the `<n>` of uninstall's "<n> terminals in the window keep running" (16.2).
+ * Rejects with a SkydeckError when server.json cannot be read or its process cannot be judged,
+ * when it names a process that is not the server's, when the keepers cannot be listed or the
+ * system refuses a signal, and when the server outlives SIGKILL by `killMs`.
  */
 export async function stopServer(
   deck: Deck,
   times: LifecycleTimes = {},
-): Promise<{ stopped: boolean; terminals: number }> {
+): Promise<{ stopped: boolean; keepers: number }> {
   const { platform } = deck;
   const { pingMs, stopMs, killMs } = timesOf(times);
-  const server = recordedServer(deck);
+  const files = serverFiles(deck);
+  const server = recordedServer(deck, files);
+  const keepers = keeperLines(platform, files).filter((k) => k.state !== 'dead').length;
   if (server === null || judge(platform, server.line) === 'dead') {
-    return NOT_RUNNING;
+    return { stopped: false, keepers };
   }
-  const { files, line } = server;
+  const { line } = server;
   const client = controlClient(platform.net, files.serverSock);
-  let terminals = 0;
   if ((await pingOnce(client, pingMs)) !== null) {
-    terminals = await terminalCount(client);
     await client.shutdown().catch((error: unknown) => {
       if (!(error instanceof SkydeckError)) throw error;
     });
-    if (await gone(platform, line, stopMs)) return { stopped: true, terminals };
+    if (await gone(platform, line, stopMs)) return { stopped: true, keepers };
   }
   for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
     if (!signalServer(platform, files, line, signal) || (await gone(platform, line, killMs))) {
-      return { stopped: true, terminals };
+      return { stopped: true, keepers };
     }
   }
   throw new SkydeckError(
@@ -389,13 +389,14 @@ export async function stopServer(
   );
 }
 
-/** How many terminals the server lists; 0 when it does not say. */
-async function terminalCount(client: ControlClient): Promise<number> {
+/** The keepers' .pid lines (listKeeperLines); a terms/ that cannot be listed is a SkydeckError. */
+function keeperLines(platform: Platform, files: RuntimeFiles): ReturnType<typeof listKeeperLines> {
   try {
-    return (await client.status()).terminals.length;
+    return listKeeperLines(platform, files);
   } catch (error) {
-    if (error instanceof SkydeckError) return 0;
-    throw error;
+    throw new SkydeckError(
+      `the keepers in ${files.termsDir} cannot be listed (${describeError(error)})`,
+    );
   }
 }
 
@@ -412,20 +413,13 @@ function signalServer(
   line: PidLine,
   signal: 'SIGTERM' | 'SIGKILL',
 ): boolean {
-  let keeper: boolean;
-  try {
-    keeper = listKeeperLines(platform, files).some(
-      (k) =>
-        k.line !== null &&
-        k.line.pid === line.pid &&
-        k.line.procStart === line.procStart &&
-        k.line.bootId === line.bootId,
-    );
-  } catch (error) {
-    throw new SkydeckError(
-      `the keepers in ${files.termsDir} cannot be listed (${describeError(error)}); the window's server (pid ${line.pid}) was not signalled`,
-    );
-  }
+  const keeper = keeperLines(platform, files).some(
+    (k) =>
+      k.line !== null &&
+      k.line.pid === line.pid &&
+      k.line.procStart === line.procStart &&
+      k.line.bootId === line.bootId,
+  );
   if (keeper || line.pid === platform.pid || line.pid === 1) {
     throw new SkydeckError(
       `${files.serverJson} names pid ${line.pid}, which is not the window's server (${keeper ? 'a keeper' : 'this process or init'}); nothing was signalled`,

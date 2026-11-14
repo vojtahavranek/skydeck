@@ -2047,7 +2047,9 @@ code allows; it is tested on 3.12, which Ubuntu 24.04 and the CI runners have.)
 Before what it does in step 1:
 
 - when a server runs, it stops it as `skydeck window --stop` does (5.1) and says `stopped skydeck's window server; <n>
-  terminals in the window keep running`. Keepers and their sessions are never stopped (2).
+  terminals in the window keep running`, where `<n>` counts the keepers whose `.pid` line is alive
+  or cannot be judged (4.2), read before the stop: a server that does not answer cannot say how
+  many it has. Keepers and their sessions are never stopped (2).
 - it names the Edge profile folder when one is configured or can be derived: `the window's Edge
   profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
