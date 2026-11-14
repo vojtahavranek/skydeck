@@ -1428,12 +1428,14 @@ page last proposed (`attach`, `resize`). The rules:
   focus change while the program has focus reporting on, 9.2). A proposed size is first clamped
   to at most 1,000 columns and 500 rows (a wider one is not an error): 65,535 columns would make
   the screen side allocate gigabytes of scrollback (ruled, plan task 12's review). The page
-  proposes the most columns and rows whose screen fits the terminal's area, the screen being cell
-  × count rounded to whole pixels as xterm.js 6.0.0 rounds it; the answer does not depend on the
-  terminal's current size. The fit addon's does (it divides by the cell of the current size), so
-  at some widths no size proposes itself — 104 columns propose 103 and 103 propose 104 — and a
-  terminal shown there was resized every second (plan task 28's review). For an unchanged area,
-  pixel ratio and cell the page's answer stays what it was.
+  computes its proposal itself (not with the fit addon): the most columns and rows whose screen
+  fits the terminal's area, the screen being cell × count rounded to whole pixels as xterm.js
+  6.0.0 rounds it, and the room the addon gave its scroll bar (14 px) and xterm.js's padding
+  counted out; the answer does not depend on the terminal's current size. The fit addon's does (it
+  divides by the cell of the current size), so at some widths no size proposes itself — 104
+  columns propose 103 and 103 propose 104 — and a terminal shown there was resized every second
+  (ruled by the plan owner, M4 of plan task 28's review). For an unchanged area, pixel ratio and
+  cell the page's answer stays what it was.
 
 The page's xterm.js keeps 5,000 lines of scrollback, as the screen side does (7.2), so that both
 reflow alike and find (9.7) sees what the snapshot holds.

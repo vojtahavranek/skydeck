@@ -3856,8 +3856,11 @@ server only, the key mapping of S2 9.1, swallowed queries, links, the clipboard 
 - Modify (replace): `web/terminal-view.js`, `web/terminal-view.css`
 - Test: `test-page/terminal.test.ts`, `test-page/keys.test.ts`
 
-**Behaviour.** xterm.js 6.0.0 with `addon-unicode-graphemes`, `addon-fit` (only to compute the
-proposal sent in `attach` and `resize`), `addon-search` (Ctrl+Shift+F); scrollback 5,000; the
+**Behaviour.** xterm.js 6.0.0 with `addon-unicode-graphemes` and `addon-search` (Ctrl+Shift+F);
+the proposal sent in `attach` and `resize` is computed by the view itself, with xterm.js's own
+rounding of its screen (S2 8.2.6) — not by `addon-fit`, whose division depends on the
+terminal's current size and has no fixed point at some widths (ruled by the plan owner, M4 of
+task 28's review; `addon-fit` stays vendored, its removal a follow-up); scrollback 5,000; the
 DOM renderer; the font list `"Cascadia Mono", "Cascadia Code", Consolas, "Segoe UI Symbol",
 monospace` (W9 checks it). The size is set only from `snap` and `size`; a page that is not the
 owner shows "sized by another window". Up to 8 terminals stay attached, the least recently shown
