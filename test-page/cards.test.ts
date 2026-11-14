@@ -236,6 +236,83 @@ test('the right side', async (t) => {
   );
 
   await t.test(
+    "the header's chip reads exactly as the selected row's chip in the list (one implementation of its words)",
+    async (t) => {
+      const s = await scripted(t, chromium);
+      for (const chip of [
+        { level: 'checks-failing', count: 3 },
+        { level: 'review-required', count: 1 },
+        { level: 'cant-read', count: 2 },
+        { level: 'merged', count: 30 },
+      ]) {
+        s.serve(
+          listWith([[{ id: S1, terminal: null, slot: null }], []], { rows: { [S1]: { chip } } }),
+        );
+        if ((await s.page.locator(`#list [data-id="${S1}"][data-selected="true"]`).count()) === 0) {
+          await clickRow(s.page, S1);
+        }
+        const inList = s.page.locator(`#list [data-id="${S1}"] .row-chip`);
+        await s.page.waitForFunction(
+          (level) =>
+            document.querySelector('#cards .header-chip')?.getAttribute('data-level') === level,
+          chip.level,
+        );
+        const listed = (await inList.textContent()) ?? '';
+        assert.notEqual(listed, '');
+        assert.deepEqual(await texts(s.page, '.card-header .header-chip'), [listed]);
+      }
+    },
+  );
+
+  await t.test(
+    'the header has one height: a short and a very long directory, a wide and a narrow window; the directory is cut with an ellipsis but whole in the page and its tooltip, the short id never cut',
+    async (t) => {
+      const s = await scripted(t, chromium);
+      const long = `/home/u/${'a-very-long-directory-name/'.repeat(12)}end`;
+      const show = (dir: string): void =>
+        s.serve(
+          listWith(
+            [[{ id: S1, terminal: TERM_A, slot: 1 }], [{ id: TERM_A, slot: 1, sessionId: S1 }]],
+            {
+              rows: { [S1]: { dir, title: 'a title' } },
+            },
+          ),
+        );
+      const measure = (): Promise<{ height: number; id: boolean; title: string; text: string }> =>
+        s.page.evaluate(() => {
+          const header = document.querySelector('#cards .card-header') as HTMLElement;
+          const id = document.querySelector('#cards .header-id') as HTMLElement;
+          const dir = document.querySelector('#cards .header-dir') as HTMLElement;
+          const box = header.getBoundingClientRect();
+          const idBox = id.getBoundingClientRect();
+          return {
+            height: box.height,
+            id: id.scrollWidth <= id.clientWidth && idBox.right <= box.right && idBox.width > 0,
+            title: dir.title,
+            text: dir.textContent ?? '',
+          };
+        });
+      show('/home/u/short');
+      await clickRow(s.page, S1);
+      await showsText(s.page, '#cards .header-dir', /^\/home\/u\/short$/);
+      const short = await measure();
+      assert.ok(short.id, 'the short id is whole');
+      show(long);
+      await showsText(s.page, '#cards .header-dir', /end$/);
+      const wide = await measure();
+      assert.equal(wide.height, short.height, 'a long directory does not change the height');
+      assert.equal(wide.text, long, 'the whole directory is in the page');
+      assert.equal(wide.title, long, 'and in its tooltip');
+      assert.ok(wide.id, 'the short id is whole');
+      await s.page.setViewportSize({ width: 900, height: 700 });
+      await sleep(200);
+      const narrow = await measure();
+      assert.equal(narrow.height, short.height, 'a narrow window does not change the height');
+      assert.ok(narrow.id, 'the short id is whole at 900 px');
+    },
+  );
+
+  await t.test(
     'a click on the short id copies the whole id and leaves the keyboard where it was; text of the header stays selected when a list changes another of its fields',
     async (t) => {
       const s = await scripted(t, chromium);
@@ -804,7 +881,7 @@ test('the right side', async (t) => {
             probe.remove();
             return space;
           }, selector),
-          'pre-wrap',
+          selector === '.header-dir' || selector === '.header-id' ? 'pre' : 'pre-wrap',
           `${selector} keeps its spaces`,
         );
       }

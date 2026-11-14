@@ -1929,6 +1929,12 @@ id), where the title comes from. Each open pull request on a line of its own
 merged and closed ones fold into `30 merged ▸`; `+ PR`. The note's first three lines (a click
 edits it). Buttons Note and Done / Undone.
 
+Stage A's header (19) has one height for every session and window width, so that the terminal
+area under it does not jump between sessions and the page knows its size before a terminal is
+shown: the directory is one line, cut with an ellipsis when it is long (the whole path stays in
+the page, is selected and copied whole, and is its tooltip); the short id is never cut (ruled by
+the plan owner, review of plan task 29).
+
 Editing (stage D) uses the step 1 rules and functions: a label or group that design 7.1 refuses is
 refused with the same message; a note is edited in a text box instead of `$VISUAL`, saved as typed
 (an empty note is no note), and a save is refused when the stored note changed since the edit

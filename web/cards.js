@@ -17,26 +17,13 @@
 // app.js gives it to the zone after the call. The short id's copy takes no keyboard on a click.
 
 /** @import { ElsewherePayload, ExitMessage, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
+import { chipText } from './list-text.js';
 
 /**
  * @typedef {object} CardsDeps
  * @property {(action: Record<string, unknown> & { kind: string }) => Promise<ResultMessage>} act
  * @property {(id: string) => void} select
  */
-
-/** Design 7.3's chip levels in S2 12.3's words. */
-const CHIP_WORDS = /** @type {Record<string, string>} */ ({
-  'cant-read': "can't read",
-  unfetched: 'not fetched',
-  'checks-failing': 'failing',
-  'changes-requested': 'changes',
-  'checks-pending': 'pending',
-  'review-required': 'review',
-  draft: 'draft',
-  'approved-green': 'approved',
-  merged: 'merged',
-  closed: 'closed',
-});
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const COPIED_MS = 2000;
@@ -162,16 +149,6 @@ function stateOf(row) {
   const state = row.state === 'not-running' ? 'not running' : row.state;
   const detail = row.stateDetail ?? '';
   return detail === '' ? state : `${state} (${detail})`;
-}
-
-/**
- * Design 7.3's chip — the worst state among the attached pull requests and their count — in the
- * words of S2 12.3: "PR · review", "3 PRs · failing".
- * @param {{ level: string, count: number }} chip
- */
-function chipOf(chip) {
-  const word = CHIP_WORDS[chip.level] ?? chip.level;
-  return `${chip.count === 1 ? 'PR' : `${chip.count} PRs`} · ${word}`;
 }
 
 /**
@@ -541,10 +518,13 @@ export function createCards(root, deps) {
       setHidden(group, row.group === null);
       group.title = row.groupSource === 'title' ? 'group (from the title)' : 'group';
       setText(state, stateOf(row));
-      setText(chip, row.chip === null ? '' : chipOf(row.chip));
+      // Design 7.3's chip in S2 12.3's words — the list's own text of it (task 27).
+      setText(chip, row.chip === null ? '' : chipText(row.chip));
       setHidden(chip, row.chip === null);
       chip.dataset['level'] = row.chip?.level ?? '';
       setText(dir, row.dir ?? 'directory not known');
+      // One line, cut with an ellipsis (a fixed height; ruled): the whole path in the tooltip.
+      dir.title = row.dir ?? '';
       setText(shortId, row.shortId);
       shortId.title = `session ${row.id}; a click copies it`;
       setHidden(head, false);
