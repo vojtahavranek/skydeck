@@ -1,0 +1,195 @@
+// What `skydeck uninstall --purge` may remove (docs/design.md 8, 9.1; S2 4.2, plan A38): the
+// directories skydeck keeps, each only with what skydeck itself writes there. Principle 6: nothing
+// of the user's is destroyed — a directory that is a symbolic link, is another user's, cannot be
+// looked at, or holds anything else is left alone, and the caller names it.
+//
+// THE LISTS BELOW ARE THE ONE PLACE that says what skydeck writes into its directories. Whoever
+// makes skydeck write a new file or directory into one of them adds it here (name and kind), or
+// `--purge` leaves that directory alone from then on.
+import { join, resolve } from 'node:path';
+
+import type { FileInfo, Files, Platform } from '../platform/types.ts';
+import { describeError } from '../sessions/problems.ts';
+
+type Kind = FileInfo['kind'];
+
+/** One entry a directory may hold: its name, the kinds it may have (a socket is 'other'), and for a directory what it may hold in turn. */
+interface Entry {
+  name: string | RegExp;
+  kinds: readonly Kind[];
+  inside?: Spec;
+}
+export type Spec = readonly Entry[];
+
+/** Files.writeText's and Files.symlink's temporary: `.<name>.<12 hex>.tmp`, beside the file. */
+const HEX12 = '[0-9a-f]{12}';
+const SESSION_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** A spool file as the hook names it (bin/skydeck-hook): `<time ns>-<claude pid>-<hook pid>.ev`. */
+const SPOOL_FILE = '[0-9]+-[0-9]+-[0-9]+\\.ev';
+
+// ---------------------------------------------------------------------------------------------
+// The runtime directory (S2 4.2, plan A38)
+
+/** terms/: keepers' sockets and `.pid` lines, the keeper's `.<id>.<pid>.tmp` and Files.writeText's temporary. */
+const TERMS: Spec = [
+  { name: new RegExp(`^${HEX12}\\.sock$`), kinds: ['other'] },
+  { name: new RegExp(`^${HEX12}\\.pid$`), kinds: ['file'] },
+  { name: new RegExp(`^\\.${HEX12}(?:\\.pid)?\\.(?:${HEX12}|[0-9]+)\\.tmp$`), kinds: ['file'] },
+];
+
+export const RUNTIME_DIR: Spec = [
+  { name: 'server.json', kinds: ['file'] },
+  { name: 'server.pid', kinds: ['file'] },
+  { name: 'server.sock', kinds: ['other'] },
+  { name: 'keepalive.pid', kinds: ['file'] },
+  { name: 'keepalive.interop', kinds: ['file'] },
+  { name: 'interop', kinds: ['symlink'] },
+  { name: 'terms', kinds: ['dir'], inside: TERMS },
+  { name: /^keeper-[A-Za-z0-9_-]+\.py$/, kinds: ['file'] },
+  // The writers' temporaries: Files.writeText's and symlink's, the keep-alive script's `.<name>.<pid>.tmp`.
+  {
+    name: new RegExp(
+      `^\\.(?:server\\.json|server\\.pid|keepalive\\.pid|keepalive\\.interop|interop|keeper-[A-Za-z0-9_-]+\\.py)\\.(?:${HEX12}|[0-9]+)\\.tmp$`,
+    ),
+    kinds: ['file', 'symlink'],
+  },
+];
+
+// ---------------------------------------------------------------------------------------------
+// Step 1's directories (design 9.1)
+
+/** `<dataDir>`: the database and the files SQLite keeps beside it; install's two links and their temporaries. */
+export const DATA_DIR: Spec = [
+  { name: /^skydeck\.db(?:-wal|-shm|-journal)?$/, kinds: ['file'] },
+  { name: 'skydeck-hook', kinds: ['symlink'] },
+  { name: 'node', kinds: ['symlink'] },
+  { name: new RegExp(`^\\.(?:skydeck-hook|node)\\.${HEX12}\\.tmp$`), kinds: ['symlink'] },
+];
+
+/**
+ * `<stateDir>`: the spool (the hook's files and temporaries, bad/), locks/ (created, unused),
+ * hook.log, the notes being edited and their temporaries, the window's logs, their rotations and
+ * the rotations' temporaries (S2 4.2), and the runtime directory of this store when the rule put it
+ * there (`run-<store id>`, S2 4.2).
+ */
+export function stateDirSpec(storeId: string): Spec {
+  return [
+    {
+      name: 'spool',
+      kinds: ['dir'],
+      inside: [
+        { name: new RegExp(`^${SPOOL_FILE}$`), kinds: ['file'] },
+        { name: new RegExp(`^\\.${SPOOL_FILE}\\.tmp$`), kinds: ['file'] },
+        {
+          name: 'bad',
+          kinds: ['dir'],
+          inside: [{ name: new RegExp(`^${SPOOL_FILE}$`), kinds: ['file'] }],
+        },
+      ],
+    },
+    { name: 'locks', kinds: ['dir'], inside: [] },
+    { name: 'hook.log', kinds: ['file'] },
+    { name: new RegExp(`^note-${SESSION_ID}\\.md$`), kinds: ['file'] },
+    { name: new RegExp(`^\\.note-${SESSION_ID}\\.md\\.${HEX12}\\.tmp$`), kinds: ['file'] },
+    { name: /^(?:server|keepers)\.log(?:\.1)?$/, kinds: ['file'] },
+    { name: /^\.(?:server|keepers)\.log\.1\.tmp$/, kinds: ['file'] },
+    { name: `run-${storeId}`, kinds: ['dir'], inside: RUNTIME_DIR },
+  ];
+}
+
+/** `<configDir>`: config.json (the user writes it; skydeck only reads it). */
+export const CONFIG_DIR: Spec = [{ name: 'config.json', kinds: ['file'] }];
+
+// ---------------------------------------------------------------------------------------------
+// Removing one
+
+export type Purged =
+  | { kind: 'removed' }
+  | { kind: 'absent' }
+  /** Left alone on purpose: not skydeck's to remove. `why` follows "it". */
+  | { kind: 'left'; why: string }
+  /** Could not be judged or removed. `why` follows "it". */
+  | { kind: 'failed'; why: string };
+
+function ruleFor(spec: Spec, name: string): Entry | undefined {
+  return spec.find((entry) =>
+    typeof entry.name === 'string' ? entry.name === name : entry.name.test(name),
+  );
+}
+
+/**
+ * Removes `dir` when it is a plain path (no `.` or `..`: such a path can be followed through a
+ * symbolic link), a directory of the user's that is not a symbolic link, and every entry below it is
+ * one `spec` allows, of its kind, each directory the user's: first those entries, then each
+ * directory once it is empty. Otherwise nothing of it is removed: 'left', with why. A look that
+ * fails is 'failed'; so is a removal that fails, and an entry that appeared while it was purged (it
+ * stays, and so does the directory holding it).
+ */
+export function purgeDir(platform: Platform, dir: string, spec: Spec): Purged {
+  const { files } = platform;
+  let why: string | null;
+  try {
+    if (resolve(dir) !== dir) {
+      return { kind: 'left', why: 'is not a plain path (a . or .. in it)' };
+    }
+    const info = files.lstat(dir);
+    if (info === null) return { kind: 'absent' };
+    why = notOwnDirectory(info, platform.uid) ?? foreignIn(platform, dir, spec, '');
+  } catch (error) {
+    return { kind: 'failed', why: `cannot be looked at (${describeError(error)})` };
+  }
+  if (why !== null) return { kind: 'left', why };
+  try {
+    removeEntries(files, dir, spec);
+    if (files.list(dir).length > 0) {
+      return { kind: 'failed', why: 'was given a new entry while it was purged, which stays' };
+    }
+    files.removeTree(dir); // empty: nothing else can go with it
+  } catch (error) {
+    return { kind: 'failed', why: `cannot be removed (${describeError(error)})` };
+  }
+  return { kind: 'removed' };
+}
+
+function notOwnDirectory(info: FileInfo, uid: number): string | null {
+  if (info.kind === 'symlink') return 'is a symbolic link';
+  if (info.kind !== 'dir') return 'is not a directory';
+  if (info.uid !== uid) return `belongs to uid ${info.uid}`;
+  return null;
+}
+
+/** Why the first entry below `dir` (named from the top) is not one `spec` allows; null when all are. */
+function foreignIn(platform: Platform, dir: string, spec: Spec, prefix: string): string | null {
+  const { files } = platform;
+  for (const name of files.list(dir)) {
+    const info = files.lstat(join(dir, name));
+    if (info === null) continue; // gone meanwhile
+    const rule = ruleFor(spec, name);
+    const path = `${prefix}${name}`;
+    if (rule === undefined || !rule.kinds.includes(info.kind)) {
+      return `holds ${path}, which skydeck did not write`;
+    }
+    if (info.kind === 'dir') {
+      if (info.uid !== platform.uid) return `holds ${path}, which belongs to uid ${info.uid}`;
+      const inner = foreignIn(platform, join(dir, name), rule.inside ?? [], `${path}/`);
+      if (inner !== null) return inner;
+    }
+  }
+  return null;
+}
+
+/** Removes what `spec` allows below `dir`; an entry that is not (one that appeared since the look) stays. */
+function removeEntries(files: Files, dir: string, spec: Spec): void {
+  for (const name of files.list(dir)) {
+    const path = join(dir, name);
+    const info = files.lstat(path);
+    const rule = ruleFor(spec, name);
+    if (info === null || rule === undefined || !rule.kinds.includes(info.kind)) continue;
+    if (info.kind === 'dir') {
+      removeEntries(files, path, rule.inside ?? []);
+      if (files.list(path).length === 0) files.removeTree(path);
+    } else {
+      files.remove(path);
+    }
+  }
+}
