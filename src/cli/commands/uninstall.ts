@@ -11,15 +11,19 @@
 // their sessions are never stopped and never connected to (S2 7.1): `--purge` judges them by their
 // `.pid` lines in every directory that can be the runtime directory and refuses, before it does
 // anything, while one may live; otherwise it also removes those directories.
+//
+// The purge is careful (principle 6; src/cli/purge.ts): from each directory only what skydeck
+// writes there, then the directory; one that is not only skydeck's is left alone and named. And it
+// refuses, before anything is undone, while a place variable is set but ignored (design 9.1).
 import { createHash } from 'node:crypto';
-import { basename, join, resolve } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 
 import { removeHookEntries, rewriteReport, settingsPath } from '../../claude/settings.ts';
 import type { Config } from '../../platform/config.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import { runtimeDirCandidates, storeId } from '../../platform/paths.ts';
 import type { Places } from '../../platform/paths.ts';
-import type { FileInfo, Files, Platform } from '../../platform/types.ts';
+import type { Env, Files, Platform } from '../../platform/types.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import type { Deck } from '../../sessions/deck.ts';
 import { describeError } from '../../sessions/problems.ts';
@@ -31,6 +35,8 @@ import { stopServer } from '../../window/lifecycle.ts';
 import { listKeeperLines, runtimeFiles } from '../../window/runtime.ts';
 import { deriveProfileDirUnder } from '../../window/windows.ts';
 import { parseCommandArgs } from '../args.ts';
+import { CONFIG_DIR, DATA_DIR, RUNTIME_DIR, purgeDir, stateDirSpec } from '../purge.ts';
+import type { Spec } from '../purge.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
@@ -47,8 +53,10 @@ const SPEC: ArgSpec = {
     'made. The database stays. The backups of the settings file are kept (it names them).\n' +
     "First it stops the window's server; the terminals in the window keep running.\n" +
     '\n' +
-    '  --purge  also remove the data, state and configuration directories and the runtime\n' +
-    '           directory; refused while a terminal of the window may still run\n',
+    '  --purge  also remove what skydeck wrote into the data, state, configuration and\n' +
+    '           runtime directories, then those directories; one holding anything else is\n' +
+    '           left alone. Refused while a terminal of the window may still run, and while\n' +
+    '           HOME, SKYDECK_HOME or an XDG_* variable is set but empty or relative\n',
   flags: { purge: { type: 'boolean' } },
   min: 0,
   max: 0,
@@ -70,8 +78,9 @@ export const command: Command = {
       return EXIT.ok;
     }
     const { platform } = ctx;
-    const { places, config } = resolveDeckPlaces(platform);
     const purge = parsed.flags['purge'] === true;
+    if (purge) refuseOnUnusablePlaceVariables(platform.env);
+    const { places, config } = resolveDeckPlaces(platform);
     let runtimeDirs: string[];
     if (platform.files.stat(places.dbPath) === null) {
       // No database: no record, and no server of this installation (a server opens it first).
@@ -102,24 +111,40 @@ export const command: Command = {
       // only after the stop, so it refuses only the purge: the uninstall is done, the data stays.
       refuseWhileKeepersMayLive(platform, runtimeDirs, AFTER);
       const own = [places.dataDir, places.stateDir, places.configDir];
-      const unseen: string[] = [];
+      const notRemoved: string[] = [];
       for (const dir of runtimeDirs) {
-        // One inside skydeck's own directories goes with them.
+        // One inside skydeck's own directories is purged with them (stateDirSpec's run-<id>).
         if (!own.some((parent) => dir === parent || dir.startsWith(`${parent}/`))) {
-          const failed = removeRuntimeDir(ctx, platform, dir);
-          if (failed !== null) unseen.push(failed);
+          const purged = purgeDir(platform, dir, RUNTIME_DIR);
+          if (purged.kind === 'removed') ctx.io.stdout(`removed ${sanitize(dir)}\n`);
+          // Ruled (purge-care): any directory left alone is named in the last line, exit 1.
+          if (purged.kind === 'left' || purged.kind === 'failed') {
+            notRemoved.push(sanitize(`${dir}: it ${purged.why}`)); // a name may hold a line break
+          }
         }
       }
-      // The store is closed by now.
-      for (const dir of own) {
-        if (platform.files.lstat(dir) !== null) {
-          attempt(`cannot remove ${dir}`, () => platform.files.removeTree(dir));
-          ctx.io.stdout(`removed ${sanitize(dir)}\n`);
+      // The store is closed by now. Step 1's directories, each with only what skydeck writes there;
+      // two places that are one directory are one purge with both lists.
+      const specs = new Map<string, Spec>();
+      for (const [dir, spec] of [
+        [places.dataDir, DATA_DIR],
+        [places.stateDir, stateDirSpec(storeId(places.dbPath))],
+        [places.configDir, CONFIG_DIR],
+      ] as const) {
+        specs.set(dir, [...(specs.get(dir) ?? []), ...spec]);
+      }
+      // The deepest first: a place inside another (XDG_STATE_HOME under the data directory) goes
+      // before the one that holds it, so that one run removes both.
+      for (const [dir, spec] of [...specs].sort(([a], [b]) => b.length - a.length)) {
+        const purged = purgeDir(platform, dir, spec);
+        if (purged.kind === 'removed') ctx.io.stdout(`removed ${sanitize(dir)}\n`);
+        if (purged.kind === 'left' || purged.kind === 'failed') {
+          notRemoved.push(sanitize(`${dir}: it ${purged.why}`)); // a name may hold a line break
         }
       }
-      if (unseen.length > 0) {
-        // A look that came after the undo: it refuses only that directory, and says so (ruled).
-        throw new SkydeckError(`${AFTER_UNSEEN} ${unseen.join('; ')}`);
+      if (notRemoved.length > 0) {
+        // After the undo: the uninstall is done, these directories stay, and the line says so.
+        throw new SkydeckError(`${AFTER_UNSEEN} ${notRemoved.join('; ')}`);
       }
     }
     return EXIT.ok;
@@ -256,96 +281,46 @@ function refuseWhileKeepersMayLive(
   }
 }
 
-type Kind = FileInfo['kind'];
-
-/** What a runtime directory holds (S2 4.2), each of its kind (a socket is 'other'). */
-const RUNTIME_ENTRIES: Readonly<Record<string, Kind>> = {
-  'server.json': 'file',
-  'server.pid': 'file',
-  'server.sock': 'other',
-  'keepalive.pid': 'file',
-  'keepalive.interop': 'file',
-  interop: 'symlink',
-  terms: 'dir',
-};
-const KEEPER_CODE = /^keeper-[A-Za-z0-9_-]+\.py$/;
 /**
- * The temporaries its writers leave when a write is cut short: Files.writeText's and symlink's
- * `.<name>.<12 hex>.tmp`, the keep-alive script's `.<name>.<pid>.tmp`.
+ * The variables that choose the directories `--purge` removes (design 9.1, S2 4.2). HOME too
+ * (ruled, purge-care): the home directory is HOME as it is, so an empty or relative one makes every
+ * place relative to the working directory.
  */
-const RUNTIME_TEMP =
-  /^\.(?:server\.json|server\.pid|keepalive\.pid|keepalive\.interop|interop|keeper-[A-Za-z0-9_-]+\.py)\.(?:[0-9a-f]{12}|[0-9]+)\.tmp$/;
-/** In terms/: `<terminal id>.sock` (a socket) and `.pid` (a file). */
-const TERMS_ENTRY = /^[0-9a-f]{12}\.(sock|pid)$/;
-/** The keeper's `.<id>.<pid>.tmp` and Files.writeText's `.<id>.pid.<12 hex>.tmp`. */
-const TERMS_TEMP = /^\.[0-9a-f]{12}(?:\.pid)?\.(?:[0-9a-f]{12}|[0-9]+)\.tmp$/;
-
-/** The kinds an entry of a runtime directory may have; null for a name it does not hold. */
-function runtimeKinds(name: string): readonly Kind[] | null {
-  const kind = Object.hasOwn(RUNTIME_ENTRIES, name) ? RUNTIME_ENTRIES[name] : undefined;
-  if (kind !== undefined) return [kind];
-  if (KEEPER_CODE.test(name)) return ['file'];
-  if (RUNTIME_TEMP.test(name)) return ['file', 'symlink'];
-  return null;
-}
-
-function termsKinds(name: string): readonly Kind[] | null {
-  const entry = TERMS_ENTRY.exec(name);
-  if (entry !== null) return [entry[1] === 'sock' ? 'other' : 'file'];
-  return TERMS_TEMP.test(name) ? ['file'] : null;
-}
+const PLACE_VARIABLES = [
+  'HOME',
+  'SKYDECK_HOME',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_RUNTIME_DIR',
+] as const;
 
 /**
- * Removes a runtime directory only when it is a plain path (no `.` or `..`), a directory of the
- * user's that is not a symbolic link, holding nothing but what a runtime directory holds, each of
- * its kind: the store's record is only a path, and nothing of the user's is destroyed (A38,
- * principle 6); otherwise it is left alone and named. A look that fails refuses this directory's
- * removal: the reason is returned for the command's last line (ruled), and the purge goes on.
+ * Design 9.1 (D26) ignores a place variable that is empty or not absolute, so `SKYDECK_HOME=sandbox
+ * skydeck uninstall --purge` would purge the installation found without it: most likely the real
+ * one. HOME is not ignored but taken as it is, so an empty or relative one puts every place under
+ * the working directory. Before anything is done, `--purge` refuses while one of them is set but
+ * empty or not absolute, each named with what it would do.
  */
-function removeRuntimeDir(ctx: Context, platform: Platform, dir: string): string | null {
-  const { files } = platform;
-  let foreign: string | null = null;
-  try {
-    const info = resolve(dir) === dir ? files.lstat(dir) : undefined;
-    if (info === undefined) {
-      foreign = 'is not a plain path (a . or .. in it)';
-    } else if (info === null) {
-      return null;
-    } else if (info.kind !== 'dir') {
-      foreign = info.kind === 'symlink' ? 'is a symbolic link' : 'is not a directory';
-    } else if (info.uid !== platform.uid) {
-      foreign = `belongs to uid ${info.uid}`;
-    } else {
-      const other = foreignEntry(files, dir);
-      foreign = other === null ? null : `holds ${other}, which skydeck did not write`;
-    }
-  } catch (error) {
-    return `${dir}: it cannot be looked at (${describeError(error)})`;
+function refuseOnUnusablePlaceVariables(env: Env): void {
+  const ignored = PLACE_VARIABLES.flatMap((name) => {
+    const value = env[name];
+    if (value === undefined || (value !== '' && isAbsolute(value))) return [];
+    const shown = `${name} is set to ${JSON.stringify(value)}`;
+    const why = value === '' ? 'empty' : 'not an absolute path';
+    // HOME is not ignored but taken as it is (os.homedir()): its clause says what that does.
+    return [
+      name === 'HOME'
+        ? `${shown} (${why}), which skydeck takes as it is, so every place would be relative to the working directory`
+        : `${shown} but ignored (${why}), so skydeck would find the installation it finds without it`,
+    ];
+  });
+  if (ignored.length > 0) {
+    throw new SkydeckError(
+      `${BEFORE}: ${ignored.join('; ')}; it does not purge the installation it would then find. ` +
+        'Unset the variable, or set it to an absolute path',
+    );
   }
-  if (foreign !== null) {
-    ctx.io.stdout(`left ${sanitize(dir)} alone: it ${sanitize(foreign)}\n`);
-    return null;
-  }
-  attempt(`cannot remove ${dir}`, () => files.removeTree(dir));
-  ctx.io.stdout(`removed ${sanitize(dir)}\n`);
-  return null;
-}
-
-/** The first entry that a runtime directory does not hold, or not of that kind (`terms/<name>` inside terms/). */
-function foreignEntry(files: Files, dir: string): string | null {
-  const odd = (path: string, kinds: readonly Kind[] | null): boolean => {
-    const kind = files.lstat(path)?.kind;
-    return kinds === null || (kind !== undefined && !kinds.includes(kind));
-  };
-  for (const name of files.list(dir)) {
-    if (odd(join(dir, name), runtimeKinds(name))) return name;
-  }
-  const terms = join(dir, 'terms');
-  if (files.lstat(terms)?.kind !== 'dir') return null;
-  for (const name of files.list(terms)) {
-    if (odd(join(terms, name), termsKinds(name))) return `terms/${name}`;
-  }
-  return null;
 }
 
 /** The settings first (they name the hook link), then the links; last, where the backups are. */
