@@ -1,0 +1,24 @@
+#!/bin/sh
+# The `skydeck` of a fixture app root (test/fixtures/fake-serve): `skydeck serve` as the tests of
+# src/window/lifecycle.ts and of doctor and uninstall see it. It runs ../fake-serve.ts with the
+# node SKYDECK_NODE names, and only inside a test sandbox (SKYDECK_TEST_NO_WINDOWS=1 and an
+# absolute SKYDECK_HOME): run by hand, it would answer for the user's real installation.
+if [ "${SKYDECK_TEST_NO_WINDOWS-}" != 1 ]; then
+  echo 'fake-serve: runs only inside a test sandbox' >&2
+  exit 2
+fi
+case ${SKYDECK_HOME-} in
+  /*) ;;
+  *)
+    echo 'fake-serve: runs only inside a test sandbox (SKYDECK_HOME)' >&2
+    exit 2
+    ;;
+esac
+case ${SKYDECK_NODE-} in
+  /*) ;;
+  *)
+    echo 'fake-serve: SKYDECK_NODE must name a node binary' >&2
+    exit 2
+    ;;
+esac
+exec "$SKYDECK_NODE" "${0%/*}/../fake-serve.ts" "$@"
