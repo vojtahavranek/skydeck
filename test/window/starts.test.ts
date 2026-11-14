@@ -10,7 +10,7 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import { refresh } from '../../src/sessions/refresh.ts';
-import { lockKey, prepareNew, readLock } from '../../src/sessions/resume.ts';
+import { lockKey, prepareNew, readLock, renewLock } from '../../src/sessions/resume.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import { startDeadline } from '../../src/sessions/launch.ts';
 import type { PreparedLaunch } from '../../src/sessions/resume.ts';
@@ -132,11 +132,30 @@ describe('decideFoundKeeper: a resume', () => {
     const d = testDeck(t);
     const { hello } = resumeLaunch(d);
     d.deck.store.setKv(lockKey(S1), `${T0 + SEC}:999`);
-    const replaced = decideFoundKeeper(d.deck, hello);
-    assert.equal(replaced.start, false);
-    assert.match(replaced.start ? '' : replaced.reason, /resume lock/);
+    assert.deepEqual(decideFoundKeeper(d.deck, hello), {
+      start: false,
+      reason: '0b5f3c1e: its resume lock was renewed or taken over',
+    });
     d.deck.store.deleteKv(lockKey(S1));
     assert.equal(decideFoundKeeper(d.deck, hello).start, false);
+  });
+
+  test('a renewed lock is not the hello’s either (ruled: the exact value; S2 7.3’s limit for restore)', (t) => {
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    d.clock.advanceMs(1000);
+    const renewed = renewLock(d.deck, S1, lock);
+    assert.ok(renewed !== null && renewed !== lock);
+    assert.deepEqual(decideFoundKeeper(d.deck, hello), {
+      start: false,
+      reason: '0b5f3c1e: its resume lock was renewed or taken over',
+    });
+    settleEndedTerminal(d.deck, hello);
+    assert.equal(
+      readLock(d.deck, S1),
+      renewed,
+      'settling leaves a lock that is not exactly the hello’s',
+    );
   });
 
   test('a hello without a lock skydeck wrote → not started', (t) => {

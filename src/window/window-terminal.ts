@@ -47,6 +47,12 @@ function notStartedText(exit: KeeperExit): string {
  * the program (T, also when it has exited since: a failed exec is a program that ran) → ok; an exit
  * without a program (X with notStarted, or a keeper lost before T) or a terminal forgotten → not
  * started; neither within START_MS → timed out. Followed through onChange, subscribed before G.
+ *
+ * Ruled by the plan owner (task 21, review 2): every failure after the spawn is answered with
+ * `timedOut: true`, so that step 1 shows no command to run by hand — the window never does. Where
+ * the program was not started the error says so and why ("not started: <reason>"); the terminal is
+ * listed with its exit, it offers Resume itself, and settleEndedTerminal gives back the lock and a
+ * new session's label and group (S2 7.8).
  */
 function startAndWait(deps: WindowTerminalDeps, id: string): Promise<OpenResult> {
   const { registry, platform } = deps;
@@ -68,12 +74,12 @@ function startAndWait(deps: WindowTerminalDeps, id: string): Promise<OpenResult>
         finish({
           ok: false,
           error: 'the terminal was closed before its program started',
-          timedOut: false,
+          timedOut: true,
         });
       } else if (term.program !== null) {
         finish({ ok: true });
       } else if (term.exit !== null) {
-        finish({ ok: false, error: notStartedText(term.exit), timedOut: false });
+        finish({ ok: false, error: notStartedText(term.exit), timedOut: true });
       }
     };
     off = registry.onChange(check);
@@ -92,10 +98,12 @@ function startAndWait(deps: WindowTerminalDeps, id: string): Promise<OpenResult>
 /**
  * One adapter per launch: `size` is the first size of S2 8.2.6. open() spawns a keeper with
  * programEnvironment(...), the next slot and meta (A28), sends G on a hello that arrives within
- * its 5-second wait, and resolves { ok: true } on T; { ok: false, timedOut: false, error } on X
- * with notStarted, on KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed', or a
- * keeper that ends before T; { ok: false, timedOut: true } on KeeperStartError 'no-hello' or no T
- * within 5 s after G. After open() has answered, it sends nothing: a hello that comes later is a
+ * its 5-second wait, and resolves { ok: true } on T; { ok: false, timedOut: false, error } on
+ * KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed' (no keeper runs); and, ruled
+ * by the plan owner (task 21, review 2: the window never shows a command to run by hand), { ok:
+ * false, timedOut: true, error } on KeeperStartError 'no-hello' or 'stopping' (the keeper may run),
+ * on X with notStarted or a keeper that ends before T ("not started: <reason>"), and on no T within
+ * 5 s after G. After open() has answered, it sends nothing: a hello that comes later is a
  * found keeper, and goes through decideFoundKeeper before any G (task 23 wires events.hello).
  *
  * A resume whose spec's lock is null or not a lock skydeck writes (`lockTakenNs` null) is
@@ -148,7 +156,10 @@ export function windowTerminal(
         await registry.spawn(keeperSpec);
       } catch (error) {
         if (error instanceof KeeperStartError) {
-          return { ok: false, error: error.message, timedOut: error.kind === 'no-hello' };
+          // Ruled (M1): once the keeper was started and is not known to have ended, the answer
+          // is a timeout — a hand-run claude could double the session.
+          const mayRun = error.kind === 'no-hello' || error.kind === 'stopping';
+          return { ok: false, error: error.message, timedOut: mayRun };
         }
         throw error;
       }

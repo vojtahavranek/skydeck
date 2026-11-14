@@ -40,7 +40,10 @@ function runningText(session: DerivedSession): string {
  * A resume (S2 7.3): the hello's lock must be one skydeck writes; then, on freshly refreshed rows
  * (prepareResumeById's refresh and lookup), checkResumable (it throws its refusal), and the
  * session's lock in the store must still be exactly the hello's — no other skydeck has taken it
- * over, and no refresh has swept it as stale.
+ * over, and no refresh has swept it as stale. Ruled by the plan owner (task 21, review 2): the exact
+ * value, also against a renewal — a renewal and a take-over of a stale lock with no new event have
+ * the same shape. Restore, the one renewer, does not reach a window terminal in stage A (S2 7.3's
+ * limit for the stage that brings it).
  */
 function resumeRefusal(deck: Deck, hello: KeeperHello): string | null {
   const { sessionId } = hello.meta;
@@ -54,7 +57,7 @@ function resumeRefusal(deck: Deck, hello: KeeperHello): string | null {
   }
   checkResumable(row, deck.platform.files);
   if (readLock(deck, sessionId) !== hello.lock) {
-    return `${short(sessionId)}: its resume lock is no longer this terminal's (another skydeck may have resumed it)`;
+    return `${short(sessionId)}: its resume lock was renewed or taken over`;
   }
   return null;
 }
@@ -116,9 +119,12 @@ export function decideFoundKeeper(
  * release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote
  * (only while it is unchanged since: its update time is still its creation time).
  *
- * A resume whose hello carries no lock skydeck wrote took none: nothing is released. Unlike
- * settleFailedLaunch this does not depend on a printed command: nothing was printed for the user to
- * run, and the ended terminal offers Resume itself (S2 7.8). Throws what the store throws.
+ * For every exit of a terminal, started or not (ruled by the plan owner, task 21, review 2: what
+ * the exit and the store say decide, not `hello.started`, which a hello from before T has false).
+ * A resume whose hello carries no lock skydeck wrote took none: nothing is released; a lock that is
+ * no longer exactly the hello's (taken over, or renewed: S2 7.8's limit) is left alone. Unlike
+ * settleFailedLaunch this does not depend on a printed command: the window shows none (S2 11.2,
+ * ruled), and the ended terminal offers Resume itself (S2 7.8). Throws what the store throws.
  */
 export function settleEndedTerminal(deck: Deck, hello: KeeperHello): void {
   ingestSpool(deck);

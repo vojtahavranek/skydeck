@@ -3,7 +3,7 @@
 // label and group, and starts that fail or time out. Platform: realTestPlatform with a deck (the
 // window-deck helper); real keepers through a registry; the stand-in as claudeCommand.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -17,6 +17,7 @@ import { runRestore } from '../../src/sessions/restore.ts';
 import { lockKey, prepareNew, readLock } from '../../src/sessions/resume.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import type { KeeperHello } from '../../src/window/frames.ts';
+import type { Terminal } from '../../src/terminals/types.ts';
 import type { Registry } from '../../src/window/terminals.ts';
 import { decideFoundKeeper, settleEndedTerminal } from '../../src/window/starts.ts';
 import { windowTerminal } from '../../src/window/window-terminal.ts';
@@ -61,12 +62,12 @@ function coreLimits(pid: number | 'self'): { soft: string; hard: string } {
   return { soft: fields[0] ?? '', hard: fields[1] ?? '' };
 }
 
-/** python3 that sleeps 7 s before it runs the real one: a keeper whose hello comes after 5 s. */
-function slowPython(w: WindowDeck): string {
+/** python3 that sleeps `seconds` (7: a hello after the 5 s wait) before it runs the real one. */
+function slowPython(w: WindowDeck, seconds = 7): string {
   const slow = join(w.s.root, 'slow-bin');
   mkdirSync(slow, { recursive: true });
   const script = join(slow, 'python3');
-  writeFileSync(script, `#!/bin/sh\nsleep 7\nexec ${join(w.s.bin, 'python3')} "$@"\n`);
+  writeFileSync(script, `#!/bin/sh\nsleep ${seconds}\nexec ${join(w.s.bin, 'python3')} "$@"\n`);
   chmodSync(script, 0o755);
   return `${slow}:${w.s.bin}`;
 }
@@ -344,7 +345,7 @@ describe('window terminal: starts that fail', () => {
     assert.deepEqual(r.registry.list(), []);
   });
 
-  test('a deadline already passed → the keeper refuses G: { ok: false, timedOut: false }, “not started: …”', async (t) => {
+  test('a deadline already passed → the keeper refuses G: “not started: …” as a timeout (ruled, S2): no command', async (t) => {
     const w = await windowDeck(t);
     w.resumable(S1);
     const r = w.registry();
@@ -357,13 +358,58 @@ describe('window terminal: starts that fail', () => {
     const result = await windowTerminal(deps, SIZE).open(spec);
     assert.deepEqual(result, {
       ok: false,
-      timedOut: false,
+      timedOut: true,
       error: 'not started: the start deadline passed',
     });
     assert.deepEqual(readRecords(record), [], 'nothing ran');
   });
 
-  test('a keeper that ends after its hello, before T → { ok: false, timedOut: false }', async (t) => {
+  test('not started (the deadline passed): no by-hand command for a resume or a new session; settling the exit then gives back the lock, the label and the group', async (t) => {
+    const w = await windowDeck(t);
+    w.resumable(S1);
+    const r = w.registry();
+    const { deps, record } = w.deps(r);
+    const past = w.tp.platform.clock.nowNs() - 1_000_000_000n;
+    const window = windowTerminal(deps, SIZE);
+    const tooLate: Terminal = {
+      ...window,
+      open: (spec) => window.open({ ...spec, startByNs: past }),
+    };
+
+    const outcome = await launchPrepared(w.deck, prepareResumeById(w.deck, S1), tooLate);
+    assert.equal(outcome.code, 1);
+    assert.ok(
+      outcome.lines.includes('skydeck: not started: the start deadline passed'),
+      outcome.lines.join('\n'),
+    );
+    assert.equal(
+      outcome.lines.some((line) => line.includes('to start it yourself')),
+      false,
+    );
+    assert.notEqual(readLock(w.deck, S1), null, 'kept until the exit is settled');
+    const id = opened(r, S1);
+    await until(() => info(r.registry, id).state === 'not-started', 'not started', 10_000);
+    settleEndedTerminal(w.deck, helloOf(r, id));
+    assert.equal(readLock(w.deck, S1), null);
+
+    const dir = join(w.s.home, 'new one');
+    mkdirSync(dir);
+    const prepared = prepareNew(w.deck, { dir, label: 'try', group: 'ops', extra: [] });
+    const fresh = await launchPrepared(w.deck, prepared, tooLate);
+    assert.equal(fresh.code, 1);
+    assert.equal(
+      fresh.lines.some((line) => line.includes('to start it yourself')),
+      false,
+    );
+    assert.ok(w.deck.store.meta(prepared.sessionId), 'kept until the exit is settled');
+    const newId = opened(r, prepared.sessionId);
+    await until(() => info(r.registry, newId).state === 'not-started', 'not started', 10_000);
+    settleEndedTerminal(w.deck, helloOf(r, newId));
+    assert.equal(w.deck.store.meta(prepared.sessionId), null);
+    assert.deepEqual(readRecords(record), [], 'nothing ran');
+  });
+
+  test('a keeper that ends after its hello, before T → “not started” as a timeout: no command; settling gives the lock back', async (t) => {
     const w = await windowDeck(t);
     w.resumable(S1);
     const r = w.registry();
@@ -375,12 +421,63 @@ describe('window terminal: starts that fail', () => {
         w.signalKeeper(w.keeperOf(termId), 'SIGKILL');
       },
     };
-    const prepared = prepareResumeById(w.deck, S1);
-    const result = await windowTerminal({ ...deps, registry }, SIZE).open(
-      launchSpec(prepared, readLock(w.deck, S1)),
+    const outcome = await launchPrepared(
+      w.deck,
+      prepareResumeById(w.deck, S1),
+      windowTerminal({ ...deps, registry }, SIZE),
     );
-    assert.equal(result.ok, false);
-    assert.equal(result.ok ? null : result.timedOut, false);
+    assert.equal(outcome.code, 1);
+    assert.ok(
+      outcome.lines.includes('skydeck: not started: the keeper ended before the program started'),
+      outcome.lines.join('\n'),
+    );
+    assert.equal(
+      outcome.lines.some((line) => line.includes('to start it yourself')),
+      false,
+    );
+    const id = opened(r);
+    assert.equal(info(r.registry, id).state, 'lost');
+    settleEndedTerminal(w.deck, helloOf(r, id));
+    assert.equal(readLock(w.deck, S1), null);
+    assert.deepEqual(readRecords(record), []);
+  });
+
+  test('the server stopping while the keeper starts → timedOut: true, no command, the lock kept; a later server finds the keeper (ruled, M1)', async (t) => {
+    const w = await windowDeck(t);
+    w.resumable(S1);
+    const path = slowPython(w, 2);
+    const r = w.registry({
+      platform: { ...w.tp.platform, env: { ...w.tp.platform.env, PATH: path } },
+    });
+    const { deps, record } = w.deps(r);
+    const prepared = prepareResumeById(w.deck, S1);
+    const lock = readLock(w.deck, S1);
+    const launching = launchPrepared(w.deck, prepared, windowTerminal(deps, SIZE));
+    await sleep(300);
+    await r.registry.stopAll(); // skydeck window --restart while the keeper's python3 starts
+    const outcome = await launching;
+    assert.equal(outcome.code, 1);
+    assert.equal(
+      outcome.lines.at(-1),
+      `skydeck: run skydeck again to see whether session ${S1} is running`,
+    );
+    assert.equal(
+      outcome.lines.some((line) => line.includes('to start it yourself')),
+      false,
+    );
+    assert.equal(readLock(w.deck, S1), lock);
+    // The keeper it spawned lives on, unstarted: the next server finds it (and runs the guard).
+    await until(
+      () => readdirSync(w.termsDir).some((name) => name.endsWith('.pid')),
+      'the keeper came up',
+      10_000,
+    );
+    const later = w.registry();
+    await later.registry.rediscover();
+    const found = later.events.hello.find((e) => e.origin === 'found');
+    assert.ok(found, 'found by the next server');
+    assert.equal(found.hello.started, false);
+    assert.equal(found.hello.lock, lock);
     assert.deepEqual(readRecords(record), []);
   });
 
