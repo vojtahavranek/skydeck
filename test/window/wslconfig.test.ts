@@ -33,7 +33,9 @@ test('the key in another section, or before any section, is not read', () => {
 
 test('a [general] section after another one is read', () => {
   assert.equal(
-    instanceIdleTimeout('[wsl2]\nmemory=8GB\nvmIdleTimeout=-1\n[general]\ninstanceIdleTimeout=-1\n'),
+    instanceIdleTimeout(
+      '[wsl2]\nmemory=8GB\nvmIdleTimeout=-1\n[general]\ninstanceIdleTimeout=-1\n',
+    ),
     -1,
   );
 });
@@ -81,7 +83,9 @@ test('the last occurrence in [general] wins, as WSL reads the file from the top'
     60000,
   );
   assert.equal(
-    instanceIdleTimeout('[general]\ninstanceIdleTimeout=60000\n[wsl2]\n[general]\ninstanceIdleTimeout=-1\n'),
+    instanceIdleTimeout(
+      '[general]\ninstanceIdleTimeout=60000\n[wsl2]\n[general]\ninstanceIdleTimeout=-1\n',
+    ),
     -1,
   );
   assert.equal(
