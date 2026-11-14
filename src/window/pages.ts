@@ -10,8 +10,9 @@
  * with `Allow: GET`, a path other than `/ws` (the query ignored) 404, then an Origin other than
  * `http://127.0.0.1:<port>` (for port 80 also `http://127.0.0.1`) 403. Each refusal carries the
  * headers of every answer (`securityHeaders`) and `Cache-Control: no-store`. Once `bye` has run,
- * an upgrade with the right Host is answered 503 (a wrong Host still 421). What Node.js answers before any listener (a request without Host, an
- * unknown method, headers above 16 KiB …) stays Node.js's own (ruled, task 17; S2 8.2.1).
+ * an upgrade with the right Host is answered 503 (a wrong Host still 421). What Node.js answers
+ * before any listener (a request without Host, an unknown method, headers above 16 KiB …) stays
+ * Node.js's own (ruled, task 17; S2 8.2.1).
  *
  * The handshake (S2 8.2.2). A proof is checked only through `auth.ts` (ruled, task 11): mode `key`
  * with `keyProofMatches`, mode `launch` with `tokens.check`, never by a comparison of its own; the
