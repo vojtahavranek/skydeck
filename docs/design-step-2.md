@@ -1257,9 +1257,10 @@ snap is left out because one screen can be that large: 5,000 lines of image-like
 cell its own colours) give a snap of about 40 MiB at 200 columns and 60 MiB at 300 (measured
 with the screen side, 7.2), and counting it would make such a screen a reconnect loop; a page
 that lets snap after snap pile up without reading is still cut. The snaps of several terminals
-attached at the same moment count, all but the latest, so a page that attached about nine of the
-densest screens at once would be cut: the page therefore attaches its visible terminal first and
-the others one at a time, each after the previous `snap` has arrived (a named limit). These rules
+attached at the same moment count, all but the latest, so a page that attached about nine screens
+of 7.5 MiB, or three of the image-like ones of 40–60 MiB, at once would be cut: the page therefore
+attaches its visible terminal first and the others one at a time, each after the previous `snap`
+has arrived (a named limit). These rules
 were ruled in plan task 17. A page attaches only to terminals it shows or has shown recently
 (12.6), so a hidden terminal costs nothing.
 
