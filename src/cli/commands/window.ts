@@ -4,6 +4,8 @@
 // waits for a page to use it (S2 8.2.2): only then does it say that the window is open. Only one
 // command starts Edge at a time: it holds `kv` `window_launching` while it starts Edge and waits.
 //
+// Standard output carries the command's one result line; every other line (the restart, the
+// earlier alarm, a failure) goes to standard error with the `skydeck: ` prefix (ruled, task 25).
 // Every line that carries foreign text — the checkout a ping names, a path from server.json or the
 // configuration (`window.edge`) — is sanitised before it is printed. No line carries a key or a
 // launch token, but the address `--print-url` is asked for.
@@ -276,8 +278,9 @@ async function serverToUse(
   if (found.kind !== 'none') {
     // A hung server would only make the command wait out the client's 5 s once more.
     if (found.kind !== 'hung') pagesBefore = await pagesOf(deck);
-    ctx.io.stdout(
-      `restarting the window's server for the new build; new sessions in the window get the environment of this shell (${sanitize(platform.cwd)})\n`,
+    // A diagnostic line, so on standard error: standard output has the one result line (ruled).
+    ctx.io.stderr(
+      `skydeck: restarting the window's server for the new build; new sessions in the window get the environment of this shell (${sanitize(platform.cwd)})\n`,
     );
     await stopServer(deck, times);
   }

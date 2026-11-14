@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parentPidFromStat } from '../../../src/claude/procstat.ts';
 import { realPlatform } from '../../../src/platform/real.ts';
-import type { Detached, Net, Platform, Processes } from '../../../src/platform/types.ts';
+import type { Detached, Net, Platform, Proc, Processes } from '../../../src/platform/types.ts';
 import { controlClient } from '../../../src/window/client.ts';
 import type { ControlClient } from '../../../src/window/client.ts';
 import { stopServer } from '../../../src/window/lifecycle.ts';
@@ -118,6 +118,8 @@ interface RunOptions {
   times?: WindowTimes;
   /** The checkout the command runs from (default: this repository). */
   appRoot?: string;
+  /** Changes the command's /proc (to make a process one that cannot be judged). */
+  proc?: (proc: Proc) => Proc;
 }
 
 interface Harness {
@@ -329,6 +331,7 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
         processes,
         net,
         appRoot: options.appRoot ?? d.platform.appRoot,
+        proc: options.proc?.(d.platform.proc) ?? d.platform.proc,
       };
       const before = requests.length;
       const startedAt = performance.now();
@@ -471,6 +474,11 @@ async function keyPage(t: TestContext, h: Harness): Promise<void> {
       ws.terminate();
     });
   }
+}
+
+/** S2 5.1's restart line, on standard error (ruled, task 25: standard output has the result only). */
+function restartLine(h: Harness): string {
+  return `skydeck: restarting the window's server for the new build; new sessions in the window get the environment of this shell (${h.project})\n`;
 }
 
 const SUCCESS = /^skydeck window: http:\/\/127\.0\.0\.1:([0-9]+)\/ \(server pid ([0-9]+)\)\n$/;
@@ -791,10 +799,10 @@ describe('skydeck window: a server running (S2 5.1, 14)', () => {
     });
 
     assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stderr, restartLine(h));
     assert.equal(
       r.stdout,
-      `restarting the window's server for the new build; new sessions in the window get the environment of this shell (${h.project})\n` +
-        'skydeck window: a window is already open\n',
+      'skydeck window: a window is already open\n',
       'the window that was open came back: no second one (ruled, task 25)',
     );
     assert.equal((await back).outcome, 'welcome');
@@ -859,12 +867,8 @@ describe('skydeck window --restart, --stop, --new-secret (S2 5.1, 5.5)', () => {
     const r = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' } });
 
     assert.equal(r.code, 0, r.stderr);
-    const lines = r.stdout.split('\n');
-    assert.equal(
-      lines[0],
-      `restarting the window's server for the new build; new sessions in the window get the environment of this shell (${h.project})`,
-    );
-    assert.match(`${lines[1]}\n`, SUCCESS);
+    assert.equal(r.stderr, restartLine(h));
+    assert.match(r.stdout, SUCCESS);
     const now = h.server();
     assert.ok(now !== null);
     assert.notEqual(now.pid, old.pid, 'a new server');
@@ -952,6 +956,7 @@ describe('--restart replaces any server (S2 5.1)', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, SUCCESS);
+    assert.equal(r.stderr, '', 'no restart line');
     assert.equal(h.edgeRuns().length, 1);
   });
 
@@ -966,9 +971,8 @@ describe('--restart replaces any server (S2 5.1)', () => {
     });
 
     assert.equal(r.code, 0, r.stderr);
-    const lines = r.stdout.split('\n');
-    assert.match(lines[0] ?? '', /^restarting the window's server /);
-    assert.match(`${lines[1]}\n`, SUCCESS);
+    assert.equal(r.stderr, restartLine(h));
+    assert.match(r.stdout, SUCCESS);
     await exited;
     assert.deepEqual(h.signals, [{ pid: fake.pid, signal: 'SIGTERM' }]);
     assert.notEqual(h.server()?.pid, fake.pid);
@@ -984,7 +988,8 @@ describe('--restart replaces any server (S2 5.1)', () => {
     const r = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' } });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout.split('\n')[0] ?? '', /^restarting the window's server /);
+    assert.equal(r.stderr, restartLine(h));
+    assert.match(r.stdout, SUCCESS);
     await exited;
     assert.deepEqual(h.signals, [], 'it stopped on POST /shutdown');
     assert.equal(h.server()?.checkout, REPOSITORY);
@@ -1006,10 +1011,8 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(
-      r.stdout.split('\n').slice(1).join('\n'),
-      'skydeck window: a window is already open\n',
-    );
+    assert.equal(r.stderr, restartLine(h));
+    assert.equal(r.stdout, 'skydeck window: a window is already open\n');
     assert.equal((await back).outcome, 'welcome');
     assert.deepEqual(tokensAsked(r), [], 'no token minted');
     assert.equal(h.edgeRuns().length, 1, 'Edge not started again');
@@ -1026,7 +1029,7 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout.split('\n')[1] ?? '', /^skydeck window: http:/);
+    assert.match(r.stdout, SUCCESS);
     assert.ok(r.ms >= 3000, `waited for the page to come back (${r.ms} ms)`);
     assert.equal(tokensAsked(r).length, 1);
     assert.equal(h.edgeRuns().length, 2);
@@ -1054,7 +1057,7 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
 
     const printed = await h.run(['--restart', '--print-url'], { times });
     assert.equal(printed.code, 0, printed.stderr);
-    assert.match(printed.stdout.split('\n')[1] ?? '', /^http:\/\/127\.0\.0\.1:[0-9]+\/#t=/);
+    assert.match(printed.stdout, /^http:\/\/127\.0\.0\.1:[0-9]+\/#t=[A-Za-z0-9_-]{43}\n$/);
     assert.ok(printed.ms < 30_000, `--print-url: no wait (${printed.ms} ms)`);
 
     await keyPage(t, h);
@@ -1203,6 +1206,61 @@ describe('window_launching (S2 5.1: one command starts Edge at a time)', () => {
     assert.match(r.stdout, SUCCESS);
     assert.ok(r.ms >= 2000, `it waited for the lock (${r.ms} ms)`);
     assert.equal(h.edgeRuns().length, 1);
+  });
+
+  test('held by a command that cannot be judged (its /proc entry unreadable): it holds the lock until stale, nothing taken over on it', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run(['--print-url']);
+    assert.equal(first.code, 0, first.stderr);
+    const live = await h.liveProcess();
+    h.d.deck.store.setKv('window_launching', launchingValue(h, live, h.d.platform.clock.nowNs()));
+    const unreadable = (proc: Proc): Proc => ({
+      ...proc,
+      stat: (pid) => {
+        if (pid === live.pid) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+        return proc.stat(pid);
+      },
+    });
+    assert.equal(
+      pidLineState(
+        { pid: live.pid, procStart: live.procStart, bootId: h.d.platform.proc.bootId() ?? '' },
+        unreadable(h.d.platform.proc),
+        h.d.platform.proc.bootId(),
+      ),
+      'unknown',
+    );
+    live.child.kill('SIGKILL'); // dead in fact: only the unreadable entry keeps it "unknown"
+    await once(live.child, 'exit');
+
+    const r = await h.run([], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { launchingMs: 2500 },
+      proc: unreadable,
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.ms >= 2000, `held until stale (${r.ms} ms)`);
+    assert.equal(h.edgeRuns().length, 1);
+  });
+
+  test('a command releases only its own value: one taken over meanwhile is left as it is', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run(['--print-url']);
+    assert.equal(first.code, 0, first.stderr);
+    const live = await h.liveProcess();
+
+    // The fake Edge only records: the command holds the lock for its whole page wait.
+    const pending = h.run([], { times: { launchingMs: 1000, pageMs: 4000 } });
+    await until(() => h.edgeRuns().length === 1, 'Edge started', WAIT_MS);
+    const own = h.d.deck.store.getKv('window_launching');
+    assert.ok(own !== null, 'the command holds the lock');
+    await sleep(1200); // stale now: another command may take it over
+    const other = launchingValue(h, live, h.d.platform.clock.nowNs());
+    h.d.deck.store.setKv('window_launching', other);
+    const r = await pending;
+
+    assert.equal(r.code, 1, 'no page came');
+    assert.equal(h.d.deck.store.getKv('window_launching'), other, 'the other one is left');
   });
 
   test('a value that does not parse holds nothing', async (t) => {

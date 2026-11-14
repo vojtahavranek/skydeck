@@ -273,10 +273,20 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    <time>; run skydeck window --new-secret`. Only one command starts Edge at a time: it
    holds the `kv` entry `window_launching` (taken in one transaction, stale after 45 seconds, longer than its wait) while
    it starts Edge and waits; a second `skydeck window` meanwhile waits for that one's page instead
-   of starting another window.
+   of starting another window. The entry names its holder — a mark of its own, the time, and the
+   command's pid, process start and boot id — and holds nothing once that command is dead by
+   design 5.5's rule, so that a command interrupted while it waited (Ctrl+C) does not make the next
+   one wait for a page that never comes; a holder that cannot be judged counts as alive, and holds
+   the 45 seconds. A command gives up only the value it wrote itself (ruled by the plan owner,
+   stage A's plan task 25).
 3. prints one line: `skydeck window: http://127.0.0.1:<port>/ (server pid <n>)` — never a key or a
    token — and exits 0. When Edge was started but no page connected in time it says so, names
    `--print-url`, and exits 1.
+
+Standard output carries only the command's one result line (this one, `a window is already open`,
+the address of `--print-url`, the line of `--stop`); every other line — the restart line, the
+earlier alarm, a failure — is printed on standard error with the `skydeck: ` prefix of every
+diagnostic line of skydeck (ruled by the plan owner, stage A's plan task 25).
 
 After a restart (`--restart`, or a server of another build replaced in step 1) the windows of the
 old server come back only once the new server's start is done (8.2.1 answers 503 until then; the
