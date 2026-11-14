@@ -192,6 +192,23 @@ test('a candidate that leads through the link never makes the link point at itse
   assert.equal(s.linkTarget(), null);
 });
 
+test("a socket that is not skydeck's at the link's own path is never replaced by a link to itself", async (t) => {
+  const s = setup(t);
+  const stranger = await s.platform.net.listenHttp(
+    { path: s.files.interop },
+    {
+      request: (_req, res) => {
+        res.end();
+      },
+    },
+  );
+  t.after(() => stranger.close());
+  const platform = { ...s.platform, env: { ...s.platform.env, WSL_INTEROP: s.files.interop } };
+  const interop = createInteropFrom(platform, s.files, s.path('missing'));
+  assert.equal(await interop.refresh(), null);
+  assert.equal(lstatSync(s.files.interop).isSocket(), true); // left as it was: not a link of ours
+});
+
 test('the link is not written again while it points where it should', async (t) => {
   const s = setup(t);
   const a = await s.listen('first');
@@ -230,8 +247,8 @@ test('two refreshes at once make one pass over the candidates', async (t) => {
 });
 
 test("createInterop tries S2 6.4's order: /run/WSL/1_interop, keepalive.interop, the server's own", async (t) => {
-  // Nothing real is reached: the sockets refuse every connection without trying one, and the
-  // paths under /run/WSL are never looked up on this machine.
+  // Nothing real is reached: the sockets refuse every connection without trying one, realpath
+  // answers a path under /run/WSL with itself, and every other use of such a path throws.
   const s = setup(t, { WSL_INTEROP: '/run/WSL/88_interop' });
   keepAliveSays(s, '/run/WSL/99_interop');
   const tried: string[] = [];
@@ -242,10 +259,20 @@ test("createInterop tries S2 6.4's order: /run/WSL/1_interop, keepalive.interop,
       return Promise.reject(Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }));
     },
   };
-  const files: Files = {
-    ...s.platform.files,
-    realpath: (path) => (path.startsWith('/run/WSL/') ? path : s.platform.files.realpath(path)),
-  };
+  const real = s.platform.files as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const files = Object.fromEntries(
+    Object.entries(real).map(([name, method]) => [
+      name,
+      (...args: unknown[]) => {
+        const wsl = args.find((arg) => typeof arg === 'string' && arg.startsWith('/run/WSL/'));
+        if (wsl !== undefined) {
+          if (name === 'realpath') return wsl;
+          throw new Error(`the test reached ${String(wsl)} through ${name}`);
+        }
+        return method(...args);
+      },
+    ]),
+  ) as unknown as Files;
   const interop = createInterop({ ...s.platform, net, files }, s.files);
   assert.equal(await interop.refresh(), null);
   assert.deepEqual(tried, ['/run/WSL/1_interop', '/run/WSL/99_interop', '/run/WSL/88_interop']);
