@@ -2122,9 +2122,11 @@ running server as they are. One look can only come after the server's stop — a
 was starting as it stopped — and it refuses only the purge: the uninstall is then done, the data
 stays, and the command says exactly that (`skydeck is uninstalled, but --purge removed no
 directory: …`, exit 1). Otherwise it also removes every one of those directories that exists —
-one that is a symbolic link, is another user's or holds anything a runtime directory does not
-(4.2) is left alone and named (`left <dir> alone: it …`), since the store's record is only a path
-and nothing of the user's is destroyed (2, principle 6).
+one that is not a plain path (a trailing `/`, a `.` or `..`, which would be followed through a
+symbolic link), is a symbolic link, is another user's, holds anything a runtime directory does not
+(4.2) or an entry of another kind than skydeck writes there, or cannot be looked at, is left alone
+and named (`left <dir> alone: it …`), and the purge goes on, since the store's record is only a
+path and nothing of the user's is destroyed (2, principle 6).
 
 ### 16.3 Doctor
 
@@ -2141,7 +2143,7 @@ are problems.
 | server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, is alive but does not answer, or answers `GET /ping` but not `GET /status`. |
 | port | something that is not this installation's server answers on `127.0.0.1:<window.port>`: `/proc/net/tcp` or `tcp6` lists a listener on that port and no server of this installation is alive: one that answers `GET /ping` holds it, and while one is alive but does not answer, or cannot be judged, the port is most likely its own (`info`; the server's own line is the problem). `doctor` never binds the port, not even for an instant (a server starting at that moment would exit 10), and sends nothing to a foreign program. |
 | launch alarm | `window_alarm` is set: a launch token was presented twice at <time>, so another program may have skydeck's key (8.2.2); `run skydeck window --new-secret`. |
-| keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. |
+| keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. Whether the keep-alive runs is the server's word when it answers; otherwise `doctor` judges it as the server judges one it did not start (6.1): its `keepalive.pid` line (one that cannot be read or judged is "cannot be told", never "not running"), and one connection, sending nothing, to the socket `keepalive.interop` names (refused or gone: its `wsl.exe` is gone; never a socket inside the runtime directory). |
 | interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. |
 | C: drive | the C: drive is not mounted at `/mnt/c`, where all of the window expects it (Edge's working directory, the keep-alive's `wsl.exe`, the users' folders of 5.4). |
 | Edge | `window.edge` does not exist or is not a file (`info` when the window has never been used). |
