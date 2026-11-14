@@ -80,14 +80,29 @@ function setTip(target, tip) {
 /**
  * One row's elements, made once (S2 12.2): the state icon, then the first line — the slot, the
  * ticket key or the group, the title, the marks, the chip, ✎, the age — and the state line.
+ *
+ * A double click activates only when both its clicks were on this row: Chromium counts a double
+ * click by time and distance, not by element, so a list that moved the rows between the two
+ * clicks would otherwise resume a session the user clicked once (S2 12.6: nothing resumes but on
+ * purpose). Then they are two single clicks: each selects the row it landed on.
  * @param {string} id
  * @param {ListHooks} hooks
+ * @param {{ first: string | null }} clicks the row of the last click that began a sequence
  */
-function makeRow(id, hooks) {
+function makeRow(id, hooks, clicks) {
   const root = element('list-row', 'div');
   root.dataset.id = id;
-  root.addEventListener('click', () => hooks.select(id, 'click'));
-  root.addEventListener('dblclick', () => hooks.activate(id));
+  root.addEventListener('click', (event) => {
+    if (event.detail <= 1) {
+      clicks.first = id;
+    }
+    hooks.select(id, 'click');
+  });
+  root.addEventListener('dblclick', () => {
+    if (clicks.first === id) {
+      hooks.activate(id);
+    }
+  });
   const icon = element('row-icon');
   const main = element('row-main');
   const first = element('row-line');
@@ -166,7 +181,8 @@ function makeHeader(name) {
  */
 export function createList(root, hooks) {
   // The filter (S2 12.8, stage A: design 7.4's): always there at the top, `/` gives it the
-  // keyboard; Enter gives the keyboard back to the list, Esc clears the filter.
+  // keyboard; Enter and Esc end the entry (Esc also clears it) and give the keyboard back to the
+  // list when they are released, so that their auto-repeats stay in the field and act on no row.
   const filterBar = element('list-filterbar', 'div');
   const filter = /** @type {HTMLInputElement} */ (element('list-filter', 'input'));
   filter.type = 'text';
@@ -176,21 +192,29 @@ export function createList(root, hooks) {
   filter.setAttribute('aria-label', 'Filter the list');
   filterBar.append(filter);
   filter.addEventListener('input', () => hooks.view({ filter: filter.value }));
+  /** The Enter or Esc that ended the entry, until it is released ('' when none). */
+  let leaving = '';
   filter.addEventListener('keydown', (event) => {
     if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
       return;
     }
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' || event.key === 'Enter') {
       event.preventDefault();
-      if (filter.value !== '') {
+      if (event.key === 'Escape' && filter.value !== '') {
         filter.value = '';
         hooks.view({ filter: '' });
       }
-      root.focus(); // the field keeps no keyboard of its own: back to the list
-    } else if (event.key === 'Enter') {
-      event.preventDefault();
-      root.focus();
+      leaving = event.key;
     }
+  });
+  filter.addEventListener('keyup', (event) => {
+    if (leaving !== '' && event.key === leaving) {
+      leaving = '';
+      root.focus(); // the field keeps no keyboard of its own: back to the list
+    }
+  });
+  filter.addEventListener('blur', () => {
+    leaving = '';
   });
 
   const body = element('list-body', 'div');
@@ -211,6 +235,28 @@ export function createList(root, hooks) {
   let showDone = false;
   /** When `current` arrived (performance.now()), to count its ages on (A18). */
   let receivedAt = 0;
+  /** The section the selected row was drawn in, to scroll to it when it moves to another. */
+  let selectedSection = '';
+  /** The row of the last click that began a click sequence (makeRow: double clicks). */
+  const clicks = { first: /** @type {string | null} */ (null) };
+  /**
+   * An Enter of the list's is down and not yet released. app.js hands the list its action, not
+   * the event, so the list tells an auto-repeated Enter from a press by the release: a held Enter
+   * resumes once, its repeats nothing (review 2).
+   */
+  let enterDown = false;
+  addEventListener(
+    'keyup',
+    (event) => {
+      if (event.key === 'Enter') {
+        enterDown = false;
+      }
+    },
+    true,
+  );
+  addEventListener('blur', () => {
+    enterDown = false;
+  });
 
   /** @type {Map<string, RowElements>} */
   const rowElements = new Map();
@@ -266,7 +312,7 @@ export function createList(root, hooks) {
   const rowFor = (id) => {
     let row = rowElements.get(id);
     if (row === undefined) {
-      row = makeRow(id, hooks);
+      row = makeRow(id, hooks, clicks);
       rowElements.set(id, row);
     }
     return row;
@@ -337,6 +383,7 @@ export function createList(root, hooks) {
     const nothing = filtering && sections.every((section) => section.count === 0);
     /** @type {HTMLElement[]} */
     const lines = [];
+    let sectionNow = '';
     if (nothing) {
       lines.push(empty);
     }
@@ -356,6 +403,9 @@ export function createList(root, hooks) {
         const drawn = rowFor(row.id);
         paintRow(drawn, rowText(row, now, terminalOf(row)), row.done);
         setData(drawn.root, 'selected', String(row.id === selectedId));
+        if (row.id === selectedId) {
+          sectionNow = section.name;
+        }
         lines.push(drawn.root);
       }
     }
@@ -388,9 +438,13 @@ export function createList(root, hooks) {
     setText(footerAction, foot?.action ?? '');
     paintCounts();
 
-    if (moved && selectedId !== null) {
+    // The selected row is scrolled into view when the selection changed and when the row moved
+    // to another section (a resume brings it to Open); never for a move inside its section, so
+    // that a list that arrives does not pull the list back from where the user scrolled it.
+    if (selectedId !== null && (moved || sectionNow !== selectedSection)) {
       rowElements.get(selectedId)?.root.scrollIntoView({ block: 'nearest' });
     }
+    selectedSection = sectionNow;
   };
 
   const toggleDone = () => {
@@ -467,6 +521,10 @@ export function createList(root, hooks) {
         fold(false);
         return;
       case 'enter':
+        if (enterDown) {
+          return; // an auto-repeat of an Enter that is still down
+        }
+        enterDown = true;
         if (selected !== null && all.some((row) => row.id === selected)) {
           hooks.activate(selected);
         }

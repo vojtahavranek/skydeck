@@ -17,7 +17,7 @@ const ESCAPE_SEQUENCE =
   /(?:\x1b[\]PX^_]|[\u009d\u0090\u0098\u009e\u009f])[^]*?(?:\x07|\x1b\\|\u009c|$)|(?:\x1b\[|\u009b)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[^]?/gu;
 const LINE_BREAKS_AND_TABS = /[\t\n\r]/g;
 const CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
-const BIDIRECTIONAL_CONTROLS = /[‪-‮⁦-⁩]/g;
+const BIDIRECTIONAL_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/g;
 
 /**
  * Design 7.4's sanitiser, as src/text/sanitize.ts has it: escape sequences removed, each tab and
@@ -136,9 +136,20 @@ function levelWords(level) {
 }
 
 /**
- * Design 7.3's chip: the worst state among the attached pull requests and their count, in S2
- * 12.3's words (`PR · failing`, `3 PRs · failing`; `can't read` dotted); the tooltip names each
- * one with its own state (S2 12.3).
+ * The words of design 7.3's chip (the worst state among a row's attached pull requests and their
+ * count) in S2 12.3's words: `PR · failing` for one, `3 PRs · failing` for several. Exported so
+ * that the header (task 29) shows the same chip with the same words.
+ * @param {{ level: string, count: number }} chip a row's `chip`
+ * @returns {string}
+ */
+export function chipText(chip) {
+  const words = levelWords(chip.level);
+  return chip.count === 1 ? `PR · ${words}` : `${chip.count} PRs · ${words}`;
+}
+
+/**
+ * A row's chip: `chipText`, drawn dotted when it is `can't read` (S2 12.3); the tooltip names each
+ * attached pull request with its own state (S2 12.3).
  * @param {RowPayload} row
  * @returns {ChipText | null}
  */
@@ -146,8 +157,6 @@ function chipOf(row) {
   if (row.chip === null || typeof row.chip !== 'object') {
     return null;
   }
-  const { level, count } = row.chip;
-  const words = levelWords(level);
   const tip = (Array.isArray(row.prs) ? row.prs : [])
     .map((pr) =>
       [`${clean(pr.repo)} #${pr.number}`, levelWords(pr.level), clean(pr.error)]
@@ -155,11 +164,7 @@ function chipOf(row) {
         .join(' · '),
     )
     .join('\n');
-  return {
-    text: count === 1 ? `PR · ${words}` : `${count} PRs · ${words}`,
-    tip,
-    dotted: level === 'cant-read',
-  };
+  return { text: chipText(row.chip), tip, dotted: row.chip.level === 'cant-read' };
 }
 
 /** What may stand between a title's ticket key and the rest of it. */

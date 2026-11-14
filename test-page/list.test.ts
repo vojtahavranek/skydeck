@@ -210,6 +210,36 @@ async function healthy(page: Page, problems: readonly string[]): Promise<void> {
   assert.ok(hooks.selected <= 1, 'data-selected on one row at most');
 }
 
+/**
+ * Whether the selected row can be seen whole: inside the list's body, below the pinned section
+ * header, and the element at its centre is the row itself (nothing drawn over it).
+ */
+async function selectedInView(page: Page): Promise<string> {
+  return readPage(
+    page,
+    () => {
+      const row = document.querySelector('#list [data-selected="true"]');
+      const body = document.querySelector('#list .list-body');
+      if (!(row instanceof HTMLElement) || body === null) return 'no selected row';
+      const r = row.getBoundingClientRect();
+      const b = body.getBoundingClientRect();
+      const header = [...document.querySelectorAll('#list .list-section')]
+        .map((element) => element.getBoundingClientRect())
+        .filter((box) => box.top <= b.top + 1 && box.bottom > b.top)
+        .at(0);
+      const top = Math.max(b.top, header?.bottom ?? b.top);
+      const atCentre = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (r.top < top - 1 || r.bottom > b.bottom + 1) {
+        return `row ${r.top}–${r.bottom}, visible ${top}–${b.bottom}`;
+      }
+      return atCentre !== null && row.contains(atCentre)
+        ? 'in view'
+        : `covered by ${atCentre?.className ?? 'nothing'}`;
+    },
+    null,
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // A scripted stand-in server
 
@@ -813,6 +843,88 @@ test('the list', async (t) => {
   );
 
   await t.test(
+    'a double click whose two clicks land on different rows (a list moved the rows between them) resumes nothing: it is two single clicks',
+    async (t) => {
+      const week = [fullRow(S2), fullRow(S3)];
+      let current = fullList({ week });
+      const s = await scripted(t, chromium, () => current, 40);
+      await untilDrawn(s.page, (rows) => rows.length === 2, 'two rows');
+      const box = await s.page.locator(`#list [data-id="${S3}"]`).boundingBox();
+      assert.ok(box !== null);
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+
+      await s.page.mouse.click(x, y); // the first click, on S3
+      await s.page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S3,
+      );
+      await sleep(300); // its view's list has landed
+      // A newer session joins This week at its top: every row below moves down one place, and
+      // S2 (not running) is now under the pointer.
+      current = fullList({ week: [fullRow(S4, { lastActivityNs: ago(SEC) }), ...week] });
+      s.send(current);
+      await untilDrawn(s.page, (rows) => rows.length === 3, 'a row joined');
+      const under = await s.page.evaluate(
+        ({ x, y }) =>
+          document.elementFromPoint(x, y)?.closest('[data-id]')?.getAttribute('data-id'),
+        { x, y },
+      );
+      assert.equal(under, S2, 'another row is under the pointer now');
+      const before = s.sent.length;
+      // The second click of a double click, alone: Chromium makes it a dblclick by its count.
+      await s.page.mouse.down({ clickCount: 2 });
+      await s.page.mouse.up({ clickCount: 2 });
+      await sleep(500);
+      assert.deepEqual(
+        s.sent.slice(before).filter((message) => message['t'] === 'act'),
+        [],
+        'no resume',
+      );
+      assert.equal(await selectedRow(s.page), S2, 'the second click selected the row it landed on');
+    },
+  );
+
+  await t.test(
+    'a held Enter (auto-repeat) resumes nothing more: from the filter field nothing, on the list once; the next press acts again',
+    async (t) => {
+      const list = fullList({ week: [fullRow(S1), fullRow(S2)] });
+      const s = await scripted(t, chromium, () => list, 41);
+      await untilDrawn(s.page, (rows) => rows.length === 2, 'two rows');
+      const acts = (): Record<string, unknown>[] =>
+        s.sent.filter((message) => message['t'] === 'act');
+      await clickRow(s.page, S1);
+
+      // Held in the filter field: it ends the entry, and its repeats reach no row.
+      await s.page.keyboard.press('/');
+      await s.page.keyboard.type('sess');
+      await s.page.keyboard.down('Enter');
+      await s.page.keyboard.down('Enter'); // repeat: true
+      await s.page.keyboard.down('Enter');
+      await s.page.keyboard.up('Enter');
+      await sleep(500);
+      assert.deepEqual(acts(), [], 'nothing resumed from the field');
+      assert.equal(await active(s.page), '#list');
+
+      // Held on the list: one resume for the press, none for its repeats.
+      await s.page.keyboard.down('Enter');
+      await s.page.keyboard.down('Enter');
+      await s.page.keyboard.down('Enter');
+      await s.page.keyboard.up('Enter');
+      await until(() => acts().length > 0, 'an act', PAGE_WAIT_MS);
+      await sleep(500);
+      assert.deepEqual(
+        acts().map((act) => [act['kind'], act['sessionId']]),
+        [['resume', S1]],
+      );
+      // The next press is a press again.
+      await s.page.keyboard.press('Enter');
+      await until(() => acts().length > 1, 'a second act', PAGE_WAIT_MS);
+    },
+  );
+
+  await t.test(
     'a list that changes a row between the mousedown and the mouseup on its title loses no click',
     async (t) => {
       const quiet = fullList({ week: [fullRow(S1), fullRow(S2, { title: 'the second' })] });
@@ -903,12 +1015,125 @@ test('the list', async (t) => {
         return r.top >= b.top - 1 && r.bottom <= b.bottom + 1;
       });
       assert.ok(inView, 'the selected row is in view');
+      assert.equal(await selectedInView(s.page), 'in view');
       await s.page.keyboard.press('PageUp');
       await s.page.waitForFunction(
         (id) =>
           document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
         ids[0],
       );
+
+      // Up from the bottom of a long list: the selected row is never under the pinned header.
+      await s.page.keyboard.press('End');
+      for (let i = 0; i < 40; i++) {
+        await s.page.keyboard.press('ArrowUp');
+        const where = await selectedInView(s.page);
+        assert.equal(where, 'in view', `after ${i + 1} × ↑`);
+      }
+      await s.page.keyboard.press('End');
+      await s.page.keyboard.press('PageUp');
+      assert.equal(await selectedInView(s.page), 'in view', 'after PageUp');
+      await s.page.keyboard.press('PageUp');
+      assert.equal(await selectedInView(s.page), 'in view', 'after a second PageUp');
+    },
+  );
+
+  await t.test(
+    'a selected row that moves to another section is scrolled into view (Enter on a row deep in This week brings it to Open)',
+    async (t) => {
+      const ids = Array.from(
+        { length: 60 },
+        (_, i) => `${String(i).padStart(8, '0')}-0000-4000-8000-000000000000`,
+      );
+      const week = ids.map((id, i) => fullRow(id, { lastActivityNs: ago(BigInt(i + 1) * MIN) }));
+      let current = fullList({ week });
+      const s = await scripted(t, chromium, () => current, 38);
+      await untilDrawn(s.page, (rows) => rows.length === 60, 'sixty rows');
+      await toZone(s.page, 'list');
+      await s.page.keyboard.press('End');
+      const last = ids[59] ?? '';
+      await s.page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        last,
+      );
+      // Its terminal comes: the row is now the first under Open, at the top of the list.
+      current = fullList(
+        {
+          open: [fullRow(last, { state: 'running', sinceNs: ago(SEC), terminal: TERM_A, slot: 1 })],
+          week: week.slice(0, 59),
+        },
+        [fullTerminal(TERM_A, { slot: 1, sessionId: last })],
+      );
+      s.send(current);
+      await untilDrawn(s.page, (rows) => rows[0]?.id === last, 'the row under Open');
+      await sleep(200);
+      assert.equal(await selectedInView(s.page), 'in view');
+    },
+  );
+
+  await t.test(
+    'sections and rows in exactly the order the server sent them, the list keys following it; a new order is drawn as sent',
+    async (t) => {
+      let current = fullList({
+        open: [
+          fullRow(S4, {
+            state: 'working',
+            sinceNs: ago(MIN),
+            elsewhere: { pid: 4242, tty: null, dir: null },
+          }),
+        ],
+        // Neither in the order of the ids nor in the order of activity.
+        week: [
+          fullRow(S3, { lastActivityNs: ago(5n * DAY) }),
+          fullRow(S1, { lastActivityNs: ago(MIN) }),
+          fullRow(S2, { lastActivityNs: ago(3n * DAY) }),
+        ],
+      });
+      // The sections too: This week first, as no server sends them, and drawn as sent.
+      const sections = current['sections'] as SectionPayload[];
+      current = { ...current, sections: [sections[1], sections[0], sections[2]] };
+      const s = await scripted(t, chromium, () => current, 39);
+      await untilDrawn(s.page, (rows) => rows.length === 4, 'four rows');
+      assert.deepEqual(await drawnIds(s.page), [S3, S1, S2, S4]);
+      assert.deepEqual(await headers(s.page), ['week This week 3', 'open Open 1']);
+      await toZone(s.page, 'list');
+      await s.page.keyboard.press('Home');
+      const order: (string | null)[] = [await selectedRow(s.page)];
+      for (let i = 0; i < 3; i++) {
+        const before = order.at(-1);
+        await s.page.keyboard.press('ArrowDown');
+        await s.page.waitForFunction(
+          (id) =>
+            document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') !== id,
+          before ?? null,
+          { timeout: PAGE_WAIT_MS },
+        );
+        order.push(await selectedRow(s.page));
+      }
+      assert.deepEqual(order, [S3, S1, S2, S4], '↓ follows the drawn order');
+
+      current = fullList({
+        open: [
+          fullRow(S4, {
+            state: 'working',
+            sinceNs: ago(MIN),
+            elsewhere: { pid: 4242, tty: null, dir: null },
+          }),
+        ],
+        week: [
+          fullRow(S2, { lastActivityNs: ago(3n * DAY) }),
+          fullRow(S3, { lastActivityNs: ago(5n * DAY) }),
+          fullRow(S1, { lastActivityNs: ago(MIN) }),
+        ],
+      });
+      s.send(current);
+      await untilDrawn(
+        s.page,
+        (rows) => rows.map((row) => row.id).join() === [S4, S2, S3, S1].join(),
+        'the new order',
+      );
+      assert.deepEqual(await headers(s.page), ['open Open 1', 'week This week 3']);
     },
   );
 

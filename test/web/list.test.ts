@@ -6,7 +6,14 @@ import { describe, test } from 'node:test';
 
 import { sanitize as serverSanitize } from '../../src/text/sanitize.ts';
 import type { RowPayload, SectionPayload, TerminalPayload } from '../../src/window/protocol.ts';
-import { countsText, footerText, rowText, sanitize, sectionText } from '../../web/list-text.js';
+import {
+  chipText,
+  countsText,
+  footerText,
+  rowText,
+  sanitize,
+  sectionText,
+} from '../../web/list-text.js';
 
 const SEC = 1_000_000_000n;
 const MIN = 60n * SEC;
@@ -283,6 +290,27 @@ describe("rowText: the chip (design 7.3's rule, S2 12.3's words)", () => {
   });
 });
 
+describe("chipText: the chip's words, for the row and for task 29's header", () => {
+  test('one pull request: "PR · <state>"; several: "<n> PRs · <the worst>"', () => {
+    assert.equal(chipText({ level: 'review-required', count: 1 }), 'PR · review');
+    assert.equal(chipText({ level: 'checks-failing', count: 3 }), '3 PRs · failing');
+    assert.equal(chipText({ level: 'cant-read', count: 2 }), "2 PRs · can't read");
+  });
+
+  test('a level the page does not know is shown as the server named it, sanitised', () => {
+    assert.equal(chipText({ level: 'later\x1b[31m-level', count: 1 }), 'PR · later-level');
+  });
+
+  test('exactly what a row shows for its chip', () => {
+    for (const level of ['cant-read', 'unfetched', 'draft', 'approved-green', 'merged', 'closed']) {
+      for (const count of [1, 2, 30]) {
+        const chip = { level, count };
+        assert.equal(chipText(chip), rowText(row({ chip, prs: [] }), now, null).chip?.text);
+      }
+    }
+  });
+});
+
 describe('rowText: the ticket key and the group (S2 12.2)', () => {
   test('a title that starts with its group: the key apart, the rest of the title after it', () => {
     const text = rowText(
@@ -375,7 +403,7 @@ describe("sanitize (web/list-text.js): the server's rule (src/text/sanitize.ts)"
     '\u009d0;c1 osc\u009c',
     'a\tb\nc\rd',
     '\x00\x01\x7f\u0085nul',
-    'bidi ‮evil‬ ⁦x⁩',
+    'bidi \u202eevil\u202c \u2066x\u2069',
     'trailing escape \x1b',
     'unfinished \x1b]0;never closed',
     '  spaces  kept  ',

@@ -95,6 +95,8 @@
   border-radius: 6px;
   cursor: pointer;
   user-select: none; /* a double click resumes; it selects no text */
+  /* Scrolled into view below the pinned section header, never under it (about its height). */
+  scroll-margin-top: 2.5em;
 }
 .list-row[data-lines='2'] {
   min-height: 42px;
