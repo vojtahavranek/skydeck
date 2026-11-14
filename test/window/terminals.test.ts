@@ -2,7 +2,7 @@
 // streams to sinks in order, the slot rule, input and its limit, the end of a program, starts that
 // fail. Platform: realTestPlatform; real keepers running the stand-in; G is sent by the test.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -438,34 +438,76 @@ describe('registry: slots and input', () => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const { spec, mirror } = await startStandin(box, r);
-    assert.equal(r.registry.input(spec.id, utf8('/stall 5\r')), 'ok');
-    await until(() => mirror.text().includes('stalling 5 s'), 'the stall began');
-    const chunk = new Uint8Array(64 * 1024).fill(0x61); // 'a', echoed when read
-    let accepted = 0;
+    const MiB = 1024 * 1024;
+    const CHUNK = 64 * 1024; // one I frame of 64 KiB and 5 bytes each (the server's INPUT_CHUNK)
+    // How much is answered `ok` before `full` depends on how fast the keeper reads while the loop
+    // below runs: a frame the kernel takes at once no longer waits at the server. While the
+    // program does not read, at most this much is taken OUTSIDE the server: the keeper's input
+    // queue (INPUT_CAP, 4 MiB, bin/skydeck-keeper); the frames it has read but not queued (at most
+    // two reads of READ_SIZE, 128 KiB); the socket's kernel buffer (net.core.wmem_default, 208 KiB
+    // on Linux: three or four frames); the pty's buffer (15 KiB measured); the one read the paused
+    // program still makes (its stdin's highWaterMark is 0; at most 64 KiB). That is 4 MiB and
+    // under 1 MiB more — measured: 4 MiB and 256 KiB, the keeper given all the time it wanted.
+    // `full` comes once more than 4 MiB of frames wait at the server (INPUT_UNWRITTEN,
+    // src/window/terminals.ts): 63 frames are under the mark, so a 64th is still sent, and 64 are
+    // over it. A test process held up in the loop lets the keeper take its whole queue first: the
+    // 6 MiB this test used to send then never came to `full`.
+    const OUTSIDE = 5 * MiB;
+    const AT_SERVER = 4 * MiB; // 64 chunks
+    const SEND = 12 * MiB; // clearly more than OUTSIDE + AT_SERVER
+    const STALL_S = 5;
+    // Built before the stall, which it would otherwise shorten. Chunk n begins with its number and
+    // is otherwise one letter, 'a' to 'z' in turn: a lost, repeated or reordered chunk shows.
+    const chunks = Array.from({ length: SEND / CHUNK }, (_, n) => {
+      const chunk = new Uint8Array(CHUNK).fill(0x61 + (n % 26));
+      chunk.set(utf8(`${String(n).padStart(5, '0')}.`));
+      return chunk;
+    });
+    const stallAsked = performance.now();
+    assert.equal(r.registry.input(spec.id, utf8(`/stall ${STALL_S}\r`)), 'ok');
+    await until(() => mirror.text().includes(`stalling ${STALL_S} s`), 'the stall began');
+    const taken: Uint8Array[] = [];
     let full = false;
-    for (let sent = 0; sent < 6 * 1024 * 1024; sent += chunk.length) {
+    for (const chunk of chunks) {
       const answer = r.registry.input(spec.id, chunk);
       if (answer === 'full') {
         full = true;
       } else {
         assert.equal(answer, 'ok');
-        accepted += chunk.length;
+        taken.push(chunk);
       }
     }
-    assert.equal(full, true, 'more than 4 MiB unwritten is full');
-    assert.ok(accepted > 4 * 1024 * 1024 && accepted < 6 * 1024 * 1024, `accepted ${accepted}`);
-    await until(() => r.registry.input(spec.id, new Uint8Array(0)) === 'ok', 'ok again', 15_000);
-    // Everything accepted reaches the program, in order (it records each chunk it reads).
-    await until(
-      () => {
-        const read = readRecords(spec.env['STANDIN_RECORD'] ?? '')
-          .flatMap((x) => (x.ev === 'input' ? [x.hex] : []))
-          .join('');
-        return read.split('61').length - 1 >= accepted;
-      },
-      'every accepted byte was read',
-      30_000,
+    // The bounds hold only while the program does not read. Its stall began after it was asked
+    // for; half a second is left for its timer.
+    const loopEnded = performance.now() - stallAsked;
+    assert.ok(
+      loopEnded < STALL_S * 1000 - 500,
+      `the loop ended ${Math.round(loopEnded)} ms after the ${STALL_S} s stall was asked for`,
     );
+    assert.equal(full, true, 'more than 4 MiB unwritten is full');
+    // At least the 64 chunks waiting at the server and the first one, which the kernel takes at
+    // once (the socket's buffer is empty and larger than a frame); at most OUTSIDE + AT_SERVER.
+    const accepted = taken.length * CHUNK;
+    assert.ok(accepted > 4 * MiB && accepted <= OUTSIDE + AT_SERVER, `accepted ${accepted}`);
+    await until(() => r.registry.input(spec.id, new Uint8Array(0)) === 'ok', 'ok again', 15_000);
+    // Everything accepted reaches the program, in order, and nothing else (it records each chunk
+    // it reads; a refused chunk was never sent).
+    const record = spec.env['STANDIN_RECORD'] ?? '';
+    const expected =
+      Buffer.from(`/stall ${STALL_S}\r`).toString('hex') + Buffer.concat(taken).toString('hex');
+    const read = (): string =>
+      readRecords(record)
+        .flatMap((x) => (x.ev === 'input' ? [x.hex] : []))
+        .join('');
+    await until(
+      // The file's size first: it is cheap, and it holds at least the hex of what was read.
+      () => statSync(record).size >= expected.length && read().length >= expected.length,
+      'every accepted byte was read',
+      60_000,
+    );
+    const hex = read();
+    assert.equal(hex.length, expected.length, 'nothing but the accepted input was read');
+    assert.ok(hex === expected, 'every accepted byte, in order');
   });
 
   test('unknown terminals: input unknown, attach null; resize, start and refuse do nothing', async (t) => {
