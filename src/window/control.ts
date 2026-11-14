@@ -3,6 +3,7 @@
 // carries a secret. No request carries a program or an argument list to run.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+import { failureKind } from './auth.ts';
 import type { Tokens } from './auth.ts';
 import { parseControlRequest } from './protocol.ts';
 import type {
@@ -39,7 +40,7 @@ interface Answer {
  * a kind that starts with `route` is 404 (stage C's `/resume`, `/new`, `/restore` included), a
  * bad body 400, a body over 64 KiB 413, a dependency that throws 500. A refusal answers
  * `{ error: <kind> }` and is logged by its kind, never by the request's text (S2 5.2); a failure
- * by the error's name, never its message.
+ * by the error's name and, when it has one, its code (failureKind), never its message.
  *
  * `POST /token` answers the token in base64url and `expiresAtNs` as decimal text; tokens stay in
  * `deps.tokens`, in memory (S2 15.2). `GET /token/<id>` is 404 for an id the tokens do not know.
@@ -118,7 +119,7 @@ export function controlHandler(
       answer = answerTo(parsed.value, res);
       body = Buffer.from(JSON.stringify(answer.value), 'utf8');
     } catch (error) {
-      deps.log(`server.sock: ${parsed.value.route} failed (${errorName(error)})`);
+      deps.log(`server.sock: ${parsed.value.route} failed (${failureKind(error)})`);
       send(res, { status: 500, value: { error: 'failed' } });
       return;
     }
@@ -168,17 +169,4 @@ function sendBytes(res: ServerResponse, status: number, body: Buffer, close: boo
     ...(close ? { Connection: 'close' } : {}),
   });
   res.end(body);
-}
-
-/** An error's name for a log line, never its message (which can quote data). */
-function errorName(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return `a thrown ${error === null ? 'null' : typeof error}`;
-  }
-  try {
-    const name: unknown = error.name;
-    return typeof name === 'string' && /^[A-Za-z][A-Za-z0-9]*$/.test(name) ? name : 'Error';
-  } catch {
-    return 'an error that cannot be read'; // a `name` getter that throws
-  }
 }

@@ -367,7 +367,9 @@ test('shutdown through the client resolves, and a second request does not call d
 
 test('a connection that does not read its answers does not keep POST /shutdown from the next asker', async (t) => {
   // Answers big enough that 80 of them fill the socket: the stalled connection's /shutdown is
-  // parsed, but its answer waits behind them for as long as nobody reads.
+  // parsed, but its answer waits behind them for as long as nobody reads. 80 answers are about
+  // 1.7 MB, eight times a unix socket's buffer by Linux's default (net.core.wmem_default, 212,992
+  // bytes); on a host whose buffer holds them all, the first assertion of 0 calls fails falsely.
   const big: StatusAnswer = {
     ...STATUS,
     terminals: Array.from({ length: 200 }, (_, n) => ({
@@ -543,6 +545,20 @@ test('a dependency that throws is 500, logged by its name without its message; t
   assert.deepEqual(await c.client.ping(), PING);
 });
 
+test("a failure's log line carries the error's code too, never its message", async (t) => {
+  // The store's errors are plain Errors with a code: the code is what tells them apart.
+  const locked = Object.assign(new Error('MARKER-a7b8 database is locked'), {
+    code: 'ERR_SQLITE_ERROR',
+  });
+  const c = await startControl(t, () => ({
+    ping: () => {
+      throw locked;
+    },
+  }));
+  assert.deepEqual(await ask(c, 'GET', '/ping'), { status: 500, body: { error: 'failed' } });
+  assert.deepEqual(c.logs, ['server.sock: ping failed (Error (ERR_SQLITE_ERROR))']);
+});
+
 // ---------------------------------------------------------------------------------------------
 // Tokens in memory only; the socket's place
 
@@ -558,7 +574,9 @@ test('tokens are never written to a file, the store or the log', async (t) => {
   const filesAfter = filesUnder(c.d.sandbox.root);
   assert.deepEqual(filesAfter, filesBefore);
   assert.deepEqual(c.d.deck.store.kvEntries(''), kvBefore);
-  // deps.log is the handler's one way to write (server.log, in the server).
+  // deps.log is the handler's one way to write (server.log, in the server): these requests log
+  // nothing at all, so no encoding of a token can be in it.
+  assert.deepEqual(c.logs, []);
   const logged = Buffer.from(c.logs.join('\n'), 'utf8');
   for (const { id, token } of minted) {
     const needles = [Buffer.from(token), Buffer.from(token, 'base64url'), Buffer.from(id)];

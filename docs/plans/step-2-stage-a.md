@@ -938,6 +938,9 @@ export interface Tokens {
   forgetAll(): void; // empties everything, stops every timer
 }
 export function createTokens(clock: Clock, random: (n: number) => Uint8Array, onAlarm: () => void): Tokens;
+/** An error's name and, when it has one, its code (`Name (CODE)`), for a log line; never its
+ *  message (S2 5.2). Never throws. Exported for task 18's control socket (ruled by the plan owner). */
+export function failureKind(error: unknown): string;
 /** kv window_alarm, in one transaction: the time of the FIRST second use is kept (ruled, review 2
  *  of task 11) — a recorded time is never overwritten; a value that is not a decimal time is. */
 export function raiseAlarm(store: Store, nowNs: Ns): void;
@@ -2524,8 +2527,9 @@ export function controlHandler(deps: ControlDeps): (req: IncomingMessage, res: S
 ```
 
 Ruled by the plan owner (task 18): a route whose dependency (`ping`, `status`, `tokens`) throws
-answers 500 `{ error: 'failed' }`, logs the error's name only (never its message), and the server
-goes on; a throw from `shutdown` is not caught and becomes the server's uncaught error (S2 5.2).
+answers 500 `{ error: 'failed' }`, logs the error's name and, when it has one, its code
+(`failureKind`, 2.8) — never its message — and the server goes on; a throw from `shutdown` is
+not caught and becomes the server's uncaught error (S2 5.2).
 A refusal answers `{ error: <kind> }` and is logged by its kind. Every `POST /shutdown` answers
 `{ ok: true }`; `deps.shutdown` is called once, when the first of those answers has been handed to
 the socket (or its asker went away), so one asker that does not read its answers keeps no other
