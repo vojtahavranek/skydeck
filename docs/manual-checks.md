@@ -10,9 +10,11 @@ Setup:
 
 - skydeck is installed ([install.md](install.md)); item 1 is the install itself.
 - Make a throwaway project folder: `mkdir -p ~/skydeck-try`.
-- Items 1 and 8 run `bin/skydeck` from the checkout: while skydeck is not installed there is no
-  `<dataDir>/node` link, so with a default `node` older than 24.12 put `SKYDECK_NODE=...` in front,
-  as in [install.md](install.md), step 2. The `skydeck` command of the other items uses the link.
+- Items 1 and 8 run `bin/skydeck` from the checkout, and W24 runs `skydeck` with a throwaway
+  `SKYDECK_HOME`: there is no `<dataDir>/node` link then (item 1: not installed yet; item 8: just
+  removed; W24: a home of its own), so with a default `node` older than 24.12 put `SKYDECK_NODE=...`
+  in front, as in [install.md](install.md), step 2. The `skydeck` command of the other items uses
+  the link.
 - Use several terminals: **A** (and **B**) run `claude`; **S** (and **C**) run `skydeck`. `<ref>` is the
   first 4 or more characters of a session id; `skydeck ls` prints the first 8, as the last column.
 - **Send one prompt in every session you want to see again after it ends.** A session that never
@@ -327,8 +329,9 @@ took until the page showed, and anything Windows showed meanwhile (W20).
 
 **In the window.** The page owns every key of the design's table from stage A on, also those whose
 action comes later. Setup: the window open with the throwaway session in slot 1 (its number shows
-at the left of its row in Open). Press each key; the page must do what the table says, and Edge
-nothing of its own (no new window or tab, find bar, print dialog, devtools pane, history, reload):
+at the left of its row in Open). Press every key the key help lists (Ctrl+Shift+H): the page must do
+what the help says, and Edge nothing of its own (no new window or tab, find bar, print dialog,
+devtools pane, history, reload). What the ones with something to see do:
 
 | Key | Expected |
 |---|---|
@@ -477,8 +480,12 @@ Write down which symbols show as boxes.
 In the throwaway session: `print a table with two columns, a symbol and its name, with the rows
 🙂, ❤️, 👍🏽, 👨‍👩‍👧 and 🇨🇿`. Expected: the right edges of the table's lines are in one column.
 Compare with the same prompt in a session in your usual terminal (Windows Terminal, WezTerm).
+The design's question here is whether the width rules of `@xterm/addon-unicode-graphemes`, which
+the window uses, match Claude Code's own layout better than `addon-unicode11`, the fallback
+(design-step-2.md, 9.4): a change of skydeck's code, not of this check.
 
-Write down which rows are off, and by how many columns.
+Write down which rows are off, and by how many columns, in the window and in your usual terminal;
+that is what decides whether the fallback is tried.
 
 ## W12. Links open in your own Edge (real claude)
 
@@ -691,6 +698,10 @@ mkdir -p "$T/config"
 printf '{ "window": { "port": 47699, "keepAlive": "off" } }\n' > "$T/config/config.json"
 SKYDECK_HOME="$T" skydeck serve --foreground
 ```
+
+(The trial home has no `node` link: with a default `node` older than 24.12, put
+`SKYDECK_NODE=<the node install linked>` in front, for instance
+`SKYDECK_NODE="$(readlink ~/.local/share/skydeck/node)"`.)
 
 In a second W (put the directory the first one printed for `$T`):
 

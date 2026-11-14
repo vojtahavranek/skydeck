@@ -658,15 +658,15 @@ effect.
 - **A new session**: Ctrl+Shift+N (in a browser tab also the `+ New` button), with its directory,
   label, group and `claude` flags.
 - **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
-- **Keys** (Ctrl+Shift+H shows them all): Ctrl+Shift+1 … 9 the session in that slot, Ctrl+Tab or
-  Ctrl+Shift+O the previous session, Ctrl+Shift+L between list and terminal, Ctrl+Shift+F find in
-  the scrollback, Ctrl+Shift+C copy, Ctrl+Shift+V Claude Code's image paste (it reads the Windows
-  clipboard itself), Ctrl+V paste text, Shift+Enter a new line, Ctrl+click a link (it opens in your
-  own Edge). In the list: ↑ ↓ `j` `k`, Home, End, PgUp, PgDn, ← → (fold, unfold), `/` filter,
-  Enter, Esc (clear the filter, then back to the terminal). Ctrl+Shift+P, Ctrl+Shift+J and the list
-  keys `l` `g` `n` `p` `d` and F2 are the window's already and say `<key>: comes in a later stage`.
-  Every other key goes to Claude Code: Alt chords, Ctrl with a letter, function keys, Esc in the
-  terminal. The key bar at the bottom says where the keyboard is (`Focus: list`, `Focus: terminal`).
+- **Keys**: **Ctrl+Shift+H shows every key of the window**, those that come in later stages
+  marked so (they say `<key>: comes in a later stage` when pressed). The window takes only Ctrl+Shift
+  chords with a letter or a digit, and Ctrl+Tab, besides the list's own keys while the list has the
+  keyboard; every other key goes to Claude Code (Alt chords, Ctrl with a letter, function keys, Esc
+  in the terminal). Three to know from the start: Ctrl+Shift+L moves the keyboard between list and
+  terminal, Ctrl+Shift+C copies from the terminal (plain Ctrl+C interrupts the program), and
+  Ctrl+Shift+V is Claude Code's own image paste (it reads the Windows clipboard itself; Ctrl+V
+  pastes text). The key bar at the bottom says where the keyboard is (`Focus: list`,
+  `Focus: terminal`).
 
 ### Known limits of stage A
 
@@ -703,11 +703,20 @@ effect.
   it the terminal's size while the program has asked for focus reports.
 - **The list.** An expiring session says `expires soon`, without the number of days. From an empty
   filter field it is two Escs to the terminal. The ended bar of a selected session that the filter
-  hides offers no Resume, and Close only once the end is known: clear the filter. In one rare case
+  hides offers no Resume, and Close only once the end is known: clear the filter. A resume card's
+  warnings about flags (`original flags unknown; resuming with defaults`, flags not passed on)
+  show until the terminal replaces the card, not after a successful resume. The pull-request chip
+  is the command line's (design.md 7.3): `3 PRs · …` counts the merged ones too; a chip that counts
+  open and merged pull requests apart comes in a later stage. In one rare case
   (a click outside the list and, within a double click's time, a click on a row a list update has
   just moved under the pointer) that row is resumed as by a double click.
 - **A flood of output.** When a program writes faster than skydeck can show (megabytes at once), a
   key pressed in that moment can be lost: press it again, Ctrl+C included.
+- **A paste larger than the program takes.** While a program does not read its input, skydeck keeps
+  only a few MiB of it waiting; what comes beyond that is not delivered, and the window says that
+  not all of what you typed or pasted reached the program. After a paste the program can then be
+  left inside a bracketed paste (it takes what follows as pasted text, Enter included): paste a
+  short text again (its end closes the open paste), or end the input as that program allows.
 - **The command line does not use the window yet.** `skydeck resume`, `new` and `restore` start
   `claude` in the terminal you are in. After a WSL restart, resume the sessions one by one in the
   window (or run `skydeck restore` in a terminal, which brings them back there). A `skydeck resume`
