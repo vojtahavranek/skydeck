@@ -545,7 +545,12 @@ The server checks the keep-alive's pid every tick (10.1). `GET /status` (8.3) ca
 ### 6.3 The page notices that the server is gone
 
 The page sends `ping` over the WebSocket every second (8.2.3). With no `pong` for 3 seconds, or a
-closed WebSocket, it shows a bar across the window:
+closed WebSocket, it shows a bar across the window. The 3 seconds count only from a ping the page
+really sent — no `pong` with that ping's `n` within 3 seconds — and are judged only at a check of
+the page's that comes on time: one that comes late, because the page's timers were held (a hidden,
+minimised or covered window, which Chromium wakes once a minute after 5 minutes; a frozen page; a
+debugger), judges nothing, sends a ping, and the 3 seconds count from that ping. A closed socket
+shows the bar at once (ruled, plan task 26's review 2):
 
 > skydeck's server is not answering (since 14:02:11). Sessions in the window keep running unless
 > WSL has stopped. To get back, open a WSL terminal and run: `skydeck window`
@@ -1133,7 +1138,8 @@ the server's proof.
 5. The page checks `pS`. Until it has, it sends nothing else, shows nothing the server sent, and
    does not reload itself on the server's word. A wrong `pS` makes it close the connection and say
    `something answers on port <n> that is not skydeck's server; nothing was sent to it`, and it
-   opens no further connection until it is reloaded, in either mode (6.3; ruled, plan task 26).
+   opens no further connection until it is reloaded, in either mode (6.3; ruled, plan task 26) —
+   but for a reload key's own, which reloads only after a proof (15.3).
    Once `pS` checks out, in mode `launch` it keeps the secret from `key` (below); later
    connections use mode `key`.
 6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
@@ -1147,8 +1153,12 @@ the server's proof.
    close every skydeck window, delete the window's profile folder and run skydeck window
    --new-secret` (ruled, plan task 26). A page that cannot remember a reload (its session storage
    is not available) does not reload on its own: it sends nothing more and says `this window's page
-   is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press F5
-   to reload it, or close it and run skydeck window` (ruled, plan task 26's review 1).
+   is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press
+   Ctrl+Shift+R to reload it, or close it and run skydeck window` (ruled, plan task 26's review 1;
+   Ctrl+Shift+R is the page's reload in both zones, 12.9). Nor does a page whose key IndexedDB did
+   not take (it lives only in the page's memory, and a reload would lose it): it says `this window's
+   page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload
+   itself; run skydeck window again`.
 
 **Reading the secret.** The server reads the secret from the store at every `hello`, so
 `--new-secret` takes effect at once (ruled, plan task 17). While another process holds the store's
@@ -1205,6 +1215,10 @@ are no presentation (ruled, plan task 26): a connection that ended before the pa
 it — the server reads the secret before it looks at any token ("Reading the secret" above), so the
 token still waits and no alarm can follow. After either the page tries again with the token, on
 6.3's schedule; an expired or dropped token then answers 4003, which ends it.
+A key that IndexedDB does not take lives in the page's memory only: the window works and says
+`this window's key could not be stored: the window works until it is reloaded or closed, and its
+reload keys do not reload it; run skydeck window again for a window that keeps its key`, and its
+reload keys do nothing (review 2 of plan task 26).
 The secret's bytes never reach the page's code: the page can make proofs with the key but cannot
 read it, and neither can any other page at that origin. A reload, and a window opened later in the
 same profile, find the key there. A page that has neither a token nor a stored key says `this

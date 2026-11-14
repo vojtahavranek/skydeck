@@ -423,8 +423,11 @@ export function honest(
     /** The welcome's asset version; default the stand-in's own build. */
     assetVersion?: string;
     token?: Uint8Array;
-    pings?: boolean;
+    /** Whether pings are answered (asked at each ping); default yes. */
+    pings?: boolean | (() => boolean);
     before?: (n: number) => 'close-1013' | 'drop' | 'drop-after-hello' | null;
+    /** Every message after `start` but pings, with the connection's number (1, 2, …). */
+    open?: (conn: StandinConnection, message: Record<string, unknown>, n: number) => void;
     serverId?: string;
     bootId?: string;
   },
@@ -489,9 +492,14 @@ export function honest(
         phase = 'open';
         return;
       }
-      if (message['t'] === 'ping' && options.pings !== false) {
-        conn.send({ t: 'pong', n: message['n'], bootId: 'stand-in-boot', serverId: '0' });
+      if (message['t'] === 'ping') {
+        const answer = typeof options.pings === 'function' ? options.pings() : options.pings;
+        if (answer !== false) {
+          conn.send({ t: 'pong', n: message['n'], bootId: 'stand-in-boot', serverId: '0' });
+        }
+        return;
       }
+      options.open?.(conn, message, which);
     });
   };
 }

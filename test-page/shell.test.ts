@@ -4,6 +4,7 @@
 // and the retries. Real test servers run on realTestPlatform with real keepers and the stand-in
 // program (test/helpers/window.ts); stand-in servers come from helpers/shell.ts.
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { cpSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -58,7 +59,72 @@ const STALE =
   "this window's page is not the one skydeck's server serves, and reloading did not change that; close every skydeck window, delete the window's profile folder and run skydeck window --new-secret";
 
 const STALE_UNKNOWN =
-  "this window's page is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press F5 to reload it, or close it and run skydeck window";
+  "this window's page is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press Ctrl+Shift+R to reload it, or close it and run skydeck window";
+const STALE_UNSTORED =
+  "this window's page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run skydeck window again";
+const UNSTORED =
+  "this window's key could not be stored: the window works until it is reloaded or closed, and its reload keys do not reload it; run skydeck window again for a window that keeps its key";
+
+const TERM_A = 'aaaaaaaaaaaa';
+const TERM_B = 'bbbbbbbbbbbb';
+
+/** A `list` of a scripted stand-in: rows of Open with their terminals (S2 8.2.3). */
+function scriptedList(
+  rows: { id: string; terminal: string | null; slot: number | null }[],
+  terminals: { id: string; slot: number | null; sessionId: string | null }[],
+): Record<string, unknown> {
+  return {
+    t: 'list',
+    nowNs: '1794474000000000000',
+    counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
+    sections: [
+      {
+        name: 'open',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: rows.length,
+        rows: rows.map((row) => ({
+          id: row.id,
+          shortId: row.id.slice(0, 8),
+          title: `session ${row.id.slice(0, 8)}`,
+          titleSource: 'summary',
+          group: null,
+          groupSource: null,
+          state: row.terminal === null ? 'not-running' : 'running',
+          stateDetail: null,
+          sinceNs: '1794474000000000000',
+          lastActivityNs: '1794474000000000000',
+          dir: '/home/u/project',
+          marks: [],
+          hasNote: false,
+          noteHead: [],
+          done: false,
+          prs: [],
+          chip: null,
+          terminal: row.terminal,
+          slot: row.slot,
+          elsewhere: null,
+          starting: false,
+          attention: null,
+          stack: null,
+        })),
+      },
+    ],
+    doneHidden: 0,
+    banner: null,
+    terminals: terminals.map((term) => ({
+      ...term,
+      state: 'running',
+      notReported: false,
+      cols: 80,
+      rows: 24,
+      ownsSize: true,
+    })),
+    selected: null,
+    dirs: [],
+  };
+}
 
 /** `text` as a regular expression that matches it literally. */
 function escape(text: string): string {
@@ -180,6 +246,12 @@ async function resumeFromList(page: Page, sessionId: string): Promise<void> {
   await showsText(page, '#focus-zone', /^Focus: list$/);
   await page.keyboard.press('Enter');
   await showsText(page, '#terminal', PLACEHOLDER);
+  // S2 11.3: the new terminal is selected, with the keyboard in it.
+  await page.waitForFunction(
+    () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+    null,
+    { timeout: PAGE_WAIT_MS },
+  );
 }
 
 /** Another app root for a server: this checkout's bin, src and vendor, and a web/ with one more file. */
@@ -582,7 +654,10 @@ test('the page shell', async (t) => {
       // The notice stays until it is dismissed.
       await sleep(1000);
       assert.match(await shownText(l.page, '#info-text'), WSL_RESTARTED);
-      await l.page.locator('#info-close').click();
+      // Its button takes Enter, also in the list zone: a focused button is no list.
+      await toZone(l.page, 'list');
+      await l.page.focus('#info-close');
+      await l.page.keyboard.press('Enter');
       await l.page.waitForSelector('#info[hidden]', { state: 'attached' });
     },
   );
@@ -646,6 +721,7 @@ test('the page shell', async (t) => {
 
       const [first] = scripts;
       assert.ok(first !== undefined && first.procStart !== null);
+      assert.ok(stillRuns(first.child.pid, first.procStart), 'the keep-alive script still runs');
       process.kill(first.child.pid, 'SIGTERM');
       await showsText(l.page, '#keepalive', /^WSL is not kept running$/);
       await until(() => scripts.length === 2, 'the keep-alive started again', PAGE_WAIT_MS);
@@ -874,6 +950,346 @@ test('the page shell', async (t) => {
       await sleep(2000);
 
       assert.equal(loads, 1, 'no reload of its own');
+      assert.equal(standin.connections.length, 1);
+    },
+  );
+
+  await t.test(
+    'Enter on a focused button presses it, also in the list zone: + New opens the form and nothing is resumed',
+    async (t) => {
+      const l = await launched(t, chromium);
+      l.d.resumable(S1);
+      await clickRow(l.page, S1); // a session that is not running, selected in the list zone
+      await showsText(l.page, '#focus-zone', /^Focus: list$/);
+      await mark(l.page, 'enter on + New');
+
+      await l.page.focus('#new-button');
+      await l.page.keyboard.press('Enter');
+      await l.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await sleep(1000);
+
+      assert.deepEqual(
+        after(await logOf(l.page), 'enter on + New').filter((e) => e.e === 'out' && e.t === 'act'),
+        [],
+      );
+      assert.deepEqual(l.server.hub.list(), []);
+    },
+  );
+
+  await t.test('Esc in the new form closes it', async (t) => {
+    const standin = await standinServer(t);
+    const page = await newPage(t, chromium);
+    await page.goto(standin.url);
+    await showsText(page, '#problem', /^this window has no key; /);
+    await page.keyboard.press('Control+Shift+N');
+    await page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#right-zone:not([data-pane="new"])', { state: 'attached' });
+  });
+
+  await t.test(
+    'Esc in the list zone gives the list its filter to clear, then goes back to the terminal',
+    async (t) => {
+      const standin = await standinServer(t);
+      const page = await newPage(t, chromium);
+      await page.goto(standin.url);
+      await showsText(page, '#problem', /^this window has no key; /);
+      await toZone(page, 'list');
+      await page.keyboard.press('/');
+      await page.keyboard.type('zz');
+      await page.focus('#list'); // the keyboard back on the list itself
+
+      await page.keyboard.press('Escape');
+      assert.equal(await page.inputValue('#list input'), '', 'the field is cleared');
+      assert.equal(await zone(page), 'Focus: list');
+      await page.keyboard.press('Escape');
+      await showsText(page, '#focus-zone', /^Focus: terminal$/);
+    },
+  );
+
+  await t.test(
+    "texts over S2 8.2.3's limits are not sent: a filter is cut to 1,024 bytes with a line; a label of the new form that is too long is refused with a true sentence; the connection stays",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(8);
+      const page = await newPage(t, chromium);
+      const sent: Record<string, unknown>[] = [];
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          open: (conn, message) => {
+            sent.push(message);
+            if (message['t'] === 'view') conn.send(scriptedList([], []));
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+
+      await toZone(page, 'list');
+      await page.keyboard.press('/');
+      await page.fill('#list input', 'é'.repeat(600)); // 1,200 bytes of UTF-8
+      await showsText(page, '#key-message', /^the filter is cut to its first 1,024 bytes$/);
+      const views = sent.filter((message) => message['t'] === 'view');
+      assert.equal(views.at(-1)?.['filter'], 'é'.repeat(512));
+
+      await page.keyboard.press('Control+Shift+N');
+      await page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await page.fill('input[name="label"]', 'x'.repeat(1100));
+      await page.locator('#cards button', { hasText: 'Start' }).click();
+      await showsText(
+        page,
+        '#cards',
+        /the label is longer than skydeck takes: at most 1,024 bytes of UTF-8/,
+      );
+      await sleep(500);
+
+      assert.deepEqual(
+        sent.filter((message) => message['t'] === 'act'),
+        [],
+      );
+      assert.equal(standin.connections.length, 1, 'never closed, never reconnected');
+      assert.equal(await shownText(page, '#gone'), '');
+    },
+  );
+
+  for (const variant of ['skipped', 'moved on'] as const) {
+    await t.test(
+      `after a reconnect a terminal the new list lacks is ${variant === 'skipped' ? 'skipped' : 'given up when a list without it comes, and the next one is attached'} (ruled, task 26)`,
+      async (t) => {
+        const secret = new Uint8Array(32).fill(10);
+        const page = await newPage(t, chromium);
+        await page.addInitScript(RECORDER);
+        const both = scriptedList(
+          [
+            { id: S1, terminal: TERM_A, slot: 1 },
+            { id: S2, terminal: TERM_B, slot: 2 },
+          ],
+          [
+            { id: TERM_A, slot: 1, sessionId: S1 },
+            { id: TERM_B, slot: 2, sessionId: S2 },
+          ],
+        );
+        const onlyB = scriptedList(
+          [
+            { id: S1, terminal: null, slot: null },
+            { id: S2, terminal: TERM_B, slot: 2 },
+          ],
+          [{ id: TERM_B, slot: 2, sessionId: S2 }],
+        );
+        const onlyA = scriptedList(
+          [
+            { id: S1, terminal: TERM_A, slot: 1 },
+            { id: S2, terminal: null, slot: null },
+          ],
+          [{ id: TERM_A, slot: 1, sessionId: S1 }],
+        );
+        let snaps = 0;
+        const standin = await standinServer(t, {
+          socket: honest(secret, {
+            open: (conn, message, n) => {
+              const snap = (term: unknown): void =>
+                conn.send({ t: 'snap', term, ch: ++snaps, cols: 80, rows: 24, data: '' });
+              if (message['t'] === 'view') {
+                conn.send(n === 1 || variant === 'moved on' ? both : onlyB);
+              } else if (message['t'] === 'attach') {
+                if (n > 1 && variant === 'moved on' && message['term'] === TERM_B) {
+                  conn.send(onlyA); // no snap for B: the list says it is gone
+                } else {
+                  snap(message['term']);
+                }
+              }
+            },
+          }),
+        });
+        await page.goto(standin.url);
+        await storeKey(page, secret);
+        await page.goto(standin.url);
+        await connection(page, 'open');
+        // S1 (terminal A) is shown first; then slot 2 shows B: both are attached, B is shown.
+        await page.waitForSelector('#terminal .terminal-placeholder', { timeout: PAGE_WAIT_MS });
+        await page.keyboard.press('Control+Shift+Digit2');
+        await until(
+          () =>
+            standin.connections[0]?.received.filter((text) => text.includes('"attach"')).length ===
+            2,
+          'both terminals attached',
+          PAGE_WAIT_MS,
+        );
+        await mark(page, 'reconnect');
+
+        standin.connections[0]?.ws.terminate();
+        await until(() => standin.connections.length === 2, 'a second connection', PAGE_WAIT_MS);
+        await connection(page, 'open');
+        await sleep(1500);
+
+        const attaches = after(await logOf(page), 'reconnect')
+          .filter((e) => e.e === 'out' && e.t === 'attach')
+          .map((e) => (e.term === TERM_A ? 'A' : e.term === TERM_B ? 'B' : '?'));
+        assert.deepEqual(attaches, variant === 'skipped' ? ['B'] : ['B', 'A']);
+      },
+    );
+  }
+
+  await t.test(
+    'timers held for 60 s while the server answers: no close, no bar, no reconnect (ruled, review 2)',
+    async (t) => {
+      const secret = new Uint8Array(32).fill(11);
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      await page.clock.install();
+      const standin = await standinServer(t, { socket: honest(secret, {}) });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await sleep(1500); // pings and pongs on time
+      await mark(page, 'held');
+
+      const now = await page.evaluate(() => Date.now());
+      await page.clock.pauseAt(now + 100);
+      await sleep(2000); // no timer runs
+      await page.clock.fastForward(60_000); // one late tick
+      await page.clock.resume();
+      await sleep(4500);
+
+      assert.deepEqual(
+        after(await logOf(page), 'held').filter((e) => e.e === 'close' || e.e === 'ws'),
+        [],
+      );
+      assert.equal(await shownText(page, '#gone'), '');
+      assert.equal(standin.connections.length, 1);
+    },
+  );
+
+  await t.test(
+    "timers held and a server that stopped answering: found after the late tick's own ping (ruled, review 2)",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(12);
+      const page = await newPage(t, chromium);
+      await page.clock.install();
+      let answering = true;
+      const standin = await standinServer(t, {
+        socket: honest(secret, { pings: () => answering }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await sleep(1500);
+
+      const now = await page.evaluate(() => Date.now());
+      await page.clock.pauseAt(now + 100);
+      answering = false;
+      await sleep(1000);
+      await page.clock.fastForward(60_000);
+      await page.clock.resume();
+      await sleep(1000);
+      assert.equal(await shownText(page, '#gone'), '', 'not judged at the late tick');
+
+      await showsText(page, '#gone-text', GONE, 4500);
+    },
+  );
+
+  await t.test(
+    "a challenge whose nonce is not canonical is not skydeck's server: no hello, the warning",
+    async (t) => {
+      const page = await newPage(t, chromium);
+      const standin = await standinServer(t, {
+        socket: (conn) => {
+          const valid = Buffer.alloc(32, 0x40).toString('base64url');
+          conn.send({ t: 'challenge', protocol: 1, nonce: `${valid.slice(0, -1)}B` });
+        },
+      });
+      await page.goto(standin.url);
+      await storeKey(page, new Uint8Array(32).fill(13));
+      standin.connections.length = 0;
+      await page.goto(standin.url);
+
+      await showsText(
+        page,
+        '#problem',
+        /^something answers on port \d+ that is not skydeck's server/,
+      );
+      await sleep(1000);
+      assert.equal(standin.connections.length, 1);
+      assert.deepEqual(standin.connections[0]?.received, []);
+    },
+  );
+
+  await t.test(
+    'the reconnect schedule of S2 6.3: every second for 10 s, then every 5 s',
+    async (t) => {
+      const standin = await standinServer(t);
+      const page = await newPage(t, chromium);
+      await page.goto(standin.url);
+      const base = await assetBase(page);
+      const delays = await page.evaluate(async (base) => {
+        const { retryDelay } = (await import(`${base}connection.js`)) as {
+          retryDelay(sinceLostMs: number): number;
+        };
+        return [0, 1000, 9999, 10_000, 60_000].map(retryDelay);
+      }, base);
+      assert.deepEqual(delays, [1000, 1000, 1000, 5000, 5000]);
+    },
+  );
+
+  await t.test(
+    'a key that cannot be stored: the window works, says so, and its reload keys do not reload it',
+    async (t) => {
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      await page.addInitScript(() => {
+        Object.defineProperty(globalThis, 'indexedDB', {
+          get() {
+            throw new DOMException('no IndexedDB here', 'SecurityError');
+          },
+        });
+      });
+      const started = await startTestServer(t);
+      const { token } = await controlClient(
+        started.d.platform.net,
+        started.d.files.serverSock,
+      ).token(30);
+      await page.goto(pageUrl(started.server.port, token));
+      await connection(page, 'open');
+      await showsText(page, '#problem', new RegExp(`^${escape(UNSTORED)}$`));
+      await mark(page, 'unstored');
+
+      await toZone(page, 'list');
+      await page.keyboard.press('F5');
+      await sleep(2000);
+      assert.deepEqual(
+        after(await logOf(page), 'unstored').filter((e) => e.e === 'unload' || e.e === 'ws'),
+        [],
+      );
+    },
+  );
+
+  await t.test(
+    'a key that cannot be stored and a server of another asset version: no reload (it would lose the key), and a line that says so',
+    async (t) => {
+      const secret = randomBytes(32);
+      const token = randomBytes(32);
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      await page.addInitScript(() => {
+        Object.defineProperty(globalThis, 'indexedDB', {
+          get() {
+            throw new DOMException('no IndexedDB here', 'SecurityError');
+          },
+        });
+      });
+      const standin = await standinServer(t, {
+        socket: honest(secret, { token, assetVersion: 'another-build' }),
+      });
+      await page.goto(pageUrl(standin.port, token.toString('base64url')));
+      await showsText(page, '#problem', new RegExp(`^${escape(STALE_UNSTORED)}$`));
+      await connection(page, 'fatal');
+      await sleep(1500);
+
+      assert.equal((await logOf(page)).filter((e) => e.e === 'unload').length, 0);
       assert.equal(standin.connections.length, 1);
     },
   );

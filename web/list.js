@@ -136,6 +136,12 @@ export function createList(root, hooks) {
         showDone = !showDone;
         hooks.view({ showDone });
         return;
+      case 'escape':
+        // app.js hands Esc over while a filter is set: the field is cleared with it.
+        filter.value = '';
+        filter.hidden = true;
+        hooks.view({ filter: '' });
+        return;
     }
   };
 

@@ -58,6 +58,8 @@ import {
 
 const PROTOCOL = 1;
 const PING_MS = 1000;
+/** A tick of the checks that comes this much later than the one before was held (ruled, review 2). */
+const LATE_MS = 1500;
 /** S2 6.3: no answer for this long and the server counts as gone. */
 const SILENT_MS = 3000;
 const CHECK_MS = 250;
@@ -88,7 +90,13 @@ export const TEXTS = {
     "this window's page is not the one skydeck's server serves, and reloading did not change that; close every skydeck window, delete the window's profile folder and run skydeck window --new-secret",
   /** The same, for a page that cannot remember a reload (no session storage): it does not reload. */
   staleUnknown:
-    "this window's page is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press F5 to reload it, or close it and run skydeck window",
+    "this window's page is not the one skydeck's server serves, and it cannot tell whether it reloaded already; press Ctrl+Shift+R to reload it, or close it and run skydeck window",
+  /** A launch whose key IndexedDB did not take: a reload would lose it (S2 8.2.2). */
+  unstored:
+    "this window's key could not be stored: the window works until it is reloaded or closed, and its reload keys do not reload it; run skydeck window again for a window that keeps its key",
+  /** The same, when the server's asset version differs (S2 8.2.2 step 6): no reload either. */
+  staleUnstored:
+    "this window's page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run skydeck window again",
   /** @param {string} port */
   notSkydeck: (port) =>
     `something answers on port ${port} that is not skydeck's server; nothing was sent to it`,
@@ -176,6 +184,16 @@ export function splitInput(data, binary = false) {
 }
 
 /**
+ * S2 6.3: how long the page waits before it tries again, `sinceLostMs` after it lost the server:
+ * every second for 10 seconds, then every 5 seconds.
+ * @param {number} sinceLostMs
+ * @returns {number}
+ */
+export function retryDelay(sinceLostMs) {
+  return sinceLostMs < FAST_FOR_MS ? FAST_MS : SLOW_MS;
+}
+
+/**
  * The page's connection. It connects at once; `send` is for the messages of S2 8.2.3 once open
  * (false while not); `reload` is the reload keys' (S2 12.9, 15.3).
  * @param {ConnectionOptions} options
@@ -187,6 +205,10 @@ export function createConnection(options) {
   const url = `ws://${location.host}/ws`;
   let key = options.key;
   let token = options.token;
+  // S2 8.2.2: the page forgets the token once it is used; nothing keeps it but `token`.
+  options.token = null;
+  /** Whether `key` is in IndexedDB: a page whose key is only in memory must not reload. */
+  let keyStored = options.key !== null;
   /** @type {WebSocket | null} */
   let socket = null;
   /** @type {State} */
@@ -197,7 +219,6 @@ export function createConnection(options) {
   let lostAt = null;
   /** @type {Date | null} */
   let lostSince = null;
-  let heard = 0;
   let pings = 0;
   /** @type {ReturnType<typeof setInterval>[]} */
   let timers = [];
@@ -333,8 +354,7 @@ export function createConnection(options) {
       setState('lost');
       events.lost(lostSince);
     }
-    const waited = performance.now() - lostAt;
-    retry = setTimeout(attempt, waited < FAST_FOR_MS ? FAST_MS : SLOW_MS);
+    retry = setTimeout(attempt, retryDelay(performance.now() - lostAt));
   };
 
   /** @param {WebSocket} ws */
@@ -381,17 +401,43 @@ export function createConnection(options) {
     lost();
   };
 
-  /** @param {WebSocket} ws */
+  /**
+   * The open connection: its messages, and S2 6.3's silence (ruled, review 2). The server is
+   * silent only when a ping the page really sent has had no pong (the pong carries the ping's
+   * `n`) for 3 seconds, judged at a tick that comes on time. A tick that comes late — the page's
+   * timers were held: a hidden, minimised or covered window, a frozen page, a debugger — judges
+   * nothing: it pings, and the 3 seconds count from that ping. A closed socket is gone at once.
+   * @param {WebSocket} ws
+   */
   const open = (ws) => {
-    heard = performance.now();
+    /** The pings without their pong yet, the oldest first: `n` → when it was sent. */
+    const unanswered = new Map();
+    let lastTick = performance.now();
+    let lastPing = -Infinity;
+    /** @param {number} now */
+    const ping = (now) => {
+      const n = pings++;
+      unanswered.set(n, now);
+      lastPing = now;
+      ws.send(JSON.stringify({ t: 'ping', n }));
+    };
     ws.onmessage = (event) => {
-      heard = performance.now();
       const data = event.data;
       if (typeof data === 'string') {
         const message = parse(data);
-        if (isObject(message) && typeof message['t'] === 'string' && message['t'] !== 'pong') {
-          events.message(/** @type {ServerMessage} */ (/** @type {unknown} */ (message)));
+        if (!isObject(message) || typeof message['t'] !== 'string') {
+          return;
         }
+        if (message['t'] === 'pong') {
+          const n = message['n'];
+          for (const sent of [...unanswered.keys()]) {
+            if (typeof n === 'number' && sent <= n) {
+              unanswered.delete(sent);
+            }
+          }
+          return;
+        }
+        events.message(/** @type {ServerMessage} */ (/** @type {unknown} */ (message)));
         return;
       }
       if (data instanceof ArrayBuffer && data.byteLength >= 5) {
@@ -409,15 +455,28 @@ export function createConnection(options) {
     };
     timers.push(
       setInterval(() => {
-        if (performance.now() - heard > SILENT_MS) {
-          drop(ws);
+        const now = performance.now();
+        const late = now - lastTick > LATE_MS;
+        lastTick = now;
+        if (ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        if (late) {
+          unanswered.clear();
+          ping(now);
+          return;
+        }
+        for (const sentAt of unanswered.values()) {
+          if (now - sentAt > SILENT_MS) {
+            drop(ws);
+            return;
+          }
+          break;
+        }
+        if (now - lastPing >= PING_MS) {
+          ping(now);
         }
       }, CHECK_MS),
-      setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ t: 'ping', n: pings++ }));
-        }
-      }, PING_MS),
     );
   };
 
@@ -477,12 +536,21 @@ export function createConnection(options) {
       token = null;
       try {
         await storeKey(key);
+        keyStored = true;
       } catch {
-        // the key still lives in this page's memory for its reconnects
+        // The key lives in this page's memory for its reconnects, and is lost by a reload.
+        keyStored = false;
       }
     }
     const { welcome } = result;
     const step = versionStep(welcome.assetVersion);
+    if (step === 'reload' && !keyStored) {
+      socket = null;
+      ws.onclose = null;
+      ws.close();
+      fail(TEXTS.staleUnstored);
+      return;
+    }
     if (step === 'reload') {
       location.reload();
       return;
@@ -518,6 +586,9 @@ export function createConnection(options) {
     open(ws);
     setState('open');
     events.welcome(welcome, change, since);
+    if (!keyStored) {
+      events.warn(TEXTS.unstored);
+    }
   }
 
   /**
@@ -526,6 +597,10 @@ export function createConnection(options) {
    */
   const reload = async () => {
     if (probing || key === null) {
+      return;
+    }
+    if (!keyStored) {
+      events.warn(TEXTS.unstored);
       return;
     }
     probing = true;

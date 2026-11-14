@@ -1259,7 +1259,11 @@ export function cancels(e, zone, handled) {}
 // terminalKey `{ send: '\x16' }`; Ctrl+Shift+R and BrowserRefresh: windowChord and listKey
 // `reload`) is acted on once.
 
-// web/list.js — replaced by task 27
+// web/list.js — replaced by task 27. It also writes the title bar's counts into `#counts` of
+// index.html (S2 12.1). app.js hands it `escape` (with `key`) while a filter is set, so that the
+// list clears its field with the filter; with no filter app.js goes back to the terminal itself.
+// app.js applies list keys only while the keyboard is on the list itself, not on a control of it
+// (a button, a link, a field: Enter presses a button; review 2 of task 26).
 /** @param {HTMLElement} root
  *  @param {{ select(id: string, how: 'click' | 'key'): void, activate(id: string): void,
  *           view(change: { filter?: string, unfolded?: string[], showDone?: boolean }): void }} hooks */

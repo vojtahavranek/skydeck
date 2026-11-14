@@ -21,7 +21,7 @@ import { paneFor } from './pane.js';
 import { createTerminalView } from './terminal-view.js';
 
 // S2 8.2.2: before anything else.
-const token = takeToken();
+let token = takeToken();
 
 const NO_KEY =
   'this window has no key; run skydeck window (or skydeck window --print-url for a browser tab)';
@@ -122,10 +122,18 @@ const list = createList(dom.list, {
 const terminalView = createTerminalView(dom.terminal, {
   send: (message) => {
     send(message);
+    // The view detached the terminal the re-attach waits for: its snap will not come.
+    if (message.t === 'detach' && message['term'] === state.waitingSnap) {
+      nextReattach();
+    }
   },
   chord: (event) => chordOf(event),
   openLink: (url) => {
-    void act({ kind: 'open-link', url });
+    void act({ kind: 'open-link', url }).then((result) => {
+      if (!result.ok) {
+        say(result.error ?? 'skydeck could not open the link');
+      }
+    });
   },
 });
 const cards = createCards(dom.cards, {
@@ -281,10 +289,80 @@ function focusChanged() {
   }
 }
 
-/** @param {{ filter?: string, unfolded?: string[], showDone?: boolean }} change */
+/** S2 8.2.3's limits of a string a page sends, in bytes of UTF-8. */
+const TEXT_BYTES = 1024;
+const PATH_BYTES = 4096;
+const utf8 = new TextEncoder();
+
+/**
+ * `text` (well formed) cut to at most `bytes` bytes of UTF-8, never inside a character.
+ * @param {string} text
+ * @param {number} bytes
+ * @returns {string}
+ */
+function cutTo(text, bytes) {
+  let used = 0;
+  let end = 0;
+  for (const character of text) {
+    used += utf8.encode(character).length;
+    if (used > bytes) {
+      break;
+    }
+    end += character.length;
+  }
+  return text.slice(0, end);
+}
+
+/**
+ * A change of the page's view (S2 8.2.3 `view`). The filter is held to S2 8.2.3's limit, so that
+ * the server never refuses the page's view (it would close the connection for it): a longer one
+ * is cut to its first 1,024 bytes, and the key bar says so.
+ * @param {{ filter?: string, unfolded?: string[], showDone?: boolean }} change
+ */
 function changeView(change) {
-  state.view = { ...state.view, ...change };
+  let next = change;
+  if (change.filter !== undefined) {
+    const filter = cutTo(change.filter.toWellFormed(), TEXT_BYTES);
+    if (filter.length < change.filter.length) {
+      say('the filter is cut to its first 1,024 bytes');
+    }
+    next = { ...change, filter };
+  }
+  state.view = { ...state.view, ...next };
   sendView();
+}
+
+/** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
+const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
+  new: [
+    ['dir', 'the directory', PATH_BYTES],
+    ['label', 'the label', TEXT_BYTES],
+    ['group', 'the group', TEXT_BYTES],
+    ['flags', 'the flags', TEXT_BYTES],
+  ],
+  'open-link': [['url', 'the link', PATH_BYTES]],
+});
+
+/**
+ * Why S2 8.2.3 would refuse `action` (the server closes the connection for such a message), or
+ * null when it would not.
+ * @param {Record<string, unknown> & { kind: string }} action
+ * @returns {string | null}
+ */
+function overLimit(action) {
+  for (const [field, name, bytes] of LIMITED[action.kind] ?? []) {
+    const value = action[field];
+    if (typeof value !== 'string') {
+      continue;
+    }
+    if (!value.isWellFormed()) {
+      return `${name} holds text that is not well formed; skydeck cannot take it`;
+    }
+    if (utf8.encode(value).length > bytes) {
+      return `${name} is longer than skydeck takes: at most ${bytes === TEXT_BYTES ? '1,024' : '4,096'} bytes of UTF-8`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -354,6 +432,10 @@ function act(action) {
     error: "skydeck's server is not connected; try again",
     sessionId: null,
   };
+  const refused = overLimit(action);
+  if (refused !== null) {
+    return Promise.resolve({ ...unsent, error: refused });
+  }
   if (!send({ t: 'act', id, ...sized })) {
     return Promise.resolve(unsent);
   }
@@ -404,7 +486,8 @@ function nextReattach() {
   while (queue !== null && queue.length > 0) {
     const id = /** @type {string} */ (queue.shift());
     const term = state.list?.terminals.find((candidate) => candidate.id === id);
-    if (term === undefined) {
+    // Skipped: one the new list lacks, and one the view detached meanwhile.
+    if (term === undefined || !terminalView.attached().includes(id)) {
       continue;
     }
     state.waitingSnap = id;
@@ -471,7 +554,8 @@ function received(message) {
         nextReattach();
       } else if (
         state.waitingSnap !== null &&
-        !message.terminals.some((term) => term.id === state.waitingSnap)
+        (!message.terminals.some((term) => term.id === state.waitingSnap) ||
+          !terminalView.attached().includes(state.waitingSnap))
       ) {
         nextReattach();
       }
@@ -532,7 +616,9 @@ function render() {
     return;
   }
   state.paneKey = key;
+  const before = dom.rightZone.dataset.paneTerm ?? '';
   dom.rightZone.dataset.pane = pane.kind;
+  dom.rightZone.dataset.paneTerm = pane.kind === 'terminal' ? pane.term.id : '';
   terminalView.show(pane.kind === 'terminal' ? pane.term : null);
   cards.hide();
   switch (pane.kind) {
@@ -560,6 +646,16 @@ function render() {
     case 'none':
       cards.header(null);
       break;
+  }
+  // S2 11.3: a terminal that comes to be shown in the terminal zone gets the keyboard (after a
+  // resume its list comes after the result), unless a text field of the page has it.
+  if (
+    pane.kind === 'terminal' &&
+    pane.term.id !== before &&
+    state.zone === 'terminal' &&
+    !isTextField(document.activeElement)
+  ) {
+    terminalView.focus();
   }
   focusChanged();
 }
@@ -592,13 +688,10 @@ function setZone(zone, moveFocus = true) {
   if (state.pane.kind === 'terminal') {
     terminalView.focus();
   }
+  // A card's own controls are not focused for the user: an Enter would press one (S2 12.6:
+  // nothing resumes but on purpose). The zone itself holds the keyboard then.
   if (!dom.rightZone.contains(document.activeElement)) {
-    const first = dom.cards.querySelector('button, input, select, textarea');
-    if (first instanceof HTMLElement && !first.closest('[hidden]')) {
-      first.focus();
-    } else {
-      dom.rightZone.focus();
-    }
+    dom.rightZone.focus();
   }
 }
 
@@ -633,6 +726,23 @@ function isTextField(element) {
     element instanceof HTMLTextAreaElement ||
     element instanceof HTMLSelectElement ||
     (element instanceof HTMLElement && element.isContentEditable)
+  );
+}
+
+/**
+ * Whether the keyboard is on the list itself (S2 12.9's list keys): inside the list zone, and not
+ * on a control of it — a button, a link, a field, a summary, editable text — which takes its own
+ * keys (Enter presses a button).
+ * @returns {boolean}
+ */
+function listHasKeyboard() {
+  const element = document.activeElement;
+  if (!(element instanceof HTMLElement) || !dom.listZone.contains(element)) {
+    return false;
+  }
+  return !(
+    element.isContentEditable ||
+    element.matches('button, a[href], input, select, textarea, summary')
   );
 }
 
@@ -725,9 +835,13 @@ function doListKey(action, event) {
       say(`${keyName(event)}: comes in a later stage`);
       return true;
     case 'escape':
-      // S2 12.9: Esc clears the filter, then goes back to the terminal.
+      // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
+      // back to the terminal.
       if (state.view.filter !== '') {
-        changeView({ filter: '' });
+        list.key(action);
+        if (state.view.filter !== '') {
+          changeView({ filter: '' });
+        }
       } else {
         setZone('terminal');
       }
@@ -777,8 +891,20 @@ function onKeyDown(event) {
     if (action !== null && action.kind === 'reload') {
       // The page's reload, in the list zone and while the page (not xterm.js) has the keyboard.
       handled = doListKey(action, event);
-    } else if (action !== null && zone === 'list' && !isTextField(document.activeElement)) {
+    } else if (action !== null && zone === 'list' && listHasKeyboard()) {
       handled = doListKey(action, event);
+    } else if (
+      zone === 'terminal' &&
+      state.pane.kind === 'new' &&
+      event.key === 'Escape' &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey
+    ) {
+      // Esc closes the new form (the page has the keyboard: xterm.js has not).
+      closeNew();
+      handled = true;
     }
   }
   if (cancels(event, zone, handled)) {
@@ -794,6 +920,13 @@ function openNew() {
   state.newOpen = true;
   render();
   setZone('terminal');
+}
+
+/** The new form closed: the right side shows the selection again, the zone keeps the keyboard. */
+function closeNew() {
+  state.newOpen = false;
+  render();
+  dom.rightZone.focus();
 }
 byId('new-button').addEventListener('click', openNew);
 
@@ -839,6 +972,7 @@ async function start() {
     fatal(TEXTS.notValid);
     return;
   }
+  token = null; // S2 8.2.2: only the connection holds it, until it is used
   connection = createConnection({
     assetVersion,
     windowId,
