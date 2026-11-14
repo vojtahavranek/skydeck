@@ -184,89 +184,78 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// What a page would show: a headless terminal fed a snapshot and the records after it
+// What a page would show: a headless terminal built from the sink's snapshot and the records after it
 
 export interface Mirror extends StreamSink {
+  /** The headless terminal; asserted to exist (the snapshot came). */
   term: Terminal;
-  /** Every call the sink got, in order: 'o' output, 's' size, 'x' exit, 'n' notice. */
+  /** Every call the sink got, in order: 'S' snapshot, 'o' output, 's' size, 'x' exit, 'n' notice. */
   calls: string[];
   outputs: Uint8Array[];
   notices: { kind: string; text: string }[];
   exits: { exit: KeeperExit; lost: boolean }[];
   /** Resolves when everything written so far has been parsed. */
   settled(): Promise<void>;
+  /** Every output record so far, as UTF-8. */
   text(): string;
 }
 
-/** A sink that builds the screen a page would show, starting from `snap`. */
-export function mirror(
-  modules: XtermModules,
-  snap: { cols: number; rows: number; data: string } | null = null,
-): Mirror & { start(snap: { cols: number; rows: number; data: string }): void } {
+/** A sink that builds the screen a page would show: `snapshot` must be its first call. */
+export function mirror(modules: XtermModules): Mirror {
   let term: Terminal | null = null;
-  const pending: (() => void)[] = [];
   let decoded = '';
   const decoder = new TextDecoder();
-  const m = {
-    calls: [] as string[],
-    outputs: [] as Uint8Array[],
-    notices: [] as { kind: string; text: string }[],
-    exits: [] as { exit: KeeperExit; lost: boolean }[],
+  const m: Mirror = {
+    calls: [],
+    outputs: [],
+    notices: [],
+    exits: [],
     get term(): Terminal {
       assert.ok(term, 'the mirror has no snapshot yet');
       return term;
     },
-    start(first: { cols: number; rows: number; data: string }) {
-      term = new modules.Terminal({
-        cols: first.cols,
-        rows: first.rows,
-        scrollback: 5000,
-        allowProposedApi: true,
-      });
+    snapshot(cols, rows, data) {
+      assert.equal(m.calls.length, 0, 'snapshot is the first call on a sink');
+      m.calls.push('S');
+      term = new modules.Terminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
       term.loadAddon(new modules.UnicodeGraphemesAddon());
-      term.write(first.data);
-      for (const step of pending.splice(0)) step();
+      term.write(data);
     },
-    output(bytes: Uint8Array) {
+    output(bytes) {
       m.calls.push('o');
       const copy = bytes.slice();
       m.outputs.push(copy);
       decoded += decoder.decode(copy, { stream: true });
-      run(() => m.term.write(copy));
+      m.term.write(copy);
     },
-    size(cols: number, rows: number) {
+    size(cols, rows) {
       m.calls.push('s');
-      run(() => m.term.resize(cols, rows));
+      m.term.resize(cols, rows);
     },
-    exit(exit: KeeperExit, lost: boolean) {
+    exit(exit, lost) {
       m.calls.push('x');
       m.exits.push({ exit, lost });
     },
-    notice(kind: 'gap' | 'newer-keeper' | 'input-full', text: string) {
+    notice(kind, text) {
       m.calls.push('n');
       m.notices.push({ kind, text });
     },
     settled: () => new Promise<void>((resolve) => m.term.write('', resolve)),
     text: () => decoded,
   };
-  const run = (step: () => void): void => {
-    if (term === null) pending.push(step);
-    else step();
-  };
-  if (snap !== null) m.start(snap);
   return m;
 }
 
-/** Attaches a mirror to a terminal of `registry`; resolves once its snapshot is written. */
+/** Attaches a mirror to a terminal of `registry`; resolves once its snapshot came. */
 export async function attachMirror(
   registry: Registry,
   modules: XtermModules,
   termId: string,
 ): Promise<Mirror & { detach(): void }> {
   const m = mirror(modules);
-  const attached = await registry.attach(termId, m);
+  const attached = registry.attach(termId, m);
   assert.ok(attached, `attach ${termId} gave null`);
-  m.start(attached);
+  await until(() => m.calls.length > 0, 'the snapshot reached the sink');
   return Object.assign(m, { detach: attached.detach });
 }
 

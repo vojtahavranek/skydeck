@@ -1006,49 +1006,58 @@ export function createRegistry(deps: RegistryDeps): Registry {
     return claim !== null && claim.hello !== null && claim.link.isOpen() ? claim : null;
   }
 
-  function attach(
-    termId: string,
-    sink: StreamSink,
-  ): Promise<{ cols: number; rows: number; data: string; detach(): void } | null> {
+  /**
+   * Ruled (task 16, wave 3): the sink is registered at the current point of the chain and its
+   * first call is `snapshot` for that point; records, exits and notices that arise before the
+   * snapshot is made wait for it, in order. A terminal forgotten, or a sink detached, before the
+   * snapshot is made gets no call at all.
+   */
+  function attach(termId: string, sink: StreamSink): { detach(): void } | null {
     const term = terms.get(termId);
-    if (term === undefined) return Promise.resolve(null);
-    // Every record after this point reaches the sink; none before the answer below was given.
-    const entry: Attached = { sink, from: term.count, held: [] };
+    if (term === undefined) return null;
+    // Not records, but what the terminal shows now: a page that attaches later still sees them.
+    // (An exit that came before the attach is in list(), so it is not repeated; ruled.)
+    const shown = (): (() => void)[] => [
+      ...(term.info.state === 'newer-keeper'
+        ? [() => sink.notice('newer-keeper', NEWER_TEXT)]
+        : []),
+      ...(term.gap ? [() => sink.notice('gap', GAP_TEXT)] : []),
+    ];
+    const entry: Attached = { sink, from: term.count, held: shown() };
     term.sinks.add(entry);
-    const detach = (): void => {
-      term.sinks.delete(entry);
+    const deliver = (snap: { cols: number; rows: number; data: string }): void => {
+      if (term.forgotten || !term.sinks.has(entry)) return;
+      const held = entry.held ?? [];
+      entry.held = null;
+      callSink(term, () => sink.snapshot(snap.cols, snap.rows, snap.data));
+      for (const step of held) {
+        if (!term.sinks.has(entry)) return; // detached by one of the calls
+        callSink(term, step);
+      }
     };
-    // What the terminal shows besides its records, right after the snapshot.
-    const first: (() => void)[] = [];
-    if (term.info.state === 'newer-keeper')
-      first.push(() => sink.notice('newer-keeper', NEWER_TEXT));
-    if (term.gap) first.push(() => sink.notice('gap', GAP_TEXT));
-    const exit = term.info.exit;
-    if (isOver(term.info.state) && exit !== null) {
-      first.push(() => sink.exit(exit, term.info.state === 'lost'));
-    }
-    const screen = term.screen;
-    const snapshot =
-      screen === null
-        ? Promise.resolve({ cols: term.info.cols, rows: term.info.rows, data: '' })
-        : screen.snapshot();
-    return snapshot.then(
-      (snap) => {
-        if (term.forgotten || !term.sinks.has(entry)) return null;
-        entry.held = [...first, ...(entry.held ?? [])];
-        clock.after(0, () => {
-          const held = entry.held ?? [];
-          entry.held = null;
-          if (!term.sinks.has(entry)) return;
-          for (const step of held) callSink(term, step);
-        });
-        return { cols: snap.cols, rows: snap.rows, data: snap.data, detach };
-      },
-      () => {
+    const take = (): void => {
+      const screen = term.screen;
+      if (screen === null) {
+        // No screen yet (a keeper whose hello has not come): an empty one at the known size.
+        const empty = { cols: term.info.cols, rows: term.info.rows, data: '' };
+        void Promise.resolve().then(() => deliver(empty));
+        return;
+      }
+      screen.snapshot().then(deliver, () => {
+        // The screen was replaced meanwhile (a rebuild): start over from the new one's point;
+        // what was held belonged to the old one.
+        if (term.forgotten || !term.sinks.has(entry)) return;
+        entry.from = term.count;
+        entry.held = shown();
+        take();
+      });
+    };
+    take();
+    return {
+      detach() {
         term.sinks.delete(entry);
-        return null;
       },
-    );
+    };
   }
 
   const registry: Registry = {

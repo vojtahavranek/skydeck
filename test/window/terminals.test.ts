@@ -13,6 +13,7 @@ import {
   assertSameScreen,
   attachMirror,
   info,
+  mirror,
   registrySandbox,
   settledTerm,
 } from '../helpers/registry.ts';
@@ -66,7 +67,9 @@ describe('registry: spawn, claim and streams', () => {
     await settledTerm(screenSide);
     assertSameScreen(screenSide, first.term);
     assertSameScreen(screenSide, second.term);
-    assert.deepEqual(new Set(first.calls), new Set(['o']), 'only output records');
+    assert.equal(first.calls[0], 'S', 'the snapshot first');
+    assert.deepEqual(new Set(first.calls.slice(1)), new Set(['o']), 'then only output records');
+    assert.equal(second.calls[0], 'S');
   });
 
   test("the stand-in's DA1 and CPR are answered once each", async (t) => {
@@ -178,6 +181,34 @@ describe('registry: spawn, claim and streams', () => {
     assert.equal(info(r.registry, spec.id).state, 'not-started');
     await until(() => !existsSync(spec.socket), 'the keeper ended after A');
   });
+  test('a sink detached before its snapshot, or of a terminal closed before it, gets no call', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry();
+    const { spec, mirror: first } = await startStandin(box, r);
+    const early = mirror(box.modules);
+    const handle = r.registry.attach(spec.id, early);
+    assert.ok(handle);
+    handle.detach();
+    // A sink attached while output is queued: the snapshot first, then each later record once.
+    assert.equal(r.registry.input(spec.id, utf8('/lines 300\r')), 'ok');
+    await until(() => first.text().includes('line 10\r\n'), 'output under way');
+    const during = await attachMirror(r.registry, box.modules, spec.id);
+    await until(() => prompts(first) >= 2, 'the prompt after the lines');
+    await typeLine(r, spec.id, first, '/idle');
+    await until(() => prompts(during) >= 1, 'the late sink saw the next prompt');
+    await Promise.all([first.settled(), during.settled()]);
+    assertSameScreen(first.term, during.term);
+    assert.deepEqual(early.calls, []);
+
+    r.registry.refuse(spec.id, 'x'); // running: N is ignored by the keeper
+    assert.equal(r.registry.input(spec.id, utf8('/exit\r')), 'ok');
+    await until(() => info(r.registry, spec.id).state === 'ended', 'ended');
+    const gone = mirror(box.modules);
+    assert.ok(r.registry.attach(spec.id, gone));
+    assert.equal(r.registry.close(spec.id), 'ok');
+    await sleep(300);
+    assert.deepEqual(gone.calls, [], 'closed before its snapshot was made');
+  });
 });
 
 describe('registry: the end of a program', () => {
@@ -207,14 +238,14 @@ describe('registry: the end of a program', () => {
     // The last screen stays until close.
     const late = await attachMirror(r.registry, box.modules, a.spec.id);
     await late.settled();
-    assert.deepEqual(late.exits, [{ exit: ended.exit, lost: false }]);
+    assert.deepEqual(late.calls, ['S'], 'an exit before the attach is in list(), not repeated');
     assert.equal(r.registry.close(a.spec.id), 'ok');
     assert.equal(
       r.registry.list().some((x) => x.id === a.spec.id),
       false,
     );
     assert.equal(r.registry.close(a.spec.id), 'unknown');
-    assert.equal(await r.registry.attach(a.spec.id, late), null);
+    assert.equal(r.registry.attach(a.spec.id, late), null);
   });
 
   test('the keeper killed → exited with lost true, and the stand-in ended', async (t) => {
@@ -392,15 +423,10 @@ describe('registry: slots and input', () => {
     const box = await registrySandbox(t);
     const r = box.registry();
     assert.equal(r.registry.input('0123456789ab', utf8('x')), 'unknown');
-    assert.equal(await r.registry.attach('0123456789ab', (await attachNothing()) as never), null);
+    assert.equal(r.registry.attach('0123456789ab', mirror(box.modules)), null);
     r.registry.resize('0123456789ab', 80, 24);
     r.registry.start('0123456789ab');
     r.registry.refuse('0123456789ab', 'no');
     assert.deepEqual(r.registry.list(), []);
   });
 });
-
-/** A sink that ignores everything. */
-async function attachNothing(): Promise<unknown> {
-  return { output() {}, size() {}, exit() {}, notice() {} };
-}
