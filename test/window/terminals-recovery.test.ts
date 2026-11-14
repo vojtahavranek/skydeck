@@ -2,10 +2,11 @@
 // rebuilding every screen exactly from snapshot and tail, parking, reconnecting to a keeper that is
 // slow, gap and newer keepers. Platform: realTestPlatform; real keepers running the stand-in.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import type { Server, Socket } from 'node:net';
 import { describe, test } from 'node:test';
+import type { TestContext } from 'node:test';
 
 import { procStartFromStat } from '../../src/claude/procstat.ts';
 import { decodeSnapshot, encodeFrame, frameReader } from '../../src/window/frames.ts';
@@ -327,4 +328,103 @@ describe('registry: a keeper with a newer protocol', () => {
     assert.equal(r.registry.input(id, utf8('x')), 'full');
     assert.equal(r.registry.close(id), 'running', 'its program keeps running');
   });
+});
+
+describe('registry: closing a lost terminal', () => {
+  /**
+   * A keeper played by this test: a socket in terms/ that answers C with a protocol-1 hello, and
+   * a pid line naming this test process (alive; killKeepersIn never signals it).
+   */
+  async function fakeKeeper(
+    t: TestContext,
+    box: RegistryBox,
+    id: string,
+  ): Promise<{ stop(): Promise<void> }> {
+    const sockets: Socket[] = [];
+    const server: Server = createServer((socket) => {
+      sockets.push(socket);
+      socket.on('error', () => {});
+      const reader = frameReader();
+      socket.on('data', (chunk) => {
+        const frames = reader.push(chunk);
+        if ('error' in frames || !frames.some((f) => f.type === 'C')) return;
+        const hello = {
+          protocol: 1,
+          keeper: '2',
+          id,
+          started: true,
+          startBy: '1',
+          lock: null,
+          pid: process.pid,
+          procStart: 1,
+          cols: 80,
+          rows: 24,
+          seq: 0,
+          snapSeq: 0,
+          tailFrom: 1,
+          gap: false,
+          meta: {
+            sessionId: SESSION,
+            kind: 'resume',
+            slot: 1,
+            openedNs: '1',
+            build: 'test',
+            label: null,
+            dir: box.s.home,
+          },
+          exited: null,
+        };
+        socket.write(encodeFrame('H', utf8(JSON.stringify(hello))));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(box.files.termSock(id), resolve));
+    const stop = async (): Promise<void> => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    };
+    t.after(stop);
+    const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+    const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    box.tp.platform.files.writeText(
+      box.files.termPid(id),
+      `${process.pid} ${procStartFromStat(stat)} ${bootId} 2 1\n`,
+    );
+    return { stop };
+  }
+
+  for (const line of ['alive', 'unknown'] as const) {
+    test(`a lost terminal whose pid line is ${line}: close removes none of its keeper's files`, async (t) => {
+      const box = await registrySandbox(t);
+      const id = line === 'alive' ? 'aaaaaaaaaaaa' : 'bbbbbbbbbbbb';
+      const keeper = await fakeKeeper(t, box, id);
+      // 'unknown': the boot id cannot be read, so no line can be judged.
+      const platform: Platform =
+        line === 'alive'
+          ? box.tp.platform
+          : {
+              ...box.tp.platform,
+              proc: {
+                ...box.tp.platform.proc,
+                bootId: () => {
+                  throw Object.assign(new Error('unreadable'), { code: 'EACCES' });
+                },
+              },
+            };
+      const r = box.registry({ platform });
+      const found = await r.registry.rediscover();
+      assert.deepEqual(
+        found.map((x) => x.id),
+        [id],
+        `a ${line} line is connected to`,
+      );
+      // The keeper's socket now refuses: the terminal is lost (S2 7.8), its line still not dead.
+      await keeper.stop();
+      const sock = box.files.termSock(id);
+      if (!existsSync(sock)) writeFileSync(sock, ''); // connecting to a file is refused too
+      await until(() => info(r.registry, id).state === 'lost', 'lost', 10_000);
+      assert.equal(r.registry.close(id), 'ok');
+      assert.equal(existsSync(sock), true, 'the socket file stays');
+      assert.equal(existsSync(box.files.termPid(id)), true, 'the pid line stays');
+    });
+  }
 });
