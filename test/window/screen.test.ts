@@ -1206,11 +1206,14 @@ async function sweep(steps: Step[], cols: number, rows: number): Promise<number>
 }
 
 /**
- * A stream dense with sequences, one record per line, that avoids what S2 7.2 names as not
- * restored (the scroll region, the saved cursor, character sets, tab stops; a wrapped line in the
- * alternate screen, autowrap off, `38;5;n` below 16): SGR with sub-parameters, DECSET and DECRST,
- * DECSCUSR, OSC 0 titles, OSC 8 links, an OSC 52, DECRQSS, synchronized output, SOS and APC,
- * C1 introducers, controls inside a CSI, aborted sequences, and the alternate screen.
+ * A stream dense with sequences, one record per line: SGR with sub-parameters, DECSET and DECRST,
+ * DECSCUSR, OSC 0 titles, OSC 8 links, an OSC 52, DECRQSS, synchronized output, SOS and APC, C1
+ * introducers, controls inside a CSI, aborted sequences, and the alternate screen. It avoids what
+ * S2 7.2 names as not restored: the scroll region, the saved cursor, character sets, tab stops; a
+ * wrapped line in the alternate screen, autowrap off, `38;5;n` below 16; rows erased with a
+ * background below the last row with content; half a wide character overwritten in inverse
+ * video. (Its SGR 4:3 and 58 are named as not kept too, but task 12's comparison does not look at
+ * an underline's style or colour.)
  */
 function denseStream(): Step[] {
   const clip = Buffer.from('a clipboard of a few hundred bytes '.repeat(8)).toString('base64');
@@ -1398,6 +1401,49 @@ describe('createScreen: the snapshot’s seam (S2 7.2, task 33)', () => {
     b.screen.dispose();
   });
 
+  test('named limit (S2 7.2): rows erased with a background colour below the last row with content come back without it', async () => {
+    for (const bytes of ['ab\x1b[48;5;200m\x1b[J', '\x1b[48;5;200m\x1b[2J']) {
+      const a = open({ cols: 6, rows: 3, snapshot: null });
+      await a.screen.output(utf8(bytes));
+
+      const b = await rebuilt(a.screen);
+
+      const background = (term: Terminal, y: number): number[] =>
+        Array.from(
+          { length: 6 },
+          (_, x) => term.buffer.active.getLine(y)?.getCell(x)?.getBgColor() ?? 0,
+        );
+      assert.deepEqual(background(b.term, 0), background(a.term, 0), JSON.stringify(bytes));
+      assert.deepEqual(
+        background(a.term, 1),
+        [200, 200, 200, 200, 200, 200],
+        JSON.stringify(bytes),
+      );
+      assert.equal(
+        b.term.buffer.active.getLine(1)?.getCell(0)?.getBgColorMode(),
+        0,
+        JSON.stringify(bytes),
+      );
+      a.screen.dispose();
+      b.screen.dispose();
+    }
+  });
+
+  test('named limit (S2 7.2): an erased cell left in inverse video by overwriting half a wide character comes back without it', async () => {
+    const a = open({ cols: 6, rows: 3, snapshot: null });
+    await a.screen.output(utf8('x\x1b[7m🙂\x1b[D \x1b[0m'));
+
+    const b = await rebuilt(a.screen);
+
+    const cell = (term: Terminal, x: number): IBufferCell | undefined =>
+      term.buffer.active.getLine(0)?.getCell(x);
+    assert.deepEqual([cell(a.term, 1)?.getChars(), cell(a.term, 1)?.isInverse()], ['', 0x4000000]);
+    assert.deepEqual([cell(b.term, 1)?.getChars(), cell(b.term, 1)?.isInverse()], ['', 0]);
+    assert.ok(cell(b.term, 2)?.isInverse(), 'the space written after it keeps its inverse');
+    a.screen.dispose();
+    b.screen.dispose();
+  });
+
   test('an OSC 52 cut after more than 64 KiB: the tail is bounded, and the rebuilt screen prints none of the rest', async () => {
     const a = open({ cols: 20, rows: 3, snapshot: null });
     await a.screen.output(utf8(`ab\x1b]52;c;${'QUJD'.repeat(20_000)}`));
@@ -1434,6 +1480,32 @@ describe('createScreen: widths (S2 9.4)', () => {
       screen.dispose();
     });
   }
+});
+
+describe('createScreen: logging (S2 5.2)', () => {
+  test('the headless terminal logs nothing: a parsing error does not reach the console', async (t) => {
+    const calls: string[] = [];
+    for (const method of ['error', 'warn', 'info', 'log', 'debug', 'trace'] as const) {
+      t.mock.method(console, method, (...args: unknown[]) => {
+        calls.push(`${method}: ${String(args[0])}`);
+      });
+    }
+    t.mock.method(process.stderr, 'write', (chunk: unknown) => {
+      calls.push(`stderr: ${String(chunk)}`);
+      return true;
+    });
+    const { screen } = open({ cols: 20, rows: 3, snapshot: null }, { live: true });
+
+    // xterm.js reports both as a parsing error, with the character and the parameters.
+    await screen.output(utf8('\x1b_an APC é\x1b\\\x1b[1;2\x1bé\x1b[99;99zsecret'));
+    const b = await rebuilt(screen);
+    await b.screen.output(utf8('\x1b_é'));
+    t.mock.restoreAll();
+
+    assert.deepEqual(calls, []);
+    screen.dispose();
+    b.screen.dispose();
+  });
 });
 
 describe('createScreen: dispose', () => {

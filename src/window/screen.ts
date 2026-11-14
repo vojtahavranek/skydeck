@@ -272,6 +272,9 @@ export function createScreen(
     scrollback: SCROLLBACK,
     // The width addon uses the unicode API, which xterm.js still marks as proposed.
     allowProposedApi: true,
+    // xterm.js's own log quotes the program's output (a parsing error names the character and
+    // the parameters), and the server's stderr goes to server.log (S2 5.2): it logs nothing.
+    logLevel: 'off',
   });
   term.loadAddon(new modules.UnicodeGraphemesAddon());
   const serializer = new modules.SerializeAddon();

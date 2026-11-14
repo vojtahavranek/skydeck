@@ -223,11 +223,25 @@ describe('escapeTail: bounds', () => {
       `\x1b${'('.repeat(100_000)}`,
       `\x1bP${'1;'.repeat(100_000)}`,
       `\x1b[1<${'2;'.repeat(100_000)}`,
-      `\x1b]${'0'.repeat(100_000)}`,
-      `\x1b]${'1'.repeat(100_000)}`,
     ]) {
       assert.ok(tailOf(stream).length < 1024, JSON.stringify(stream.slice(0, 8)));
     }
+  });
+
+  test('an endless OSC number keeps only the digits that change it, and is not bounded', () => {
+    // xterm.js's OSC number is `number * 10 + digit` without a limit: it reaches Infinity, after
+    // which no digit changes it.
+    let number = 0;
+    let digits = 0;
+    while (number * 10 + 1 !== number) {
+      number = number * 10 + 1;
+      digits++;
+    }
+
+    assert.equal(tailOf(`\x1b]${'0'.repeat(100_000)}`), '\x1b]0');
+    assert.equal(tailOf(`\x1b]${'0'.repeat(100_000)}1`), '\x1b]01');
+    assert.equal(tailOf(`\x1b]${'1'.repeat(100_000)}`), `\x1b]${'1'.repeat(digits)}`);
+    assert.equal(tailOf(`\x1b]${'0'.repeat(100_000)};ti`), '\x1b]0;ti');
   });
 });
 
@@ -559,8 +573,8 @@ describe('escapeTail: a fresh xterm.js parser given the tail is in the state of 
       `\x1b${'('.repeat(7)}`,
       `\x1bP${'1;'.repeat(40)}`,
       `\x1bP?1${'!'.repeat(6)}`,
-      `\x1b]${'0'.repeat(400)}`,
-      `\x1b]${'9'.repeat(400)}`,
+      `\x1b]${'0'.repeat(70_000)}`,
+      `\x1b]${'9'.repeat(70_000)}`,
     ]) {
       for (const next of ['5m', ':7m', ';7m', '7m', '!q', '$p', '0', 'm', 'q;x\x07', '\x1b\\']) {
         assertSameParser(utf8(s), utf8(next), `${JSON.stringify(s)} then ${JSON.stringify(next)}`);
