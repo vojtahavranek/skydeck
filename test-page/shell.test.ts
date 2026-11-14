@@ -1427,6 +1427,7 @@ test('the page shell', async (t) => {
       const secret = new Uint8Array(32).fill(16);
       const page = await newPage(t, chromium);
       const acts: Record<string, unknown>[] = [];
+      let views = 0;
       const rows = scriptedList(
         [
           { id: S1, terminal: null, slot: null },
@@ -1437,7 +1438,10 @@ test('the page shell', async (t) => {
       const standin = await standinServer(t, {
         socket: honest(secret, {
           open: (conn, message) => {
-            if (message['t'] === 'view') conn.send(rows);
+            if (message['t'] === 'view') {
+              views++;
+              conn.send(rows);
+            }
             if (message['t'] === 'act') acts.push(message);
           },
         }),
@@ -1447,6 +1451,9 @@ test('the page shell', async (t) => {
       await page.goto(standin.url);
       await connection(page, 'open');
       await page.locator(`#list [data-id="${S2}"]`).waitFor({ timeout: PAGE_WAIT_MS });
+      // The page's second view (the first row selected by itself) and its list are done.
+      await until(() => views >= 2, 'the second view', PAGE_WAIT_MS);
+      await sleep(300);
       assert.equal(await selectedRow(page), S1);
       assert.equal(await zone(page), 'Focus: terminal');
 
@@ -1581,7 +1588,12 @@ test('the page shell', async (t) => {
         [],
         'nothing resumed',
       );
-      assert.equal(sent.filter((message) => message['t'] === 'view').at(-1)?.['filter'], 'sea');
+      const views = sent.slice(before).filter((message) => message['t'] === 'view');
+      assert.deepEqual(
+        views.map((view) => [view['filter'], view['showDone']]),
+        [['sea', false]],
+        'only the filter's own view: no show-done toggled',
+      );
     },
   );
 
