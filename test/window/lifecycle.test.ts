@@ -347,6 +347,24 @@ test('findServer: a server that is gone by the look after a refused ping is none
   assert.equal(looks, 2);
 });
 
+test('findServer: a server that cannot be judged at the look after a refused ping is an error, not hung', async (t) => {
+  const h = harness(t);
+  const own = ownLine(h);
+  writeServer(h, own); // no socket: the ping is refused
+  let looks = 0;
+  const deck = deckWith(h.deck, {
+    proc: {
+      stat: (pid) => {
+        if (pid !== own.pid) return h.base.proc.stat(pid);
+        looks += 1;
+        if (looks > 1) throw new SkydeckError('cannot read /proc/<pid>/stat (EMFILE)');
+        return h.base.proc.stat(pid);
+      },
+    },
+  });
+  await assert.rejects(findServer(deck, FAKE_ROOT, h.build), SkydeckError);
+});
+
 test('findServer: a server.json whose process cannot be judged is an error, not none', async (t) => {
   const h = harness(t);
   const own = ownLine(h);
@@ -663,7 +681,7 @@ test('stopServer: a server that ends on SIGTERM gets no SIGKILL', async (t) => {
   );
 });
 
-test('stopServer checks the identity again before SIGKILL: a pid whose process start changed is not signalled', async (t) => {
+test('stopServer: a server gone after SIGTERM (its pid has another process start now) gets no SIGKILL', async (t) => {
   const h = harness(t);
   const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
   let reused = false;
@@ -801,4 +819,290 @@ test('a time that is not a whole number of ms a timer can wait is a RangeError, 
   assert.deepEqual(h.started, []);
   assert.deepEqual(h.signals, []);
   assert.equal(startOf(h.base.proc, fake.pid), fake.procStart);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Review 2: the checks around each signal, the requests, the start's own pings, the errors
+
+/** A real process of the test's own (`sleep 60`) as server.json would name it. */
+async function liveSleep(
+  t: TestContext,
+  h: Harness,
+): Promise<{ child: ChildProcess; line: { pid: number; procStart: number; bootId: string } }> {
+  const child = spawn(join(h.s.bin, 'sleep'), ['60'], { env: h.s.env(), stdio: 'ignore' });
+  t.after(() => {
+    child.kill('SIGKILL');
+  });
+  await once(child, 'spawn');
+  const pid = child.pid;
+  assert.ok(pid !== undefined);
+  const procStart = startOf(h.base.proc, pid);
+  const bootId = h.base.proc.bootId();
+  assert.ok(procStart !== null && bootId !== null);
+  return { child, line: { pid, procStart, bootId } };
+}
+
+test('stopServer: an identity that changed after the first look gets no SIGTERM', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  let looks = 0;
+  const deck = deckWith(h.deck, {
+    proc: {
+      stat: (pid) => {
+        if (pid !== fake.pid) return h.base.proc.stat(pid);
+        looks += 1;
+        return looks === 1 ? h.base.proc.stat(pid) : statLine(pid, fake.procStart + 1, 'sleep');
+      },
+    },
+  });
+  assert.deepEqual(await stopServer(deck, { pingMs: 300, stopMs: 400, killMs: 400 }), {
+    stopped: true,
+    terminals: 0,
+  });
+  assert.deepEqual(h.signals, []);
+});
+
+for (const at of ['SIGTERM', 'SIGKILL'] as const) {
+  test(`stopServer judges the identity right before ${at}: one gone while the keepers are listed gets none`, async (t) => {
+    const h = harness(t);
+    const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+    // The keeper listing is the last thing before the identity check of each signal.
+    let listings = 0;
+    let reused = false;
+    const files = h.files();
+    const deck = deckWith(h.deck, {
+      files: {
+        list: (dir) => {
+          if (dir === files.termsDir) {
+            listings += 1;
+            if (listings === (at === 'SIGTERM' ? 1 : 2)) reused = true;
+          }
+          return h.base.platform.files.list(dir);
+        },
+      },
+      proc: {
+        stat: (pid) =>
+          reused && pid === fake.pid
+            ? statLine(pid, fake.procStart + 1, 'sleep')
+            : h.base.proc.stat(pid),
+      },
+    });
+    assert.deepEqual(await stopServer(deck, { pingMs: 300, stopMs: 300, killMs: 300 }), {
+      stopped: true,
+      terminals: 0,
+    });
+    assert.deepEqual(
+      h.signals.map(({ signal }) => signal),
+      at === 'SIGTERM' ? [] : ['SIGTERM'],
+    );
+  });
+}
+
+test('stopServer: a server that cannot be judged any more while it is waited for is an error, nothing signalled', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_ON_SHUTDOWN: 'stay' });
+  let looks = 0;
+  const deck = deckWith(h.deck, {
+    proc: {
+      stat: (pid) => {
+        if (pid !== fake.pid) return h.base.proc.stat(pid);
+        looks += 1;
+        if (looks > 1) throw new SkydeckError('cannot read /proc/<pid>/stat (EMFILE)');
+        return h.base.proc.stat(pid);
+      },
+    },
+  });
+  await assert.rejects(stopServer(deck, { stopMs: 400, killMs: 400 }), SkydeckError);
+  assert.deepEqual(h.signals, []);
+});
+
+test('stopServer: a server that cannot be judged any more after SIGTERM gets no SIGKILL: an error', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  let unknown = false;
+  h.onSignal = (call) => {
+    if (call.signal === 'SIGTERM') unknown = true;
+  };
+  const deck = deckWith(h.deck, {
+    proc: {
+      stat: (pid) => {
+        if (unknown && pid === fake.pid) {
+          throw new SkydeckError('cannot read /proc/<pid>/stat (EMFILE)');
+        }
+        return h.base.proc.stat(pid);
+      },
+    },
+  });
+  await assert.rejects(stopServer(deck, { pingMs: 300, stopMs: 400, killMs: 400 }), SkydeckError);
+  assert.deepEqual(
+    h.signals.map(({ signal }) => signal),
+    ['SIGTERM'],
+  );
+});
+
+test('stopServer: a server.json naming pid 1 is refused, nothing signalled', async (t) => {
+  const h = harness(t);
+  const kill = forbidKill(t);
+  const start = startOf(h.base.proc, 1);
+  const bootId = h.base.proc.bootId();
+  assert.ok(start !== null && bootId !== null);
+  writeServer(h, { pid: 1, procStart: start, bootId });
+  await assert.rejects(stopServer(h.deck, { pingMs: 300, stopMs: 300, killMs: 300 }), SkydeckError);
+  assert.deepEqual(h.signals, []);
+  assert.equal(kill.calls(), 0);
+});
+
+test('stopServer: a server that gives no ping answer gets SIGTERM at once, not after stopMs', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  h.onSignal = (call) => {
+    if (call.signal === 'SIGTERM') fake.child.kill('SIGTERM');
+  };
+  const before = performance.now();
+  assert.deepEqual(await stopServer(h.deck, { pingMs: 300, stopMs: START_MS, killMs: START_MS }), {
+    stopped: true,
+    terminals: 0,
+  });
+  const [term] = h.signals;
+  assert.ok(term !== undefined);
+  assert.ok(term.atMs - before < START_MS / 2, `SIGTERM after ${term.atMs - before} ms`);
+});
+
+test('stopServer: a /status that cannot be read and a /shutdown cut off still stop a server that ends', async (t) => {
+  const h = harness(t);
+  const { child, line } = await liveSleep(t, h);
+  const files = writeServer(h, line);
+  const ping: PingAnswer = {
+    serverId: '0011223344556677',
+    bootId: line.bootId,
+    build: h.build,
+    protocol: 1,
+    pid: line.pid,
+    port: PORT,
+    checkout: FAKE_ROOT,
+  };
+  const listener = await h.base.platform.net.listenHttp(
+    { path: files.serverSock },
+    {
+      request: (req, res) => {
+        if (req.url === '/ping') {
+          res.end(JSON.stringify(ping));
+        } else if (req.url === '/status') {
+          res.end(JSON.stringify({ of: 'another build' }));
+        } else {
+          child.kill('SIGKILL'); // the test's own "server" ends without answering /shutdown
+          req.socket.destroy();
+        }
+      },
+    },
+  );
+  t.after(() => listener.close());
+  assert.deepEqual(await stopServer(h.deck, { stopMs: START_MS }), { stopped: true, terminals: 0 });
+  assert.deepEqual(h.signals, []);
+});
+
+test('startServe: serve exiting 0 while only a server answering with another boot id answers: no answer', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '0' }));
+  await startFake(t, h, { FAKE_SERVE_MODE: 'serve', FAKE_SERVE_BOOT_ID: 'another-boot' });
+  assert.deepEqual(await startServe(h.deck, { startMs: 1500 }), {
+    ok: false,
+    line: `the window's server did not start (no answer in 1.5 s); see ${logPath(h)}`,
+  });
+});
+
+test('startServe: each ping of the start waits at most 1 s, so none is left open long after it gave up', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'silent' }));
+  const real = h.deck.platform.net;
+  const timeouts: number[] = [];
+  let pending = 0;
+  let lastSettled = 0;
+  const net = {
+    ...real,
+    requestUnix: (path: string, request: Parameters<typeof real.requestUnix>[1]) => {
+      timeouts.push(request.timeoutMs);
+      pending += 1;
+      const done = (): void => {
+        pending -= 1;
+        lastSettled = performance.now();
+      };
+      const answer = real.requestUnix(path, request);
+      answer.then(done, done);
+      return answer;
+    },
+  };
+  const deck = { ...h.deck, platform: { ...h.deck.platform, net } };
+  assert.deepEqual(await startServe(deck, { startMs: 2500 }), {
+    ok: false,
+    line: `the window's server did not start (no answer in 2.5 s); see ${logPath(h)}`,
+  });
+  const returned = performance.now();
+  assert.ok(timeouts.length > 0);
+  assert.ok(
+    timeouts.every((ms) => ms <= 1000),
+    `ping timeouts ${timeouts.join(', ')}`,
+  );
+  while (pending > 0) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(lastSettled - returned < 2500, `a ping settled ${lastSettled - returned} ms later`);
+});
+
+test('startServe: a boot id that cannot be read is an error before anything is started', async (t) => {
+  const h = harness(t);
+  for (const bootId of [
+    () => null,
+    () => {
+      throw new SkydeckError('cannot read the boot id (EACCES)');
+    },
+  ]) {
+    const deck = deckWith(h.deck, { proc: { bootId } });
+    await assert.rejects(startServe(deck, { startMs: START_MS }), SkydeckError);
+  }
+  assert.deepEqual(h.started, []);
+});
+
+test('a server.json that cannot be read is a SkydeckError naming it', async (t) => {
+  const h = harness(t);
+  const files = h.files();
+  mkdirSync(files.serverJson, { recursive: true }); // a directory: EISDIR
+  for (const call of [() => findServer(h.deck, FAKE_ROOT, h.build), () => stopServer(h.deck)]) {
+    await assert.rejects(call(), (error: unknown) => {
+      assert.ok(error instanceof SkydeckError);
+      assert.ok(error.message.includes(files.serverJson), error.message);
+      return true;
+    });
+  }
+  assert.deepEqual(h.signals, []);
+});
+
+test('stopServer: keepers that cannot be listed, or a signal the system refuses, are a SkydeckError', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  const files = h.files();
+  const unlisted = deckWith(h.deck, {
+    files: {
+      list: (dir) => {
+        if (dir === files.termsDir) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        return h.base.platform.files.list(dir);
+      },
+    },
+  });
+  await assert.rejects(
+    stopServer(unlisted, { pingMs: 300, stopMs: 300, killMs: 300 }),
+    SkydeckError,
+  );
+  assert.deepEqual(h.signals, []);
+
+  h.onSignal = () => {
+    throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+  };
+  await assert.rejects(
+    stopServer(h.deck, { pingMs: 300, stopMs: 300, killMs: 300 }),
+    (error: unknown) => {
+      assert.ok(error instanceof SkydeckError);
+      assert.match(error.message, /EPERM/);
+      assert.match(error.message, new RegExp(`pid ${fake.pid}`));
+      return true;
+    },
+  );
 });

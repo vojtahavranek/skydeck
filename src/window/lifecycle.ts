@@ -63,6 +63,8 @@ const DEFAULT_TIMES: Required<LifecycleTimes> = {
 
 /** How often a wait looks again: for the server's answer, or for its process to be gone. */
 const POLL_MS = 100;
+/** The longest a single ping of startServe's wait waits, whatever `pingMs` says. */
+const START_PING_MS = 1000;
 
 /** S2 5.2's exit codes of `serve` that have a line of their own. */
 const PORT_USED = 10;
@@ -121,12 +123,26 @@ function judge(platform: Platform, line: PidLine): 'alive' | 'dead' {
   return state;
 }
 
-/** The server server.json names and the line to judge it by; null when there is none. */
+/**
+ * The server server.json names and the line to judge it by; null when there is none. A file that
+ * cannot be read (EACCES, EISDIR …) is a SkydeckError naming it.
+ *
+ * readServerJson takes only a file in which every field of today's ServerJson is valid, so the
+ * file's whole shape is a contract between builds: a later build that requires one more field
+ * would read an older server's file as "no server" — `skydeck window` would then not find it, and
+ * `--restart` and `--stop` would have nothing to stop. Only pid, procStart, bootId and checkout
+ * are used here; whoever adds a field to ServerJson keeps it optional for the reader.
+ */
 function recordedServer(
   deck: Deck,
 ): { files: RuntimeFiles; line: PidLine; checkout: string } | null {
   const files = serverFiles(deck);
-  const json = readServerJson(deck.platform.files, files.serverJson);
+  let json: ReturnType<typeof readServerJson>;
+  try {
+    json = readServerJson(deck.platform.files, files.serverJson);
+  } catch (error) {
+    throw new SkydeckError(`cannot read ${files.serverJson} (${describeError(error)})`);
+  }
   if (json === null) return null;
   return {
     files,
@@ -196,7 +212,10 @@ export async function findServer(
  * that found a stale record chooses and records another directory — or the process's exit, which
  * becomes S2 5.2's line for its code. Exit 0 means a server of this checkout holds the lock: that
  * one is waited for within the same time. After the time is up the process is left running.
- * Rejects with a SkydeckError when the program cannot be started.
+ * Each attempt's ping waits at most `pingMs` and never more than 1 s: attempts follow each other
+ * every 100 ms, and a ping still open when the time is up would keep the command's process alive
+ * after its line. Rejects with a SkydeckError, starting nothing, when the boot id cannot be read
+ * (no server could ever be confirmed), and when the program cannot be started.
  */
 export async function startServe(
   deck: Deck,
@@ -204,9 +223,15 @@ export async function startServe(
 ): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }> {
   const { platform, places } = deck;
   const { pingMs, startMs } = timesOf(times);
+  const attemptMs = Math.min(pingMs, START_PING_MS);
   const checkout = platform.appRoot;
-  const build = computeBuild(platform.files, checkout);
   const bootId = currentBootId(platform);
+  if (bootId === null) {
+    throw new SkydeckError(
+      "the window's server is not started: the boot id cannot be read, so no answer of it could be confirmed",
+    );
+  }
+  const build = computeBuild(platform.files, checkout);
   const log = join(places.stateDir, 'server.log');
   const program = join(checkout, 'bin', 'skydeck');
   // fromEntries defines own properties: a variable named __proto__ stays a variable.
@@ -255,12 +280,11 @@ export async function startServe(
         return { ok: false, line: didNotStart(`no answer in ${startMs / 1000} s`, log) };
       }
       const client = controlClient(platform.net, serverFiles(deck).serverSock);
-      const ping = await Promise.race([pingOnce(client, pingMs), interrupted()]);
+      const ping = await Promise.race([pingOnce(client, attemptMs), interrupted()]);
       if (
         ping !== null &&
         ping.checkout === checkout &&
         ping.build === build &&
-        bootId !== null &&
         ping.bootId === bootId
       ) {
         return { ok: true, ping };
@@ -331,8 +355,9 @@ function refusalReason(platform: Platform, dir: string): string | null {
  * after server.json's pid, process start and boot id were confirmed alive at that moment, and
  * never when they name a keeper of the runtime directory, this process or pid 1. `stopped` is
  * true when a server was running and is gone; `terminals` is how many the server listed (0 when
- * it did not answer). Rejects with a SkydeckError when the process cannot be judged, when
- * server.json names a process that is not the server's, or when it outlives SIGKILL by `killMs`.
+ * it did not answer). Rejects with a SkydeckError when server.json cannot be read or its process
+ * cannot be judged, when it names a process that is not the server's, when the keepers cannot be
+ * listed or the system refuses a signal, and when the server outlives SIGKILL by `killMs`.
  */
 export async function stopServer(
   deck: Deck,
@@ -376,8 +401,10 @@ async function terminalCount(client: ControlClient): Promise<number> {
 
 /**
  * Sends `signal` to the server when its identity is confirmed alive now; false when it is gone.
- * Throws, sending nothing, when it cannot be judged, or when the identity is that of a keeper of
- * this runtime directory, of this process or of pid 1: such a server.json names no server.
+ * Throws a SkydeckError, sending nothing, when the identity is that of a keeper of this runtime
+ * directory, of this process or of pid 1 (such a server.json names no server), when the keepers
+ * cannot be listed, or when the process cannot be judged; and when the system refuses the signal.
+ * The identity is judged last, directly before the signal, so that nothing runs in between.
  */
 function signalServer(
   platform: Platform,
@@ -385,20 +412,33 @@ function signalServer(
   line: PidLine,
   signal: 'SIGTERM' | 'SIGKILL',
 ): boolean {
-  if (judge(platform, line) === 'dead') return false;
-  const keeper = listKeeperLines(platform, files).some(
-    (k) =>
-      k.line !== null &&
-      k.line.pid === line.pid &&
-      k.line.procStart === line.procStart &&
-      k.line.bootId === line.bootId,
-  );
+  let keeper: boolean;
+  try {
+    keeper = listKeeperLines(platform, files).some(
+      (k) =>
+        k.line !== null &&
+        k.line.pid === line.pid &&
+        k.line.procStart === line.procStart &&
+        k.line.bootId === line.bootId,
+    );
+  } catch (error) {
+    throw new SkydeckError(
+      `the keepers in ${files.termsDir} cannot be listed (${describeError(error)}); the window's server (pid ${line.pid}) was not signalled`,
+    );
+  }
   if (keeper || line.pid === platform.pid || line.pid === 1) {
     throw new SkydeckError(
       `${files.serverJson} names pid ${line.pid}, which is not the window's server (${keeper ? 'a keeper' : 'this process or init'}); nothing was signalled`,
     );
   }
-  return platform.processes.signal(line.pid, signal);
+  if (judge(platform, line) === 'dead') return false;
+  try {
+    return platform.processes.signal(line.pid, signal);
+  } catch (error) {
+    throw new SkydeckError(
+      `the window's server (pid ${line.pid}) cannot be sent ${signal} (${describeError(error)})`,
+    );
+  }
 }
 
 /** Whether the server's process is gone (dead by design 5.5) within `ms`. */

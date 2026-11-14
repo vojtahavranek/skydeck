@@ -1123,10 +1123,14 @@ export type FoundServer =
 export interface LifecycleTimes { pingMs?: number; startMs?: number; stopMs?: number; killMs?: number }
 /** Ruled (task 22): a server.json line that cannot be judged ('unknown', design 5.5) rejects with a
  *  SkydeckError — the command says it cannot tell whether the server runs; nothing is given up on
- *  it. After a ping without an answer the line is judged again: dead meanwhile → none, else hung. */
+ *  it. After a ping without an answer the line is judged again: dead meanwhile → none, else hung.
+ *  All three functions reject with a SkydeckError, never another error, for a server.json, a
+ *  terms/ directory or a signal the system refuses (task 22, review 2). */
 export function findServer(deck: Deck, checkout: string, build: string, times?: LifecycleTimes): Promise<FoundServer>;
 /** Starts `<appRoot>/bin/skydeck serve` detached (S2 5.2) and waits at most 10 s for a ping of this
- *  checkout (ruled, task 22), the current build and boot id; one fixed line per exit code. */
+ *  checkout (ruled, task 22), the current build and boot id; one fixed line per exit code. Each
+ *  ping of that wait waits at most 1 s, so none outlives the wait by more (task 22, review 2); a
+ *  boot id that cannot be read rejects with a SkydeckError before anything is started. */
 export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }>;
 /** A server that answers ping: GET /status (`terminals`: every terminal it lists, ended ones
  *  included), POST /shutdown, wait 10 s; then SIGTERM and after 5 s SIGKILL. A server that gives no
