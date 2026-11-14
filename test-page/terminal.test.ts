@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import type { Page } from 'playwright';
 
 import type { Platform } from '../src/platform/types.ts';
+import { encodeOutputFrame } from '../src/window/protocol.ts';
 import type { StreamSink } from '../src/window/hub.ts';
 import type { RunningServer } from '../src/window/server.ts';
 import { sleep } from '../test/helpers/keeper.ts';
@@ -21,11 +22,14 @@ import {
   RESTARTED,
   active,
   after,
+  assetBase,
   connection,
   honest,
   launched,
   logOf,
   mark,
+  pageUrl,
+  problemsOf,
   scriptedList,
   showsText,
   standinServer,
@@ -54,7 +58,7 @@ const ANSWERED = ['DA1', 'DA2', 'CPR', 'DECRQM 2026', 'DECRQSS m', 'OSC 10', 'OS
 const GAP = "part of this terminal's output was lost while skydeck's server was not running";
 const NEWER = 'this terminal was started by a newer skydeck; run skydeck window --restart';
 const INPUT_FULL =
-  'this terminal is not taking input at the moment: what you typed was not sent to the program';
+  'this terminal is not taking input at the moment: not all of what you typed or pasted reached the program';
 
 /** Grants the page's origin the clipboard (S2 9.5: the page writes it; the test reads it). */
 async function allowClipboard(page: Page, port: number): Promise<void> {
@@ -340,34 +344,68 @@ test('the terminal view', async (t) => {
   );
 
   await t.test(
-    'OSC 52 from the shown terminal of a focused window writes the clipboard; from a hidden one it does not',
+    'OSC 52 writes the clipboard from the shown terminal of a focused, visible window only; not from a hidden terminal, an unfocused or hidden window, nor a read, a payload over 1 MiB or one that is not base64',
     async (t) => {
       const l = await launched(t, chromium);
       const { page, d } = l;
       await allowClipboard(page, l.server.port);
+      const sinks = captureSinks(l.server);
       d.resumable(S1);
       d.resumable(S2);
-      await resumeHere(page, S1);
+      const term1 = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
       await page.evaluate(() => navigator.clipboard.writeText('before'));
       await typeLine(page, '/osc52 from-the-shown-one');
       await until(async () => (await clipboardText(page)) === 'from-the-shown-one', 'written');
 
-      await resumeHere(page, S2);
+      const term2 = await resumeHere(page, S2);
       await untilScreen(page, promptOf(S2));
-      await page.keyboard.press('Control+Shift+Digit1');
-      await untilTerminalOf(page, S1);
-      // S1 reads its next line only after the stall, when S2 is shown and S1 is hidden.
-      await typeLine(page, '/stall 3');
-      await typeLine(page, '/osc52 from-a-hidden-one');
-      await page.keyboard.press('Control+Shift+Digit2');
-      await untilTerminalOf(page, S2);
+      // S1 is attached and not shown: its program writes the clipboard.
+      l.server.hub.input(term1, Buffer.from('/osc52 from-a-hidden-one\r'));
       await until(
         () => inputOf(d.record, S1).includes(hexOf('/osc52 from-a-hidden-one')),
         'the hidden one wrote its OSC 52',
       );
-      await sleep(1500);
-      assert.equal(await clipboardText(page), 'from-the-shown-one', 'the clipboard is as it was');
+      await sleep(1000);
+      assert.equal(await clipboardText(page), 'from-the-shown-one', 'not from a hidden terminal');
+
+      // The shown one, in a window without focus, then in a hidden window.
+      const sink = sinks.get(term2);
+      assert.ok(sink !== undefined);
+      const osc52 = (payload: string): void => {
+        sink.output(Buffer.from(`\x1b]52;c;${payload}\x07`, 'latin1'));
+      };
+      const base64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64');
+      await page.evaluate(() => {
+        Reflect.set(globalThis, 'hasFocusOf', document.hasFocus.bind(document));
+        document.hasFocus = () => false;
+      });
+      osc52(base64('from-an-unfocused-window'));
+      await sleep(500);
+      await page.evaluate(() => {
+        document.hasFocus = Reflect.get(globalThis, 'hasFocusOf') as () => boolean;
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      });
+      osc52(base64('from-a-hidden-window'));
+      await sleep(500);
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      });
+      // A read, a payload over 1 MiB, one that is not base64.
+      await mark(page, 'reads');
+      osc52('?');
+      osc52(base64('x'.repeat(1024 * 1024 + 1)));
+      osc52('%%% not base64 %%%');
+      await sleep(1000);
+      assert.equal(await clipboardText(page), 'from-the-shown-one', 'none of them wrote it');
+      assert.deepEqual(
+        after(await logOf(page), 'reads').filter((e) => e.e === 'out' && e.t === 'input'),
+        [],
+        'a read is never answered',
+      );
+      // And the same path writes it when nothing stands against it.
+      osc52(base64('through the same path'));
+      await until(async () => (await clipboardText(page)) === 'through the same path', 'written');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
@@ -466,8 +504,8 @@ test('the terminal view', async (t) => {
       d.resumable(S1);
       await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
-      await typeLine(page, '/stall 10');
-      await untilScreen(page, /stalling 10 s/);
+      await typeLine(page, '/stall 20');
+      await untilScreen(page, /stalling 20 s/);
       // More than the keeper (4 MiB), the sockets and the server (4 MiB) take while it stalls.
       await page.evaluate(() => navigator.clipboard.writeText('y'.repeat(10 * 1024 * 1024)));
       await page.keyboard.press('Control+V');
@@ -672,6 +710,9 @@ test('the terminal view', async (t) => {
       );
       await until(async () => (await screenText(page)) === screen, 'the same screen, whole', 5000);
       assert.ok(server.port === port);
+      // And the new stream is live: a line typed now appears.
+      await typeLine(page, '/red after the second restart');
+      await untilScreen(page, /^after the second restart$/m);
       assert.deepEqual(
         l.problems.filter((p) => !/ERR_CONNECTION_REFUSED|WebSocket/.test(p)),
         [],
@@ -815,6 +856,405 @@ test('the terminal view', async (t) => {
       await untilScreen(page, /after$/m);
       await sleep(500);
       assert.deepEqual(console, [], 'nothing in the console');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    "focus reporting: xterm.js's own report when the program turns it on, or when a snapshot restores it, reaches no program and makes no window the size owner; a real focus change is reported",
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      d.resumable(S1);
+      const term = await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      const reports = (): { in: number; out: number } => {
+        const read = Buffer.from(inputOf(d.record, S1), 'hex').toString('latin1');
+        return { in: read.split('\x1b[I').length - 1, out: read.split('\x1b[O').length - 1 };
+      };
+      // The program turns focus reporting on (the screen side keeps the mode for snapshots).
+      l.server.hub.input(term, Buffer.from('/red \x1b[?1004hreports on\r'));
+      await untilScreen(page, /^reports on$/m);
+      await sleep(800);
+      assert.deepEqual(reports(), { in: 0, out: 0 }, 'nothing that the user did');
+      // Real focus changes: the list takes the keyboard, then the terminal again.
+      await page.keyboard.press('Control+Shift+L');
+      await until(() => reports().out === 1, 'the focus leaving reported');
+      await page.keyboard.press('Control+Shift+L');
+      await until(() => reports().in === 1, 'the focus coming back reported');
+
+      // A second window that only attaches: its snapshot restores the mode.
+      const other = await page.context().newPage();
+      await other.setViewportSize({ width: 900, height: 500 });
+      await other.goto(pageUrl(l.server.port));
+      await connection(other, 'open');
+      await untilTerminalOf(other, S1);
+      await untilScreen(other, /^reports on$/m);
+      await sleep(1000);
+      assert.deepEqual(reports(), { in: 1, out: 1 }, 'the second window sent nothing');
+      const hinted = (p: Page): Promise<boolean> =>
+        p.evaluate(() => {
+          const hint = document.querySelector('#terminal .tv-term:not([hidden]) .tv-hint');
+          return hint instanceof HTMLElement && !hint.hidden;
+        });
+      assert.equal(await hinted(other), true, 'the second window does not own the size');
+      assert.equal(await hinted(page), false, 'the first one still does');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'one narrowing of the window is one resize of the program (at most two), and the page is never wider than its window',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      d.resumable(S1);
+      await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      await sleep(1000);
+      const resizes = (): string[] =>
+        recordsOf(d.record, S1).flatMap((e) => (e.ev === 'resize' ? [`${e.cols}x${e.rows}`] : []));
+      for (const width of [900, 1000, 1280]) {
+        const before = resizes().length;
+        await page.setViewportSize({ width, height: 720 });
+        await sleep(1500);
+        const got = resizes().slice(before);
+        assert.ok(got.length >= 1 && got.length <= 2, `${width} px: ${JSON.stringify(got)}`);
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+          width,
+          `${width} px: the page is as wide as its window`,
+        );
+      }
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'queries the stand-in does not ask are swallowed too: the page sends nothing for any of them',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      const sinks = captureSinks(l.server);
+      d.resumable(S1);
+      const term = await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      const sink = sinks.get(term);
+      assert.ok(sink !== undefined);
+      const ESC = '\x1b';
+      const probes: [string, string][] = [
+        ['DA1', `${ESC}[c`],
+        ['DA1 0', `${ESC}[0c`],
+        ['DA2', `${ESC}[>c`],
+        ['DA3', `${ESC}[=c`],
+        ['DSR 5', `${ESC}[5n`],
+        ['CPR 6', `${ESC}[6n`],
+        ['DECXCPR ?6', `${ESC}[?6n`],
+        ['DSR ?15', `${ESC}[?15n`],
+        ['DSR ?996', `${ESC}[?996n`],
+        ['DECRQM ansi 4', `${ESC}[4$p`],
+        ['DECRQM ?2026', `${ESC}[?2026$p`],
+        ['DECRQM ?1004', `${ESC}[?1004$p`],
+        ['DECRQSS m', `${ESC}P$qm${ESC}\\`],
+        ['DECRQSS "p', `${ESC}P$q"p${ESC}\\`],
+        ['DECRQSS SP q', `${ESC}P$q q${ESC}\\`],
+        ['XTVERSION >0q', `${ESC}[>0q`],
+        ['XTVERSION >q', `${ESC}[>q`],
+        ['CSI 14t', `${ESC}[14t`],
+        ['CSI 16t', `${ESC}[16t`],
+        ['CSI 18t', `${ESC}[18t`],
+        ['CSI 19t', `${ESC}[19t`],
+        ['CSI 21t', `${ESC}[21t`],
+        ['OSC 4;1;?', `${ESC}]4;1;?\x07`],
+        ['OSC 10;?', `${ESC}]10;?\x07`],
+        ['OSC 10;?;?', `${ESC}]10;?;?${ESC}\\`],
+        ['OSC 11;?', `${ESC}]11;?${ESC}\\`],
+        ['OSC 12;?', `${ESC}]12;?\x07`],
+        ['OSC 52 read', `${ESC}]52;c;?\x07`],
+        ['ENQ', '\x05'],
+        ['kitty ?u', `${ESC}[?u`],
+        ['DECID', `${ESC}Z`],
+        ['DECREQTPARM', `${ESC}[0x`],
+        ['XTGETTCAP', `${ESC}P+q544e${ESC}\\`],
+        ['DECSET 1004', `${ESC}[?1004h`],
+        ['DECSET 2004;1004', `${ESC}[?2004;1004h`],
+        ['DECSET 2031', `${ESC}[?2031h`],
+        ['DECSET 2048', `${ESC}[?2048h`],
+        ['DECSET 1000;1006', `${ESC}[?1000;1006h`],
+        ['soft reset', `${ESC}[!p`],
+        ['RIS', `${ESC}c`],
+      ];
+      await mark(page, 'probes');
+      const answered: string[] = [];
+      for (const [name, bytes] of probes) {
+        const before = after(await logOf(page), 'probes').filter(
+          (e) => e.e === 'out' && e.t === 'input',
+        ).length;
+        sink.output(Buffer.from(bytes, 'latin1'));
+        await sleep(150);
+        const now = after(await logOf(page), 'probes').filter(
+          (e) => e.e === 'out' && e.t === 'input',
+        ).length;
+        if (now > before) answered.push(name);
+      }
+      await sleep(500);
+      assert.deepEqual(answered, [], 'answered by the page');
+      assert.deepEqual(
+        after(await logOf(page), 'probes').filter((e) => e.e === 'out' && e.t === 'input'),
+        [],
+      );
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'a line of 40,000 closing brackets after a URL does not hold the page under the mouse; an OSC 8 target over 2,048 characters is not offered',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      const sinks = captureSinks(l.server);
+      d.resumable(S1);
+      const term = await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      const sink = sinks.get(term);
+      assert.ok(sink !== undefined);
+      sink.output(Buffer.from(`\r\nhttp://x${')'.repeat(40_000)}\r\nbelow\r\n`));
+      await untilScreen(page, /^below$/m);
+      const brackets = await whereIs(page, '))))))))');
+      const started = performance.now();
+      await page.mouse.move(brackets.x, brackets.y);
+      await page.mouse.move(brackets.x + 30, brackets.y);
+      await page.evaluate(() => 1);
+      const held = performance.now() - started;
+      assert.ok(held < 3000, `the page answered ${Math.round(held)} ms after the moves`);
+
+      sink.output(
+        Buffer.from(
+          `\x1b]8;;https://example.com/${'a'.repeat(10_000)}\x1b\\a-long-target\x1b]8;;\x1b\\\r\n`,
+        ),
+      );
+      await untilScreen(page, /^a-long-target$/m);
+      const calls = d.edgeCalls().length;
+      await clickAt(page, await whereIs(page, 'a-long-target'), true);
+      await sleep(500);
+      assert.equal(await noticeText(page, 'link'), '', 'no target shown');
+      await clickAt(page, await whereIs(page, 'a-long-target'), true);
+      await sleep(500);
+      assert.equal(d.edgeCalls().length, calls, 'nothing opened');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'records that come while a very large snap is parsed reach the screen, in order, and nothing is thrown',
+    async (t) => {
+      const secret = new Uint8Array(32).fill(29);
+      const page = await newPage(t, chromium);
+      const problems = problemsOf(page);
+      const term = 'aaaaaaaaaaaa';
+      const list = scriptedList(
+        [{ id: S1, terminal: term, slot: 1 }],
+        [{ id: term, slot: 1, sessionId: S1 }],
+      );
+      // 300 coloured cells a row, about 52 MB of text: longer than xterm.js 6.0.0 lets wait.
+      const row = Array.from(
+        { length: 300 },
+        (_, c) => `\x1b[38;5;${(c * 7) % 256}m${String.fromCharCode(97 + (c % 26))}`,
+      ).join('');
+      const big = `${Array.from({ length: Math.ceil(52_000_000 / row.length) }, () => row).join('\r\n')}\x1b[0m\r\n`;
+      let channel = 0;
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          open: (conn, message) => {
+            if (message['t'] === 'view') conn.send(list);
+            if (message['t'] !== 'attach') return;
+            channel++;
+            conn.send({ t: 'snap', term, ch: channel, cols: 300, rows: 40, data: big });
+            const ch = channel;
+            void (async () => {
+              for (let k = 1; k <= 20; k++) {
+                await sleep(100);
+                conn.ws.send(encodeOutputFrame(ch, Buffer.from(`record ${k}\r\n`)));
+              }
+            })();
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await untilScreen(page, /^record 20$/m, 120_000);
+      const screen = await screenText(page);
+      for (let k = 1; k <= 20; k++) {
+        assert.match(screen, new RegExp(`^record ${k}$`, 'm'), `record ${k} on the screen`);
+      }
+      assert.deepEqual(problems, [], 'nothing thrown, nothing lost');
+    },
+  );
+
+  await t.test(
+    'output that would wait beyond what the view holds for xterm.js is dropped and a fresh snap asked for, nothing thrown; the fresh snap then shows',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const base = await assetBase(l.page);
+      const result = await l.page.evaluate(async (base) => {
+        const module = (await import(`${base}terminal-view.js`)) as {
+          createTerminalView(
+            root: HTMLElement,
+            deps: object,
+          ): {
+            show(term: object): void;
+            snap(message: object): void;
+            output(channel: number, bytes: Uint8Array): void;
+          };
+        };
+        const sent: Record<string, unknown>[] = [];
+        const root = document.createElement('div');
+        root.className = 'terminal';
+        root.style.cssText = 'position:fixed;left:0;top:0;width:733px;height:411px';
+        document.body.append(root);
+        const view = module.createTerminalView(root, {
+          send: (message: Record<string, unknown>) => sent.push(message),
+          chord: () => false,
+          openLink: () => {},
+        });
+        const term = 'eeeeeeeeeeee';
+        view.show({
+          id: term,
+          slot: null,
+          sessionId: null,
+          state: 'running',
+          notReported: false,
+          cols: 80,
+          rows: 24,
+          ownsSize: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        view.snap({ t: 'snap', term, ch: 7, cols: 80, rows: 24, data: 'the first snap\r\n' });
+        // 40 MB of records in one go, faster than any parse: more than the view holds.
+        const record = new TextEncoder().encode(`${'\x1b[31mx\x1b[0m'.repeat(6000)}\r\n`);
+        for (let given = 0; given < 40_000_000; given += record.length) view.output(7, record);
+        const attaches = sent.filter((message) => message['t'] === 'attach').length;
+        view.snap({ t: 'snap', term, ch: 8, cols: 80, rows: 24, data: 'a fresh snap\r\n' });
+        view.output(8, new TextEncoder().encode('and the stream after it\r\n'));
+        const deadline = performance.now() + 60_000;
+        const rows = (): string => root.querySelector('.xterm-rows')?.textContent ?? '';
+        while (!rows().includes('and the stream after it') && performance.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return { attaches, rows: rows() };
+      }, base);
+      assert.equal(result.attaches, 2, 'the attach of the show and one fresh snap asked for');
+      assert.match(result.rows, /a fresh snap.*and the stream after it/s);
+      assert.doesNotMatch(result.rows, /the first snap/);
+      assert.deepEqual(l.problems, [], 'nothing thrown');
+    },
+  );
+
+  await t.test(
+    "after a reconnect, a terminal whose own attach was lost with the connection gets the view's size, not the list's",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(30);
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      const terms = ['aaaaaaaaaaaa', 'bbbbbbbbbbbb'];
+      const list = scriptedList(
+        [
+          { id: S1, terminal: terms[0] ?? '', slot: 1 },
+          { id: S2, terminal: terms[1] ?? '', slot: 2 },
+        ],
+        [
+          { id: terms[0] ?? '', slot: 1, sessionId: S1 },
+          { id: terms[1] ?? '', slot: 2, sessionId: S2 },
+        ],
+      );
+      let channel = 0;
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          open: (conn, message, n) => {
+            if (message['t'] === 'view') conn.send(list);
+            const term = message['term'];
+            if (message['t'] !== 'attach' || typeof term !== 'string') return;
+            if (n === 1 && term === terms[1]) {
+              // The view's own attach of B: the connection is lost before it is answered.
+              setTimeout(() => conn.ws.terminate(), 50);
+              return;
+            }
+            conn.send({ t: 'snap', term, ch: ++channel, cols: 80, rows: 24, data: `${term}\r\n` });
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await untilScreen(page, /^a{12}$/m);
+      await sleep(500);
+      await page.keyboard.press('Control+Shift+Digit2');
+      await until(async () => (await shownTerm(page)) === terms[1], 'B shown');
+      await until(() => standin.connections.length >= 2, 'the page connected again');
+      await connection(page, 'open');
+      await untilScreen(page, /^b{12}$/m);
+      // app.js attached B again with the list's size (80x24); the view's own size must follow.
+      const conn = standin.connections.at(-1);
+      assert.ok(conn !== undefined);
+      const resizeOfB = (): Record<string, unknown> | undefined =>
+        conn.received
+          .map((text) => JSON.parse(text) as Record<string, unknown>)
+          .find((message) => message['t'] === 'resize' && message['term'] === terms[1]);
+      await until(() => resizeOfB() !== undefined, "B's own size sent");
+      assert.notDeepEqual([resizeOfB()?.['cols'], resizeOfB()?.['rows']], [80, 24]);
+    },
+  );
+
+  await t.test(
+    "the view's `fits` is what its fit addon proposes: for an area with a terminal in it and with none",
+    async (t) => {
+      const l = await launched(t, chromium);
+      const base = await assetBase(l.page);
+      const result = await l.page.evaluate(async (base) => {
+        const module = (await import(`${base}terminal-view.js`)) as {
+          createTerminalView(
+            root: HTMLElement,
+            deps: object,
+          ): {
+            show(term: object): void;
+            fits(width: number, height: number): { cols: number; rows: number } | null;
+          };
+        };
+        const sent: Record<string, unknown>[] = [];
+        const root = document.createElement('div');
+        root.className = 'terminal';
+        root.style.cssText = 'position:fixed;left:0;top:0;width:733px;height:411px';
+        document.body.append(root);
+        const view = module.createTerminalView(root, {
+          send: (message: Record<string, unknown>) => sent.push(message),
+          chord: () => false,
+          openLink: () => {},
+        });
+        const empty = view.fits(733, 411);
+        view.show({
+          id: 'ffffffffffff',
+          slot: null,
+          sessionId: null,
+          state: 'running',
+          notReported: false,
+          cols: 80,
+          rows: 24,
+          ownsSize: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const attach = sent.find((message) => message['t'] === 'attach');
+        return {
+          empty,
+          open: view.fits(733, 411),
+          proposed: attach === undefined ? null : { cols: attach['cols'], rows: attach['rows'] },
+        };
+      }, base);
+      assert.ok(result.proposed !== null);
+      assert.deepEqual(result.open, result.proposed, 'with a terminal open');
+      assert.deepEqual(result.empty, result.proposed, 'measured with none open');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );

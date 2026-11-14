@@ -63,6 +63,10 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* Its size comes from the area, never from the terminal in it (xterm.js's screen has a fixed
+     width): else the fit addon measures the terminal, and one narrowing of the window became a
+     resize per two columns (review 2 of task 28). */
+  contain: size;
 }
 /* On xterm.js's element, not its parent: the fit addon counts this padding out. */
 .tv-screen .xterm {
@@ -78,6 +82,8 @@
   top: 0;
   left: 0;
   right: 16px;
+  max-height: 50%;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;

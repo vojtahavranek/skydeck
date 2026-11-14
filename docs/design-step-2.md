@@ -1424,7 +1424,8 @@ page last proposed (`attach`, `resize`). The rules:
   it to the screen side and sends `size` to every attached page. A page sets its xterm.js size only
   from `snap` and `size` — never from its own fitting — so page and screen side reflow at the same
   point of the stream. A page that is not the owner shows the terminal at the owner's size (cut off
-  or with a margin) and a hint "sized by another window"; typing makes it the owner. A proposed
+  or with a margin) and a hint "sized by another window"; typing makes it the owner (and so does a
+focus change while the program has focus reporting on, 9.2). A proposed
   size is first clamped to at most 1,000 columns and 500 rows (a wider one is not an error): 65,535
   columns would make the screen side allocate gigabytes of scrollback (ruled, plan task 12's
   review).
@@ -1529,7 +1530,11 @@ neither; 6.1 is re-evaluated when released (20).
 ### 9.2 Focus and mouse
 
 Focus reports (mode 1004) and mouse reports are what the page's xterm.js produces, sent as
-`input`. They are the user's own events, not query answers (9.3).
+`input`. They are the user's own events, not query answers (9.3): xterm.js 6.0.0 also reports
+the focus by itself the moment it parses `CSI ? 1004 h` (from the program or a snapshot), and
+the page drops that report. With focus reporting on, a real focus change is `input`, so a window
+becomes the size owner (8.2.6) by being clicked, not only by being typed in (ruled for stage A,
+plan task 28's review).
 
 ### 9.3 Terminal queries
 
@@ -1941,10 +1946,18 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
   never written into it (so that the page's screen stays the screen side's): the reconnecting bar
   (7.8) and "sized by another window" (8.2.6) while they hold; a gap or a newer keeper, which the
   server repeats after every snapshot, until a later snapshot is followed by the terminal's stream
-  without it — and one the user dismissed is not shown again for a repeat, only for a new
-  occasion; and `input-full` ("this terminal is not taking input at the moment: what you typed was
-  not sent to the program", true of all three reasons the server takes no input) until input sent
-  after it was taken (the server answers input it refuses at once; plan task 28).
+  without it — and one the user dismissed is not shown again for a repeat; a dismissal is
+  forgotten once a snapshot's repeat ends without that notice, and a notice that comes in the
+  stream shows again (a new occasion). The page cannot tell a new occasion that comes right
+  after a snapshot, before the terminal's stream goes on, from the repeat of one dismissed: it
+  stays hidden then (a named limit). And `input-full` ("this terminal is not taking input at the
+  moment: not all of what you typed or pasted reached the program", true of all three reasons the
+  server takes no input) until input sent after it was taken (the server answers input it
+  refuses at once; plan task 28). Of a paste that is refused in part, the program gets the parts
+  that were taken and may be left inside the bracketed paste (no end marker): the server takes
+  or refuses each `input` message on its own and answers only a refusal, and the page has sent
+  every part of the paste before the first refusal can come, so it cannot hold back the rest or
+  send the end marker later (a named limit).
 - **A session running in another terminal**: the card of 7.9.
 - **A session not running**: the **resume card**: how it ended (exited normally, ended
   unexpectedly, mid-turn), last activity, the directory, the exact command (design 7.6's), the flags

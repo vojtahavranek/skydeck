@@ -47,6 +47,19 @@ const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, "Segoe UI Symbol", mon
 const REFIT_MS = 100;
 /** `input-full` goes once input sent this long ago had no `input-full` (the server answers at once). */
 const TAKEN_MS = 1000;
+/** Characters given to xterm.js and not parsed yet above which the next writes wait in the view:
+ *  xterm.js 6.0.0 throws away a write while more than 50,000,000 wait (`write data discarded`). */
+const PARSE_AHEAD = 4_000_000;
+/** What may wait in the view for xterm.js; beyond it the waiting output is dropped and a fresh
+ *  snapshot asked for (S2 8.2.4: a snapshot is always right). */
+const WAITING_MAX = 32_000_000;
+/** S2 9.6: the server opens a URL of at most this many characters. */
+const URL_MAX = 2048;
+/** The padding of xterm.js's element (terminal-view.css) and the scroll bar the fit addon counts
+ *  out (its default with a scrollback): what `fits` subtracts too. */
+const PAD_X = 4;
+const PAD_Y = 2;
+const SCROLL_BAR = 14;
 /** The terminal states whose program is over (hub.ts). */
 const OVER = new Set(['ended', 'lost', 'not-started']);
 
@@ -58,7 +71,7 @@ const TEXTS = {
   sizedElsewhere: 'sized by another window; type here to size it to this one',
   /** For each reason the server takes no input (its text names one of them only, task 16). */
   inputFull:
-    'this terminal is not taking input at the moment: what you typed was not sent to the program',
+    'this terminal is not taking input at the moment: not all of what you typed or pasted reached the program',
   /** @param {string} url */
   linkTarget: (url) => `this link leads to ${url}; Ctrl+click it again to open it`,
   noMatch: 'no match',
@@ -86,7 +99,14 @@ const URL_PATTERN = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&*+,;=%()']+/g;
  * @property {boolean} owner whether this page owns the size (S2 8.2.6)
  * @property {string} state
  * @property {Map<string, Notice>} notices by kind
- * @property {Set<string>} dismissed the gap and newer-keeper texts the user dismissed
+ * @property {Set<string>} dismissed `<kind>:<text>` of the gap and newer-keeper notices the user
+ *   dismissed (forgotten when a snapshot's replay ends without that kind)
+ * @property {Set<string>} replayed the kinds the server repeated after the last snap
+ * @property {boolean} quiet a focus report xterm.js makes by itself is not the user's (S2 9.2)
+ * @property {number} parsing characters given to xterm.js and not parsed yet
+ * @property {{ data: string | Uint8Array, then?: () => void }[]} waiting writes held for xterm.js
+ * @property {number} waitingSize their characters
+ * @property {boolean} refreshing a fresh snapshot was asked for: output until it comes is dropped
  * @property {number} refusedAt when the last `input-full` came (performance.now)
  * @property {number} sentAt when the page last sent input
  * @property {string | null} armed the OSC 8 link target the next Ctrl+click opens
@@ -152,6 +172,12 @@ export function createTerminalView(root, deps) {
       state: payload.state,
       notices: new Map(),
       dismissed: new Set(),
+      replayed: new Set(),
+      quiet: false,
+      parsing: 0,
+      waiting: [],
+      waitingSize: 0,
+      refreshing: false,
       refusedAt: -Infinity,
       sentAt: -Infinity,
       armed: null,
@@ -176,14 +202,31 @@ export function createTerminalView(root, deps) {
     swallowQueries(t);
     xterm.registerLinkProvider(plainLinks(t));
     xterm.attachCustomKeyEventHandler((event) => keyEvent(t, event));
-    xterm.onData((data) => sendInput(t, data, false));
+    xterm.onData((data) => {
+      // S2 9.2, 9.3: xterm.js reports the focus at once when it parses `CSI ? 1004 h` (also in a
+      // snapshot): that report is not the user's, and must not reach the program or make this
+      // page the size owner. Real focus changes later are.
+      if (t.quiet && (data === '\x1b[I' || data === '\x1b[O')) {
+        return;
+      }
+      sendInput(t, data, false);
+    });
     xterm.onBinary((data) => sendInput(t, data, true));
     xterm.open(screen);
-    // xterm.js 6.0.0 sends a paste but does not cancel it, so the browser also puts the pasted
-    // text into xterm.js's hidden textarea, after xterm.js has emptied it: a large paste then
-    // holds megabytes there and makes the page slow at everything it does after. The page
-    // cancels the paste once xterm.js has taken it (its listener on the textarea runs first).
-    xterm.textarea?.addEventListener('paste', (event) => event.preventDefault());
+    // S2 9.1: the page pastes, before xterm.js sees the event (the capture phase of its element):
+    // xterm.js 6.0.0 neither cancels a paste (the browser then puts the whole text into its
+    // hidden textarea, which makes the page slow at everything after) nor filters it (a text
+    // that holds ESC [ 2 0 1 ~ ends its own bracketed paste, and the rest reaches the program as
+    // typed keys). Without ESC no sequence can be in it. The find bar's field is not in here.
+    screen.addEventListener(
+      'paste',
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        xterm.paste((event.clipboardData?.getData('text/plain') ?? '').replaceAll('\x1b', ''));
+      },
+      true,
+    );
     return t;
   };
 
@@ -209,6 +252,16 @@ export function createTerminalView(root, deps) {
       parser.registerCsiHandler(id, swallow);
     }
     parser.registerDcsHandler({ intermediates: '$', final: 'q' }, swallow); // DECRQSS
+    // Focus reporting turned on: xterm.js reports the focus at once (M1 of task 28's review).
+    parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+      if (params.includes(1004)) {
+        t.quiet = true;
+        queueMicrotask(() => {
+          t.quiet = false;
+        });
+      }
+      return false;
+    });
     for (const ident of [4, 10, 11, 12]) {
       // A colour query has `?`; a colour that is set goes on to xterm.js.
       parser.registerOscHandler(ident, (data) => data.includes('?'));
@@ -295,6 +348,83 @@ export function createTerminalView(root, deps) {
     }
   };
 
+  // --- writing (S2 8.2.4, 8.2.8) ------------------------------------------------------------------
+
+  /**
+   * Writes to the terminal's xterm.js in order, never more than PARSE_AHEAD characters ahead of
+   * what it has parsed: a snapshot can be 60 MiB (S2 8.2.8), and xterm.js throws away a write
+   * while more than 50,000,000 characters wait. What comes meanwhile waits here; when more than
+   * WAITING_MAX would wait, it is dropped and a fresh snapshot asked for, so that the screen is
+   * never silently wrong. `then` runs once xterm.js has parsed `data`.
+   * @param {Term} t
+   * @param {string | Uint8Array} data
+   * @param {() => void} [then]
+   */
+  const write = (t, data, then) => {
+    if (t.waiting.length > 0 || t.parsing > PARSE_AHEAD) {
+      t.waiting.push(then === undefined ? { data } : { data, then });
+      t.waitingSize += data.length;
+      if (t.waitingSize > WAITING_MAX) {
+        refresh(t);
+      }
+      return;
+    }
+    give(t, data, then);
+  };
+
+  /**
+   * @param {Term} t
+   * @param {string | Uint8Array} data
+   * @param {(() => void) | undefined} then
+   */
+  const give = (t, data, then) => {
+    t.parsing += data.length;
+    try {
+      t.xterm.write(data, () => {
+        t.parsing -= data.length;
+        if (terms.get(t.id) !== t) {
+          return; // detached meanwhile: its xterm.js is gone
+        }
+        then?.();
+        // xterm.js 6.0.0 calls this before it counts the write as parsed: a write given from here
+        // would still meet the whole of it waiting (and be thrown away). The next ones go after.
+        queueMicrotask(() => drain(t));
+      });
+    } catch {
+      t.parsing -= data.length;
+      refresh(t); // nothing is lost silently: a fresh snapshot replaces what xterm.js refused
+    }
+  };
+
+  /** @param {Term} t */
+  const drain = (t) => {
+    while (t.waiting.length > 0 && t.parsing <= PARSE_AHEAD) {
+      const next = /** @type {{ data: string | Uint8Array, then?: () => void }} */ (
+        t.waiting.shift()
+      );
+      t.waitingSize -= next.data.length;
+      give(t, next.data, next.then);
+    }
+  };
+
+  /**
+   * Asks for a fresh snapshot of `t` (`attach` again; S2 8.2.4: a snapshot is always right) and
+   * drops what waits and what comes until it is here.
+   * @param {Term} t
+   */
+  const refresh = (t) => {
+    t.waiting = [];
+    t.waitingSize = 0;
+    if (t.refreshing) {
+      return;
+    }
+    t.refreshing = true;
+    const size = (t === shown ? propose(t) : null) ??
+      t.proposed ?? { cols: t.xterm.cols, rows: t.xterm.rows };
+    t.proposed = size;
+    deps.send({ t: 'attach', term: t.id, ...size });
+  };
+
   // --- links (S2 9.6) ---------------------------------------------------------------------------
 
   /**
@@ -310,8 +440,8 @@ export function createTerminalView(root, deps) {
         return;
       }
       const target = canonical(uri);
-      if (target === null) {
-        return;
+      if (target === null || target.length > URL_MAX) {
+        return; // S2 9.6: the server would open no such URL
       }
       if (canonical(textOf(t, range).trim()) === target || t.armed === target) {
         disarm(t);
@@ -356,12 +486,15 @@ export function createTerminalView(root, deps) {
      */
     provideLinks(y, callback) {
       const buffer = t.xterm.buffer.active;
+      // The rows of the logical line that a URL touching row y can span: a URL is at most
+      // URL_MAX characters, so no more rows than those are looked at, however long the line.
+      const reach = Math.ceil(URL_MAX / Math.max(1, t.xterm.cols)) + 1;
       let first = y - 1;
-      while (first > 0 && buffer.getLine(first)?.isWrapped === true) {
+      while (first > 0 && y - 1 - first < reach && buffer.getLine(first)?.isWrapped === true) {
         first--;
       }
       let last = y - 1;
-      while (buffer.getLine(last + 1)?.isWrapped === true) {
+      while (last - (y - 1) < reach && buffer.getLine(last + 1)?.isWrapped === true) {
         last++;
       }
       // The logical line's text, and for each UTF-16 unit of it the cell it is in.
@@ -393,6 +526,9 @@ export function createTerminalView(root, deps) {
       const links = [];
       for (const match of text.matchAll(URL_PATTERN)) {
         const url = trimUrl(match[0]);
+        if (url.length > URL_MAX) {
+          continue; // S2 9.6: the server would open no such URL
+        }
         const start = cells[match.index];
         const end = cells[match.index + url.length - 1];
         if (start === undefined || end === undefined || start.y > y - 1 || end.y < y - 1) {
@@ -450,7 +586,8 @@ export function createTerminalView(root, deps) {
     close.addEventListener('click', () => {
       const held = bar.contains(document.activeElement);
       if (kind === 'gap' || kind === 'newer-keeper') {
-        t.dismissed.add(text);
+        // The text the bar shows now (a later notice of its kind may have replaced the first).
+        t.dismissed.add(`${kind}:${t.notices.get(kind)?.text ?? text}`);
       }
       if (kind === 'link') {
         t.armed = null;
@@ -514,9 +651,19 @@ export function createTerminalView(root, deps) {
       return;
     }
     t.replay = false;
-    for (const [kind, notice] of [...t.notices]) {
-      if ((kind === 'gap' || kind === 'newer-keeper') && !notice.confirmed) {
+    for (const kind of ['gap', 'newer-keeper']) {
+      if (t.replayed.has(kind)) {
+        continue;
+      }
+      // Not repeated after the snapshot: it no longer holds, and a dismissal of it is forgotten,
+      // so that the next such notice shows (it is a new occasion).
+      if (t.notices.get(kind)?.confirmed === false) {
         dropNotice(t, kind);
+      }
+      for (const key of [...t.dismissed]) {
+        if (key.startsWith(`${kind}:`)) {
+          t.dismissed.delete(key);
+        }
       }
     }
   };
@@ -554,6 +701,33 @@ export function createTerminalView(root, deps) {
       t.proposed = size;
       deps.send({ t: 'resize', term: t.id, ...size });
     }
+  };
+
+  /**
+   * The size of one cell of the terminals' font in CSS pixels: from an open xterm.js (its screen
+   * is its columns × the cell), else measured as xterm.js measures it (32 × W at the font).
+   * @returns {{ width: number, height: number } | null}
+   */
+  const cellSize = () => {
+    for (const t of terms.values()) {
+      const screen = t.xterm.element?.querySelector('.xterm-screen');
+      if (screen instanceof HTMLElement) {
+        const width = parseFloat(screen.style.width) / t.xterm.cols;
+        const height = parseFloat(screen.style.height) / t.xterm.rows;
+        if (width > 0 && height > 0) {
+          return { width, height };
+        }
+      }
+    }
+    const probe = element('span', 'tv-measure');
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;line-height:normal;font-family:${FONT};font-size:${fontSize()}px`;
+    probe.textContent = 'W'.repeat(32);
+    document.body.append(probe);
+    const rect = probe.getBoundingClientRect();
+    probe.remove();
+    return rect.width > 0 && rect.height > 0
+      ? { width: rect.width / 32, height: Math.ceil(rect.height) }
+      : null;
   };
 
   // The colours follow the page's light or dark scheme (style.css, terminal-view.css).
@@ -795,23 +969,30 @@ export function createTerminalView(root, deps) {
       const asked = t.asked;
       t.asked = false;
       t.replay = true;
+      t.replayed.clear();
       disarm(t);
       for (const notice of t.notices.values()) {
         notice.confirmed = false;
       }
+      // What waits of the stream before this snap is in it already (S2 8.2.4): dropped.
+      t.waiting = [];
+      t.waitingSize = 0;
+      t.refreshing = false;
       const { xterm } = t;
       // S2 8.2.4: the terminal starts over at the snapshot's size, after what was written before
-      // it (writes are queued), with the parser back in its ground state (CAN ends any sequence a
-      // stream that was cut left open).
-      xterm.write('\x18', () => {
+      // it, with the parser back in its ground state (CAN ends any sequence a stream that was cut
+      // left open).
+      write(t, '\x18', () => {
         xterm.reset();
         xterm.resize(msg.cols, msg.rows);
       });
-      xterm.write(msg.data);
-      // A snap the page did not ask for (a reconnect, a page that fell behind): the server has
-      // another proposal of this page's, so it gets this page's own when it differs.
+      write(t, msg.data);
+      // The server sizes the terminal to the proposal it has of this page's: the one of this
+      // view's own attach, or the list's size app.js proposed after a reconnect — which may also
+      // stand for an attach of the view's that never reached the server (sent while the
+      // connection was down). So the view's own size goes out whenever the snap's differs.
       const size = t === shown ? propose(t) : null;
-      if (size !== null && !sameSize(size, asked ? t.proposed : msg)) {
+      if (size !== null && !sameSize(size, msg)) {
         t.proposed = size;
         deps.send({ t: 'resize', term: t.id, ...size });
       } else if (!asked) {
@@ -824,11 +1005,11 @@ export function createTerminalView(root, deps) {
      */
     output(channel, bytes) {
       const t = byChannel.get(channel);
-      if (t === undefined) {
-        return;
+      if (t === undefined || t.refreshing) {
+        return; // unknown, or a fresh snapshot is coming that holds it
       }
       recordCame(t);
-      t.xterm.write(bytes);
+      write(t, bytes);
     },
     /** @param {SizeMessage} msg */
     size(msg) {
@@ -838,7 +1019,7 @@ export function createTerminalView(root, deps) {
       }
       recordCame(t);
       // In stream order: after the output written before it.
-      t.xterm.write('', () => t.xterm.resize(msg.cols, msg.rows));
+      write(t, '', () => t.xterm.resize(msg.cols, msg.rows));
       t.owner = msg.owner;
       paint(t);
     },
@@ -851,7 +1032,7 @@ export function createTerminalView(root, deps) {
       // A program that ended inside a synchronized update leaves mode 2026 set (the snapshot
       // keeps it), and xterm.js would hold the screen back for a second: nothing more comes, so
       // the page ends it (notes for task 28). The exit follows every snap of an ended terminal.
-      t.xterm.write('\x1b[?2026l');
+      write(t, '\x1b[?2026l');
       end(t);
     },
     /**
@@ -870,11 +1051,14 @@ export function createTerminalView(root, deps) {
         return;
       }
       const existing = t.notices.get(kind);
-      if (t.replay && existing === undefined && t.dismissed.has(text)) {
-        return; // the server repeats it after every snap: once per terminal is enough
-      }
-      if (!t.replay) {
-        t.dismissed.delete(text); // a new occasion
+      const key = `${kind}:${text}`;
+      if (t.replay) {
+        t.replayed.add(kind);
+        if (existing === undefined && t.dismissed.has(key)) {
+          return; // the server repeats it after every snap: once per terminal is enough
+        }
+      } else {
+        t.dismissed.delete(key); // in the stream: a new occasion
       }
       showNotice(t, kind, text);
     },
@@ -906,6 +1090,27 @@ export function createTerminalView(root, deps) {
     },
     /** @returns {string[]} */
     attached: () => [...order],
+    /**
+     * What fits (an optional member of contract 2.9, for app.js's `area()`): the columns and
+     * rows a terminal of this view shows in a terminal area (`#terminal`'s box) of `width` ×
+     * `height` CSS pixels — xterm.js's padding and the scroll bar counted out as the fit addon
+     * counts them, clamped as S2 8.2.6 clamps a proposal — or null while no cell can be measured.
+     * @param {number} width
+     * @param {number} height
+     * @returns {{ cols: number, rows: number } | null}
+     */
+    fits(width, height) {
+      const cell = cellSize();
+      if (cell === null || !(width > 0) || !(height > 0)) {
+        return null;
+      }
+      const cols = Math.floor((Math.floor(width) - PAD_X - SCROLL_BAR) / cell.width);
+      const rows = Math.floor((Math.floor(height) - PAD_Y) / cell.height);
+      return {
+        cols: Math.max(2, Math.min(MAX_COLS, cols)),
+        rows: Math.max(1, Math.min(MAX_ROWS, rows)),
+      };
+    },
   };
 }
 
@@ -945,21 +1150,28 @@ function canonical(text) {
 
 /**
  * A URL found in text without the punctuation that ends a sentence after it, and without a
- * closing bracket it does not open.
+ * closing bracket it does not open. Linear: the brackets are counted once.
  * @param {string} url
  * @returns {string}
  */
 function trimUrl(url) {
-  /** @param {string} text @param {string} char */
-  const count = (text, char) => text.split(char).length - 1;
+  let parens = 0;
+  let brackets = 0;
+  for (const char of url) {
+    if (char === '(') parens++;
+    else if (char === ')') parens--;
+    else if (char === '[') brackets++;
+    else if (char === ']') brackets--;
+  }
+  // parens < 0: more `)` than `(` in what is left (the same for brackets).
   let end = url.length;
   while (end > 0) {
-    const text = url.slice(0, end);
-    const last = text[end - 1] ?? '';
-    const unopened =
-      (last === ')' && count(text, ')') > count(text, '(')) ||
-      (last === ']' && count(text, ']') > count(text, '['));
-    if (!".,;:!?'".includes(last) && !unopened) {
+    const last = url[end - 1] ?? '';
+    if (last === ')' && parens < 0) {
+      parens++;
+    } else if (last === ']' && brackets < 0) {
+      brackets++;
+    } else if (!".,;:!?'".includes(last)) {
       break;
     }
     end--;

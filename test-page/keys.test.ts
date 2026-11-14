@@ -249,13 +249,52 @@ test('keys in the terminal view', async (t) => {
       await until(async () => !(await hint(other)), 'the typing window owns the size');
       await until(() => hint(page), 'the first window now says another window sizes it');
       await until(() => resizes() > before, 'the program resized');
+      // The owner's size settles (its layout may still send one more proposal).
+      let quiet = resizes();
+      let since = performance.now();
+      await until(() => {
+        if (resizes() !== quiet) [quiet, since] = [resizes(), performance.now()];
+        return performance.now() - since >= 1500;
+      }, 'the sizes settle');
       const last = recordsOf(d.record, S1)
         .filter((entry) => entry.ev === 'resize')
         .at(-1);
       assert.ok(last !== undefined && last.ev === 'resize');
       assert.notEqual(last.rows, firstRows, 'the size of the window that typed');
       await until(async () => (await rowsOf(other)) === last.rows, 'the second window at its size');
-      assert.equal(await rowsOf(page), last.rows, 'the first window at the new owner’s size');
+      await until(async () => (await rowsOf(page)) === last.rows, 'the first one at the new size');
+
+      // Sizes come from the server only: the window that does not own the size is made smaller,
+      // its terminal stays at the owner's size (its proposal is only remembered).
+      const ownerRows = await rowsOf(other);
+      const resized = resizes();
+      await page.setViewportSize({ width: 1000, height: 420 });
+      await sleep(1500);
+      assert.equal(await rowsOf(page), ownerRows, 'still the owner’s size');
+      assert.equal(await rowsOf(other), ownerRows);
+      assert.equal(resizes(), resized, 'the program was not resized');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'a paste that holds ESC [ 2 0 1 ~ cannot end its own bracketed paste: the program reads one paste, the end marker once, at its end',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+        origin: `http://127.0.0.1:${l.server.port}`,
+      });
+      d.resumable(S1);
+      await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      await clipboard(page, 'harmless \x1b[201~ /red NOT-PASTED\r');
+      const before = inputOf(d.record, S1).length;
+      await page.keyboard.press('Control+V');
+      const expected = bracketed('harmless [201~ /red NOT-PASTED\r');
+      await until(() => inputSince(d.record, before).length >= expected.length, 'the paste read');
+      await sleep(300);
+      assert.equal(inputSince(d.record, before), expected, 'one paste, its ESC taken out');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
