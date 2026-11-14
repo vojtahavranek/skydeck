@@ -170,13 +170,15 @@ function notOwnDirectory(info: FileInfo, uid: number): string | null {
 function foreignIn(platform: Platform, dir: string, spec: Spec, prefix: string): string | null {
   const { files } = platform;
   for (const name of files.list(dir)) {
+    const path = `${prefix}${name}`;
+    // The name first: one that is on no list is foreign, also when lstat cannot find it — a name
+    // that is not UTF-8 is listed decoded and is then not there by that name (every rule is ASCII,
+    // so a name a rule allows always is). Only a listed name that is gone is skipped.
+    const rule = ruleFor(spec, name);
+    if (rule === undefined) return `holds ${path}, which skydeck did not write`;
     const info = files.lstat(join(dir, name));
     if (info === null) continue; // gone meanwhile
-    const rule = ruleFor(spec, name);
-    const path = `${prefix}${name}`;
-    if (rule === undefined || !rule.kinds.includes(info.kind)) {
-      return `holds ${path}, which skydeck did not write`;
-    }
+    if (!rule.kinds.includes(info.kind)) return `holds ${path}, which skydeck did not write`;
     if (info.kind === 'dir') {
       if (info.uid !== platform.uid) return `holds ${path}, which belongs to uid ${info.uid}`;
       const inner = foreignIn(platform, join(dir, name), rule.inside ?? [], `${path}/`);

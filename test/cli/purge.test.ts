@@ -284,3 +284,60 @@ describe('purgeDir removes directories only with rmdir', () => {
     assert.equal(existsSync(dir), false);
   });
 });
+
+describe('purgeDir: from review 2', () => {
+  /** A file whose name is not UTF-8 (Latin-1 `café.txt`): readdir decodes it to something lstat cannot find. */
+  function latin1File(dir: string): void {
+    writeFileSync(
+      Buffer.concat([Buffer.from(`${dir}/caf`), Buffer.from([0xe9]), Buffer.from('.txt')]),
+      'mine',
+    );
+  }
+
+  for (const where of ['', 'spool'] as const) {
+    test(`a file whose name is not UTF-8${where === '' ? '' : ` inside ${where}/`} leaves the directory alone, whole`, (t) => {
+      const { platform, root } = platformOf(t);
+      const dir = join(root, 'state');
+      mkdirSync(join(dir, 'spool'), { recursive: true });
+      writeFileSync(join(dir, 'hook.log'), 'a line');
+      writeFileSync(join(dir, 'spool', '1-2-3.ev'), 'v=1');
+      latin1File(where === '' ? dir : join(dir, where));
+
+      const purged = purgeDir(platform, dir, stateDirSpec(STORE_ID));
+
+      assert.equal(purged.kind, 'left', JSON.stringify(purged));
+      assert.match(
+        purged.kind === 'left' ? purged.why : '',
+        /^holds (spool\/)?caf�\.txt, which skydeck did not write$/,
+      );
+      assert.ok(existsSync(join(dir, 'hook.log')), 'hook.log stays');
+      assert.ok(existsSync(join(dir, 'spool', '1-2-3.ev')), 'the spool file stays');
+    });
+  }
+
+  test('a symbolic link where skydeck keeps a directory is never followed: left alone, the target whole', (t) => {
+    for (const [name, spec, rel, inside] of [
+      ['spool', stateDirSpec(STORE_ID), 'spool', '1-2-3.ev'],
+      ['locks', stateDirSpec(STORE_ID), 'locks', 'x'],
+      [`run-${STORE_ID}`, stateDirSpec(STORE_ID), `run-${STORE_ID}`, 'server.json'],
+      ['terms', RUNTIME_DIR, 'terms', 'aaaaaaaaaaaa.pid'],
+    ] as const) {
+      const { platform, root } = platformOf(t);
+      const dir = join(root, 'dir');
+      mkdirSync(dir);
+      const elsewhere = join(root, 'elsewhere');
+      mkdirSync(elsewhere);
+      writeFileSync(join(elsewhere, inside), 'mine');
+      symlinkSync(elsewhere, join(dir, rel));
+
+      const purged = purgeDir(platform, dir, spec);
+
+      assert.deepEqual(
+        purged,
+        { kind: 'left', why: `holds ${name}, which skydeck did not write` },
+        name,
+      );
+      assert.ok(existsSync(join(elsewhere, inside)), `${name}: the target stays whole`);
+    }
+  });
+});

@@ -119,7 +119,7 @@ export const command: Command = {
           if (purged.kind === 'removed') ctx.io.stdout(`removed ${sanitize(dir)}\n`);
           // Ruled (purge-care): any directory left alone is named in the last line, exit 1.
           if (purged.kind === 'left' || purged.kind === 'failed') {
-            notRemoved.push(`${dir}: it ${purged.why}`);
+            notRemoved.push(sanitize(`${dir}: it ${purged.why}`)); // a name may hold a line break
           }
         }
       }
@@ -137,7 +137,7 @@ export const command: Command = {
         const purged = purgeDir(platform, dir, spec);
         if (purged.kind === 'removed') ctx.io.stdout(`removed ${sanitize(dir)}\n`);
         if (purged.kind === 'left' || purged.kind === 'failed') {
-          notRemoved.push(`${dir}: it ${purged.why}`);
+          notRemoved.push(sanitize(`${dir}: it ${purged.why}`)); // a name may hold a line break
         }
       }
       if (notRemoved.length > 0) {

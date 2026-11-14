@@ -677,3 +677,19 @@ describe('uninstall --purge: the runtime directory under the shared purge', () =
     gone(join(dir, 'server.json'));
   });
 });
+
+describe('uninstall --purge: from review 2', () => {
+  test('a foreign name with a line break reaches the last line as one line', async (t) => {
+    const d = await installed(t);
+    writeFileSync(join(d.places.stateDir, 'x\nskydeck: removed everything'), 'mine');
+
+    const r = await purge(d.platform);
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stderr.split('\n').filter((line) => line !== '').length, 1, r.stderr);
+    assert.ok(
+      r.stderr.includes('it holds x skydeck: removed everything, which skydeck did not write'),
+      r.stderr,
+    );
+  });
+});
