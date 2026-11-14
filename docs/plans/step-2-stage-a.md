@@ -2468,10 +2468,12 @@ Backpressure (ruled by the plan owner at review 2, S2 8.2.8): a page is behind o
 (output, size, exit) or its `list` finds min(`buffered`, the bytes sent since the end of the last
 `snap`) above 1 MiB — a snap's own bytes do not count, so a large screen never loops; while
 behind its records are dropped (the streams that lose one are marked) and its `list` is held; at
-Node.js's `drain` (nothing queued, so below 64 KiB) only the marked streams are attached again (a
-fresh `snap` on a new channel, then what the hub tells after it) and the current `list` goes out.
+Node.js's `drain` (nothing queued, so below 64 KiB) the current `list` goes out at once and only
+the marked streams are attached again (their fresh `snap` on a new channel follows when the hub
+gives it, then what the hub tells after it).
 Above 64 MiB queued, whatever it is, the connection is destroyed with one fixed log line. At most
-64 connections may be in the hello phase; a further upgrade is answered 503. The hello reads the
+64 connections may be in the hello phase; a further upgrade that passes the checks above is
+answered 503 (the `bye` 503 comes before those checks). The hello reads the
 secret from the store every time (a named limit, S2 8.2.2: `--new-secret` takes effect at once;
 a held write lock can stall the server up to the 5 s busy timeout). When a page goes, every
 stream is detached before the sizes are handed over; during `bye` no size is handed over.

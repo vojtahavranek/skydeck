@@ -958,9 +958,10 @@ protect nothing there (ruled, plan task 17); server tests pin them, so that a No
 changes them is noticed. Every request with `Connection: Upgrade` and an `Upgrade` header goes to
 the upgrade handler whatever its path, method or `Host`; that handler applies this section's checks
 itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`. After `bye`
-(5.5), an upgrade with the right `Host` is answered 503 (ruled, plan task 17). So is one that
-comes while 64 connections are waiting for their `hello` (8.2.2): a local process cannot hold the
-server's descriptors with connections that prove nothing (ruled, plan task 17).
+(5.5), an upgrade with the right `Host` is answered 503 (ruled, plan task 17). An upgrade that
+passes the checks above is also answered 503 while 64 connections are waiting for their `hello`
+(8.2.2): a local process cannot hold the server's descriptors with connections that prove nothing
+(ruled, plan task 17).
 
 **Why `'unsafe-inline'` for styles, and only for styles.** xterm.js 6.0.0's DOM renderer creates
 `<style>` elements at run time and writes the colour palette, cursor and selection rules into them
@@ -1206,10 +1207,11 @@ exit) or its `list` finds more than 1 MiB queued on the page's socket, the serve
 forwarding records to that page, marks the terminals whose records it drops **behind**, and holds
 the page's `list`. A `snap`'s own bytes do not count toward the 1 MiB: a large screen is not a
 slow page, and counting it would make the fresh snap put the page behind again. When the queue
-has drained (Node.js's `drain`: nothing is left queued, so below 64 KiB), the server sends a
-fresh `snap` for each terminal that is behind, followed by the state the terminal is in (its
-`exit`, a `gap` or `newer-keeper` notice), then the page's current `list`, and forwards again;
-a terminal that lost nothing keeps its stream. With more than 64 MiB queued, whatever it is,
+has drained (Node.js's `drain`: nothing is left queued, so below 64 KiB), the server sends the
+page's current `list` at once and attaches each terminal that is behind again: its fresh `snap`
+follows when the hub gives it, then the state the terminal is in (its `exit`, a `gap` or
+`newer-keeper` notice), and records are forwarded again; a terminal that lost nothing keeps its
+stream. With more than 64 MiB queued, whatever it is,
 the server drops the connection, and the page reconnects (6.3, 8.2.5). These rules were ruled in
 plan task 17. A page attaches only to terminals it shows or has shown recently (12.6), so a
 hidden terminal costs nothing.

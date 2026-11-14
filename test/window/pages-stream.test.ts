@@ -731,6 +731,13 @@ describe('pages: a page that does not read', () => {
     const lists = client.all.flatMap((i) => ('text' in i && i.text.t === 'list' ? [i.text] : []));
     assert.equal(lists.length, listsBefore + 1, 'one list for the time behind');
     assert.deepEqual(lists.at(-1)?.dirs, ['/v9', 'filter:']);
+    // At the drain the held list goes out at once; the fresh snap follows when the hub gives it.
+    const at = (wanted: (m: ServerMessage) => boolean): number =>
+      client.all.findLastIndex((i) => 'text' in i && wanted(i.text));
+    assert.ok(
+      at((m) => m.t === 'list') < at((m) => m.t === 'snap'),
+      'the list before the fresh snap',
+    );
   });
 
   test('a page with no terminal whose lists pile up gets the current one at the drain', async (t) => {
