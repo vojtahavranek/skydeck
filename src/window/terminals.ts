@@ -198,7 +198,6 @@ interface Term {
   parking: Promise<void> | null;
   gap: boolean;
   reconnect: (() => void) | null;
-  reconnecting: boolean;
   forgotten: boolean;
   /** The 'late' or 'found' origin the next hello is reported with ('spawned' while spawn waits). */
   origin: 'spawned' | 'late' | 'found';
@@ -348,7 +347,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       sink.output(bytes);
     });
     if (term.bytes - term.parkedAt > parkBytes) {
-      park(term);
+      void park(term);
     }
   }
 
@@ -443,7 +442,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
       parking: null,
       gap: false,
       reconnect: null,
-      reconnecting: false,
       forgotten: false,
       origin: 'found',
     };
@@ -877,20 +875,27 @@ export function createRegistry(deps: RegistryDeps): Registry {
       keeperEnded = true;
     });
 
-    const began = performance.now();
-    while (performance.now() - began < HELLO_MS) {
-      if (term.forgotten) throw startError('spawn-failed', 'closed');
-      if (keeperEnded && term.hello === null) {
-        forget();
-        throw startError('spawn-failed', 'the keeper ended at start');
+    // The 5 s count on the platform's timer; a claim still waiting for its hello then is dropped.
+    let timedOut = false;
+    const cancelWait = clock.after(HELLO_MS, () => {
+      timedOut = true;
+      if (term.hello === null) term.claim?.link.destroy();
+    });
+    try {
+      while (!timedOut && term.hello === null) {
+        if (term.forgotten) throw startError('spawn-failed', 'closed');
+        if (keeperEnded) {
+          forget();
+          throw startError('spawn-failed', 'the keeper ended at start');
+        }
+        try {
+          await connect(term, HELLO_MS);
+        } catch {
+          await clock.sleep(SOCKET_POLL_MS); // not listening yet
+        }
       }
-      try {
-        const left = Math.max(1, Math.ceil(HELLO_MS - (performance.now() - began)));
-        if (await connect(term, left)) break;
-      } catch {
-        await clock.sleep(SOCKET_POLL_MS); // not listening yet
-      }
-      if (term.hello !== null) break;
+    } finally {
+      cancelWait();
     }
     if (term.hello === null) {
       term.origin = 'late';

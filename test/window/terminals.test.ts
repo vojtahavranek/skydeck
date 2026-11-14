@@ -256,6 +256,19 @@ describe('registry: starts that fail', () => {
     assert.deepEqual(r.registry.list(), []);
   });
 
+  test('a keeper that ends at start (it refused its spec) → spawn-failed; nothing is kept', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry();
+    const error = await r.registry.spawn({ ...box.spec(), argv: [] }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    assert.ok(error instanceof KeeperStartError, String(error));
+    assert.equal(error.kind, 'spawn-failed');
+    assert.deepEqual(r.registry.list(), []);
+    assert.ok(box.logLines().some((line) => line.endsWith(': bad-spec')));
+  });
+
   test('a socket path of 108 bytes → path-too-long, refused before spawning', async (t) => {
     const box = await registrySandbox(t);
     const r = box.registry();

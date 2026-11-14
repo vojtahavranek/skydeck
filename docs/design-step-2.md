@@ -681,11 +681,17 @@ seam; closed by task 33 of stage A's plan).
 - **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
   passed with output since the last park, and for every terminal when it stops (5.5). A park names
   the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
-  about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by design.
+  about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by design. The keeper's
+  first size is in no frame (a hello carries the current size), so the server that spawns a keeper
+  parks its empty screen at record 0 right after the first `hello`: every later claim gets that
+  size in `S`, and a rebuild without any other park starts at the right width (stage A's plan,
+  task 16).
 - **Gap.** A keeper that reports gap (7.1, step 6) has lost records. The server rebuilds from what
   is left, shows "part of this terminal's output was lost while skydeck's server was not running"
-  on the terminal, and makes the program redraw by changing the pty's width by one column and back.
-  The scrollback above the redraw may be wrong.
+  on the terminal, and makes the program redraw by changing the pty's width by one column and back,
+  with a pause of at least 50 ms between the two (two quick SIGWINCH collapse into one, and a
+  program that reads its size when it handles the signal sees no change; measured with the
+  stand-in, plan task 3). The scrollback above the redraw may be wrong.
 
 A server restart therefore shows every screen exactly as it was (verified with the prototype for
 every viewport cell, colour, attribute, 119 lines of scrollback, wrap flags and modes after two
@@ -1100,7 +1106,10 @@ page last proposed (`attach`, `resize`). The rules:
   it to the screen side and sends `size` to every attached page. A page sets its xterm.js size only
   from `snap` and `size` — never from its own fitting — so page and screen side reflow at the same
   point of the stream. A page that is not the owner shows the terminal at the owner's size (cut off
-  or with a margin) and a hint "sized by another window"; typing makes it the owner.
+  or with a margin) and a hint "sized by another window"; typing makes it the owner. A proposed
+  size is first clamped to at most 1,000 columns and 500 rows (a wider one is not an error): 65,535
+  columns would make the screen side allocate gigabytes of scrollback (ruled, plan task 12's
+  review).
 
 The page's xterm.js keeps 5,000 lines of scrollback, as the screen side does (7.2), so that both
 reflow alike and find (9.7) sees what the snapshot holds.
