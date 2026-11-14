@@ -519,10 +519,10 @@ does the same and then removes the data, state and configuration folders (`<data
 and then the folder. It cannot be undone. A folder that holds anything else (a file of yours, an
 editor's backup), is a symbolic link, is another user's or cannot be read is left alone, whole; the
 others are still purged, and the last line says which folder stayed and why (`skydeck is
-uninstalled, but --purge did not remove …`, exit 1). It refuses, changing nothing, while
+uninstalled, but --purge did not remove …`, exit 1). It refuses, changing nothing, while `HOME`,
 `SKYDECK_HOME` or one of `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR` is
 set but empty or not an absolute path: skydeck ignores such a value (see "Environment variables"),
-and would purge the installation it finds without it. It leaves the backups (they are in Claude
+or for `HOME` takes it as it is, and would purge the installation it then finds. It leaves the backups (they are in Claude
 Code's folder) and the compile cache (`~/.cache/skydeck`, see "Environment variables"). To remove
 skydeck altogether, delete the checkout last.
 

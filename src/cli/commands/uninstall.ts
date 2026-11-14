@@ -56,7 +56,7 @@ const SPEC: ArgSpec = {
     '  --purge  also remove what skydeck wrote into the data, state, configuration and\n' +
     '           runtime directories, then those directories; one holding anything else is\n' +
     '           left alone. Refused while a terminal of the window may still run, and while\n' +
-    '           SKYDECK_HOME or an XDG_* variable is set but ignored (empty or relative)\n',
+    '           HOME, SKYDECK_HOME or an XDG_* variable is set but empty or relative\n',
   flags: { purge: { type: 'boolean' } },
   min: 0,
   max: 0,
@@ -281,8 +281,13 @@ function refuseWhileKeepersMayLive(
   }
 }
 
-/** The variables that choose the directories `--purge` removes (design 9.1, S2 4.2). */
+/**
+ * The variables that choose the directories `--purge` removes (design 9.1, S2 4.2). HOME too
+ * (ruled, purge-care): the home directory is HOME as it is, so an empty or relative one makes every
+ * place relative to the working directory.
+ */
 const PLACE_VARIABLES = [
+  'HOME',
   'SKYDECK_HOME',
   'XDG_DATA_HOME',
   'XDG_STATE_HOME',

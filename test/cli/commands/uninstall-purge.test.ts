@@ -75,6 +75,17 @@ function everythingSkydeckWrites(d: TestPlatform): void {
 
 const purge = (platform: Platform): Promise<Run> => run(platform, ['uninstall', '--purge']);
 
+/** Every path below `dir` with its kind and size, sorted: what a test compares before and after. */
+function tree(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .map((entry) => {
+      const path = join(entry.parentPath, entry.name);
+      const info = lstatSync(path);
+      return `${path} ${info.isDirectory() ? 'dir' : info.isSymbolicLink() ? 'link' : info.size}`;
+    })
+    .sort();
+}
+
 const dirsOf = (d: TestPlatform): string[] => [
   d.places.dataDir,
   d.places.stateDir,
@@ -374,6 +385,7 @@ describe('uninstall --purge with SKYDECK_HOME at the user’s own places', () =>
 
 describe('uninstall --purge refuses on a SKYDECK_HOME or XDG_* that is set but ignored', () => {
   const VARIABLES = [
+    'HOME', // ruled (review 2): os.homedir() gives HOME as it is, '' or relative too
     'SKYDECK_HOME',
     'XDG_DATA_HOME',
     'XDG_STATE_HOME',
@@ -399,11 +411,14 @@ describe('uninstall --purge refuses on a SKYDECK_HOME or XDG_* that is set but i
         const d = await realLooking(t);
         assert.ok(d.places.dataDir.startsWith(join(d.sandbox.home, '.local')), d.places.dataDir);
         const platform = { ...d.platform, env: { ...d.platform.env, [name]: value } };
+        const before = tree(d.sandbox.root);
 
         const r = await purge(platform);
 
         assert.equal(r.code, 1, r.stdout);
         assert.equal(r.stdout, '');
+        // Nothing changed anywhere: the sandbox, its home (the working directory) included.
+        assert.deepEqual(tree(d.sandbox.root), before);
         assert.match(
           r.stderr,
           new RegExp(

@@ -768,8 +768,10 @@ could not be resumed; see above`).
   when there is one) and exit 1. The window's runtime folders are purged the same way (S2 16.2). Before
   anything is undone, `--purge` refuses (exit 1, nothing changed) while `SKYDECK_HOME`,
   `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` or `XDG_RUNTIME_DIR` is set but ignored by
-  9.1's rule: it names the variable and does not purge the installation it would find without it.
-  A plain `uninstall` is not affected.
+  9.1's rule, or `HOME` is set but empty or relative (the home directory is `HOME` as it is, so
+  every place would then be relative to the working directory): it names the variable and does not
+  purge the installation it would find. A relative directory is never purged. A plain `uninstall`
+  is not affected.
 - **`skydeck doctor`** reports and exits 1 on any problem: hook entries present and `<hookPath>`
   resolvable; Node.js version; database writable; spool size, and the files in `spool/bad/` with
   their ages (they are removed after seven days); age of the last event; the last lines of
@@ -805,7 +807,8 @@ An environment variable (`SKYDECK_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG
 as unset. The program, the hook and the launcher all apply this rule. A path in `config.json`
 (`claudeHome`) must be absolute. Because of it, `SKYDECK_HOME=sandbox` reaches the real
 installation; so `uninstall --purge`, the one command that removes folders, refuses while
-`SKYDECK_HOME` or an `XDG_*` variable it reads is set but ignored (8).
+`SKYDECK_HOME` or an `XDG_*` variable it reads is set but ignored, or `HOME` is set but empty or
+relative (8).
 
 Configuration keys, all optional: `terminal` (`here` or `wezterm`; default `here`), `wezterm.domain`,
 `groupPattern`, `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
