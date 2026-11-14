@@ -53,8 +53,8 @@ interface WindowFacts {
 
 type Server =
   | { kind: 'none' }
-  | { kind: 'hung'; pid: number }
-  | { kind: 'unknown'; error: string } // server.json names a process that cannot be judged
+  | { kind: 'hung'; pid: number; starting?: true } // starting: only its lock names it (ruled, server-findable)
+  | { kind: 'unknown'; error: string } // server.json, or the lock, names a process that cannot be judged
   | {
       kind: 'ours' | 'other-build' | 'other-checkout';
       ping: PingAnswer;
@@ -84,6 +84,8 @@ export interface WindowCheck {
 }
 
 const NOT_MOUNTED = 'the C: drive is not mounted at /mnt/c';
+/** findServer's default ping wait, which doctor uses (S2 5.1: 5 seconds). */
+const PING_S = 5;
 /** Where systemd marks a user whose runtime directory outlives their last login session (S2 4.2). */
 const LINGER_DIR = '/var/lib/systemd/linger';
 /** The python3 the launcher starts `serve` through (S2 2); a test sandbox may name another (A31). */
@@ -157,6 +159,14 @@ function answered(server: Server): server is Extract<Server, { ping: PingAnswer 
   return (
     server.kind === 'ours' || server.kind === 'other-build' || server.kind === 'other-checkout'
   );
+}
+
+/**
+ * A server answered and says that its start is not done (GET /status `starting`; ruled,
+ * server-findable): what it makes during its start (the interop link) is not there yet.
+ */
+function stillStarting(server: Server): boolean {
+  return answered(server) && server.status?.starting === true;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -233,7 +243,9 @@ async function checkServer(view: WindowView, report: Report): Promise<void> {
     case 'hung':
       report(
         'problem',
-        `the window's server (pid ${server.pid}) is alive but does not answer; skydeck window --restart stops it`,
+        server.starting === true
+          ? `the window's server (pid ${server.pid}) is starting and did not finish within ${PING_S} s (it holds the window_server lock and has not answered yet); see ${join(view.facts.places.stateDir, 'server.log')}; skydeck window --restart stops it`
+          : `the window's server (pid ${server.pid}) is alive but does not answer; skydeck window --restart stops it`,
       );
       return;
   }
@@ -242,6 +254,11 @@ async function checkServer(view: WindowView, report: Report): Promise<void> {
     report(
       'problem',
       `the window's server (pid ${ping.pid}) answers, but GET /status failed (${server.statusError ?? '?'})`,
+    );
+  } else if (status.starting === true) {
+    report(
+      'info',
+      `the window's server (pid ${ping.pid}) is starting, from ${status.checkout}, build ${status.build}; run skydeck doctor again once it has started`,
     );
   } else {
     const up = formatAge(platform.clock.nowNs() - nsOf(status.startedAtNs, platform.clock.nowNs()));
@@ -347,6 +364,16 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
     case 'unreadable':
       report('info', 'keep-alive: keepalive.pid cannot be read, so whether it runs cannot be told');
       return;
+  }
+  if (stillStarting(server) && answered(server) && server.status?.keepAlive.state === 'starting') {
+    // By the server's own word (ruled, server-findable, review 2): its keep-alive is starting —
+    // its first check starts it (S2 6.1). One that is off, or failed (it cannot start: no
+    // WSL_DISTRO_NAME, …), stays the problem below, also while the server starts.
+    report(
+      'info',
+      "keep-alive: not confirmed yet: the window's server is starting, and its first check starts the keep-alive or takes over one that still runs",
+    );
+    return;
   }
   const serverRuns = server.kind !== 'none';
   const terminals = view.keepers().some((keeper) => keeper.state !== 'dead');
@@ -529,8 +556,9 @@ async function checkInterop(view: WindowView, report: Report): Promise<void> {
   const { files } = view.runtime();
   const link = files.interop;
   const info = fs.lstat(link);
+  const server = await view.server();
   if (info === null) {
-    if (answered(await view.server())) {
+    if (answered(server) && !stillStarting(server)) {
       report(
         'problem',
         `${link} does not exist although the window's server runs: no interop socket answered it (S2 6.4)`,
@@ -557,6 +585,11 @@ async function checkInterop(view: WindowView, report: Report): Promise<void> {
   const answer = real === null ? 'refused' : await probeSocket(platform, real);
   if (answer === 'accepts') {
     report('ok', `${link} -> ${target} answers`);
+  } else if (answer === 'refused' && stillStarting(server)) {
+    report(
+      'info',
+      `${link} -> ${target} points at nothing that answers yet: the window's server is starting and points it again`,
+    );
   } else if (answer === 'refused') {
     report(
       'problem',

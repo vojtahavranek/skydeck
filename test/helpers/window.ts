@@ -45,6 +45,26 @@ import { writeWindowConfig } from './window-config.ts';
 /** How long a test waits for something a real process does (this machine is shared and loaded). */
 export const WAIT_MS = 20_000;
 
+/**
+ * Whether `log` — a server's log text: `server.log`, or the stderr of `serve --foreground` — holds
+ * the line the server `serverId` logs last in its start (server.ts). From that line on its start is
+ * done: pages are served and `/status` no longer says `starting`. `server.json` comes earlier,
+ * before `server.sock` answers (ruled by the plan owner, follow-up "server-findable"), so
+ * "server.json exists" does not mean "ready": a test that needs a ready server waits for this.
+ */
+export function startDone(log: string, serverId: string): boolean {
+  return log.includes(`server: ${serverId} listening on`);
+}
+
+/** Waits (at most `ms`) until `log()` says that the start of the server `serverId` is done. */
+export async function untilStartDone(
+  log: () => string,
+  serverId: string,
+  ms = WAIT_MS,
+): Promise<void> {
+  await until(() => startDone(log(), serverId), `the start of server ${serverId} done`, ms);
+}
+
 export interface ServerSandboxOptions {
   /** Over the sandbox's environment of the servers (an entry set to undefined removes one). */
   env?: Record<string, string | undefined>;

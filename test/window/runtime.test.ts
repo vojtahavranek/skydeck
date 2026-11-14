@@ -35,6 +35,7 @@ import {
   listKeeperLines,
   prepareRuntimeDir,
   readServerJson,
+  readServerLock,
   releaseServerLock,
   removeDeadKeeperFiles,
   resolveRuntimeDir,
@@ -1142,6 +1143,22 @@ test("releaseServerLock removes the lock this process holds and leaves another's
   d.deck.store.setKv('window_server', another);
   releaseServerLock(d.deck);
   assert.equal(d.deck.store.getKv('window_server'), another);
+});
+
+test('readServerLock (ruled, server-findable): the holder takeServerLock wrote, its line and checkout; null when free or not a lock', (t) => {
+  const d = testDeck(t);
+  assert.equal(readServerLock(d.deck.store), null);
+
+  takeServerLock(d.deck, lockValue(4321, 123, BOOT_A, '/home/dev/sky:deck'));
+  assert.deepEqual(readServerLock(d.deck.store), {
+    line: { pid: 4321, procStart: 123, bootId: BOOT_A },
+    checkout: '/home/dev/sky:deck',
+  });
+
+  for (const garbage of ['garbage', `0:1:${BOOT_A}:/x`, `1:2:${BOOT_A}:relative`, '']) {
+    d.deck.store.setKv('window_server', garbage);
+    assert.equal(readServerLock(d.deck.store), null, JSON.stringify(garbage));
+  }
 });
 
 // Several servers taking the lock at the same moment against one database: exactly one wins.

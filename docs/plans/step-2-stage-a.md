@@ -202,7 +202,7 @@ Each is binding for the implementer. The last column names the task that records
 | A28 | A terminal opened for `new` shows as a row of its own whose `id` is the new session's id (known from `prepareNew`), `starting: true`, titled with the label or `new session in <dir>`; when the session reports a start it becomes that session's ordinary row. Keeper `meta` carries `label` and `dir` so that this survives a server restart. | S2 7.5 says such a row exists; an id is needed for selection. | 13 (7.5) |
 | A29 | `skydeck window` passes its working directory to `serve` in `SKYDECK_ENV_ORIGIN`; `serve` takes it out of its environment (task 8's `serverEnvironment`) and records it with its start time as "where the environment came from" (S2 5.2); a `serve` started by hand records its own working directory. | `serve` runs in `/` (S2 5.2), so it cannot see where its environment came from. | 23 (5.2) |
 | A30 | `doctor`'s port check reads `/proc/net/tcp` and `/proc/net/tcp6` (`Proc.tcpListening`, task 5) for a listener on `<window.port>`; when one exists and no server of this installation is alive, something else holds the port (`problem`). While this installation's server is alive but does not answer, or cannot be judged, a held port is most likely its own: `info`, and the server's own line is the problem (ruled by the plan owner, task 24). | No side effect: binding the port, even for an instant, could make a server that starts at that moment exit 10; no request is sent to a foreign program. | 24 (16.3) |
-| A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). The launcher honours `SKYDECK_TEST_PYTHON3` (an absolute path) in place of `/usr/bin/python3` for `serve`'s core-limit program only when `SKYDECK_TEST_NO_WINDOWS=1` is set too, the mark of a test sandbox; without that mark it is ignored (task 6; ruled, pull request #36). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. `doctor` and `uninstall` honour `SKYDECK_TEST_MNT_C` (an absolute directory standing for `/mnt/c`) only with `SKYDECK_TEST_NO_WINDOWS=1` too; with that mark and without it they read nothing under `/mnt/` and the C: drive counts as not mounted, and `doctor`'s `/usr/bin/python3` line honours `SKYDECK_TEST_PYTHON3` as the launcher does (task 24; ruled by the plan owner). In a marked sandbox (`SKYDECK_TEST_NO_WINDOWS=1`) `serve` stops itself in the orderly way after `SKYDECK_TEST_SERVE_MAX_SECONDS` seconds (600 by default, also for a value that is not whole seconds) and within a second once its `SKYDECK_HOME` is gone, so that a killed test run leaves no server running; outside a marked sandbox neither exists (task 25; ruled by the plan owner). `skydeck window` takes its waits from `SKYDECK_TEST_WINDOW_TIMES` (`name=ms` pairs separated by commas: `pingMs`, `startMs`, `stopMs`, `killMs` for lifecycle.ts, and its own `pageMs` 30 s, `reuseMs` 2 s, `launchingMs` 45 s, `reconnectMs` 7 s), honoured only with `SKYDECK_TEST_NO_WINDOWS=1`; there a value that cannot be parsed is an error, never the defaults (task 25; ruled by the plan owner). | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
+| A31 | Timeouts that the tests must not wait out are parameters with the design's values as defaults (the 30-second page wait and the 10-second stop wait of `skydeck window`, the keeper's linger and caps), set in tests only through an options argument or an environment variable whose name starts with `SKYDECK_TEST_` (the keeper's and the keep-alive's included). The launcher honours `SKYDECK_TEST_PYTHON3` (an absolute path) in place of `/usr/bin/python3` for `serve`'s core-limit program only when `SKYDECK_TEST_NO_WINDOWS=1` is set too, the mark of a test sandbox; without that mark it is ignored (task 6; ruled, pull request #36). `serve` also honours `SKYDECK_TEST_PORT` (any port, 0 included) over `window.port`, so that tests running `bin/skydeck serve` as a child never pick the same port; they read the port from `server.json`. `doctor` and `uninstall` honour `SKYDECK_TEST_MNT_C` (an absolute directory standing for `/mnt/c`) only with `SKYDECK_TEST_NO_WINDOWS=1` too; with that mark and without it they read nothing under `/mnt/` and the C: drive counts as not mounted, and `doctor`'s `/usr/bin/python3` line honours `SKYDECK_TEST_PYTHON3` as the launcher does (task 24; ruled by the plan owner). In a marked sandbox (`SKYDECK_TEST_NO_WINDOWS=1`) `serve` stops itself in the orderly way after `SKYDECK_TEST_SERVE_MAX_SECONDS` seconds (600 by default, also for a value that is not whole seconds) and within a second once its `SKYDECK_HOME` is gone, so that a killed test run leaves no server running; outside a marked sandbox neither exists (task 25; ruled by the plan owner). In a marked sandbox `serve` also honours `SKYDECK_TEST_SERVE_START_DELAY_MS` (a whole number of ms, at most 60000, so that a mistyped value cannot hold the lock and the port for long while a SIGTERM is only kept): its start waits that long between binding the port and writing `server.json`, the step in which only the `window_server` lock names it, so that tests can meet a server that is starting; a value that is not such a number is no delay and one log line; outside a marked sandbox it is ignored (follow-up "server-findable"; ruled by the plan owner). `skydeck window` takes its waits from `SKYDECK_TEST_WINDOW_TIMES` (`name=ms` pairs separated by commas: `pingMs`, `startMs`, `stopMs`, `killMs` for lifecycle.ts, and its own `pageMs` 30 s, `reuseMs` 2 s, `launchingMs` 45 s, `reconnectMs` 7 s), honoured only with `SKYDECK_TEST_NO_WINDOWS=1`; there a value that cannot be parsed is an error, never the defaults (task 25; ruled by the plan owner). | A test suite that waits 30 s per case is not run; two test files must not race for one port. | — |
 | A32 | No test can start a Windows program (review A, must-fix): `test/helpers/sandbox.ts`'s environment gains `SKYDECK_TEST_NO_WINDOWS=1`; with it set, `realPlatform`'s `processes.startDetached` and `runner.run` refuse (an Error with `code` `'EWINDOWS'`, nothing started) a command under `/mnt/` or ending in `.exe` (any case); a platform that can start a real process — `realTestPlatform`, and `testPlatform` given real processes (`realProcesses: true`) — refuses them always, whatever any environment says (the guard is part of the processes object they build, `realPlatform({ refuseWindows: true })`, never read from `process.env`: in the test process the variable is in the platform's environment, not in the runner's own; `refuseWindows` can only turn the refusal on); the pure fake starts nothing: it records the call and returns what its handler scripts, also for a Windows command, so that a test can assert the command line (ruling of 2026-11-13, task 5). The guard also covers `runner.runInteractive`; it judges every file the command can lead execvp to (every directory of `PATH`, or execvp's default without one; a path as the kernel follows it, symbolic links before `..`) by name and by content (a file that starts with `MZ`, what WSL interop runs), and is also active when the variable is in the environment given to the child. Only the program itself is judged: `sh -c '/mnt/…'` runs. `test/helpers/window-config.ts` (task 5) writes the sandbox `config.json` every server test uses: `window.edge` = a recording stub in the sandbox, `keepAlive` `off`, unless the test passes its own. `runServer` takes the first interop candidate as an option (`interopFirst`, default `/run/WSL/1_interop`; `SKYDECK_TEST_INTEROP_FIRST` for child processes), and tests always point it into the sandbox. | The development machine has a real `msedge.exe`, `wsl.exe` and `/run/WSL/1_interop` (checked by the reviewer); a link Ctrl+clicked in a page test would open a tab on the user's desktop at every local run, and CI would never show it. | 5 (17) |
 | A33 | The stand-in refuses to run outside a sandbox (review A, must-fix): it exits 2 before doing anything — no hook, no live file, no record — unless `STANDIN_RECORD`, `SKYDECK_HOME` and `CLAUDE_CONFIG_DIR` are all set to absolute paths; there are no defaults. It ends itself, exit 0, when the directory of its record file is gone (checked every second) — then without running the hook or writing anything, since the hook would create `$SKYDECK_HOME/state/spool` again and leave a directory behind after every crashed test — or 10 minutes after it started, with `SessionEnd` reason `other` as on `/exit`. | Implementers run tests inside Claude Code sessions on a machine with the hook installed: a stand-in with an inherited environment would write into the user's real spool and `~/.claude/sessions`, and a crashed test would leave keepers and stand-ins running. | — |
 | A34 | Test helpers signal only through `killKeepersIn(s, runtimeDir)` (task 5, `test/helpers/kill.ts`), which asserts that the real path of `runtimeDir` lies under `s.root` before it reads a single `.pid` line, and signals only pids whose lines are alive by design 5.5's rule; a test signals other processes only through the child handles it started itself. | If a runtime directory were ever resolved wrongly, a cleanup would kill the user's real keepers and their sessions. | — |
@@ -700,6 +700,10 @@ export interface ServerOptions {
   /** The first interop candidate of S2 6.4 (A32); default '/run/WSL/1_interop', or
    *  SKYDECK_TEST_INTEROP_FIRST when set. Tests always point it into the sandbox. */
   interopFirst?: string;
+  /** A31 (ruled by the plan owner, follow-up "server-findable"): ms the start waits between
+   *  binding the port and writing server.json, while only the window_server lock names it;
+   *  default 0. `serve` sets it from SKYDECK_TEST_SERVE_START_DELAY_MS in a marked sandbox only. */
+  startDelayMs?: number;
 }
 export interface RunningServer {
   port: number;
@@ -717,8 +721,13 @@ export interface RunningServer {
    *  (runServer runs in test processes too, A19, and installs no process-wide handler). */
   done: Promise<number>;
 }
-/** Resolves once the server listens and server.json is written; rejects with a ServeExit(code) for
- *  10, 11, 12, 13 and for 0 (another server of this checkout holds the lock). */
+/** Resolves once the start is done (the keepers found, the first tick run); rejects with a
+ *  ServeExit(code) for 10, 11, 12, 13 and for 0 (another server of this checkout holds the lock).
+ *  server.json and server.pid are written right after the port is bound and server.sock is probed
+ *  (a server.sock a process answers on fails the start before they are written), BEFORE server.sock
+ *  listens, so that every server that answers can be found by them; until then the lock names it;
+ *  a start that fails after that removes them (ruled by the plan owner, follow-up
+ *  "server-findable"). */
 export function runServer(options: ServerOptions): Promise<RunningServer>;
 export class ServeExit extends Error { readonly code: 0 | 10 | 11 | 12 | 13 }
 /** Exported for its test (ruled, task 23): the notices a keep-alive state gives the pages —
@@ -733,6 +742,11 @@ export function keepAliveNotices(): (state: KeepAlivePayload) => { kind: 'keepal
 // removed exactly and the lines after it matching /^\s+at / are kept; a stack that does not begin
 // with that header gives no frames.
 export function uncaughtLine(error: unknown): string;
+// Exported for its test (ruled by the plan owner, follow-up "server-findable"; A31): in a marked
+// sandbox SKYDECK_TEST_SERVE_START_DELAY_MS, a whole number of ms up to 60000, is
+// ServerOptions.startDelayMs; 0 outside one and when unset; another value is 0 and `invalid`
+// (serve logs one line).
+export function startDelayOf(env: Env): { ms: number; invalid: boolean };
 ```
 
 `test/helpers/window.ts` (task 23; its shape ruled by the plan owner at task 23's review 1). A
@@ -941,6 +955,11 @@ export function parsePageMessage(text: string): { ok: true; value: PageMessage }
 // server.sock (S2 8.3), stage A
 export interface PingAnswer { serverId: string; bootId: string; build: string; protocol: 1; pid: number; port: number; checkout: string }
 export interface StatusAnswer {
+  /** Ruled by the plan owner (follow-up "server-findable", 10:16Z): true while the start is not
+   *  done — the same flag that answers a page's upgrade with 503; optional for the reader
+   *  (client.ts): absent — a server of an older build — means false; another type is an answer
+   *  that cannot be read. */
+  starting?: boolean;
   pages: number; terminals: { id: string; slot: number | null; state: string; sessionId: string | null; pid: number | null }[];
   keepAlive: KeepAlivePayload; python: { found: boolean; version: string | null };
   build: string; checkout: string; startedAtNs: NsText; envOrigin: { dir: string; atNs: NsText };
@@ -985,7 +1004,11 @@ Two additions to S2 8.2.3 and 8.3 that task 1 records in the design: `result` ca
  *  (ruled): it could prove nothing, and a page holding a key from it gets 4003 and asks for a new launch.
  *  Both: RangeError, and nothing stored, when the random source gives another number of bytes. */
 export function ensureSecret(store: Store, random: (n: number) => Uint8Array): Uint8Array;
-export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void;         // --new-secret; clears window_alarm; one transaction
+export function replaceSecret(store: Store, random: (n: number) => Uint8Array, guard?: () => void): void;         // --new-secret; clears window_alarm; one transaction
+/** `guard` (ruled by the plan owner, follow-up "server-findable"; optional, none by default) runs
+ *  first inside that transaction; when it throws, nothing changes — neither the secret nor the
+ *  alarm — and its error is thrown. `--new-secret` passes one that refuses while the window_server
+ *  lock names a holder alive or unknown by design 5.5's rule. */
 /** RangeError for a key that is not 32 bytes, a mode other than 'key' | 'launch', or an sN or cN that is not isNonce. */
 export function pageProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string;
 export function serverProof(key: Uint8Array, mode: 'key' | 'launch', sN: string, cN: string, origin: string): string; // as pageProof
@@ -1091,6 +1114,10 @@ export function writeServerJson(files: Files, path: string, value: ServerJson): 
 export function takeServerLock(deck: Deck, value: { pid: number; procStart: number; bootId: string; checkout: string }): { taken: true } | { taken: false; holder: { pid: number; checkout: string } };
 /** Removes the lock only when it names this process's pid (`platform.pid`). */
 export function releaseServerLock(deck: Deck): void;
+/** The holder the lock names, not judged: its pid line and checkout; null when the lock is free or
+ *  holds a value that does not parse (ruled by the plan owner, follow-up "server-findable": how a
+ *  command finds a server that is starting, findServer and stopServer below). */
+export function readServerLock(store: Store): { line: PidLine; checkout: string } | null;
 /** Keepers by their .pid lines (S2 4.2), whatever their state (pidLineState, 2.8), for doctor,
  *  uninstall and the server's rediscovery. doctor counts state 'alive'; removeDeadKeeperFiles, the
  *  server's rediscovery and `uninstall --purge` act only on 'dead' (purge refuses while any line
@@ -1177,7 +1204,7 @@ export type FoundServer =
   | { kind: 'ours'; ping: PingAnswer }
   | { kind: 'other-build'; ping: PingAnswer }
   | { kind: 'other-checkout'; ping: PingAnswer }
-  | { kind: 'hung'; pid: number };
+  | { kind: 'hung'; pid: number; starting?: true }; // starting: see findServer (ruled, follow-up "server-findable")
 /** Timeouts in ms, the design's values by default (A31): ping 5000, start 10000, stop 10000, kill 5000.
  *  A time left out or given as undefined is the default; one that is not a whole number from 0 to
  *  2^31 − 1 makes each function below reject with a RangeError before it does anything (ruled, task 22). */
@@ -1190,17 +1217,44 @@ export interface LifecycleTimes { pingMs?: number; startMs?: number; stopMs?: nu
  *  timed out is not tried again (ruled, task 22, review 2). The ping open at the end is aborted.
  *  All three functions reject with a SkydeckError, never another error, for a server.json, a
  *  terms/ directory or a signal the system refuses (task 22, review 2). */
+/** A server that is starting (ruled by the plan owner, follow-up "server-findable"): while
+ *  server.json is missing or names a dead process, the window_server lock (readServerLock) is
+ *  read. A holder dead, absent or a value that does not parse: none, as before. A holder that
+ *  cannot be judged: the SkydeckError of an unknown server.json line ("cannot tell whether the
+ *  window's server (pid N) still runs…"). A holder alive: a server that is starting — server.json
+ *  is looked at again every 100 ms within pingMs and, once it names a live process, judged and
+ *  pinged as above in what is left of pingMs; still not recorded when pingMs is over →
+ *  { kind: 'hung', pid: <the lock's>, starting: true }; recorded during the wait but no answer in
+ *  what is left → { kind: 'hung', pid, starting: true } too (review 2: it is still starting). A caller that ignores `starting` treats it
+ *  as any hung server: it is never "not running". */
 export function findServer(deck: Deck, checkout: string, build: string, times?: LifecycleTimes): Promise<FoundServer>;
 /** Starts `<appRoot>/bin/skydeck serve` detached (S2 5.2) and waits at most 10 s for a ping of this
  *  checkout (ruled, task 22), the current build and boot id, which counts only once server.json
- *  names that server — pid, server id, boot id, its process alive (ruled by the plan owner, task 25:
- *  a server answers before it writes server.json; else its own line); one fixed line per exit code. Each
+ *  names that server — pid, server id, boot id, its process alive (ruled by the plan owner, task 25;
+ *  else its own line). A server of this build writes server.json before server.sock answers, so for
+ *  it the check passes at its first answer — it stays for any server that answers before it
+ *  records itself (ruled by the plan owner, follow-up "server-findable"). One fixed line per exit
+ *  code; for exit 11 the running server of another checkout is named from server.json or, while
+ *  that server is starting and has written none yet, from the window_server lock (sanitised;
+ *  ruled, follow-up "server-findable"). Settled at the follow-up's review 2: exit 0 while neither
+ *  server.json nor the lock names a process that is alive or cannot be judged — the server this
+ *  command started was stopped by another command during its start, or ended — gives at once
+ *  "the window's server stopped before this command could use it; run skydeck window again (its
+ *  log: <stateDir>/server.log)" (the path sanitised), not the no-answer line after the wait; and
+ *  "answers, but did not record itself" is given only of a server that still answers (it is
+ *  pinged once more) — of one that is gone (its identity dead by design 5.5's rule where
+ *  server.json or the lock names it, else no /proc entry for its pid) that same stopped line, of
+ *  one that lives but answers no more "the window's server (pid N) does not answer; skydeck window
+ *  --restart stops it". Each
  *  ping of that wait waits at most 1 s (then the runtime directory is looked up again), and the one
  *  open when the wait ends is aborted: nothing outlives the call (ruled, task 22, review 2). A boot
  *  id that cannot be read rejects with a SkydeckError before anything is started. */
 export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }>;
 /** A server that answers ping: POST /shutdown, wait 10 s; then SIGTERM and after 5 s SIGKILL. A server that gives no
- *  ping answer gets no POST /shutdown and SIGTERM at once, without the 10 s (ruled, task 22). Each
+ *  ping answer within the ping wait (a refused or failed ping is tried again every 100 ms, as
+ *  findServer does; one that times out is not — ruled by the plan owner, follow-up
+ *  "server-findable", third ruling; a server gone meanwhile is stopped) gets no POST /shutdown
+ *  and SIGTERM at once, without the 10 s (ruled, task 22). Each
  *  signal only after server.json's pid, process start and boot id are confirmed alive at that moment
  *  (S2 5.1 --restart). Never signals a keeper (an identity a keeper's .pid line holds), this process
  *  or pid 1: rejects with a SkydeckError instead, as for an 'unknown' line and for a server that
@@ -1211,7 +1265,12 @@ export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: tr
  *  ended terminals. Task 24's "<n> terminals in the window keep running" (S2 16.2) shows it. */
 /** `options.hungPid` (ruled by the plan owner, task 25): the pid of the server the caller has just
  *  found not answering (findServer's 'hung'); when server.json still names it, no ping is sent and
- *  SIGTERM comes at once. Left out, or another pid: as above. */
+ *  SIGTERM comes at once. Left out, or another pid: as above.
+ *  A server that is starting (ruled by the plan owner, follow-up "server-findable"): found as
+ *  findServer finds it. One that records itself within pingMs is pinged in what is left of pingMs
+ *  and stopped as above; one still not recorded then, or whose pid is `hungPid`, gets SIGTERM at once
+ *  and SIGKILL after killMs to the identity the lock names, each after it was confirmed alive and
+ *  never to a keeper, this process or pid 1 (the refusal names "skydeck's window_server lock"). */
 export function stopServer(deck: Deck, times?: LifecycleTimes, options?: { hungPid?: number }): Promise<{ stopped: boolean; keepers: number }>;
 
 // src/window/build.ts (task 14)
@@ -1843,9 +1902,11 @@ export function programEnvironment(serverEnv: Readonly<Record<string, string>>, 
  *  with a segment Windows cannot have: '.' or '..', a control character, " * : < > ? | or a
  *  backslash, a trailing space or dot. */
 export function windowsPath(linuxPath: string): string | null;
-/** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
-export function deriveProfileDir(files: Files): { ok: true; dir: string } | { ok: false; error: string };
-/** For tests: deriveProfileDir with `usersRoot` standing for /mnt/c/Users (a sandbox folder). */
+/** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users),
+ *  found under `usersRoot`, standing for /mnt/c/Users: `<driveC(env)>/Users` (drive.ts), a sandbox
+ *  folder in tests. (`deriveProfileDir(files)`, the same under the real /mnt/c/Users, was removed by
+ *  the follow-up "server-findable": since task 25 nothing called it — startEdge, doctor and
+ *  uninstall all derive under driveC.) */
 export function deriveProfileDirUnder(files: Files, usersRoot: string): { ok: true; dir: string } | { ok: false; error: string };
 /** S2 5.3: the arguments for msedge.exe. */
 export function edgeArgs(port: number, token: string, profileDir: string): string[];
@@ -1870,10 +1931,9 @@ export function parentPidFromStat(line: string): number | null; // field 4, afte
   `unlimited`, `0`, absent.
 - pid lines: round trip with and without the keeper fields; garbled lines → null; `isPidLineAlive`
   with the fake proc: alive, other boot, reused pid, no boot id.
-- `windowsPath`, `deriveProfileDir` with sandbox folders standing for `/mnt/c/Users/*/AppData/Local/Microsoft/Edge`
-  (the function takes the `/mnt/c/Users` root as a parameter in a helper, `deriveProfileDirUnder`,
-  exported for tests only, so the test can point it into the sandbox): one user → the folder;
-  none, two, an unreadable one.
+- `windowsPath`, `deriveProfileDirUnder` with sandbox folders standing for `/mnt/c/Users/*/AppData/Local/Microsoft/Edge`
+  (the function takes the `/mnt/c/Users` root as a parameter, so the test can point it into the
+  sandbox): one user → the folder; none, two, an unreadable one.
 - `edgeArgs(47613, 'abc', 'C:\\x')` → exactly the four arguments of S2 5.3.
 - `linkToOpen`: `https://github.com/a/b/pull/1` → itself; `http://x` → `http://x/`; `file:///etc`,
   `javascript:…`, a 2,049-character URL, `-https://x`, `not a url` → null.
@@ -3444,10 +3504,14 @@ status answers and the stop of S2 5.5.
 **Behaviour.** `runServer` in this order: refuse with `CLAUDECODE` set (13); `serverEnvironment`;
 `openDeck(platform, { guardSchema: true })`; take the lock (0 or 11); the runtime directory
 (`take`) and `prepareRuntimeDir` (12); `loadAssets` and the keeper file; `ensureSecret`; bind the
-port (10, releasing the lock); remove a `server.sock` that refuses and listen there (the HTTP and page handlers read the bound
-port through a function, A6: with port 0 it is known only now); `rediscover`
-and `decideFoundKeeper` for every keeper not started; the interop link and the keep-alive; write
-`server.json` and `server.pid`; start the tick. The actions are task 32's `createActions`, given
+port (10, releasing the lock); remove a `server.sock` that refuses (one a process answers on fails
+the start before anything is written); write `server.json` and `server.pid` (before `server.sock`
+answers, so that a server that answers can always be found by them; a start that fails after this
+removes them: ruled by the plan owner, follow-up "server-findable"); listen on `server.sock` (the
+HTTP and page handlers read the bound port through a function, A6: with port 0 it is known only
+now); the python3 check; `rediscover` and `decideFoundKeeper` for every
+keeper not started; the interop link and the keep-alive; start the tick (until it has run,
+`/status` says `starting` and a page's upgrade gets 503). The actions are task 32's `createActions`, given
 `windowTerminal(deps, size)` as its terminal factory and `openLink` (task 19). The registry's
 `events` keep each terminal's latest `hello` and send a hello of origin `late` or `found` whose
 `started` is false through `decideFoundKeeper` (task 21); a `spawned` hello is `open()`'s. `tick.ts`: every second the keep-alive; every second tick the refresh,

@@ -12,7 +12,9 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -190,6 +192,109 @@ describe('starting (S2 5.2)', () => {
       ),
     );
     assert.equal(d.deck.store.getKv('window_server'), null);
+  });
+
+  test('server.json and server.pid are written before server.sock answers (ruled, server-findable): while the start still runs its python3 check, the ping names the server server.json names', async (t) => {
+    const d = serverSandbox(t);
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    t.after(release);
+    let checking = false;
+    const starting = d.start({
+      platform: (p) => ({
+        ...p,
+        runner: {
+          ...p.runner,
+          async run(command, args, options) {
+            if (command === 'python3' && args[1] === '-c') {
+              checking = true;
+              await held;
+            }
+            return p.runner.run(command, args, options);
+          },
+        },
+      }),
+    });
+    await until(() => checking, 'the python3 check of the start', WAIT_MS);
+
+    const ping = await controlClient(d.platform.net, d.files.serverSock).ping();
+    assert.ok(typeof ping === 'object', `the ping is answered while the start runs: ${ping}`);
+    const json = readServerJson(d.platform.files, d.files.serverJson);
+    assert.ok(json !== null, 'server.json is there');
+    assert.deepEqual(
+      { pid: json.pid, serverId: json.serverId, port: json.port, bootId: json.bootId },
+      { pid: ping.pid, serverId: ping.serverId, port: ping.port, bootId: ping.bootId },
+    );
+    assert.deepEqual(parsePidLine(readFileSync(d.files.serverPid, 'utf8')), {
+      pid: json.pid,
+      procStart: json.procStart,
+      bootId: json.bootId,
+    });
+    const client = controlClient(d.platform.net, d.files.serverSock);
+    assert.equal((await client.status()).starting, true, '/status says it is starting');
+    release();
+    const { server } = await starting;
+    assert.equal(server.serverId, json.serverId);
+    assert.equal((await client.status()).starting, false, 'and not once the start is done');
+  });
+
+  test('startDelayMs (SKYDECK_TEST_SERVE_START_DELAY_MS in serve, A31; ruled, server-findable): the lock held for it with nothing recorded and nothing on server.sock; then the server as always', async (t) => {
+    const d = serverSandbox(t);
+    const begun = performance.now();
+    const starting = d.start({ startDelayMs: 1500 });
+    await until(() => d.deck.store.getKv('window_server') !== null, 'the lock taken', WAIT_MS);
+    await sleep(300);
+    assert.equal(existsSync(d.files.serverJson), false);
+    assert.equal(existsSync(d.files.serverPid), false);
+    assert.equal(await controlClient(d.platform.net, d.files.serverSock).ping(500), 'refused');
+    const { server } = await starting;
+    assert.ok(performance.now() - begun >= 1500, `${performance.now() - begun} ms`);
+    assert.equal(readServerJson(d.platform.files, d.files.serverJson)?.serverId, server.serverId);
+  });
+
+  test('server.sock held by a process that answers: the start fails before it writes server.json — what was there is left as it is — and gives the lock back (review 2)', async (t) => {
+    const d = serverSandbox(t);
+    const other = createServer();
+    await new Promise<void>((resolve) => other.listen(d.files.serverSock, resolve));
+    t.after(() => new Promise<void>((resolve) => other.close(() => resolve())));
+    const theirs = '{"written": "by whatever answers on server.sock"}\n';
+    writeFileSync(d.files.serverJson, theirs, { mode: 0o600 });
+    await assert.rejects(d.start(), {
+      name: 'SkydeckError',
+      message: `${d.files.serverSock} is in use by a process that answers on it; see skydeck doctor`,
+    });
+    assert.equal(readFileSync(d.files.serverJson, 'utf8'), theirs, 'server.json left as it was');
+    assert.equal(existsSync(d.files.serverPid), false, 'no server.pid written');
+    assert.equal(d.deck.store.getKv('window_server'), null, 'the lock released');
+  });
+
+  test('a start that fails once server.json is written (server.sock cannot be listened on) removes server.json and server.pid and gives the lock back', async (t) => {
+    const d = serverSandbox(t);
+    let recorded = false;
+    await assert.rejects(
+      d.start({
+        platform: (p) => ({
+          ...p,
+          net: {
+            ...p.net,
+            listenHttp(where, handlers) {
+              if ('path' in where) {
+                recorded = existsSync(d.files.serverJson) && existsSync(d.files.serverPid);
+                return Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+              }
+              return p.net.listenHttp(where, handlers);
+            },
+          },
+        }),
+      }),
+      /EACCES/,
+    );
+    assert.ok(recorded, 'server.json and server.pid were written before server.sock');
+    assert.equal(existsSync(d.files.serverJson), false, 'server.json removed');
+    assert.equal(existsSync(d.files.serverPid), false, 'server.pid removed');
+    assert.equal(d.deck.store.getKv('window_server'), null, 'the lock released');
   });
 
   test('CLAUDECODE set → ServeExit 13, and nothing is taken', async (t) => {

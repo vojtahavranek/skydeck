@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
 import { parentPidFromStat, procStartFromStat } from '../../../src/claude/procstat.ts';
-import { sandboxLimits, uncaughtLine } from '../../../src/cli/commands/serve.ts';
+import { sandboxLimits, startDelayOf, uncaughtLine } from '../../../src/cli/commands/serve.ts';
 import { ensureSecret, pageProof } from '../../../src/window/auth.ts';
 import { readServerJson } from '../../../src/window/runtime.ts';
 import type { ServerJson } from '../../../src/window/runtime.ts';
@@ -31,7 +31,7 @@ import { procStartOf, sleep, stillRuns, until, within } from '../../helpers/keep
 import { killKeepersIn } from '../../helpers/kill.ts';
 import { freshNonce } from '../../helpers/pages.ts';
 import { readRecords, waitForRecord } from '../../helpers/standin.ts';
-import { connectTestPage, serverSandbox, WAIT_MS } from '../../helpers/window.ts';
+import { connectTestPage, serverSandbox, startDone, WAIT_MS } from '../../helpers/window.ts';
 import type { ServerSandbox } from '../../helpers/window.ts';
 
 const LAUNCHER = fileURLToPath(new URL('../../../bin/skydeck', import.meta.url));
@@ -140,6 +140,11 @@ function serveSandbox(t: TestContext): {
     children.push(entry);
     return entry as Serve;
   };
+  /**
+   * The child's server once its start is done: its server.json, then the line it logs last in its
+   * start (server.json is written before server.sock answers and the keepers are found, so that
+   * a server that is starting can be found: ruled, server-findable; pages get 503 until then).
+   */
   const started = async (entry: Omit<Serve, 'json'>): Promise<Serve> => {
     let json: ServerJson | null = null;
     await until(
@@ -148,9 +153,13 @@ function serveSandbox(t: TestContext): {
           assert.fail(`serve exited ${entry.child.exitCode}: ${entry.stderr()}`);
         }
         json = ownServer(d, entry.child);
-        return json !== null;
+        if (json === null) return false;
+        return (
+          startDone(entry.stderr(), json.serverId) ||
+          (existsSync(log) && startDone(readFileSync(log, 'utf8'), json.serverId))
+        );
       },
-      'server.json of the child',
+      'server.json of the child, and its start done',
       WAIT_MS,
     );
     return { ...entry, json: json as unknown as ServerJson };
@@ -377,17 +386,35 @@ describe('skydeck serve (S2 5.2)', () => {
 
   test('SIGTERM while the server starts: the start is finished, then the stop; exit 0, nothing left', async (t) => {
     const { d, serve } = serveSandbox(t);
-    // The server's python3 check (on its PATH) takes 3 s: the signal comes in the middle.
+    // The server's python3 check (on its PATH) takes 3 s: the signal comes in the middle, after
+    // server.json is written (it comes before server.sock answers; ruled, server-findable).
     const python = join(d.s.bin, 'python3');
     unlinkSync(python);
     writeFileSync(python, '#!/bin/sh\nsleep 3\nexec /usr/bin/python3 "$@"\n', { mode: 0o755 });
     const entry = serve();
-    await until(() => d.deck.store.getKv('window_server') !== null, 'the lock taken', WAIT_MS);
-    assert.equal(existsSync(d.files.serverJson), false, 'still starting');
+    await until(() => existsSync(d.files.serverJson), 'server.json written', WAIT_MS);
+    assert.doesNotMatch(entry.stderr(), /listening on/, 'still starting');
     const node = serveNode(entry.child);
     assert.ok(node !== null, "the child's node process");
     process.kill(node, 'SIGTERM');
     assert.equal(await within(entry.exited, 'serve to exit', WAIT_MS), 0, entry.stderr());
+    assert.match(entry.stderr(), /listening on/, 'the start was finished first');
+    for (const path of [d.files.serverJson, d.files.serverPid, d.files.serverSock]) {
+      assert.equal(existsSync(path), false, `${path} is gone`);
+    }
+    assert.equal(d.deck.store.getKv('window_server'), null);
+  });
+
+  test('SIGTERM while the server holds only its lock (the start seam, ruled, server-findable): the start is finished, then the stop; exit 0, nothing left', async (t) => {
+    const { d, serve } = serveSandbox(t);
+    const entry = serve({ env: { SKYDECK_TEST_SERVE_START_DELAY_MS: '3000' } });
+    await until(() => d.deck.store.getKv('window_server') !== null, 'the lock taken', WAIT_MS);
+    assert.equal(existsSync(d.files.serverJson), false, 'not recorded yet');
+    const node = serveNode(entry.child);
+    assert.ok(node !== null, "the child's node process");
+    process.kill(node, 'SIGTERM');
+    assert.equal(await within(entry.exited, 'serve to exit', WAIT_MS), 0, entry.stderr());
+    assert.match(entry.stderr(), /listening on/, 'the start was finished first');
     for (const path of [d.files.serverJson, d.files.serverPid, d.files.serverSock]) {
       assert.equal(existsSync(path), false, `${path} is gone`);
     }
@@ -420,21 +447,30 @@ describe('a marked test sandbox ends its server by itself (ruled, task 25, revie
     assert.equal(d.deck.store.getKv('window_server'), null);
   });
 
-  test('once its SKYDECK_HOME is gone: the orderly stop within a tick or two', async (t) => {
-    const { d, serve, started } = serveSandbox(t);
-    const server = await started(serve());
-    const moved = `${d.s.skydeckHome}.moved`;
-    renameSync(d.s.skydeckHome, moved);
-    let code: number | null;
-    try {
-      code = await within(server.exited, 'serve to exit', WAIT_MS);
-    } finally {
-      renameSync(moved, d.s.skydeckHome); // the sandbox's own cleanup looks there
-    }
-    assert.match(server.stderr(), /server: stopping: the test sandbox is gone/);
-    assert.match(server.stderr(), /server: stopped/, 'the orderly stop of S2 5.5, not an exit');
-    assert.equal(code, 0, server.stderr());
-  });
+  for (const slow of [false, true]) {
+    test(`once its SKYDECK_HOME is gone: the orderly stop within a tick or two${slow ? ' — also when its start goes on for 3 s after server.json (the home moved only once the start is done)' : ''}`, async (t) => {
+      const { d, serve, started } = serveSandbox(t);
+      if (slow) {
+        // The python3 check comes after server.json (ruled, server-findable): a home moved as soon as
+        // server.json is there would vanish under the rest of the start.
+        const python = join(d.s.bin, 'python3');
+        unlinkSync(python);
+        writeFileSync(python, '#!/bin/sh\nsleep 3\nexec /usr/bin/python3 "$@"\n', { mode: 0o755 });
+      }
+      const server = await started(serve());
+      const moved = `${d.s.skydeckHome}.moved`;
+      renameSync(d.s.skydeckHome, moved);
+      let code: number | null;
+      try {
+        code = await within(server.exited, 'serve to exit', WAIT_MS);
+      } finally {
+        renameSync(moved, d.s.skydeckHome); // the sandbox's own cleanup looks there
+      }
+      assert.match(server.stderr(), /server: stopping: the test sandbox is gone/);
+      assert.match(server.stderr(), /server: stopped/, 'the orderly stop of S2 5.5, not an exit');
+      assert.equal(code, 0, server.stderr());
+    });
+  }
 
   test('sandboxLimits: only in a marked sandbox; 600 s by default; a value that is not whole seconds gives the default and says so', () => {
     assert.equal(sandboxLimits({ SKYDECK_HOME: '/s/home' }), null);
@@ -460,6 +496,60 @@ describe('a marked test sandbox ends its server by itself (ruled, task 25, revie
         }),
         { maxMs: 600_000, home: null, invalid: true },
         bad,
+      );
+    }
+  });
+});
+
+describe('the start seam SKYDECK_TEST_SERVE_START_DELAY_MS (A31; ruled, server-findable)', () => {
+  test('in a marked sandbox: the lock held, server.json and server.sock not there for the delay; then the server as always', async (t) => {
+    const { d, serve, started } = serveSandbox(t);
+    const begun = performance.now();
+    const entry = serve({ env: { SKYDECK_TEST_SERVE_START_DELAY_MS: '2000' } });
+    await until(() => d.deck.store.getKv('window_server') !== null, 'the lock taken', WAIT_MS);
+    assert.equal(existsSync(d.files.serverJson), false);
+    assert.equal(existsSync(d.files.serverPid), false);
+    assert.equal(existsSync(d.files.serverSock), false);
+    const server = await started(entry);
+    assert.ok(performance.now() - begun >= 2000, `${performance.now() - begun} ms`);
+    assert.ok(ownServer(d, server.child) !== null);
+  });
+
+  test('a value that is not a whole number of ms: no delay, and one line says so', async (t) => {
+    const { serve, started } = serveSandbox(t);
+    const server = await started(serve({ env: { SKYDECK_TEST_SERVE_START_DELAY_MS: '2s' } }));
+    assert.match(
+      server.stderr(),
+      /server: SKYDECK_TEST_SERVE_START_DELAY_MS is not a whole number of milliseconds up to 60000; the start is not delayed/,
+    );
+  });
+
+  test('startDelayOf: only in a marked sandbox; 0 when unset; a value that is not whole ms is 0 and invalid', () => {
+    assert.deepEqual(startDelayOf({ SKYDECK_TEST_SERVE_START_DELAY_MS: '500' }), {
+      ms: 0,
+      invalid: false,
+    });
+    assert.deepEqual(
+      startDelayOf({ SKYDECK_TEST_NO_WINDOWS: '0', SKYDECK_TEST_SERVE_START_DELAY_MS: '500' }),
+      { ms: 0, invalid: false },
+    );
+    assert.deepEqual(startDelayOf({ SKYDECK_TEST_NO_WINDOWS: '1' }), { ms: 0, invalid: false });
+    for (const [text, ms] of [
+      ['0', 0],
+      ['2500', 2500],
+      ['60000', 60_000],
+    ] as const) {
+      assert.deepEqual(
+        startDelayOf({ SKYDECK_TEST_NO_WINDOWS: '1', SKYDECK_TEST_SERVE_START_DELAY_MS: text }),
+        { ms, invalid: false },
+        text,
+      );
+    }
+    for (const bad of ['', '-1', '1.5', 'x', '60001', '2147483647', '01', ' 5']) {
+      assert.deepEqual(
+        startDelayOf({ SKYDECK_TEST_NO_WINDOWS: '1', SKYDECK_TEST_SERVE_START_DELAY_MS: bad }),
+        { ms: 0, invalid: true },
+        JSON.stringify(bad),
       );
     }
   });

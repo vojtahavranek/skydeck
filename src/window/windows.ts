@@ -35,7 +35,7 @@ export function windowsPath(linuxPath: string): string | null {
   return `${letter.toUpperCase()}:\\${parts.join('\\')}`;
 }
 
-/** Where Windows keeps its users' folders, as WSL sees it. */
+/** Where Windows keeps its users' folders, as WSL sees it: the Windows form of the profile folder. */
 const USERS = '/mnt/c/Users';
 /** A user's Edge folder, below their user folder. */
 const EDGE_FOLDER = ['AppData', 'Local', 'Microsoft', 'Edge'];
@@ -55,16 +55,11 @@ function isReadableFolder(files: Files, path: string): boolean {
   }
 }
 
-/** S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users). */
-export function deriveProfileDir(
-  files: Files,
-): { ok: true; dir: string } | { ok: false; error: string } {
-  return deriveProfileDirUnder(files, USERS);
-}
-
 /**
- * deriveProfileDir with `usersRoot` standing for /mnt/c/Users, so that tests can point it into a
- * sandbox. The profile folder it gives is always under `C:\Users\<name>`.
+ * S2 5.4: the derived profile folder, or an error naming window.profileDir (none or several users),
+ * found under `usersRoot`, the folder that stands for /mnt/c/Users: the C: drive's `Users` as
+ * driveC (drive.ts) gives it, a sandbox folder in tests. The profile folder it gives is always
+ * under `C:\Users\<name>`.
  */
 export function deriveProfileDirUnder(
   files: Files,

@@ -14,6 +14,7 @@ import { SkydeckError, UsageError } from '../../platform/errors.ts';
 import { isoFromNs, MAX_TIMER_MS, NS_PER_MS } from '../../platform/time.ts';
 import type { Env, Platform } from '../../platform/types.ts';
 import type { Deck } from '../../sessions/deck.ts';
+import type { Store } from '../../store/store.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { replaceSecret } from '../../window/auth.ts';
 import { computeBuild } from '../../window/build.ts';
@@ -24,7 +25,7 @@ import { findServer, startServe, stopServer } from '../../window/lifecycle.ts';
 import type { LifecycleTimes } from '../../window/lifecycle.ts';
 import { pidLineState } from '../../window/pidline.ts';
 import type { PingAnswer } from '../../window/protocol.ts';
-import { resolveRuntimeDir, runtimeFiles } from '../../window/runtime.ts';
+import { readServerLock, resolveRuntimeDir, runtimeFiles } from '../../window/runtime.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec, ParsedArgs } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -66,6 +67,10 @@ const ALARM =
 
 /** How often a wait looks again: at the token, at the pages, at the lock. */
 const POLL_MS = 100;
+/** lifecycle.ts's ping wait when SKYDECK_TEST_WINDOW_TIMES gives none (S2 5.1: 5 seconds). */
+const PING_MS = 5000;
+/** lifecycle.ts's start wait when SKYDECK_TEST_WINDOW_TIMES gives none (S2 5.2: 10 seconds). */
+const START_MS = 10_000;
 
 interface Options {
   printUrl: boolean;
@@ -187,11 +192,37 @@ async function openWindow(
   }
   if (options.newSecret) {
     // The server forgets every token when it stops (S2 8.2.2); the pages of the old key are
-    // refused from the next connection on.
+    // refused from the next connection on. Replaced only while no server holds the lock (ruled,
+    // server-findable): one started after the stop would keep the tokens it minted before.
     await stopServer(deck, times);
-    replaceSecret(deck.store, platform.randomBytes);
+    replaceSecret(deck.store, platform.randomBytes, () => {
+      refuseUnderServer(platform, deck.store);
+    });
   }
-  const { ping, pagesBefore } = await serverToUse(ctx, deck, options.restart, times);
+  const { ping, pagesBefore, startWait } = await serverToUse(ctx, deck, options.restart, times);
+  try {
+    return await useServer(ctx, deck, options, times, ping, pagesBefore, startWait);
+  } finally {
+    startWait?.cancel();
+  }
+}
+
+/**
+ * S2 5.1 steps 2 and 3 with the server `ping` names; `startWait`, when this command started it, is
+ * the start wait begun before its start (ruled, server-findable: the wait for a page that comes
+ * back counts from the end of the start, within that wait).
+ */
+async function useServer(
+  ctx: Context,
+  deck: Deck,
+  options: Options,
+  times: Times,
+  ping: PingAnswer,
+  pagesBefore: number,
+  startWait: Wait | null,
+): Promise<number> {
+  const { platform } = deck;
+  const say = (line: string): void => ctx.io.stdout(`${line}\n`);
   // Looked up again: a server that replaced a stale record listens elsewhere (S2 4.2).
   const client = controlClient(
     platform.net,
@@ -211,8 +242,13 @@ async function openWindow(
   }
   // After a restart the windows of the old server come back once the new one's start is done
   // (S2 6.3): waited for, so that an update does not open a second window (ruled, task 25). After
-  // --new-secret they cannot: the old key is refused.
+  // --new-secret they cannot: the old key is refused. The new server answers, and is recorded,
+  // before its start is done: the wait counts from the end of the start (ruled, server-findable),
+  // and a start that is not done within the start wait is not waited for any longer.
   const comeBack = pagesBefore > 0 && !options.newSecret;
+  if (comeBack && !options.newWindow && startWait !== null) {
+    await whileStarting(platform, client, startWait);
+  }
   if (
     !options.newWindow &&
     (await pageWithin(platform, client, comeBack ? times.reconnectMs : 0))
@@ -223,6 +259,39 @@ async function openWindow(
   await launch(deck, client, ping, options, times);
   say(`skydeck window: http://127.0.0.1:${ping.port}/ (server pid ${ping.pid})`);
   return EXIT.ok;
+}
+
+/**
+ * The guard of --new-secret's replace (ruled, server-findable), run inside replaceSecret's one
+ * transaction after the stop: it refuses — so that nothing changes, neither the key nor the alarm
+ * — while the window_server lock names a holder alive by design 5.5's rule (a server started
+ * meanwhile, whose tokens would outlive the key) or one that cannot be judged.
+ */
+function refuseUnderServer(platform: Platform, store: Store): void {
+  const holder = readServerLock(store);
+  if (holder === null) return;
+  const { pid } = holder.line;
+  switch (pidLineState(holder.line, platform.proc, bootIdOf(platform))) {
+    case 'dead':
+      return;
+    case 'alive':
+      throw new SkydeckError(
+        `skydeck's key was not replaced: a window server (pid ${pid}) started meanwhile; run skydeck window --new-secret again`,
+      );
+    case 'unknown':
+      throw new SkydeckError(
+        `skydeck's key was not replaced: cannot tell whether the window's server (pid ${pid}) still runs: the boot id or its /proc entry cannot be read`,
+      );
+  }
+}
+
+/** The current boot id; null when it cannot be read. */
+function bootIdOf(platform: Platform): string | null {
+  try {
+    return platform.proc.bootId();
+  } catch {
+    return null;
+  }
 }
 
 function keepRunning(keepers: number): string {
@@ -246,28 +315,31 @@ function timeOf(ns: string): string {
  * stopped with S2 5.1's line. A server of another checkout, or one that does not answer, is
  * reported (exit 1) unless `--restart` replaces it. `pagesBefore`: the pages the stopped server
  * reported (GET /status) just before its stop — 0 when none was stopped, or it did not answer, or
- * its answer had no page count that can be read (ruled, task 25).
+ * its answer had no page count that can be read (ruled, task 25). `startWait`: for a server this
+ * command started, the start wait begun right before its start (the caller cancels it); else null.
  */
 async function serverToUse(
   ctx: Context,
   deck: Deck,
   restart: boolean,
   times: Times,
-): Promise<{ ping: PingAnswer; pagesBefore: number }> {
+): Promise<{ ping: PingAnswer; pagesBefore: number; startWait: Wait | null }> {
   const { platform } = deck;
   const checkout = platform.appRoot;
   const found = await findServer(deck, checkout, computeBuild(platform.files, checkout), times);
   if (!restart) {
     switch (found.kind) {
       case 'ours':
-        return { ping: found.ping, pagesBefore: 0 };
+        return { ping: found.ping, pagesBefore: 0, startWait: null };
       case 'other-checkout':
         throw new SkydeckError(
           `the window's server runs from ${sanitize(found.ping.checkout)}; run skydeck window there, or skydeck window --restart here to replace it`,
         );
       case 'hung':
         throw new SkydeckError(
-          `the window's server (pid ${found.pid}) does not answer; skydeck window --restart stops it`,
+          found.starting === true
+            ? `the window's server (pid ${found.pid}) is starting and did not finish within ${(times.pingMs ?? PING_MS) / 1000} s; run skydeck window again, or skydeck window --restart to replace it`
+            : `the window's server (pid ${found.pid}) does not answer; skydeck window --restart stops it`,
         );
       case 'other-build':
       case 'none':
@@ -285,11 +357,35 @@ async function serverToUse(
     // One found not answering is not pinged again: SIGTERM at once (S2 5.1; ruled, task 25).
     await stopServer(deck, times, found.kind === 'hung' ? { hungPid: found.pid } : {});
   }
-  const started = await startServe(deck, times);
+  const startWait = deadline(platform, times.startMs ?? START_MS);
+  let started: Awaited<ReturnType<typeof startServe>>;
+  try {
+    started = await startServe(deck, times);
+  } catch (error) {
+    startWait.cancel();
+    throw error;
+  }
   if (!started.ok) {
+    startWait.cancel();
     throw new SkydeckError(sanitize(started.line));
   }
-  return { ping: started.ping, pagesBefore };
+  return { ping: started.ping, pagesBefore, startWait };
+}
+
+/**
+ * While the server says that its start is not done (`GET /status` `starting`, ruled,
+ * server-findable), looking again every POLL_MS, until `wait` is over; an answer that cannot be
+ * had ends the wait too (the wait for the page says what is wrong).
+ */
+async function whileStarting(platform: Platform, client: ControlClient, wait: Wait): Promise<void> {
+  while (!wait.over()) {
+    const status = await client.status().catch((error: unknown) => {
+      if (error instanceof SkydeckError) return null;
+      throw error;
+    });
+    if (status?.starting !== true) return;
+    await platform.clock.sleep(POLL_MS);
+  }
 }
 
 /** How long the old server's page count is waited for (the client's own wait for an answer). */
@@ -451,7 +547,12 @@ async function waitForUse(
 }
 
 /** A deadline `ms` from now on the platform's clock (a timer: WSL's wall clock steps back). */
-function deadline(platform: Platform, ms: number): { over(): boolean; cancel(): void } {
+interface Wait {
+  over(): boolean;
+  cancel(): void;
+}
+
+function deadline(platform: Platform, ms: number): Wait {
   let late = false;
   const cancel = platform.clock.after(ms, () => {
     late = true;
@@ -527,11 +628,8 @@ function holds(platform: Platform, value: string, staleMs: number): boolean {
   const pid = Number(match[2]);
   const procStart = Number(match[3]);
   if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(procStart)) return false;
-  let bootId: string | null;
-  try {
-    bootId = platform.proc.bootId();
-  } catch {
-    bootId = null;
-  }
-  return pidLineState({ pid, procStart, bootId: match[4] ?? '' }, platform.proc, bootId) !== 'dead';
+  return (
+    pidLineState({ pid, procStart, bootId: match[4] ?? '' }, platform.proc, bootIdOf(platform)) !==
+    'dead'
+  );
 }

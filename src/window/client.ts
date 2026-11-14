@@ -269,8 +269,9 @@ const readStatus: Reader<StatusAnswer> = (body) => {
   if (!isObject(body)) {
     return null;
   }
-  const { pages, terminals, python, build, checkout, startedAtNs, envOrigin } = body;
+  const { starting, pages, terminals, python, build, checkout, startedAtNs, envOrigin } = body;
   if (
+    (starting !== undefined && typeof starting !== 'boolean') ||
     !isWhole(pages, 0) ||
     !Array.isArray(terminals) ||
     !isObject(python) ||
@@ -291,6 +292,7 @@ const readStatus: Reader<StatusAnswer> = (body) => {
     return null;
   }
   return {
+    starting: starting === true, // absent: a server of an older build, which is done when it answers
     pages,
     terminals: read as StatusTerminal[],
     keepAlive,
