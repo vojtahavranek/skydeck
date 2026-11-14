@@ -938,6 +938,9 @@ export interface Tokens {
   forgetAll(): void; // empties everything, stops every timer
 }
 export function createTokens(clock: Clock, random: (n: number) => Uint8Array, onAlarm: () => void): Tokens;
+/** An error's name and, when it has one, its code (`Name (CODE)`), for a log line; never its
+ *  message (S2 5.2). Never throws. Exported for task 18's control socket (ruled by the plan owner). */
+export function failureKind(error: unknown): string;
 /** kv window_alarm, in one transaction: the time of the FIRST second use is kept (ruled, review 2
  *  of task 11) — a recorded time is never overwritten; a value that is not a decimal time is. */
 export function raiseAlarm(store: Store, nowNs: Ns): void;
@@ -1061,6 +1064,14 @@ export function pidLineState(line: PidLine, proc: Proc, bootId: string | null): 
 export function isPidLineAlive(line: PidLine, proc: Proc, bootId: string | null): boolean;
 
 // src/window/client.ts (task 18): the command line's side of server.sock
+// Ruled by the plan owner (task 18): ping is 'refused' for ECONNREFUSED and ENOENT (a missing
+// socket) and 'timeout' for ETIMEDOUT and EAGAIN (a full accept queue: the server lives but does
+// not answer now); any other system error (EPIPE or ECONNRESET from a server that is closing:
+// task 22 catches them), another status or an answer that cannot be read (one that is not HTTP
+// included) is a SkydeckError, and a RangeError from requestUnix passes unchanged. The other methods wait 5 s and
+// reject with a SkydeckError that says what went wrong (never a token). tokenState rejects for a
+// token the server does not know (404); dropToken resolves for one (`{ ok: false }`: nothing to
+// give up). Every answer is checked against its type; a field a newer server adds is left out.
 export interface ControlClient {
   ping(timeoutMs?: number): Promise<PingAnswer | 'refused' | 'timeout'>; // 5 s default
   status(): Promise<StatusAnswer>;
@@ -2514,6 +2525,15 @@ talk to it.
 export interface ControlDeps { ping(): PingAnswer; status(): StatusAnswer; tokens: Tokens; shutdown(): void; log: (line: string) => void }
 export function controlHandler(deps: ControlDeps): (req: IncomingMessage, res: ServerResponse) => void;
 ```
+
+Ruled by the plan owner (task 18): a route whose dependency (`ping`, `status`, `tokens`) throws
+answers 500 `{ error: 'failed' }`, logs the error's name and, when it has one, its code
+(`failureKind`, 2.8) — never its message — and the server goes on; a throw from `shutdown` is
+not caught and becomes the server's uncaught error (S2 5.2).
+A refusal answers `{ error: <kind> }` and is logged by its kind. Every `POST /shutdown` answers
+`{ ok: true }`; `deps.shutdown` is called once, when the first of those answers has been handed to
+the socket (or its asker went away), so one asker that does not read its answers keeps no other
+waiting; every other request for it calls nothing.
 
 **Files**
 - Create: `src/window/control.ts`, `src/window/client.ts`
