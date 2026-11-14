@@ -647,7 +647,8 @@ export interface TerminalHub {
   resize(termId: string, cols: number, rows: number): void;
   /** S2 8.2.3 `close-terminal`: forgets an ended, lost or not-started terminal. */
   close(termId: string): 'ok' | 'running' | 'unknown';
-  /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). */
+  /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). Pages calls it when
+   *  a page starts focused and when a page reports focus (with the theme of its start; ruled). */
   setTheme(theme: ThemePayload): void;
   /** Called after any change of `list()`; returns the function that unsubscribes. */
   onChange(listener: () => void): () => void;
@@ -2454,13 +2455,18 @@ header) has its `Host` (421), method (OPTIONS 403, any other but GET 405 with `A
 path (`/ws`, query ignored, else 404) checked there, then its `Origin` (403); the refusals carry
 `securityHeaders` and `no-store`. `bye` keeps a `'close'` listener on the raw upgrade socket, as a
 listener only, to resolve once the socket has really closed (ruled); every write and close goes
-through the WebSocket connection.
+through the WebSocket connection. After `bye` an upgrade is answered 503 (ruled, S2 8.2.1, 5.5).
+
+Pages calls `hub.setTheme` with a page's theme (from its `start`) when that page starts focused
+and whenever it reports `focus` with `focused` true: `FocusMessage` carries no theme, so the one
+of `start` is sent again (ruled; S2 7.2's "the last focused page").
 
 **Exported API**
 
 ```ts
 // src/window/size.ts — pure, S2 8.2.6
 export interface SizeState { owner: string | null; proposals: ReadonlyMap<string, { cols: number; rows: number; attachedAt: number; inputAt: number | null }> }
+/** RangeError for an attach or resize without cols and rows (the caller's mistake; ruled). */
 export function sizeAfter(state: SizeState, event: { kind: 'attach' | 'resize' | 'input' | 'detach'; page: string; cols?: number; rows?: number; at: number }): { state: SizeState; apply: { cols: number; rows: number } | null };
 // src/window/pages.ts
 export interface PageState { windowId: string; focused: boolean; focusedAt: number; area: { cols: number; rows: number } | null; view: ViewMessage; attached: ReadonlySet<string> }
@@ -2483,7 +2489,8 @@ export interface Pages {
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
   /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
-   *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS). */
+   *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS).
+   *  From then on an upgrade is answered 503 (ruled). */
   bye(reason: string): Promise<void>;
 }
 export function createPages(deps: PagesDeps): Pages;

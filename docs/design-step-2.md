@@ -424,7 +424,8 @@ under `/mnt/<letter>/` maps to `<LETTER>:\`). None or several is an error that n
 
 ### 5.5 Stopping the server
 
-On `POST /shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connections; parks a
+On `POST /shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connections (an upgrade
+that still arrives gets 503, 8.2.1); parks a
 snapshot in every keeper (7.3); closes its keeper connections (the keepers and their programs keep
 running); sends every page `bye` with the reason; removes `server.json`, `server.pid` and
 `server.sock`; releases the `window_server` lock (5.2); and exits 0. It does not stop the
@@ -957,7 +958,8 @@ headers above 16 KiB; `CONNECT` is closed without an answer. They only refuse, s
 protect nothing there (ruled, plan task 17); server tests pin them, so that a Node.js release that
 changes them is noticed. Every request with `Connection: Upgrade` and an `Upgrade` header goes to
 the upgrade handler whatever its path, method or `Host`; that handler applies this section's checks
-itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`.
+itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`. Once the server
+has begun to stop (5.5) it answers every upgrade 503 (ruled, plan task 17).
 
 **Why `'unsafe-inline'` for styles, and only for styles.** xterm.js 6.0.0's DOM renderer creates
 `<style>` elements at run time and writes the colour palette, cursor and selection rules into them

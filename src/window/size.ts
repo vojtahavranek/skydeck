@@ -63,7 +63,7 @@ function ranksAbove(a: Proposal, b: Proposal): boolean {
  * The state after `event`, and the size to apply (send to the keeper) or null. The state given is
  * never changed. A resize, input or detach of a page that is not attached changes nothing. An
  * attach of a page already attached replaces its proposal and attach time and keeps its input
- * time. RangeError for an attach or resize without cols and rows.
+ * time. RangeError for an attach or resize without cols and rows (the caller's mistake; ruled).
  */
 export function sizeAfter(
   state: SizeState,

@@ -97,7 +97,8 @@ export interface Pages {
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
   /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
-   *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS). */
+   *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS).
+   *  From then on an upgrade is answered 503 (ruled). */
   bye(reason: string): Promise<void>;
 }
 
