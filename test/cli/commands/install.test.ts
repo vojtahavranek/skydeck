@@ -19,7 +19,7 @@ import { command } from '../../../src/cli/commands/install.ts';
 import { main } from '../../../src/cli/main.ts';
 import { hookEntry } from '../../../src/claude/settings.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
-import type { Files } from '../../../src/platform/types.ts';
+import type { Files, RunResult } from '../../../src/platform/types.ts';
 import { capture } from '../../helpers/capture.ts';
 import {
   backupAtT0,
@@ -29,8 +29,18 @@ import {
   transcript,
   withStore,
 } from '../../helpers/install.ts';
-import { S1, S2, S3, SEC, T0, statLine, testPlatform } from '../../helpers/platform.ts';
-import type { TestPlatform } from '../../helpers/platform.ts';
+import {
+  S1,
+  S2,
+  S3,
+  SEC,
+  T0,
+  fakeRunner,
+  runResult,
+  statLine,
+  testPlatform,
+} from '../../helpers/platform.ts';
+import type { FakeRunner, TestPlatform } from '../../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../../helpers/spool.ts';
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -678,6 +688,108 @@ describe('install: the first-run offer', () => {
   });
 });
 
+describe('install: python3 for the window (S2 16.1)', () => {
+  const LINE = 'the window (skydeck window) needs python3 3.9 or newer; the commands do not';
+
+  /** install with `python3 --version` answered by `answer`; every other program as testPlatform's runner. */
+  async function installWith(
+    t: Parameters<typeof testPlatform>[0],
+    answer: Partial<RunResult>,
+  ): Promise<{ d: TestPlatform; r: Awaited<ReturnType<typeof run>>; runner: FakeRunner }> {
+    const d = testPlatform(t);
+    const runner = fakeRunner((call) => runResult(call.command === 'python3' ? answer : {}));
+    const r = await run({ ...d.platform, runner }, ['install'], { lines: ['y'] });
+    return { d, r, runner };
+  }
+
+  const linesOf = (text: string): string[] => text.split('\n').filter((line) => line !== '');
+
+  test('python3 not found: the info line, and install succeeds', async (t) => {
+    const { r } = await installWith(t, { code: null, notFound: true });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(linesOf(r.stdout).includes(LINE), r.stdout);
+  });
+
+  test('python3 3.12: no line', async (t) => {
+    const { r } = await installWith(t, { stdout: 'Python 3.12.3\n' });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.doesNotMatch(r.stdout + r.stderr, /python3/);
+  });
+
+  test('python3 3.9 is new enough', async (t) => {
+    const { r } = await installWith(t, { stdout: 'Python 3.9.0\n' });
+
+    assert.doesNotMatch(r.stdout + r.stderr, /python3/);
+  });
+
+  test('python3 older than 3.9 (3.8, or a python 2 that answers on stderr): the info line', async (t) => {
+    for (const answer of [{ stdout: 'Python 3.8.10\n' }, { stderr: 'Python 2.7.18\n' }]) {
+      const { r } = await installWith(t, answer);
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok(linesOf(r.stdout).includes(LINE), JSON.stringify(answer) + r.stdout);
+    }
+  });
+
+  test('python3 --version that fails, times out or says no version: the info line', async (t) => {
+    for (const answer of [
+      { code: 1, stderr: 'boom\n' },
+      { code: null, timedOut: true },
+      { stdout: 'something else\n' },
+    ]) {
+      const { r } = await installWith(t, answer);
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok(linesOf(r.stdout).includes(LINE), JSON.stringify(answer) + r.stdout);
+    }
+  });
+
+  test('it runs python3 --version once, in the platform environment, and starts nothing else on its account', async (t) => {
+    const { d, runner } = await installWith(t, { stdout: 'Python 3.12.3\n' });
+
+    const python = runner.calls.filter((call) => call.command === 'python3');
+    assert.deepEqual(
+      python.map((call) => call.args),
+      [['--version']],
+    );
+    assert.equal(python[0]?.options?.env?.['PATH'], d.platform.env['PATH']);
+    assert.ok(
+      runner.calls.every((call) => call.command === 'python3'),
+      JSON.stringify(runner.calls),
+    );
+    assert.deepEqual(d.processes.calls, []);
+  });
+
+  test('nothing else changes: the same lines, links, settings and database as with python3', async (t) => {
+    const withPython = await installWith(t, { stdout: 'Python 3.12.3\n' });
+    const without = await installWith(t, { code: null, notFound: true });
+    const normalise = (r: { stdout: string; stderr: string }, d: TestPlatform): string[] =>
+      linesOf((r.stdout + r.stderr).replaceAll(d.sandbox.root, '<root>'));
+
+    assert.deepEqual(
+      normalise(without.r, without.d).filter((line) => line !== LINE),
+      normalise(withPython.r, withPython.d),
+    );
+    for (const { d } of [withPython, without]) {
+      assert.equal(readlinkSync(d.places.binLink), join(d.platform.appRoot, 'bin', 'skydeck'));
+      assert.deepEqual(JSON.parse(readFileSync(settingsFile(d.places), 'utf8')), {
+        hooks: ourHooks(d),
+      });
+    }
+    const kvOf = (d: TestPlatform): unknown =>
+      withStore(d.places, (store) =>
+        (['settings_backup', 'first_run_offered'] as const).map((key) => store.getKv(key)),
+      );
+    assert.deepEqual(kvOf(without.d), kvOf(withPython.d));
+    assert.equal(
+      withStore(without.d.places, (store) => store.getKv('window_secret')),
+      null,
+    );
+  });
+});
+
 describe('install: arguments', () => {
   test('--help prints the usage and exits 0', async (t) => {
     const d = testPlatform(t);
@@ -698,5 +810,26 @@ describe('install: arguments', () => {
   test('name and summary are those of the plan', () => {
     assert.equal(command.name, 'install');
     assert.equal(command.summary, 'Install the hooks and links');
+  });
+});
+
+describe('install: python3 that cannot be started (review 2)', () => {
+  test('a python3 the system refuses to start (EACCES): install succeeds with the info line', async (t) => {
+    const d = testPlatform(t);
+    const runner = fakeRunner((call) => {
+      if (call.command === 'python3') {
+        throw Object.assign(new Error('spawn python3 EACCES'), { code: 'EACCES' });
+      }
+      return runResult({});
+    });
+
+    const r = await run({ ...d.platform, runner }, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(
+      r.stdout,
+      /^the window \(skydeck window\) needs python3 3\.9 or newer; the commands do not$/m,
+    );
+    assert.match(r.stdout, /skydeck is installed\n$/);
   });
 });

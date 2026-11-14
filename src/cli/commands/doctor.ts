@@ -4,6 +4,11 @@
 // creates nothing, and it reports what it can however broken the rest is (ruled by the plan
 // owner): a configuration that cannot be read, or a database that is missing or cannot be opened,
 // is one problem line, and the checks that do not need it still run.
+//
+// Then the window's lines (S2 16.3, src/cli/window-checks.ts). Ruled by the plan owner (task 24):
+// while the window has never been used — no window_secret, or no database to read it from — every
+// one of them that would be a problem is `info`, so that doctor exits for the commands as step 1's
+// did; once it was used they count as problems.
 import { join } from 'node:path';
 
 import { checkNodeVersion } from '../../../bin/node-version.mjs';
@@ -24,14 +29,18 @@ import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import { EXIT } from '../exit.ts';
+import { WINDOW_CHECKS, windowView } from '../window-checks.ts';
+import type { WindowCheck, WindowView } from '../window-checks.ts';
 
 const SPEC: ArgSpec = {
   usage:
     'skydeck doctor\n' +
     '\n' +
     'Checks the configuration, the hook entries and links, Node.js, the database, the spool,\n' +
-    "hook.log, what the last refresh skipped, Claude Code's folders, gh and the terminal. One\n" +
-    'line per check; exits 1 when any line is a problem.\n',
+    "hook.log, what the last refresh skipped, Claude Code's folders, gh and the terminal, then\n" +
+    'what the window needs (python3, its server, the port, the keep-alive, Edge, the runtime\n' +
+    'directory, the vendored files) and its terminals. One line per check; exits 1 when any\n' +
+    'line is a problem (a line of the window only once the window has been used).\n',
   flags: {},
   min: 0,
   max: 0,
@@ -94,6 +103,17 @@ export const command: Command = {
           // check throws, the database's own failures included, is one problem line and the next
           // check runs. (There is no per-item loop here that could wait the busy timeout many times.)
           report('problem', `${check.name}: could not be checked (${describeError(error)})`);
+        }
+      }
+      const view = windowView({ platform, places, config, store });
+      const windowReport: Report = (kind, text) => {
+        report(kind === 'problem' && !view.used ? 'info' : kind, text);
+      };
+      for (const check of WINDOW_CHECKS) {
+        try {
+          await runWindowCheck(check, view, windowReport);
+        } catch (error) {
+          windowReport('problem', `${check.name}: could not be checked (${describeError(error)})`);
         }
       }
     } finally {
@@ -163,6 +183,13 @@ async function runCheck(check: Check, facts: Facts, report: Report): Promise<voi
       }
       return;
   }
+}
+
+/** A window check runs only with what it needs (doctor has said why it is missing). */
+async function runWindowCheck(check: WindowCheck, view: WindowView, report: Report): Promise<void> {
+  if (check.needs === 'config' && view.facts.config === null) return;
+  if (check.needs === 'deck' && view.deck === null) return;
+  await check.run(view, report);
 }
 
 const CHECKS: readonly Check[] = [

@@ -520,9 +520,12 @@ That a `wsl.exe` started from inside WSL counts as a Windows client is **UNVERIF
 check W14). The design does not depend on it:
 
 - the documented alternative is the user's own setting: `instanceIdleTimeout=-1` under `[general]`
-  in `%USERPROFILE%\.wslconfig` (or "keep WSL running" in the WSL Settings app, which writes it),
-  then one `wsl --shutdown`. `[wsl2] vmIdleTimeout=-1` is not needed for this: the VM idles only
-  after its last distribution has stopped. skydeck never writes that file (2);
+  in `%USERPROFILE%\.wslconfig` (or "keep WSL running" in the WSL Settings app, which writes it).
+  It takes effect at the next WSL restart by itself; `wsl --shutdown` restarts WSL at once but
+  ends EVERY session and terminal in WSL, so it is run only when nothing is running that the user
+  wants to keep — no skydeck output names `wsl --shutdown` without saying so (ruled by the plan
+  owner, task 24). `[wsl2] vmIdleTimeout=-1` is not needed for this: the VM idles only after its
+  last distribution has stopped. skydeck never writes that file (2);
 - `doctor` reports which protection is in effect (16.3);
 - the page notices when WSL has stopped anyway (6.3), and restore brings the sessions back (12.7).
 
@@ -2115,11 +2118,13 @@ code allows; it is tested on 3.12, which Ubuntu 24.04 and the CI runners have.)
 Before what it does in step 1:
 
 - when a server runs, it stops it as `skydeck window --stop` does (5.1) and says `stopped skydeck's window server; <n>
-  terminals in the window keep running`, where `<n>` counts the keepers whose `.pid` line is alive
-  or cannot be judged (4.2), read before the stop: a server that does not answer cannot say how
-  many it has. Keepers and their sessions are never stopped (2).
-- it names the Edge profile folder when one is configured or can be derived: `the window's Edge
-  profile is in <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
+  terminals in the window keep running` (for one: `1 terminal in the window keeps running`), where
+  `<n>` counts the keepers whose `.pid` line is alive or cannot be judged (4.2), read before the
+  stop: a server that does not answer cannot say how many it has. Keepers and their sessions are
+  never stopped (2).
+- it names the Edge profile folder — the configured one, or the derived one (5.4) — when that
+  folder exists (Edge creates it at the window's first start): `the window's Edge profile is in
+  <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
 
 `--purge` refuses (exit 1) while any keeper is alive — by its `.pid` line and design 5.5's rule,
 never by connecting to it (7.1); a line that cannot be told dead counts as alive (4.2) — naming the
@@ -2128,27 +2133,50 @@ directory that can be the runtime directory: the one the store records and each 
 4.2 can give (`$SKYDECK_HOME/run`, `$XDG_RUNTIME_DIR/skydeck-<store id>`, `<stateDir>/run-<store
 id>`), because the command may run with another environment than the server did. Purging
 `<stateDir>` can remove keeper sockets under it, and the screens of those sessions could not be
-shown again; the user ends those sessions first. Otherwise it also removes every one of those
-directories that exists.
+shown again; the user ends those sessions first. A `terms/` of one of them that cannot be listed
+refuses the purge the same way: what runs there cannot be told. Every check that can refuse the
+uninstall comes before anything is undone or stopped, and such a refusal leaves the settings file, the links and a
+running server as they are. One look can only come after the server's stop — a keeper the server
+was starting as it stopped — and it refuses only the purge: the uninstall is then done, the data
+stays, and the command says exactly that (`skydeck is uninstalled, but --purge removed no
+directory: …`, exit 1). Otherwise it also removes every one of those directories that exists —
+the recorded one with repeated and trailing slashes dropped, so that a symbolic link is seen as
+one (`<link>/` would be followed) — one that is not a plain path (a `.` or `..` in it), is a
+symbolic link, is another user's, or holds anything a runtime directory does not (4.2) or an
+entry of another kind than skydeck writes there, is left alone and named (`left <dir> alone: it
+…`), and the purge goes on, since the store's record is only a path and nothing of the user's is
+destroyed (2, principle 6). One that cannot be looked at (a look fails) is a refusal of that
+directory's removal only: the rest goes on, and the command ends with `skydeck is uninstalled, but
+--purge did not remove <dir>: it cannot be looked at (<reason>)` (exit 1).
 
 ### 16.3 Doctor
 
 New lines, with `ok`, `info` or `problem` as in design 8. It still starts no program but those it
-already runs (`gh`, `wezterm`) and `python3 --version`; it starts nothing on Windows.
+already runs (`gh`, `wezterm`) and `python3 --version`; it starts nothing on Windows, signals
+nothing and creates nothing. While the window has never been used — no `window_secret`, or no
+database to read it from — every line below that would be a `problem` is `info`, so that `doctor`
+judges an installation that uses only the commands as step 1's did; once the window was used they
+are problems.
 
 | Check | `problem` when |
 |---|---|
-| python3 | `python3` is not found or is older than 3.9 (`info` instead when the window has never been used: no `window_secret`). |
-| server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, or is alive but does not answer. |
-| port | something that is not this installation's server answers on `127.0.0.1:<window.port>`. |
+| python3 | `python3` is not found or is older than 3.9 (`info` instead when the window has never been used: no `window_secret`). A second line: `/usr/bin/python3`, through which the launcher sets the server's core limit (2), is missing or not executable. |
+| server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, is alive but does not answer, or answers `GET /ping` but not `GET /status`. |
+| port | something that is not this installation's server answers on `127.0.0.1:<window.port>`: `/proc/net/tcp` or `tcp6` lists a listener on that port and no server of this installation is alive: one that answers `GET /ping` holds it, and while one is alive but does not answer, or cannot be judged, the port is most likely its own (`info`; the server's own line is the problem). `doctor` never binds the port, not even for an instant (a server starting at that moment would exit 10), and sends nothing to a foreign program. |
 | launch alarm | `window_alarm` is set: a launch token was presented twice at <time>, so another program may have skydeck's key (8.2.2); `run skydeck window --new-secret`. |
-| keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. |
+| keep-alive | a server or a keeper runs and neither protection is in effect. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. Whether the keep-alive runs is the server's word when it answers; otherwise `doctor` judges it as the server judges one it did not start (6.1): its `keepalive.pid` line (one that cannot be read or judged is "cannot be told", never "not running"), and one connection, sending nothing, to the socket `keepalive.interop` names (refused or gone: its `wsl.exe` is gone; never a socket inside the runtime directory). The problem line names the setting and that it takes effect at the next WSL restart; it names `wsl --shutdown` only with what it does (6.1). |
 | interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. |
-| Edge | `window.edge` does not exist (`info` when the window has never been used). |
+| C: drive | the C: drive is not mounted at `/mnt/c`, where all of the window expects it (Edge's working directory, the keep-alive's `wsl.exe`, the users' folders of 5.4). |
+| Edge | `window.edge` does not exist or is not a file (`info` when the window has never been used). |
 | profile folder | it cannot be derived (5.4) and `window.profileDir` is not set. |
 | runtime directory | it is not mode 700 or not the user's, or a socket path would be 108 bytes or longer. The line names the directory the store records, or else which rule chose it (4.2), and says `info` when `XDG_RUNTIME_DIR` was passed over because the user does not linger (systemd would remove it when the last terminal closes). |
 | vendored files | a file of `vendor/MANIFEST.json` is missing or its hash differs (a broken checkout). |
-| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start). |
+| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start); a `.pid` file that cannot be read is named on its own, as one whose keeper cannot be judged. |
+
+In a test sandbox (`SKYDECK_TEST_NO_WINDOWS=1`, 17) `doctor` and `uninstall` read nothing under
+`/mnt/`: the directory `SKYDECK_TEST_MNT_C` names stands for `/mnt/c`, and without it the C: drive
+counts as not mounted; the `/usr/bin/python3` line honours `SKYDECK_TEST_PYTHON3` as the launcher
+does.
 
 ### 16.4 Configuration
 

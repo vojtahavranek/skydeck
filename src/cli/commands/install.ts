@@ -1,6 +1,8 @@
 // `skydeck install` (design 8): the directories and the database, three links, the two hook entries
 // in Claude Code's settings file (shown and asked first, with a backup), a first refresh, and the
-// one-time offer to mark old sessions as done (7.1, D20). Running it again changes nothing.
+// one-time offer to mark old sessions as done (7.1, D20). Running it again changes nothing. It
+// writes nothing for the window (S2 16.1): it only says so when python3 3.9 or newer, which the
+// window's keepers need, is not found.
 //
 // The settings file is the one place where skydeck changes Claude Code's configuration
 // (principle 2), so that step adds nothing but the two entries, never touches other hooks, never
@@ -30,6 +32,7 @@ import type { Context } from '../context.ts';
 import { refreshWithProgress, withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 import { jsonText } from '../json.ts';
+import { PYTHON3_NEEDED, probePython3 } from '../python.ts';
 import { backupBase, createBackup, nextBackupName } from '../settings-backup.ts';
 
 const SPEC: ArgSpec = {
@@ -98,6 +101,10 @@ export const command: Command = {
       }
       refreshWithProgress(ctx, deck);
       await offerFirstRun(ctx, deck);
+      // S2 16.1: the commands do not need python3, so this is said and nothing else changes.
+      if ((await probePython3(deck.platform)).kind !== 'found') {
+        ctx.io.stdout(`${PYTHON3_NEEDED}\n`);
+      }
       ctx.io.stdout('skydeck is installed\n');
       return EXIT.ok;
     });
