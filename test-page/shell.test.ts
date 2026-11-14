@@ -2335,6 +2335,7 @@ test('the page shell', async (t) => {
     'Enter in the new form',
     "Esc in the view's own find field",
     "Enter in the view's own find field",
+    "Enter on a button of the view's own",
   ] as const) {
     await t.test(
       `a held ${held}: once the keyboard is in the terminal, no further event of that key reaches the program until it is released; the next press does (Z1, ruled 15:46Z)`,
@@ -2390,6 +2391,22 @@ test('the page shell', async (t) => {
           await page.focus('#terminal .own-find');
           await w.clear();
           await page.keyboard.down(key); // the view's own key: its holder takes the keyboard
+          await w.holderGetsIt();
+        } else if (held === "Enter on a button of the view's own") {
+          // A button of the view inside #terminal whose click gives the view's holder the
+          // keyboard, as a find bar's close button may (task 28).
+          await page.evaluate(() => {
+            const button = document.createElement('button');
+            button.className = 'own-button';
+            button.textContent = 'close';
+            button.addEventListener('click', () => {
+              document.querySelector<HTMLElement>('#terminal .xterm-helper-textarea')?.focus();
+            });
+            document.querySelector('#terminal')?.append(button);
+          });
+          await page.focus('#terminal .own-button');
+          await w.clear();
+          await page.keyboard.down(key); // Enter clicks the button: its holder takes the keyboard
           await w.holderGetsIt();
         } else {
           await page.keyboard.press('Control+Shift+N');

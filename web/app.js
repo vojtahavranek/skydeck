@@ -1102,12 +1102,12 @@ function terminalHasKeyboard() {
 }
 
 /**
- * Whether the keyboard is on the program's own holder: in `#terminal`, xterm.js's (inside
- * `.xterm`) or a view's holder that is no text field — not a field of the view's own, such as its
- * find bar's (Z1, item 6).
+ * Whether the keyboard is on the program's own holder: the element inside `.xterm`, xterm.js's
+ * textarea — nothing else of the view, neither a field nor a button of its own, such as its find
+ * bar's (Z1, item 6).
  */
 function programHasKeyboard() {
-  return terminalHasKeyboard() && !isTextField(document.activeElement);
+  return xtermHasKeyboard();
 }
 
 /**

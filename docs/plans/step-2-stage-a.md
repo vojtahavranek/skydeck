@@ -1350,13 +1350,14 @@ export function cancels(e, zone, handled) {}
 // a zone chord, Esc closing the new form, and a terminal that the page's own resume or new
 // brings (S2 11.3 comes first) — until that terminal is shown, another session is selected or the
 // connection is lost; a terminal that only a list brought does not.
-// A key pressed while the keyboard was not on the program's own holder (xterm.js's, or a view's
-// holder that is no text field — not the find field) reaches the program only when it is pressed
-// again: once the holder has the keyboard, every further event of it (auto-repeat keydowns,
-// keypress, keyup) is swallowed at the window's capture phase, before the view sees it, until it
-// is released. A key the page acted on that moved the keyboard there is such a key; so are a
-// card's button or the form's Enter that starts a terminal (task 29) and the find bar's Esc or
-// Enter (task 28). A window chord acts at its first keydown only, not at its auto-repeats.
+// A key pressed while the keyboard was not on the program's own holder (the element inside
+// `.xterm`: for the real view xterm.js's textarea; not the find bar's field or buttons, nor any
+// other element of the view) reaches the program only when it is pressed again: once the holder
+// has the keyboard, every further event of it (auto-repeat keydowns, keypress, keyup) is
+// swallowed at the window's capture phase, before the view sees it, until it is released. A key
+// the page acted on that moved the keyboard there is such a key; so are a card's button or the
+// form's Enter that starts a terminal (task 29) and the find bar's Esc, Enter or button (task
+// 28). A window chord acts at its first keydown only, not at its auto-repeats.
 // Ctrl+Shift+V reaches `pasteRaw()` only while the keyboard is in `#terminal` (Z1).
 // `area()` takes off the height of `#cards .card-header` — a hook: cards.js keeps that class on
 // its header (task 29) — as it is while shown, else as last shown: for an act's first size and

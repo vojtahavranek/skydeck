@@ -2069,7 +2069,7 @@ new form, and the terminal of a resume or new started from the page (11.3), unli
 a list brought (ruled, plan task 26's review 2). That holds while the user waits for it: once they
 select another session, or the connection is lost, its terminal is like one a list brought. A key
 pressed while the keyboard was not on the program's own holder (in the list, the form, the help, a
-text field — the terminal's find field too) reaches the program only when it is pressed again:
+text field, a button — the terminal's find bar too) reaches the program only when it is pressed again:
 when that key moves the keyboard there (Enter on a running row or one that resumes, Esc back to
 the terminal, the new form's Enter, the find bar's Esc or Enter), or anything else does while it
 is held, its repeats and its release are the page's, and the next press is the program's; a held
