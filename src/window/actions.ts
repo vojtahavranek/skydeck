@@ -8,7 +8,6 @@
  * (principle 6), and a link is opened only when S2 9.6 allows it. No action carries a program or
  * an argument list (S2 8.3).
  */
-import { isSessionId } from '../claude/session-id.ts';
 import { SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { launchPrepared } from '../sessions/launch.ts';
@@ -17,9 +16,11 @@ import { prepareNew } from '../sessions/resume.ts';
 import type { PreparedLaunch } from '../sessions/resume.ts';
 import { prepareResumeById } from '../sessions/resume-by-id.ts';
 import type { Terminal } from '../terminals/types.ts';
+import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { splitFlags } from './flags.ts';
 import type { ActionHandler, TerminalHub } from './hub.ts';
+import { parsePageMessage } from './protocol.ts';
 import type { ActMessage, ResultMessage } from './protocol.ts';
 import { MAY_START } from './view/sections.ts';
 import { linkToOpen } from './windows.ts';
@@ -51,11 +52,6 @@ const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 cha
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
 
-/** The limits `parsePageMessage` holds an action to (S2 8.2.3), checked again where the action is
- *  acted on (ruled, review 1 of task 32). */
-const SIZE_MAX = 65_535;
-const TERMINAL_ID = /^[0-9a-f]{12}$/;
-
 function refusal(message: string): Answer {
   return { ok: false, lines: [message], error: message, sessionId: null };
 }
@@ -66,10 +62,14 @@ function launched(prepared: PreparedLaunch, outcome: LaunchOutcome): Answer {
   return { ok, lines: outcome.lines, error: null, sessionId: ok ? prepared.sessionId : null };
 }
 
-const isText = (value: unknown): value is string => typeof value === 'string';
-
-function isSize(value: unknown): boolean {
-  return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= SIZE_MAX;
+/**
+ * A SkydeckError as the result's lines, as step 1's command line prints it (failureText): one line
+ * per line of the message, each sanitised — a message can quote what the page sent (a flag as
+ * typed) — and the same text as one line for `error`.
+ */
+function refusedBy(error: SkydeckError): Answer {
+  const lines = error.message.replace(/\n$/, '').split('\n').map(sanitize);
+  return { ok: false, lines, error: lines.join(' '), sessionId: null };
 }
 
 /** The action's id, to answer with; 0 when it has none (parsePageMessage lets no such action through). */
@@ -78,30 +78,27 @@ function idOf(action: unknown): number {
   return Number.isSafeInteger(id) && (id as number) >= 0 ? (id as number) : 0;
 }
 
-/** Whether `action` is one of stage A's kinds with every field of the right type and within its limits. */
-function wellFormed(action: ActMessage): boolean {
-  if (typeof action !== 'object' || action === null || action.t !== 'act') return false;
-  switch (action.kind) {
-    case 'resume':
-      return (
-        isText(action.sessionId) &&
-        isSessionId(action.sessionId) &&
-        isSize(action.cols) &&
-        isSize(action.rows)
-      );
-    case 'new':
-      return (
-        [action.dir, action.label, action.group, action.flags].every(isText) &&
-        isSize(action.cols) &&
-        isSize(action.rows)
-      );
-    case 'close-terminal':
-      return isText(action.term) && TERMINAL_ID.test(action.term);
-    case 'open-link':
-      return isText(action.url);
-    default:
-      return false;
+/**
+ * The action checked again where it is acted on (ruled, review 1 of task 32), by the one parser of
+ * page messages (S2 8.2.3: its kind, the types and the limits of its fields, well-formed text),
+ * so that the rule has one place: the checked copy, or the parser's kind (fixed text) for one
+ * that fails.
+ */
+function checked(
+  action: ActMessage,
+): { ok: true; action: ActMessage } | { ok: false; kind: string } {
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(action) as string | undefined;
+  } catch {
+    text = undefined;
   }
+  if (text === undefined) return { ok: false, kind: 'act: cannot be read' };
+  const parsed = parsePageMessage(text);
+  if (!parsed.ok) return parsed;
+  return parsed.value.t === 'act'
+    ? { ok: true, action: parsed.value }
+    : { ok: false, kind: 't: not an action' };
 }
 
 /** A label or group left empty, or holding only white space, is none (ruled, review 1 of task 32;
@@ -115,14 +112,14 @@ function orNone(text: string): string | null {
  * lock) → `launchPrepared` with `terminalFor` the action's size; `new` → `splitFlags` →
  * `prepareNew` with the form's directory, label and group → `launchPrepared`. A launch answers its
  * outcome's lines (`ok` when it started, with the session's id); a SkydeckError (the guard, the
- * lock, RefError, prepareNew's refusals) answers its message. `close-terminal` → `hub.close`;
+ * lock, RefError, prepareNew's refusals) answers its message, sanitised. `close-terminal` → `hub.close`;
  * `open-link` → `linkToOpen`, then `openLink`. Before a resume opens its terminal, the session's
  * terminals that are over (ended, lost, not started) are closed: an ended terminal is dropped when
  * its session runs again (ruled, review of task 13).
  *
- * Never rejects (2.5): an action that is not well formed is refused with one fixed log line, and
- * an unexpected error is answered `ok: false` and logged by kind (failureKind) — never its message,
- * which can quote what the page sent or a path. A terminal whose `open()` rejects is answered as
+ * Never rejects (2.5): an action that is not well formed is refused with one log line (the
+ * parser's kind), and an unexpected error is answered `ok: false` and logged by kind (failureKind)
+ * — never its message, which can quote what the page sent or a path. A terminal whose `open()` rejects is answered as
  * an open that timed out (`guarded`): no command to run by hand, the lock and the label kept.
  */
 export function createActions(deps: ActionDeps): ActionHandler {
@@ -212,17 +209,19 @@ export function createActions(deps: ActionDeps): ActionHandler {
   }
 
   return {
-    async act(_page, action) {
-      const id = idOf(action);
-      if (!wellFormed(action)) {
-        log('act: refused an action that is not valid');
+    async act(_page, given) {
+      const id = idOf(given);
+      const check = checked(given);
+      if (!check.ok) {
+        log(`act: refused an action that is not valid (${check.kind})`);
         return { t: 'result', id, ...refusal(NOT_AN_ACTION) };
       }
+      const action = check.action;
       try {
         return { t: 'result', id, ...(await run(action)) };
       } catch (error) {
         if (error instanceof SkydeckError) {
-          return { t: 'result', id, ...refusal(error.message) };
+          return { t: 'result', id, ...refusedBy(error) };
         }
         const kind = failureKind(error);
         log(`act ${action.kind}: failed (${kind})`);

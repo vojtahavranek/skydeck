@@ -707,18 +707,60 @@ test('an action that is not one of stage A, or not well formed, is refused witho
     { t: 'act', id: 9, kind: 'resume', sessionId: S1, cols: 0, rows: 30 },
     { t: 'act', id: 9, kind: 'resume', sessionId: S1, cols: 100, rows: 1.5 },
     { t: 'act', id: 9, kind: 'resume', sessionId: 'S1', cols: 100, rows: 30 },
+    { t: 'act', id: 9, kind: 'resume', sessionId: S1, cols: 65536, rows: 30 },
+    { t: 'act', id: 9, kind: 'resume', sessionId: S1, cols: 100, rows: 30, extra: 1 },
     { t: 'act', id: 9, kind: 'new', dir: 7, label: '', group: '', flags: '', cols: 1, rows: 1 },
+    newAction({ dir: d.sandbox.home, cols: 0 }),
+    newAction({ dir: d.sandbox.home, rows: 65536 }),
+    { ...newAction({ dir: d.sandbox.home }), label: 7 },
+    { ...newAction({ dir: d.sandbox.home }), flags: null },
+    // The parser's text limits (UTF-8 bytes: paths 4,096, other text 1,024) and well-formed text.
+    newAction({ dir: d.sandbox.home, label: 'x'.repeat(1025) }),
+    newAction({ dir: d.sandbox.home, label: 'é'.repeat(513) }),
+    newAction({ dir: d.sandbox.home, flags: 'x'.repeat(200_000) }),
+    newAction({ dir: `/${'d'.repeat(4096)}` }),
+    newAction({ dir: d.sandbox.home, label: 'a\ud800b' }),
     { t: 'act', id: 9, kind: 'close-terminal', term: '../server' },
     { t: 'act', id: 9, kind: 'open-link', url: null },
+    { t: 'act', id: 9, kind: 'open-link', url: `https://example.com/${'u'.repeat(4096)}` },
+    { t: 'input', id: 9, kind: 'resume', sessionId: S1, cols: 100, rows: 30 },
   ] as unknown as ActMessage[];
   for (const action of hostile) {
-    const result = await h.act(action);
+    const result = await h.act({ ...action, id: 9 });
     assert.deepEqual(result, refused(9, 'skydeck cannot do that action'), JSON.stringify(action));
   }
   assert.deepEqual(h.events, []);
+  assert.deepEqual(h.links, []);
   assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+  assert.deepEqual(d.deck.store.allMeta(), []);
   assert.equal(h.logs.length, hostile.length);
   for (const line of h.logs) {
-    assert.equal(line, 'act: refused an action that is not valid');
+    // The parser's kind: fixed text, never what the page sent.
+    assert.match(line, /^act: refused an action that is not valid \([\w.-]+: [a-z ]+\)$/);
   }
+});
+
+test("the limits are the parser's own: an action at them is acted on", async (t) => {
+  const d = testDeck(t);
+  const h = harness(d);
+  const label = 'é'.repeat(512); // 1,024 UTF-8 bytes
+  const result = await h.act(newAction({ dir: d.sandbox.home, label, cols: 65535, rows: 1 }));
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.sizes, [{ cols: 65535, rows: 1 }]);
+  assert.equal(d.deck.store.meta(NEW_ID)?.label, label);
+});
+
+test("a refusal's message reaches the page sanitised: a flag quoted as typed carries no escape or line break", async (t) => {
+  const d = testDeck(t);
+  const h = harness(d);
+  for (const flags of [`'-c\x1b[2J\nSECOND LINE'`, `-c\x1b]0;evil\x07`]) {
+    const result = await h.act(newAction({ dir: d.sandbox.home, flags }));
+    assert.equal(result.ok, false);
+    for (const text of [...result.lines, result.error ?? '']) {
+      assert.ok(!/[\x00-\x1f\x7f-\x9f]/.test(text), JSON.stringify(text));
+    }
+    assert.match(result.lines[0] ?? '', /^cannot pass -c/);
+    assert.equal(result.error, result.lines.join(' '));
+  }
+  assert.deepEqual(h.specs, []);
 });

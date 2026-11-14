@@ -3161,14 +3161,16 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload;
 - Test: `test/window/actions.test.ts`, `test/window/selected.test.ts` (`testDeck`, a fake
   `Terminal` that records its specs and answers as the test says, a fake hub)
 
-**Behaviour.** Every action is checked again where it is acted on — its kind one of these four,
-its fields of the right type, sizes 1–65,535, `sessionId` by `isSessionId`, `term` 12 lowercase hex
-— and one that is not is answered `ok: false` "skydeck cannot do that action" with one fixed log
-line (ruled by the plan owner, review 1 of task 32: an action is what a page asks the server to
-do). `resume` → `terminalFor({ cols, rows })` → `prepareResumeById` → `launchPrepared(deck,
+**Behaviour.** Every action is checked again where it is acted on, by the same parser
+(`parsePageMessage` over the action's JSON, so that its limits have one place: the kind, the types,
+sizes 1–65,535, `sessionId`, `term`, the text limits in UTF-8 bytes, well-formed text), and the
+checked copy is what is acted on; one that fails is answered `ok: false` "skydeck cannot do that
+action" with one log line carrying the parser's kind (ruled by the plan owner, review 1 of task 32:
+an action is what a page asks the server to do). `resume` → `terminalFor({ cols, rows })` → `prepareResumeById` → `launchPrepared(deck,
 prepared, terminal)` → `{ ok: code === 0, lines, error: null, sessionId }` (`sessionId` null unless
 it started, A25); a `SkydeckError` (the guard, the lock, `RefError`) → `{ ok: false, lines:
-[message], error: message, sessionId: null }`. The terminal is built first (ruled, review 1 of task
+[message], error: message, sessionId: null }`, the message sanitised line by line as step 1's
+`failureText` prints it (it can quote a flag as typed; review 2 of task 32). The terminal is built first (ruled, review 1 of task
 32), so that a factory that throws leaves no lock and, for `new`, no label behind; a refused
 action builds it and never opens it. Once
 `prepareResumeById` has let it through, and before `launchPrepared`, the resume closes the
@@ -3210,8 +3212,11 @@ exit, else null; `expiring` and `expired` from the marks.
   the kind and no message text, no lock and no label left; a terminal whose `open()` rejects or
   throws, for `resume` and for `new` → `ok: false`, the timed-out lines, one log line by kind, no
   message text and no command in any line, the lock and the label kept.
-- An action that is not well formed (an unknown kind, a size of 0, a session id that is not one, a
-  terminal id that is not 12 hex) → refused, nothing done, one fixed log line.
+- An action that is not well formed (an unknown kind, a size of 0 or 65,536, a session id that is
+  not one, a terminal id that is not 12 hex, an unknown field, a label over 1,024 UTF-8 bytes, a
+  lone surrogate) → refused, nothing done, one log line with the parser's kind; an action at the
+  limits → acted on. A refusal quoting a flag with an escape sequence or a line break → no control
+  character in `lines` or `error`.
 - `selectedPayload`: the command for a session with recorded flags; a directory with a control
   character → `command` null; unknown flags listed; each `ended` case; `expiring`, `expired`.
 

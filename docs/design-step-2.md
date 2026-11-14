@@ -1178,9 +1178,10 @@ URLs 4,096, `input.data` 64 KiB, other text 1,024; the action of 9.6 then opens 
 2,048 characters) or a size that is not a whole number from 1 to 65,535. No action carries a program or an argument list to run (8.3):
 `resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
 fields that become part of a launch, checked as `skydeck new` checks them. The actions check every
-action again where they act on it — its kind, the types and limits of its fields — and refuse one
-that does not pass ("skydeck cannot do that action", one fixed log line; ruled by the plan owner,
-review of plan task 32).
+action again where they act on it, with the same parser — its kind, the types and limits of its
+fields, well-formed text — and refuse one that does not pass ("skydeck cannot do that action", one
+log line with the parser's kind; ruled by the plan owner, review of plan task 32). A refusal's
+message is sanitised line by line, as the command line prints it: it can quote what the page sent.
 
 Server → page:
 
