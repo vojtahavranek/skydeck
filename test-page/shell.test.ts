@@ -1592,7 +1592,7 @@ test('the page shell', async (t) => {
       assert.deepEqual(
         views.map((view) => [view['filter'], view['showDone']]),
         [['sea', false]],
-        'only the filter's own view: no show-done toggled',
+        "only the filter's own view: no show-done toggled",
       );
     },
   );
