@@ -15,7 +15,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The page suite's browser download and run (S2 17.5).
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -29,7 +30,25 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm run check
+      # `npm run check` without its last step, the page suite, which only the newest leg runs.
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
       # By name: bin/skydeck-keeper is python, not sh (plan A14).
       - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive
       - run: python3 -m py_compile bin/skydeck-keeper
+      # The page suite (S2 17.4, 17.5): Node 24 only, with Chromium cached under the pinned
+      # Playwright's version.
+      - name: Read the Playwright version
+        if: matrix.node == '24'
+        id: playwright
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: matrix.node == '24'
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: matrix.node == '24'
+        run: npx playwright install --with-deps chromium
+      - if: matrix.node == '24'
+        run: npm run test:page
