@@ -40,12 +40,14 @@ export interface StreamSink {
 
 export interface TerminalHub {
   list(): readonly TerminalInfo[];
-  /** The snapshot at the current point of the terminal's chain, then every later record to `sink`
-   *  (S2 8.2.4) until `detach`. null for an unknown terminal. */
+  /** The snapshot at the point of the terminal's chain when attach is called, then every later
+   *  record to `sink` (S2 8.2.4) until `detach`; the sink gets none of them before the promise has
+   *  resolved (the screen side snapshots asynchronously, task 12). null for an unknown terminal or
+   *  one closed meanwhile. */
   attach(
     termId: string,
     sink: StreamSink,
-  ): { cols: number; rows: number; data: string; detach(): void } | null;
+  ): Promise<{ cols: number; rows: number; data: string; detach(): void } | null>;
   input(termId: string, data: Uint8Array): 'ok' | 'full' | 'ended' | 'unknown';
   /** Sends Z to the keeper; the size reaches every sink when the R record comes back (S2 8.2.6). */
   resize(termId: string, cols: number, rows: number): void;
