@@ -475,6 +475,7 @@ describe('registry: slots and input', () => {
     box.signalKeeper(keeper, 'SIGSTOP');
     try {
       // SIGSTOP takes effect asynchronously: the loop starts once the keeper is stopped (state T).
+      // A keeper still stopped at the teardown is ended too: killKeepersIn sends SIGKILL.
       await until(() => procState(keeper.pid) === 'T', 'the keeper stopped');
       for (const chunk of chunks) {
         const answer = r.registry.input(spec.id, chunk);
@@ -494,7 +495,7 @@ describe('registry: slots and input', () => {
     const accepted = taken.length * CHUNK;
     assert.ok(
       accepted > AT_SERVER && accepted <= AT_SERVER + OUTSIDE,
-      `accepted ${accepted}, outside the server at most ${OUTSIDE}`,
+      `accepted ${accepted}: more than ${AT_SERVER} and at most ${AT_SERVER + OUTSIDE} expected`,
     );
     // The keeper runs again; the program reads again after its stall.
     await until(() => r.registry.input(spec.id, new Uint8Array(0)) === 'ok', 'ok again', 15_000);
