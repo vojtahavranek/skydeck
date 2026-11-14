@@ -1124,6 +1124,7 @@ test('the page shell', async (t) => {
     async (t) => {
       const secret = new Uint8Array(32).fill(14);
       const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
       const rows = scriptedList(
         [
           { id: S1, terminal: TERM_A, slot: 1 },
@@ -1131,11 +1132,26 @@ test('the page shell', async (t) => {
         ],
         [{ id: TERM_A, slot: 1, sessionId: S1 }],
       );
+      /** Every list the stand-in sent; `landed()` waits until the page has received them all. */
+      let listsSent = 0;
+      const landed = async (): Promise<void> => {
+        const deadline = performance.now() + PAGE_WAIT_MS;
+        while (
+          (await logOf(page)).filter((e) => e.e === 'in' && e.t === 'list').length < listsSent
+        ) {
+          assert.ok(performance.now() < deadline, 'the lists reached the page');
+          await sleep(50);
+        }
+        await sleep(100); // and were drawn
+      };
       const standin = await standinServer(t, {
         socket: honest(secret, {
           serverId: (n) => `${n}`.repeat(16).slice(0, 16),
           open: (conn, message) => {
-            if (message['t'] === 'view') conn.send(rows);
+            if (message['t'] === 'view') {
+              listsSent++;
+              conn.send(rows);
+            }
             if (message['t'] === 'attach') {
               conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
             }
@@ -1173,6 +1189,7 @@ test('the page shell', async (t) => {
           document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
         S1,
       );
+      await landed(); // the list that answers k's view: its render must not come after the blur
       // And while nothing has the keyboard at all, the list zone's keys still apply.
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       assert.equal(await active(page), 'BODY');
@@ -1188,11 +1205,21 @@ test('the page shell', async (t) => {
           document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
         S1,
       );
+      await landed();
+      // A render that leaves the right side the same (the same list again) also gives the zone
+      // the keyboard back (review 2, round four).
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      assert.equal(await active(page), 'BODY');
+      listsSent++;
+      standin.connections.at(-1)?.send(rows);
+      await landed();
+      assert.equal(await active(page), '#list');
 
       // A card replaced while its button had the keyboard: the zone takes it back.
       await clickRow(page, S2); // not running: its resume card
       await page.focus('#cards button');
       await showsText(page, '#focus-zone', /^Focus: terminal$/);
+      listsSent++;
       standin.connections.at(-1)?.send(
         scriptedList(
           [
@@ -1218,6 +1245,7 @@ test('the page shell', async (t) => {
       // selected session leaves the right side empty, cards.hide() hides the card, and the zone
       // takes the keyboard at once (ruled, review 2 round three).
       await page.focus('#cards button');
+      listsSent++;
       standin.connections
         .at(-1)
         ?.send(
@@ -1228,6 +1256,7 @@ test('the page shell', async (t) => {
         );
       await page.waitForSelector('#right-zone[data-pane="none"]', { state: 'attached' });
       assert.equal(await active(page), '#right-zone');
+      listsSent++;
       standin.connections.at(-1)?.send(rows); // S2 back
 
       // Esc closes the form over the shown terminal: the terminal has the keyboard again.
