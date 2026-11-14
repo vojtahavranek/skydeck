@@ -3005,9 +3005,9 @@ export interface WindowTerminalDeps {
 /** One adapter per launch: `size` is the first size of S2 8.2.6. open() spawns a keeper with
  *  programEnvironment(...), the next slot and meta (A28), sends G on a hello that arrives within
  *  its 5-second wait, and resolves { ok: true } on T; { ok: false, timedOut: false, error } on
- *  KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed' (no keeper runs); and —
- *  ruled by the plan owner (task 21, review 2): the window never shows a command to run by hand —
- *  { ok: false, timedOut: true, error } on KeeperStartError 'no-hello' or 'stopping' (the keeper may
+ *  KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed' (no keeper process was
+ *  started, or it is known dead with no terminal left); and — ruled by the plan owner (task 21,
+ *  review 2; S2 11.2) — { ok: false, timedOut: true, error } on KeeperStartError 'no-hello' or 'stopping' (the keeper may
  *  run), on X with notStarted or a keeper that ends before T ("not started: <reason>": the terminal
  *  offers Resume, its exit gives the lock back), and on no T within 5 s after G. After open() has
  *  answered, it sends nothing: a hello that comes later is a

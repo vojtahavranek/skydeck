@@ -1565,11 +1565,13 @@ value and start deadline (11.1), the first size (8.2.6) and the next free slot; 
   shows it when `T` comes.
 
 So a failure behaves as a failed tab does in step 1 (`settleFailedLaunch`), with one rule of the
-window's own (ruled by the plan owner, stage A's plan task 21): the window never shows a command to
-run by hand where a keeper may run (a hand-run `claude` could start the session twice) or where its
-terminal offers Resume itself. Every failure after the keeper was spawned takes the timeout's path:
-no command, and the lock and the label stay; the terminal's exit gives them back when its program
-never started (7.8).
+window's own (ruled by the plan owner, stage A's plan task 21): `timedOut: false` (step 1 then
+prints the command to run by hand) is answered only for a launch for which no keeper process was
+ever started (python3 missing, the socket path too long, the registry refusing before it spawns) or
+whose keeper is known dead with no terminal left (it ended at start). Every other failure takes the
+timeout's path: no command — a keeper may run, and a hand-run `claude` could start the session
+twice, or the terminal offers Resume itself — and the lock and the label stay; the terminal's exit
+gives them back when its program never started (7.8).
 
 ### 11.3 In the window
 

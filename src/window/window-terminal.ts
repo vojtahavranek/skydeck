@@ -49,10 +49,11 @@ function notStartedText(exit: KeeperExit): string {
  * started; neither within START_MS → timed out. Followed through onChange, subscribed before G.
  *
  * Ruled by the plan owner (task 21, review 2): every failure after the spawn is answered with
- * `timedOut: true`, so that step 1 shows no command to run by hand — the window never does. Where
- * the program was not started the error says so and why ("not started: <reason>"); the terminal is
- * listed with its exit, it offers Resume itself, and settleEndedTerminal gives back the lock and a
- * new session's label and group (S2 7.8).
+ * `timedOut: true`, so that step 1 shows no command to run by hand — a keeper may run, or the
+ * terminal offers Resume itself (S2 11.2: `timedOut: false` only where no keeper process was ever
+ * started, or it is known dead with no terminal left). Where the program was not started the error
+ * says so and why ("not started: <reason>"); the terminal is listed with its exit, and
+ * settleEndedTerminal gives back the lock and a new session's label and group (S2 7.8).
  */
 function startAndWait(deps: WindowTerminalDeps, id: string): Promise<OpenResult> {
   const { registry, platform } = deps;
@@ -99,12 +100,13 @@ function startAndWait(deps: WindowTerminalDeps, id: string): Promise<OpenResult>
  * One adapter per launch: `size` is the first size of S2 8.2.6. open() spawns a keeper with
  * programEnvironment(...), the next slot and meta (A28), sends G on a hello that arrives within
  * its 5-second wait, and resolves { ok: true } on T; { ok: false, timedOut: false, error } on
- * KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed' (no keeper runs); and, ruled
- * by the plan owner (task 21, review 2: the window never shows a command to run by hand), { ok:
- * false, timedOut: true, error } on KeeperStartError 'no-hello' or 'stopping' (the keeper may run),
- * on X with notStarted or a keeper that ends before T ("not started: <reason>"), and on no T within
- * 5 s after G. After open() has answered, it sends nothing: a hello that comes later is a
- * found keeper, and goes through decideFoundKeeper before any G (task 23 wires events.hello).
+ * KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed' (no keeper process was
+ * started, or it is known dead with no terminal left); and, ruled by the plan owner (task 21,
+ * review 2; S2 11.2), { ok: false, timedOut: true, error } on KeeperStartError 'no-hello' or
+ * 'stopping' (the keeper may run), on X with notStarted or a keeper that ends before T ("not
+ * started: <reason>"), and on no T within 5 s after G. After open() has answered, it sends
+ * nothing: a hello that comes later is a found keeper, and goes through decideFoundKeeper before
+ * any G (task 23 wires events.hello).
  *
  * A resume whose spec's lock is null or not a lock skydeck writes (`lockTakenNs` null) is
  * protected by no lock of its own: it is answered { ok: false, timedOut: false } without spawning
