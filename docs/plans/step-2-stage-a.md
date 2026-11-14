@@ -2558,7 +2558,8 @@ at a live interop socket.
 /** THE one way stage A starts a Windows program (S2 2; ruled, task 19): `args` as an argument
  *  list, detached, stdio /dev/null, cwd /mnt/c, the platform's environment with WSL_INTEROP =
  *  `interop` when given (else unchanged). Rejects, starting nothing, when an argument is empty,
- *  holds a '"' or a control character, or ends with a backslash; otherwise as startDetached. */
+ *  holds a '"' or a control character (S2 2: U+0000–U+001F, U+007F, U+0080–U+009F), or ends
+ *  with a backslash; otherwise as startDetached. */
 export function startWindowsProgram(platform: Platform, command: string, args: readonly string[], interop: string | null): Promise<Detached>;
 /** RangeError (ruled, task 19) for a port outside 1–65535 or a token that is not base64url: the
  *  caller's mistake, nothing started. { ok: false, line } for a missing program (S2 5.3's line),
@@ -2602,8 +2603,8 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
   or derived (task 8); derivation failing → the error naming `window.profileDir`; a profile
   folder that would change how Edge splits its command line → S2 5.3's line naming
   `window.profileDir`, nothing started; a bad port or token → `RangeError`, nothing started.
-- `startWindowsProgram`: each refused argument (empty, `"`, a control character, a trailing
-  backslash) → rejected, nothing started.
+- `startWindowsProgram`: each refused argument (empty, `"`, a control character — C0, DEL and
+  C1 —, a trailing backslash) → rejected, nothing started.
 - `openLink`: an allowed URL → `window.edge` with that URL as the only argument; a refused one
   (task 8's `linkToOpen`) → nothing started, false.
 - Keep-alive: mode `wsl` and no live `keepalive.pid` → `wsl.exe -d <WSL_DISTRO_NAME> -u
@@ -2611,7 +2612,9 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
   `keepalive.pid` (a process the test started) → nothing started, state `running`; the started
   process gone at a tick → `notice` through `onChange` and restarts after 5 s, 30 s, then every 5
   minutes (fake clock), state `failed` with the error while it is down; after 5 minutes running
-  the schedule starts over at 5 s; the line of a `wsl.exe` seen to end does not count as running;
+  the schedule starts over at 5 s; the line of a `wsl.exe` seen to end does not count as running,
+  also when it is first seen at the tick that sees the end (written, and `wsl.exe` ended, between
+  two ticks) and when it could not be read while `wsl.exe` ran;
   mode `off` → never started, state `off`; no `WSL_DISTRO_NAME` → `failed` with a reason.
 - Keep-alive, its Windows side (ruled, review 2; fakes only): a keep-alive found running is taken
   when its `keepalive.interop` socket accepts; an orphan when it is refused or gone; not judged

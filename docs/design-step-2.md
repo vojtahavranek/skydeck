@@ -97,7 +97,8 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   a shell; arguments are passed as an argument list. Every such start goes through one function
   (`startWindowsProgram`), which refuses an argument that is empty, holds a `"` or a control
   character, or ends with a backslash: the program receives one command line and splits it
-  itself, and each of these can change how it does. skydeck **writes nothing on the Windows side**:
+  itself, and each of these can change how it does. A **control character**, here and wherever
+  this document escapes or refuses one, is U+0000–U+001F, U+007F (DEL) or U+0080–U+009F (C1). skydeck **writes nothing on the Windows side**:
   Edge writes into the profile folder it is given (5.4). A Start-menu shortcut is only proposed
   (20), and needs the user's agreement.
 - **"No runtime dependencies" (design 10) is amended, not dropped.** Step 2 adds:

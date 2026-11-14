@@ -229,6 +229,7 @@ test('the line for an unsafe window.profileDir shows it as its JSON string, with
   const cases: [string, string][] = [
     ['C:\\Users\\Me Name\\x\\', '"C:\\\\Users\\\\Me Name\\\\x\\\\"'],
     ['C:\\x\u009b2J\\', '"C:\\\\x\\u009b2J\\\\"'], // CSI, a C1 control
+    ['C:\\a\u0085b', '"C:\\\\a\\u0085b"'], // NEL, a C1 control: refused by itself
     ['C:\\a\u007fb', '"C:\\\\a\\u007fb"'], // DEL
     ['C:\\a\u001b[2Jb', '"C:\\\\a\\u001b[2Jb"'], // ESC
   ];
@@ -327,7 +328,18 @@ test('startWindowsProgram starts the program detached in /mnt/c with stdio ignor
 
 test('startWindowsProgram refuses an argument that could change how a Windows program splits its command line', async (t) => {
   const { platform, processes } = setup(t);
-  for (const arg of ['', 'a"b', 'a\\', 'a\tb', 'a\nb', 'a\rb', 'a\x00b', 'a\x7fb']) {
+  for (const arg of [
+    '',
+    'a"b',
+    'a\\',
+    'a\tb',
+    'a\nb',
+    'a\rb',
+    'a\x00b',
+    'a\x7fb',
+    'a\u0085b',
+    'a\u009bb',
+  ]) {
     await assert.rejects(
       startWindowsProgram(platform, '/mnt/c/x.exe', ['ok', arg], LINK),
       /cannot be passed to a Windows program/,

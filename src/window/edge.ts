@@ -15,8 +15,11 @@ import { deriveProfileDir, edgeArgs, linkToOpen } from './windows.ts';
 const WINDOWS_CWD = '/mnt/c';
 /** A launch token as the address carries it: base64url (S2 8.2.2). */
 const TOKEN = /^[A-Za-z0-9_-]+$/;
-/** A character that can change how a Windows program splits its command line, or a control one. */
-const UNSAFE_CHARACTER = /["\x00-\x1f\x7f]/;
+/**
+ * A character that can change how a Windows program splits its command line ('"'), or a control
+ * character (S2 2: U+0000–U+001F, U+007F and U+0080–U+009F).
+ */
+const UNSAFE_CHARACTER = /["\x00-\x1f\x7f-\x9f]/;
 
 /**
  * Whether `arg` could be split differently by the Windows program than skydeck meant: the program
