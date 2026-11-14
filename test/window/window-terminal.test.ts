@@ -329,6 +329,18 @@ describe('window terminal: starts that fail', () => {
     assert.deepEqual(r.registry.list(), []);
   });
 
+  test('windowTerminal only builds the adapter: nothing is spawned and no slot taken before open() (task 32’s terminalFor)', async (t) => {
+    const w = await windowDeck(t);
+    const r = w.registry();
+    const { deps } = w.deps(r);
+    const terminal = windowTerminal(deps, SIZE);
+    assert.equal(terminal.name, 'window');
+    assert.equal(terminal.opensTabs, true);
+    assert.deepEqual(r.spawned, []);
+    assert.deepEqual(r.registry.list(), []);
+    assert.equal(r.registry.nextSlot(), 1);
+  });
+
   test('a resume whose lock is null or not skydeck’s is not started: no keeper is spawned', async (t) => {
     const w = await windowDeck(t);
     w.resumable(S1);
