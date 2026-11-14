@@ -150,6 +150,13 @@ const terminalView = createTerminalView(dom.terminal, {
     });
   },
 });
+/**
+ * The view's optional `fits(width, height)` (contract 2.9, task 28): the columns and rows a
+ * terminal of the view shows in a terminal area of that many CSS pixels, or null while it cannot
+ * tell. A view without it leaves `area()` to the page's own arithmetic.
+ * @type {typeof terminalView & { fits?: (width: number, height: number) => { cols: number, rows: number } | null }}
+ */
+const fitting = terminalView;
 const cards = createCards(dom.cards, {
   act: (action) => act(action),
   select: (id) => select(id, 'click'),
@@ -262,24 +269,30 @@ function showKeepAlive(failed, reason) {
 // --- sizes and colours --------------------------------------------------------------------------
 
 /**
- * What the terminal area holds at the terminal's font, measured with the hidden cell of
- * index.html, which has the terminal's font (style.css, `--term-font`). For `focus` (S2 8.2.3)
- * while a terminal is shown, what the cards show above it is taken off (the header, an ended bar);
- * for an act's first size (`forAct`, S2 8.2.6) and for another pane only the header, which the
- * terminal it brings will have above it (Z1, item 5).
+ * What the terminal area holds: the columns and rows of the view's `fits` (contract 2.9, task 28)
+ * when it has one and can tell, else at the terminal's font, measured with the hidden cell of
+ * index.html, which has the terminal's font (style.css, `--term-font`). The area is the right
+ * zone's box less what stands above the terminal: for `focus` (S2 8.2.3) while a terminal is
+ * shown, what the cards show (the header, an ended bar); for an act's first size (`forAct`, S2
+ * 8.2.6) and for another pane only the header, which the terminal it brings will have above it
+ * (Z1, item 5).
  * @param {boolean} [forAct]
  * @returns {{ cols: number, rows: number }}
  */
 function area(forAct = false) {
-  const cell = dom.measure.getBoundingClientRect();
-  const cellWidth = cell.width / 20 || 8;
-  const cellHeight = cell.height || 17;
   const box = dom.rightZone.getBoundingClientRect();
   const above =
     state.pane.kind === 'terminal' && !forAct
       ? dom.cards.getBoundingClientRect().height
       : headerHeight();
   const height = box.height - above;
+  const fitted = typeof fitting.fits === 'function' ? fitting.fits(box.width, height) : null;
+  if (fitted !== null) {
+    return fitted;
+  }
+  const cell = dom.measure.getBoundingClientRect();
+  const cellWidth = cell.width / 20 || 8;
+  const cellHeight = cell.height || 17;
   return {
     cols: Math.max(1, Math.min(MAX_COLS, Math.floor(box.width / cellWidth))),
     rows: Math.max(1, Math.min(MAX_ROWS, Math.floor(height / cellHeight))),
@@ -953,8 +966,13 @@ function doChord(chord, event) {
       return;
     case 'paste-raw':
       // A key of S2 9.1 that sends bytes acts only while the terminal itself has the keyboard:
-      // never from the list, the form or the help (Z1, item 7).
-      if (state.zone === 'terminal' && terminalHasKeyboard()) {
+      // never from the list, the form, the help or a text field — one of the view's own too, whose
+      // key events reach this through `chord` (Z1, item 7).
+      if (
+        state.zone === 'terminal' &&
+        terminalHasKeyboard() &&
+        !isTextField(document.activeElement)
+      ) {
         terminalView.pasteRaw();
       }
       return;
@@ -1016,10 +1034,11 @@ function chordOf(event) {
   if (chord === null) {
     return false;
   }
-  // xterm.js asks for keydown, keypress and keyup alike: the chord is acted on at its first
-  // keydown only (not at an auto-repeat, Z1), and true tells the view to drop the others too
-  // (review 2 of task 26).
-  if (event.type === 'keydown' && !event.repeat && !actedOn.has(event)) {
+  // xterm.js asks for keydown, keypress and keyup alike: the chord is acted on at its keydown
+  // only, and true tells the view to drop the others too (review 2 of task 26). (An auto-repeat
+  // never gets here to act: onKeyDown stops every chord keydown but Ctrl+Shift+V's in a text
+  // field, which doChord refuses.)
+  if (event.type === 'keydown' && !actedOn.has(event)) {
     actedOn.add(event);
     doChord(chord, event);
   }

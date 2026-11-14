@@ -1358,12 +1358,15 @@ export function cancels(e, zone, handled) {}
 // the page acted on that moved the keyboard there is such a key; so are a card's button or the
 // form's Enter that starts a terminal (task 29) and the find bar's Esc, Enter or button (task
 // 28). A window chord acts at its first keydown only, not at its auto-repeats.
-// Ctrl+Shift+V reaches `pasteRaw()` only while the keyboard is in `#terminal` (Z1).
+// Ctrl+Shift+V reaches `pasteRaw()` only while the keyboard is in `#terminal` and not on a text
+// field — the view's own find field included, whose key events reach `chord(e)` (Z1).
 // `area()` takes off the height of `#cards .card-header` — a hook: cards.js keeps that class on
 // its header (task 29) — as it is while shown, else as last shown: for an act's first size and
 // for every pane but a shown terminal; for `focus` while a terminal is shown, all the cards show
 // above it. Before any header was shown it is 0, and that first terminal is resized once (a
-// known limit, Z1). A module that hides or removes its own keyboard holder in its OWN handler
+// known limit, Z1). The columns and rows for that box (CSS pixels) are the view's optional
+// `fits(width, height)` (task 28) when it has one and answers non-null, else the page's own
+// arithmetic at the terminal's font. A module that hides or removes its own keyboard holder in its OWN handler
 // (the find bar's Esc, a card's own button) is followed by no call of app.js: it moves the
 // keyboard itself to another element of its own — there is no hook for it. The page's chrome (the
 // title bar, the key bar, a notice's ×) takes no keyboard on a mouse click, so a click there

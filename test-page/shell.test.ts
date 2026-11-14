@@ -19,6 +19,7 @@ import type { ServerSandbox } from '../test/helpers/window.ts';
 import { browser } from './helpers/browser.ts';
 import {
   active,
+  actsWorld,
   after,
   assetBase,
   buildOf,
@@ -2218,96 +2219,22 @@ test('the page shell', async (t) => {
   }
 
   /**
-   * A stand-in world for the key and size cases of Z1: S1 running in slot 1 (shown first), S2 not
-   * running; a resume of S2 and a new session (S3) each answer ok and list their terminal, and a
-   * resume of a session whose terminal ended lists that terminal running again. `end(id)` lists
-   * the terminal of `id` ended. The view is `view` (pinned over the minimal one), `cardsCss` the
-   * cards' stylesheet if given.
+   * `actsWorld` (helpers/shell.ts) on a pinned page whose view is `view` (pinned over the minimal
+   * one) and whose cards' stylesheet is `cardsCss` if given; `got`, `clear` and `holderGetsIt` read
+   * the text-control view's holder.
    */
   const keysWorld = async (
     t: Parameters<typeof newPage>[0],
-    view: 'textarea-view.js' | 'chord-view.js',
+    view: 'textarea-view.js' | 'chord-view.js' | 'fits-view.js',
     cardsCss?: string,
   ) => {
-    const secret = new Uint8Array(32).fill(23);
     const page = await newPage(t, chromium);
     await pinModules(t, page, {
       'terminal-view.js': fixture(view),
       'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
       ...(cardsCss === undefined ? {} : { 'cards.css': cardsCss }),
     });
-    const terms: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B, [S3]: TERM_C };
-    const listed = [S1, S2];
-    const running = new Set<string>([S1]);
-    const ended = new Set<string>();
-    let sendList: (() => void) | null = null;
-    const acts: Record<string, unknown>[] = [];
-    const focuses: { cols: number; rows: number }[] = [];
-    let shown: string | null = null;
-    const listFor = (selected: string | null): Record<string, unknown> => {
-      const list = scriptedList(
-        listed.map((id) => ({
-          id,
-          terminal: running.has(id) ? (terms[id] ?? null) : null,
-          slot: running.has(id) ? listed.indexOf(id) + 1 : null,
-        })),
-        [...running].map((id) => ({
-          id: terms[id] ?? '',
-          slot: listed.indexOf(id) + 1,
-          sessionId: id,
-        })),
-        selected === null || running.has(selected)
-          ? null
-          : {
-              sessionId: selected,
-              command: `claude --resume ${selected}`,
-              flagsKnown: true,
-              unknownFlags: [],
-              ended: 'exited',
-              expiring: false,
-              expired: false,
-            },
-      );
-      for (const term of list['terminals'] as Record<string, unknown>[]) {
-        if (ended.has(term['sessionId'] as string)) term['state'] = 'ended';
-      }
-      return list;
-    };
-    const standin = await standinServer(t, {
-      socket: honest(secret, {
-        open: (conn, message) => {
-          sendList = () => conn.send(listFor(shown));
-          if (message['t'] === 'view') {
-            shown = (message['selected'] as string | null) ?? null;
-            conn.send(listFor(shown));
-          } else if (message['t'] === 'focus') {
-            focuses.push(message['area'] as { cols: number; rows: number });
-          } else if (message['t'] === 'attach') {
-            conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
-          } else if (message['t'] === 'act') {
-            acts.push(message);
-            const sessionId = message['kind'] === 'new' ? S3 : (message['sessionId'] as string);
-            if (!listed.includes(sessionId)) listed.push(sessionId);
-            running.add(sessionId);
-            ended.delete(sessionId);
-            conn.send({
-              t: 'result',
-              id: message['id'],
-              ok: true,
-              lines: [],
-              error: null,
-              sessionId,
-            });
-            conn.send(listFor(sessionId));
-          }
-        },
-      }),
-    });
-    await page.goto(standin.url);
-    await storeKey(page, secret);
-    await page.goto(standin.url);
-    await connection(page, 'open');
-    await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+    const world = await actsWorld(t, page);
     const got = async (): Promise<string[]> =>
       ((await page.evaluate(() => Reflect.get(globalThis, 'programGot'))) as string[]) ?? [];
     const holderGetsIt = (): Promise<unknown> =>
@@ -2319,12 +2246,7 @@ test('the page shell', async (t) => {
     /** Forgets what the program got so far (the setup's own keys). */
     const clear = (): Promise<unknown> =>
       page.evaluate(() => ((Reflect.get(globalThis, 'programGot') as string[]).length = 0));
-    /** Lists the terminal of `id` ended (its ended bar shows while it is selected). */
-    const end = (id: string): void => {
-      ended.add(id);
-      sendList?.();
-    };
-    return { page, acts, focuses, got, clear, holderGetsIt, end };
+    return { page, ...world, got, clear, holderGetsIt };
   };
 
   for (const held of [
@@ -2437,7 +2359,7 @@ test('the page shell', async (t) => {
   }
 
   await t.test(
-    'Ctrl+Shift+V sends its raw Ctrl+V only while the terminal zone has the keyboard: not from the list, and in the filter field the browser keeps the key (Z1, item 7)',
+    "Ctrl+Shift+V sends its raw Ctrl+V only while the terminal zone has the keyboard: not from the list, and in the filter field or a field of the view's own the browser keeps the key (Z1, item 7)",
     async (t) => {
       const w = await keysWorld(t, 'chord-view.js');
       const { page } = w;
@@ -2473,6 +2395,19 @@ test('the page shell', async (t) => {
 
       await page.keyboard.press('Escape'); // the filter closes; the list has the keyboard
       await page.keyboard.press('Escape'); // back to the terminal
+      // A field of the view's own inside #terminal (a find field): the view hands its key events
+      // to `deps.chord`, as this one hands all of #terminal's.
+      await page.evaluate(() => {
+        const field = document.createElement('input');
+        field.className = 'own-find';
+        document.querySelector('#terminal')?.append(field);
+      });
+      await page.focus('#terminal .own-find');
+      const inOwnField = prevented();
+      await page.keyboard.press('Control+Shift+V');
+      assert.equal(await inOwnField, false, "the view's own field keeps the browser's own key");
+      assert.equal(await pastes(), 0, "not from the view's own field");
+
       await page.focus('#terminal .terminal-placeholder');
       await page.keyboard.press('Control+Shift+V');
       assert.equal(await pastes(), 1, 'from the terminal');
@@ -2599,6 +2534,50 @@ test('the page shell', async (t) => {
       );
       const resume = w.acts.find((act) => act['kind'] === 'resume');
       assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, shown);
+    },
+  );
+
+  await t.test(
+    "with a view that has `fits(width, height)`, the size is the view's: asked for the terminal area's box in CSS pixels (the header taken off), and a null answer leaves the page's own arithmetic (Z1, item 5)",
+    async (t) => {
+      const w = await keysWorld(
+        t,
+        'fits-view.js',
+        '.card-header { height: 60px; overflow: hidden; }\n',
+      );
+      const { page } = w;
+      const asked = async (): Promise<number[][]> =>
+        page.evaluate(() => Reflect.get(globalThis, 'fitsAsked') as number[][]);
+      const zoneBox = async (): Promise<{ width: number; height: number }> =>
+        page.evaluate(() => {
+          const box = document.querySelector('#right-zone')?.getBoundingClientRect();
+          return { width: box?.width ?? 0, height: box?.height ?? 0 };
+        });
+      await sleep(500);
+      assert.deepEqual(w.focuses.at(-1), { cols: 77, rows: 33 }, "focus.area is the view's answer");
+
+      // A resume from S2's card asks for the view's answer, for the zone less the header (60 px).
+      await clickRow(page, S2);
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', { cols: 66, rows: 22 }));
+      const box = await zoneBox();
+      const before = (await asked()).length;
+      await page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
+        state: 'attached',
+      });
+      const resume = w.acts.find((act) => act['kind'] === 'resume');
+      assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, { cols: 66, rows: 22 });
+      assert.deepEqual((await asked())[before], [box.width, box.height - 60]);
+
+      // A view that cannot tell: the page's own arithmetic, a size of at least 1 × 1.
+      await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', null));
+      await page.setViewportSize({ width: 1100, height: 700 });
+      await sleep(700);
+      const own = w.focuses.at(-1);
+      assert.ok(own !== undefined && own !== null, 'a size is sent');
+      assert.notDeepEqual(own, { cols: 66, rows: 22 });
+      assert.ok(own.cols >= 1 && own.rows >= 1, JSON.stringify(own));
     },
   );
 

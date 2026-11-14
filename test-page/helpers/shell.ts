@@ -22,7 +22,7 @@ import {
   wrapSecret,
 } from '../../src/window/auth.ts';
 import { controlClient } from '../../src/window/client.ts';
-import { testPlatform } from '../../test/helpers/platform.ts';
+import { S1, S2, S3, testPlatform } from '../../test/helpers/platform.ts';
 import { startTestServer } from '../../test/helpers/window.ts';
 import type {
   ServerSandboxOptions,
@@ -748,6 +748,102 @@ export function scriptedList(
     selected,
     dirs: [],
   };
+}
+
+/**
+ * A stand-in world for the cases about the page's acts and sizes (Z1 of task 26), opened on
+ * `page` (pinned or not): S1 running in slot 1 (shown first), S2 not running. A resume of S2 and
+ * a new session (S3) each answer ok and list their terminal; a resume of a session whose terminal
+ * ended lists that terminal running again. `acts` and `focuses` (each `focus`'s `area`) record
+ * what the page sent; `end(id)` lists the terminal of `id` ended.
+ */
+export async function actsWorld(
+  t: TestContext,
+  page: Page,
+): Promise<{
+  acts: Record<string, unknown>[];
+  focuses: { cols: number; rows: number }[];
+  end: (id: string) => void;
+}> {
+  const secret = new Uint8Array(32).fill(23);
+  const terms: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B, [S3]: TERM_C };
+  const listed = [S1, S2];
+  const running = new Set<string>([S1]);
+  const ended = new Set<string>();
+  let sendList: (() => void) | null = null;
+  const acts: Record<string, unknown>[] = [];
+  const focuses: { cols: number; rows: number }[] = [];
+  let shown: string | null = null;
+  const listFor = (selected: string | null): Record<string, unknown> => {
+    const list = scriptedList(
+      listed.map((id) => ({
+        id,
+        terminal: running.has(id) ? (terms[id] ?? null) : null,
+        slot: running.has(id) ? listed.indexOf(id) + 1 : null,
+      })),
+      [...running].map((id) => ({
+        id: terms[id] ?? '',
+        slot: listed.indexOf(id) + 1,
+        sessionId: id,
+      })),
+      selected === null || running.has(selected)
+        ? null
+        : {
+            sessionId: selected,
+            command: `claude --resume ${selected}`,
+            flagsKnown: true,
+            unknownFlags: [],
+            ended: 'exited',
+            expiring: false,
+            expired: false,
+          },
+    );
+    for (const term of list['terminals'] as Record<string, unknown>[]) {
+      if (ended.has(term['sessionId'] as string)) term['state'] = 'ended';
+    }
+    return list;
+  };
+  const standin = await standinServer(t, {
+    socket: honest(secret, {
+      open: (conn, message) => {
+        sendList = () => conn.send(listFor(shown));
+        if (message['t'] === 'view') {
+          shown = (message['selected'] as string | null) ?? null;
+          conn.send(listFor(shown));
+        } else if (message['t'] === 'focus') {
+          focuses.push(message['area'] as { cols: number; rows: number });
+        } else if (message['t'] === 'attach') {
+          conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
+        } else if (message['t'] === 'act') {
+          acts.push(message);
+          const sessionId = message['kind'] === 'new' ? S3 : (message['sessionId'] as string);
+          if (!listed.includes(sessionId)) listed.push(sessionId);
+          running.add(sessionId);
+          ended.delete(sessionId);
+          conn.send({
+            t: 'result',
+            id: message['id'],
+            ok: true,
+            lines: [],
+            error: null,
+            sessionId,
+          });
+          conn.send(listFor(sessionId));
+        }
+      },
+    }),
+  });
+  await page.goto(standin.url);
+  await storeKey(page, secret);
+  await page.goto(standin.url);
+  await connection(page, 'open');
+  await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+  /** Lists the terminal of `id` ended (its ended bar shows while it is selected). */
+  const end = (id: string): void => {
+    ended.add(id);
+    sendList?.();
+  };
+  return { acts, focuses, end };
 }
 
 /** `text` as a regular expression that matches it literally. */
