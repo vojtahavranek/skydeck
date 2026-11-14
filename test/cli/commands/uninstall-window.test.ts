@@ -317,7 +317,7 @@ describe('uninstall --purge', () => {
     assert.equal(r.code, 1, r.stdout);
     assert.match(
       r.stderr,
-      /uninstall --purge removed no directory: terminals of the window may still run: aaaaaaaaaaaa/,
+      /skydeck is uninstalled, but --purge removed no directory: terminals of the window may still run: aaaaaaaaaaaa/,
     );
     assert.ok(existsSync(files.termPid(ID_A)));
     for (const dir of [m.places.dataDir, m.places.stateDir, m.places.configDir]) {
@@ -392,6 +392,28 @@ describe('uninstall --purge', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.ok(existsSync(join(target, 'terms')), 'the link target stays');
+    assert.ok(
+      r.lines.includes(`left ${join(m.s.skydeckHome, 'run')} alone: it is a symbolic link`),
+      r.stdout,
+    );
+  });
+
+  test("a candidate that is another user's is left alone and named", async (t) => {
+    const m = await installed(t);
+    const files = m.makeRuntime();
+    // The sandbox cannot make a directory another user owns: lstat says so for that one path.
+    const lstat = (path: string): ReturnType<Platform['files']['lstat']> => {
+      const info = m.platform.files.lstat(path);
+      return path === files.dir && info !== null ? { ...info, uid: info.uid + 1 } : info;
+    };
+
+    const r = await uninstall(m, ['--purge'], () => [], { files: { ...m.platform.files, lstat } });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(existsSync(files.termsDir));
+    const uid = m.platform.uid + 1;
+    assert.ok(r.lines.includes(`left ${files.dir} alone: it belongs to uid ${uid}`), r.stdout);
+    assert.equal(existsSync(m.places.dataDir), false, 'the rest of the purge is done');
   });
 
   test('never connects to a keeper: not while refusing, not while removing (S2 7.1)', async (t) => {

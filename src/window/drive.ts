@@ -14,7 +14,7 @@ import { isAbsolute, posix } from 'node:path';
 import type { Env } from '../platform/types.ts';
 
 /** S2 5.3: the C: drive as WSL mounts it. */
-export const MNT_C = '/mnt/c';
+const MNT_C = '/mnt/c';
 /** `<letter>:\` and the rest of an absolute Windows path. */
 const WINDOWS_ABSOLUTE = /^([A-Za-z]):\\(.*)$/;
 

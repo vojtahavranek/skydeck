@@ -40,11 +40,11 @@ import { deriveProfileDirUnder } from '../window/windows.ts';
 import { instanceIdleTimeout } from '../window/wslconfig.ts';
 import { probePython3 } from './python.ts';
 
-export type Kind = 'ok' | 'info' | 'problem';
-export type Report = (kind: Kind, text: string) => void;
+type Kind = 'ok' | 'info' | 'problem';
+type Report = (kind: Kind, text: string) => void;
 
 /** What doctor could open: the configuration and the database are null when they could not be had. */
-export interface WindowFacts {
+interface WindowFacts {
   platform: Platform;
   places: Places;
   config: Config | null;

@@ -266,7 +266,17 @@ describe('doctor: the port', () => {
       socket.destroy();
     });
 
-    const r = await doctor(m);
+    // Every listen doctor would make goes through the platform's net: record them all.
+    const listens: unknown[] = [];
+    const net = {
+      ...m.platform.net,
+      listenHttp: (...args: Parameters<Platform['net']['listenHttp']>) => {
+        listens.push(args[0]);
+        return m.platform.net.listenHttp(...args);
+      },
+    };
+
+    const r = await doctor(m, { net });
 
     lineOf(
       r,
@@ -275,6 +285,7 @@ describe('doctor: the port', () => {
         `something that is not this installation's window server listens on 127\\.0\\.0\\.1:${address.port}`,
       ),
     );
+    assert.deepEqual(listens, [], 'doctor binds nothing, not even for an instant (A30)');
     assert.equal(connections, 0, 'no request is sent to a foreign program');
   });
 
