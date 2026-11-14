@@ -119,6 +119,8 @@ const PYTHON = ['/usr/bin/python3', '/bin/python3'].find((p) => existsSync(p));
 interface Pty {
   /** The pid of the pty's first process (the stand-in, or the wrapper script). */
   pid: Promise<number>;
+  /** The pid of the pty helper itself (this file's python3), the test's own child. */
+  helperPid: number;
   /** Everything the program wrote to the terminal so far. */
   output(): Buffer;
   write(data: string | Buffer): void;
@@ -173,6 +175,14 @@ function inPty(
     stderr += chunk.toString('utf8');
   });
   const control = child.stdio[3] as NodeJS.WritableStream;
+  // A helper that has just gone answers a write here with EPIPE, asynchronously: no error of the
+  // test, as nothing is left to act on the line. Any other error of the pipe still fails it.
+  control.on('error', (error: NodeJS.ErrnoException) => {
+    controlOpen = false;
+    if (error.code !== 'EPIPE') {
+      throw error;
+    }
+  });
   const exit = new Promise<number | null>((resolve) => {
     child.on('close', (code) => {
       exited = true;
@@ -181,7 +191,9 @@ function inPty(
   });
   t.after(async () => {
     if (!exited) {
-      if (controlOpen) {
+      // Never into a pipe known to be closed: the helper's end is in, or the pipe ended or failed.
+      const gone = child.exitCode !== null || child.signalCode !== null;
+      if (controlOpen && !gone && control.writable) {
         control.write('killgroup\n');
       }
       const timer = setTimeout(() => child.kill('SIGKILL'), 3000);
@@ -199,8 +211,10 @@ function inPty(
     }
     throw new Error(`no pid from the pty helper; stderr: ${stderr}`);
   })();
+  assert.ok(child.pid !== undefined, 'the pty helper did not start');
   return {
     pid,
+    helperPid: child.pid,
     output: () => output,
     write: (data) => {
       child.stdin?.write(data);
@@ -356,6 +370,20 @@ function procStat(pid: number): string[] {
     .slice(line.lastIndexOf(')') + 2)
     .trim()
     .split(' ');
+}
+
+/** The state letter of `pid` in /proc ('Z': it has ended and is not yet reaped), or null. */
+function procState(pid: number): string | null {
+  try {
+    return procStat(pid)[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Holds the event loop for `ms`: nothing of Node's (an exit, a pipe's end) is seen meanwhile. */
+function blockFor(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function hex(text: string): string {
@@ -1030,6 +1058,27 @@ describe('stand-in: limits on its life', () => {
     assert.equal(await pty.exited(3000), 128 + 9);
     assert.equal(existsSync(`/proc/${start.pid}`), false);
   });
+});
+
+describe("stand-in: this file's pty helper", () => {
+  // The helper goes first: the program ends, the helper exits, and the test holds the event loop
+  // until the helper is a zombie, so that its `after` hook runs before Node has seen the helper's
+  // end and sends `killgroup` into a pipe whose other end is closed. That write fails with EPIPE,
+  // asynchronously; it must not fail the file ("generated asynchronous activity after the test
+  // ended … write EPIPE", seen in a full run under load).
+  for (let round = 1; round <= 20; round++) {
+    test(`a helper gone before its after hook runs fails nothing (round ${round})`, (t) => {
+      const s = sandbox(t);
+      s.link('true');
+      const pty = inPty(t, join(s.bin, 'true'), [], s.env(), { cwd: s.home });
+
+      const deadline = performance.now() + 5000;
+      while (procState(pty.helperPid) !== 'Z') {
+        assert.ok(performance.now() < deadline, 'the pty helper did not end');
+        blockFor(5);
+      }
+    });
+  }
 });
 
 describe('stand-in: the helpers', () => {
