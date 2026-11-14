@@ -110,6 +110,21 @@ export function sandboxLimits(
   };
 }
 
+/**
+ * A31, the start seam (ruled, server-findable): in a marked test sandbox
+ * (SKYDECK_TEST_NO_WINDOWS=1) SKYDECK_TEST_SERVE_START_DELAY_MS, a whole number of ms a timer can
+ * wait, is how long the start waits between binding the port and writing server.json — the step in
+ * which only the window_server lock names the server, made slow for the tests of commands that
+ * meet a server while it starts. 0 outside a marked sandbox and when unset; a value that is not
+ * such a number is 0 and `invalid` (one log line). Exported for its test.
+ */
+export function startDelayOf(env: Env): { ms: number; invalid: boolean } {
+  const text = env.SKYDECK_TEST_SERVE_START_DELAY_MS;
+  if (env.SKYDECK_TEST_NO_WINDOWS !== '1' || text === undefined) return { ms: 0, invalid: false };
+  const valid = /^(0|[1-9][0-9]{0,9})$/.test(text) && Number(text) <= MAX_TIMER_MS;
+  return valid ? { ms: Number(text), invalid: false } : { ms: 0, invalid: true };
+}
+
 /** Whether `path` is gone; a look that fails is no answer (it is not gone). */
 function isGone(platform: Platform, path: string): boolean {
   try {
@@ -196,8 +211,19 @@ export const command: Command = {
       stopOn('SIGINT');
     });
 
+    const delay = startDelayOf(platform.env);
+    if (delay.invalid) {
+      log(
+        'server: SKYDECK_TEST_SERVE_START_DELAY_MS is not a whole number of milliseconds; the start is not delayed',
+      );
+    }
     try {
-      server = await runServer({ platform, port: testPort(platform.env), foreground });
+      server = await runServer({
+        platform,
+        port: testPort(platform.env),
+        foreground,
+        startDelayMs: delay.ms,
+      });
     } catch (error) {
       if (error instanceof ServeExit) {
         // 10 and 12 carry a path from the configuration or the store's record (review 2).

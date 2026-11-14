@@ -315,6 +315,34 @@ test('replaceSecret with a short random source throws and changes nothing', (t) 
   assert.equal(deck.store.getKv('window_alarm'), String(T0));
 });
 
+test('replaceSecret with a guard (ruled, server-findable): the guard runs inside the one transaction, first; when it throws nothing changes', (t) => {
+  const { deck } = testDeck(t);
+  const { random } = countingRandom(t);
+  const before = ensureSecret(deck.store, random);
+  raiseAlarm(deck.store, T0);
+  const refusal = new Error('a server runs');
+  assert.throws(
+    () =>
+      replaceSecret(deck.store, random, () => {
+        deck.store.setKv('window_launching', 'written by the guard'); // rolled back with it
+        throw refusal;
+      }),
+    (error) => error === refusal,
+  );
+  assert.equal(deck.store.getKv('window_secret'), b64(before));
+  assert.equal(deck.store.getKv('window_alarm'), String(T0));
+  assert.equal(deck.store.getKv('window_launching'), null, 'the guard ran inside the transaction');
+
+  const { store, calls } = watched(deck.store);
+  replaceSecret(store, random, () => {
+    store.getKv('window_server'); // what the guard of --new-secret reads
+    calls.push('guard done');
+  });
+  assert.deepEqual(calls, ['getKv inside', 'guard done', 'setKv inside', 'deleteKv inside']);
+  assert.notEqual(deck.store.getKv('window_secret'), b64(before));
+  assert.equal(deck.store.getKv('window_alarm'), null);
+});
+
 test('replaceSecret creates a secret where there was none', (t) => {
   const { deck } = testDeck(t);
   const { random } = countingRandom(t);

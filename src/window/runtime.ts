@@ -14,6 +14,7 @@ import { runtimeDirByRule, storeId } from '../platform/paths.ts';
 import type { RuntimeRule } from '../platform/paths.ts';
 import type { Files, Platform, Proc } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
+import type { Store } from '../store/store.ts';
 import { describeError } from '../sessions/problems.ts';
 import { parsePidLine, pidLineState } from './pidline.ts';
 import type { PidLine, PidLineState } from './pidline.ts';
@@ -461,6 +462,17 @@ function parseLock(text: string): { line: PidLine; checkout: string } | null {
   const procStart = Number(startText);
   if (!isWhole(pid, 1) || !isWhole(procStart, 0)) return null;
   return { line: { pid, procStart, bootId }, checkout };
+}
+
+/**
+ * The holder the window_server lock names: its pid line and its checkout; null when the lock is
+ * free or holds a value skydeck does not write (it names no server: takeServerLock takes it). The
+ * holder is not judged here. A command finds a server that is starting by it (ruled,
+ * server-findable): the server takes the lock first and writes server.json only later (S2 5.2).
+ */
+export function readServerLock(store: Store): { line: PidLine; checkout: string } | null {
+  const held = store.getKv('window_server');
+  return held === null ? null : parseLock(held);
 }
 
 /**

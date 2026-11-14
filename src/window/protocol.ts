@@ -558,6 +558,11 @@ export interface PingAnswer {
   checkout: string;
 }
 export interface StatusAnswer {
+  /** Ruled (follow-up "server-findable"): true while the server's start is not done — the same
+   *  flag that answers a page's upgrade with 503 (S2 8.2.1); it answers, and has written
+   *  server.json, before then. Optional for the reader: a server of an older build sends none, and
+   *  that means false. */
+  starting?: boolean;
   pages: number;
   terminals: {
     id: string;

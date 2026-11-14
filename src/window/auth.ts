@@ -99,10 +99,19 @@ export function ensureSecret(store: Store, random: (n: number) => Uint8Array): U
 
 /**
  * `skydeck window --new-secret` (S2 5.1): a new secret, and `window_alarm` cleared, in one
- * transaction. The caller has stopped the server first (which forgets every token).
+ * transaction. The caller has stopped the server first (which forgets every token). `guard`
+ * (ruled, server-findable) runs first inside that transaction: when it throws, nothing is changed
+ * — neither the secret nor the alarm — and its error is thrown. `--new-secret` passes one that
+ * refuses while the window_server lock names a holder that may live: a server started after the
+ * stop would keep the tokens it minted before the new key.
  */
-export function replaceSecret(store: Store, random: (n: number) => Uint8Array): void {
+export function replaceSecret(
+  store: Store,
+  random: (n: number) => Uint8Array,
+  guard: () => void = () => {},
+): void {
   store.transaction(() => {
+    guard();
     store.setKv('window_secret', encode(draw(random, KEY_BYTES)));
     store.deleteKv('window_alarm');
   });

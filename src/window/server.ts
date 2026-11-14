@@ -1,9 +1,9 @@
 /**
  * The window's server (S2 4.1, 5.2, 5.5; plan task 23): every part of `src/window/` put together
  * into the one server of an installation. `runServer` takes the lock, the runtime directory, the
- * assets and the build, the port and `server.sock`, finds the keepers left running, points the
- * interop link, writes `server.json` and `server.pid`, and starts the tick (tick.ts); `stop` is
- * S2 5.5. The command `skydeck serve` (src/cli/commands/serve.ts) runs it in a process of its own;
+ * assets and the build and the port, writes `server.json` and `server.pid`, listens on
+ * `server.sock`, finds the keepers left running, points the interop link, and starts the tick
+ * (tick.ts); `stop` is S2 5.5. The command `skydeck serve` (src/cli/commands/serve.ts) runs it in a process of its own;
  * tests run it in theirs (A19), so nothing here touches the process itself (signals, exit).
  */
 import { join } from 'node:path';
@@ -68,6 +68,10 @@ export interface ServerOptions {
   /** The first interop candidate of S2 6.4 (A32); default '/run/WSL/1_interop', or
    *  SKYDECK_TEST_INTEROP_FIRST when set. Tests always point it into the sandbox. */
   interopFirst?: string;
+  /** A31 (ruled, server-findable): ms the start waits between binding the port and writing
+   *  server.json, while only the window_server lock names it; default 0. `serve` sets it from
+   *  SKYDECK_TEST_SERVE_START_DELAY_MS in a marked test sandbox only. */
+  startDelayMs?: number;
 }
 
 export interface RunningServer {
@@ -182,10 +186,12 @@ async function pythonOf(platform: Platform): Promise<StatusAnswer['python']> {
  * S2 5.2 in this order: the refusal under Claude Code (13); the server's environment; the deck
  * (its connection guarded, S2 10.1); the lock (0 or 11); the runtime directory, taken and
  * prepared (12); the assets, the keeper file and the vendored xterm modules (A35); the secret; the
- * port (10, the lock released); `server.sock` (one that refuses removed); the keepers found
- * (`rediscover`, each one not started through decideFoundKeeper); the interop link; `server.json`
- * and `server.pid`; the tick, whose first run makes the first keep-alive check. A failure on the
- * way gives back everything taken so far.
+ * port (10, the lock released); `server.json` and `server.pid` — before `server.sock` answers, so
+ * that every server that answers can be found by them (ruled, server-findable; until then the lock
+ * names it); `server.sock` (one that refuses removed); the keepers found (`rediscover`, each one
+ * not started through decideFoundKeeper); the interop link; the tick, whose first run makes the
+ * first keep-alive check. A failure on the way gives back everything taken so far, server.json and
+ * server.pid included.
  */
 export async function runServer(options: ServerOptions): Promise<RunningServer> {
   const { platform } = options;
@@ -203,9 +209,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
   let lockTaken = false;
   const listeners: HttpListener[] = [];
   let registry: Registry | null = null;
+  let unrecord = (): void => {}; // server.json and server.pid, once they may be written
   const giveBack = async (): Promise<void> => {
     await registry?.stopAll().catch(() => {});
     for (const listener of listeners.reverse()) await listener.close().catch(() => {});
+    unrecord(); // before the lock, as the orderly stop does (S2 5.5)
     if (lockTaken) {
       try {
         releaseServerLock(deck);
@@ -485,6 +493,30 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       throw error;
     }
 
+    // server.json and server.pid (S2 4.2, 5.2) before server.sock answers (ruled, server-findable):
+    // a command finds a server by server.json, so one that answers must have written it already.
+    // Until here the window_server lock is what names this server.
+    const envOrigin = { dir: environment.origin ?? cwdOf(platform), atNs: String(startedNs) };
+    if (options.startDelayMs !== undefined && options.startDelayMs > 0) {
+      await clock.sleep(options.startDelayMs); // A31's seam: this step made slow
+    }
+    const record: ServerJson = {
+      pid: own.pid,
+      procStart: own.procStart,
+      bootId: own.bootId,
+      port: boundPort,
+      serverId,
+      build,
+      checkout,
+      startedAt: String(startedNs),
+      envOrigin,
+    };
+    unrecord = () => {
+      removeOwn(platform, files, serverId, own.pid, log);
+    };
+    writeServerJson(fs, files.serverJson, record);
+    fs.writeText(files.serverPid, formatPidLine(own), 0o600);
+
     // server.sock (S2 5.2, 8.3): one a dead server left behind refuses connections.
     if ((await probeSocket(platform, files.serverSock)) === 'refused') {
       fs.remove(files.serverSock);
@@ -499,7 +531,6 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       port: boundPort,
       checkout,
     });
-    const envOrigin = { dir: environment.origin ?? cwdOf(platform), atNs: String(startedNs) };
     let control: HttpListener;
     try {
       control = await platform.net.listenHttp(
@@ -508,6 +539,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
           request: controlHandler({
             ping,
             status: () => ({
+              starting: !ready, // what answers a page's upgrade with 503 (ruled, server-findable)
               pages: pages.count(),
               terminals: created.list().map((term) => ({
                 id: term.id,
@@ -594,19 +626,6 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log('server: stopped');
     };
 
-    const record: ServerJson = {
-      pid: own.pid,
-      procStart: own.procStart,
-      bootId: own.bootId,
-      port: boundPort,
-      serverId,
-      build,
-      checkout,
-      startedAt: String(startedNs),
-      envOrigin,
-    };
-    writeServerJson(fs, files.serverJson, record);
-    fs.writeText(files.serverPid, formatPidLine(own), 0o600);
     await startedTick.start();
     log(`server: ${serverId} listening on 127.0.0.1:${boundPort} (build ${build})`);
     ready = true;

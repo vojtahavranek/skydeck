@@ -33,7 +33,7 @@ import {
 } from '../../src/window/runtime.ts';
 import type { RuntimeFiles } from '../../src/window/runtime.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
-import { BOOT_A, realTestPlatform, statLine } from '../helpers/platform.ts';
+import { BOOT_A, BOOT_B, realTestPlatform, statLine } from '../helpers/platform.ts';
 import type { RealTestPlatform } from '../helpers/platform.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
 import { writeWindowConfig } from '../helpers/window-config.ts';
@@ -1396,4 +1396,295 @@ test('findServer: a ping that timed out is not tried again → hung at once', as
     pid: 4242,
   });
   assert.equal(asked.attempts(), 1);
+});
+
+// ---------------------------------------------------------------------------------------------
+// A server that is starting (ruled, server-findable): it holds the window_server lock from the
+// start's first step and writes server.json only once its port is bound — every command finds it
+// by the lock until then. On the fake clock.
+
+const BUILD = '0123456789abcdef';
+const HOLDER = `4242:777:${BOOT_A}:/checkout`;
+
+/**
+ * fakeServerDeck without server.json, its lock naming pid 4242 (alive in the fake /proc):
+ * `record()` writes the server.json the starting server writes (pid 4242), `json` is its value.
+ */
+function startingDeck(t: TestContext): {
+  d: ReturnType<typeof testDeck>;
+  files: RuntimeFiles;
+  ping: PingAnswer;
+  json: NonNullable<ReturnType<typeof readServerJson>>;
+  record: () => void;
+} {
+  const { d, files, ping } = fakeServerDeck(t);
+  const json = readServerJson(d.platform.files, files.serverJson);
+  assert.ok(json !== null);
+  d.platform.files.remove(files.serverJson);
+  d.deck.store.setKv('window_server', HOLDER);
+  return {
+    d,
+    files,
+    ping,
+    json,
+    record: () => {
+      writeServerJson(d.platform.files, files.serverJson, json);
+    },
+  };
+}
+
+/** The deck with `hook` called on each signal before the fake processes record it. */
+function onSignals(deck: Deck, hook: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => void): Deck {
+  const real = deck.platform.processes;
+  const processes: Processes = {
+    startDetached: (...args) => real.startDetached(...args),
+    signal(pid, signal) {
+      hook(pid, signal);
+      return real.signal(pid, signal);
+    },
+  };
+  return { ...deck, platform: { ...deck.platform, processes } };
+}
+
+/** ms of the fake clock since `before`. */
+function msSince(d: ReturnType<typeof testDeck>, before: bigint): number {
+  return Number((d.clock.nowNs() - before) / 1_000_000n);
+}
+
+test('findServer: a live holder of the lock without server.json is starting — waited for within pingMs, then hung with starting, and no ping is sent', async (t) => {
+  const { d } = startingDeck(t);
+  const asked = withRequests(d.deck, refused);
+  const before = d.clock.nowNs();
+  assert.deepEqual(await findServer(asked.deck, '/checkout', BUILD, { pingMs: 1000 }), {
+    kind: 'hung',
+    pid: 4242,
+    starting: true,
+  });
+  assert.equal(asked.attempts(), 0, 'nothing listens for a server that has not recorded itself');
+  assert.ok(msSince(d, before) >= 1000, `${msSince(d, before)} ms`);
+});
+
+test('findServer: a starting server that writes server.json within pingMs is found by it and pinged in what is left — the refused ping of the moment before it listens tried again', async (t) => {
+  const { d, ping, record } = startingDeck(t);
+  d.clock.after(300, record);
+  const asked = withRequests(d.deck, (attempt) =>
+    attempt === 1 ? refused() : Promise.resolve({ status: 200, body: ping }),
+  );
+  const before = d.clock.nowNs();
+  assert.deepEqual(await findServer(asked.deck, '/checkout', BUILD, { pingMs: 1000 }), {
+    kind: 'ours',
+    ping,
+  });
+  assert.equal(asked.attempts(), 2);
+  const ms = msSince(d, before);
+  assert.ok(ms >= 300 && ms < 1000, `${ms} ms`);
+});
+
+test('findServer: a starting server that writes server.json too late for the ping: hung, not starting', async (t) => {
+  const { d, record } = startingDeck(t);
+  d.clock.after(950, record);
+  const asked = withRequests(d.deck, refused);
+  assert.deepEqual(await findServer(asked.deck, '/checkout', BUILD, { pingMs: 1000 }), {
+    kind: 'hung',
+    pid: 4242,
+  });
+});
+
+test('findServer: a starting server whose process ends, or whose lock is released, while it is waited for: none', async (t) => {
+  const ends: ((d: ReturnType<typeof testDeck>) => void)[] = [
+    (d) => {
+      d.proc.setProcess(4242, null);
+    },
+    (d) => {
+      d.deck.store.deleteKv('window_server');
+    },
+  ];
+  for (const end of ends) {
+    const { d } = startingDeck(t);
+    d.clock.after(300, () => {
+      end(d);
+    });
+    const before = d.clock.nowNs();
+    assert.deepEqual(await findServer(d.deck, '/checkout', BUILD, { pingMs: 1000 }), {
+      kind: 'none',
+    });
+    assert.ok(msSince(d, before) < 1000);
+  }
+});
+
+test('findServer: a lock whose holder is gone, of another boot or a reused pid, or that is not a lock, with no server.json: none at once', async (t) => {
+  const { d } = startingDeck(t);
+  for (const lock of [
+    `4243:777:${BOOT_A}:/checkout`, // no such process
+    `4242:777:${BOOT_B}:/checkout`, // another boot
+    `4242:778:${BOOT_A}:/checkout`, // the pid reused
+    'garbage',
+  ]) {
+    d.deck.store.setKv('window_server', lock);
+    const before = d.clock.nowNs();
+    assert.deepEqual(
+      await findServer(d.deck, '/checkout', BUILD, { pingMs: 1000 }),
+      { kind: 'none' },
+      lock,
+    );
+    assert.equal(d.clock.nowNs(), before, `no wait: ${lock}`);
+  }
+});
+
+test('findServer: a server.json of an ended process beside a live holder of the lock: the holder is the server, starting', async (t) => {
+  const { d, files, json } = startingDeck(t);
+  writeServerJson(d.platform.files, files.serverJson, { ...json, pid: 4243 });
+  assert.deepEqual(await findServer(d.deck, '/checkout', BUILD, { pingMs: 1000 }), {
+    kind: 'hung',
+    pid: 4242,
+    starting: true,
+  });
+});
+
+test('findServer: a holder of the lock that cannot be judged is the error of a server.json line that cannot be judged; nothing is waited for', async (t) => {
+  const { d } = startingDeck(t);
+  const unreadable = deckWith(d.deck, {
+    proc: {
+      stat: (pid) => {
+        if (pid === 4242) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+        return d.proc.stat(pid);
+      },
+    },
+  });
+  const noBoot = deckWith(d.deck, { proc: { bootId: () => null } });
+  for (const deck of [unreadable, noBoot]) {
+    const before = d.clock.nowNs();
+    await assert.rejects(findServer(deck, '/checkout', BUILD, { pingMs: 1000 }), {
+      name: 'SkydeckError',
+      message:
+        "cannot tell whether the window's server (pid 4242) still runs: the boot id or its /proc entry cannot be read",
+    });
+    assert.equal(d.clock.nowNs(), before);
+  }
+});
+
+test('stopServer: a starting server that has not recorded itself within pingMs gets SIGTERM, then SIGKILL after killMs, to the identity the lock names, each confirmed alive', async (t) => {
+  const { d } = startingDeck(t);
+  d.processes.live.add(4242);
+  const at: { signal: string; ms: number; alive: boolean }[] = [];
+  const before = d.clock.nowNs();
+  const asked = withRequests(d.deck, refused);
+  const deck = onSignals(asked.deck, (pid, signal) => {
+    at.push({ signal, ms: msSince(d, before), alive: d.proc.stat(pid) !== null });
+    if (signal === 'SIGKILL') d.proc.setProcess(pid, null);
+  });
+  assert.deepEqual(await stopServer(deck, { pingMs: 1000, stopMs: 10_000, killMs: 500 }), {
+    stopped: true,
+    keepers: 0,
+  });
+  assert.deepEqual(d.processes.signals, [
+    { pid: 4242, signal: 'SIGTERM' },
+    { pid: 4242, signal: 'SIGKILL' },
+  ]);
+  assert.equal(asked.attempts(), 0, 'no request: nothing listens for it');
+  const [term, kill] = at;
+  assert.ok(term !== undefined && kill !== undefined);
+  assert.ok(term.alive && kill.alive);
+  assert.ok(term.ms >= 1000 && term.ms < 1100, `SIGTERM at ${term.ms} ms`);
+  assert.ok(kill.ms - term.ms >= 500, `SIGKILL ${kill.ms - term.ms} ms after SIGTERM`);
+});
+
+test('stopServer with hungPid naming the lock’s holder (findServer said starting): SIGTERM at once, no wait', async (t) => {
+  const { d } = startingDeck(t);
+  d.processes.live.add(4242);
+  const before = d.clock.nowNs();
+  const deck = onSignals(d.deck, (pid) => {
+    d.proc.setProcess(pid, null); // ends on SIGTERM
+  });
+  assert.deepEqual(
+    await stopServer(deck, { pingMs: 1000, stopMs: 10_000, killMs: 500 }, { hungPid: 4242 }),
+    { stopped: true, keepers: 0 },
+  );
+  assert.deepEqual(d.processes.signals, [{ pid: 4242, signal: 'SIGTERM' }]);
+  assert.ok(msSince(d, before) < 1000, `${msSince(d, before)} ms`);
+});
+
+test('stopServer: a starting server that records itself while it is waited for is pinged in what is left — once refused, the moment before it listens — and stopped by POST /shutdown, no signal', async (t) => {
+  const { d, ping, record } = startingDeck(t);
+  d.processes.live.add(4242);
+  d.clock.after(300, record);
+  const paths: string[] = [];
+  const net: Net = {
+    ...d.deck.platform.net,
+    requestUnix(_path, request) {
+      paths.push(`${request.method} ${request.path}`);
+      if (request.path === '/ping') {
+        return paths.length === 1 ? refused() : Promise.resolve({ status: 200, body: ping });
+      }
+      d.clock.after(200, () => {
+        d.proc.setProcess(4242, null); // its orderly stop ends it
+      });
+      return Promise.resolve({ status: 200, body: { ok: true } });
+    },
+  };
+  const deck = { ...d.deck, platform: { ...d.deck.platform, net } };
+  assert.deepEqual(await stopServer(deck, { pingMs: 1000, stopMs: 10_000, killMs: 500 }), {
+    stopped: true,
+    keepers: 0,
+  });
+  assert.deepEqual(paths, ['GET /ping', 'GET /ping', 'POST /shutdown']);
+  assert.deepEqual(d.processes.signals, []);
+});
+
+test('stopServer: a lock naming a keeper, pid 1 or this very process is refused, nothing signalled', async (t) => {
+  const { d, files } = startingDeck(t);
+  mkdirSync(files.termsDir, { recursive: true, mode: 0o700 });
+  d.platform.files.writeText(
+    files.termPid('0000000000a1'),
+    formatPidLine({
+      pid: 4242,
+      procStart: 777,
+      bootId: BOOT_A,
+      keeper: { version: '2', started: true },
+    }),
+  );
+  d.proc.setProcess(1, { stat: statLine(1, 5, 'init'), cmdline: [] });
+  d.proc.setProcess(4000, { stat: statLine(4000, 9, 'node'), cmdline: [] }); // platform.pid
+  for (const [lock, what] of [
+    [HOLDER, 'a keeper'],
+    [`1:5:${BOOT_A}:/checkout`, 'this process or init'],
+    [`4000:9:${BOOT_A}:/checkout`, 'this process or init'],
+  ] as const) {
+    d.deck.store.setKv('window_server', lock);
+    await assert.rejects(
+      stopServer(d.deck, { pingMs: 1000, stopMs: 1000, killMs: 1000 }),
+      {
+        name: 'SkydeckError',
+        message: `skydeck's window_server lock names pid ${lock.split(':')[0] ?? ''}, which is not the window's server (${what}); nothing was signalled`,
+      },
+      lock,
+    );
+  }
+  assert.deepEqual(d.processes.signals, []);
+});
+
+test('stopServer: a holder of the lock that cannot be judged is an error; a dead one is nothing to stop — nothing signalled, no wait', async (t) => {
+  const { d } = startingDeck(t);
+  const noBoot = deckWith(d.deck, { proc: { bootId: () => null } });
+  await assert.rejects(stopServer(noBoot, { pingMs: 1000 }), {
+    name: 'SkydeckError',
+    message:
+      "cannot tell whether the window's server (pid 4242) still runs: the boot id or its /proc entry cannot be read",
+  });
+  d.proc.setProcess(4242, null);
+  const before = d.clock.nowNs();
+  assert.deepEqual(await stopServer(d.deck, { pingMs: 1000 }), { stopped: false, keepers: 0 });
+  assert.equal(d.clock.nowNs(), before);
+  assert.deepEqual(d.processes.signals, []);
+});
+
+test('startServe: serve exiting 11 while a server of another checkout starts (its lock, no server.json yet) names it from the lock, sanitised', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '11' }));
+  const holder = await liveSleep(t, h);
+  const { pid, procStart, bootId } = holder.line;
+  h.deck.store.setKv('window_server', `${pid}:${procStart}:${bootId}:/elsewhere/\x1b[31mskydeck`);
+  assert.deepEqual(await startServe(h.deck, { startMs: START_MS }), {
+    ok: false,
+    line: `a window server already runs (pid ${pid}, from /elsewhere/skydeck)`,
+  });
 });

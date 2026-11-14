@@ -147,13 +147,15 @@ interface Harness {
   /** Every path under /mnt/ the commands asked their files for (A32: there must be none). */
   mntAsked: string[];
   run(args: string[], options?: RunOptions): Promise<Result>;
+  /** Another skydeck command (`doctor`, `uninstall`) as run() runs `window`: argv in full. */
+  exec(argv: string[], options?: RunOptions): Promise<Result>;
   edgeRuns(): EdgeRun[];
   presentations(): Presentation[];
   /** The server server.json names, and a client of server.sock. */
   server(): ServerJson | null;
   /**
-   * server.json once the server answering on server.sock has written it: a server answers its
-   * ping before it writes server.json (S2 5.2), so a command can be done before the file is there.
+   * server.json once the server answering on server.sock has written it (a server writes it
+   * before server.sock answers: ruled, server-findable; the check stays for the fake serve).
    */
   running(): Promise<ServerJson>;
   client(): ControlClient;
@@ -354,7 +356,8 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
     requests,
     signals,
     mntAsked,
-    async run(args, options = {}) {
+    run: (args, options) => h.exec(['window', ...args], options),
+    async exec(argv, options = {}) {
       const times = timesText({ ...TIMES, ...options.times });
       const env = Object.fromEntries(
         Object.entries({ ...baseEnv, SKYDECK_TEST_WINDOW_TIMES: times, ...options.env }).filter(
@@ -373,7 +376,7 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
       };
       const before = requests.length;
       const startedAt = performance.now();
-      const r = await runSkydeck(platform, ['window', ...args]);
+      const r = await runSkydeck(platform, argv);
       return {
         code: r.code,
         stdout: r.stdout,
@@ -1203,16 +1206,18 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
 
 /**
  * The sandbox's python3 made slow (3 s) for the server's version check (`python3 -I -c …`), which
- * it makes between answering its first ping and writing server.json (S2 5.2): the gap widened.
- * Everything else (the keepers: `python3 -I <keeper>`) runs the real python3 at once.
+ * it makes after answering its first ping: before the follow-up "server-findable" that was the gap
+ * before server.json; since then server.json comes before the first answer, and these tests pin
+ * that a command that returns leaves a findable server. Everything else (the keepers: `python3 -I
+ * <keeper>`) runs the real python3 at once.
  */
-function slowServerStart(h: Harness): void {
+function slowServerStart(h: Harness, seconds = 3): void {
   const link = join(h.d.s.bin, 'python3');
   const real = realpathSync(link);
   unlinkSync(link);
   writeFileSync(
     link,
-    `#!/bin/sh\nif [ "$1" = -I ] && [ "$2" = -c ]; then sleep 3; fi\nexec '${real}' "$@"\n`,
+    `#!/bin/sh\nif [ "$1" = -I ] && [ "$2" = -c ]; then sleep ${seconds}; fi\nexec '${real}' "$@"\n`,
     { mode: 0o755 },
   );
 }
@@ -1561,5 +1566,391 @@ describe('the test seam SKYDECK_TEST_WINDOW_TIMES (A31)', () => {
       assert.match(r.stderr, /^skydeck: SKYDECK_TEST_WINDOW_TIMES /, bad);
     }
     assert.deepEqual(h.started, []);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// A server that is starting can be found (ruled, server-findable): from its first step it holds
+// the window_server lock; its server.json comes once its port is bound, before server.sock
+// answers. The start seam SKYDECK_TEST_SERVE_START_DELAY_MS (A31) widens the time in which only
+// the lock names it.
+
+interface Starting {
+  /** The command that started the server, not waited for. */
+  done: Promise<Result>;
+  /** The identity the lock names: the node process of `serve`. */
+  pid: number;
+  procStart: number;
+}
+
+/**
+ * `skydeck window <args>` with the start seam set to `delayMs` for the server it starts; resolves
+ * once that server holds the lock and has not written server.json: a server that is starting.
+ */
+async function startingServer(
+  h: Harness,
+  delayMs: number,
+  args: string[] = ['--print-url'],
+  env: Record<string, string> = {},
+): Promise<Starting> {
+  const done = h.run(args, {
+    env: { SKYDECK_TEST_SERVE_START_DELAY_MS: String(delayMs), ...env },
+  });
+  done.catch(() => {}); // awaited by the test; never an unhandled rejection meanwhile
+  const deadline = performance.now() + WAIT_MS;
+  for (;;) {
+    const match = /^([0-9]+):([0-9]+):/.exec(h.d.deck.store.getKv('window_server') ?? '');
+    if (match !== null) {
+      assert.equal(h.server(), null, 'server.json is not written yet: the server is starting');
+      return { done, pid: Number(match[1]), procStart: Number(match[2]) };
+    }
+    if (performance.now() > deadline) assert.fail('no server took the window_server lock');
+    await sleep(20);
+  }
+}
+
+/** The lock's value naming `line`, as a server of this checkout writes it. */
+function lockOf(
+  h: Harness,
+  line: { pid: number; procStart: number },
+  checkout = REPOSITORY,
+): string {
+  return `${line.pid}:${line.procStart}:${h.d.platform.proc.bootId() ?? ''}:${checkout}`;
+}
+
+/** Whether no process with the identity `line` runs any more. */
+function ended(line: { pid: number; procStart: number }): boolean {
+  return !stillRuns(line.pid, line.procStart);
+}
+
+describe('a server that is starting is found by every command (ruled, server-findable)', () => {
+  test('skydeck window while a server starts: it waits for that server and uses it — no second serve, one Edge, both exit 0', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 2000, [], { FAKE_EDGE_PAGE: 'once' });
+
+    const second = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' }, times: { pingMs: 20_000 } });
+    const a = await first.done;
+
+    assert.equal(a.code, 0, a.stderr);
+    assert.equal(second.code, 0, second.stderr);
+    assert.equal(h.started.filter(isServe).length, 1, 'one serve started, by the first');
+    assert.equal(h.edgeRuns().length, 1, 'one Edge start');
+    for (const r of [a, second]) {
+      assert.equal(SUCCESS.exec(r.stdout)?.[2], String(first.pid), 'both use the one server');
+    }
+  });
+
+  test('skydeck window while a server starts and has not recorded itself within pingMs: the line saying so, exit 1, nothing started or signalled', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 4000);
+    const serves = h.started.filter(isServe).length;
+
+    const r = await h.run([], { times: { pingMs: 1000 } });
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stdout, '');
+    assert.equal(
+      r.stderr,
+      `skydeck: the window's server (pid ${first.pid}) is starting and did not finish within 1 s; run skydeck window again, or skydeck window --restart to replace it\n`,
+    );
+    assert.equal(h.started.filter(isServe).length, serves, 'no serve started');
+    assert.equal(h.edgeRuns().length, 0);
+    assert.deepEqual(h.signals, []);
+    assert.equal((await first.done).code, 0, 'the starting server finishes its start');
+  });
+
+  test('--stop while a server starts: waits for it to record itself, POST /shutdown, the orderly stop once its start is done — no signal', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 2000);
+
+    const r = await h.run(['--stop'], { times: { pingMs: 20_000 } });
+    await first.done;
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stdout,
+      "stopped skydeck's window server; 0 terminals in the window keep running\n",
+    );
+    assert.deepEqual(h.signals, []);
+    assert.equal(h.asked('POST', '/shutdown').length, 1);
+    assert.ok(ended(first), 'the server is gone');
+    assert.equal(h.server(), null);
+    assert.equal(h.d.deck.store.getKv('window_server'), null, 'its lock released: an orderly stop');
+  });
+
+  test('--stop while a server starts and has not recorded itself within pingMs: SIGTERM to the identity its lock names, the orderly stop once its start is done', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 5000);
+
+    const r = await h.run(['--stop'], { times: { pingMs: 1000, killMs: 30_000 } });
+    await first.done;
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stdout,
+      "stopped skydeck's window server; 0 terminals in the window keep running\n",
+    );
+    assert.deepEqual(
+      h.signals.map(({ pid, signal }) => ({ pid, signal })),
+      [{ pid: first.pid, signal: 'SIGTERM' }],
+    );
+    assert.ok(ended(first));
+    assert.equal(h.d.deck.store.getKv('window_server'), null, 'its lock released: an orderly stop');
+  });
+
+  test('--restart while a server starts: that server is stopped and a new one started, with the restart line', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 2000);
+
+    const r = await h.run(['--restart', '--print-url'], { times: { pingMs: 20_000 } });
+    await first.done;
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stderr, restartLine(h));
+    const now = h.server();
+    assert.ok(now !== null);
+    assert.notEqual(now.pid, first.pid, 'a new server');
+    assert.ok(ended(first), 'the starting one is gone');
+  });
+
+  test('--new-secret while a server starts: that server is gone before the key changes; then a new key and server', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 2000);
+    // What the store and /proc say, every 20 ms, until the command is done.
+    const samples: { secret: string | null; alive: boolean }[] = [];
+    let sampling = true;
+    const sampler = (async () => {
+      while (sampling) {
+        samples.push({ secret: h.d.deck.store.getKv('window_secret'), alive: !ended(first) });
+        await sleep(20);
+      }
+    })();
+
+    const r = await h.run(['--new-secret', '--print-url'], { times: { pingMs: 20_000 } });
+    sampling = false;
+    await sampler;
+    await first.done;
+
+    assert.equal(r.code, 0, r.stderr);
+    const old = samples.find((sample) => sample.alive && sample.secret !== null)?.secret;
+    assert.ok(old !== undefined, 'the starting server made a key');
+    for (const sample of samples) {
+      if (sample.alive && sample.secret !== null) {
+        assert.equal(sample.secret, old, 'no new key while that server lives');
+      }
+    }
+    const secret = h.d.deck.store.getKv('window_secret');
+    assert.ok(secret !== null && secret !== old, 'a new key');
+    assert.ok(ended(first));
+    assert.notEqual(h.server()?.pid, first.pid);
+  });
+
+  for (const how of ['alive', 'unknown'] as const) {
+    test(`--new-secret with a server ${how === 'alive' ? 'started' : 'that cannot be judged appearing'} between the stop and the replace: the key and the alarm stay, exit 1, nothing started or signalled`, async (t) => {
+      const h = windowHarness(t);
+      const live = await h.liveProcess();
+      const store = h.d.deck.store;
+      store.setKv('window_secret', 'A'.repeat(43));
+      store.setKv('window_alarm', '1794474000000000000');
+      // The lock names `live` with another process start (dead) until the command's stop has
+      // judged it; at that moment a server takes the lock: `live`, as it is.
+      store.setKv('window_server', lockOf(h, { pid: live.pid, procStart: live.procStart + 1 }));
+      let taken = false;
+      const proc = (base: Proc): Proc => ({
+        ...base,
+        stat: (pid) => {
+          if (pid === live.pid && taken && how === 'unknown') {
+            throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+          }
+          const stat = base.stat(pid);
+          if (pid === live.pid && !taken) {
+            taken = true;
+            store.setKv('window_server', lockOf(h, live));
+          }
+          return stat;
+        },
+      });
+
+      const r = await h.run(['--new-secret'], { proc });
+
+      assert.equal(r.code, 1);
+      assert.equal(
+        r.stderr,
+        how === 'alive'
+          ? `skydeck: skydeck's key was not replaced: a window server (pid ${live.pid}) started meanwhile; run skydeck window --new-secret again\n`
+          : `skydeck: skydeck's key was not replaced: cannot tell whether the window's server (pid ${live.pid}) still runs: the boot id or its /proc entry cannot be read\n`,
+      );
+      assert.ok(taken, 'the server came between the stop and the replace');
+      assert.equal(store.getKv('window_secret'), 'A'.repeat(43), 'the key stays');
+      assert.equal(store.getKv('window_alarm'), '1794474000000000000', 'the alarm stays');
+      assert.deepEqual(h.started, []);
+      assert.deepEqual(h.signals, []);
+    });
+  }
+
+  test('doctor while a server starts: it waits for it and reports it running', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 2000);
+
+    const r = await h.exec(['doctor']);
+    await first.done;
+
+    assert.match(r.stdout, new RegExp(`the window's server runs: pid ${first.pid}, from `));
+    assert.doesNotMatch(r.stdout, /no window server runs/);
+  });
+
+  test('doctor with a live holder of the lock that never records itself: the line saying it is starting, after the ping wait', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run(['--print-url']); // a database, a key: the window has been used
+    assert.equal(first.code, 0, first.stderr);
+    const stop = await h.run(['--stop']);
+    assert.equal(stop.code, 0, stop.stderr);
+    const live = await h.liveProcess();
+    h.d.deck.store.setKv('window_server', lockOf(h, live));
+
+    const r = await h.exec(['doctor']);
+
+    const json = join(h.d.box.runtimeDir, 'server.json');
+    const log = join(h.d.s.skydeckHome, 'state', 'server.log');
+    assert.ok(
+      r.stdout.includes(
+        `the window's server (pid ${live.pid}) is starting: it holds the window_server lock but has not written ${json} within 5 s; see ${log}; skydeck window --restart stops it\n`,
+      ),
+      r.stdout,
+    );
+    assert.doesNotMatch(r.stdout, /no window server runs/);
+    assert.deepEqual(h.signals, []);
+  });
+
+  test('uninstall while a server starts: the server is stopped', async (t) => {
+    const h = windowHarness(t);
+    const first = await startingServer(h, 2000);
+
+    const r = await h.exec(['uninstall']);
+    await first.done;
+
+    assert.ok(
+      r.stdout.includes(
+        "stopped skydeck's window server; 0 terminals in the window keep running\n",
+      ),
+      `${r.stdout}${r.stderr}`,
+    );
+    assert.ok(ended(first));
+    assert.deepEqual(h.signals, []);
+  });
+
+  test('a dead holder of the lock without server.json is no server: --stop says so; skydeck window starts one, which takes the lock over', async (t) => {
+    const h = windowHarness(t);
+    const live = await h.liveProcess();
+    live.child.kill('SIGKILL');
+    await once(live.child, 'exit');
+    h.d.deck.store.setKv('window_server', lockOf(h, live));
+
+    const stop = await h.run(['--stop']);
+    assert.equal(stop.code, 0, stop.stderr);
+    assert.equal(stop.stdout, "the window's server is not running\n");
+    const r = await h.run(['--print-url']);
+
+    assert.equal(r.code, 0, r.stderr);
+    const json = h.server();
+    assert.ok(json !== null);
+    assert.equal(h.d.deck.store.getKv('window_server'), lockOf(h, json, json.checkout));
+    assert.deepEqual(h.signals, []);
+  });
+
+  test('a holder of the lock that cannot be judged, without server.json: --stop and skydeck window cannot tell — exit 1, nothing signalled or started', async (t) => {
+    const h = windowHarness(t);
+    const live = await h.liveProcess();
+    h.d.deck.store.setKv('window_server', lockOf(h, live));
+    const unreadable = (proc: Proc): Proc => ({
+      ...proc,
+      stat: (pid) => {
+        if (pid === live.pid) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+        return proc.stat(pid);
+      },
+    });
+
+    for (const args of [['--stop'], [], ['--new-secret']]) {
+      const r = await h.run(args, { proc: unreadable });
+      assert.equal(r.code, 1, args.join(' '));
+      assert.equal(
+        r.stderr,
+        `skydeck: cannot tell whether the window's server (pid ${live.pid}) still runs: the boot id or its /proc entry cannot be read\n`,
+      );
+    }
+    assert.deepEqual(h.started, []);
+    assert.deepEqual(h.signals, []);
+    assert.equal(h.d.deck.store.getKv('window_server'), lockOf(h, live), 'nothing taken over');
+  });
+});
+
+describe('a server that answers but has not finished its start (ruled, server-findable, 10:16Z)', () => {
+  test('--restart with a window open while the new server still starts after writing server.json: the wait for the page counts from the end of the start — "already open", no token, no Edge', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
+    assert.equal(first.code, 0, first.stderr);
+    const old = h.server();
+    assert.ok(old !== null);
+    slowServerStart(h); // the new server's start goes on for 3 s after it answers
+    const back = reconnectingPage(t, h, old.pid);
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { reconnectMs: 1000 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, 'skydeck window: a window is already open\n');
+    assert.equal((await back).outcome, 'welcome');
+    assert.deepEqual(tokensAsked(r), [], 'no token minted');
+    assert.equal(h.edgeRuns().length, 1, 'Edge not started again');
+  });
+
+  test('--restart with a window open while the new server is still starting when the start wait is over: it goes on — a token, Edge, whose page waits out the 503', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
+    assert.equal(first.code, 0, first.stderr);
+    // The server gives its python3 check 5 s: its start ends at least 5 s after it answers, which
+    // is after the 4 s start wait begun before it was started.
+    slowServerStart(h, 12);
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { startMs: 4000, reconnectMs: 500 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, SUCCESS);
+    assert.equal(tokensAsked(r).length, 1);
+    assert.equal(h.edgeRuns().length, 2);
+    // Every /status of the new server before the token said it was starting: the command went on.
+    const stop = r.requests.findIndex((q) => q.method === 'POST' && q.path === '/shutdown');
+    const token = r.requests.findIndex((q) => q.method === 'POST' && q.path === '/token');
+    assert.ok(stop >= 0 && token > stop);
+    const looks = r.requests
+      .slice(stop + 1, token)
+      .filter((q) => q.method === 'GET' && q.path === '/status');
+    assert.ok(looks.length > 0, 'it looked whether the start was done');
+    for (const look of looks) {
+      assert.equal((look.answer?.body as { starting?: unknown }).starting, true);
+    }
+  });
+
+  test('doctor while a server finishes its start after writing server.json: "is starting" (info); the interop link it has not made yet is no problem', async (t) => {
+    const h = windowHarness(t);
+    slowServerStart(h, 8);
+    const url = await h.run(['--print-url']); // done once the server answers; its start goes on
+    assert.equal(url.code, 0, url.stderr);
+    const json = h.server();
+    assert.ok(json !== null);
+
+    const r = await h.exec(['doctor']);
+
+    assert.match(
+      r.stdout,
+      new RegExp(`^info +the window's server \\(pid ${json.pid}\\) is starting, from `, 'm'),
+    );
+    assert.doesNotMatch(r.stdout, /does not exist although the window's server runs/);
+    assert.match(r.stdout, /interop does not exist yet: the window's server makes it/);
   });
 });

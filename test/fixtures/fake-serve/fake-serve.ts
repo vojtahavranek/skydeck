@@ -15,7 +15,8 @@
 //                           sessionLeader }
 //   FAKE_SERVE_DELAY_MS     waits this long before it takes the runtime directory
 //   FAKE_SERVE_JSON_DELAY_MS  waits this long after server.sock answers before it writes
-//                           server.json (the real server's gap between the two, S2 5.2)
+//                           server.json (a server that answers before it records itself: what
+//                           the real server did before the follow-up "server-findable")
 //   FAKE_SERVE_BUILD        the build /ping and server.json report (default: this app root's)
 //   FAKE_SERVE_CHECKOUT     the checkout they report (default: this app root)
 //   FAKE_SERVE_BOOT_ID      the boot id /ping reports (default: the current one; server.json

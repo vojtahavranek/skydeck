@@ -6,9 +6,13 @@
  * Every command looks where the store's record says (`resolveRuntimeDir` 'follow', S2 4.2) and
  * believes `server.json` only once design 5.5's rule has judged its pid, process start and boot
  * id: nothing is decided on a line that cannot be judged (the command stops with the error).
- * Only `stopServer` sends a signal, and only to the process `server.json` names, after that
- * identity was confirmed alive right before each signal — never to a keeper, never to this
- * process (S2 5.1 `--restart`; the keepers and their programs keep running).
+ * A server that is starting is found too (ruled, server-findable): it holds the `window_server`
+ * lock from its first step and writes `server.json` once its port is bound, before `server.sock`
+ * answers (S2 5.2), so while `server.json` names no live process a live holder of the lock is
+ * such a server, waited for within the ping wait. Only `stopServer` sends a signal, and only to
+ * the process `server.json` — or, for a server that has not recorded itself, the lock — names,
+ * after that identity was confirmed alive right before each signal — never to a keeper, never to
+ * this process (S2 5.1 `--restart`; the keepers and their programs keep running).
  */
 
 import { join } from 'node:path';
@@ -29,6 +33,7 @@ import {
   listKeeperLines,
   prepareRuntimeDir,
   readServerJson,
+  readServerLock,
   resolveRuntimeDir,
   runtimeFiles,
   RuntimeDirError,
@@ -40,7 +45,7 @@ export type FoundServer =
   | { kind: 'ours'; ping: PingAnswer }
   | { kind: 'other-build'; ping: PingAnswer }
   | { kind: 'other-checkout'; ping: PingAnswer }
-  | { kind: 'hung'; pid: number };
+  | { kind: 'hung'; pid: number; starting?: true };
 
 /**
  * Timeouts in ms, the design's values by default (A31): ping 5000, start 10000, stop 10000, kill
@@ -170,15 +175,92 @@ async function pingOnce(
 // ---------------------------------------------------------------------------------------------
 // Finding the server
 
+/** The end of a wait, on the platform's clock: `over()` once `ms` have passed, `passed` settles
+ *  then, and `signal` aborts then (or at `cancel()`), so that a ping still open is given up. */
+interface Deadline {
+  over(): boolean;
+  passed: Promise<void>;
+  signal: AbortSignal;
+  cancel(): void;
+}
+
+function deadlineIn(platform: Platform, ms: number): Deadline {
+  const controller = new AbortController();
+  let late = false;
+  let stop = (): void => {};
+  const passed = new Promise<void>((resolve) => {
+    stop = platform.clock.after(ms, () => {
+      late = true;
+      controller.abort();
+      resolve();
+    });
+  });
+  return {
+    over: () => late,
+    passed,
+    signal: controller.signal,
+    cancel() {
+      stop();
+      controller.abort();
+    },
+  };
+}
+
+/** The server a command deals with: the one server.json names, or one only the lock names yet. */
+type Found =
+  | {
+      kind: 'recorded';
+      line: PidLine;
+      checkout: string;
+      files: RuntimeFiles;
+      /** Found only after a wait: it was starting, and listens a moment after it records itself. */
+      waited: boolean;
+    }
+  | { kind: 'starting'; line: PidLine; checkout: string };
+
+/**
+ * The server to deal with (ruled, server-findable): the one server.json names, when its process is
+ * alive by design 5.5's rule; otherwise the holder of the window_server lock, when it is alive — a
+ * server that is starting: server.json is looked at again every POLL_MS (where the store's record
+ * says, looked up again: the start records its directory) until it names a live process (then
+ * that one, `waited`), or until `deadline` is over or `stopWaiting` says so for the holder's line
+ * (then 'starting', with the identity the lock names). null when neither names a live process:
+ * no lock, a value skydeck does not write, its holder dead — also when that comes about during
+ * the wait. Rejects with judge's SkydeckError for a server.json line or a holder that cannot be
+ * judged, as for a server.json that cannot be read.
+ */
+async function serverWithin(
+  deck: Deck,
+  deadline: Deadline,
+  stopWaiting: (line: PidLine) => boolean = () => false,
+): Promise<Found | null> {
+  const { platform } = deck;
+  for (let waited = false; ; waited = true) {
+    const files = serverFiles(deck);
+    const server = recordedServer(deck, files);
+    if (server !== null && judge(platform, server.line) === 'alive') {
+      return { kind: 'recorded', ...server, files, waited };
+    }
+    const holder = readServerLock(deck.store);
+    if (holder === null || judge(platform, holder.line) === 'dead') return null;
+    if (deadline.over() || stopWaiting(holder.line)) return { kind: 'starting', ...holder };
+    await Promise.race([platform.clock.sleep(POLL_MS), deadline.passed]);
+  }
+}
+
 /**
  * S2 5.1 step 1: server.json read; none when it is missing or its process is dead by design
- * 5.5's rule; otherwise `GET /ping` within `pingMs`: another checkout → other-checkout, another
- * build or boot → other-build, else ours. After a ping that gets no answer the process is judged
- * again: gone meanwhile → none. A refused or failed ping (a server in its orderly stop no longer
- * accepts, S2 5.5) is tried again every 100 ms until `pingMs` is over (ruled); one that timed
- * out has waited already: a process still alive is then hung. The ping open when `pingMs` is
- * over is aborted, so nothing outlives the call. Rejects with a SkydeckError when server.json
- * cannot be read or the process cannot be judged.
+ * 5.5's rule — unless the window_server lock names a live holder: a server that is starting
+ * (ruled, server-findable), whose server.json is waited for within `pingMs`; one that has not
+ * recorded itself by then is `hung` with `starting: true` and the pid the lock names. Then
+ * `GET /ping` within what is left of `pingMs`: another checkout → other-checkout, another build or
+ * boot → other-build, else ours. After a ping that gets no answer the process is judged again:
+ * gone meanwhile → none. A refused or failed ping (a server in its orderly stop no longer accepts,
+ * S2 5.5; a starting one listens a moment after it records itself) is tried again every 100 ms
+ * until `pingMs` is over (ruled); one that timed out has waited already: a process still alive
+ * is then hung. The ping open when `pingMs` is over is aborted, so nothing outlives the call.
+ * Rejects with a SkydeckError when server.json cannot be read or the process — or the lock's
+ * holder — cannot be judged.
  */
 export async function findServer(
   deck: Deck,
@@ -187,56 +269,46 @@ export async function findServer(
   times: LifecycleTimes = {},
 ): Promise<FoundServer> {
   const { pingMs } = timesOf(times);
-  const files = serverFiles(deck);
-  const server = recordedServer(deck, files);
-  if (server === null || judge(deck.platform, server.line) === 'dead') {
-    return { kind: 'none' };
+  const deadline = deadlineIn(deck.platform, pingMs);
+  try {
+    const found = await serverWithin(deck, deadline);
+    if (found === null) return { kind: 'none' };
+    if (found.kind === 'starting') return { kind: 'hung', pid: found.line.pid, starting: true };
+    const ping = await pingWithin(deck, found.files, found.line, pingMs, deadline);
+    if (ping === 'dead') return { kind: 'none' };
+    if (ping === 'hung') return { kind: 'hung', pid: found.line.pid };
+    if (ping.checkout !== checkout) return { kind: 'other-checkout', ping };
+    if (ping.build !== build || ping.bootId !== found.line.bootId) {
+      return { kind: 'other-build', ping };
+    }
+    return { kind: 'ours', ping };
+  } finally {
+    deadline.cancel();
   }
-  const ping = await pingWithin(deck, files, server.line, pingMs);
-  if (ping === 'dead') return { kind: 'none' };
-  if (ping === 'hung') return { kind: 'hung', pid: server.line.pid };
-  if (ping.checkout !== checkout) return { kind: 'other-checkout', ping };
-  if (ping.build !== build || ping.bootId !== server.line.bootId) {
-    return { kind: 'other-build', ping };
-  }
-  return { kind: 'ours', ping };
 }
 
 /**
  * findServer's ping (ruled): the answer, 'dead' when the process is gone by a look after a ping
- * without an answer, 'hung' when it still lives after a ping that timed out or once `pingMs` is
- * over. Refused and failed pings are tried again every POLL_MS; the one open at the end is aborted.
+ * without an answer, 'hung' when it still lives after a ping that timed out or once `deadline` is
+ * over. Refused and failed pings are tried again every POLL_MS; the one open at the end is aborted
+ * (the caller cancels `deadline`).
  */
 async function pingWithin(
   deck: Deck,
   files: RuntimeFiles,
   line: PidLine,
   pingMs: number,
+  deadline: Deadline,
 ): Promise<PingAnswer | 'dead' | 'hung'> {
   const { platform } = deck;
   const client = controlClient(platform.net, files.serverSock);
-  const controller = new AbortController();
-  let late = false;
-  let cancel = (): void => {};
-  const over = new Promise<void>((resolve) => {
-    cancel = platform.clock.after(pingMs, () => {
-      late = true;
-      controller.abort();
-      resolve();
-    });
-  });
-  try {
-    for (;;) {
-      const answer = await pingOnce(client, pingMs, controller.signal);
-      if (typeof answer === 'object') return answer;
-      if (judge(platform, line) === 'dead') return 'dead';
-      if (answer === 'timeout' || late) return 'hung';
-      await Promise.race([platform.clock.sleep(POLL_MS), over]);
-      if (late) return judge(platform, line) === 'dead' ? 'dead' : 'hung';
-    }
-  } finally {
-    cancel();
-    controller.abort();
+  for (;;) {
+    const answer = await pingOnce(client, pingMs, deadline.signal);
+    if (typeof answer === 'object') return answer;
+    if (judge(platform, line) === 'dead') return 'dead';
+    if (answer === 'timeout' || deadline.over()) return 'hung';
+    await Promise.race([platform.clock.sleep(POLL_MS), deadline.passed]);
+    if (deadline.over()) return judge(platform, line) === 'dead' ? 'dead' : 'hung';
   }
 }
 
@@ -257,11 +329,12 @@ async function pingWithin(
  * server that records another directory); the ping open when the wait ends is aborted, so nothing
  * outlives the call. Rejects with a SkydeckError, starting nothing, when the boot id cannot be read
  * (no server could ever be confirmed), and when the program cannot be started.
- * Started means findable (ruled, task 25): a server answers its ping before it writes server.json
- * (S2 5.2), and every other command finds a server by server.json; so a matching ping counts only
- * once server.json (where the store's record says, looked up again) names that server — its pid,
- * server id and boot id, its process alive by design 5.5's rule — within the same `startMs`. A
- * server that answers but has not recorded itself by then gives its own line.
+ * Started means findable (ruled, task 25): every other command finds a server by server.json; so
+ * a matching ping counts only once server.json (where the store's record says, looked up again)
+ * names that server — its pid, server id and boot id, its process alive by design 5.5's rule —
+ * within the same `startMs`. A server that answers but has not recorded itself by then gives its
+ * own line. A server of this build writes server.json before server.sock answers (ruled,
+ * server-findable), so for it the check passes at its first answer; it stays for any that does not.
  */
 export async function startServe(
   deck: Deck,
@@ -390,8 +463,14 @@ function exitLine(deck: Deck, exit: Exit, log: string): string {
       return `port ${deck.config.window.port} on 127.0.0.1 is used by another program; set window.port in ${sanitize(deck.places.configPath)}`;
     case OTHER_CHECKOUT: {
       const server = recordedServer(deck, serverFiles(deck));
-      return server !== null && judge(deck.platform, server.line) === 'alive'
-        ? `a window server already runs (pid ${server.line.pid}, from ${sanitize(server.checkout)})`
+      if (server !== null && judge(deck.platform, server.line) === 'alive') {
+        return `a window server already runs (pid ${server.line.pid}, from ${sanitize(server.checkout)})`;
+      }
+      // One that is starting has not recorded itself yet: its lock names it (ruled, server-findable).
+      const holder = readServerLock(deck.store);
+      return holder !== null &&
+        pidLineState(holder.line, deck.platform.proc, currentBootId(deck.platform)) === 'alive'
+        ? `a window server already runs (pid ${holder.line.pid}, from ${sanitize(holder.checkout)})`
         : didNotStart(`exit ${exit.code}`, log);
     }
     case RUNTIME_DIR: {
@@ -451,6 +530,13 @@ function refusalReason(platform: Platform, dir: string): string | null {
  * answering (findServer's 'hung'); when server.json still names that pid, it is not pinged again
  * and gets SIGTERM at once (S2 5.1), so that a command's stop does not wait the ping twice.
  * Without it, or for another pid, the server is pinged as above.
+ * A server that is starting (ruled, server-findable): while server.json names no live process, a
+ * live holder of the window_server lock is waited for within `pingMs` to record itself — then it
+ * is pinged in what is left of `pingMs`, a refused ping tried again every 100 ms (it listens a
+ * moment after it records itself), and stopped as above; one that has not recorded itself by
+ * then, or whose pid is `options.hungPid`, gets SIGTERM at once and SIGKILL after `killMs`, to the
+ * identity the lock names, under the same checks. A holder that cannot be judged rejects as an
+ * unknown server.json line does; nothing is signalled on it.
  */
 export async function stopServer(
   deck: Deck,
@@ -459,29 +545,64 @@ export async function stopServer(
 ): Promise<{ stopped: boolean; keepers: number }> {
   const { platform } = deck;
   const { pingMs, stopMs, killMs } = timesOf(times);
-  const files = serverFiles(deck);
-  const server = recordedServer(deck, files);
-  const keepers = keeperLines(platform, files).filter((k) => k.state !== 'dead').length;
-  if (server === null || judge(platform, server.line) === 'dead') {
-    return { stopped: false, keepers };
+  const deadline = deadlineIn(platform, pingMs);
+  let target: { found: Found; answered: boolean } | 'none' | 'gone';
+  let keepers: number;
+  try {
+    keepers = keeperLines(platform, serverFiles(deck)).filter((k) => k.state !== 'dead').length;
+    target = await stopTarget(deck, pingMs, deadline, options.hungPid);
+  } finally {
+    deadline.cancel();
   }
-  const { line } = server;
-  const client = controlClient(platform.net, files.serverSock);
-  const knownHung = options.hungPid !== undefined && options.hungPid === line.pid;
-  if (!knownHung && typeof (await pingOnce(client, pingMs)) === 'object') {
-    await client.shutdown().catch((error: unknown) => {
-      if (!(error instanceof SkydeckError)) throw error;
-    });
-    if (await gone(platform, line, stopMs)) return { stopped: true, keepers };
-  }
+  if (target === 'none') return { stopped: false, keepers };
+  if (target === 'gone') return { stopped: true, keepers };
+  const { found, answered } = target;
+  const { line } = found;
+  if (answered && (await gone(platform, line, stopMs))) return { stopped: true, keepers };
+  const files = found.kind === 'recorded' ? found.files : serverFiles(deck);
+  const source = found.kind === 'recorded' ? files.serverJson : "skydeck's window_server lock";
   for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
-    if (!signalServer(platform, files, line, signal) || (await gone(platform, line, killMs))) {
+    if (
+      !signalServer(platform, files, line, source, signal) ||
+      (await gone(platform, line, killMs))
+    ) {
       return { stopped: true, keepers };
     }
   }
   throw new SkydeckError(
     `the window's server (pid ${line.pid}) did not end, not even after SIGKILL`,
   );
+}
+
+/**
+ * stopServer's first step: the server to stop and whether it was asked to (`answered`: it answered
+ * the ping and got POST /shutdown); 'none' when no live server is found; 'gone' when the one found
+ * ended while it was pinged.
+ */
+async function stopTarget(
+  deck: Deck,
+  pingMs: number,
+  deadline: Deadline,
+  hungPid: number | undefined,
+): Promise<{ found: Found; answered: boolean } | 'none' | 'gone'> {
+  const found = await serverWithin(deck, deadline, (line) => line.pid === hungPid);
+  if (found === null) return 'none';
+  if (found.kind === 'starting' || found.line.pid === hungPid) return { found, answered: false };
+  const client = controlClient(deck.platform.net, found.files.serverSock);
+  let answered: boolean;
+  if (found.waited) {
+    const ping = await pingWithin(deck, found.files, found.line, pingMs, deadline);
+    if (ping === 'dead') return 'gone';
+    answered = typeof ping === 'object';
+  } else {
+    answered = typeof (await pingOnce(client, pingMs)) === 'object';
+  }
+  if (answered) {
+    await client.shutdown().catch((error: unknown) => {
+      if (!(error instanceof SkydeckError)) throw error;
+    });
+  }
+  return { found, answered };
 }
 
 /** The keepers' .pid lines (listKeeperLines); a terms/ that cannot be listed is a SkydeckError. */
@@ -498,14 +619,16 @@ function keeperLines(platform: Platform, files: RuntimeFiles): ReturnType<typeof
 /**
  * Sends `signal` to the server when its identity is confirmed alive now; false when it is gone.
  * Throws a SkydeckError, sending nothing, when the identity is that of a keeper of this runtime
- * directory, of this process or of pid 1 (such a server.json names no server), when the keepers
- * cannot be listed, or when the process cannot be judged; and when the system refuses the signal.
- * The identity is judged last, directly before the signal, so that nothing runs in between.
+ * directory, of this process or of pid 1 (such a server.json, or lock, names no server: `source`
+ * says which named it), when the keepers cannot be listed, or when the process cannot be judged;
+ * and when the system refuses the signal. The identity is judged last, directly before the
+ * signal, so that nothing runs in between.
  */
 function signalServer(
   platform: Platform,
   files: RuntimeFiles,
   line: PidLine,
+  source: string,
   signal: 'SIGTERM' | 'SIGKILL',
 ): boolean {
   const keeper = keeperLines(platform, files).some(
@@ -517,7 +640,7 @@ function signalServer(
   );
   if (keeper || line.pid === platform.pid || line.pid === 1) {
     throw new SkydeckError(
-      `${files.serverJson} names pid ${line.pid}, which is not the window's server (${keeper ? 'a keeper' : 'this process or init'}); nothing was signalled`,
+      `${source} names pid ${line.pid}, which is not the window's server (${keeper ? 'a keeper' : 'this process or init'}); nothing was signalled`,
     );
   }
   if (judge(platform, line) === 'dead') return false;

@@ -36,6 +36,7 @@ const PING: PingAnswer = {
 };
 
 const STATUS: StatusAnswer = {
+  starting: false,
   pages: 1,
   terminals: [
     { id: '0123456789ab', slot: 1, state: 'running', sessionId: S1, pid: 5001 },
@@ -276,6 +277,23 @@ test('status answers what deps.status gives', async (t) => {
   const c = await startControl(t);
   assert.deepEqual(await c.client.status(), STATUS);
   assert.equal(c.calls.status, 1);
+});
+
+test('status: `starting` as the server says it (ruled, server-findable); absent — an older server — is false; another type is an answer that cannot be read', async () => {
+  const older: Record<string, unknown> = { ...STATUS };
+  delete older.starting;
+  for (const [body, starting] of [
+    [{ ...STATUS, starting: true }, true],
+    [{ ...STATUS, starting: false }, false],
+    [older, false],
+  ] as const) {
+    const { net } = fakeNet(answering(200, body));
+    assert.deepEqual(await controlClient(net, SOCK).status(), { ...STATUS, starting });
+  }
+  for (const starting of ['yes', 1, null]) {
+    const { net } = fakeNet(answering(200, { ...STATUS, starting }));
+    await assert.rejects(controlClient(net, SOCK).status(), /cannot be read/, String(starting));
+  }
 });
 
 test('token(30) mints a token: 32 bytes in base64url, an id of 32 hex, expiring in 30 s', async (t) => {
