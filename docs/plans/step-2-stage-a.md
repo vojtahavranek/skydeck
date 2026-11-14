@@ -2699,8 +2699,8 @@ export function escapeTail(): EscapeTail;
 
 **Files**
 - Create: `src/window/escape-tail.ts`
-- Modify: `src/window/screen.ts` (the seam; the pen's real underline, ruled),
-  `test/window/screen.test.ts`, `docs/design-step-2.md` 7.2 and 21 (ruled)
+- Modify: `src/window/screen.ts` (the seam; the pen's real underline and xterm.js's log level
+  off, ruled), `test/window/screen.test.ts`, `docs/design-step-2.md` 5.2, 7.2 and 21 (ruled)
 - Test: `test/window/escape-tail.test.ts`
 
 **Tests** (platform: none — the vendored modules)
@@ -3571,3 +3571,11 @@ Rulings on task 33's findings (2026-11-14):
     of an open link's text comes out as plain text (a named limit, pinned; the sweep leaves out the
     cuts while a link is open). Also named in S2 7.2: underline style and colour (SGR 4:3, 58) are
     not kept, and a link's cells come back with a plain, not dashed, underline.
+14. **From task 33's review 2**, two defects of task 12's code. The headless terminal ran at
+    xterm.js's default log level, so a parsing error, which quotes a character and the parameters
+    of the program's output, went to stderr and so to `server.log`. Ruled: fixed in this pull
+    request, `logLevel: 'off'`, tested (S2 5.2, 21). And two more differences of the serialise
+    addon: rows erased with a background colour below the last row with content come back with
+    the default background; an erased cell left in inverse video by overwriting half a wide
+    character comes back without it. Ruled: named limits in S2 7.2, each pinned by a test, no
+    repair; the sweeps' streams avoid both.
