@@ -24,7 +24,10 @@ const SECTIONS = [
       [['Ctrl+Shift+C'], 'copy the terminal’s selection'],
       [['Ctrl+Shift+V'], 'send a raw Ctrl+V (Claude Code’s image paste)'],
       [['Ctrl+Shift+H'], 'this help, and away again'],
-      [['Ctrl+Shift+R'], 'reload the page, once skydeck’s server has proven itself'],
+      [
+        ['Ctrl+Shift+R', 'Refresh', 'Shift+Refresh', 'Ctrl+Refresh'],
+        'reload the page, once skydeck’s server has proven itself (Refresh: the keyboard’s refresh key)',
+      ],
       [['Ctrl+Shift+P'], `the quick switcher: ${LATER}`],
       [['Ctrl+Shift+J'], `the next session that needs you: ${LATER}`],
     ],
@@ -36,6 +39,7 @@ const SECTIONS = [
       [['Ctrl+V'], 'paste text'],
       [['Shift+Enter'], 'a new line'],
       [['Ctrl+click'], 'open a link'],
+      [['Alt+F4'], 'close the window, as any window; it never reaches the program'],
     ],
   },
   {
@@ -49,7 +53,10 @@ const SECTIONS = [
       [['/'], 'filter'],
       [['a'], 'show or hide done sessions'],
       [['Esc'], 'clear the filter, then back to the terminal'],
-      [['F5', 'Ctrl+R'], 'reload the page, once skydeck’s server has proven itself'],
+      [
+        ['F5', 'Shift+F5', 'Ctrl+F5', 'Ctrl+R'],
+        'reload the page, once skydeck’s server has proven itself',
+      ],
       [['l', 'F2'], `label: ${LATER}`],
       [['g'], `group: ${LATER}`],
       [['n'], `note: ${LATER}`],
@@ -60,7 +67,7 @@ const SECTIONS = [
 ];
 
 const NOTES = [
-  'Esc in the terminal is Claude Code’s and never leaves the terminal; so are F5 and Ctrl+R while the terminal has the keyboard. Esc in the new form closes it.',
+  'Esc in the terminal is Claude Code’s and never leaves the terminal; so are F5, Shift+F5, Ctrl+F5 and Ctrl+R while the terminal has the keyboard (while the page has it — the new form, a card, the find bar — they reload the page, as in the list). Esc in the new form closes it.',
   'In a browser tab (skydeck window --print-url) the browser keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab and their Shift forms for itself: use Ctrl+Shift+O for the previous session and + New in the key bar for a new one.',
   'The window takes Ctrl+Shift with a letter or a digit, and Ctrl+Tab, for itself. A Claude Code binding on one of them (ctrl+shift+<key>, which a terminal with the kitty keyboard protocol could send) never reaches Claude Code; Ctrl+Shift+-, Alt, Ctrl with a letter and the function keys stay Claude Code’s.',
 ];

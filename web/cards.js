@@ -262,7 +262,9 @@ export function createCards(root, deps) {
         clearTimeout(copiedTimer);
       }
       copiedTimer = setTimeout(() => {
-        copied.textContent = '';
+        // Late or not, it clears only its own line (header() clears it for another session).
+        copiedTimer = null;
+        if (copied.textContent === text) copied.textContent = '';
       }, COPIED_MS);
     };
     const clipboard = /** @type {Clipboard | undefined} */ (navigator.clipboard);
@@ -383,7 +385,9 @@ export function createCards(root, deps) {
     });
     button.dataset['fact'] = '';
     const actions = element('div', 'card-actions');
-    actions.append(button, element('span', 'card-hint', 'opens in this window, in a new terminal'));
+    // True whenever it is shown: an expired session's card says it cannot be resumed instead.
+    const hint = element('span', 'card-hint', 'opens in this window, in a new terminal');
+    actions.append(button, hint);
     return {
       parts: [ended, activity.line, where.line, command.line, warnings, actions, lines],
       /**
@@ -435,6 +439,7 @@ export function createCards(root, deps) {
           warnings.replaceChildren(...warned.map((text) => element('div', 'card-warning', text)));
         }
         button.disabled = expired;
+        setHidden(hint, expired);
         if (!pending) {
           setText(lines, resultLines.join('\n'));
         }
@@ -508,6 +513,12 @@ export function createCards(root, deps) {
       if (row === null) {
         setHidden(head, true);
         return;
+      }
+      if (row.id !== headId) {
+        // "id copied" was about the session shown before.
+        if (copiedTimer !== null) clearTimeout(copiedTimer);
+        copiedTimer = null;
+        setText(copied, '');
       }
       headId = row.id;
       setText(title, row.title);

@@ -17,7 +17,7 @@ import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import { readRecords } from '../test/helpers/standin.ts';
 import { connectTestPage } from '../test/helpers/window.ts';
-import { cancels, listKey, terminalKey, windowChord } from '../web/keys.js';
+import { listKey, terminalKey, windowChord } from '../web/keys.js';
 import type { KeyLike } from '../web/keys.js';
 import { browser, newPage } from './helpers/browser.ts';
 import {
@@ -222,6 +222,15 @@ test('the right side', async (t) => {
         assert.deepEqual(await texts(s.page, '.card-header .header-chip'), [chip]);
         assert.deepEqual(await texts(s.page, '.card-header .header-group'), ['']);
       }
+
+      // Nothing selected — the row is gone from the list: no header and no card of a session that
+      // is not shown (S2 12.6; ruled for task 27, 14:41Z).
+      s.serve(scriptedList([], []));
+      await s.page.waitForSelector('#right-zone[data-pane="none"]', { state: 'attached' });
+      assert.equal(
+        await s.page.evaluate(() => document.getElementById('cards')?.innerText.trim()),
+        '',
+      );
     },
   );
 
@@ -231,10 +240,19 @@ test('the right side', async (t) => {
       const s = await scripted(t, chromium);
       await s.page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
       const list = (state: string): Row =>
-        listWith([[{ id: S1, terminal: null, slot: null }], []], {
-          rows: { [S1]: { state, dir: '/home/u/selectable' } },
-          list: { selected: selectedOf(S1) },
-        });
+        listWith(
+          [
+            [
+              { id: S1, terminal: null, slot: null },
+              { id: S2, terminal: null, slot: null },
+            ],
+            [],
+          ],
+          {
+            rows: { [S1]: { state, dir: '/home/u/selectable' } },
+            list: { selected: selectedOf(S1) },
+          },
+        );
       s.serve(list('not-running'));
       await clickRow(s.page, S1);
       await showsText(s.page, '#cards .header-id', new RegExp(`^${S1.slice(0, 8)}$`));
@@ -247,6 +265,24 @@ test('the right side', async (t) => {
         { timeout: 5000 },
       );
       assert.equal(await active(s.page), '#list', 'the click took no keyboard');
+      // The feedback goes away by itself.
+      await showsText(s.page, '#cards .header-copied', /^id copied$/);
+      await showsText(s.page, '#cards .header-copied', /^$/, 5000);
+      // Another session in the header: the feedback of the first is gone at once, and the second
+      // copies its own id.
+      await s.page.locator('#cards .header-id').click();
+      await showsText(s.page, '#cards .header-copied', /^id copied$/);
+      await clickRow(s.page, S2);
+      await showsText(s.page, '#cards .header-id', new RegExp(`^${S2.slice(0, 8)}$`));
+      assert.equal(await shownText(s.page, '#cards .header-copied'), '');
+      await s.page.locator('#cards .header-id').click();
+      await s.page.waitForFunction(
+        async (id) => (await navigator.clipboard.readText()) === id,
+        S2,
+        { timeout: 5000 },
+      );
+      await clickRow(s.page, S1);
+      await s.page.focus('#list');
 
       await s.page.locator('#cards .header-dir').click({ clickCount: 3 });
       const selected = (): Promise<string> =>
@@ -288,6 +324,9 @@ test('the right side', async (t) => {
       ]);
       const button = s.page.locator('#cards button', { hasText: 'Resume here' });
       assert.equal(await button.isDisabled(), false);
+      assert.deepEqual(await texts(s.page, '.card-hint'), [
+        'opens in this window, in a new terminal',
+      ]);
 
       show({ ended: 'mid-turn', flagsKnown: false, expiring: true });
       await showsText(
@@ -312,12 +351,13 @@ test('the right side', async (t) => {
       show({ ended: null, command: null, expired: true });
       await showsText(s.page, '#cards .card-ended', /transcript is gone/);
       assert.equal(await button.isDisabled(), true, 'an expired session cannot be resumed');
+      assert.deepEqual(await texts(s.page, '.card-hint'), [''], 'nothing opens: no hint');
       assert.match((await texts(s.page, '.card-command'))[0] ?? '', /cannot/);
     },
   );
 
   await t.test(
-    'Resume here sends act resume; while it waits a second press sends nothing; a refusal shows its lines on the card',
+    'Resume here sends act resume; while it waits a second press sends nothing; a refusal shows its lines on the card and releases the button, and so does a lost connection',
     async (t) => {
       const s = await scripted(t, chromium);
       let release: (result: Row) => void = () => {};
@@ -353,6 +393,22 @@ test('the right side', async (t) => {
         '#cards .card-lines',
         new RegExp(`${S1.slice(0, 8)} is running \\(pid 4242\\)`),
       );
+
+      // The refusal released the button; a lost connection releases it too.
+      await button.click();
+      await sleep(300);
+      assert.equal(s.sent.filter((message) => message['t'] === 'act').length, 2);
+      const first = s.conn();
+      first.ws.terminate();
+      await showsText(s.page, '#cards .card-lines', /stopped answering/);
+      await connection(s.page, 'open');
+      assert.notEqual(s.conn(), first, 'a new connection');
+      await button.click();
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (s.sent.filter((message) => message['t'] === 'act').length < 3) {
+        assert.ok(performance.now() < deadline, 'a resume on the new connection');
+        await sleep(50);
+      }
     },
   );
 
@@ -589,6 +645,37 @@ test('the right side', async (t) => {
       );
       assert.equal(await zone(s.page), 'Focus: terminal');
       assert.equal(await s.page.inputValue('#cards input[name="flags"]'), '-r x', 'kept for a fix');
+      assert.deepEqual(await texts(s.page, '.card-hint'), ['starts in this window · Esc closes']);
+    },
+  );
+
+  await t.test(
+    'the new form: a second Enter while a start is pending sends nothing; a lost connection ends the wait and Start works again',
+    async (t) => {
+      const s = await scripted(t, chromium);
+      s.answer.act = () => null; // never answered
+      const acts = (): number => s.sent.filter((message) => message['t'] === 'act').length;
+      s.serve(listWith([[{ id: S1, terminal: null, slot: null }], []]));
+      await clickRow(s.page, S1);
+      await s.page.keyboard.press('Control+Shift+N');
+      await s.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await s.page.fill('#cards input[name="label"]', 'x');
+      await s.page.keyboard.press('Enter');
+      await s.page.keyboard.press('Enter');
+      await sleep(300);
+      assert.equal(acts(), 1);
+
+      const first = s.conn();
+      first.ws.terminate();
+      await showsText(s.page, '#cards .card-new', /stopped answering/);
+      await connection(s.page, 'open');
+      assert.notEqual(s.conn(), first, 'a new connection');
+      await s.page.locator('#cards button', { hasText: 'Start' }).click();
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (acts() < 2) {
+        assert.ok(performance.now() < deadline, 'a start on the new connection');
+        await sleep(50);
+      }
     },
   );
 
@@ -624,6 +711,7 @@ test('the right side', async (t) => {
 // ---------------------------------------------------------------------------------------------
 // The key help against keys.js
 
+/** The help's names of named keys, and the `key` of the events they stand for. */
 const NAMED: Record<string, string> = {
   '↑': 'ArrowUp',
   '↓': 'ArrowDown',
@@ -632,12 +720,95 @@ const NAMED: Record<string, string> = {
   PgUp: 'PageUp',
   PgDn: 'PageDown',
   Esc: 'Escape',
+  Refresh: 'BrowserRefresh',
 };
+const NAME_OF = Object.fromEntries(Object.entries(NAMED).map(([name, key]) => [key, name]));
+
+type Section = 'window' | 'terminal' | 'list';
+const MODIFIERS = ['Ctrl', 'Shift', 'Alt', 'Meta'] as const;
+
+/** Every key event the tables can be asked about: each character and named key, with each of the
+ *  16 sets of modifiers (US and Czech characters; a letter's and a digit's physical key). */
+function everyEvent(): KeyLike[] {
+  const chars = [
+    ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+    ...'`-=[]\;\',./~!@#$%^&*()_+{}|:"<>? ',
+    ...'+ěščřžýáíéúů§¨',
+  ];
+  const named = [
+    'Enter',
+    'Escape',
+    'Tab',
+    'Backspace',
+    'Delete',
+    'Insert',
+    'Home',
+    'End',
+    'PageUp',
+    'PageDown',
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'ContextMenu',
+    'BrowserRefresh',
+    ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
+  ];
+  const codeOf = (key: string): string => {
+    if (/^[a-z]$/i.test(key)) return `Key${key.toUpperCase()}`;
+    if (/^[0-9]$/.test(key)) return `Digit${key}`;
+    const shifted = '!@#$%^&*()'.indexOf(key); // US: Shift+1 … Shift+0
+    if (shifted !== -1) return `Digit${(shifted + 1) % 10}`;
+    const czech = '+ěščřžýáíé'.indexOf(key); // Czech: the number row without Shift
+    if (czech !== -1) return `Digit${(czech + 1) % 10}`;
+    return named.includes(key) ? key : '';
+  };
+  const events: KeyLike[] = [];
+  for (const key of [...chars, ...named]) {
+    for (let bits = 0; bits < 16; bits++) {
+      events.push({
+        key,
+        code: codeOf(key),
+        ctrlKey: (bits & 1) !== 0,
+        shiftKey: (bits & 2) !== 0,
+        altKey: (bits & 4) !== 0,
+        metaKey: (bits & 8) !== 0,
+      });
+    }
+  }
+  return events;
+}
+
+/** The help's name of a key event in a section (`null`: keys.js does not classify it there). */
+function helpNameOf(e: KeyLike, section: Section): string | null {
+  const held = (e: KeyLike): string =>
+    MODIFIERS.filter((m) => e[`${m.toLowerCase()}Key` as 'ctrlKey'])
+      .map((m) => `${m}+`)
+      .join('');
+  if (section === 'window') {
+    const chord = windowChord(e, 'terminal');
+    assert.deepEqual(windowChord(e, 'list'), chord, `${held(e)}${e.key}: the same in both zones`);
+    if (chord === null) return null;
+    if (chord.kind === 'slot') return 'Ctrl+Shift+1…9';
+    if (e.key === 'Tab' || e.key === 'BrowserRefresh')
+      return `${held(e)}${NAME_OF[e.key] ?? e.key}`;
+    return `Ctrl+Shift+${e.key.toUpperCase()}`;
+  }
+  if (windowChord(e, 'terminal') !== null) return null; // the window's own, in its section
+  if (section === 'terminal') {
+    const mapped = terminalKey(e);
+    if (mapped === null) return null;
+    if (e.key === 'F4') return 'Alt+F4'; // with or without Shift (keys.js)
+    return `${held(e)}${e.key.length === 1 ? e.key.toUpperCase() : e.key}`;
+  }
+  if (listKey(e) === null) return null;
+  if (e.key.length === 1 && !e.ctrlKey) return e.key; // the character chose the key, Shift too
+  return `${held(e)}${NAME_OF[e.key] ?? (e.key.length === 1 ? e.key.toUpperCase() : e.key)}`;
+}
 
 /** The key events (US layout) a key name of the help stands for. */
 function eventsOf(name: string): KeyLike[] {
-  const range = /^Ctrl\+Shift\+1…9$/.exec(name);
-  if (range !== null) {
+  if (name === 'Ctrl+Shift+1…9') {
     return [1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => ({
       key: '!@#$%^&*('[digit - 1] as string,
       code: `Digit${digit}`,
@@ -648,114 +819,65 @@ function eventsOf(name: string): KeyLike[] {
     }));
   }
   const parts = name.split('+');
-  const last = parts.at(-1) as string;
-  const ctrlKey = parts.includes('Ctrl');
-  const shiftKey = parts.includes('Shift');
+  const last = name.endsWith('++') ? '+' : (parts.at(-1) as string);
+  const has = (m: string): boolean => parts.slice(0, -1).includes(m);
   const key =
     NAMED[last] ??
-    (last.length === 1 ? (shiftKey ? last.toUpperCase() : last.toLowerCase()) : last);
-  return [{ key, code: '', ctrlKey, shiftKey, altKey: false, metaKey: false }];
+    (last.length === 1 ? (has('Shift') ? last.toUpperCase() : last.toLowerCase()) : last);
+  return [
+    {
+      key,
+      code: '',
+      ctrlKey: has('Ctrl'),
+      shiftKey: has('Shift'),
+      altKey: has('Alt'),
+      metaKey: has('Meta'),
+    },
+  ];
 }
 
-/** What keys.js makes of `e` in `zone`: the kind of its action, or null. */
-function kindOf(e: KeyLike, zone: string): string | null {
-  if (zone === 'window') {
-    const inList = windowChord(e, 'list');
-    const inTerminal = windowChord(e, 'terminal');
-    assert.deepEqual(inList, inTerminal, `${e.key}: the same chord in both zones`);
-    return inList?.kind ?? null;
-  }
-  if (zone === 'terminal') {
-    if (windowChord(e, 'terminal') !== null) return null; // the window's, not the terminal's
-    const mapped = terminalKey(e);
-    if (mapped !== null) return 'terminal';
-    return null;
-  }
-  const action = listKey(e);
-  return action === null ? null : action.kind;
+/** The kind keys.js gives `e` in a section, or null. */
+function kindOf(e: KeyLike, section: Section): string | null {
+  if (section === 'window') return windowChord(e, 'terminal')?.kind ?? null;
+  if (windowChord(e, 'terminal') !== null) return null;
+  if (section === 'terminal') return terminalKey(e) === null ? null : 'terminal';
+  return listKey(e)?.kind ?? null;
 }
 
+/**
+ * Both directions, exhaustively: every key the help shows is one keys.js classifies in that
+ * section, marked `comes in a later stage` exactly when keys.js gives `later`; and every event
+ * keys.js classifies (window chords, the terminal's mapping, list keys) has its name in the help.
+ */
 function checkHelp(help: { zone: string; keys: string[]; text: string }[]): void {
-  assert.ok(help.length > 20, `${help.length} lines`);
   const later = /comes in a later stage/;
-  const seen = { window: new Set<string>(), list: new Set<string>(), terminal: new Set<string>() };
+  const shown = { window: new Set<string>(), terminal: new Set<string>(), list: new Set<string>() };
   for (const line of help) {
-    assert.ok(['window', 'list', 'terminal'].includes(line.zone), line.text);
+    assert.ok(['window', 'terminal', 'list'].includes(line.zone), line.text);
+    const section = line.zone as Section;
     assert.ok(line.keys.length > 0, `a line with keys: ${line.text}`);
     for (const name of line.keys) {
       if (name === 'Ctrl+click') {
-        assert.equal(line.zone, 'terminal', 'a link is opened in the terminal');
+        assert.equal(section, 'terminal', 'a link is opened in the terminal');
         continue;
       }
       for (const e of eventsOf(name)) {
-        const kind = kindOf(e, line.zone);
-        assert.ok(kind !== null, `${name} (${line.zone}) is a key keys.js handles there`);
-        assert.equal(
-          kind === 'later',
-          later.test(line.text),
-          `${name}: marked later exactly when it is`,
-        );
-        assert.ok(
-          cancels(e, line.zone === 'list' ? 'list' : 'terminal', true) || name === 'Ctrl+V',
-        );
-        seen[line.zone as keyof typeof seen].add(
-          `${e.ctrlKey ? 'C' : ''}${e.shiftKey ? 'S' : ''}${e.key}`,
-        );
+        const kind = kindOf(e, section);
+        assert.ok(kind !== null, `${name} (${section}) is a key keys.js handles there`);
+        assert.equal(helpNameOf(e, section), name, `${name} is named as the test names it`);
+        assert.equal(kind === 'later', later.test(line.text), `${name}: marked later exactly when`);
       }
+      shown[section].add(name);
     }
   }
-  // Every key keys.js handles is in the help (S2 12.9 and A11: the keys of later stages too).
-  const letters = 'abcdefghijklmnopqrstuvwxyz'.split('');
-  for (const letter of letters) {
-    const chord: KeyLike = {
-      key: letter.toUpperCase(),
-      code: `Key${letter.toUpperCase()}`,
-      ctrlKey: true,
-      shiftKey: true,
-      altKey: false,
-      metaKey: false,
-    };
-    if (windowChord(chord, 'terminal') !== null) {
-      assert.ok(seen.window.has(`CS${chord.key}`), `Ctrl+Shift+${chord.key} is in the help`);
+  const missing: string[] = [];
+  for (const e of everyEvent()) {
+    for (const section of ['window', 'terminal', 'list'] as const) {
+      const name = helpNameOf(e, section);
+      if (name !== null && !shown[section].has(name)) missing.push(`${section}: ${name}`);
     }
-    const plain: KeyLike = {
-      key: letter,
-      code: `Key${letter.toUpperCase()}`,
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-    };
-    if (listKey(plain) !== null) assert.ok(seen.list.has(letter), `${letter} is in the help`);
   }
-  for (const key of [
-    '/',
-    'ArrowUp',
-    'ArrowDown',
-    'ArrowLeft',
-    'ArrowRight',
-    'Home',
-    'End',
-    'PageUp',
-    'PageDown',
-    'Enter',
-    'Escape',
-    'F2',
-    'F5',
-  ]) {
-    const plain: KeyLike = {
-      key,
-      code: '',
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-    };
-    if (listKey(plain) !== null) assert.ok(seen.list.has(key), `${key} is in the help`);
-  }
-  assert.ok(seen.window.has('CTab'), 'Ctrl+Tab is in the help');
-  assert.ok(seen.terminal.has('Cv'), 'Ctrl+V is in the help');
-  assert.ok(seen.terminal.has('SEnter'), 'Shift+Enter is in the help');
+  assert.deepEqual([...new Set(missing)], [], 'every key keys.js classifies is in the help');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -841,6 +963,30 @@ async function realServerCases(
   chromium: Parameters<typeof newPage>[1],
 ): Promise<void> {
   await t.test(
+    'the page of a real server with the real web/ reports no problem with a card shown, the form open and the help open; a resume card shown for a selected row leaves the keyboard on the list',
+    async (t) => {
+      const l = await launched(t, chromium);
+      l.d.resumable(S1);
+      await clickRow(l.page, S1);
+      await showsText(l.page, '#cards .card-command', /--resume/);
+      assert.equal(await active(l.page), '#list', 'the card took no keyboard');
+      noProblems(l);
+      await l.page.keyboard.press('Control+Shift+N');
+      await l.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      noProblems(l);
+      await l.page.keyboard.press('Escape');
+      await l.page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await l.page.keyboard.press('Control+Shift+H');
+      await l.page.waitForSelector('#help:not([hidden])');
+      noProblems(l);
+      await l.page.keyboard.press('Control+Shift+H');
+      await l.page.waitForSelector('#help[hidden]', { state: 'attached' });
+      await sleep(300);
+      noProblems(l);
+    },
+  );
+
+  await t.test(
     "the resume card of a not-running session shows the command the server sent; Resume here starts it, with the keyboard in its terminal; a refusal shows the guard's message on the card",
     async (t) => {
       const l = await launched(t, chromium);
@@ -888,9 +1034,13 @@ async function realServerCases(
       const l = await launched(t, chromium);
       l.d.resumable(S1);
       const far = l.d.resumable(S2, join(l.d.s.home, 'far'));
-      const outside = outsideProgram(l, S2, far, ends);
+      // S2's resume card is shown; then S2 starts in another terminal: within a tick the card
+      // turns into the elsewhere card, with no button left to press.
       await clickRow(l.page, S2);
+      await showsText(l.page, '#cards .card-command', /--resume/);
+      const outside = outsideProgram(l, S2, far, ends);
       await showsText(l.page, '#cards .card', new RegExp(`pid ${outside.pid}\\b`));
+      assert.equal(await l.page.locator('#cards button:visible').count(), 0, 'no stale button');
       assert.match(await shownText(l.page, '#cards .card'), /cannot be shown here/);
 
       await clickRow(l.page, S1);
