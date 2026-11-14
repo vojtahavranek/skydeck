@@ -16,7 +16,7 @@ import type { Detached, Platform } from '../src/platform/types.ts';
 import { securityHeaders } from '../src/window/assets.ts';
 import { controlClient } from '../src/window/client.ts';
 import { procStartOf, sleep, stillRuns, until } from '../test/helpers/keeper.ts';
-import { S1, S2 } from '../test/helpers/platform.ts';
+import { S1, S2, S3 } from '../test/helpers/platform.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import type {
   ServerSandbox,
@@ -67,6 +67,17 @@ const UNSTORED =
 
 const TERM_A = 'aaaaaaaaaaaa';
 const TERM_B = 'bbbbbbbbbbbb';
+const TERM_C = 'cccccccccccc';
+
+/** The id of the element that has the keyboard, or its tag. */
+async function active(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const element = document.activeElement;
+    if (element === null) return 'none';
+    const inTerminal = document.getElementById('terminal')?.contains(element) === true;
+    return inTerminal ? 'in #terminal' : element.id !== '' ? `#${element.id}` : element.tagName;
+  });
+}
 
 /** A `list` of a scripted stand-in: rows of Open with their terminals (S2 8.2.3). */
 function scriptedList(
@@ -378,9 +389,10 @@ test('the page shell', async (t) => {
       for (const [key, cancelled] of terminalZone) {
         assert.equal(await pressed(key), cancelled, `${key} in the terminal zone`);
       }
-      await page.keyboard.press('Control+Shift+P');
+      // Every key through pressed(), so that each reads its own entry.
+      assert.equal(await pressed('Control+Shift+P'), true);
       await showsText(page, '#key-message', /^Ctrl\+Shift\+P: comes in a later stage$/);
-      await page.keyboard.press('Control+Shift+J');
+      assert.equal(await pressed('Control+Shift+J'), true);
       await showsText(page, '#key-message', /^Ctrl\+Shift\+J: comes in a later stage$/);
 
       assert.equal(await pressed('Control+Shift+H'), true);
@@ -1291,6 +1303,205 @@ test('the page shell', async (t) => {
 
       assert.equal((await logOf(page)).filter((e) => e.e === 'unload').length, 0);
       assert.equal(standin.connections.length, 1);
+    },
+  );
+
+  await t.test(
+    "the keyboard goes back to the zone when what had it goes away: after the notice's × the list takes j; after Esc from the form the shown terminal has it; with the form open Ctrl+Shift+L there and back gives the form's first field",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(14);
+      const page = await newPage(t, chromium);
+      const rows = scriptedList(
+        [
+          { id: S1, terminal: TERM_A, slot: 1 },
+          { id: S2, terminal: null, slot: null },
+        ],
+        [{ id: TERM_A, slot: 1, sessionId: S1 }],
+      );
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          serverId: (n) => `${n}`.repeat(16).slice(0, 16),
+          open: (conn, message) => {
+            if (message['t'] === 'view') conn.send(rows);
+            if (message['t'] === 'attach') {
+              conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
+            }
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await page.waitForSelector('#terminal .terminal-placeholder', { timeout: PAGE_WAIT_MS });
+
+      // A server restarted (another server id): the notice; dismissed in the list zone.
+      await toZone(page, 'list');
+      standin.connections[0]?.ws.terminate();
+      await showsText(page, '#info-text', RESTARTED);
+      assert.equal(await selectedRow(page), S1);
+      await page.locator('#info-close').click();
+      await page.waitForSelector('#info[hidden]', { state: 'attached' });
+      assert.equal(await active(page), '#list');
+      await page.keyboard.press('j');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S2,
+      );
+
+      // Esc closes the form over the shown terminal: the terminal has the keyboard again.
+      await page.keyboard.press('Control+Shift+Digit1');
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      await page.keyboard.press('Control+Shift+N');
+      await page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      assert.equal(await active(page), 'in #terminal');
+
+      // The form open, to the list and back: its first field has the keyboard again.
+      await page.keyboard.press('Control+Shift+N');
+      await page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await toZone(page, 'list');
+      await toZone(page, 'terminal');
+      assert.equal(
+        await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name),
+        'directory',
+      );
+    },
+  );
+
+  await t.test(
+    'a socket that ends while a launch stores its key is found at once, and the page connects again with its key',
+    async (t) => {
+      const secret = randomBytes(32);
+      const token = randomBytes(32);
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      await page.addInitScript(() => {
+        // IndexedDB that opens 800 ms late (a cold profile, a slow disk).
+        const realOpen = IDBFactory.prototype.open;
+        IDBFactory.prototype.open = function open(name: string, version?: number) {
+          const fake: Record<string, unknown> = { result: null, error: null };
+          setTimeout(() => {
+            const request = realOpen.call(this, name, version);
+            request.onupgradeneeded = () => {
+              fake['result'] = request.result;
+              (fake['onupgradeneeded'] as (() => void) | undefined)?.();
+            };
+            request.onsuccess = () => {
+              fake['result'] = request.result;
+              (fake['onsuccess'] as (() => void) | undefined)?.();
+            };
+            request.onerror = () => {
+              fake['error'] = request.error;
+              (fake['onerror'] as (() => void) | undefined)?.();
+            };
+          }, 800);
+          return fake as unknown as IDBOpenDBRequest;
+        };
+      });
+      let messages = 0;
+      const answer = honest(secret, { token });
+      const standin = await standinServer(t, {
+        socket: (conn) => {
+          answer(conn);
+          conn.ws.on('message', () => {
+            // The launch's hello is answered, and 300 ms later its socket ends.
+            if (++messages === 1) setTimeout(() => conn.ws.terminate(), 300);
+          });
+        },
+      });
+
+      await page.goto(pageUrl(standin.port, token.toString('base64url')));
+      await until(() => standin.connections.length === 2, 'a second connection', PAGE_WAIT_MS);
+      await connection(page, 'open');
+
+      assert.deepEqual(
+        (await logOf(page)).filter((e) => e.e === 'out' && e.t === 'hello').map((e) => e.mode),
+        ['launch', 'key'],
+      );
+    },
+  );
+
+  await t.test(
+    'the re-attach queue and a view that detaches meanwhile: a terminal it detached is not attached again by the queue (ruled, task 26)',
+    async (t) => {
+      const secret = new Uint8Array(32).fill(15);
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      const three = scriptedList(
+        [
+          { id: S1, terminal: TERM_A, slot: 1 },
+          { id: S2, terminal: TERM_B, slot: 2 },
+          { id: S3, terminal: TERM_C, slot: 3 },
+        ],
+        [
+          { id: TERM_A, slot: 1, sessionId: S1 },
+          { id: TERM_B, slot: 2, sessionId: S2 },
+          { id: TERM_C, slot: 3, sessionId: S3 },
+        ],
+      );
+      let snaps = 0;
+      let withhold = false;
+      const standin = await standinServer(t, {
+        socket: honest(secret, {
+          open: (conn, message) => {
+            if (message['t'] === 'view') conn.send(three);
+            else if (message['t'] === 'attach') {
+              if (withhold && message['term'] === TERM_A) return; // its snap is late
+              conn.send({
+                t: 'snap',
+                term: message['term'],
+                ch: ++snaps,
+                cols: 80,
+                rows: 24,
+                data: '',
+              });
+            }
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await page.waitForSelector('#terminal .terminal-placeholder', { timeout: PAGE_WAIT_MS });
+      await page.keyboard.press('Control+Shift+Digit2');
+      await page.keyboard.press('Control+Shift+Digit3');
+      await until(
+        () =>
+          standin.connections[0]?.received.filter((text) => text.includes('"attach"')).length === 3,
+        'three terminals attached',
+        PAGE_WAIT_MS,
+      );
+      await mark(page, 'reconnect');
+      withhold = true;
+      standin.connections[0]?.ws.terminate();
+      await until(() => standin.connections.length === 2, 'a second connection', PAGE_WAIT_MS);
+      await connection(page, 'open');
+      await sleep(1500);
+      // The window is hidden: the view detaches all but the shown terminal (C).
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await sleep(500);
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      withhold = false;
+      await page.keyboard.press('Control+Shift+Digit1'); // A shown again: the view attaches it
+      await sleep(1500);
+
+      const names: Record<string, string> = { [TERM_A]: 'A', [TERM_B]: 'B', [TERM_C]: 'C' };
+      assert.deepEqual(
+        after(await logOf(page), 'reconnect')
+          .filter((e) => e.e === 'out' && (e.t === 'attach' || e.t === 'detach'))
+          .map((e) => `${e.t} ${names[e.term ?? ''] ?? '?'}`),
+        ['attach C', 'attach A', 'detach A', 'detach B', 'attach A'],
+      );
     },
   );
 

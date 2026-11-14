@@ -428,7 +428,8 @@ export function honest(
     before?: (n: number) => 'close-1013' | 'drop' | 'drop-after-hello' | null;
     /** Every message after `start` but pings, with the connection's number (1, 2, …). */
     open?: (conn: StandinConnection, message: Record<string, unknown>, n: number) => void;
-    serverId?: string;
+    /** The welcome's server id, or one per connection (1, 2, …). */
+    serverId?: string | ((n: number) => string);
     bootId?: string;
   },
 ): (conn: StandinConnection) => void {
@@ -474,7 +475,10 @@ export function honest(
         phase = 'start';
         const fields = {
           assetVersion: options.assetVersion ?? conn.build,
-          serverId: options.serverId ?? '0123456789abcdef',
+          serverId:
+            typeof options.serverId === 'function'
+              ? options.serverId(which)
+              : (options.serverId ?? '0123456789abcdef'),
           bootId: options.bootId ?? 'stand-in-boot',
         };
         conn.send(

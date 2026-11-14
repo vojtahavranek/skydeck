@@ -459,6 +459,9 @@ export function createConnection(options) {
         const late = now - lastTick > LATE_MS;
         lastTick = now;
         if (ws.readyState !== WebSocket.OPEN) {
+          // It closed while nobody listened (between the handshake and open: a launch storing
+          // its key): gone, as a closed socket is.
+          drop(ws);
           return;
         }
         if (late) {
@@ -542,9 +545,15 @@ export function createConnection(options) {
         keyStored = false;
       }
     }
+    if (ws.readyState !== WebSocket.OPEN) {
+      // It ended while the key was being stored (the token is used up: mode key from now on).
+      socket = null;
+      lost();
+      return;
+    }
     const { welcome } = result;
     const step = versionStep(welcome.assetVersion);
-    if (step === 'reload' && !keyStored) {
+    if ((step === 'reload' || step === 'unknown') && !keyStored) {
       socket = null;
       ws.onclose = null;
       ws.close();

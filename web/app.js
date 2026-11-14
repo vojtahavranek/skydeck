@@ -122,9 +122,14 @@ const list = createList(dom.list, {
 const terminalView = createTerminalView(dom.terminal, {
   send: (message) => {
     send(message);
-    // The view detached the terminal the re-attach waits for: its snap will not come.
+    // The view detached the terminal the re-attach waits for: its snap will not come. The queue
+    // goes on once the view is done (it may be detaching more: those are skipped then).
     if (message.t === 'detach' && message['term'] === state.waitingSnap) {
-      nextReattach();
+      queueMicrotask(() => {
+        if (state.waitingSnap === message['term']) {
+          nextReattach();
+        }
+      });
     }
   },
   chord: (event) => chordOf(event),
@@ -187,6 +192,7 @@ function showInfo(text) {
 }
 byId('info-close').addEventListener('click', () => {
   dom.info.hidden = true;
+  giveKeyboard(); // the button that had it is gone
 });
 
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -657,6 +663,10 @@ function render() {
   ) {
     terminalView.focus();
   }
+  // What had the keyboard was replaced (a card): the zone takes it back.
+  if (document.activeElement === null || document.activeElement === document.body) {
+    giveKeyboard();
+  }
   focusChanged();
 }
 
@@ -685,14 +695,30 @@ function setZone(zone, moveFocus = true) {
   if (dom.rightZone.contains(document.activeElement) && document.activeElement !== dom.rightZone) {
     return;
   }
+  giveKeyboard();
+}
+
+/**
+ * Gives the keyboard to the zone the key bar names (S2 12.9), also when what had it went away (a
+ * dismissed notice, a closed form, a card replaced): the list; in the terminal zone the shown
+ * terminal, else a card's first text field, else the zone itself. Never a card's button: an Enter
+ * would press it (S2 12.6: nothing resumes but on purpose).
+ */
+function giveKeyboard() {
+  if (state.zone === 'list') {
+    dom.list.focus();
+    return;
+  }
   if (state.pane.kind === 'terminal') {
     terminalView.focus();
+    if (dom.rightZone.contains(document.activeElement)) {
+      return;
+    }
   }
-  // A card's own controls are not focused for the user: an Enter would press one (S2 12.6:
-  // nothing resumes but on purpose). The zone itself holds the keyboard then.
-  if (!dom.rightZone.contains(document.activeElement)) {
-    dom.rightZone.focus();
-  }
+  const field = [...dom.cards.querySelectorAll('input, textarea, select')].find(
+    (element) => isTextField(element) && element.closest('[hidden]') === null,
+  );
+  (field instanceof HTMLElement ? field : dom.rightZone).focus();
 }
 
 document.addEventListener('focusin', (event) => {
@@ -737,6 +763,9 @@ function isTextField(element) {
  */
 function listHasKeyboard() {
   const element = document.activeElement;
+  if (element === null || element === document.body) {
+    return true; // nothing has it: the zone does
+  }
   if (!(element instanceof HTMLElement) || !dom.listZone.contains(element)) {
     return false;
   }
@@ -926,7 +955,7 @@ function openNew() {
 function closeNew() {
   state.newOpen = false;
   render();
-  dom.rightZone.focus();
+  giveKeyboard();
 }
 byId('new-button').addEventListener('click', openNew);
 
