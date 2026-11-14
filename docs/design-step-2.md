@@ -2049,7 +2049,8 @@ selection away, and the Ctrl+C meant to copy it would reach the program. Meanwhi
 be on nothing; the next plain click, a zone chord, or the next render once nothing is selected
 gives it back. The user's own actions move it whatever is selected: a zone chord, Esc closing the
 new form, and the terminal of a resume or new started from the page (11.3), unlike one that only
-a list brought (ruled, plan task 26's review 2).
+a list brought (ruled, plan task 26's review 2). That holds while the user waits for it: once they
+select another session, or the connection is lost, its terminal is like one a list brought.
 
 ### 12.10 Done
 

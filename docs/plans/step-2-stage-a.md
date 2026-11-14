@@ -1348,7 +1348,8 @@ export function cancels(e, zone, handled) {}
 // nothing is selected gives it back (no rule acts on the end of a selection: a mousedown's caret
 // would set it off before a drag selects). The user's own actions move it whatever is selected:
 // a zone chord, Esc closing the new form, and a terminal that the page's own resume or new
-// brings (S2 11.3 comes first); a terminal that only a list brought does not. A module that hides or removes its own keyboard holder in its OWN handler
+// brings (S2 11.3 comes first) — until that terminal is shown, another session is selected or the
+// connection is lost; a terminal that only a list brought does not. A module that hides or removes its own keyboard holder in its OWN handler
 // (the find bar's Esc, a card's own button) is followed by no call of app.js: it moves the
 // keyboard itself to another element of its own — there is no hook for it. The page's chrome (the
 // title bar, the key bar, a notice's ×) takes no keyboard on a mouse click, so a click there

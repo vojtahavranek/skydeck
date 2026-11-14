@@ -98,7 +98,11 @@ const state = {
   waitingSnap: null,
   /** The first list after a welcome starts the re-attach. */
   welcomed: false,
-  /** The session whose terminal a resume or new of this page is bringing (S2 11.3). @type {string | null} */
+  /**
+   * The session whose terminal a resume or new of this page is bringing (S2 11.3): set by its
+   * result, ended when that terminal is shown, when another session is selected, or when the
+   * connection is lost (Z1). @type {string | null}
+   */
   bringing: null,
   lastFocus: '',
 };
@@ -413,6 +417,9 @@ function overLimit(action) {
  */
 function select(id, how) {
   state.newOpen = false;
+  if (state.bringing !== id) {
+    state.bringing = null; // the user chose another session: the resume's mark ends (Z1)
+  }
   if (state.selected !== id) {
     state.selected = id;
     state.mru = [id, ...state.mru.filter((other) => other !== id)];
@@ -1107,6 +1114,7 @@ async function start() {
       output: (channel, bytes) => terminalView.output(channel, bytes),
       lost: (since) => {
         dropPending();
+        state.bringing = null; // the resume's terminal is no longer the page's own news (Z1)
         showGone(since);
       },
       fatal: (text) => {

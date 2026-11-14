@@ -2062,6 +2062,141 @@ test('the page shell', async (t) => {
     },
   );
 
+  for (const how of ['another session is selected', 'the connection is lost'] as const) {
+    await t.test(
+      `the mark of the page's own resume ends when ${how} before its terminal is shown: a list that brings that terminal later does not take the keyboard while text is selected (Z1)`,
+      async (t) => {
+        const secret = new Uint8Array(32).fill(22);
+        const page = await newPage(t, chromium);
+        await pinModules(t, page, {
+          'terminal-view.js': fixture('textarea-view.js'),
+          'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
+        });
+        const terms: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B };
+        const running = new Set<string>([S1]);
+        const listFor = (selected: string | null): Record<string, unknown> =>
+          scriptedList(
+            [S1, S2].map((id) => ({
+              id,
+              terminal: running.has(id) ? (terms[id] ?? null) : null,
+              slot: running.has(id) ? [S1, S2].indexOf(id) + 1 : null,
+            })),
+            [...running].map((id) => ({
+              id: terms[id] ?? '',
+              slot: [S1, S2].indexOf(id) + 1,
+              sessionId: id,
+            })),
+            selected === null || running.has(selected)
+              ? null
+              : {
+                  sessionId: selected,
+                  command: `claude --resume ${selected}`,
+                  flagsKnown: true,
+                  unknownFlags: [],
+                  ended: 'exited',
+                  expiring: false,
+                  expired: false,
+                },
+          );
+        let shown: string | null = null;
+        const standin = await standinServer(t, {
+          socket: honest(secret, {
+            serverId: (n) => `${n}`.repeat(16).slice(0, 16),
+            open: (conn, message) => {
+              if (message['t'] === 'view') {
+                shown = (message['selected'] as string | null) ?? null;
+                conn.send(listFor(shown));
+              } else if (message['t'] === 'attach') {
+                conn.send({
+                  t: 'snap',
+                  term: message['term'],
+                  ch: 1,
+                  cols: 80,
+                  rows: 24,
+                  data: '',
+                });
+              } else if (message['t'] === 'act' && message['kind'] === 'resume') {
+                conn.send({
+                  t: 'result',
+                  id: message['id'],
+                  ok: true,
+                  lines: [],
+                  error: null,
+                  sessionId: message['sessionId'],
+                });
+                if (how === 'the connection is lost') {
+                  conn.ws.terminate(); // before S2's terminal is listed
+                } else {
+                  // S2's terminal comes in a list a moment later.
+                  setTimeout(() => {
+                    running.add(S2);
+                    conn.send(listFor(shown));
+                  }, 700);
+                }
+              }
+            },
+          }),
+        });
+        await page.goto(standin.url);
+        await storeKey(page, secret);
+        await page.goto(standin.url);
+        await connection(page, 'open');
+        await page.waitForSelector('#terminal .xterm-helper-textarea', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        const holderHasIt = (): Promise<boolean> =>
+          page.evaluate(
+            () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+          );
+        const selected = (): Promise<string> =>
+          page.evaluate(() => getSelection()?.toString() ?? '');
+
+        // Resume S2 from the list (the page's own action: the mark is set).
+        await clickRow(page, S2);
+        await page.keyboard.press('Enter');
+        if (how === 'another session is selected') {
+          // The result came (the page goes to the terminal zone with S2's card, its terminal not
+          // listed yet); at once, before the list, S1 in slot 1.
+          await showsText(page, '#focus-zone', /^Focus: terminal$/);
+          assert.equal(await selectedRow(page), S2);
+          await page.keyboard.press('Control+Shift+Digit1');
+          await page.waitForFunction(
+            (id) =>
+              document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') ===
+              id,
+            S1,
+          );
+          await sleep(1200); // S2's terminal is listed, while S1 is shown
+          running.delete(S2); // and goes again, never shown
+          standin.connections.at(-1)?.send(listFor(shown));
+          await sleep(300);
+          await clickRow(page, S2); // S2 again: its resume card
+        } else {
+          await showsText(page, '#info-text', RESTARTED); // reconnected (another server)
+          await connection(page, 'open');
+          assert.equal(await selectedRow(page), S2);
+        }
+        await toZone(page, 'terminal');
+        await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+
+        // Text of the page selected; then a list brings S2's terminal (as if from a command line).
+        await page.keyboard.press('Control+Shift+H');
+        await page.locator('#help .help-line').first().dblclick();
+        await sleep(300);
+        const text = await selected();
+        assert.notEqual(text, '');
+        running.add(S2);
+        standin.connections.at(-1)?.send(listFor(S2));
+        await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+        await sleep(300);
+
+        assert.equal(await selected(), text, 'the selection stays');
+        assert.equal(await holderHasIt(), false, 'the list did not move the keyboard');
+      },
+    );
+  }
+
   // Last: every module this file pinned was served through the pin (helpers/shell.ts pinModules).
   await t.test('every pinned module was served through the pin', () => {
     assert.deepEqual(unservedPins(), []);
