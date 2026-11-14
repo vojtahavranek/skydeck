@@ -724,7 +724,10 @@ export function createTerminalView(root, deps) {
     }
   };
 
-  /** The canvas `measureCell` measures with (made at its first call). @type {OffscreenCanvasRenderingContext2D | null | undefined} */
+  /**
+   * The canvas `measureCell` measures with (made at its first call).
+   * @type {OffscreenCanvasRenderingContext2D | null | undefined}
+   */
   let canvas;
   /**
    * The cell of the terminals' font in device pixels at `size` px, measured as xterm.js 6.0.0
