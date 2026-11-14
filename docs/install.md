@@ -695,7 +695,12 @@ effect.
   its own. Most of it heals when the program draws that part again (W26).
 - **Keys.** Ctrl+C with text selected in the terminal interrupts the program; Ctrl+Shift+C copies.
   On a keyboard layout whose letters are not Latin (Russian, Greek) the Ctrl+Shift letter chords,
-  Ctrl+R and Ctrl+V are not recognised; US and Czech are not affected.
+  Ctrl+R and Ctrl+V are not recognised; US and Czech are not affected. A key pressed while the
+  keyboard was outside the terminal never reaches the program, also when it brings the keyboard
+  into the terminal (Enter on a row, Esc from the list) and is held: press it again.
+- **Sizes.** The first session started in a window that has not shown a session's header yet is
+  resized once right after its start. With several windows open, clicking into a window can give
+  it the terminal's size while the program has asked for focus reports.
 - **The list.** An expiring session says `expires soon`, without the number of days. From an empty
   filter field it is two Escs to the terminal. The ended bar of a selected session that the filter
   hides offers no Resume, and Close only once the end is known: clear the filter. In one rare case
