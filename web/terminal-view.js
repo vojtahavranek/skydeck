@@ -391,8 +391,11 @@ export function createTerminalView(root, deps) {
         queueMicrotask(() => drain(t));
       });
     } catch {
+      // Behind PARSE_AHEAD (and the drain after xterm.js has counted a write as parsed) its
+      // "write data discarded" cannot come; whatever else makes `write` throw, nothing is lost
+      // silently: a fresh snapshot replaces what xterm.js refused.
       t.parsing -= data.length;
-      refresh(t); // nothing is lost silently: a fresh snapshot replaces what xterm.js refused
+      refresh(t);
     }
   };
 

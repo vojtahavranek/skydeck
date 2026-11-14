@@ -603,6 +603,20 @@ test('the terminal view', async (t) => {
       await until(async () => (await noticeText(page, 'gap')) === GAP, 'the gap shown');
       await until(async () => (await noticeText(page, 'newer-keeper')) === NEWER, 'newer shown');
       assert.equal(await inTerminal(), true);
+      // Only xterm.js's own textarea is inside `.xterm`: the view's controls are beside it, so that
+      // app.js never takes a key held on one of them for the program's (#70's rule).
+      await page.keyboard.press('Control+Shift+F');
+      await page.keyboard.press('Escape');
+      assert.equal(
+        await page.evaluate(
+          () =>
+            document.querySelectorAll(
+              '#terminal .xterm .tv-find, #terminal .xterm .tv-bar, #terminal .xterm .tv-hint, #terminal .xterm button, #terminal .xterm input',
+            ).length,
+        ),
+        0,
+        'no control of the view inside .xterm',
+      );
 
       // A mouse click on the × takes no keyboard: it stays in the terminal.
       await page.locator(close('gap')).click();
@@ -1255,6 +1269,148 @@ test('the terminal view', async (t) => {
       assert.ok(result.proposed !== null);
       assert.deepEqual(result.open, result.proposed, 'with a terminal open');
       assert.deepEqual(result.empty, result.proposed, 'measured with none open');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'a write xterm.js refuses asks for one fresh snap; what comes until it is dropped, and the fresh snap and its stream show',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const base = await assetBase(l.page);
+      const result = await l.page.evaluate(async (base) => {
+        // The view's own xterm.js module (the same URL): its `write` throws once, for one record.
+        const xterm = (await import(`${base}../vendor/xterm/xterm/lib/xterm.mjs`)) as {
+          Terminal: { prototype: { write(data: string | Uint8Array, then?: () => void): void } };
+        };
+        const proto = xterm.Terminal.prototype;
+        const write = proto.write;
+        let thrown = 0;
+        proto.write = function (data, then) {
+          const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+          if (thrown === 0 && text.includes('refused by xterm.js')) {
+            thrown++;
+            throw new Error('write data discarded, use flow control to avoid losing data');
+          }
+          write.call(this, data, then);
+        };
+        try {
+          const module = (await import(`${base}terminal-view.js`)) as {
+            createTerminalView(
+              root: HTMLElement,
+              deps: object,
+            ): {
+              show(term: object): void;
+              snap(message: object): void;
+              output(channel: number, bytes: Uint8Array): void;
+            };
+          };
+          const sent: Record<string, unknown>[] = [];
+          const root = document.createElement('div');
+          root.className = 'terminal';
+          root.style.cssText = 'position:fixed;left:0;top:0;width:733px;height:411px';
+          document.body.append(root);
+          const view = module.createTerminalView(root, {
+            send: (message: Record<string, unknown>) => sent.push(message),
+            chord: () => false,
+            openLink: () => {},
+          });
+          const term = 'dddddddddddd';
+          view.show({
+            id: term,
+            slot: null,
+            sessionId: null,
+            state: 'running',
+            notReported: false,
+            cols: 80,
+            rows: 24,
+            ownsSize: true,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
+          view.snap({ t: 'snap', term, ch: 7, cols: 80, rows: 24, data: 'the first snap\r\n' });
+          view.output(7, bytes('a record before\r\n'));
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          view.output(7, bytes('refused by xterm.js\r\n'));
+          view.output(7, bytes('a record after it\r\n'));
+          const attaches = sent.filter((message) => message['t'] === 'attach').length;
+          view.snap({ t: 'snap', term, ch: 8, cols: 80, rows: 24, data: 'a fresh snap\r\n' });
+          view.output(8, bytes('and the stream after it\r\n'));
+          const rows = (): string => root.querySelector('.xterm-rows')?.textContent ?? '';
+          const deadline = performance.now() + 20_000;
+          while (!rows().includes('and the stream after it') && performance.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          return { thrown, attaches, rows: rows() };
+        } finally {
+          proto.write = write;
+        }
+      }, base);
+      assert.equal(result.thrown, 1, 'xterm.js refused one write');
+      assert.equal(result.attaches, 2, 'the attach of the show and one fresh snap asked for');
+      assert.match(result.rows, /a fresh snap.*and the stream after it/s);
+      assert.doesNotMatch(result.rows, /the first snap|a record after it/);
+      assert.deepEqual(l.problems, [], 'nothing thrown');
+    },
+  );
+
+  await t.test(
+    'a dismissed gap is the text its bar showed: when a later gap replaced the first, the repeat of the later one after a snap stays hidden',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const base = await assetBase(l.page);
+      const result = await l.page.evaluate(async (base) => {
+        const module = (await import(`${base}terminal-view.js`)) as {
+          createTerminalView(
+            root: HTMLElement,
+            deps: object,
+          ): {
+            show(term: object): void;
+            snap(message: object): void;
+            output(channel: number, bytes: Uint8Array): void;
+            notice(term: string, kind: string, text: string): void;
+          };
+        };
+        const root = document.createElement('div');
+        root.className = 'terminal';
+        root.style.cssText = 'position:fixed;left:0;top:0;width:733px;height:411px';
+        document.body.append(root);
+        const view = module.createTerminalView(root, {
+          send: () => {},
+          chord: () => false,
+          openLink: () => {},
+        });
+        const term = 'cccccccccccc';
+        view.show({
+          id: term,
+          slot: null,
+          sessionId: null,
+          state: 'running',
+          notReported: false,
+          cols: 80,
+          rows: 24,
+          ownsSize: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
+        const shown = (): string =>
+          root.querySelector('.tv-bar[data-kind="gap"] .tv-bar-text')?.textContent ?? '';
+        view.snap({ t: 'snap', term, ch: 7, cols: 80, rows: 24, data: 'a screen\r\n' });
+        view.output(7, bytes('a record\r\n'));
+        view.notice(term, 'gap', 'the first gap');
+        view.notice(term, 'gap', 'a later gap');
+        const before = shown();
+        root.querySelector<HTMLButtonElement>('.tv-bar[data-kind="gap"] .tv-bar-close')?.click();
+        const dismissed = shown();
+        // A snap, and the server's repeat of the gap it holds: the later one.
+        view.snap({ t: 'snap', term, ch: 8, cols: 80, rows: 24, data: 'a screen\r\n' });
+        view.notice(term, 'gap', 'a later gap');
+        const repeated = shown();
+        return { before, dismissed, repeated };
+      }, base);
+      assert.equal(result.before, 'a later gap', 'the bar shows the later gap');
+      assert.equal(result.dismissed, '');
+      assert.equal(result.repeated, '', 'its repeat stays hidden');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
