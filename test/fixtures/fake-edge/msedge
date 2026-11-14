@@ -1,0 +1,23 @@
+#!/bin/sh
+# The fake Edge of the tests of `skydeck window` (plan task 25): runs ./fake-edge.ts with the node
+# SKYDECK_NODE names, and only inside a test sandbox (SKYDECK_TEST_NO_WINDOWS=1 and an absolute
+# SKYDECK_HOME). exec, so that the process the command started is the one that plays the page.
+if [ "${SKYDECK_TEST_NO_WINDOWS-}" != 1 ]; then
+  echo 'fake-edge: runs only inside a test sandbox' >&2
+  exit 2
+fi
+case ${SKYDECK_HOME-} in
+  /*) ;;
+  *)
+    echo 'fake-edge: runs only inside a test sandbox (SKYDECK_HOME)' >&2
+    exit 2
+    ;;
+esac
+case ${SKYDECK_NODE-} in
+  /*) ;;
+  *)
+    echo 'fake-edge: SKYDECK_NODE must name a node binary' >&2
+    exit 2
+    ;;
+esac
+exec "$SKYDECK_NODE" "${0%/*}/fake-edge.ts" "$@"

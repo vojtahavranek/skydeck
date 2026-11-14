@@ -23,19 +23,28 @@ const CONFIG_PATH = '/home/me/.config/skydeck/config.json';
 const PROFILE = 'C:\\Users\\me\\AppData\\Local\\skydeck\\edge-profile';
 /** A launch token as task 11 mints it: 32 bytes in base64url. */
 const TOKEN = 'q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA';
-/** Where WSL shows the Windows users' folders. */
-const USERS = '/mnt/c/Users';
+/**
+ * Where these tests' C: drive (C_DRIVE, task 24's stand-in, SKYDECK_TEST_MNT_C) shows the Windows
+ * users' folders: in a sandbox startEdge derives the profile folder there, never under /mnt.
+ */
+const USERS = '/stand-in/c/Users';
 
 function windowConfig(overrides: Partial<WindowConfig> = {}): WindowConfig {
   return { ...DEFAULT_CONFIG.window, profileDir: PROFILE, ...overrides };
 }
 
 /**
- * `files` with /mnt/c/Users shown from `usersRoot` (a sandbox folder), and every other path under
- * /mnt/ refused, so that no test reads the developer's Windows folders.
+ * `files` with the stand-in drive's Users folder shown from `usersRoot` (a sandbox folder), and
+ * every path under /mnt/ refused (and recorded in `mntAsked`), so that no test reads the
+ * developer's Windows folders.
  */
-function windowsFoldersIn(files: Files, usersRoot: string | undefined): Files {
+function windowsFoldersIn(
+  files: Files,
+  usersRoot: string | undefined,
+  mntAsked: string[] = [],
+): Files {
   const mapPath = (path: string): string => {
+    if (path === '/mnt' || path.startsWith('/mnt/')) mntAsked.push(path);
     if (usersRoot !== undefined && (path === USERS || path.startsWith(`${USERS}/`))) {
       return `${usersRoot}${path.slice(USERS.length)}`;
     }
@@ -58,6 +67,8 @@ interface Setup {
   platform: Platform;
   processes: FakeProcesses;
   sandbox: Sandbox;
+  /** Every path under /mnt/ the code under test asked its files for. */
+  mntAsked: string[];
 }
 
 /** The C: drive in these tests: task 24's stand-in for /mnt/c (only a path: the processes are fakes). */
@@ -77,12 +88,13 @@ function setup(
   });
   const processes = fakeProcesses(options.handler);
   const usersRoot = options.usersRoot?.(tp.sandbox);
+  const mntAsked: string[] = [];
   const platform: Platform = {
     ...tp.platform,
     processes,
-    files: windowsFoldersIn(tp.platform.files, usersRoot),
+    files: windowsFoldersIn(tp.platform.files, usersRoot, mntAsked),
   };
-  return { platform, processes, sandbox: tp.sandbox };
+  return { platform, processes, sandbox: tp.sandbox, mntAsked };
 }
 
 function failWith(code: string): () => never {
@@ -164,7 +176,7 @@ test('startEdge: another start failure gives a line with the program, the reason
 });
 
 test('startEdge uses window.profileDir as configured and derives nothing', async (t) => {
-  // No users folder is mapped: a derivation would reach /mnt/c/Users and throw.
+  // No users folder is mapped: a derivation would find no Windows user.
   const { platform, processes } = setup(t);
   const profileDir = 'D:\\Profiles\\skydeck window';
   await startEdge(platform, windowConfig({ profileDir }), CONFIG_PATH, 47613, TOKEN, LINK);
@@ -183,6 +195,30 @@ test('startEdge without window.profileDir derives the folder of the one Windows 
   );
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(onlyCall(processes).args, edgeArgs(47613, TOKEN, PROFILE));
+});
+
+test('startEdge in a sandbox derives the profile folder from the stand-in drive only: nothing under /mnt is read (review 2 of task 25)', async (t) => {
+  const { platform, mntAsked } = setup(t, { usersRoot: (s) => usersWithEdge(s, 'me') });
+  await startEdge(platform, windowConfig({ profileDir: null }), CONFIG_PATH, 47613, TOKEN, LINK);
+  assert.deepEqual(mntAsked, []);
+});
+
+test('startEdge in a sandbox without a stand-in drive: the C: drive is not mounted, nothing under /mnt is read, nothing started', async (t) => {
+  const { platform, processes, mntAsked } = setup(t, { env: { SKYDECK_TEST_MNT_C: undefined } });
+  const result = await startEdge(
+    platform,
+    windowConfig({ profileDir: null }),
+    CONFIG_PATH,
+    47613,
+    TOKEN,
+    LINK,
+  );
+  assert.deepEqual(result, {
+    ok: false,
+    line: `the C: drive is not mounted, so the Edge profile folder cannot be derived; set window.profileDir to the folder for the window's Edge profile (an absolute Windows path) in ${CONFIG_PATH}`,
+  });
+  assert.deepEqual(mntAsked, []);
+  assert.deepEqual(processes.calls, []);
 });
 
 for (const [name, users] of [
