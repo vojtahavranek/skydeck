@@ -180,6 +180,11 @@ interface Claim {
   skipUntil: number;
   /** Resolves when the hello came and the tail is on the screen; the claim's answer. */
   settle: ((ok: boolean) => void) | null;
+  /** The claim settled: the hello came and its tail is on the screen. */
+  ok: boolean;
+  /** Frames read on this connection, for the idle check while the tail is replayed. */
+  frames: number;
+  stopIdle: (() => void) | null;
 }
 
 interface Term {
@@ -206,6 +211,12 @@ interface Term {
   forgotten: boolean;
   /** The 'late' or 'found' origin the next hello is reported with ('spawned' while spawn waits). */
   origin: 'spawned' | 'late' | 'found';
+  /** Attaches waiting for the screen a claim is rebuilding (restarted by newScreen). */
+  waiting: (() => void)[];
+  /** The last claim problem logged, so that a keeper that keeps failing logs it once. */
+  note: string | null;
+  /** The size the forced redraw goes back to, until it has or a page resized. */
+  redrawTo: { cols: number; rows: number; due: boolean } | null;
 }
 
 export function createRegistry(deps: RegistryDeps): Registry {
@@ -221,6 +232,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   const log = (id: string, kind: string): void => {
     deps.log(`terminal ${id}: ${kind}`);
+  };
+  /** A claim's problem, logged once while the same one repeats (a keeper that keeps failing). */
+  const note = (term: Term, kind: string): void => {
+    if (term.note !== kind) {
+      term.note = kind;
+      log(term.info.id, kind);
+    }
   };
 
   function changed(): void {
@@ -305,16 +323,28 @@ export function createRegistry(deps: RegistryDeps): Registry {
     screen.setTheme(theme);
     term.screen = screen;
     term.last = Promise.resolve();
+    for (const restart of term.waiting.splice(0)) restart();
   }
 
   /** One record from the keeper, in stream order: applied, then forwarded. */
   function record(term: Term, frame: Frame): void {
     const screen = term.screen;
     if (screen === null) return;
+    let size: { cols: number; rows: number } | null = null;
+    if (frame.type === 'R') {
+      const parsed = parseResize(frame.payload);
+      if (!parsed.ok || parsed.value.cols > MAX_COLS || parsed.value.rows > MAX_ROWS) {
+        // The keeper is only ever given clamped sizes: a larger one is not its record.
+        note(term, parsed.ok ? 'resize record too large' : `bad resize record (${parsed.kind})`);
+        term.claim?.link.destroy();
+        return;
+      }
+      size = parsed.value;
+    }
     term.count += 1;
     const n = term.count;
     term.bytes += frame.payload.length;
-    if (frame.type === 'D') {
+    if (size === null) {
       const bytes = frame.payload;
       const applied = screen.output(bytes);
       term.last = applied.then(
@@ -323,16 +353,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
       );
       return;
     }
-    const size = parseResize(frame.payload);
-    if (!size.ok) {
-      log(term.info.id, `bad resize record (${size.kind})`);
-      return;
-    }
-    const { cols, rows } = size.value;
+    const { cols, rows } = size;
     term.last = screen.resize(cols, rows).then(
       () => {
-        if (term.screen !== screen) return;
-        if (term.info.cols !== cols || term.info.rows !== rows) {
+        // Forwarded like an output record, also from a screen a rebuild replaced.
+        if (term.screen === screen && (term.info.cols !== cols || term.info.rows !== rows)) {
           term.info.cols = cols;
           term.info.rows = rows;
           changed();
@@ -447,6 +472,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
       reconnect: null,
       forgotten: false,
       origin: 'found',
+      waiting: [],
+      note: null,
+      redrawTo: null,
     };
   }
 
@@ -477,18 +505,32 @@ export function createRegistry(deps: RegistryDeps): Registry {
           if (claim !== null) onFrame(term, claim, frame);
         },
         refused: (kind) => {
-          log(id, `keeper sent a frame the codec refuses (${kind})`);
+          note(term, `keeper sent a frame the codec refuses (${kind})`);
         },
         closed: () => {
           settle(false);
-          if (claim !== null) onClosed(term, claim);
+          if (claim !== null) {
+            claim.stopIdle?.();
+            onClosed(term, claim);
+          }
         },
       },
       (error) => {
         log(id, `frame handling failed (${(error as Error)?.name ?? 'error'})`);
       },
     );
-    claim = { link, hello: null, phase: 'hello', useS: true, position: 0, skipUntil: 0, settle };
+    claim = {
+      link,
+      hello: null,
+      phase: 'hello',
+      useS: true,
+      position: 0,
+      skipUntil: 0,
+      settle,
+      ok: false,
+      frames: 0,
+      stopIdle: null,
+    };
     if (stopped || term.forgotten) {
       link.destroy();
       return false;
@@ -498,7 +540,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     previous?.link.destroy();
     const cancel = clock.after(helloMs, () => {
       if (claim !== null && claim.hello === null && term.claim === claim) {
-        log(id, 'no hello');
+        note(term, 'no hello');
         settle(false);
         link.destroy();
       }
@@ -510,16 +552,16 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   function onFrame(term: Term, claim: Claim, frame: Frame): void {
     if (term.claim !== claim || term.forgotten) return;
-    const id = term.info.id;
+    claim.frames += 1;
     if (claim.phase === 'hello') {
       if (frame.type !== 'H') {
-        log(id, 'first frame not a hello');
+        note(term, 'first frame not a hello');
         claim.link.destroy();
         return;
       }
       const parsed = parseHello(frame.payload);
       if (!parsed.ok) {
-        log(id, `bad hello (${parsed.kind})`);
+        note(term, `bad hello (${parsed.kind})`);
         claim.link.destroy();
         return;
       }
@@ -529,8 +571,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
     if (frame.type === 'S' && (claim.phase === 'snapshot' || claim.phase === 'maybe')) {
       const hello = claim.hello as KeeperHello;
       const snap = decodeSnapshot(frame.payload);
-      if (snap === null || snap.seq !== hello.snapSeq) {
-        log(id, 'bad snapshot');
+      if (
+        snap === null ||
+        snap.seq !== hello.snapSeq ||
+        snap.cols > MAX_COLS ||
+        snap.rows > MAX_ROWS
+      ) {
+        note(term, 'bad snapshot');
         claim.link.destroy();
         return;
       }
@@ -543,7 +590,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       return;
     }
     if (claim.phase === 'snapshot') {
-      log(id, 'snapshot missing');
+      note(term, 'snapshot missing');
       claim.link.destroy();
       return;
     }
@@ -572,7 +619,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       case 'T': {
         const parsed = parseStarted(frame.payload);
         if (!parsed.ok) {
-          log(id, `bad started (${parsed.kind})`);
+          note(term, `bad started (${parsed.kind})`);
           return;
         }
         onStarted(term, parsed.value);
@@ -581,14 +628,14 @@ export function createRegistry(deps: RegistryDeps): Registry {
       case 'X': {
         const parsed = parseExit(frame.payload);
         if (!parsed.ok) {
-          log(id, `bad exit (${parsed.kind})`);
+          note(term, `bad exit (${parsed.kind})`);
           return;
         }
         onExit(term, claim, parsed.value);
         return;
       }
       default:
-        log(id, `unexpected frame ${frame.type}`);
+        note(term, `unexpected frame ${frame.type}`);
         claim.link.destroy();
     }
   }
@@ -596,7 +643,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
   function onHello(term: Term, claim: Claim, hello: KeeperHello): void {
     const id = term.info.id;
     if (hello.id !== id) {
-      log(id, 'hello of another terminal');
+      note(term, 'hello of another terminal');
+      claim.link.destroy();
+      return;
+    }
+    if (hello.cols > MAX_COLS || hello.rows > MAX_ROWS) {
+      // The keeper is only ever given clamped sizes (ruled): a larger one is not its own.
+      note(term, 'hello with a size above 1000 x 500');
       claim.link.destroy();
       return;
     }
@@ -652,6 +705,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
     } else {
       claim.useS = true;
       claim.skipUntil = 0;
+      // The old screen goes at once: until S or the first record makes the new one, attaches
+      // wait for it, and a claim that ends meanwhile cannot leave the old screen to go on with.
+      term.screen?.dispose();
+      term.screen = null;
+      setSize(term, hello.cols, hello.rows);
       // The rebuilt screen stands for every record up to the tail's start, lost ones included.
       term.keeperSeq = hello.tailFrom - 1;
       if (hello.snapSeq === 0 && hello.tailFrom > hello.seq) {
@@ -680,7 +738,35 @@ export function createRegistry(deps: RegistryDeps): Registry {
       redraw(term, claim, hello.cols, hello.rows);
     }
     emit('hello', () => events.hello(copy(term), hello, origin));
+    watchTail(term, claim);
     replayed(term, claim);
+  }
+
+  /**
+   * A tail that stops coming (a keeper stopped while it sends, or one whose `seq` promises more
+   * than it sends) would leave the claim unsettled for ever: with no frame for HELLO_MS the
+   * connection is closed, and S2 7.8's reconnection takes over.
+   */
+  function watchTail(term: Term, claim: Claim): void {
+    let seen = claim.frames;
+    let idle = 0;
+    const stop = clock.every(RECONNECT_MS, () => {
+      if (claim.settle === null || term.claim !== claim) {
+        stop();
+        return;
+      }
+      idle = claim.frames === seen ? idle + RECONNECT_MS : 0;
+      seen = claim.frames;
+      if (idle >= HELLO_MS) {
+        stop();
+        note(term, 'the tail stopped coming');
+        const settle = claim.settle;
+        claim.settle = null;
+        settle(false);
+        claim.link.destroy();
+      }
+    });
+    claim.stopIdle = stop;
   }
 
   function setSize(term: Term, cols: number, rows: number): void {
@@ -703,6 +789,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.claim === claim) {
         term.answering = true;
+        claim.ok = true;
+        term.note = null;
+        claim.stopIdle?.();
+        redrawBack(term); // a redraw cut short by a broken connection goes on here
         settle(true);
       }
     });
@@ -712,9 +802,24 @@ export function createRegistry(deps: RegistryDeps): Registry {
   function redraw(term: Term, claim: Claim, cols: number, rows: number): void {
     const narrow = cols > 1 ? cols - 1 : cols + 1;
     claim.link.send('Z', encodeResize(narrow, rows));
+    const back = { cols, rows, due: false };
+    term.redrawTo = back;
     clock.after(REDRAW_PAUSE_MS, () => {
-      if (term.claim === claim) claim.link.send('Z', encodeResize(cols, rows));
+      back.due = true;
+      redrawBack(term);
     });
+  }
+
+  /**
+   * The redraw's second resize, on whatever connection there is: without one it waits for the
+   * next claim that settles. A page's resize meanwhile has won (`redrawTo` is cleared).
+   */
+  function redrawBack(term: Term): void {
+    const back = term.redrawTo;
+    const now = usable(term);
+    if (back === null || !back.due || now === null || isOver(term.info.state)) return;
+    term.redrawTo = null;
+    now.link.send('Z', encodeResize(back.cols, back.rows));
   }
 
   function onStarted(term: Term, started: KeeperStarted): void {
@@ -725,6 +830,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
   }
 
   function onExit(term: Term, claim: Claim, exit: KeeperExit): void {
+    // S2 8.1: the server has the exit; the keeper may end (7.8). Sent at once, so that a
+    // connection that breaks before the screen side caught up does not keep the keeper waiting.
+    claim.link.send('A');
+    // One exit per terminal: a second X (a keeper that repeats it) only gets its A.
+    if (term.info.exit !== null) return;
     term.info.exit = exit;
     void term.last.then(() => {
       if (term.forgotten) return;
@@ -734,8 +844,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
         sink.exit(exit, false);
       });
       emit('exited', () => events.exited(copy(term), exit, false));
-      // S2 8.1: the server has the exit; the keeper may end (7.8).
-      claim.link.send('A');
       replayed(term, claim);
     });
   }
@@ -747,11 +855,15 @@ export function createRegistry(deps: RegistryDeps): Registry {
     if (term.claim === claim) term.claim = null;
     if (stopped || term.forgotten || term.claim !== null) return;
     if (isOver(term.info.state) || term.info.state === 'newer-keeper') return;
+    // The exit came (it may still be on its way through the screen side): nothing to reconnect to.
+    if (term.info.exit !== null) return;
     if (term.hello === null) return; // a spawn or a find still waits for its first hello
-    startReconnecting(term);
+    // At once only after a claim that worked: one that fails after its hello waits a second, so
+    // that a keeper whose stream keeps failing is not claimed again and again without a pause.
+    startReconnecting(term, claim.ok);
   }
 
-  function startReconnecting(term: Term): void {
+  function startReconnecting(term: Term, now: boolean): void {
     if (term.reconnect !== null) return;
     setState(term, 'reconnecting');
     let busy = false;
@@ -763,7 +875,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       });
     };
     term.reconnect = clock.every(RECONNECT_MS, attempt);
-    attempt();
+    if (now) attempt();
   }
 
   function stopReconnecting(term: Term): void {
@@ -826,7 +938,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   function lose(term: Term): void {
     stopReconnecting(term);
-    if (term.forgotten || isOver(term.info.state)) return;
+    // A terminal that has its exit is never made lost after it (one exit per terminal).
+    if (term.forgotten || isOver(term.info.state) || term.info.exit !== null) return;
     const exit: KeeperExit =
       term.info.program !== null
         ? { code: null, signal: SIGHUP, atNs: String(clock.nowNs()), notStarted: null }
@@ -863,6 +976,14 @@ export function createRegistry(deps: RegistryDeps): Registry {
     }
     if (stopped) throw startError('spawn-failed', 'the server is stopping');
     if (terms.has(spec.id)) throw startError('spawn-failed', 'the terminal id is taken');
+    let own: string;
+    try {
+      own = files.termSock(spec.id);
+    } catch {
+      throw startError('spawn-failed', 'not a terminal id');
+    }
+    // The registry claims terms/<id>.sock: a keeper told to listen elsewhere could never be found.
+    if (spec.socket !== own) throw startError('spawn-failed', "not the terminal's socket");
     const size = clampSize(spec.cols, spec.rows) ?? { cols: 120, rows: 40 };
     const sent: KeeperSpec = { ...spec, ...size };
     const term = newTerm(spec.id, spec.meta, size.cols, size.rows);
@@ -908,6 +1029,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     try {
       while (!timedOut && term.hello === null) {
         if (term.forgotten) throw startError('spawn-failed', 'closed');
+        if (stopped) {
+          forget();
+          throw startError('spawn-failed', 'the server is stopping');
+        }
         if (keeperEnded) {
           forget();
           throw startError('spawn-failed', 'the keeper ended at start');
@@ -1065,22 +1190,29 @@ export function createRegistry(deps: RegistryDeps): Registry {
         callSink(term, step);
       }
     };
+    const restart = (): void => {
+      if (term.forgotten || !term.sinks.has(entry)) return;
+      entry.from = term.count;
+      entry.held = shown(); // what was held belonged to the screen that was replaced
+      take();
+    };
     const take = (): void => {
+      if (stopped) return; // a stopping server has no screens to give
       const screen = term.screen;
+      if (screen === null && term.hello !== null && term.info.state !== 'newer-keeper') {
+        // A claim is rebuilding the screen (its hello came, S or the first record not yet):
+        // wait for it, so that the snapshot is the screen of this point of the stream.
+        term.waiting.push(restart);
+        return;
+      }
       if (screen === null) {
         // No screen yet (a keeper whose hello has not come): an empty one at the known size.
         const empty = { cols: term.info.cols, rows: term.info.rows, data: '' };
         void Promise.resolve().then(() => deliver(empty));
         return;
       }
-      screen.snapshot().then(deliver, () => {
-        // The screen was replaced meanwhile (a rebuild): start over from the new one's point;
-        // what was held belonged to the old one.
-        if (term.forgotten || !term.sinks.has(entry)) return;
-        entry.from = term.count;
-        entry.held = shown();
-        take();
-      });
+      // A rejection: the screen was replaced meanwhile (a rebuild); start over from the new one.
+      screen.snapshot().then(deliver, restart);
     };
     take();
     return {
@@ -1107,6 +1239,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     resize(termId, cols, rows) {
       const term = terms.get(termId);
+      if (term !== undefined) term.redrawTo = null; // a page's size wins over the redraw's
       const size = clampSize(cols, rows);
       const claim = term === undefined ? null : usable(term);
       if (claim !== null && size !== null && !isOver(term?.info.state ?? 'ended')) {

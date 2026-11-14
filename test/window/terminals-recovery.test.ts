@@ -9,14 +9,20 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import { procStartFromStat } from '../../src/claude/procstat.ts';
-import { decodeSnapshot, encodeFrame, frameReader } from '../../src/window/frames.ts';
-import type { Frame, KeeperSpec } from '../../src/window/frames.ts';
+import {
+  decodeSnapshot,
+  encodeFrame,
+  encodeSnapshot,
+  frameReader,
+} from '../../src/window/frames.ts';
+import type { Frame, FrameType, KeeperSpec } from '../../src/window/frames.ts';
 import type { Platform } from '../../src/platform/types.ts';
 import { PROMPT, SESSION, sleep, until } from '../helpers/keeper.ts';
 import {
   assertSameScreen,
   attachMirror,
   info,
+  mirror,
   registrySandbox,
   settledTerm,
 } from '../helpers/registry.ts';
@@ -143,6 +149,7 @@ describe('registry: rebuilding after a restart', () => {
     const { spec, mirror } = await startStandin(box, r);
     const keeper = box.keeperOf(spec.id);
     const hellos = r.events.hello.length;
+    const outputs = mirror.outputs.length;
     box.signalKeeper(keeper, 'SIGSTOP');
     try {
       // A stopped keeper keeps its connection open: the registry notices only when it ends.
@@ -154,6 +161,8 @@ describe('registry: rebuilding after a restart', () => {
       box.signalKeeper(keeper, 'SIGCONT');
     }
     await until(() => info(r.registry, spec.id).state === 'running', 'running again', 10_000);
+    await sleep(300);
+    assert.equal(mirror.outputs.length, outputs, 'the reconnect forwarded no record again');
     assert.equal(r.states.get(spec.id)?.includes('lost'), false);
     assert.equal(r.events.hello.length, hellos + 1, 'one hello for the reconnect');
     assert.equal(r.events.hello.at(-1)?.origin, 'found', 'a reconnect hello is found');
@@ -201,10 +210,14 @@ describe('registry: rebuilding after a restart', () => {
     const { spec, mirror } = await startStandin(box, r1);
     await typeLine(r1, spec.id, mirror, '/lines 4000');
     // A reconnect of a registry that has every record: the keeper's gap lost nothing for it.
+    const outputs = mirror.outputs.length;
     r1.sockets.at(-1)?.destroy();
     await until(() => r1.events.hello.length === 2, 'the reconnect');
     assert.equal(r1.events.hello[1]?.hello.gap, true);
     assert.ok((r1.events.hello[1]?.hello.tailFrom ?? 0) > 1, 'the tail starts after the dropped');
+    await until(() => info(r1.registry, spec.id).state === 'running', 'running again');
+    await sleep(300);
+    assert.equal(mirror.outputs.length, outputs, 'the reconnect forwarded no record again');
     await typeLine(r1, spec.id, mirror, '/idle');
     assert.deepEqual(mirror.notices, [], 'no gap notice for a screen that lost nothing');
     assert.equal(r1.terminals.length, 1, 'not rebuilt');
@@ -427,4 +440,363 @@ describe('registry: closing a lost terminal', () => {
       assert.equal(existsSync(box.files.termPid(id)), true, 'the pid line stays');
     });
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// A keeper played by the test, frame by frame (review 2 of #52)
+
+interface FakeConn {
+  /** Frames the registry sent on this connection, after its C. */
+  received: Frame[];
+  send(type: FrameType, payload?: Uint8Array | string): void;
+  /** Bytes as they are, for what the codec would refuse to build. */
+  raw(bytes: Uint8Array): void;
+  /** Ends the connection after what was written. */
+  end(): void;
+}
+
+function helloOf(box: RegistryBox, id: string, over: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    protocol: 1,
+    keeper: '2',
+    id,
+    started: true,
+    startBy: '1',
+    lock: null,
+    pid: process.pid,
+    procStart: 1,
+    cols: 80,
+    rows: 24,
+    seq: 0,
+    snapSeq: 0,
+    tailFrom: 1,
+    gap: false,
+    meta: {
+      sessionId: SESSION,
+      kind: 'resume',
+      slot: 1,
+      openedNs: '1',
+      build: 'test',
+      label: null,
+      dir: box.s.home,
+    },
+    exited: null,
+    ...over,
+  });
+}
+
+/**
+ * A socket in terms/ whose every claim runs `script` (with the claim's number from 0), and a pid
+ * line naming this test process: alive, and never signalled by killKeepersIn.
+ */
+async function scriptedKeeper(
+  t: TestContext,
+  box: RegistryBox,
+  id: string,
+  script: (conn: FakeConn, n: number) => void,
+): Promise<{ conns: FakeConn[]; stop(): Promise<void> }> {
+  const conns: FakeConn[] = [];
+  const sockets: Socket[] = [];
+  const server: Server = createServer((socket) => {
+    sockets.push(socket);
+    socket.on('error', () => {});
+    const reader = frameReader();
+    let conn: FakeConn | null = null;
+    socket.on('data', (chunk) => {
+      const frames = reader.push(chunk);
+      if ('error' in frames) return;
+      for (const frame of frames) {
+        if (conn === null && frame.type === 'C') {
+          conn = {
+            received: [],
+            send(type, payload) {
+              if (!socket.destroyed) {
+                socket.write(
+                  encodeFrame(type, typeof payload === 'string' ? utf8(payload) : payload),
+                );
+              }
+            },
+            raw(bytes) {
+              if (!socket.destroyed) socket.write(bytes);
+            },
+            end() {
+              socket.end(); // what was written still arrives, then the connection ends
+            },
+          };
+          conns.push(conn);
+          script(conn, conns.length - 1);
+        } else {
+          conn?.received.push(frame);
+        }
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(box.files.termSock(id), resolve));
+  const stop = async (): Promise<void> => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  };
+  t.after(stop);
+  const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+  box.tp.platform.files.writeText(
+    box.files.termPid(id),
+    `${process.pid} ${procStartFromStat(stat)} ${bootId} 2 1\n`,
+  );
+  return { conns, stop };
+}
+
+/** Every line of a headless terminal's active buffer, trimmed, without the empty ones. */
+function screenLines(term: TestRegistry['terminals'][0]): string[] {
+  const lines: string[] = [];
+  const buffer = term.buffer.active;
+  for (let y = 0; y < buffer.length; y++) {
+    const text = buffer.getLine(y)?.translateToString(true) ?? '';
+    if (text !== '') lines.push(text);
+  }
+  return lines;
+}
+
+describe('registry: a keeper that misbehaves, and claims that break', () => {
+  test('an attach while a found screen is being rebuilt gets the rebuilt screen, never an empty one', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000001';
+    await scriptedKeeper(t, box, id, (conn) => {
+      conn.send('H', helloOf(box, id, { seq: 7, snapSeq: 5, tailFrom: 6 }));
+      setTimeout(() => {
+        conn.send('S', encodeSnapshot(5, 90, 30, 'PARKED-SCREEN\r\n'));
+        conn.send('D', 'six\r\n');
+        conn.send('D', 'seven\r\n');
+      }, 200);
+    });
+    const r = box.registry();
+    let page: Mirror | null = null;
+    r.registry.onChange(() => {
+      if (page === null && r.registry.list().some((x) => x.id === id)) {
+        page = mirror(box.modules);
+        assert.ok(r.registry.attach(id, page)); // the hub contract allows it inside onChange
+        assert.notDeepEqual([info(r.registry, id).cols, info(r.registry, id).rows], [1, 1]);
+      }
+    });
+    await r.registry.rediscover();
+    const m = page as Mirror | null;
+    assert.ok(m);
+    await until(() => m.calls.length > 0, 'the snapshot');
+    await m.settled();
+    assert.deepEqual([m.term.cols, m.term.rows], [90, 30]);
+    assert.deepEqual(screenLines(m.term), ['PARKED-SCREEN', 'six', 'seven']);
+    // The snapshot is the screen where the stream was rebuilt; the tail follows it, once.
+    assert.deepEqual(m.calls, ['S', 'o', 'o']);
+  });
+
+  test('one exit per terminal: X and then a broken connection, or X twice, give one exit', async (t) => {
+    const box = await registrySandbox(t);
+    const a = 'c00000000002';
+    const big = 'x'.repeat(60_000);
+    const fa = await scriptedKeeper(t, box, a, (conn, n) => {
+      if (n === 0) {
+        conn.send('H', helloOf(box, a));
+        for (let i = 0; i < 50; i++) conn.send('D', big); // the screen side falls behind
+        conn.send('X', JSON.stringify({ code: 0, signal: null, atNs: '5', notStarted: null }));
+        conn.end();
+      } else {
+        conn.send(
+          'H',
+          helloOf(box, a, {
+            seq: 50,
+            tailFrom: 51,
+            gap: true,
+            exited: { code: 9, signal: null, atNs: '6', notStarted: null },
+          }),
+        );
+        conn.send('X', JSON.stringify({ code: 9, signal: null, atNs: '6', notStarted: null }));
+      }
+    });
+    const b = 'c00000000003';
+    await scriptedKeeper(t, box, b, (conn) => {
+      conn.send('H', helloOf(box, b));
+      conn.send('X', JSON.stringify({ code: 1, signal: null, atNs: '5', notStarted: null }));
+      conn.send('X', JSON.stringify({ code: 2, signal: null, atNs: '6', notStarted: null }));
+    });
+    const r = box.registry();
+    await r.registry.rediscover();
+    await until(() => r.events.exited.length >= 2, 'both exits', 10_000);
+    await sleep(1500);
+    assert.deepEqual(r.events.exited.map((e) => [e.term.id, e.exit.code, e.lost]).sort(), [
+      [a, 0, false],
+      [b, 1, false],
+    ]);
+    assert.equal(fa.conns.length, 1, 'no reconnect after the exit');
+    assert.equal(info(r.registry, a).state, 'ended');
+    assert.equal(info(r.registry, a).exit?.code, 0);
+  });
+
+  test('a claim that ends between its hello and its snapshot does not leave the old screen to go on with', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000004';
+    await scriptedKeeper(t, box, id, (conn, n) => {
+      if (n === 0) {
+        conn.send('H', helloOf(box, id, { seq: 3 }));
+        for (const word of ['old1', 'old2', 'old3']) conn.send('D', `${word}\r\n`);
+        setTimeout(() => conn.end(), 200);
+        return;
+      }
+      conn.send('H', helloOf(box, id, { seq: 12, snapSeq: 10, tailFrom: 11 }));
+      if (n === 1) {
+        conn.end(); // right after the hello
+        return;
+      }
+      conn.send('S', encodeSnapshot(10, 80, 24, 'SNAP\r\n'));
+      conn.send('D', 'eleven\r\n');
+      conn.send('D', 'twelve\r\n');
+    });
+    const r = box.registry();
+    await r.registry.rediscover();
+    await until(
+      () => r.events.hello.length === 3,
+      () =>
+        `the third claim; log ${r.log.join(' | ')}; hellos ${r.events.hello.length}; states ${JSON.stringify([...r.states])}`,
+      10_000,
+    );
+    await until(() => info(r.registry, id).state === 'running', 'running');
+    const screen = r.terminals.at(-1);
+    assert.ok(screen);
+    await until(() => screenLines(screen).includes('twelve'), 'the tail on the screen');
+    assert.deepEqual(screenLines(screen), ['SNAP', 'eleven', 'twelve']);
+  });
+
+  test('a keeper whose stream fails after its hello is claimed again once a second, and logged once', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000005';
+    const fake = await scriptedKeeper(t, box, id, (conn) => {
+      conn.send('H', helloOf(box, id, { seq: 3, snapSeq: 2, tailFrom: 3 }));
+      conn.send('D', 'not a snapshot'); // S must come first
+    });
+    const r = box.registry();
+    await r.registry.rediscover();
+    await sleep(2500);
+    assert.ok(fake.conns.length <= 5, `${fake.conns.length} claims in 2.5 s`);
+    assert.ok(fake.conns.length >= 2, 'it is claimed again');
+    assert.equal(r.log.filter((line) => line.endsWith('snapshot missing')).length, 1);
+  });
+
+  test('a tail that stops coming: rediscover still resolves, and the terminal reconnects', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000006';
+    await scriptedKeeper(t, box, id, (conn) => {
+      conn.send('H', helloOf(box, id, { seq: 5 }));
+      conn.send('D', 'one\r\n'); // four records promised are never sent
+    });
+    const r = box.registry();
+    const began = performance.now();
+    const found = await r.registry.rediscover();
+    assert.ok(performance.now() - began < 9000, 'resolved');
+    assert.deepEqual(
+      found.map((x) => x.id),
+      [id],
+    );
+    assert.ok(r.log.some((line) => line.endsWith('the tail stopped coming')));
+    await until(() => (r.states.get(id) ?? []).includes('reconnecting'), 'reconnecting');
+  });
+
+  test('no answer while a reconnect replays the tail; a live query after it is answered once', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000007';
+    const fake = await scriptedKeeper(t, box, id, (conn, n) => {
+      if (n === 0) {
+        conn.send('H', helloOf(box, id));
+        conn.send('D', '\x1b[c'); // live: answered
+        setTimeout(() => conn.end(), 300);
+        return;
+      }
+      conn.send('H', helloOf(box, id, { seq: 2 }));
+      conn.send('D', '\x1b[c'); // record 1, on the screen already
+      conn.send('D', '\x1b[c'); // record 2, written while no server was there: not answered
+      setTimeout(() => conn.send('D', '\x1b[c'), 500); // live again
+    });
+    const r = box.registry();
+    await r.registry.rediscover();
+    const answers = (conn: FakeConn | undefined): number =>
+      conn?.received.filter((f) => f.type === 'I').length ?? 0;
+    await until(() => answers(fake.conns[0]) === 1, 'the live query answered');
+    await until(() => fake.conns.length === 2, 'the reconnect');
+    await sleep(300);
+    assert.equal(answers(fake.conns[1]), 0, 'nothing answered while the tail is replayed');
+    await until(() => answers(fake.conns[1]) === 1, 'the live query after it');
+    await sleep(300);
+    assert.equal(answers(fake.conns[0]), 1);
+    assert.equal(answers(fake.conns[1]), 1);
+  });
+
+  test('keepers that answer wrongly are not listed, and each is logged by kind once', async (t) => {
+    const box = await registrySandbox(t);
+    const cases: [string, string, (conn: FakeConn) => void][] = [
+      ['c0000000000a', 'first frame not a hello', (conn) => conn.send('D', 'x')],
+      [
+        'c0000000000b',
+        'bad hello (hello.tailFrom: missing)',
+        (conn) => conn.send('H', helloOf(box, 'c0000000000b', { tailFrom: undefined })),
+      ],
+      [
+        'c0000000000c',
+        'hello of another terminal',
+        (conn) => conn.send('H', helloOf(box, 'c0000000000f')),
+      ],
+      [
+        'c0000000000d',
+        'hello with a size above 1000 x 500',
+        (conn) => conn.send('H', helloOf(box, 'c0000000000d', { cols: 2000 })),
+      ],
+      [
+        'c0000000000e',
+        'keeper sent a frame the codec refuses (unknown-type)',
+        (conn) => conn.raw(Uint8Array.of(0x51, 0, 0, 0, 0)),
+      ], // 'Q': a type byte the codec does not know
+    ];
+    for (const [id, , script] of cases) {
+      await scriptedKeeper(t, box, id, script);
+    }
+    const r = box.registry();
+    const found = await r.registry.rediscover();
+    assert.deepEqual(found, []);
+    await sleep(2200); // the background claims go on, once a second
+    for (const [id, kind] of cases) {
+      assert.equal(
+        r.log.filter((line) => line === `terminal ${id}: ${kind}`).length,
+        1,
+        `${kind}: ${r.log.join(' | ')}`,
+      );
+    }
+    assert.deepEqual(r.registry.list(), []);
+  });
+});
+
+describe('registry: the forced redraw', () => {
+  test('a redraw whose connection breaks inside its pause is finished on the next connection', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000008';
+    const gapHello = (): string => helloOf(box, id, { seq: 3, snapSeq: 0, tailFrom: 3, gap: true });
+    const fake = await scriptedKeeper(t, box, id, (conn, n) => {
+      conn.send('H', gapHello());
+      conn.send('D', 'three\r\n');
+      if (n === 0) {
+        const check = setInterval(() => {
+          if (conn.received.some((f) => f.type === 'Z')) {
+            clearInterval(check);
+            conn.end(); // inside the 100 ms between the two resizes
+          }
+        }, 5);
+      }
+    });
+    const r = box.registry();
+    await r.registry.rediscover();
+    await until(() => fake.conns.length === 2, 'the reconnect', 5000);
+    const sizes = (conn: FakeConn | undefined): string[] =>
+      (conn?.received ?? [])
+        .filter((f) => f.type === 'Z')
+        .map((f) => new TextDecoder().decode(f.payload));
+    await until(() => sizes(fake.conns[1]).length > 0, 'the second resize', 5000);
+    assert.deepEqual(sizes(fake.conns[0]), ['79 24']);
+    assert.deepEqual(sizes(fake.conns[1]), ['80 24'], 'back to the width, not a new redraw');
+  });
 });
