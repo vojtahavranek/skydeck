@@ -756,7 +756,11 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   checks that the session's resume lock in the store is still exactly the spec's `lock` (no other
   skydeck has taken it over); for a new session, that no live process holds the session id. When
   all holds and the deadline has not passed, it sends `G`; otherwise `N` with the reason, which the
-  window shows on the terminal ("not started: <reason>").
+  window shows on the terminal ("not started: <reason>"). The lock is compared exactly: a renewal and
+  a take-over of a stale lock with no new event look alike. Known limit, for the stage that brings
+  restore into the window: restore renews its locks, so a restored keeper whose hello comes late, or
+  after a reconnect, is refused ("its resume lock was renewed or taken over"; ruled by the plan
+  owner, stage A's plan task 21).
 - **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
   passed with output since the last park, and for every terminal when it stops (5.5). A park names
   the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
@@ -847,7 +851,11 @@ both in memory: the **expected session**. Which session it shows is decided agai
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
   terminal's program or a descendant of it (parent pids read from `/proc/<pid>/stat`, at most 8
   steps up, each judged alive by design 5.5's rule). The descendant rule covers a `claudeCommand`
-  that is a wrapper;
+  that is a wrapper. A step whose `/proc` file cannot be read (design 5.5's "unknown") decides
+  nothing: that holder's session is neither given to a terminal by it nor listed as running in
+  another terminal (7.9), and while any holder is unknown no terminal newly becomes "started, not
+  reported"; the server keeps the previous tick's answer for that session and acts on nothing that
+  rests on it (stage A's plan, task 21, ruled);
 - a terminal shows the session one of its holders holds. After `/clear` or an in-session `/resume`
   that is the new session; the old one becomes `not-running` (with no mark, design 6.3), and the
   terminal moves to the new session's row with its slot;
@@ -883,7 +891,9 @@ The keeper reads the pty until it closes, reaps the program, and sends `exit` wi
 signal. It then ends when the server has acknowledged the exit (8.1), or when no server has been
 connected for 10 minutes since the program ended; it removes its socket and pid file. A terminal
 that was not started (7.1, step 2) ends the same way, after its `X` with `notStarted`: nothing was
-started, and the resume's lock expires by design 7.6.
+started, and the server gives back the resume's lock and a new session's label and group as below
+(ruled by the plan owner, stage A's plan task 21: the window shows no command to run by hand for it,
+11.2, so nothing waits for the lock to expire).
 
 The server, on `exit`:
 
@@ -902,7 +912,13 @@ The server, on `exit`:
   session removes the label and group it stored (design 7.6, 7.7): nothing runs, and the bar's
   Resume must not be refused for a minute. This differs **on purpose** from `settleFailedLaunch`,
   which releases only when no command could be printed (a printed command may yet be run by hand):
-  here nothing is printed for the user to run, and the bar offers Resume itself.
+  the window prints nothing for the user to run (11.2), and the bar offers Resume itself. It is done
+  for every exit, also of a terminal whose program was never started (an `X` with `notStarted`, a
+  keeper lost before `T`); a new session's label and group are removed only while they are as
+  `prepareNew` stored them (principle 6). Known limit, for the stage that brings restore into the
+  window: restore renews its locks, so the store's lock is then no longer exactly the one the
+  terminal took, and such a lock is not given back (it expires; 7.3 has the other half). Lock values
+  then need a mark that a renewal keeps and a take-over changes.
 
 A keeper whose connection ends without `exit` is **lost** only when its process is dead by design
 5.5's rule (its `.pid` line) or its socket refuses connections: then its program got SIGHUP
@@ -1566,15 +1582,24 @@ value and start deadline (11.1), the first size (8.2.6) and the next free slot; 
 
 - `T` (8.1): `{ ok: true }`; the program runs, and the terminal is tied to its pid and process start
   (7.5);
-- `X` with `notStarted`, a keeper that cannot be started at all (python3 missing, a socket path
-  too long, a spawn error), or a keeper that ends before `T`: `{ ok: false, timedOut: false }` with
-  the reason — nothing was started;
-- no `hello`, or no `T` after `G`, within 5 seconds: `{ ok: false, timedOut: true }`. The keeper
-  may still start the program before its deadline; a later server that finds it runs the guard
-  first (7.3), and this server keeps the terminal and shows it when `T` comes.
+- a keeper that cannot be started at all (python3 missing, a socket path too long, a spawn error):
+  `{ ok: false, timedOut: false }` with the reason — no keeper runs;
+- `X` with `notStarted`, or a keeper that ends before `T`: `{ ok: false, timedOut: true }` with
+  "not started: <reason>" — nothing was started, the terminal stays listed with its exit and offers
+  Resume, and its exit gives back the lock (7.8);
+- no `hello`, or no `T` after `G`, within 5 seconds, or the server stopping while the keeper starts:
+  `{ ok: false, timedOut: true }`. The keeper may still start the program before its deadline; a
+  later server that finds it runs the guard first (7.3), and this server keeps the terminal and
+  shows it when `T` comes.
 
-So a failure behaves as a failed tab does in step 1 (`settleFailedLaunch`): the lines end with the
-command line to run by hand when that is safe, and none after a timeout.
+So a failure behaves as a failed tab does in step 1 (`settleFailedLaunch`), with one rule of the
+window's own (ruled by the plan owner, stage A's plan task 21): `timedOut: false` (step 1 then
+prints the command to run by hand) is answered only for a launch for which no keeper process was
+ever started (python3 missing, the socket path too long, the registry refusing before it spawns) or
+whose keeper is known dead with no terminal left (it ended at start). Every other failure takes the
+timeout's path: no command — a keeper may run, and a hand-run `claude` could start the session
+twice, or the terminal offers Resume itself — and the lock and the label stay; the terminal's exit
+gives them back when its program never started (7.8).
 
 ### 11.3 In the window
 

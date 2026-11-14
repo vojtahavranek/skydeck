@@ -64,9 +64,12 @@ export interface Registry extends TerminalHub {
   /** S2 7.1: `python3 -I <keeperFile>`, detached, cwd /, stdout /dev/null, stderr appended to
    *  keepers.log, the spec on stdin; then claim and attach. Resolves after `hello`; rejects with
    *  KeeperStartError: kind 'python-missing' (S2 14's message), 'path-too-long', 'spawn-failed' —
-   *  nothing was started, the terminal is forgotten — or 'no-hello' (none within 5 s): the keeper
-   *  may still be starting, so the registry KEEPS the terminal, goes on claiming its socket, and
-   *  reports its hello through `events.hello` when it comes. Sends no G. */
+   *  nothing was started, or the keeper ended; the terminal is forgotten — 'stopping' (ruled by the
+   *  plan owner, task 21): the registry was stopped while the keeper it started had not sent its
+   *  hello; the terminal is forgotten, but the keeper may live and a later server finds it — or
+   *  'no-hello' (none within 5 s): the keeper may still be starting, so the registry KEEPS the
+   *  terminal, goes on claiming its socket, and reports its hello through `events.hello` when it
+   *  comes. Sends no G. */
   spawn(spec: KeeperSpec): Promise<TerminalInfo>;
   /** S2 7.3: connects to every keeper of terms/ whose .pid line is alive or unknown (ruled:
    *  nothing is removed on unknown); removes dead ones' files. Resolves once each found screen is
@@ -84,7 +87,7 @@ export interface Registry extends TerminalHub {
 }
 
 export class KeeperStartError extends Error {
-  readonly kind: 'python-missing' | 'path-too-long' | 'spawn-failed' | 'no-hello';
+  readonly kind: 'python-missing' | 'path-too-long' | 'spawn-failed' | 'stopping' | 'no-hello';
   constructor(kind: KeeperStartError['kind'], message: string) {
     super(message);
     this.name = 'KeeperStartError';
@@ -1071,6 +1074,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       'python-missing': PYTHON_MISSING,
       'path-too-long': `the terminal's socket path would be ${detail} bytes; a unix socket path must be shorter than ${SOCKET_PATH_LIMIT} bytes`,
       'spawn-failed': `the terminal's keeper could not be started${detail === '' ? '' : ` (${detail})`}`,
+      stopping: "the server stopped while the terminal's keeper was starting",
       'no-hello': `the terminal's keeper did not answer within ${HELLO_MS / 1000} seconds`,
     };
     return new KeeperStartError(kind, messages[kind]);
@@ -1137,8 +1141,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
       while (!timedOut && term.hello === null) {
         if (term.forgotten) throw startError('spawn-failed', 'closed');
         if (stopped) {
+          // Ruled (task 21, M1): the keeper was started and is not known to have ended; it may
+          // live, and a later server finds it. Not 'spawn-failed', which means nothing runs.
           forget();
-          throw startError('spawn-failed', 'the server is stopping');
+          throw startError('stopping');
         }
         if (keeperEnded) {
           forget();

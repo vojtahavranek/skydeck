@@ -158,7 +158,7 @@ more than one task edits, and who edits them, never two tasks of one wave:
 | `test/helpers/platform.ts`, `test/helpers/sandbox.ts` (A32), `test/helpers/deck.ts` | 5 (1) |
 | `src/claude/procstat.ts` | 8 (1) |
 | `src/sessions/resume.ts`, `src/sessions/restore.ts`, `src/cli/launching.ts` | 4 (1) |
-| `src/window/terminals.ts` | 16 (3) creates it; 21 (4) uses only the `Registry` API task 16 exports |
+| `src/window/terminals.ts`, `test/window/terminals.test.ts` | 16 (3) creates them; 21 (4) adds the `KeeperStartError` kind `'stopping'` and its test case (ruled, task 21's review 2) and otherwise only uses the `Registry` API task 16 exports |
 | `src/window/screen.ts`, `test/window/screen.test.ts` | 12 (2) creates them; 33 (3) edits them; 16 (3) only calls `createScreen` |
 | `test/keeper/limits.test.ts` | 9 (2) creates it; 20 (3) edits it (ruled on #51) |
 | `web/index.html`, `web/app.js`, `web/style.css` | 26 (6) only; tasks 27–29 own `web/list.*`, `web/terminal-view.*`, `web/cards.*`/`web/help.js` |
@@ -2414,9 +2414,12 @@ export interface Registry extends TerminalHub {
   /** S2 7.1: `python3 -I <keeperFile>`, detached, cwd /, stdout /dev/null, stderr appended to
    *  keepers.log, the spec on stdin; then claim and attach. Resolves after `hello`; rejects with
    *  KeeperStartError: kind 'python-missing' (S2 14's message), 'path-too-long', 'spawn-failed' —
-   *  nothing was started, the terminal is forgotten — or 'no-hello' (none within 5 s): the keeper
-   *  may still be starting, so the registry KEEPS the terminal, goes on claiming its socket, and
-   *  reports its hello through `events.hello` when it comes. Sends no G. */
+   *  nothing was started, or the keeper ended; the terminal is forgotten — 'stopping' (ruled by
+   *  the plan owner, task 21's review 2): the registry was stopped after it started the keeper and
+   *  before its hello; the terminal is forgotten, but the keeper may live and a later server finds
+   *  it (a stop before anything is spawned stays 'spawn-failed') — or 'no-hello' (none within
+   *  5 s): the keeper may still be starting, so the registry KEEPS the terminal, goes on claiming
+   *  its socket, and reports its hello through `events.hello` when it comes. Sends no G. */
   spawn(spec: KeeperSpec): Promise<TerminalInfo>;
   /** S2 7.3: connects to every keeper of terms/ whose .pid line is alive or unknown (ruled by the
    *  plan owner: nothing is removed on unknown); removes dead ones' files. Resolves once each
@@ -2433,7 +2436,7 @@ export interface Registry extends TerminalHub {
   stopAll(): Promise<void>;
 }
 export class KeeperStartError extends Error {
-  readonly kind: 'python-missing' | 'path-too-long' | 'spawn-failed' | 'no-hello';
+  readonly kind: 'python-missing' | 'path-too-long' | 'spawn-failed' | 'stopping' | 'no-hello';
 }
 export function createRegistry(deps: RegistryDeps): Registry;
 ```
@@ -3025,21 +3028,32 @@ export interface WindowTerminalDeps {
 }
 /** One adapter per launch: `size` is the first size of S2 8.2.6. open() spawns a keeper with
  *  programEnvironment(...), the next slot and meta (A28), sends G on a hello that arrives within
- *  its 5-second wait, and resolves { ok: true } on T; { ok: false, timedOut: false, error } on X
- *  with notStarted, on KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed', or a
- *  keeper that ends before T; { ok: false, timedOut: true } on KeeperStartError 'no-hello' or no T
- *  within 5 s after G. After open() has answered, it sends nothing: a hello that comes later is a
+ *  its 5-second wait, and resolves { ok: true } on T; { ok: false, timedOut: false, error } on
+ *  KeeperStartError 'python-missing', 'path-too-long' or 'spawn-failed' (no keeper process was
+ *  started, or it is known dead with no terminal left); and — ruled by the plan owner (task 21,
+ *  review 2; S2 11.2) — { ok: false, timedOut: true, error } on KeeperStartError 'no-hello' or 'stopping' (the keeper may
+ *  run), on X with notStarted or a keeper that ends before T ("not started: <reason>": the terminal
+ *  offers Resume, its exit gives the lock back), and on no T within 5 s after G. After open() has
+ *  answered, it sends nothing: a hello that comes later is a
  *  found keeper, and goes through decideFoundKeeper before any G (task 23 wires events.hello). */
 export function windowTerminal(deps: WindowTerminalDeps, size: { cols: number; rows: number }): Terminal;
 
 // src/window/starts.ts
 /** S2 7.3: for a keeper found with started false — refresh, then the guard (checkResumable on the
  *  refreshed row; for `new`, no live process holds the id) and the lock (still exactly the hello's
- *  `lock`), and the deadline. */
+ *  `lock`, compared exactly; a renewal is refused like a take-over, "its resume lock was renewed or
+ *  taken over": S2 7.3's limit for restore in the window), and the deadline. Ruled by the plan
+ *  owner (task 21, reviews 1 and 2): it never throws (a failure
+ *  while checking is a refusal naming it); a hello whose `started` is true or whose `exited` is set
+ *  is never started; a `new` is refused when the boot id cannot be read (checkResumable's words). */
 export function decideFoundKeeper(deck: Deck, hello: KeeperHello): { start: true } | { start: false; reason: string };
 /** S2 7.8: after an exit, when the session never reported a start for this launch (ingestSpool
  *  first, then resumeStarted with the lock's time and event id; for `new`, no event of the id):
- *  release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote. */
+ *  release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote.
+ *  Ruled by the plan owner (task 21, review 2): task 23 calls it for EVERY exit of a terminal,
+ *  started or not — the exit and the store decide, not `hello.started`; the lock is compared
+ *  exactly (a renewed one is left to expire: S2 7.8's limit for restore in the window); the meta
+ *  row only while it is unchanged since prepareNew wrote it (updated = created). */
 export function settleEndedTerminal(deck: Deck, hello: KeeperHello): void;
 
 // src/window/mapping.ts — S2 7.5, 7.9; pure over its input
@@ -3050,6 +3064,14 @@ export interface Mapping {
   notReported: ReadonlySet<string>;
   /** Running sessions none of whose holders belongs to a terminal, with the first holder's pid and tty. */
   elsewhere: ReadonlyMap<string, { pid: number; tty: string | null }>;
+  /** Ruled by the plan owner (task 21, review 1): the sessions with a holder whose chain could not
+   *  be read (design 5.5's "unknown": a /proc read that failed, a stat line without a readable
+   *  start or parent, no boot id). Such a session is not put into `elsewhere` by this pass and is
+   *  not given to a terminal by that holder; in a pass where this set is not empty (or without a
+   *  boot id) no terminal is newly put into `notReported`. A consumer keeps the previous pass's
+   *  answer for a session in `unknown` and takes no action that rests on it (task 23's tick: no
+   *  terminal is closed because "its session runs elsewhere", nothing is marked not reported). */
+  unknown: ReadonlySet<string>;
 }
 export function mapTerminals(input: { terminals: readonly TerminalInfo[]; sessions: readonly DerivedSession[]; proc: Proc; bootId: string | null; nowNs: Ns; startTimeoutNs: Ns }): Mapping;
 ```
@@ -3063,8 +3085,10 @@ which keeps each terminal's latest `hello` so that `settleEndedTerminal` gets it
 **Files**
 - Create: `src/window/window-terminal.ts`, `src/window/starts.ts`, `src/window/mapping.ts`
 - Test: `test/window/window-terminal.test.ts`, `test/window/starts.test.ts`, `test/window/mapping.test.ts`
+- Test helper (ruled by the plan owner, task 21): `test/helpers/window-deck.ts` — a deck and registries in one sandbox
+- Modify (ruled by the plan owner, review 2): `src/window/terminals.ts` and `test/window/terminals.test.ts` — the `KeeperStartError` kind `'stopping'`
 
-**Tests** (platform: `testDeck(t, { real: true })`; the stand-in as `claudeCommand`, real keepers through a registry)
+**Tests** (platform: `testDeck(t, { real: true })`; the stand-in as `claudeCommand`, real keepers through a registry; the pure cases of `mapTerminals` and of `decideFoundKeeper` / `settleEndedTerminal` on `testDeck(t)` with a fake `/proc`, ruled by the plan owner, task 21)
 - `launchPrepared(deck, prepareResumeById(deck, S1), windowTerminal(deps, { cols: 100, rows: 30 }))`
   → `{ code: 0 }`; the stand-in's `argv` is `buildResumeCommand`'s, its `cwd` the session's
   directory, its size 100 × 30; `prepareNew` with a directory and a label → `buildNewCommand`'s

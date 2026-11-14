@@ -2,7 +2,7 @@
 // streams to sinks in order, the slot rule, input and its limit, the end of a program, starts that
 // fail. Platform: realTestPlatform; real keepers running the stand-in; G is sent by the test.
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync, chmodSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -323,6 +323,47 @@ describe('registry: starts that fail', () => {
     assert.equal(error.kind, 'path-too-long');
     assert.deepEqual(r.registry.list(), []);
     assert.deepEqual(r.spawned, [], 'refused before spawning: no keeper was started');
+  });
+
+  test('the server stopping while a spawned keeper starts → stopping (ruled, task 21): forgotten, the keeper lives on', async (t) => {
+    const box = await registrySandbox(t);
+    const slow = join(box.s.root, 'slow-bin');
+    mkdirSync(slow);
+    const script = join(slow, 'python3');
+    writeFileSync(script, `#!/bin/sh\nsleep 2\nexec ${join(box.s.bin, 'python3')} "$@"\n`);
+    chmodSync(script, 0o755);
+    const platform = {
+      ...box.tp.platform,
+      env: { ...box.tp.platform.env, PATH: `${slow}:${box.s.bin}` },
+    };
+    const r = box.registry({ platform });
+    const spec = box.spec();
+    const spawning = r.registry.spawn(spec).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    await sleep(300);
+    await r.registry.stopAll();
+    const error = await spawning;
+    assert.ok(error instanceof KeeperStartError, String(error));
+    assert.equal(error.kind, 'stopping');
+    assert.deepEqual(r.registry.list(), []);
+    assert.equal(r.spawned.length, 1, 'its keeper was started');
+    // Its pid line, not only its socket (bound first): the cleanup's killKeepersIn finds keepers
+    // by their pid lines, and must not miss this one.
+    await until(
+      () => existsSync(box.files.termPid(spec.id)),
+      'the keeper came up after all (its pid line)',
+      10_000,
+    );
+    // Before anything is spawned, a stopped registry still answers spawn-failed.
+    const late = await r.registry.spawn(box.spec()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    assert.ok(late instanceof KeeperStartError);
+    assert.equal(late.kind, 'spawn-failed');
+    assert.equal(r.spawned.length, 1, 'nothing more was started');
   });
 
   test('a keeper whose hello comes late → no-hello after 5 s, the terminal kept, its hello reported as late; no G', async (t) => {
