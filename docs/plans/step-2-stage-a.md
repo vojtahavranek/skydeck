@@ -2529,7 +2529,9 @@ Node.js's `drain` (nothing queued, so below 64 KiB) the current `list` goes out 
 the marked streams are attached again (their fresh `snap` on a new channel follows when the hub
 gives it, then what the hub tells after it).
 Above 64 MiB queued, whatever it is but what is still queued of the latest `snap` (one screen of
-image-like output reaches 40–60 MiB), the connection is destroyed with one fixed log line. With 64
+image-like output reaches 40–60 MiB), the connection is destroyed with one fixed log line; the
+snaps of terminals attached at the same moment count, all but the latest (a named limit, S2
+8.2.8: the page attaches its visible terminal first, the others one at a time). With 64
 connections in the hello phase, an upgrade that passes the checks above drops the one that has
 waited longest and is accepted; a proven connection is never dropped for it (no 503 for this; the
 `bye` 503 stays). The hello reads the
