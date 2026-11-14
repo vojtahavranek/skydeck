@@ -47,7 +47,6 @@ function byId(id) {
 const dom = {
   gone: byId('gone'),
   goneText: byId('gone-text'),
-  goneDetail: byId('gone-detail'),
   problem: byId('problem'),
   info: byId('info'),
   infoText: byId('info-text'),
@@ -156,17 +155,14 @@ function clockTime(date) {
 /**
  * S2 6.3's bar, with the time the server stopped answering.
  * @param {Date} since
- * @param {string | null} reason the server's `bye`, when it said one
  */
-function showGone(since, reason) {
+function showGone(since) {
   const command = document.createElement('code');
   command.textContent = 'skydeck window';
   dom.goneText.replaceChildren(
     `skydeck's server is not answering (since ${clockTime(since)}). Sessions in the window keep running unless WSL has stopped. To get back, open a WSL terminal and run: `,
     command,
   );
-  dom.goneDetail.textContent = reason === null ? '' : `The server said: ${reason}`;
-  dom.goneDetail.hidden = reason === null;
   dom.gone.hidden = false;
 }
 
@@ -513,16 +509,10 @@ function received(message) {
         terminalView.notice(message.term, message.kind, message.text);
       }
       return;
-    case 'bye':
-      byeReason = message.reason;
-      return;
     default:
       return;
   }
 }
-
-/** @type {string | null} */
-let byeReason = null;
 
 // --- rendering ----------------------------------------------------------------------------------
 
@@ -862,8 +852,7 @@ async function start() {
       output: (channel, bytes) => terminalView.output(channel, bytes),
       lost: (since) => {
         dropPending();
-        showGone(since, byeReason);
-        byeReason = null;
+        showGone(since);
       },
       fatal: (text) => {
         dropPending();

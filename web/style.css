@@ -140,10 +140,6 @@ kbd {
 .bar code {
   font-family: var(--term-font);
 }
-.bar-detail {
-  margin-top: 4px;
-  color: var(--dim);
-}
 .bar-close {
   margin-left: auto;
   border: 0;

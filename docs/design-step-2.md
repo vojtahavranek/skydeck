@@ -572,7 +572,9 @@ every second would hand that program a `hello` each time; the warning stays unti
 reloaded or closed (ruled, plan task 26). A 503 at the upgrade (the server starts or stops, 8.2.1),
 a close 1013 at the `hello` (its database is busy, 8.2.2) and a close right after the challenge (a
 waiting connection dropped for a newcomer, 8.2.1) are lost connections like any other: the page
-tries again and never says that something else answers on the port.
+tries again and never says that something else answers on the port. The two sentences of a
+reconnect above ("restarted", "WSL has restarted since") stay in their notice until the user
+dismisses it (ruled, plan task 26).
 
 ### 6.4 A stable interop socket for sessions
 
@@ -1137,7 +1139,13 @@ the server's proof.
 6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
    "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
    connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
-   reloads itself (it was loaded from an older server).
+   reloads itself (it was loaded from an older server), without sending `start`. It does so once
+   per version of the server's (it remembers that version for the tab): a page that still differs
+   after that reload is not served by that server at all — most likely something else answers the
+   page's loads (15.3) — and reloading again would loop for ever, so it sends nothing more and says
+   `this window's page is not the one skydeck's server serves, and reloading did not change that;
+   close every skydeck window, delete the window's profile folder and run skydeck window
+   --new-secret` (ruled, plan task 26).
 
 **Reading the secret.** The server reads the secret from the store at every `hello`, so
 `--new-secret` takes effect at once (ruled, plan task 17). While another process holds the store's
@@ -2086,10 +2094,13 @@ Edge reaches that program instead.
 - **Its page runs at the window's origin.** It can register a service worker, which stays in the
   window's profile after that program is gone, answers later loads of the page itself, and can use
   the stored key in every later window — lasting control of the window's profile. The server
-  answers every unknown path with 404, which may make Edge drop such a worker at its next update
-  check; that is **UNVERIFIED** (the page suite tests it with a stand-in server, 17.4). The
-  recovery is to close every window, **delete the window's profile folder** (5.4), and run
-  `skydeck window --new-secret`: `--new-secret` alone does not remove a worker.
+  answering the worker's script with 404 does **not** drop it, measured in Chromium (the page
+  suite, 17.4; plan task 26): the worker goes on answering every load of the page after the real
+  server is back, and an update check that gets the 404 fails and leaves it registered. Whether
+  Edge behaves the same is W25. So the recovery is the only way out: close every window, **delete
+  the window's profile folder** (5.4), and run `skydeck window --new-secret`: `--new-secret` alone
+  does not remove a worker. Stage A builds no remedy of its own (no `Clear-Site-Data`, no
+  unregistering by the page; ruled, plan task 26).
 - **A window already open** sends nothing to a program that cannot prove itself (8.2.2). But that
   holds only while the program cannot reach the real server too: one that can — if, with the port
   taken on Windows' `127.0.0.1`, the WSL server still answers on the IPv6 loopback (check W25) —
@@ -2474,7 +2485,8 @@ In the browser suite, besides those:
   a stand-in server without one;
 - a stand-in server holding the port serves a page that registers a service worker; after the real
   server is back, whether the worker still answers the next load (the 404 of 15.3) is recorded, so
-  that W25 and 15.3 can be settled.
+  that W25 and 15.3 can be settled. Recorded in Chromium (plan task 26): it does — the worker
+  answers the next loads, and an update check that gets the 404 fails and leaves it registered.
 
 ### 17.5 Where the tests are, and what CI runs
 
@@ -2551,7 +2563,7 @@ folder, as in manual-checks.md.
 | W22 | **Real claude**: a session started in a WSL terminal shows "running in another terminal", Resume is refused with the guard's message, and after `/exit` it resumes into the window. | A | 7.9 |
 | W23 | **Real claude**: which `CLAUDE*` variables Claude Code sets for the programs it runs — print the variable names (never their values) in a session's `!env` against a plain shell's — to confirm 7.4's list. And `skydeck window` run from a session's `!` command refuses (5.1). | A | 5.1, 7.4 |
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
-| W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404 (the page suite tests this in Chromium, 17.4)? | A | 15.3 |
+| W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404? Answered for Chromium by the page suite (17.4, plan task 26): no, the worker keeps answering and stays registered; Edge itself is still to be checked here. | A | 15.3 |
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a

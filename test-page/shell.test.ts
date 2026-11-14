@@ -54,6 +54,13 @@ const RESTARTED = /^skydeck's server restarted; your sessions kept running$/;
 const WSL_RESTARTED =
   /^WSL has restarted since \d\d:\d\d:\d\d: the sessions that were running have ended\.$/;
 const PLACEHOLDER = /terminal view comes with task 28/;
+const STALE =
+  "this window's page is not the one skydeck's server serves, and reloading did not change that; close every skydeck window, delete the window's profile folder and run skydeck window --new-secret";
+
+/** `text` as a regular expression that matches it literally. */
+function escape(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 interface Launched extends Omit<StartedServer, 'page'> {
   page: Page;
@@ -568,6 +575,12 @@ test('the page shell', async (t) => {
       await connection(l.page, 'open');
       const time = (text: string): string | undefined => /\d\d:\d\d:\d\d/.exec(text)?.[0];
       assert.equal(time(restarted), time(gone), 'the time the page lost the old server');
+
+      // The notice stays until it is dismissed.
+      await sleep(1000);
+      assert.match(await shownText(l.page, '#info-text'), WSL_RESTARTED);
+      await l.page.locator('#info-close').click();
+      await l.page.waitForSelector('#info[hidden]', { state: 'attached' });
     },
   );
 
@@ -798,6 +811,39 @@ test('the page shell', async (t) => {
     },
   );
 
+  await t.test(
+    'a server whose asset version never matches the page: exactly one reload, then the line that says what to do',
+    async (t) => {
+      const secret = new Uint8Array(32).fill(4);
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      const standin = await standinServer(t, {
+        socket: honest(secret, { assetVersion: 'another-build' }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await mark(page, 'never matches');
+
+      await page.goto(standin.url);
+      await showsText(page, '#problem', new RegExp(`^${escape(STALE)}$`));
+      await connection(page, 'fatal');
+      await sleep(2000);
+
+      const log = after(await logOf(page), 'never matches');
+      assert.equal(
+        log.filter((entry) => entry.e === 'unload').length,
+        2,
+        'the goto and one reload',
+      );
+      assert.equal(
+        log.filter((entry) => entry.e === 'out' && entry.t === 'start').length,
+        0,
+        'no start for a server of another version',
+      );
+      assert.equal(standin.connections.length, 2);
+    },
+  );
+
   await t.test('no pong for 3 seconds → the bar within 4 s', async (t) => {
     const secret = new Uint8Array(32).fill(5);
     const page = await newPage(t, chromium);
@@ -819,7 +865,7 @@ test('the page shell', async (t) => {
   });
 
   await t.test(
-    "a stand-in server's service worker, then the real server answers its script with 404: what the next load shows is recorded (S2 15.3, 17.4)",
+    "a record of Chromium's behaviour (S2 15.3, 17.4, W25): a stand-in server's service worker, then the real server answers its script with 404 — what the next loads show",
     async (t) => {
       const page = await newPage(t, chromium);
       const standin = await standinServer(t, {

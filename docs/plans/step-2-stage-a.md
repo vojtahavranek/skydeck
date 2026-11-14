@@ -3630,7 +3630,10 @@ session into a terminal pane that says "terminal view comes with task 28".
   `String.prototype.isWellFormed` and `allowImportingTsExtensions` for its `.ts` import of
   `src/claude/session-id.ts`)
 - Modify: `package.json` (`"typecheck": "tsc --noEmit && tsc --noEmit -p web"`)
-- Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`
+- Test: `test-page/shell.test.ts`, `test-page/auth.test.ts`, their helper `test-page/helpers/shell.ts`
+  (the recorder, stand-in servers), `test/web/pane.test.ts` (node:test on `web/pane.js`), and one
+  case in `test/window/server-failures.test.ts` (a launch hello closed 1013 uses up no token;
+  ruled for this task)
 
 **Behaviour.** `auth.js`: S2 8.2.2 steps 3–6 and "where the page keeps its key" — HMAC proofs,
 HKDF, `unwrapKey` into a non-extractable HMAC key, IndexedDB, the token used once. The page

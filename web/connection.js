@@ -74,6 +74,8 @@ const OTHER_PROTOCOL = 4426;
 const NOT_VALID = 4003;
 const REUSED = 4004;
 const TRY_LATER = 1013;
+/** Session storage: the server's version the page last reloaded itself for. */
+const RELOADED_FOR = 'skydeck-reloaded-for';
 
 /** The texts of S2 8.2.2. */
 export const TEXTS = {
@@ -81,6 +83,9 @@ export const TEXTS = {
   alarm:
     "this window's launch address was used by another program, which may now have skydeck's key; run skydeck window --new-secret",
   protocol: "skydeck's server speaks another protocol; run skydeck window again",
+  /** S2 8.2.2 step 6, after the one reload (ruled, task 26); the recovery of S2 15.3. */
+  stale:
+    "this window's page is not the one skydeck's server serves, and reloading did not change that; close every skydeck window, delete the window's profile folder and run skydeck window --new-secret",
   /** @param {string} port */
   notSkydeck: (port) =>
     `something answers on port ${port} that is not skydeck's server; nothing was sent to it`,
@@ -414,21 +419,27 @@ export function createConnection(options) {
   };
 
   /**
-   * Whether the page may reload for `version` (S2 8.2.2 step 6), once per version: a page that
-   * reloaded and still differs goes on rather than reloading again and again.
-   * @param {string} version
-   * @returns {boolean}
+   * S2 8.2.2 step 6: a page whose asset version is not the server's reloads itself — once per
+   * version of the server's (ruled, task 26): a page that has reloaded and still differs would
+   * otherwise reload for ever. 'same'; 'reload'; or 'stuck' when it reloaded for that version
+   * already (or cannot remember that it did).
+   * @param {string} version the server's
+   * @returns {'same' | 'reload' | 'stuck'}
    */
-  const mayReloadFor = (version) => {
+  const versionStep = (version) => {
     try {
-      if (sessionStorage.getItem('skydeck-reloaded-for') === version) {
-        return false;
+      if (version === options.assetVersion) {
+        sessionStorage.removeItem(RELOADED_FOR);
+        return 'same';
       }
-      sessionStorage.setItem('skydeck-reloaded-for', version);
+      if (sessionStorage.getItem(RELOADED_FOR) === version) {
+        return 'stuck';
+      }
+      sessionStorage.setItem(RELOADED_FOR, version);
+      return 'reload';
     } catch {
-      // without session storage the page reloads; the server it reloads from is the new one
+      return version === options.assetVersion ? 'same' : 'stuck';
     }
-    return true;
   };
 
   async function attempt() {
@@ -467,8 +478,16 @@ export function createConnection(options) {
       }
     }
     const { welcome } = result;
-    if (welcome.assetVersion !== options.assetVersion && mayReloadFor(welcome.assetVersion)) {
+    const step = versionStep(welcome.assetVersion);
+    if (step === 'reload') {
       location.reload();
+      return;
+    }
+    if (step === 'stuck') {
+      socket = null;
+      ws.onclose = null;
+      ws.close();
+      fail(TEXTS.stale);
       return;
     }
     /** @type {Change} */
@@ -542,7 +561,5 @@ export function createConnection(options) {
       return true;
     },
     reload,
-    /** @returns {boolean} */
-    isOpen: () => state === 'open',
   };
 }
