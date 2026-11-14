@@ -668,7 +668,8 @@ export interface TerminalHub {
   resize(termId: string, cols: number, rows: number): void;
   /** S2 8.2.3 `close-terminal`: forgets an ended, lost or not-started terminal. */
   close(termId: string): 'ok' | 'running' | 'unknown';
-  /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). */
+  /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). Pages calls it when
+   *  a page starts focused and when a page reports focus (with the theme of its start; ruled). */
   setTheme(theme: ThemePayload): void;
   /** Called after any change of `list()`; returns the function that unsubscribes. */
   onChange(listener: () => void): () => void;
@@ -2507,11 +2508,47 @@ The handshake checks a proof only through 2.8 (ruled, task 11): mode `key` with 
 mode `launch` with `tokens.check`, never by a comparison of its own; `reused` closes with 4004
 whatever `alarmFailure` says, and a non-null `alarmFailure` is logged by that kind.
 
+Node.js's own answers stay Node.js's (ruled by the plan owner, task 17): no `clientError` hook and
+no platform change. What it answers before any handler — 400 for an HTTP/1.1 request without
+`Host` (its parser), 400 or 431 through its default `clientError` handling (an unknown method, a
+request line it cannot parse, `Content-Length` with `Transfer-Encoding`, an HTTP/2 preface, headers
+above 16 KiB), `CONNECT` closed without an answer — is recorded in S2 8.2.1 and pinned by tests.
+Every request Node.js hands the upgrade listener (any with `Connection: Upgrade` and an `Upgrade`
+header) has its `Host` (421), method (OPTIONS 403, any other but GET 405 with `Allow: GET`) and
+path (`/ws`, query ignored, else 404) checked there, then its `Origin` (403); the refusals carry
+`securityHeaders` and `no-store`. `bye` keeps a `'close'` listener on the raw upgrade socket, as a
+listener only, to resolve once the socket has really closed (ruled); every write and close goes
+through the WebSocket connection. After `bye` an upgrade with the right `Host` is answered 503
+(ruled, S2 8.2.1, 5.5); a wrong `Host` still gets 421.
+
+Backpressure (ruled by the plan owner at review 2, S2 8.2.8): a page is behind once a record
+(output, size, exit) or its `list` finds min(`buffered`, the bytes sent since the end of the last
+`snap`) above 1 MiB — a snap's own bytes do not count, so a large screen never loops; while
+behind its records are dropped (the streams that lose one are marked) and its `list` is held; at
+Node.js's `drain` (nothing queued, so below 64 KiB) the current `list` goes out at once and only
+the marked streams are attached again (their fresh `snap` on a new channel follows when the hub
+gives it, then what the hub tells after it).
+Above 64 MiB queued, whatever it is but what is still queued of the latest `snap` (one screen of
+image-like output reaches 40–60 MiB), the connection is destroyed with one fixed log line; the
+snaps of terminals attached at the same moment count, all but the latest (a named limit, S2
+8.2.8: the page attaches its visible terminal first, the others one at a time). With 64
+connections in the hello phase, an upgrade that passes the checks above drops the one that has
+waited longest and is accepted; a proven connection is never dropped for it (no 503 for this; the
+`bye` 503 stays). The hello reads the
+secret from the store every time (a named limit, S2 8.2.2: `--new-secret` takes effect at once;
+a held write lock can stall the server up to the 5 s busy timeout). When a page goes, every
+stream is detached before the sizes are handed over; during `bye` no size is handed over.
+
+Pages calls `hub.setTheme` with a page's theme (from its `start`) when that page starts focused
+and whenever it reports `focus` with `focused` true: `FocusMessage` carries no theme, so the one
+of `start` is sent again (ruled; S2 7.2's "the last focused page").
+
 **Exported API**
 
 ```ts
 // src/window/size.ts — pure, S2 8.2.6
 export interface SizeState { owner: string | null; proposals: ReadonlyMap<string, { cols: number; rows: number; attachedAt: number; inputAt: number | null }> }
+/** RangeError for an attach or resize without cols and rows (the caller's mistake; ruled). */
 export function sizeAfter(state: SizeState, event: { kind: 'attach' | 'resize' | 'input' | 'detach'; page: string; cols?: number; rows?: number; at: number }): { state: SizeState; apply: { cols: number; rows: number } | null };
 // src/window/pages.ts
 export interface PageState { windowId: string; focused: boolean; focusedAt: number; area: { cols: number; rows: number } | null; view: ViewMessage; attached: ReadonlySet<string> }
@@ -2533,6 +2570,9 @@ export interface Pages {
   /** Sends `list` to every page whose list differs from the last one it got, at most once a second each. */
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
+  /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
+   *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS).
+   *  From then on an upgrade with the right Host is answered 503 (ruled). */
   bye(reason: string): Promise<void>;
 }
 export function createPages(deps: PagesDeps): Pages;
@@ -2542,7 +2582,9 @@ export function createPages(deps: PagesDeps): Pages;
 - Create: `src/window/pages.ts`, `src/window/size.ts`
 - Test: `test/window/pages-handshake.test.ts`, `test/window/pages-stream.test.ts`,
   `test/window/size.test.ts` (`ws` as the client; a fake hub over in-memory terminals; a fake
-  action handler)
+  action handler), with `test/helpers/pages.ts` for both pages files
+- Modify: `test/keeper/limits.test.ts` (ruled on #53: a flaky assertion; only what the keeper
+  logs after the final claim counts), `src/window/hub.ts` (the attach ruling, as task 16)
 
 **Tests** (platform: `testPlatform` (fake clock, real sockets))
 - Handshake: `challenge` first with a 43-character nonce; a correct `hello` in mode `key` →
@@ -2554,6 +2596,12 @@ export function createPages(deps: PagesDeps): Pages;
   nonce) → 4003; any message before `hello`, or another before `start`, closes; `Origin`
   `http://localhost:<port>` or missing → 403 at the upgrade; `Host` wrong → 421 (task 14's
   `hostOk`, applied here to the upgrade).
+- The upgrade listener's own checks (ruled): any request with `Connection: Upgrade` reaches it, so
+  a wrong `Host` → 421, OPTIONS → 403, another method than GET → 405 with `Allow: GET`, a path
+  other than `/ws` → 404, each with the security headers and `no-store`; for port 80 `Host`
+  `127.0.0.1` and `Origin` `http://127.0.0.1` are accepted, `localhost` never. Node.js's own
+  answers (above) through the real listener: each a 4xx with an empty body (CONNECT: none), the
+  socket closed, no handler of ours called.
 - No log line and no frame the tests capture contains the secret's base64url, and a malformed
   `hello`, `start` and `input` carrying a marker string leave the marker in no log line.
 - Streams: `attach` → `snap` with a fresh channel, then binary frames `1, ch, bytes` in order, and
@@ -2569,8 +2617,18 @@ export function createPages(deps: PagesDeps): Pages;
   `sizeAfter` says so, and each page's `size.owner` and `list.terminals[].ownsSize` are true for
   the owner only.
 - Backpressure: a page whose socket is not read gets no output while more than 1 MiB is queued;
-  once drained below 64 KiB it gets a fresh `snap` per attached terminal (new channels) and output
-  again; the hub (and so the keeper) was never paused.
+  once drained below 64 KiB it gets a fresh `snap` per attached terminal that lost something (new
+  channels; one that lost nothing keeps its stream) and output again; the hub (and so the keeper)
+  was never paused. A second page that reads gets every record meanwhile. Ruled at review 2: an
+  idle terminal with a 6 MiB snap gets one snap; four and five terminals attached at once with
+  1.4 MiB snaps, idle or busy, get one snap each and every record; a busy terminal with a snap
+  above 4 MiB gets its records; a held `list` goes out once, the current one, at the drain;
+  snap after snap piling up above 64 MiB drops the connection and detaches its streams, while a
+  single snap above 64 MiB reaches a page that reads; a terminal attached while the page is
+  behind gets its snap at the drain; a `view` that arrives while behind is answered at the drain
+  even when its list is unchanged; with 64 connections waiting for their hello a 65th is
+  accepted and the oldest dropped, never a proven one, and an upgrade that is no WebSocket
+  (answered 400) drops nobody.
 - `ping` → `pong` with `n`, `bootId`, `serverId`; `view` → a `list` at once; `pushList` sends
   only changed lists and at most once a second per page (fake clock); `act` → the handler's
   `result` with the same `id`; `bye` reaches every page before the sockets close.
