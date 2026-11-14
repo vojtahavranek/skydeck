@@ -2119,8 +2119,9 @@ directory that can be the runtime directory: the one the store records and each 
 4.2 can give (`$SKYDECK_HOME/run`, `$XDG_RUNTIME_DIR/skydeck-<store id>`, `<stateDir>/run-<store
 id>`), because the command may run with another environment than the server did. Purging
 `<stateDir>` can remove keeper sockets under it, and the screens of those sessions could not be
-shown again; the user ends those sessions first. Every check that can refuse the uninstall comes
-before anything is undone or stopped, and such a refusal leaves the settings file, the links and a
+shown again; the user ends those sessions first. A `terms/` of one of them that cannot be listed
+refuses the purge the same way: what runs there cannot be told. Every check that can refuse the
+uninstall comes before anything is undone or stopped, and such a refusal leaves the settings file, the links and a
 running server as they are. One look can only come after the server's stop — a keeper the server
 was starting as it stopped — and it refuses only the purge: the uninstall is then done, the data
 stays, and the command says exactly that (`skydeck is uninstalled, but --purge removed no

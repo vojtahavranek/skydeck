@@ -586,10 +586,13 @@ describe('uninstall --purge: from review 2', () => {
     writeKeeperLine(files, ID_A, await endedLine(t, m));
     writeFileSync(join(files.termsDir, `.${ID_B}.4242.tmp`), '');
     await countingSocket(t, files.termSock(ID_C));
+    // What a server ended by SIGTERM or SIGKILL leaves: its socket, a socket (not a file).
+    const server = await countingSocket(t, files.serverSock);
 
     const r = await uninstall(m, ['--purge']);
 
     assert.equal(r.code, 0, r.stderr);
     assert.equal(existsSync(files.dir), false, r.stdout);
+    assert.equal(server.connections(), 0);
   });
 });

@@ -1085,6 +1085,28 @@ describe('doctor: from review 2', () => {
     noLine(r, /keep-alive wsl\.exe running/);
   });
 
+  test('a keep-alive whose keepalive.interop names a path that is there and refuses: not running', async (t) => {
+    const m = machine(t);
+    const files = m.makeRuntime();
+    writeKeeperLine(files, ID_A, (await liveProcess(t, m)).line);
+    writeFileSync(files.keepalivePid, formatPidLine((await liveProcess(t, m)).line));
+    const stale = join(m.s.root, 'stale.sock'); // there, but nothing listens: a refusal
+    writeFileSync(stale, '');
+    writeFileSync(files.keepaliveInterop, stale);
+
+    const r = await doctor(m);
+
+    const line = lineOf(
+      r,
+      'problem',
+      /^problem {2}WSL is not kept running while the window has terminals/,
+    );
+    assert.match(
+      line,
+      /the keep-alive's wsl\.exe is gone \(its keepalive\.interop socket refuses\)/,
+    );
+  });
+
   test('a keep-alive whose keepalive.interop socket accepts, or gives no judgement, is running', async (t) => {
     const m = machine(t);
     const files = m.makeRuntime();
