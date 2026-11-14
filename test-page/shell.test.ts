@@ -5,12 +5,9 @@
 // program (test/helpers/window.ts); stand-in servers come from helpers/shell.ts.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import type { TestContext } from 'node:test';
-
-import type { Browser, Page } from 'playwright';
 
 import type { Detached, Platform } from '../src/platform/types.ts';
 import { securityHeaders } from '../src/window/assets.ts';
@@ -19,7 +16,7 @@ import { procStartOf, sleep, stillRuns, until } from '../test/helpers/keeper.ts'
 import { S1, S2, S3 } from '../test/helpers/platform.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import type { ServerSandbox } from '../test/helpers/window.ts';
-import { browser, newPage as newUnpinnedPage } from './helpers/browser.ts';
+import { browser } from './helpers/browser.ts';
 import {
   active,
   after,
@@ -29,7 +26,10 @@ import {
   escape,
   launched as launchedUnpinned,
   MINIMAL_MODULES,
+  fixture,
   pinModules,
+  pinnedPage,
+  unservedPins,
   PLACEHOLDER,
   press,
   RESTARTED,
@@ -65,13 +65,12 @@ const checkout = new URL('../', import.meta.url).pathname.replace(/\/$/, '');
 // (test-page/fixtures/minimal-*, verbatim copies of web/'s placeholders at 40f7886), on stand-in
 // servers and on real test servers alike, so that the real modules of tasks 27–29 change
 // nothing here. Each real module is tested with the shell by its own task, in its own file.
-async function newPage(t: TestContext, chromium: Browser): Promise<Page> {
-  const page = await newUnpinnedPage(t, chromium);
-  await pinModules(page, MINIMAL_MODULES);
-  return page;
-}
+const newPage = pinnedPage;
 const launched: typeof launchedUnpinned = (t, chromium, options = {}) =>
-  launchedUnpinned(t, chromium, { ...options, modules: MINIMAL_MODULES });
+  launchedUnpinned(t, chromium, {
+    ...options,
+    modules: { ...MINIMAL_MODULES, ...options.modules },
+  });
 /** S2 6.1: the Windows client the keep-alive is. */
 const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
 
@@ -1538,12 +1537,9 @@ test('the page shell', async (t) => {
         ],
       );
       // The view under test, over the pinned minimal one (which it imports as terminal-view-real.js).
-      await pinModules(page, {
-        'terminal-view.js': readFileSync(
-          join(checkout, 'test-page/fixtures/chord-view.js'),
-          'utf8',
-        ),
-        'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'] ?? '',
+      await pinModules(t, page, {
+        'terminal-view.js': fixture('chord-view.js'),
+        'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
       });
       const standin = await standinServer(t, {
         socket: honest(secret, {
@@ -1722,12 +1718,9 @@ test('the page shell', async (t) => {
         [{ id: TERM_A, slot: 1, sessionId: S1 }],
       );
       // The view under test, over the pinned minimal one (which it imports as terminal-view-real.js).
-      await pinModules(page, {
-        'terminal-view.js': readFileSync(
-          join(checkout, 'test-page/fixtures/textarea-view.js'),
-          'utf8',
-        ),
-        'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'] ?? '',
+      await pinModules(t, page, {
+        'terminal-view.js': fixture('textarea-view.js'),
+        'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
       });
       const standin = await standinServer(t, {
         socket: honest(secret, {
@@ -1868,12 +1861,9 @@ test('the page shell', async (t) => {
               },
         );
       // The view under test, over the pinned minimal one (which it imports as terminal-view-real.js).
-      await pinModules(page, {
-        'terminal-view.js': readFileSync(
-          join(checkout, 'test-page/fixtures/textarea-view.js'),
-          'utf8',
-        ),
-        'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'] ?? '',
+      await pinModules(t, page, {
+        'terminal-view.js': fixture('textarea-view.js'),
+        'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
       });
       const standin = await standinServer(t, {
         socket: honest(secret, {
@@ -2071,4 +2061,9 @@ test('the page shell', async (t) => {
       );
     },
   );
+
+  // Last: every module this file pinned was served through the pin (helpers/shell.ts pinModules).
+  await t.test('every pinned module was served through the pin', () => {
+    assert.deepEqual(unservedPins(), []);
+  });
 });

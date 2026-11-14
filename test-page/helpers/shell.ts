@@ -577,8 +577,8 @@ export function holdWriteLock(
 
 const FIXTURES = new URL('../fixtures/', import.meta.url);
 
-/** The text of a file of test-page/fixtures/. */
-function fixture(name: string): string {
+/** The text of a file of test-page/fixtures/ (a test view, a pinned module). */
+export function fixture(name: string): string {
   return readFileSync(new URL(name, FIXTURES), 'utf8');
 }
 
@@ -587,8 +587,10 @@ function fixture(name: string): string {
  * and their stylesheets (test-page/fixtures/minimal-*), by the name of the web/ file each stands
  * for. The page shell's own tests (shell.test.ts, auth.test.ts) run on them, so that the real
  * modules of tasks 27–29 change nothing there; a new test file gets the real web/ unless it asks.
+ * The stylesheets are pinned too: a real one can change what is visible, and app.js's keyboard
+ * rules depend on visibility (ruled by the plan owner).
  */
-export const MINIMAL_MODULES: Readonly<Record<string, string>> = {
+export const MINIMAL_MODULES = {
   'list.js': fixture('minimal-list.js'),
   'terminal-view.js': fixture('minimal-view.js'),
   'cards.js': fixture('minimal-cards.js'),
@@ -596,26 +598,73 @@ export const MINIMAL_MODULES: Readonly<Record<string, string>> = {
   'list.css': fixture('minimal-list.css'),
   'terminal-view.css': fixture('minimal-view.css'),
   'cards.css': fixture('minimal-cards.css'),
-};
+} as const;
 
 /**
  * Serves `modules` (the name of a file of web/ and its text) to `page` in place of the server's,
  * for every load of the page, its own reloads included, whichever server answers: Playwright's
  * request interception of `/assets/<any build>/web/<name>`, nothing in the product. A later call
- * for the same name wins (Playwright runs the routes last registered first).
+ * for the same name wins (Playwright runs the routes last registered first). Routing changes the
+ * conditions of the whole page: Playwright intercepts every request of it, and Chromium's HTTP
+ * cache is off while any route is on — a test about caching cannot use a pinned page.
+ *
+ * The pin cannot stop working unseen: once the page has asked for app.js, every name pinned on it
+ * (the last pin of a name counting) must have been asked for through the pin by the end of the
+ * case; otherwise the case and the names go into `unservedPins()`, which a pinned file asserts
+ * empty in its last case — a renamed file or a changed asset path would otherwise run the real
+ * module without a sign. (Recorded, not thrown, in the case's `t.after`: node:test runs no hook
+ * after one that throws, and the case's servers and sandbox are cleaned up by later hooks.)
  */
 export async function pinModules(
+  t: TestContext,
   page: Page,
   modules: Readonly<Record<string, string>> = MINIMAL_MODULES,
 ): Promise<void> {
+  let pins = pinsOf.get(page);
+  if (pins === undefined) {
+    const state = { served: new Map<string, number>(), appLoaded: false };
+    pins = state;
+    pinsOf.set(page, state);
+    page.on('request', (request) => {
+      if (/\/assets\/[^/]+\/web\/app\.js$/.test(new URL(request.url()).pathname)) {
+        state.appLoaded = true;
+      }
+    });
+    t.after(() => {
+      const unused = [...state.served].filter(([, hits]) => hits === 0).map(([name]) => name);
+      if (state.appLoaded && unused.length > 0) {
+        unserved.push(`${t.name}: ${unused.join(', ')}`);
+      }
+    });
+  }
+  const { served } = pins;
   for (const [name, body] of Object.entries(modules)) {
     const contentType = name.endsWith('.css')
       ? 'text/css; charset=utf-8'
       : 'text/javascript; charset=utf-8';
-    await page.route(`**/assets/*/web/${name}`, (route) =>
-      route.fulfill({ status: 200, contentType, body }),
-    );
+    served.set(name, 0); // a later pin of the name replaces an earlier one, and its count
+    await page.route(`**/assets/*/web/${name}`, (route) => {
+      served.set(name, (served.get(name) ?? 0) + 1);
+      return route.fulfill({ status: 200, contentType, body });
+    });
   }
+}
+
+/** Per pinned page: how often each pinned name was served through the pin; whether app.js loaded. */
+const pinsOf = new WeakMap<Page, { served: Map<string, number>; appLoaded: boolean }>();
+/** The cases whose page loaded app.js and asked for a pinned name not through the pin. */
+const unserved: string[] = [];
+
+/** pinModules' record: every case (and its names) whose pin was never used; [] when all held. */
+export function unservedPins(): string[] {
+  return [...unserved];
+}
+
+/** A page of `newPage` (helpers/browser.ts) on the pinned minimal modules (`pinModules`). */
+export async function pinnedPage(t: TestContext, chromium: Browser): Promise<Page> {
+  const page = await newPage(t, chromium);
+  await pinModules(t, page, MINIMAL_MODULES);
+  return page;
 }
 
 export const RESTARTED = /^skydeck's server restarted; your sessions kept running$/;
@@ -721,7 +770,7 @@ export async function launched(
   } = {},
 ): Promise<Launched> {
   const page = await newPage(t, chromium);
-  if (options.modules !== undefined) await pinModules(page, options.modules);
+  if (options.modules !== undefined) await pinModules(t, page, options.modules);
   await page.addInitScript(RECORDER);
   const problems = problemsOf(page);
   const started = await startTestServer(t, options);
@@ -770,9 +819,11 @@ export function termOf(started: { server: StartedServer['server'] }, sessionId: 
 /**
  * Clicks the list's row of `sessionId` ONCE, as a user does, and asserts that it is then the
  * selected row: a render never loses a click on a row (contract 2.9), so no second try is made.
- * The hooks it needs from the list module (task 27): each row is an element inside `#list` with
- * `data-id="<session id>"`, a click on it selects that session, and the selected row carries
- * `data-selected="true"` (as selectedRow).
+ * The hooks it needs from the list module (task 27): EXACTLY ONE element per session inside
+ * `#list` carries `data-id="<session id>"` (the locator is strict); a click on it selects that
+ * session, also when a list arrives or the zone changes between the mousedown and the mouseup
+ * (contract 2.9: the row's element is kept across renders, or the list selects on pointerdown);
+ * the selected row, and only it, carries `data-selected="true"` (as selectedRow).
  */
 export async function clickRow(page: Page, sessionId: string): Promise<void> {
   const row = page.locator(`#list [data-id="${sessionId}"]`);
@@ -819,9 +870,12 @@ export async function press(page: Page, cdp: CDPSession, key: string): Promise<v
  * Resumes `sessionId` from the list as a user does: a click selects its row (a session that is
  * not running: the list zone), Enter resumes it, and the pane shows its terminal with the
  * keyboard in it. With any modules that follow contract 2.9; the hooks it needs: clickRow's from
- * the list, and from the terminal view (task 28) that its `focus()` puts the keyboard on an
- * element inside its root `#terminal`. Everything else it reads is app.js's (`#focus-zone`,
- * `#right-zone[data-pane]`).
+ * the list, and that a click on a row leaves the keyboard on the list itself — `#list` or an
+ * element in it that is no button, link (`a[href]`), field, summary or editable text, since
+ * app.js applies list keys only then (`listHasKeyboard`); a row that is such a control takes the
+ * Enter itself and nothing resumes. From the terminal view (task 28): its `focus()` puts the
+ * keyboard on an element inside its root `#terminal`. Everything else it reads is app.js's
+ * (`#focus-zone`, `#right-zone[data-pane]`).
  */
 export async function resumeFromList(page: Page, sessionId: string): Promise<void> {
   await clickRow(page, sessionId);
