@@ -176,6 +176,9 @@ kbd {
 .right-zone {
   display: flex;
   flex-direction: column;
+  /* A grid item is never narrower than its content by default: a long line of the header (a
+     title, a directory, both one line) would widen the zone past the window (task 29). */
+  min-width: 0;
 }
 .cards {
   flex: none;

@@ -1841,6 +1841,8 @@ bar at the bottom. The list has three sections:
   row (12.4), never a move.
 - **This week**: not running, last activity within 7 days, most recent first.
 - **Earlier**: the rest, folded by default; the folded header shows the count and the time span.
+  A click on its header folds and unfolds it, as ← and → do, and leaves the keyboard on the list
+  (ruled by the plan owner, plan task 27).
 
 Done sessions are hidden (design 7.1), with a footer "17 done hidden · show". Filtering and the
 switcher search done ones too (12.8).
@@ -1855,7 +1857,10 @@ The title bar shows the counts, e.g. `● 3 need you · 3 working · 2 idle`, an
   terminal`, `starting…`).
 - A session that is not running has one line: state icon, the ticket key (dim, monospaced) and the
   title, marks (`crashed`, `crashed mid-turn`, `expires 3d`, `expired`, `done`: design 6.3's marks
-  in words), the pull-request chip (12.3), `✎` when it has a note, and its age.
+  in words), the pull-request chip (12.3), `✎` when it has a note, and its age. Stage A shows every
+  mark of design 6.3 in words (`continued` and `2 processes` too) and the expiring one as `expires
+  soon`: the row carries only that the session is expiring, not when its transcript is deleted
+  (ruled by the plan owner, plan task 27).
 - No group headers: most groups have one member. The group (design 7.1) is printed dim at the
   start of the title when the title does not already start with it. In This week and Earlier the
   members of one group stack under the newest (`ORB-2107 ×4 … +3 more`); a click or → expands
@@ -1929,6 +1934,12 @@ id), where the title comes from. Each open pull request on a line of its own
 merged and closed ones fold into `30 merged ▸`; `+ PR`. The note's first three lines (a click
 edits it). Buttons Note and Done / Undone.
 
+Stage A's header (19) has one height for every session and window width, so that the terminal
+area under it does not jump between sessions and the page knows its size before a terminal is
+shown: the directory is one line, cut with an ellipsis when it is long (the whole path stays in
+the page, is selected and copied whole, and is its tooltip); the short id is never cut (ruled by
+the plan owner, review of plan task 29).
+
 Editing (stage D) uses the step 1 rules and functions: a label or group that design 7.1 refuses is
 refused with the same message; a note is edited in a text box instead of `$VISUAL`, saved as typed
 (an empty note is no note), and a save is refused when the stored note changed since the edit
@@ -1965,7 +1976,12 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
   button is disabled. A single click on a row selects it and shows this card; it does not resume
   (a resume costs a process, and history is easy to misclick). Enter, a double click or "Resume
   here" resumes (11.3). Refusals and launch failures show their lines on the card.
-- **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close).
+- **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close). Until
+  the page has the terminal's exit the bar says `claude is not running in this terminal`. Known
+  limit of stage A: when the selected session's row is not in the list (a filter excludes it)
+  while the window shows its ended terminal, the bar has no Resume, and Close only once the page
+  has the terminal's exit — the bar is drawn from the row, not from the terminal (stage A's plan,
+  contract 2.9 `endedBar(row, exit)`; accepted by the plan owner, review 2 of plan task 29).
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
   the label, the group and extra flags. A label or group left empty, or holding only white space,
@@ -1994,7 +2010,9 @@ restart.
 
 - `/` filters the list: title, group, note, pull-request repository and number, directory, short
   id; several words must all match; while a filter is set it includes done sessions and unfolds
-  every section and stack. (Stage A has design 7.4's filter: one text, the fields of 7.4.)
+  every section and stack. (Stage A has design 7.4's filter: one text, the fields of 7.4.) A
+  filter that leaves no row says so: `No session matches the filter.` (ruled by the plan owner,
+  plan task 27).
 - Chips: Running, Open PR, Has note, Show done.
 - Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (by slot), not
   running (most recent first), done. Enter switches to a running one and resumes one that is not
@@ -2057,7 +2075,15 @@ never leaves the terminal — while xterm.js has the keyboard; Esc in the page's
 the form (12.6). In the list: as in step 1's interactive list, ↑ ↓ `j` `k` move, `/`
 filters, `l` label, `g` group, `n` note, `p` attach a pull request, `d` done, `a` show done; new in
 the window, Home, End, PgUp, PgDn, ← → (fold, unfold), F2 (label) and Esc (clear the filter, then
-back to the terminal). Enter changes meaning: it shows a running session's terminal, or resumes one
+back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
+Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
+clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
+plan task 27). Folding Earlier (← or a click on its header) with the selection inside it first
+selects the row above it; while a filter is set nothing folds. The selection is never on a row the
+list does not show: when the selected row stops being shown otherwise (a filter, done sessions
+hidden again, the row gone from the list), no row is selected — the right side shows a terminal
+that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
+(ruled by the plan owner, plan task 27). Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a
