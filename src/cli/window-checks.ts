@@ -371,7 +371,7 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
     // WSL_DISTRO_NAME, …), stays the problem below, also while the server starts.
     report(
       'info',
-      "WSL is not kept running yet: the window's server is starting, and its first check starts the keep-alive",
+      "keep-alive: not confirmed yet: the window's server is starting, and its first check starts the keep-alive or takes over one that still runs",
     );
     return;
   }

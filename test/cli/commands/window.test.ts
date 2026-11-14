@@ -2203,7 +2203,7 @@ describe('a server that answers but has not finished its start (ruled, server-fi
       const r = await h.exec(['doctor']);
 
       const info =
-        /^info +WSL is not kept running yet: the window's server is starting, and its first check starts the keep-alive$/m;
+        /^info +keep-alive: not confirmed yet: the window's server is starting, and its first check starts the keep-alive or takes over one that still runs$/m;
       if (distro) {
         assert.match(r.stdout, info);
         assert.doesNotMatch(r.stdout, /WSL is not kept running while the window has/);
