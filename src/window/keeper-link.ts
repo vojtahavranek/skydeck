@@ -28,6 +28,10 @@ export interface KeeperLink {
   end(): Promise<void>;
   /** Closes at once; what waits is dropped. */
   destroy(): void;
+  /** Stops reading the keeper's socket (frames of a read already made still arrive). */
+  pause(): void;
+  /** Reads it again. */
+  resume(): void;
 }
 
 /**
@@ -103,6 +107,12 @@ export async function claimKeeper(
     },
     destroy() {
       socket.destroy();
+    },
+    pause() {
+      socket.pause();
+    },
+    resume() {
+      socket.resume();
     },
   };
   link.send('C');

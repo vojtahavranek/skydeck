@@ -690,7 +690,11 @@ describe('registry: a keeper that misbehaves, and claims that break', () => {
     const r = box.registry();
     const began = performance.now();
     const found = await r.registry.rediscover();
-    assert.ok(performance.now() - began < 9000, 'resolved');
+    const waited = performance.now() - began;
+    assert.ok(
+      waited >= 9500 && waited < 14_000,
+      `given up after ${Math.round(waited)} ms (ruled: 10 s)`,
+    );
     assert.deepEqual(
       found.map((x) => x.id),
       [id],
@@ -798,5 +802,47 @@ describe('registry: the forced redraw', () => {
     await until(() => sizes(fake.conns[1]).length > 0, 'the second resize', 5000);
     assert.deepEqual(sizes(fake.conns[0]), ['79 24']);
     assert.deepEqual(sizes(fake.conns[1]), ['80 24'], 'back to the width, not a new redraw');
+  });
+});
+
+describe('registry: reading a keeper no faster than its screen side applies', () => {
+  test('a flood into a slow screen side: the backlog stays at the mark, the keeper closes the claim, the screen is right after the reconnect', async (t) => {
+    const box = await registrySandbox(t);
+    const high = 256 * 1024;
+    const platform: Platform = {
+      ...box.tp.platform,
+      env: {
+        ...box.tp.platform.env,
+        SKYDECK_TEST_BACKLOG_BYTES: String(high),
+        SKYDECK_TEST_KEEPER_SEND_BYTES: String(512 * 1024),
+      },
+    };
+    const r = box.registry({ platform, slowWriteMs: 3 });
+    const { spec, mirror: page } = await startStandin(box, r);
+    const before = prompts(page);
+    assert.equal(r.registry.input(spec.id, utf8('/flood 3000000\r')), 'ok');
+    await until(() => prompts(page) > before, 'the prompt after the flood', 120_000);
+    // The server stopped reading: the keeper closed the claim that fell behind (S2 7.1 step 7).
+    assert.ok(
+      box.logLines().some((line) => line.endsWith(': send-queue-full')),
+      'send-queue-full',
+    );
+    assert.ok(r.events.hello.length >= 2, 'the registry claimed it again');
+    assert.ok(
+      r.maxBacklog() <= high + 64 * 1024 + 8 * 1024,
+      `at most one read above the mark: ${r.maxBacklog()} bytes waited`,
+    );
+    // Nothing doubled or lost: the flood's numbered lines on the screen side follow each other.
+    const screen = await screenOf(r);
+    const numbers = screenLines(screen).flatMap((line) => {
+      const match = /^flood ([0-9]{8}) /.exec(line);
+      return match === null ? [] : [Number(match[1])];
+    });
+    assert.ok(numbers.length > 1000, `${numbers.length} flood lines kept`);
+    numbers.forEach((n, i) => {
+      if (i > 0) assert.equal(n, (numbers[i - 1] ?? 0) + 1, `line after ${numbers[i - 1]}`);
+    });
+    await page.settled();
+    assertSameScreen(screen, page.term);
   });
 });

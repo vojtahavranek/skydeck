@@ -2430,6 +2430,13 @@ socket and `.pid` when the line is `dead`, never on `unknown` or `alive` (ruled;
 `rediscover` does). A37: the park of record 0, the redraw's pause, the size clamp, `tailFrom`. Test
 settings (A31, ruled): `SKYDECK_TEST_PARK_BYTES` and `SKYDECK_TEST_PARK_MS` in the platform's
 environment shorten the park rules; the 1 MiB rule is tested with the design's values.
+Ruled at review 2: the registry reads a keeper no faster than its screen side applies — above 4 MiB
+of records waiting for the screen side it pauses that socket, below 1 MiB it reads again (S2 7.3,
+"Reading"; `SKYDECK_TEST_BACKLOG_BYTES` sets the high mark in tests, the low one is a quarter of
+it); reconnect attempts to one keeper are at most one a second, the claim that just ended
+counting as one; a claim whose tail stops coming (no frame for 10 s while the server reads) is
+given up as a lost connection, so `rediscover` always settles; one exit per terminal (a second
+`X` only gets its `A`); an attach while a claim rebuilds the screen waits for that screen.
 
 **Tests** (platform: `realTestPlatform`; real keepers running the stand-in through `standinCommand`; `G` sent by the test)
 - spawn, `G`, type `/red hi\r`: an attached sink gets the output records after the snapshot, in

@@ -104,6 +104,14 @@ const PARK_BYTES = MiB;
 const PARK_MS = 30_000;
 /** No park while more than this waits unwritten to the keeper. */
 const PARK_UNWRITTEN = MiB;
+/**
+ * Ruled (review 2): the server stops reading a keeper while more than this many bytes of records
+ * wait for the screen side, and reads again below a quarter of it (1 MiB). The keeper then closes
+ * the claim at its send cap (S2 7.1 step 7) and the registry rebuilds from snapshot and tail.
+ */
+const BACKLOG_HIGH = 4 * MiB;
+/** Ruled (review 2): a claim whose tail stops coming is given up after this long. */
+const TAIL_STALL_MS = 10_000;
 /** S2 7.1 step 5: input is refused while more than this waits unwritten to the keeper. */
 const INPUT_UNWRITTEN = 4 * MiB;
 /** S2 7.1 step 5: the server sends at most 64 KiB per input frame. */
@@ -180,8 +188,6 @@ interface Claim {
   skipUntil: number;
   /** Resolves when the hello came and the tail is on the screen; the claim's answer. */
   settle: ((ok: boolean) => void) | null;
-  /** The claim settled: the hello came and its tail is on the screen. */
-  ok: boolean;
   /** Frames read on this connection, for the idle check while the tail is replayed. */
   frames: number;
   stopIdle: (() => void) | null;
@@ -215,6 +221,11 @@ interface Term {
   waiting: (() => void)[];
   /** The last claim problem logged, so that a keeper that keeps failing logs it once. */
   note: string | null;
+  /** Bytes of records handed to the screen side and not applied yet; reading paused above the mark. */
+  backlog: number;
+  paused: boolean;
+  /** A claim started less than a second ago: reconnect attempts are at most one a second. */
+  cooling: boolean;
   /** The size the forced redraw goes back to, until it has or a page resized. */
   redrawTo: { cols: number; rows: number; due: boolean } | null;
 }
@@ -228,6 +239,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
   let stopped = false;
   const parkBytes = testNumber(platform, 'PARK_BYTES', PARK_BYTES);
   const parkMs = testNumber(platform, 'PARK_MS', PARK_MS);
+  const backlogHigh = testNumber(platform, 'BACKLOG_BYTES', BACKLOG_HIGH);
+  const backlogLow = Math.floor(backlogHigh / 4);
   const finding = new Set<string>();
 
   const log = (id: string, kind: string): void => {
@@ -343,19 +356,28 @@ export function createRegistry(deps: RegistryDeps): Registry {
     }
     term.count += 1;
     const n = term.count;
-    term.bytes += frame.payload.length;
+    const length = frame.payload.length;
+    term.bytes += length;
+    held(term, length);
     if (size === null) {
       const bytes = frame.payload;
       const applied = screen.output(bytes);
       term.last = applied.then(
-        () => forwardOutput(term, n, bytes),
-        () => forwardOutput(term, n, bytes), // answer failed: the record was applied all the same
+        () => {
+          appliedNow(term, length);
+          forwardOutput(term, n, bytes);
+        },
+        () => {
+          appliedNow(term, length); // answer failed: the record was applied all the same
+          forwardOutput(term, n, bytes);
+        },
       );
       return;
     }
     const { cols, rows } = size;
     term.last = screen.resize(cols, rows).then(
       () => {
+        appliedNow(term, length);
         // Forwarded like an output record, also from a screen a rebuild replaced.
         if (term.screen === screen && (term.info.cols !== cols || term.info.rows !== rows)) {
           term.info.cols = cols;
@@ -367,9 +389,28 @@ export function createRegistry(deps: RegistryDeps): Registry {
         });
       },
       () => {
+        appliedNow(term, length);
         log(term.info.id, 'resize record refused by the screen side');
       },
     );
+  }
+
+  /** A record waits for the screen side: above the mark the keeper's socket is not read. */
+  function held(term: Term, length: number): void {
+    term.backlog += length;
+    if (!term.paused && term.backlog > backlogHigh) {
+      term.paused = true;
+      term.claim?.link.pause();
+    }
+  }
+
+  /** A record was applied: below a quarter of the mark the keeper's socket is read again. */
+  function appliedNow(term: Term, length: number): void {
+    term.backlog -= length;
+    if (term.paused && term.backlog < backlogLow) {
+      term.paused = false;
+      term.claim?.link.resume();
+    }
   }
 
   function forwardOutput(term: Term, n: number, bytes: Uint8Array): void {
@@ -474,6 +515,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
       origin: 'found',
       waiting: [],
       note: null,
+      backlog: 0,
+      paused: false,
+      cooling: false,
       redrawTo: null,
     };
   }
@@ -527,7 +571,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
       position: 0,
       skipUntil: 0,
       settle,
-      ok: false,
       frames: 0,
       stopIdle: null,
     };
@@ -538,6 +581,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const previous = term.claim;
     term.claim = claim;
     previous?.link.destroy();
+    if (term.paused) link.pause(); // the screen side is still behind: wait before reading on
+    term.cooling = true;
+    clock.after(RECONNECT_MS, () => {
+      term.cooling = false;
+    });
     const cancel = clock.after(helloMs, () => {
       if (claim !== null && claim.hello === null && term.claim === claim) {
         note(term, 'no hello');
@@ -744,8 +792,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   /**
    * A tail that stops coming (a keeper stopped while it sends, or one whose `seq` promises more
-   * than it sends) would leave the claim unsettled for ever: with no frame for HELLO_MS the
-   * connection is closed, and S2 7.8's reconnection takes over.
+   * than it sends) would leave the claim unsettled for ever: with no frame for TAIL_STALL_MS
+   * (ruled; time while the server itself does not read is not counted) the connection is closed,
+   * and S2 7.8's reconnection takes over.
    */
   function watchTail(term: Term, claim: Claim): void {
     let seen = claim.frames;
@@ -755,9 +804,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
         stop();
         return;
       }
-      idle = claim.frames === seen ? idle + RECONNECT_MS : 0;
+      idle = claim.frames === seen && !term.paused ? idle + RECONNECT_MS : 0;
       seen = claim.frames;
-      if (idle >= HELLO_MS) {
+      if (idle >= TAIL_STALL_MS) {
         stop();
         note(term, 'the tail stopped coming');
         const settle = claim.settle;
@@ -789,7 +838,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.claim === claim) {
         term.answering = true;
-        claim.ok = true;
         term.note = null;
         claim.stopIdle?.();
         redrawBack(term); // a redraw cut short by a broken connection goes on here
@@ -858,24 +906,27 @@ export function createRegistry(deps: RegistryDeps): Registry {
     // The exit came (it may still be on its way through the screen side): nothing to reconnect to.
     if (term.info.exit !== null) return;
     if (term.hello === null) return; // a spawn or a find still waits for its first hello
-    // At once only after a claim that worked: one that fails after its hello waits a second, so
-    // that a keeper whose stream keeps failing is not claimed again and again without a pause.
-    startReconnecting(term, claim.ok);
+    startReconnecting(term);
   }
 
-  function startReconnecting(term: Term, now: boolean): void {
+  /**
+   * Ruled (review 2): attempts to one keeper are at most one a second (S2 7.8), the claim that just
+   * ended counting as one: a keeper whose stream keeps failing after its hello is not claimed
+   * again and again. After a claim that lived a second or more the first attempt is at once.
+   */
+  function startReconnecting(term: Term): void {
     if (term.reconnect !== null) return;
     setState(term, 'reconnecting');
     let busy = false;
     const attempt = (): void => {
-      if (busy || term.forgotten || stopped) return;
+      if (busy || term.cooling || term.forgotten || stopped) return;
       busy = true;
       void tryReconnect(term).finally(() => {
         busy = false;
       });
     };
     term.reconnect = clock.every(RECONNECT_MS, attempt);
-    if (now) attempt();
+    attempt();
   }
 
   function stopReconnecting(term: Term): void {

@@ -26,6 +26,7 @@ import { createRegistry } from '../../src/window/terminals.ts';
 import type { Registry } from '../../src/window/terminals.ts';
 import { loadXterm } from '../../src/window/xterm.ts';
 import type { XtermModules } from '../../src/window/xterm.ts';
+import { frameReader, parseHello } from '../../src/window/frames.ts';
 import { parsePidLine } from '../../src/window/pidline.ts';
 import { KEEPER, keeperSandbox, procStartOf, stillRuns, until } from './keeper.ts';
 import type { KeeperBox } from './keeper.ts';
@@ -47,6 +48,11 @@ export interface TestRegistry {
   sockets: Socket[];
   /** The pids of the keepers this registry started, in order. */
   spawned: number[];
+  /**
+   * The most bytes of output records handed to the screen sides and not yet applied (written to
+   * their headless terminals), sampled after each read from a keeper socket.
+   */
+  maxBacklog(): number;
   /** Every state each terminal went through, as onChange saw it (consecutive repeats dropped). */
   states: Map<string, string[]>;
   /**
@@ -60,8 +66,11 @@ export interface RegistryBox extends KeeperBox {
   files: RuntimeFiles;
   keeperFile: string;
   modules: XtermModules;
-  /** A registry over the box's runtime directory; `platform` replaces the box's (its net is wrapped). */
-  registry(options?: { platform?: Platform }): TestRegistry;
+  /**
+   * A registry over the box's runtime directory; `platform` replaces the box's (its net is
+   * wrapped). `slowWriteMs`: each write to a screen side's terminal completes that much later.
+   */
+  registry(options?: { platform?: Platform; slowWriteMs?: number }): TestRegistry;
   /** A spec for the stand-in in this box (argv, env, record), as keeperSandbox makes it. */
   spec(overrides?: Partial<KeeperSpec>): KeeperSpec;
   /**
@@ -113,10 +122,16 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
     }
   };
 
-  const registry = (options: { platform?: Platform } = {}): TestRegistry => {
+  const registry = (options: { platform?: Platform; slowWriteMs?: number } = {}): TestRegistry => {
     const base = options.platform ?? kb.tp.platform;
     const sockets: Socket[] = [];
     const spawned: number[] = [];
+    /** Bytes of output records handed to a screen side, and the newest record number per terminal. */
+    let handed = 0;
+    const newest = new Map<string, number>();
+    let written = 0;
+    let worst = 0;
+    const slow = options.slowWriteMs ?? 0;
     let refusing = false;
     const platform: Platform = {
       ...base,
@@ -138,6 +153,35 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
           }
           const socket = await base.net.connectUnix(path);
           sockets.push(socket);
+          // The records this read hands to a screen side (numbered as the registry does, the ones
+          // a reconnect's tail repeats left out), sampled after the registry's handler ran.
+          const reader = frameReader();
+          let position = 0;
+          let id = '';
+          const emit = socket.emit.bind(socket) as (event: string, ...args: unknown[]) => boolean;
+          socket.emit = ((event: string, ...args: unknown[]) => {
+            if (event === 'data' && args[0] instanceof Uint8Array) {
+              const frames = reader.push(args[0].slice());
+              for (const frame of 'error' in frames ? [] : frames) {
+                if (frame.type === 'H') {
+                  const hello = parseHello(frame.payload);
+                  if (hello.ok) {
+                    id = hello.value.id;
+                    position = hello.value.tailFrom - 1;
+                  }
+                } else if (frame.type === 'D' || frame.type === 'R') {
+                  position += 1;
+                  if (position > (newest.get(id) ?? 0)) {
+                    newest.set(id, position);
+                    if (frame.type === 'D') handed += frame.payload.length;
+                  }
+                }
+              }
+            }
+            const result = emit(event, ...args);
+            if (event === 'data') worst = Math.max(worst, handed - written);
+            return result;
+          }) as typeof socket.emit;
           return socket;
         },
       },
@@ -148,6 +192,18 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       constructor(...args: ConstructorParameters<typeof Base>) {
         super(...args);
         terminals.push(this);
+      }
+      override write(data: string | Uint8Array, callback?: () => void): void {
+        // Records arrive as bytes; a snapshot, as text, is not a record.
+        const length = typeof data === 'string' ? 0 : data.length;
+        super.write(data, () => {
+          const done = (): void => {
+            written += length;
+            callback?.();
+          };
+          if (slow > 0) setTimeout(done, slow);
+          else done();
+        });
       }
     }
     const events: Events = { hello: [], started: [], exited: [] };
@@ -196,6 +252,7 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       terminals,
       sockets,
       spawned,
+      maxBacklog: () => worst,
       states,
       drop() {
         refusing = true;

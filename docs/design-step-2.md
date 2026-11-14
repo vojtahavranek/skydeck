@@ -755,6 +755,12 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   parks its empty screen at record 0 right after the first `hello`: every later claim gets that
   size in `S`, and a rebuild without any other park starts at the right width (stage A's plan,
   task 16).
+- **Reading.** The server reads a keeper no faster than its screen side applies the records: while
+  more than 4 MiB of records wait for the screen side it stops reading that keeper's socket, and
+  reads again below 1 MiB. The keeper then does what 7.1 step 7 designs for a slow reader: it
+  closes the connection at its send cap and goes on reading the pty; the server reconnects and
+  takes the rest from the tail (gap and redraw if the tail overflowed meanwhile). The memory of a
+  terminal stays bounded, and the program is never paused (stage A's plan, task 16, review 2).
 - **Gap.** A keeper that reports gap (7.1, step 6) has lost records. The server rebuilds from what
   is left, shows "part of this terminal's output was lost while skydeck's server was not running"
   on the terminal, and makes the program redraw by changing the pty's width by one column and back,
