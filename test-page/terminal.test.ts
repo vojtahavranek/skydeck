@@ -14,6 +14,7 @@ import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import { serverKeepers } from '../test/helpers/registry.ts';
 import { readRecords } from '../test/helpers/standin.ts';
+import { startTestServer } from '../test/helpers/window.ts';
 import type { ServerSandbox } from '../test/helpers/window.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
@@ -1055,6 +1056,18 @@ test('the terminal view', async (t) => {
       await clickAt(page, await whereIs(page, 'a-long-target'), true);
       await sleep(500);
       assert.equal(d.edgeCalls().length, calls, 'nothing opened');
+
+      // A plain URL over 2,048 characters: the page does not even ask the server to open it.
+      sink.output(Buffer.from(`https://example.org/${'b'.repeat(2100)}\r\nafter-long-url\r\n`));
+      await untilScreen(page, /^after-long-url$/m);
+      await mark(page, 'long url');
+      await clickAt(page, await whereIs(page, 'https://example.org/'), true);
+      await sleep(500);
+      assert.deepEqual(
+        after(await logOf(page), 'long url').filter((e) => e.e === 'out' && e.t === 'act'),
+        [],
+        'no open-link asked for',
+      );
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
@@ -1223,7 +1236,118 @@ test('the terminal view', async (t) => {
   );
 
   await t.test(
-    "the view's `fits` is what its fit addon proposes: for an area with a terminal in it and with none",
+    "the view's `fits` is what its fit addon proposes, for areas of several sizes at pixel ratios 1 and 2: with a terminal open, and with none (a terminal opened at that size proposes it again); it answers whole numbers from 1 up, or null, for any area",
+    async (t) => {
+      const started = await startTestServer(t);
+      for (const ratio of [1, 2]) {
+        const context = await chromium.newContext({
+          timezoneId: 'UTC',
+          locale: 'en-US',
+          deviceScaleFactor: ratio,
+        });
+        t.after(() => context.close());
+        const page = await context.newPage();
+        await page.goto(pageUrl(started.server.port));
+        const base = await assetBase(page);
+        const result = await page.evaluate(async (base) => {
+          const module = (await import(`${base}terminal-view.js`)) as {
+            createTerminalView(
+              root: HTMLElement,
+              deps: object,
+            ): {
+              show(term: object): void;
+              fits(width: number, height: number): { cols: number; rows: number } | null;
+            };
+          };
+          const out: {
+            area: string;
+            empty: unknown;
+            open: unknown;
+            proposed: unknown;
+            odd: unknown[];
+          }[] = [];
+          const odd = (view: { fits(w: number, h: number): unknown }): unknown[] =>
+            [
+              [0, 0],
+              [5, 5],
+              [100, -1],
+              [-3, 100],
+              [Number.NaN, 100],
+              [100, Number.POSITIVE_INFINITY],
+              [0.5, 0.5],
+            ].map(([w, h]) => view.fits(w ?? 0, h ?? 0));
+          for (const [width, height] of [
+            [733, 411],
+            [1240, 500],
+            [1425, 600],
+            [900, 300],
+            [1001, 401],
+            [641, 479],
+          ] as const) {
+            const sent: Record<string, unknown>[] = [];
+            const root = document.createElement('div');
+            root.className = 'terminal';
+            root.style.cssText = `position:fixed;left:0;top:0;width:${width}px;height:${height}px`;
+            document.body.append(root);
+            const view = module.createTerminalView(root, {
+              send: (message: Record<string, unknown>) => sent.push(message),
+              chord: () => false,
+              openLink: () => {},
+            });
+            const empty = view.fits(width, height);
+            const oddEmpty = odd(view);
+            // A terminal opened at what `fits` said (as app.js opens one): its view proposes the
+            // same size, so it is not resized after its start.
+            view.show({
+              id: 'ffffffffffff',
+              slot: null,
+              sessionId: null,
+              state: 'running',
+              notReported: false,
+              cols: empty?.cols ?? 80,
+              rows: empty?.rows ?? 24,
+              ownsSize: true,
+            });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            const attach = sent.find((message) => message['t'] === 'attach');
+            out.push({
+              area: `${width}x${height}`,
+              empty,
+              open: view.fits(width, height),
+              proposed:
+                attach === undefined ? null : { cols: attach['cols'], rows: attach['rows'] },
+              odd: [...oddEmpty, ...odd(view)],
+            });
+            root.remove();
+          }
+          return out;
+        }, base);
+        for (const { area, empty, open, proposed, odd } of result) {
+          assert.ok(proposed !== null, `${ratio}x ${area}: proposed`);
+          assert.deepEqual(open, proposed, `${ratio}x ${area}: with a terminal open`);
+          assert.deepEqual(
+            empty,
+            proposed,
+            `${ratio}x ${area}: with none open, kept by the terminal`,
+          );
+          for (const answer of odd) {
+            if (answer === null) continue;
+            const { cols, rows } = answer as { cols: number; rows: number };
+            assert.ok(
+              Number.isInteger(cols) && cols >= 1 && Number.isInteger(rows) && rows >= 1,
+              `${ratio}x ${area}: ${JSON.stringify(answer)} is whole and at least 1`,
+            );
+          }
+          assert.equal(odd[0], null, '0 x 0 is no area');
+          assert.equal(odd[2], null, 'a negative height is no area');
+          assert.equal(odd[4], null, 'NaN is no area');
+        }
+      }
+    },
+  );
+
+  await t.test(
+    "the view's own rule keeps the fit to the area: in a box that grows with what it holds (a grid column without min-width: 0), a wide terminal does not widen the area it is fitted to",
     async (t) => {
       const l = await launched(t, chromium);
       const base = await assetBase(l.page);
@@ -1238,6 +1362,65 @@ test('the terminal view', async (t) => {
           };
         };
         const sent: Record<string, unknown>[] = [];
+        const grid = document.createElement('div');
+        grid.style.cssText =
+          'position:fixed;left:0;top:0;width:900px;height:400px;display:grid;grid-template-columns:400px 1fr';
+        // As in the page: the grid item is a zone (no min-width: 0) that holds the view's root.
+        const side = document.createElement('div');
+        const zone = document.createElement('div');
+        zone.style.cssText = 'display:flex;flex-direction:column;min-height:0';
+        const root = document.createElement('div');
+        root.className = 'terminal';
+        zone.append(root);
+        grid.append(side, zone);
+        document.body.append(grid);
+        const view = module.createTerminalView(root, {
+          send: (message: Record<string, unknown>) => sent.push(message),
+          chord: () => false,
+          openLink: () => {},
+        });
+        // A terminal 200 columns wide: its screen is far wider than the column's 500 px.
+        view.show({
+          id: 'abababababab',
+          slot: null,
+          sessionId: null,
+          state: 'running',
+          notReported: false,
+          cols: 200,
+          rows: 24,
+          ownsSize: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const attach = sent.find((message) => message['t'] === 'attach');
+        return {
+          proposed: attach === undefined ? null : { cols: attach['cols'], rows: attach['rows'] },
+          fits: view.fits(500, 400),
+          width: zone.getBoundingClientRect().width,
+        };
+      }, base);
+      assert.deepEqual(result.proposed, result.fits, 'fitted to the column, not to the terminal');
+      assert.equal(result.width, 500, 'the column stays as wide as the grid makes it');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'a snap that has to wait behind output is taken whole, however large: no fresh snap asked for',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const base = await assetBase(l.page);
+      const result = await l.page.evaluate(async (base) => {
+        const module = (await import(`${base}terminal-view.js`)) as {
+          createTerminalView(
+            root: HTMLElement,
+            deps: object,
+          ): {
+            show(term: object): void;
+            snap(message: object): void;
+            output(channel: number, bytes: Uint8Array): void;
+          };
+        };
+        const sent: Record<string, unknown>[] = [];
         const root = document.createElement('div');
         root.className = 'terminal';
         root.style.cssText = 'position:fixed;left:0;top:0;width:733px;height:411px';
@@ -1247,9 +1430,9 @@ test('the terminal view', async (t) => {
           chord: () => false,
           openLink: () => {},
         });
-        const empty = view.fits(733, 411);
+        const term = 'b1b1b1b1b1b1';
         view.show({
-          id: 'ffffffffffff',
+          id: term,
           slot: null,
           sessionId: null,
           state: 'running',
@@ -1259,16 +1442,92 @@ test('the terminal view', async (t) => {
           ownsSize: true,
         });
         await new Promise((resolve) => setTimeout(resolve, 50));
-        const attach = sent.find((message) => message['t'] === 'attach');
+        view.snap({ t: 'snap', term, ch: 7, cols: 80, rows: 24, data: 'the first snap\r\n' });
+        // 12 MB of coloured output: xterm.js is behind, and the next snap has to wait.
+        const record = new TextEncoder().encode(`${'\x1b[32mx\x1b[0m'.repeat(6000)}\r\n`);
+        for (let given = 0; given < 12_000_000; given += record.length) view.output(7, record);
+        // A snap of 33,000,000 characters (a page that fell behind, a reconnect).
+        const line = `${'y'.repeat(78)}\r\n`;
+        const data = `${line.repeat(Math.ceil(33_000_000 / line.length))}the end of the big snap\r\n`;
+        view.snap({ t: 'snap', term, ch: 8, cols: 80, rows: 24, data });
+        const attaches = sent.filter((message) => message['t'] === 'attach').length;
+        const rows = (): string => root.querySelector('.xterm-rows')?.textContent ?? '';
+        const deadline = performance.now() + 90_000;
+        while (!rows().includes('the end of the big snap') && performance.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
         return {
-          empty,
-          open: view.fits(733, 411),
-          proposed: attach === undefined ? null : { cols: attach['cols'], rows: attach['rows'] },
+          size: data.length,
+          attaches,
+          later: sent.filter((message) => message['t'] === 'attach').length,
+          shown: rows().includes('the end of the big snap'),
         };
       }, base);
-      assert.ok(result.proposed !== null);
-      assert.deepEqual(result.open, result.proposed, 'with a terminal open');
-      assert.deepEqual(result.empty, result.proposed, 'measured with none open');
+      assert.ok(result.size > 32_000_000);
+      assert.equal(result.attaches, 1, 'only the attach of the show');
+      assert.equal(result.later, 1, 'and none after');
+      assert.equal(result.shown, true, 'the big snap is shown');
+      assert.deepEqual(l.problems, [], 'nothing thrown');
+    },
+  );
+
+  await t.test(
+    'a dismissal is forgotten once a snapshot is followed by the stream without that notice: a gap that comes again after the next snap shows',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const base = await assetBase(l.page);
+      const result = await l.page.evaluate(async (base) => {
+        const module = (await import(`${base}terminal-view.js`)) as {
+          createTerminalView(
+            root: HTMLElement,
+            deps: object,
+          ): {
+            show(term: object): void;
+            snap(message: object): void;
+            output(channel: number, bytes: Uint8Array): void;
+            notice(term: string, kind: string, text: string): void;
+          };
+        };
+        const root = document.createElement('div');
+        root.className = 'terminal';
+        root.style.cssText = 'position:fixed;left:0;top:0;width:733px;height:411px';
+        document.body.append(root);
+        const view = module.createTerminalView(root, {
+          send: () => {},
+          chord: () => false,
+          openLink: () => {},
+        });
+        const term = 'c2c2c2c2c2c2';
+        view.show({
+          id: term,
+          slot: null,
+          sessionId: null,
+          state: 'running',
+          notReported: false,
+          cols: 80,
+          rows: 24,
+          ownsSize: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
+        const shown = (): string =>
+          root.querySelector('.tv-bar[data-kind="gap"] .tv-bar-text')?.textContent ?? '';
+        const snap = (ch: number): void => {
+          view.snap({ t: 'snap', term, ch, cols: 80, rows: 24, data: 'a screen\r\n' });
+        };
+        snap(7);
+        view.output(7, bytes('a record\r\n'));
+        view.notice(term, 'gap', 'a gap');
+        root.querySelector<HTMLButtonElement>('.tv-bar[data-kind="gap"] .tv-bar-close')?.click();
+        // A snap whose repeat holds no gap, followed by the stream: the dismissal is forgotten.
+        snap(8);
+        view.output(8, bytes('a record\r\n'));
+        // The next snap repeats a gap with the same text: a new one, shown.
+        snap(9);
+        view.notice(term, 'gap', 'a gap');
+        return shown();
+      }, base);
+      assert.equal(result, 'a gap');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );

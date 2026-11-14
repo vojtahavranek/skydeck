@@ -104,8 +104,9 @@ const URL_PATTERN = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&*+,;=%()']+/g;
  * @property {Set<string>} replayed the kinds the server repeated after the last snap
  * @property {boolean} quiet a focus report xterm.js makes by itself is not the user's (S2 9.2)
  * @property {number} parsing characters given to xterm.js and not parsed yet
- * @property {{ data: string | Uint8Array, then?: () => void }[]} waiting writes held for xterm.js
- * @property {number} waitingSize their characters
+ * @property {{ data: string | Uint8Array, then?: () => void, counted: boolean }[]} waiting writes
+ *   held for xterm.js
+ * @property {number} waitingSize the characters of the held output (a snap's own do not count)
  * @property {boolean} refreshing a fresh snapshot was asked for: output until it comes is dropped
  * @property {number} refusedAt when the last `input-full` came (performance.now)
  * @property {number} sentAt when the page last sent input
@@ -355,21 +356,28 @@ export function createTerminalView(root, deps) {
    * what it has parsed: a snapshot can be 60 MiB (S2 8.2.8), and xterm.js throws away a write
    * while more than 50,000,000 characters wait. What comes meanwhile waits here; when more than
    * WAITING_MAX would wait, it is dropped and a fresh snapshot asked for, so that the screen is
-   * never silently wrong. `then` runs once xterm.js has parsed `data`.
+   * never silently wrong. A snap's own writes (`counted` false) do not count toward it: a snap
+   * replaces what waited, and dropping a large one would only ask the server for it again.
+   * `then` runs once xterm.js has parsed `data`.
    * @param {Term} t
    * @param {string | Uint8Array} data
-   * @param {() => void} [then]
+   * @param {{ then?: () => void, counted?: boolean }} [how]
    */
-  const write = (t, data, then) => {
+  const write = (t, data, how = {}) => {
+    const counted = how.counted ?? true;
     if (t.waiting.length > 0 || t.parsing > PARSE_AHEAD) {
-      t.waiting.push(then === undefined ? { data } : { data, then });
-      t.waitingSize += data.length;
-      if (t.waitingSize > WAITING_MAX) {
-        refresh(t);
+      t.waiting.push(
+        how.then === undefined ? { data, counted } : { data, then: how.then, counted },
+      );
+      if (counted) {
+        t.waitingSize += data.length;
+        if (t.waitingSize > WAITING_MAX) {
+          refresh(t);
+        }
       }
       return;
     }
-    give(t, data, then);
+    give(t, data, how.then);
   };
 
   /**
@@ -402,10 +410,13 @@ export function createTerminalView(root, deps) {
   /** @param {Term} t */
   const drain = (t) => {
     while (t.waiting.length > 0 && t.parsing <= PARSE_AHEAD) {
-      const next = /** @type {{ data: string | Uint8Array, then?: () => void }} */ (
-        t.waiting.shift()
-      );
-      t.waitingSize -= next.data.length;
+      const next =
+        /** @type {{ data: string | Uint8Array, then?: () => void, counted: boolean }} */ (
+          t.waiting.shift()
+        );
+      if (next.counted) {
+        t.waitingSize -= next.data.length;
+      }
       give(t, next.data, next.then);
     }
   };
@@ -707,30 +718,59 @@ export function createTerminalView(root, deps) {
   };
 
   /**
-   * The size of one cell of the terminals' font in CSS pixels: from an open xterm.js (its screen
-   * is its columns × the cell), else measured as xterm.js measures it (32 × W at the font).
-   * @returns {{ width: number, height: number } | null}
+   * The cell the fit addon divides by, for a terminal of `cols` × `rows`: xterm.js 6.0.0 rounds
+   * the screen (cell × count, in device pixels) to whole CSS pixels and divides that by the count
+   * again, so the cell depends a little on the size. From an open xterm.js: its own screen (for
+   * its own size); else measured as xterm.js 6.0.0 measures — the canvas's metrics of `W` at the
+   * font (else 32 × W in a span), the height rounded up to whole device pixels.
+   * @returns {((cols: number, rows: number) => { width: number, height: number }) | null}
    */
-  const cellSize = () => {
+  const cellRule = () => {
     for (const t of terms.values()) {
       const screen = t.xterm.element?.querySelector('.xterm-screen');
       if (screen instanceof HTMLElement) {
         const width = parseFloat(screen.style.width) / t.xterm.cols;
         const height = parseFloat(screen.style.height) / t.xterm.rows;
         if (width > 0 && height > 0) {
-          return { width, height };
+          return () => ({ width, height });
         }
       }
     }
-    const probe = element('span', 'tv-measure');
-    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;line-height:normal;font-family:${FONT};font-size:${fontSize()}px`;
-    probe.textContent = 'W'.repeat(32);
-    document.body.append(probe);
-    const rect = probe.getBoundingClientRect();
-    probe.remove();
-    return rect.width > 0 && rect.height > 0
-      ? { width: rect.width / 32, height: Math.ceil(rect.height) }
-      : null;
+    const size = fontSize();
+    let width = 0;
+    let height = 0;
+    try {
+      const context = new OffscreenCanvas(100, 100).getContext('2d');
+      if (context !== null) {
+        context.font = `${size}px ${FONT}`;
+        const metrics = context.measureText('W');
+        if ('fontBoundingBoxAscent' in metrics && 'fontBoundingBoxDescent' in metrics) {
+          width = metrics.width;
+          height = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
+        }
+      }
+    } catch {
+      // no canvas: the span below
+    }
+    if (!(width > 0 && height > 0)) {
+      const probe = element('span', 'tv-measure');
+      probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;line-height:normal;font-family:${FONT};font-size:${size}px`;
+      probe.textContent = 'W'.repeat(32);
+      document.body.append(probe);
+      width = probe.offsetWidth / 32;
+      height = probe.offsetHeight;
+      probe.remove();
+    }
+    if (!(width > 0 && height > 0)) {
+      return null;
+    }
+    const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+    const deviceWidth = width * ratio;
+    const deviceHeight = Math.ceil(height * ratio);
+    return (cols, rows) => ({
+      width: Math.round((deviceWidth * cols) / ratio) / cols,
+      height: Math.round((deviceHeight * rows) / ratio) / rows,
+    });
   };
 
   // The colours follow the page's light or dark scheme (style.css, terminal-view.css).
@@ -985,11 +1025,14 @@ export function createTerminalView(root, deps) {
       // S2 8.2.4: the terminal starts over at the snapshot's size, after what was written before
       // it, with the parser back in its ground state (CAN ends any sequence a stream that was cut
       // left open).
-      write(t, '\x18', () => {
-        xterm.reset();
-        xterm.resize(msg.cols, msg.rows);
+      write(t, '\x18', {
+        counted: false,
+        then: () => {
+          xterm.reset();
+          xterm.resize(msg.cols, msg.rows);
+        },
       });
-      write(t, msg.data);
+      write(t, msg.data, { counted: false });
       // The server sizes the terminal to the proposal it has of this page's: the one of this
       // view's own attach, or the list's size app.js proposed after a reconnect — which may also
       // stand for an attach of the view's that never reached the server (sent while the
@@ -1022,7 +1065,7 @@ export function createTerminalView(root, deps) {
       }
       recordCame(t);
       // In stream order: after the output written before it.
-      write(t, '', () => t.xterm.resize(msg.cols, msg.rows));
+      write(t, '', { then: () => t.xterm.resize(msg.cols, msg.rows) });
       t.owner = msg.owner;
       paint(t);
     },
@@ -1097,22 +1140,45 @@ export function createTerminalView(root, deps) {
      * What fits (an optional member of contract 2.9, for app.js's `area()`): the columns and
      * rows a terminal of this view shows in a terminal area (`#terminal`'s box) of `width` ×
      * `height` CSS pixels — xterm.js's padding and the scroll bar counted out as the fit addon
-     * counts them, clamped as S2 8.2.6 clamps a proposal — or null while no cell can be measured.
+     * counts them, clamped as S2 8.2.6 clamps a proposal — or null while no cell can be measured
+     * or for an area that is not a positive size. The numbers are always whole and at least 1
+     * (app.js sends them to the server, which takes nothing else), whatever it is given.
      * @param {number} width
      * @param {number} height
      * @returns {{ cols: number, rows: number } | null}
      */
     fits(width, height) {
-      const cell = cellSize();
-      if (cell === null || !(width > 0) || !(height > 0)) {
+      if (!(width > 0) || !(height > 0)) {
         return null;
       }
-      const cols = Math.floor((Math.floor(width) - PAD_X - SCROLL_BAR) / cell.width);
-      const rows = Math.floor((Math.floor(height) - PAD_Y) / cell.height);
-      return {
-        cols: Math.max(2, Math.min(MAX_COLS, cols)),
-        rows: Math.max(1, Math.min(MAX_ROWS, rows)),
+      const cell = cellRule();
+      if (cell === null) {
+        return null;
+      }
+      /** @param {number} n @param {number} least @param {number} most */
+      const whole = (n, least, most) =>
+        Number.isFinite(n) ? Math.max(least, Math.min(most, Math.floor(n))) : most;
+      const across = Math.floor(width) - PAD_X - SCROLL_BAR;
+      const down = Math.floor(height) - PAD_Y;
+      // The size at which a terminal fits itself again (its cell depends on its size): what a
+      // terminal opened at it proposes, so that it is not resized right after its start.
+      const start = cell(MAX_COLS, MAX_ROWS); // the measured cell, near enough to begin with
+      let size = {
+        cols: whole(across / start.width, 2, MAX_COLS),
+        rows: whole(down / start.height, 1, MAX_ROWS),
       };
+      for (let step = 0; step < 4; step++) {
+        const unit = cell(size.cols, size.rows);
+        const next = {
+          cols: whole(across / unit.width, 2, MAX_COLS),
+          rows: whole(down / unit.height, 1, MAX_ROWS),
+        };
+        if (next.cols === size.cols && next.rows === size.rows) {
+          break;
+        }
+        size = next;
+      }
+      return size;
     },
   };
 }

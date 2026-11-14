@@ -1370,9 +1370,11 @@ export function createTerminalView(root, deps) {}
 // Optional member (ruled, task 28's review 2, for app.js's `area()`): `fits(width, height)` →
 // `{ cols, rows } | null` — the columns and rows a terminal of the view shows in a terminal area
 // (`#terminal`'s box) of width × height CSS pixels, xterm.js's padding and scroll bar counted out
-// as the fit addon counts them, clamped to S2 8.2.6's limits; null while no cell can be measured.
-// app.js uses it when the view offers it, so that the first size of a terminal is the one its
-// view proposes.
+// as the fit addon counts them, clamped to S2 8.2.6's limits; null while no cell can be measured
+// or for an area that is not a positive size. Its numbers are always whole and at least 1, whatever
+// it is given (app.js sends them to the server, whose validator takes 1–65,535 only; ruled, #70's
+// review). app.js uses it when the view offers it, so that the first size of a terminal is the
+// one its view proposes.
 // After a reconnect (S2 8.2.5) app.js itself sends `attach` for each id of `attached()`, the shown
 // terminal first and the next once the previous one's `snap` arrived, proposing the terminal's
 // size of the new `list`; an id the new `list` lacks is skipped, and a `list` without the terminal
