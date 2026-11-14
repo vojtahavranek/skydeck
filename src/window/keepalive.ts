@@ -39,8 +39,9 @@ const RETRY_MS = [5_000, 30_000, 300_000] as const;
 const SCHEDULE_RESET_NS = 300n * NS_PER_SECOND;
 /**
  * A found keep-alive's socket that accepted is asked again after this long (ruled, review 2). WSL
- * stops 15 s after its last Windows client (S2 6): 3 s + one tick + the first 5 s retry starts a
- * new wsl.exe by 9 s, with room for its own start. Do not raise it without redoing that sum.
+ * stops 15 s after its last Windows client (S2 6). Worst case with real timers: 3 s, up to 1 s to
+ * the tick that asks, the first 5 s retry, up to 1 s to the tick that starts — a new wsl.exe by
+ * just under 10 s, with room for its own start. Do not raise it without redoing that sum.
  */
 const SOCKET_TRUSTED_MS = 3_000;
 /** The script's file name: the SIGTERM goes only to a process running it for this directory. */

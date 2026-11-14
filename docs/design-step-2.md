@@ -473,8 +473,9 @@ of the distribution alive while the window has anything to keep:
   answer within 2 seconds — is no judgement, and it counts as running. A socket that accepted is
   asked again after 3 seconds (each connection sends nothing; one a second would be 86,400 a day),
   one that gave any other answer at the next tick. The 3 seconds come from WSL's 15 (6): 3 s until
-  the socket is asked again, one tick and the first 5 s retry start a new `wsl.exe` by 9 s after
-  the old one ended, with room left for its own start; a longer wait lets WSL stop first. Such a script is an orphan: its line no
+  the socket is asked again, up to 1 s to the tick that asks, the first 5 s retry and up to 1 s to
+  the tick that starts give a new `wsl.exe` just under 10 s after the old one ended, with room left
+  for its own start; a longer wait lets WSL stop first. Such a script is an orphan: its line no
   longer counts as a running keep-alive (the next one writes its own), and the server sends it one
   SIGTERM (it exits at once and removes its `keepalive.pid`) — skydeck ending its own helper (2,
   principle 6) — only when all of these hold: its line is alive by design 5.5's rule (its identity

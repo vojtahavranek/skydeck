@@ -950,7 +950,8 @@ test('a found keep-alive whose socket accepts is asked again every 3 s; after an
 
 test("a found keep-alive's wsl.exe gone right after its socket accepted is replaced within 9 s, inside WSL's 15 s", async (t) => {
   // S2 6: WSL stops 15 s after its last Windows client. 3 s until the socket is asked again, one
-  // tick, the first 5 s retry: the new wsl.exe starts by 9 s, with room left for its own start.
+  // tick, the first 5 s retry: the new wsl.exe starts by 9 s on the fake clock (with real timers a
+  // timer due at a tick fires after it, one tick more: just under 10 s), room left for its start.
   const s = setup(t);
   scriptWritesItsLine(s);
   const socket = await interopAccepts(t, s);
