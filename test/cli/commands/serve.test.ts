@@ -11,7 +11,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -378,7 +378,7 @@ describe('skydeck serve (S2 5.2)', () => {
     const { d, serve } = serveSandbox(t);
     // The server's python3 check (on its PATH) takes 3 s: the signal comes in the middle.
     const python = join(d.s.bin, 'python3');
-    rmSync(python);
+    unlinkSync(python);
     writeFileSync(python, '#!/bin/sh\nsleep 3\nexec /usr/bin/python3 "$@"\n', { mode: 0o755 });
     const entry = serve();
     await until(() => d.deck.store.getKv('window_server') !== null, 'the lock taken', WAIT_MS);
