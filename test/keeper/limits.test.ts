@@ -23,6 +23,12 @@ import { readRecords } from '../helpers/standin.ts';
 
 const MiB = 1024 * 1024;
 
+/**
+ * The ceiling of a wait for the stand-in's /flood output, which comes at the pace of a shared CI
+ * runner: 15 s once saw only ~14,500 of 50,000 lines. A passing run waits no longer than before.
+ */
+const FLOOD_MS = 90_000;
+
 /** `size` printable bytes, numbered so that a reordering or a loss shows: "00000000.00000001.…" */
 function pasteText(size: number): Buffer {
   const parts: string[] = [];
@@ -142,7 +148,7 @@ describe('keeper: caps', { concurrency: true }, () => {
     const cap = 64 * 1024;
     const k = await box.start({ env: { SKYDECK_TEST_KEEPER_TAIL_BYTES: String(cap) } });
     const { client } = await startProgram(k);
-    await typeLine(client, '/flood 300000', 15_000);
+    await typeLine(client, '/flood 300000', FLOOD_MS);
     await quiet(client);
     const all = records(client);
 
@@ -220,18 +226,40 @@ describe('keeper: caps', { concurrency: true }, () => {
     await until(
       () => box.logLines().includes(`keeper ${k.spec.id}: send-queue-full`),
       'the keeper closed the connection that does not read',
-      15_000,
+      FLOOD_MS,
     );
+    // The only connection so far: the line is the first connection's.
+    assert.deepEqual(box.logLines(), [`keeper ${k.spec.id}: send-queue-full`]);
 
     // The program was never held up: a new claim gets the snapshot, the tail and the prompt the
-    // program drew after its flood (50,000 lines of 80 bytes).
-    const { client: second, hello } = await k.claim();
-    assert.equal(hello.snapSeq, parked);
-    assert.equal(hello.gap, false);
-    assert.equal(snapshot(await second.next('S')).data, 'before the flood');
-    const end = await second.waitForOutput('flood 00050000', 15_000);
-    await second.waitForOutput(PROMPT, 15_000, end);
-    assert.match(second.output(), /^\/flood 4000000/, 'the tail starts right after the park');
+    // program drew after its flood (50,000 lines of 80 bytes). The test's 256 KiB send cap also
+    // holds a claim's live records, and a claim made while the flood still runs gets the rest of
+    // the flood live: a loaded test process can read it too slowly, and the keeper then closes
+    // that claim too. So the test claims again until one sees the whole flood; once the flood is
+    // over, a claim gets all of it in its tail, which the cap does not hold (the test above). That
+    // a claim which reads is not closed while output flows live is the 8 MiB paste test's.
+    const last = 'flood 00050000';
+    const wholeFlood = (output: string): boolean => {
+      const at = output.indexOf(last);
+      return at !== -1 && output.includes(PROMPT, at + last.length);
+    };
+    const deadline = performance.now() + FLOOD_MS;
+    for (;;) {
+      const { client: second, hello } = await k.claim();
+      assert.equal(hello.snapSeq, parked);
+      assert.equal(hello.gap, false);
+      assert.equal(snapshot(await second.next('S')).data, 'before the flood');
+      await until(
+        () => wholeFlood(second.output()) || second.isClosed(),
+        () => `the whole flood in a claim (${JSON.stringify(second.output().slice(-200))})`,
+        Math.max(0, Math.ceil(deadline - performance.now())),
+      );
+      if (wholeFlood(second.output())) {
+        assert.match(second.output(), /^\/flood 4000000/, 'the tail starts right after the park');
+        break;
+      }
+      second.socket.destroy(); // closed by the keeper for the send cap: claim again
+    }
 
     // What the first connection got stops short of that.
     client.socket.resume();
