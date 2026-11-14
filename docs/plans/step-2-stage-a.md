@@ -3176,8 +3176,8 @@ plan owner, review 2 of task 32). Before anything else a resume is refused — `
 session is already open in the window", nothing built, no lock — while the hub lists a terminal of
 the session (`sessionId ?? expectedSessionId`) whose program may still run (`MAY_START`), whatever
 the lock says (ruled, review 2 of task 32; S2 11.1); `new` is never refused by it. A throw after the
-lock was taken and before the terminal's `open()` was called gives the lock back (nothing can have
-started; ruled, review 2 of task 32); after `open()` it stays. The terminal is built first (ruled, review 1 of task
+lock was taken and before the terminal's `open()` was called gives that lock back, no other
+(nothing can have started; ruled, review 2 of task 32); after `open()` it stays. The terminal is built first (ruled, review 1 of task
 32), so that a factory that throws leaves no lock and, for `new`, no label behind; a refused
 action builds it and never opens it. Once
 `prepareResumeById` has let it through, and before `launchPrepared`, the resume closes the

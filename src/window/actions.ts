@@ -167,14 +167,12 @@ export function createActions(deps: ActionDeps): ActionHandler {
 
   /**
    * After a throw before the terminal's `open()` was called (ruled, review 2 of task 32): nothing
-   * can have been started, so the lock prepareResumeById took is given back, and the next resume is
-   * not refused for a minute. The lock read now is that one: it is fresh, and only a stale lock is
-   * swept or taken over.
+   * can have been started, so the lock this resume took (`ours`) is given back, and the next resume
+   * is not refused for a minute — that lock and no other (releaseLock keeps one taken over since).
    */
-  function giveBackLock(sessionId: string): void {
+  function giveBackLock(sessionId: string, ours: string): void {
     try {
-      const lock = readLock(deck, sessionId);
-      if (lock !== null) releaseLock(deck, sessionId, lock);
+      releaseLock(deck, sessionId, ours);
     } catch (error) {
       log(`act resume: the lock was not given back (${failureKind(error)})`);
     }
@@ -211,11 +209,13 @@ export function createActions(deps: ActionDeps): ActionHandler {
           },
         );
         const prepared = prepareResumeById(deck, action.sessionId);
-        closeEnded(prepared.sessionId);
+        let ours: string | null = null;
         try {
+          ours = readLock(deck, prepared.sessionId); // the lock prepareResumeById has just taken
+          closeEnded(prepared.sessionId);
           return launched(prepared, await launchPrepared(deck, prepared, terminal));
         } catch (error) {
-          if (!opened) giveBackLock(prepared.sessionId);
+          if (!opened && ours !== null) giveBackLock(prepared.sessionId, ours);
           throw error;
         }
       }

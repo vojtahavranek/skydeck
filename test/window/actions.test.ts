@@ -379,13 +379,13 @@ test("resume is not refused by a running terminal that now shows another session
 test('an unexpected throw after the lock was taken and before open() gives the lock back', async (t) => {
   const d = testDeck(t);
   resumableSession(d);
-  // launchPrepared reads the lock just before it opens; that read fails (the second read of S1's
-  // lock: the first is acquireLock's).
+  // launchPrepared reads the lock just before it opens; that read fails (the third read of S1's
+  // lock: the first is acquireLock's, the second the actions' own, of the lock they took).
   let reads = 0;
   const deck = deckWith(d.deck, {
     store: {
       getKv: (key) => {
-        if (key === lockKey(S1) && ++reads === 2) throw new Error(SECRET);
+        if (key === lockKey(S1) && ++reads === 3) throw new Error(SECRET);
         return d.deck.store.getKv(key);
       },
     },
@@ -396,6 +396,42 @@ test('an unexpected throw after the lock was taken and before open() gives the l
   assert.deepEqual(h.specs, []);
   assert.deepEqual(h.logs, ['act resume: failed (Error)']);
   assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+});
+
+test('an unexpected throw after open() was called keeps the lock: the program may have started', async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  // An open() that resolves to nothing: launchPrepared throws reading its result, after the open.
+  const h = harness(d, { answer: () => undefined as never });
+  const result = await h.act(resume(S1));
+  assert.equal(result.ok, false);
+  assert.equal(h.events.at(-1), `open ${S1}`);
+  assert.deepEqual(h.logs, ['act resume: failed (TypeError)']);
+  assert.deepEqual(
+    h.specs.map((spec) => spec.lock),
+    [d.deck.store.getKv(lockKey(S1))],
+  );
+  assert.notEqual(d.deck.store.getKv(lockKey(S1)), null);
+});
+
+test('the lock given back is the one the resume took, never one another skydeck wrote since', async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  let reads = 0;
+  const deck = deckWith(d.deck, {
+    store: {
+      getKv: (key) => {
+        if (key === lockKey(S1) && ++reads === 3) {
+          d.deck.store.setKv(lockKey(S1), 'another skydeck'); // ours was taken over meanwhile
+          throw new Error(SECRET);
+        }
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const h = harness(d, { deck });
+  assert.equal((await h.act(resume(S1))).ok, false);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), 'another skydeck');
 });
 
 test('a refused resume leaves the ended terminal in place', async (t) => {
@@ -824,6 +860,17 @@ test('a refusal naming a hostile directory reaches the page sanitised', async (t
   }
 });
 
+test('a message that is not an action, or cannot be read, is refused with id 0 and never rejects', async (t) => {
+  const d = testDeck(t);
+  const h = harness(d);
+  const odd = [{ t: 'ping', n: 1 }, { ...resume(S1), id: 1n }, null] as unknown as ActMessage[];
+  for (const action of odd) {
+    assert.deepEqual(await h.act(action), refused(0, 'skydeck cannot do that action'));
+  }
+  assert.deepEqual(h.events, []);
+  assert.equal(h.logs.length, odd.length);
+});
+
 test("the limits are the parser's own: an action at them is acted on", async (t) => {
   const d = testDeck(t);
   const h = harness(d);
@@ -845,6 +892,8 @@ test("a refusal's message reaches the page sanitised: a flag quoted as typed car
     }
     assert.match(result.lines[0] ?? '', /^cannot pass -c/);
     assert.equal(result.error, result.lines.join(' '));
+    // The line break of the message is kept as a line break between lines, as failureText keeps it.
+    assert.equal(result.lines.length, flags.includes('\n') ? 2 : 1);
   }
   assert.deepEqual(h.specs, []);
 });
