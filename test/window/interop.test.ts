@@ -5,10 +5,11 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import type { Files, Net, Platform } from '../../src/platform/types.ts';
-import { createInterop, createInteropFrom } from '../../src/window/interop.ts';
+import { createInterop, createInteropFrom, probeSocket } from '../../src/window/interop.ts';
 import { runtimeFiles } from '../../src/window/runtime.ts';
 import type { RuntimeFiles } from '../../src/window/runtime.ts';
 import { testPlatform } from '../helpers/platform.ts';
+import type { FakeClock } from '../helpers/platform.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
 
 // The candidates are unix sockets in the sandbox; the first one (S2 6.4's /run/WSL/1_interop) is
@@ -17,6 +18,7 @@ import type { Sandbox } from '../helpers/sandbox.ts';
 
 interface Setup {
   platform: Platform;
+  clock: FakeClock;
   sandbox: Sandbox;
   files: RuntimeFiles;
   /** A path in the sandbox for a candidate socket. */
@@ -36,6 +38,7 @@ function setup(t: TestContext, env: Record<string, string | undefined> = {}): Se
   const files = runtimeFiles(dir);
   return {
     platform: tp.platform,
+    clock: tp.clock,
     sandbox: tp.sandbox,
     files,
     path: (name) => join(sockets, name),
@@ -79,6 +82,38 @@ function notASocket(s: Setup, name: string): string {
 function keepAliveSays(s: Setup, text: string): void {
   writeFileSync(s.files.keepaliveInterop, text);
 }
+
+test('probeSocket closes the connection it made and leaves no timer', async (t) => {
+  const s = setup(t);
+  const a = await s.listen('first');
+  const made: import('node:net').Socket[] = [];
+  const platform: Platform = {
+    ...s.platform,
+    net: {
+      ...s.platform.net,
+      connectUnix: async (path) => {
+        const socket = await s.platform.net.connectUnix(path);
+        made.push(socket);
+        return socket;
+      },
+    },
+  };
+  assert.equal(await probeSocket(platform, a.path), 'accepts');
+  assert.equal(made.length, 1);
+  assert.equal(made[0]?.destroyed, true);
+  assert.equal(s.clock.timers(), 0);
+});
+
+test('probeSocket: refused for ECONNREFUSED and ENOENT, unknown for anything else', async (t) => {
+  const s = setup(t);
+  assert.equal(await probeSocket(s.platform, notASocket(s, 'file')), 'refused');
+  assert.equal(await probeSocket(s.platform, s.path('missing')), 'refused');
+  assert.equal(await probeSocket(s.platform, join(notASocket(s, 'f2'), 'below')), 'unknown');
+  for (const path of [null, '', 'relative', '/a\n/b']) {
+    assert.equal(await probeSocket(s.platform, path), 'unknown', JSON.stringify(path));
+  }
+  assert.equal(s.clock.timers(), 0);
+});
 
 test('current() is null before the first refresh', (t) => {
   const s = setup(t);
@@ -126,6 +161,26 @@ test('no candidate accepts: no link, and null', async (t) => {
   assert.equal(await interop.refresh(), null);
   assert.equal(interop.current(), null);
   assert.equal(s.linkTarget(), null);
+});
+
+test('a candidate whose connection fails with another error (EACCES) does not get the link', async (t) => {
+  const s = setup(t);
+  const a = await s.listen('first');
+  const b = await s.listen('keepalive');
+  keepAliveSays(s, b.path);
+  const platform: Platform = {
+    ...s.platform,
+    net: {
+      ...s.platform.net,
+      connectUnix: (path) =>
+        path === a.path
+          ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+          : s.platform.net.connectUnix(path),
+    },
+  };
+  const interop = createInteropFrom(platform, s.files, a.path);
+  assert.equal(await interop.refresh(), s.files.interop);
+  assert.equal(s.linkTarget(), b.path);
 });
 
 test('a later refresh moves the link when the first one dies, and removes it when none is left', async (t) => {

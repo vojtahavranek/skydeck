@@ -12,11 +12,12 @@
  * a `wsl.exe` ended on the Windows side, and then nothing holds WSL any more (ruled, S2 6.1): for
  * a `wsl.exe` this server started its end counts; a keep-alive it did not start is judged by its
  * `keepalive.interop` socket too (refused or gone: its `wsl.exe` is gone). Such a script is an
- * orphan: its line no longer counts, and when its identity is known alive it gets one SIGTERM —
- * the server ending its own helper (S2 2, principle 6) — before the schedule starts a new one.
+ * orphan: its line no longer counts, and it gets one SIGTERM — the server ending its own helper
+ * (S2 2, principle 6) — when its identity is known alive, its command line is this directory's
+ * keep-alive script, and the end is known rather than inferred; then the schedule starts a new one.
  */
 
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import type { WindowConfig } from '../platform/config.ts';
 import { NS_PER_SECOND } from '../platform/time.ts';
@@ -36,6 +37,10 @@ const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
 const RETRY_MS = [5_000, 30_000, 300_000] as const;
 /** A keep-alive that ran this long has ended once, not again: the schedule starts over at 5 s. */
 const SCHEDULE_RESET_NS = 300n * NS_PER_SECOND;
+/** A found keep-alive's socket that accepted is asked again after this long (ruled, review 2). */
+const SOCKET_TRUSTED_MS = 30_000;
+/** The script's file name: the SIGTERM goes only to a process running it for this directory. */
+const SCRIPT_NAME = 'skydeck-keepalive';
 const NO_DISTRO =
   'WSL_DISTRO_NAME is not set, so wsl.exe cannot be told which distribution to keep running';
 
@@ -103,6 +108,9 @@ export function createKeepAlive(deps: {
   let retries = 0;
   let runningSinceNs: Ns | null = null;
   let ticking: Promise<void> | null = null;
+  /** A found keep-alive's socket accepted less than 30 s ago: it is not asked again yet. */
+  let socketTrusted = false;
+  let stopTrusting = (): void => {};
 
   const copy = (): KeepAlivePayload => ({ ...payload });
 
@@ -152,17 +160,32 @@ export function createKeepAlive(deps: {
   };
 
   /**
-   * `line`'s script holds nothing (its wsl.exe is gone): from now on its line does not count, and
-   * when its identity is known alive — never on 'unknown' — it gets ONE SIGTERM (its trap removes
-   * its own files at once). Called only with a live line that is not the orphan already — a line
-   * that is the orphan is never live (see `check`) — so each orphan gets one SIGTERM at most.
+   * Whether process `pid` runs this runtime directory's keep-alive script (ruled, review 2): one
+   * argument's last path component is `skydeck-keepalive` and one argument is `files.dir`. So the
+   * SIGTERM can never reach a keeper, `claude` or anything else, whatever keepalive.pid says.
    */
-  const orphaned = (line: PidLine | null): void => {
+  const runsOurScript = (pid: number): boolean => {
+    const bytes = platform.proc.cmdline(pid);
+    if (bytes === null) {
+      return false;
+    }
+    const args = new TextDecoder().decode(bytes).split('\0');
+    return args.some((arg) => basename(arg) === SCRIPT_NAME) && args.includes(files.dir);
+  };
+
+  /**
+   * `line`'s script holds nothing (its wsl.exe is gone): from now on its line does not count. With
+   * `terminate`, when its identity is known alive — never on 'unknown' — and it runs this
+   * directory's keep-alive script, it gets ONE SIGTERM (its trap removes keepalive.pid at once).
+   * Called only with a live line that is not the orphan already — a line that is the orphan is
+   * never live (see `check`) — so each orphan gets one SIGTERM at most.
+   */
+  const orphaned = (line: PidLine | null, terminate: boolean): void => {
     if (line === null) {
       return;
     }
     orphan = line;
-    if (stateOf(line) !== 'alive') {
+    if (!terminate || stateOf(line) !== 'alive' || !runsOurScript(line.pid)) {
       return;
     }
     try {
@@ -173,23 +196,49 @@ export function createKeepAlive(deps: {
   };
 
   /**
-   * Whether the Windows side of a keep-alive this server did not start is gone: keepalive.interop
-   * names a socket that refuses connections or is not there (ruled). Anything else — no file, one
-   * that cannot be read, not an absolute path, another error, no answer — is no judgement: false.
+   * What keepalive.interop's socket says (ruled): 'refused' — refused or not there — means the
+   * Windows side of that keep-alive is gone. No file, one that cannot be read, a path that is not
+   * absolute, another error or no answer is 'unknown': no judgement.
    */
-  const windowsSideGone = async (): Promise<boolean> => {
+  const socketSays = async (): Promise<'accepts' | 'refused' | 'unknown'> => {
     let text: string | null;
     try {
       text = platform.files.readText(files.keepaliveInterop);
     } catch {
+      return 'unknown';
+    }
+    return probeSocket(platform, text);
+  };
+
+  /** No connection again for 30 s after one that was accepted (ruled: it sends nothing). */
+  const trustSocket = (trusted: boolean): void => {
+    stopTrusting();
+    stopTrusting = (): void => {};
+    socketTrusted = trusted;
+    if (trusted) {
+      stopTrusting = clock.after(SOCKET_TRUSTED_MS, () => {
+        socketTrusted = false;
+      });
+    }
+  };
+
+  /**
+   * Whether the Windows side of a keep-alive this server did not start is gone. One being watched
+   * whose socket accepted less than 30 s ago is not asked again; any other is asked now.
+   */
+  const windowsSideGone = async (watching: boolean): Promise<boolean> => {
+    if (watching && socketTrusted) {
       return false;
     }
-    return (await probeSocket(platform, text)) === 'refused';
+    const answer = await socketSays();
+    trustSocket(answer === 'accepts');
+    return answer === 'refused';
   };
 
   /** The keep-alive is gone: failed with `error`, and a start due after the schedule's wait. */
   const lost = (error: string): void => {
     watched = null;
+    trustSocket(false);
     const ranNs = runningSinceNs === null ? null : clock.nowNs() - runningSinceNs;
     if (ranNs !== null && ranNs >= SCHEDULE_RESET_NS) {
       retries = 0;
@@ -238,12 +287,15 @@ export function createKeepAlive(deps: {
     if (watch !== null && watch.child !== null) {
       // A wsl.exe this server started: its end counts, and its script's line.
       if (watch.ended !== null) {
-        // Its script may live on. A live line seen now that is not an earlier orphan's is that
-        // script's too, even if no earlier tick saw it (the script wrote it and wsl.exe ended
-        // between two ticks): a start happens only while no live line other than an orphan's
-        // exists, and only the script writes it.
+        // Its script may live on. A live line seen now that is not an earlier orphan's is taken
+        // for that script's too, even if no earlier tick saw it (the script wrote it and wsl.exe
+        // ended between two ticks): a start happens only while no live line other than an
+        // orphan's exists. It no longer counts; but on that inference alone it is not signalled
+        // (another server's keep-alive can be the one seen): only when its socket says refused.
         const line = watch.line ?? (live ? seen : null);
-        orphaned(line);
+        const terminate =
+          watch.line !== null || (line !== null && (await socketSays()) === 'refused');
+        orphaned(line, terminate);
         lost(
           line === null
             ? `wsl.exe ended before the keep-alive started (${howItEnded(watch.ended)})`
@@ -263,9 +315,9 @@ export function createKeepAlive(deps: {
       return;
     }
     // A keep-alive this server did not start: its line, and its Windows side.
-    const gone = live && (await windowsSideGone());
+    const gone = live && (await windowsSideGone(watch !== null));
     if (gone) {
-      orphaned(seen);
+      orphaned(seen, true);
     }
     if (live && !gone) {
       watched ??= { child: null, ended: null, line: seen };

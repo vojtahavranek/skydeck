@@ -470,15 +470,25 @@ of the distribution alive while the window has anything to keep:
   also judged by its `keepalive.interop`: when that file names an absolute path and a unix
   connection to it is refused or the path is not there (the socket of that `wsl.exe` session),
   its `wsl.exe` is gone; anything else — no file, one that cannot be read, another error, no
-  answer within 2 seconds — is no judgement, and it counts as running. Such a script is an orphan:
-  its line no longer counts as a running keep-alive (the next one writes its own), and when its
-  line is alive by design 5.5's rule — its identity known, never on an unknown line — the server
-  sends it one SIGTERM (it exits at once and removes its files): skydeck ending its own helper (2,
-  principle 6). Then the schedule starts a new keep-alive. The limit that remains: an orphan that
-  cannot be judged (`keepalive.interop` missing or unreadable, a line that is unknown) is left
-  alone and counts as running. That the socket of a `wsl.exe` session goes when that `wsl.exe`
-  ends on the Windows side, and that the Linux side of a `wsl.exe` ends only with it, is
-  **UNVERIFIED** (check W14).
+  answer within 2 seconds — is no judgement, and it counts as running. A socket that accepted is
+  asked again only after 30 seconds (each connection sends nothing; one a second would be 86,400 a
+  day), one that gave any other answer at the next tick. Such a script is an orphan: its line no
+  longer counts as a running keep-alive (the next one writes its own), and the server sends it one
+  SIGTERM (it exits at once and removes its `keepalive.pid`) — skydeck ending its own helper (2,
+  principle 6) — only when all of these hold: its line is alive by design 5.5's rule (its identity
+  known, never on an unknown line); its command line (`/proc/<pid>/cmdline`) has an argument whose
+  last path component is `skydeck-keepalive` and an argument that is this runtime directory, so
+  the signal can never reach a keeper, `claude` or anything else, whatever `keepalive.pid` says;
+  and the server knows its `wsl.exe` is gone — it saw the line while that `wsl.exe` ran, or the
+  socket says refused. A line first seen at the tick that sees a started `wsl.exe` end is only
+  inferred to be that `wsl.exe`'s script (another server's keep-alive can be the one seen): it no
+  longer counts, but it is signalled only when its socket says refused. Then the schedule starts a
+  new keep-alive. The limits that remain: a keep-alive this server did not start whose
+  `keepalive.interop` gives no judgement counts as running, even when its `wsl.exe` is gone; an
+  orphan whose line is unknown, or whose command line does not match, gets no SIGTERM (its line
+  no longer counts, and a new keep-alive is started beside it). That the socket of a `wsl.exe`
+  session goes when that `wsl.exe` ends on the Windows side, and that the Linux side of a
+  `wsl.exe` ends only with it, is **UNVERIFIED** (check W14).
 
 That a `wsl.exe` started from inside WSL counts as a Windows client is **UNVERIFIED** (section 21;
 check W14). The design does not depend on it:

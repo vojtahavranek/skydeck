@@ -2600,9 +2600,13 @@ export function createInteropFrom(platform: Platform, files: RuntimeFiles, first
  *  one-line path. The interop link and the keep-alive both judge a socket by it. */
 export function probeSocket(platform: Platform, path: string | null): Promise<'accepts' | 'refused' | 'unknown'>;
 // src/window/keepalive.ts — S2 6.1 (ruled, review 2): a keep-alive this server did not start is also
-// judged by keepalive.interop (probeSocket 'refused': its wsl.exe is gone); a script whose wsl.exe
-// is gone is an orphan — its line no longer counts, and ONE SIGTERM when its line is 'alive'
-// (never on 'unknown'); then the schedule starts a new keep-alive.
+// judged by keepalive.interop (probeSocket 'refused': its wsl.exe is gone; an accepting socket is
+// asked again after 30 s, any other answer at the next tick); a script whose wsl.exe is gone is an
+// orphan — its line no longer counts, and ONE SIGTERM when its line is 'alive' (never on
+// 'unknown'), its cmdline has an argument named skydeck-keepalive and one that is files.dir, and
+// the end is known (its line was seen while its wsl.exe ran, or the socket says refused — a line
+// only inferred at the end tick is not signalled on the inference); then the schedule starts a
+// new keep-alive.
 export interface KeepAlive { state(): KeepAlivePayload; tick(): Promise<void>; onChange(listener: (state: KeepAlivePayload) => void): void }
 export function createKeepAlive(deps: { platform: Platform; window: WindowConfig; files: RuntimeFiles; appRoot: string; interop: Interop }): KeepAlive;
 ```
@@ -2641,7 +2645,11 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
   (running) for no file, an empty or relative or several-line one, an unreadable one, another
   error, no answer in time; exactly one SIGTERM to an orphan whose line is alive, none for an
   `unknown` line, none for a line of another boot; a found keep-alive whose socket later goes →
-  `failed`, one SIGTERM, restarted after 5 s.
+  `failed`, one SIGTERM, restarted after 5 s; an accepting socket asked again after 30 s, after any
+  other answer at the next tick; a line only inferred at the end tick signalled only when its
+  socket is refused; a SIGTERM only for a command line naming `skydeck-keepalive` and this runtime
+  directory (none for another program, a keeper, another runtime directory, a script named like
+  it, an empty or unreadable command line); a SIGTERM that throws does not stop the start.
 - Interop: candidates in S2 6.4's order — `/run/WSL/1_interop` (the first candidate is
   `createInteropFrom`'s parameter, so the test points it into the sandbox), `keepalive.interop`'s
   content, the server's own `WSL_INTEROP` — the link points at the first that accepts a unix
@@ -3637,3 +3645,11 @@ one SIGTERM from the server before the schedule starts a new keep-alive. The rem
 orphan that cannot be judged counts as running) is named in S2 6.1; the premise (the socket of a
 `wsl.exe` session goes with it) is for check W14 (task 30). The profile-folder line also escapes
 DEL and the C1 controls (S2 5.3).
+
+Rulings on review 2's re-check (2026-11-14): a line only inferred to be a started `wsl.exe`'s
+script (first seen at the tick that sees its end) is signalled only when its socket says refused;
+before any SIGTERM the process's command line must name `skydeck-keepalive` and this runtime
+directory, so the signal never reaches a keeper, `claude` or anything else; an accepting socket of
+a found keep-alive is asked again only after 30 s (any other answer at the next tick); "a control
+character" is U+0000–U+001F, U+007F and U+0080–U+009F everywhere (S2 2). All in S2 6.1 and task
+19's contract.
