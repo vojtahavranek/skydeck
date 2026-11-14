@@ -1,7 +1,7 @@
 // The terminal view (S2 8.2.4, 8.2.6, 9, 12.6, 15.4; plan task 28, contract 2.9): one xterm.js
 // 6.0.0 per attached terminal, with the vendored addons, fed by the snapshot and the stream of
-// S2 8.2.4 and sized by the server only (S2 8.2.6: the fit addon only computes the proposal sent
-// in `attach` and `resize`). The page's terminal answers no query (S2 9.3), maps the keys of S2
+// S2 8.2.4 and sized by the server only (S2 8.2.6: the view only computes the proposal sent in
+// `attach` and `resize`, by its own rule of what fits — see `fitIn`). The page's terminal answers no query (S2 9.3), maps the keys of S2
 // 9.1, writes the clipboard only for the shown terminal of a focused window (S2 9.5), opens links
 // only on a Ctrl+click and through the server (S2 9.6), finds in the scrollback (S2 9.7) and
 // ignores the program's window title (S2 15.4).
@@ -20,7 +20,6 @@
 /** @import { ExitMessage, SizeMessage, SnapMessage, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { IBufferRange, ILink, ILinkHandler, ITheme } from '@xterm/xterm' */
 import { Terminal } from '../vendor/xterm/xterm/lib/xterm.mjs';
-import { FitAddon } from '../vendor/xterm/addon-fit/lib/addon-fit.mjs';
 import { SearchAddon } from '../vendor/xterm/addon-search/lib/addon-search.mjs';
 import { UnicodeGraphemesAddon } from '../vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs';
 import { terminalKey } from './keys.js';
@@ -55,8 +54,8 @@ const PARSE_AHEAD = 4_000_000;
 const WAITING_MAX = 32_000_000;
 /** S2 9.6: the server opens a URL of at most this many characters. */
 const URL_MAX = 2048;
-/** The padding of xterm.js's element (terminal-view.css) and the scroll bar the fit addon counts
- *  out (its default with a scrollback): what `fits` subtracts too. */
+/** The padding of xterm.js's element (terminal-view.css) and the room its scroll bar takes (the
+ *  fit addon's 14 px with a scrollback): what every proposal and `fits` count out. */
 const PAD_X = 4;
 const PAD_Y = 2;
 const SCROLL_BAR = 14;
@@ -86,7 +85,8 @@ const URL_PATTERN = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&*+,;=%()']+/g;
  * @typedef {object} Term one attached terminal
  * @property {string} id
  * @property {Terminal} xterm
- * @property {FitAddon} fit
+ * @property {{ key: string, size: { cols: number, rows: number } } | null} fitted the area last
+ *   measured (its box, the pixel ratio and the cell) and what it holds (R3 of task 28's review)
  * @property {SearchAddon} search
  * @property {HTMLElement} box
  * @property {HTMLElement} bars
@@ -159,7 +159,7 @@ export function createTerminalView(root, deps) {
     const t = {
       id: payload.id,
       xterm: /** @type {Terminal} */ (/** @type {unknown} */ (null)),
-      fit: new FitAddon(),
+      fitted: null,
       search: new SearchAddon(),
       box,
       bars,
@@ -198,7 +198,6 @@ export function createTerminalView(root, deps) {
     });
     t.xterm = xterm;
     xterm.loadAddon(new UnicodeGraphemesAddon());
-    xterm.loadAddon(t.fit);
     xterm.loadAddon(t.search);
     swallowQueries(t);
     xterm.registerLinkProvider(plainLinks(t));
@@ -685,20 +684,32 @@ export function createTerminalView(root, deps) {
   // --- sizes (S2 8.2.6) -------------------------------------------------------------------------
 
   /**
-   * What the terminal's area holds at its font (the fit addon), or null when it cannot be
-   * measured (not shown).
+   * What the terminal's area holds at its font, or null when it cannot be measured (not shown):
+   * its box measured as the fit addon measures it (the element xterm.js is in, whole pixels),
+   * then `fitIn`. While the box, the pixel ratio and the cell are as they were, the answer is the
+   * one given before (a second bound against a size that flips; R3 of task 28's review).
    * @param {Term} t
    * @returns {{ cols: number, rows: number } | null}
    */
   const propose = (t) => {
-    const dims = t.fit.proposeDimensions();
-    if (dims === undefined || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) {
+    const box = t.xterm.element?.parentElement;
+    if (box === null || box === undefined) {
       return null;
     }
-    return {
-      cols: Math.max(1, Math.min(MAX_COLS, dims.cols)),
-      rows: Math.max(1, Math.min(MAX_ROWS, dims.rows)),
-    };
+    const style = getComputedStyle(box);
+    const width = parseInt(style.getPropertyValue('width'), 10);
+    const height = parseInt(style.getPropertyValue('height'), 10);
+    const cell = measureCell();
+    if (!(width > 0) || !(height > 0) || cell === null) {
+      return null; // hidden, or no font yet: nothing is remembered either
+    }
+    const key = `${width}x${height}@${cell.ratio}:${cell.width}x${cell.height}`;
+    if (t.fitted !== null && t.fitted.key === key) {
+      return t.fitted.size;
+    }
+    const size = fitIn(width - PAD_X - SCROLL_BAR, height - PAD_Y, cell);
+    t.fitted = { key, size };
+    return size;
   };
 
   /**
@@ -718,29 +729,20 @@ export function createTerminalView(root, deps) {
   };
 
   /**
-   * The cell the fit addon divides by, for a terminal of `cols` × `rows`: xterm.js 6.0.0 rounds
-   * the screen (cell × count, in device pixels) to whole CSS pixels and divides that by the count
-   * again, so the cell depends a little on the size. From an open xterm.js: its own screen (for
-   * its own size); else measured as xterm.js 6.0.0 measures — the canvas's metrics of `W` at the
-   * font (else 32 × W in a span), the height rounded up to whole device pixels.
-   * @returns {((cols: number, rows: number) => { width: number, height: number }) | null}
+   * The cell of the terminals' font in device pixels, measured as xterm.js 6.0.0 measures it:
+   * the canvas's metrics of `W` at the font (else 32 × W in a span); the height rounded up to
+   * whole device pixels. Null while it cannot be measured.
+   * @returns {{ width: number, height: number, ratio: number } | null}
    */
-  const cellRule = () => {
-    for (const t of terms.values()) {
-      const screen = t.xterm.element?.querySelector('.xterm-screen');
-      if (screen instanceof HTMLElement) {
-        const width = parseFloat(screen.style.width) / t.xterm.cols;
-        const height = parseFloat(screen.style.height) / t.xterm.rows;
-        if (width > 0 && height > 0) {
-          return () => ({ width, height });
-        }
-      }
-    }
+  /** @type {OffscreenCanvasRenderingContext2D | null | undefined} */
+  let canvas;
+  const measureCell = () => {
     const size = fontSize();
     let width = 0;
     let height = 0;
     try {
-      const context = new OffscreenCanvas(100, 100).getContext('2d');
+      canvas ??= new OffscreenCanvas(100, 100).getContext('2d');
+      const context = canvas;
       if (context !== null) {
         context.font = `${size}px ${FONT}`;
         const metrics = context.measureText('W');
@@ -765,12 +767,7 @@ export function createTerminalView(root, deps) {
       return null;
     }
     const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
-    const deviceWidth = width * ratio;
-    const deviceHeight = Math.ceil(height * ratio);
-    return (cols, rows) => ({
-      width: Math.round((deviceWidth * cols) / ratio) / cols,
-      height: Math.round((deviceHeight * rows) / ratio) / rows,
-    });
+    return { width: width * ratio, height: Math.ceil(height * ratio), ratio };
   };
 
   // The colours follow the page's light or dark scheme (style.css, terminal-view.css).
@@ -1139,8 +1136,9 @@ export function createTerminalView(root, deps) {
     /**
      * What fits (an optional member of contract 2.9, for app.js's `area()`): the columns and
      * rows a terminal of this view shows in a terminal area (`#terminal`'s box) of `width` ×
-     * `height` CSS pixels — xterm.js's padding and the scroll bar counted out as the fit addon
-     * counts them, clamped as S2 8.2.6 clamps a proposal — or null while no cell can be measured
+     * `height` CSS pixels — by the same rule as every proposal of the view (`fitIn`, xterm.js's
+     * padding and the scroll bar counted out), so that a terminal opened at it is not resized
+     * after its start — or null while no cell can be measured
      * or for an area that is not a positive size. The numbers are always whole and at least 1
      * (app.js sends them to the server, which takes nothing else), whatever it is given.
      * @param {number} width
@@ -1151,35 +1149,48 @@ export function createTerminalView(root, deps) {
       if (!(width > 0) || !(height > 0)) {
         return null;
       }
-      const cell = cellRule();
+      const cell = measureCell();
       if (cell === null) {
         return null;
       }
-      /** @param {number} n @param {number} least @param {number} most */
-      const whole = (n, least, most) =>
-        Number.isFinite(n) ? Math.max(least, Math.min(most, Math.floor(n))) : most;
-      const across = Math.floor(width) - PAD_X - SCROLL_BAR;
-      const down = Math.floor(height) - PAD_Y;
-      // The size at which a terminal fits itself again (its cell depends on its size): what a
-      // terminal opened at it proposes, so that it is not resized right after its start.
-      const start = cell(MAX_COLS, MAX_ROWS); // the measured cell, near enough to begin with
-      let size = {
-        cols: whole(across / start.width, 2, MAX_COLS),
-        rows: whole(down / start.height, 1, MAX_ROWS),
-      };
-      for (let step = 0; step < 4; step++) {
-        const unit = cell(size.cols, size.rows);
-        const next = {
-          cols: whole(across / unit.width, 2, MAX_COLS),
-          rows: whole(down / unit.height, 1, MAX_ROWS),
-        };
-        if (next.cols === size.cols && next.rows === size.rows) {
-          break;
-        }
-        size = next;
-      }
-      return size;
+      return fitIn(Math.floor(width) - PAD_X - SCROLL_BAR, Math.floor(height) - PAD_Y, cell);
     },
+  };
+}
+
+/**
+ * The view's one rule of what fits (S2 8.2.6; `fits` and every proposal): the most columns and
+ * rows whose screen fits `across` × `down` CSS pixels, the screen being what xterm.js 6.0.0 makes
+ * of it — cell × count in device pixels, rounded to whole CSS pixels. It does not depend on the
+ * terminal's current size, as the fit addon's answer does (it divides by the cell of the current
+ * size, so at some widths no size proposes itself: 104 columns propose 103 and 103 propose 104,
+ * and a terminal shown there was resized every second; M4 of task 28's review). Whole numbers,
+ * clamped to S2 8.2.6's limits and to at least 2 columns and 1 row, whatever it is given.
+ * @param {number} across
+ * @param {number} down
+ * @param {{ width: number, height: number, ratio: number }} cell
+ * @returns {{ cols: number, rows: number }}
+ */
+function fitIn(across, down, cell) {
+  /**
+   * @param {number} room
+   * @param {number} unit device pixels
+   * @param {number} least
+   * @param {number} most
+   */
+  const largest = (room, unit, least, most) => {
+    const screen = (/** @type {number} */ n) => Math.round((unit * n) / cell.ratio);
+    if (!Number.isFinite(room)) {
+      return room > 0 ? most : least;
+    }
+    let n = Math.max(least, Math.min(most, Math.floor((room * cell.ratio) / unit)));
+    while (n < most && screen(n + 1) <= room) n++;
+    while (n > least && screen(n) > room) n--;
+    return n;
+  };
+  return {
+    cols: largest(across, cell.width, 2, MAX_COLS),
+    rows: largest(down, cell.height, 1, MAX_ROWS),
   };
 }
 

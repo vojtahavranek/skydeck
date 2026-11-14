@@ -64,7 +64,7 @@
   min-height: 0;
   overflow: hidden;
   /* Its size comes from the area, never from the terminal in it (xterm.js's screen has a fixed
-     width): else the fit addon measures the terminal, and one narrowing of the window became a
+     width): else the proposal measures the terminal, and one narrowing of the window became a
      resize per two columns (review 2 of task 28). */
   contain: size;
 }

@@ -1236,10 +1236,10 @@ test('the terminal view', async (t) => {
   );
 
   await t.test(
-    "the view's `fits` is what its fit addon proposes, for areas of several sizes at pixel ratios 1 and 2: with a terminal open, and with none (a terminal opened at that size proposes it again); it answers whole numbers from 1 up, or null, for any area",
+    'sizes settle: for every width 420–1500 px and height 200–900 px at pixel ratios 1, 1.25, 1.5 and 2, the view proposes once what `fits` answers, then never again; a terminal opened at `fits` gets no resize; `fits` answers whole numbers from 1 up, or null, for any area',
     async (t) => {
       const started = await startTestServer(t);
-      for (const ratio of [1, 2]) {
+      for (const ratio of [1, 1.25, 1.5, 2]) {
         const context = await chromium.newContext({
           timezoneId: 'UTC',
           locale: 'en-US',
@@ -1250,40 +1250,20 @@ test('the terminal view', async (t) => {
         await page.goto(pageUrl(started.server.port));
         const base = await assetBase(page);
         const result = await page.evaluate(async (base) => {
-          const module = (await import(`${base}terminal-view.js`)) as {
-            createTerminalView(
-              root: HTMLElement,
-              deps: object,
-            ): {
-              show(term: object): void;
-              fits(width: number, height: number): { cols: number; rows: number } | null;
-            };
+          type View = {
+            show(term: object): void;
+            snap(message: object): void;
+            size(message: object): void;
+            fits(width: number, height: number): { cols: number; rows: number } | null;
           };
-          const out: {
-            area: string;
-            empty: unknown;
-            open: unknown;
-            proposed: unknown;
-            odd: unknown[];
-          }[] = [];
-          const odd = (view: { fits(w: number, h: number): unknown }): unknown[] =>
-            [
-              [0, 0],
-              [5, 5],
-              [100, -1],
-              [-3, 100],
-              [Number.NaN, 100],
-              [100, Number.POSITIVE_INFINITY],
-              [0.5, 0.5],
-            ].map(([w, h]) => view.fits(w ?? 0, h ?? 0));
-          for (const [width, height] of [
-            [733, 411],
-            [1240, 500],
-            [1425, 600],
-            [900, 300],
-            [1001, 401],
-            [641, 479],
-          ] as const) {
+          const module = (await import(`${base}terminal-view.js`)) as {
+            createTerminalView(root: HTMLElement, deps: object): View;
+          };
+          const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+          const make = (
+            width: number,
+            height: number,
+          ): { view: View; root: HTMLElement; sent: Record<string, unknown>[] } => {
             const sent: Record<string, unknown>[] = [];
             const root = document.createElement('div');
             root.className = 'terminal';
@@ -1294,55 +1274,155 @@ test('the terminal view', async (t) => {
               chord: () => false,
               openLink: () => {},
             });
-            const empty = view.fits(width, height);
-            const oddEmpty = odd(view);
-            // A terminal opened at what `fits` said (as app.js opens one): its view proposes the
-            // same size, so it is not resized after its start.
-            view.show({
-              id: 'ffffffffffff',
-              slot: null,
-              sessionId: null,
-              state: 'running',
-              notReported: false,
-              cols: empty?.cols ?? 80,
-              rows: empty?.rows ?? 24,
-              ownsSize: true,
-            });
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            const attach = sent.find((message) => message['t'] === 'attach');
-            out.push({
-              area: `${width}x${height}`,
-              empty,
-              open: view.fits(width, height),
-              proposed:
-                attach === undefined ? null : { cols: attach['cols'], rows: attach['rows'] },
-              odd: [...oddEmpty, ...odd(view)],
-            });
-            root.remove();
+            return { view, root, sent };
+          };
+          const payload = (id: string, cols: number, rows: number): object => ({
+            id,
+            slot: null,
+            sessionId: null,
+            state: 'running',
+            notReported: false,
+            cols,
+            rows,
+            ownsSize: true,
+          });
+          const bad: string[] = [];
+          // One terminal through every area, as the server applies each proposal (R1, R2).
+          const { view, root, sent } = make(900, 500);
+          const term = 'eeeeeeeeeeee';
+          view.show(payload(term, 80, 24));
+          await tick();
+          view.snap({ t: 'snap', term, ch: 7, cols: 80, rows: 24, data: '' });
+          let size = { cols: 80, rows: 24 };
+          const areas: [number, number][] = [];
+          for (let width = 420; width <= 1500; width++) areas.push([width, 500]);
+          for (let height = 200; height <= 900; height++) areas.push([907, height]);
+          for (const [width, height] of areas) {
+            root.style.width = `${width}px`;
+            root.style.height = `${height}px`;
+            const answer = view.fits(width, height);
+            const proposals: string[] = [];
+            for (let step = 0; step < 4; step++) {
+              const before = sent.length;
+              view.show(payload(term, size.cols, size.rows)); // as app.js at each list
+              await Promise.resolve();
+              const resize = sent.slice(before).find((message) => message['t'] === 'resize');
+              if (resize === undefined) break;
+              size = { cols: resize['cols'] as number, rows: resize['rows'] as number };
+              proposals.push(`${size.cols}x${size.rows}`);
+              view.size({ t: 'size', term, ...size, owner: true });
+              await tick();
+            }
+            const settled = `${size.cols}x${size.rows}`;
+            if (
+              proposals.length > 1 ||
+              answer === null ||
+              settled !== `${answer.cols}x${answer.rows}`
+            ) {
+              bad.push(
+                `${width}x${height}: ${proposals.join(' -> ')}; fits ${JSON.stringify(answer)}`,
+              );
+            }
           }
-          return out;
+          root.remove();
+          // A terminal opened at what `fits` answers, with none open and with one open (R2).
+          const opened: string[] = [];
+          for (const [width, height] of [
+            [865, 500],
+            [895, 500],
+            [1295, 500],
+            [1320, 500],
+            [1455, 500],
+            [733, 411],
+            [907, 333],
+          ] as const) {
+            for (const withOne of [false, true]) {
+              const made = make(width, height);
+              if (withOne) {
+                made.view.show(payload('aaaaaaaaaaaa', 80, 24));
+                await tick();
+              }
+              const answer = made.view.fits(width, height);
+              if (answer === null) {
+                opened.push(`${width}x${height}: null`);
+                made.root.remove();
+                continue;
+              }
+              const id = 'ffffffffffff';
+              made.view.show(payload(id, answer.cols, answer.rows));
+              await tick();
+              made.view.snap({ t: 'snap', term: id, ch: 9, ...answer, data: '' });
+              made.view.show(payload(id, answer.cols, answer.rows));
+              await tick();
+              const asked = made.sent.filter(
+                (message) =>
+                  message['term'] === id &&
+                  (message['t'] === 'attach' || message['t'] === 'resize'),
+              );
+              const wrong = asked.filter(
+                (message) => message['cols'] !== answer.cols || message['rows'] !== answer.rows,
+              );
+              if (wrong.length > 0 || asked.some((message) => message['t'] === 'resize')) {
+                opened.push(
+                  `${width}x${height}${withOne ? ' (one open)' : ''}: fits ${answer.cols}x${answer.rows}, sent ${JSON.stringify(asked)}`,
+                );
+              }
+              made.root.remove();
+            }
+          }
+          // Whatever it is given: whole numbers from 1 up, or null.
+          const promise = make(733, 411);
+          const odd = (): unknown[] =>
+            [
+              [0, 0],
+              [5, 5],
+              [100, -1],
+              [-3, 100],
+              [Number.NaN, 100],
+              [100, Number.POSITIVE_INFINITY],
+              [0.5, 0.5],
+            ].map(([w, h]) => promise.view.fits(w ?? 0, h ?? 0));
+          const answers = [...odd()];
+          promise.view.show(payload('bbbbbbbbbbbb', 80, 24));
+          await tick();
+          answers.push(...odd());
+          promise.root.remove();
+          return { ratio: devicePixelRatio, areas: areas.length, bad, opened, answers };
         }, base);
-        for (const { area, empty, open, proposed, odd } of result) {
-          assert.ok(proposed !== null, `${ratio}x ${area}: proposed`);
-          assert.deepEqual(open, proposed, `${ratio}x ${area}: with a terminal open`);
-          assert.deepEqual(
-            empty,
-            proposed,
-            `${ratio}x ${area}: with none open, kept by the terminal`,
+        assert.deepEqual(result.bad.slice(0, 5), [], `${ratio}x: of ${result.areas} areas`);
+        assert.deepEqual(result.opened, [], `${ratio}x: a terminal opened at fits`);
+        for (const answer of result.answers) {
+          if (answer === null) continue;
+          const { cols, rows } = answer as { cols: number; rows: number };
+          assert.ok(
+            Number.isInteger(cols) && cols >= 1 && Number.isInteger(rows) && rows >= 1,
+            `${ratio}x: ${JSON.stringify(answer)} is whole and at least 1`,
           );
-          for (const answer of odd) {
-            if (answer === null) continue;
-            const { cols, rows } = answer as { cols: number; rows: number };
-            assert.ok(
-              Number.isInteger(cols) && cols >= 1 && Number.isInteger(rows) && rows >= 1,
-              `${ratio}x ${area}: ${JSON.stringify(answer)} is whole and at least 1`,
-            );
-          }
-          assert.equal(odd[0], null, '0 x 0 is no area');
-          assert.equal(odd[2], null, 'a negative height is no area');
-          assert.equal(odd[4], null, 'NaN is no area');
+        }
+        for (const at of [0, 2, 3, 4, 7, 9, 10, 11]) {
+          assert.equal(result.answers[at], null, `${ratio}x: answer ${at} is null (no area)`);
         }
       }
+    },
+  );
+
+  await t.test(
+    'a window 1295 px wide (where the fit addon flipped between 104 and 103 columns) gives the program its size once, and then no resize',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      await page.setViewportSize({ width: 1295, height: 720 });
+      d.resumable(S1);
+      await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      await sleep(2000);
+      const resizes = (): string[] =>
+        recordsOf(d.record, S1).flatMap((e) => (e.ev === 'resize' ? [`${e.cols}x${e.rows}`] : []));
+      const settled = resizes();
+      await sleep(5000);
+      assert.deepEqual(resizes(), settled, `no resize while nothing changes: ${settled.join(' ')}`);
+      assert.ok(settled.length <= 2, `${settled.join(' ')}`);
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
