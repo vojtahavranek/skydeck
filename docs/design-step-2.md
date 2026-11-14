@@ -355,14 +355,6 @@ started and waits, at most 10 seconds, for the first of: `server.sock` answering
 the current boot id, this checkout and the current build, as 5.1 compares them (two checkouts at
 the same commit have the same build) — started; or the process exiting, whose code says why, and which
 it turns into one fixed line:
-A ping counts only once `server.json` names the server that answered it — the same pid, server id
-and boot id, its process alive by design 5.5's rule — within the same 10 seconds: a server answers
-its ping before it writes `server.json`, and every other command (`--stop`, `--restart`,
-`--new-secret`, `doctor`, `uninstall`) finds a server by `server.json`, so a command that returned
-earlier would leave a server that the next command cannot see. One that answers but has not
-recorded itself in that time gives `the window's server (pid <n>) answers, but did not record itself
-in <server.json> within 10 s; see <stateDir>/server.log` (exit 1) and is left running (ruled by the
-plan owner, stage A's plan task 25).
 
 | `serve` exits | `skydeck window` says (exit 1) |
 |---|---|
@@ -372,6 +364,15 @@ plan owner, stage A's plan task 25).
 | 12 | `the runtime directory <dir> cannot be used: <reason>; see skydeck doctor` (mode, owner, or a socket path of 108 bytes or more) |
 | 13 | `the window's server is not started from inside a Claude Code session` |
 | anything else, or no answer in 10 seconds | `the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log`; after a timeout the process is left running, and the next `skydeck window` finds it or reports it as not answering (5.1) |
+
+A ping counts only once `server.json` names the server that answered it — the same pid, server id
+and boot id, its process alive by design 5.5's rule — within the same 10 seconds: a server answers
+its ping before it writes `server.json`, and every other command (`--stop`, `--restart`,
+`--new-secret`, `doctor`, `uninstall`) finds a server by `server.json`, so a command that returned
+earlier would leave a server that the next command cannot see. One that answers but has not
+recorded itself in that time gives `the window's server (pid <n>) answers, but did not record itself
+in <server.json> within 10 s; see <stateDir>/server.log` (exit 1) and is left running (ruled by the
+plan owner, stage A's plan task 25).
 
 These codes are `serve`'s own; they never reach a user through another command. A store that
 another process keeps write-locked for longer than the server's 250 ms (14) fails the start at
