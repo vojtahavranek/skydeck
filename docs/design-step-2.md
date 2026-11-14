@@ -1850,7 +1850,10 @@ The title bar shows the counts, e.g. `● 3 need you · 3 working · 2 idle`, an
   terminal`, `starting…`).
 - A session that is not running has one line: state icon, the ticket key (dim, monospaced) and the
   title, marks (`crashed`, `crashed mid-turn`, `expires 3d`, `expired`, `done`: design 6.3's marks
-  in words), the pull-request chip (12.3), `✎` when it has a note, and its age.
+  in words), the pull-request chip (12.3), `✎` when it has a note, and its age. Stage A shows every
+  mark of design 6.3 in words (`continued` and `2 processes` too) and the expiring one as `expires
+  soon`: the row carries only that the session is expiring, not when its transcript is deleted
+  (ruled by the plan owner, plan task 27).
 - No group headers: most groups have one member. The group (design 7.1) is printed dim at the
   start of the title when the title does not already start with it. In This week and Earlier the
   members of one group stack under the newest (`ORB-2107 ×4 … +3 more`); a click or → expands

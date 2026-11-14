@@ -428,46 +428,72 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    '`/` filters: the field takes the keyboard, the rows follow what is typed; Enter gives the keyboard back to the list; Esc clears the filter, a second Esc goes back to the terminal',
+    '`/` filters: the field takes the keyboard and what is typed there is only text (no list key, no resume); Enter gives the keyboard back to the list; Esc clears the filter, the next Esc goes back to the terminal',
     async (t) => {
       const l = await launched(t, chromium);
       const { page, d } = l;
       session(d, S1, 2n * MIN, [{ type: 'custom-title', customTitle: 'alpha work' }]);
       session(d, S2, 3n * MIN, [{ type: 'custom-title', customTitle: 'beta work' }]);
       session(d, S3, 20n * DAY, [{ type: 'custom-title', customTitle: 'beta old' }]);
+      session(d, S4, 4n * MIN, [{ type: 'custom-title', customTitle: 'beta done' }]);
+      markDone(d.deck, S4);
       await untilDrawn(page, (rows) => rows.length === 2, 'This week');
+      const inField = (): Promise<boolean> =>
+        page.evaluate(() => document.activeElement?.classList.contains('list-filter') === true);
+      const inRight = (): Promise<boolean> =>
+        page.evaluate(
+          () => document.getElementById('right-zone')?.contains(document.activeElement) === true,
+        );
 
       await toZone(page, 'list');
       await page.keyboard.press('/');
-      assert.equal(
-        await page.evaluate(() => document.activeElement?.classList.contains('list-filter')),
-        true,
-        'the filter field has the keyboard',
-      );
-      await page.keyboard.type('beta');
-      // A filter unfolds every section (S2 12.8): the match in Earlier is shown.
+      assert.equal(await inField(), true, 'the filter field has the keyboard');
+      assert.equal(await page.inputValue('#list .list-filter'), '', '`/` is not typed');
+      // `a` (show done) and `j` (move) typed here are letters of the filter, nothing else.
+      await page.keyboard.type('betaj');
+      await page.keyboard.press('Backspace');
+      // A filter unfolds every section (S2 12.8): the match in Earlier is shown; the done one is
+      // counted in the footer, not shown.
       await untilDrawn(
         page,
         (rows) => rows.map((row) => row.id).join() === [S2, S3].join(),
         'the rows that match',
       );
       assert.equal(await page.inputValue('#list .list-filter'), 'beta');
+      assert.equal(await inField(), true);
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      // No move: the selection (S1) is filtered out, and no row that is drawn got it.
+      assert.equal(await selectedRow(page), null);
 
+      // Enter in the field resumes nothing: the keyboard goes back to the list, the filter stays.
       await page.keyboard.press('Enter');
       assert.equal(await active(page), '#list');
       assert.equal(await page.inputValue('#list .list-filter'), 'beta', 'the filter stays');
-      await page.keyboard.press('j'); // a list key again, not a letter of the filter
-      await sleep(200);
+      await sleep(500);
+      assert.deepEqual(l.server.hub.list(), [], 'nothing resumed');
+      // On the list the letters are list keys again.
+      await page.keyboard.press('j');
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S2,
+        { timeout: PAGE_WAIT_MS },
+      );
       assert.equal(await page.inputValue('#list .list-filter'), 'beta');
 
+      // S2 12.9: Esc clears the filter (the keyboard stays on the list), then goes back to the
+      // terminal.
       await page.keyboard.press('Escape');
       await untilDrawn(page, (rows) => rows.length === 2, 'the filter cleared');
       assert.equal(await page.inputValue('#list .list-filter'), '');
       assert.equal(await zone(page), 'Focus: list');
+      assert.equal(await active(page), '#list');
       await page.keyboard.press('Escape');
       await showsText(page, '#focus-zone', /^Focus: terminal$/);
+      assert.equal(await inRight(), true, 'the keyboard is in the terminal zone');
 
-      // Esc in the field itself clears it and gives the keyboard to the list.
+      // Esc in the field itself, with text in it: the same first step — cleared, the keyboard
+      // on the list.
       await toZone(page, 'list');
       await page.keyboard.press('/');
       await page.keyboard.type('alpha');
@@ -477,6 +503,10 @@ test('the list', async (t) => {
       assert.equal(await page.inputValue('#list .list-filter'), '');
       assert.equal(await active(page), '#list');
       assert.equal(await zone(page), 'Focus: list');
+      await page.keyboard.press('Escape');
+      await showsText(page, '#focus-zone', /^Focus: terminal$/);
+      assert.equal(await inRight(), true);
+      assert.deepEqual(l.server.hub.list(), [], 'nothing resumed');
     },
   );
 

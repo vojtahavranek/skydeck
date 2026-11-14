@@ -187,6 +187,13 @@ describe('rowText: a row that is not running has one line', () => {
         ['expiring', 'expires soon'],
       ],
     );
+    // Ruled (plan task 27): the row carries only that it is expiring, so no number of days —
+    // not even the server's 5, which the page does not own.
+    assert.equal(
+      text.marks[1]?.tip,
+      'its transcript will be deleted soon unless the session is resumed',
+    );
+    assert.doesNotMatch(text.marks.map((mark) => `${mark.text} ${mark.tip}`).join(' '), /\d/);
     assert.deepEqual(text.chip, {
       text: 'PR · failing',
       tip: 'o/r #7 · failing',

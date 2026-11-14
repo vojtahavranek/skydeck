@@ -66,11 +66,13 @@ const MARKS = /** @type {const} */ ([
   ['ended-unexpectedly', 'crashed', 'crashed', 'it ended unexpectedly'],
   ['continued', 'continued', 'continued', 'it continues another session (/clear or a fork)'],
   ['expired', 'expired', 'expired', 'its transcript is gone: it cannot be resumed'],
+  // Stage A (ruled, plan task 27): the row carries only that the session is expiring, not when
+  // its transcript is deleted, so no number of days.
   [
     'expiring',
     'expiring',
     'expires soon',
-    'its transcript is deleted within 5 days unless the session is resumed',
+    'its transcript will be deleted soon unless the session is resumed',
   ],
   ['duplicate', 'duplicate', '2 processes', 'two live processes hold it'],
 ]);
