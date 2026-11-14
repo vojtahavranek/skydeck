@@ -1982,10 +1982,13 @@ closed as any window. The focused zone has a
 coloured top edge, and the key bar says `Focus: list` or `Focus: terminal`. The keyboard follows
 the zone: where what had it goes away, or a click selects nothing, the page gives it to the zone's
 holder (the terminal, else a form's first field, else the zone itself; never a button). But the
-page never moves the keyboard while text of the page is selected (a bar's command, a notice, the
-header): giving the terminal's text control the keyboard would take the selection away, and the
-Ctrl+C meant to copy it would reach the program. Meanwhile the keyboard may be on nothing; a plain
-click, a zone chord or the end of the selection gives it back (ruled, plan task 26's review 2).
+page never moves the keyboard by itself while visible text of the page is selected (a bar's
+command, a notice, the header): giving the terminal's text control the keyboard would take the
+selection away, and the Ctrl+C meant to copy it would reach the program. Meanwhile the keyboard may
+be on nothing; the next plain click, a zone chord, or the next render once nothing is selected
+gives it back. The user's own actions move it whatever is selected: a zone chord, Esc closing the
+new form, and the terminal of a resume or new started from the page (11.3), unlike one that only
+a list brought (ruled, plan task 26's review 2).
 
 ### 12.10 Done
 

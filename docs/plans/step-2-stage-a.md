@@ -1281,15 +1281,19 @@ export function cancels(e, zone, handled) {}
 // At every render, and after each call it makes into a module, app.js gives the keyboard to the
 // zone when its holder is gone or no longer visible (its container hidden); so does a click that
 // selected nothing, once it is done (a notice's text, the key help, the header above a terminal).
-// But app.js NEVER moves the keyboard while text of the page is selected: giving a text control —
-// xterm.js's helper textarea — the keyboard would take the selection away, and the Ctrl+C meant
+// But app.js never moves the keyboard BY ITSELF while text of the page that the user can see is
+// selected (a selection left in a card that is hidden now does not count): giving a text control
+// — xterm.js's helper textarea — the keyboard would take the selection away, and the Ctrl+C meant
 // to copy it would reach the program. While text is selected the keyboard may be on nothing
-// although the key bar names a zone; a plain click, a zone chord or the end of the selection
-// gives it back. A module that hides or removes its own keyboard holder in its OWN handler
+// although the key bar names a zone; the next plain click, a zone chord, or the next render once
+// nothing is selected gives it back (no rule acts on the end of a selection: a mousedown's caret
+// would set it off before a drag selects). The user's own actions move it whatever is selected:
+// a zone chord, Esc closing the new form, and a terminal that the page's own resume or new
+// brings (S2 11.3 comes first); a terminal that only a list brought does not. A module that hides or removes its own keyboard holder in its OWN handler
 // (the find bar's Esc, a card's own button) is followed by no call of app.js: it moves the
 // keyboard itself to another element of its own — there is no hook for it. The page's chrome (the
 // title bar, the key bar, a notice's ×) takes no keyboard on a mouse click, so a click there
-// leaves it where the user was (ruled, review 2 of task 26, rounds three to five).
+// leaves it where the user was (ruled, review 2 of task 26, rounds three to six).
 /** @param {HTMLElement} root
  *  @param {{ select(id: string, how: 'click' | 'key'): void, activate(id: string): void,
  *           view(change: { filter?: string, unfolded?: string[], showDone?: boolean }): void }} hooks */

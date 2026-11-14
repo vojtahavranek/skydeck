@@ -98,6 +98,8 @@ const state = {
   waitingSnap: null,
   /** The first list after a welcome starts the re-attach. */
   welcomed: false,
+  /** The session whose terminal a resume or new of this page is bringing (S2 11.3). @type {string | null} */
+  bringing: null,
   lastFocus: '',
 };
 
@@ -222,18 +224,10 @@ addEventListener('mouseup', () => {
     keepKeyboard();
   }, 0);
 });
-// The end of a selection gives the keyboard back too, when nothing has it — but not while a mouse
-// button is down: a mousedown on text puts a caret there (a selection that is no range yet), and
-// giving the terminal's text control the keyboard then would take away the selection the drag is
-// about to make (review 2 of task 26). The mouseup's own check comes after the drag.
-let buttonDown = false;
-addEventListener('mousedown', () => (buttonDown = true), true);
-addEventListener('mouseup', () => (buttonDown = false), true);
-document.addEventListener('selectionchange', () => {
-  if (!buttonDown && !textSelected()) {
-    keepKeyboard();
-  }
-});
+// (No rule acts on the end of a selection: a mousedown on text makes a caret first, and a rule
+// that gave the terminal the keyboard then would take away the selection the drag is about to
+// make. The keyboard comes back at the next plain click, a zone chord, or the next render once
+// nothing is selected; ruled, review 2 of task 26.)
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let keyMessageTimer = null;
@@ -494,6 +488,7 @@ function act(action) {
         );
       }
       if (result.ok && result.sessionId !== null) {
+        state.bringing = result.sessionId;
         select(result.sessionId, 'chord');
         setZone('terminal');
       }
@@ -699,14 +694,24 @@ function render() {
   }
   // S2 11.3: a terminal that comes to be shown in the terminal zone gets the keyboard (after a
   // resume its list comes after the result), unless a text field of the page has it.
+  // A terminal the user's own action brought (a resume or new of this page) takes it whatever is
+  // selected, as a zone chord does (S2 11.3 comes first); one that only a list brought does not
+  // take it while text of the page is selected (ruled, review 2 of task 26).
+  const ownAction =
+    pane.kind === 'terminal' &&
+    state.bringing !== null &&
+    (pane.row?.id === state.bringing || pane.term.sessionId === state.bringing);
   if (
     pane.kind === 'terminal' &&
     pane.term.id !== before &&
     state.zone === 'terminal' &&
     !isTextField(document.activeElement) &&
-    !textSelected()
+    (ownAction || !textSelected())
   ) {
     terminalView.focus();
+  }
+  if (ownAction) {
+    state.bringing = null;
   }
   // What had the keyboard was replaced or hidden (a card): the zone takes it back.
   keepKeyboard();
@@ -748,7 +753,14 @@ function setZone(zone, moveFocus = true) {
  */
 function textSelected() {
   const selection = getSelection();
-  return selection !== null && selection.rangeCount > 0 && !selection.isCollapsed;
+  if (selection === null || selection.rangeCount === 0 || selection.isCollapsed) {
+    return false;
+  }
+  // Only text the user can see counts: a selection left in a card that is hidden now holds
+  // nothing back (ruled, review 2 of task 26).
+  const node = selection.getRangeAt(0).commonAncestorContainer;
+  const element = node instanceof Element ? node : node.parentElement;
+  return element !== null && element.checkVisibility();
 }
 
 /**

@@ -1750,7 +1750,9 @@ test('the page shell', async (t) => {
       await page.mouse.move(box.x + 2, box.y + box.height / 2);
       await page.mouse.down();
       await sleep(250); // a person's drag: the button stays down a moment before it moves
-      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 5 });
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+      await sleep(100);
+      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 4 });
       await page.mouse.up();
       await sleep(300);
       const text = await selected();
@@ -1769,8 +1771,12 @@ test('the page shell', async (t) => {
       assert.deepEqual(await page.evaluate(() => Reflect.get(globalThis, 'copied')), [text]);
       assert.deepEqual(await page.evaluate(() => Reflect.get(globalThis, 'programGot')), []);
 
-      // The end of a selection (here: the page's selection taken away) gives the keyboard back.
+      // Nothing acts on the end of a selection by itself; the next render, once nothing is
+      // selected, gives the keyboard back.
       await page.evaluate(() => getSelection()?.removeAllRanges());
+      await sleep(300);
+      assert.equal(await holderHasIt(), false, 'no rule on the end of a selection');
+      standin.connections.at(-1)?.send(rows);
       await page.waitForFunction(
         () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
         null,
@@ -1781,7 +1787,9 @@ test('the page shell', async (t) => {
       await page.mouse.move(box.x + 2, box.y + box.height / 2);
       await page.mouse.down();
       await sleep(250);
-      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 5 });
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+      await sleep(100);
+      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 4 });
       await page.mouse.up();
       await sleep(300);
       assert.match(await selected(), /restarted/);
@@ -1805,6 +1813,158 @@ test('the page shell', async (t) => {
         null,
         { timeout: 5000 },
       );
+    },
+  );
+
+  await t.test(
+    "a terminal the user's own resume brings takes the keyboard whatever is selected; one that only a list brings does not take it while text is selected (ruled, review 2 of task 26)",
+    async (t) => {
+      const secret = new Uint8Array(32).fill(21);
+      const page = await newPage(t, chromium);
+      const terms: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B, [S3]: TERM_C };
+      const running = new Set<string>([S1]);
+      let shownSelected: string | null = null;
+      const listFor = (selected: string | null): Record<string, unknown> =>
+        scriptedList(
+          [S1, S2, S3].map((id) => ({
+            id,
+            terminal: running.has(id) ? (terms[id] ?? null) : null,
+            slot: running.has(id) ? [S1, S2, S3].indexOf(id) + 1 : null,
+          })),
+          [...running].map((id) => ({
+            id: terms[id] ?? '',
+            slot: [S1, S2, S3].indexOf(id) + 1,
+            sessionId: id,
+          })),
+          selected === null || running.has(selected)
+            ? null
+            : {
+                sessionId: selected,
+                command: `claude --resume ${selected}`,
+                flagsKnown: true,
+                unknownFlags: [],
+                ended: 'exited',
+                expiring: false,
+                expired: false,
+              },
+        );
+      const standin = await standinServer(t, {
+        web: {
+          'terminal-view-real.js': readFileSync(join(checkout, 'web/terminal-view.js'), 'utf8'),
+          'terminal-view.js': readFileSync(
+            join(checkout, 'test-page/fixtures/textarea-view.js'),
+            'utf8',
+          ),
+        },
+        socket: honest(secret, {
+          serverId: (n) => `${n}`.repeat(16).slice(0, 16),
+          open: (conn, message) => {
+            if (message['t'] === 'view') {
+              shownSelected = (message['selected'] as string | null) ?? null;
+              conn.send(listFor(shownSelected));
+            } else if (message['t'] === 'attach') {
+              conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
+            } else if (message['t'] === 'act' && message['kind'] === 'resume') {
+              const sessionId = message['sessionId'] as string;
+              running.add(sessionId);
+              conn.send({
+                t: 'result',
+                id: message['id'],
+                ok: true,
+                lines: [],
+                error: null,
+                sessionId,
+              });
+              conn.send(listFor(sessionId));
+            }
+          },
+        }),
+      });
+      await page.goto(standin.url);
+      await storeKey(page, secret);
+      await page.goto(standin.url);
+      await connection(page, 'open');
+      await page.waitForSelector('#terminal .xterm-helper-textarea', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      const holderHasIt = (): Promise<boolean> =>
+        page.evaluate(
+          () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+        );
+      const holderGetsIt = (): Promise<unknown> =>
+        page.waitForFunction(
+          () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+          null,
+          { timeout: 5000 },
+        );
+      const selected = (): Promise<string> => page.evaluate(() => getSelection()?.toString() ?? '');
+
+      // The command of S2's resume card selected to copy it, then "Resume here": the terminal
+      // has the keyboard (the selection is in the card, which is hidden now, and the resume is
+      // the user's own).
+      await clickRow(page, S2);
+      await showsText(page, '#cards', /claude --resume /);
+      await page.locator('#cards .card-command').click({ clickCount: 3 });
+      assert.match(await selected(), /claude --resume /);
+      await page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      await holderGetsIt();
+
+      // A word of a notice copied, then a resume by the keyboard (Ctrl+Shift+L, j, Enter): the
+      // selection is still shown, and the terminal takes the keyboard all the same.
+      standin.connections[0]?.ws.terminate(); // the server restarted: the notice
+      await showsText(page, '#info-text', RESTARTED);
+      await connection(page, 'open');
+      await page.locator('#info-text').dblclick();
+      assert.notEqual(await selected(), '');
+      await page.keyboard.press('Control+c');
+      await toZone(page, 'list');
+      await page.keyboard.press('j'); // S2 → S3
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S3,
+      );
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      await holderGetsIt();
+
+      // A selection left in a card that is hidden now holds nothing back: S3's command selected
+      // on its card, then a list brings S3's terminal (as if started from a command line).
+      running.delete(S3);
+      standin.connections.at(-1)?.send(listFor(S3)); // S3 not running: its resume card
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await page.locator('#cards .card-command').click({ clickCount: 3 });
+      assert.match(await selected(), /claude --resume /);
+      running.add(S3);
+      standin.connections.at(-1)?.send(listFor(S3));
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      await holderGetsIt();
+
+      // A terminal that only a list brings while a notice's text is selected: the keyboard and
+      // the selection stay.
+      running.delete(S3);
+      standin.connections.at(-1)?.send(listFor(S3));
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      const box = await page.locator('#info-text').boundingBox();
+      assert.ok(box !== null);
+      await page.mouse.move(box.x + 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await sleep(250);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+      await sleep(100);
+      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 4 });
+      await page.mouse.up();
+      await sleep(300);
+      const text = await selected();
+      assert.notEqual(text, '');
+      running.add(S3);
+      standin.connections.at(-1)?.send(listFor(S3));
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      await sleep(300);
+      assert.equal(await selected(), text, 'the selection stays');
+      assert.equal(await holderHasIt(), false, 'the list did not move the keyboard');
     },
   );
 
