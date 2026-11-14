@@ -2562,19 +2562,21 @@ test('the page shell', async (t) => {
       const { page } = w;
       const asked = async (): Promise<number[][]> =>
         page.evaluate(() => Reflect.get(globalThis, 'fitsAsked') as number[][]);
-      const zoneBox = async (): Promise<{ width: number; height: number }> =>
+      /** `#terminal`'s box, as the view is asked about it. */
+      const terminalBox = async (): Promise<number[]> =>
         page.evaluate(() => {
-          const box = document.querySelector('#right-zone')?.getBoundingClientRect();
-          return { width: box?.width ?? 0, height: box?.height ?? 0 };
+          const box = document.querySelector('#terminal')?.getBoundingClientRect();
+          return [box?.width ?? 0, box?.height ?? 0];
         });
       await sleep(500);
       assert.deepEqual(w.focuses.at(-1), { cols: 77, rows: 33 }, "focus.area is the view's answer");
+      assert.deepEqual((await asked()).at(-1), await terminalBox(), "asked for #terminal's box");
 
-      // A resume from S2's card asks for the view's answer, for the zone less the header (60 px).
+      // A resume from S2's card asks for the view's answer, for the box its terminal has once shown
+      // (the zone less the header).
       await clickRow(page, S2);
       await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
       await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', { cols: 66, rows: 22 }));
-      const box = await zoneBox();
       const before = (await asked()).length;
       await page.locator('#cards button', { hasText: 'Resume here' }).click();
       await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
@@ -2582,7 +2584,7 @@ test('the page shell', async (t) => {
       });
       const resume = w.acts.find((act) => act['kind'] === 'resume');
       assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, { cols: 66, rows: 22 });
-      assert.deepEqual((await asked())[before], [box.width, box.height - 60]);
+      assert.deepEqual((await asked())[before], await terminalBox());
 
       // A view that cannot tell: the page's own arithmetic, a size of at least 1 × 1.
       await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', null));

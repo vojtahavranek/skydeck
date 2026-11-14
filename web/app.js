@@ -272,7 +272,7 @@ function showKeepAlive(failed, reason) {
  * What the terminal area holds: the columns and rows of the view's `fits` (contract 2.9, task 28)
  * when it has one and can tell, else at the terminal's font, measured with the hidden cell of
  * index.html, which has the terminal's font (style.css, `--term-font`). The area is the right
- * zone's box less what stands above the terminal: for `focus` (S2 8.2.3) while a terminal is
+ * zone's client box (without its border) less what stands above the terminal: for `focus` (S2 8.2.3) while a terminal is
  * shown, what the cards show (the header, an ended bar); for an act's first size (`forAct`, S2
  * 8.2.6) and for another pane only the header, which the terminal it brings will have above it
  * (Z1, item 5).
@@ -280,7 +280,8 @@ function showKeepAlive(failed, reason) {
  * @returns {{ cols: number, rows: number }}
  */
 function area(forAct = false) {
-  const box = dom.rightZone.getBoundingClientRect();
+  // The zone's client box: its 2 px top border (style.css `.zone`) is not the terminal's.
+  const box = { width: dom.rightZone.clientWidth, height: dom.rightZone.clientHeight };
   const above =
     state.pane.kind === 'terminal' && !forAct
       ? dom.cards.getBoundingClientRect().height

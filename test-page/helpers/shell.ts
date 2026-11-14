@@ -676,6 +676,7 @@ export const PLACEHOLDER = /terminal view comes with task 28/;
 export const TERM_A = 'aaaaaaaaaaaa';
 export const TERM_B = 'bbbbbbbbbbbb';
 export const TERM_C = 'cccccccccccc';
+export const TERM_D = 'dddddddddddd';
 
 /** The id of the element that has the keyboard, or its tag. */
 export async function active(page: Page): Promise<string> {
@@ -753,9 +754,11 @@ export function scriptedList(
 /**
  * A stand-in world for the cases about the page's acts and sizes (Z1 of task 26), opened on
  * `page` (pinned or not): S1 running in slot 1 (shown first), S2 not running. A resume of S2 and
- * a new session (S3) each answer ok and list their terminal; a resume of a session whose terminal
- * ended lists that terminal running again. `acts` and `focuses` (each `focus`'s `area`) record
- * what the page sent; `end(id)` lists the terminal of `id` ended.
+ * a new session (S3) each answer ok and list their terminal, at the size the act asked for (its
+ * `snap` and its entry of the list); a resume of a session whose terminal ended opens a new
+ * terminal (`TERM_D`) in place of the ended one, as the server does. `acts`, `focuses` (each
+ * `focus`'s `area`), `attaches` and `resizes` record what the page sent; `terms` is each
+ * session's terminal now; `end(id)` lists the terminal of `id` ended.
  */
 export async function actsWorld(
   t: TestContext,
@@ -763,10 +766,19 @@ export async function actsWorld(
 ): Promise<{
   acts: Record<string, unknown>[];
   focuses: { cols: number; rows: number }[];
+  attaches: Record<string, unknown>[];
+  resizes: Record<string, unknown>[];
+  terms: Readonly<Record<string, string>>;
   end: (id: string) => void;
 }> {
   const secret = new Uint8Array(32).fill(23);
   const terms: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B, [S3]: TERM_C };
+  /** Each terminal's size: the one its act asked for, else 80 × 24. */
+  const sizes: Record<string, { cols: number; rows: number }> = {};
+  const sizeOf = (term: string): { cols: number; rows: number } =>
+    sizes[term] ?? { cols: 80, rows: 24 };
+  const attaches: Record<string, unknown>[] = [];
+  const resizes: Record<string, unknown>[] = [];
   const listed = [S1, S2];
   const running = new Set<string>([S1]);
   const ended = new Set<string>();
@@ -800,6 +812,7 @@ export async function actsWorld(
     );
     for (const term of list['terminals'] as Record<string, unknown>[]) {
       if (ended.has(term['sessionId'] as string)) term['state'] = 'ended';
+      Object.assign(term, sizeOf(term['id'] as string));
     }
     return list;
   };
@@ -813,13 +826,21 @@ export async function actsWorld(
         } else if (message['t'] === 'focus') {
           focuses.push(message['area'] as { cols: number; rows: number });
         } else if (message['t'] === 'attach') {
-          conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
+          attaches.push(message);
+          const term = message['term'] as string;
+          conn.send({ t: 'snap', term, ch: 1, ...sizeOf(term), data: '' });
+        } else if (message['t'] === 'resize') {
+          resizes.push(message);
         } else if (message['t'] === 'act') {
           acts.push(message);
           const sessionId = message['kind'] === 'new' ? S3 : (message['sessionId'] as string);
           if (!listed.includes(sessionId)) listed.push(sessionId);
+          if (ended.delete(sessionId)) terms[sessionId] = TERM_D; // a new terminal, as the server's
+          const term = terms[sessionId];
+          if (term !== undefined && typeof message['cols'] === 'number') {
+            sizes[term] = { cols: message['cols'], rows: message['rows'] as number };
+          }
           running.add(sessionId);
-          ended.delete(sessionId);
           conn.send({
             t: 'result',
             id: message['id'],
@@ -843,7 +864,7 @@ export async function actsWorld(
     ended.add(id);
     sendList?.();
   };
-  return { acts, focuses, end };
+  return { acts, focuses, attaches, resizes, terms, end };
 }
 
 /** `text` as a regular expression that matches it literally. */
