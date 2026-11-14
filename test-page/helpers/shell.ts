@@ -612,9 +612,10 @@ export const MINIMAL_MODULES = {
  * (the last pin of a name counting) must have been asked for through the pin by the end of the
  * case; otherwise the case and the names go into `unservedPins()`, which a pinned file asserts
  * empty in its last case — a file of web/ renamed in index.html or app.js would otherwise run
- * the real module without a sign. (It sees only pages whose app.js comes by the same
- * `/assets/<build>/web/` path as the pins; a change of that path is caught elsewhere: assetBase,
- * and so storeKey and buildOf, assert it.) (Recorded, not thrown, in the case's `t.after`:
+ * the real module without a sign. It sees only pages that ask for `app.js` by the
+ * `/assets/<build>/web/` path the pins use: a rename of app.js itself or a change of that path is
+ * not seen here, but assetBase asserts both, so the cases that call it (through storeKey,
+ * storedKeyIs or buildOf) fail then. (Recorded, not thrown, in the case's `t.after`:
  * node:test runs no hook after one that throws, and the case's servers and sandbox are cleaned up
  * by later hooks.)
  */

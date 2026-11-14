@@ -1349,7 +1349,14 @@ export function cancels(e, zone, handled) {}
 // would set it off before a drag selects). The user's own actions move it whatever is selected:
 // a zone chord, Esc closing the new form, and a terminal that the page's own resume or new
 // brings (S2 11.3 comes first) — until that terminal is shown, another session is selected or the
-// connection is lost; a terminal that only a list brought does not. A module that hides or removes its own keyboard holder in its OWN handler
+// connection is lost; a terminal that only a list brought does not.
+// A key the page acted on that moved the keyboard into a terminal is swallowed, every further
+// event of it (auto-repeat keydowns, keypress, keyup), until it is released — at the window's
+// capture phase, and `chord(e)` answers true for such an event so that the view drops it too
+// (task 28); a card's button or the form's Enter that starts a terminal is such a key (task 29).
+// Ctrl+Shift+V reaches `pasteRaw()` only while the keyboard is in `#terminal` (Z1).
+// `area()` takes off the height of `#cards .card-header` — a hook: cards.js keeps that class on
+// its header (task 29) — as last shown, for every pane; above a shown terminal, the cards'. A module that hides or removes its own keyboard holder in its OWN handler
 // (the find bar's Esc, a card's own button) is followed by no call of app.js: it moves the
 // keyboard itself to another element of its own — there is no hook for it. The page's chrome (the
 // title bar, the key bar, a notice's ×) takes no keyboard on a mouse click, so a click there

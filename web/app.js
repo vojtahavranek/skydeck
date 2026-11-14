@@ -98,6 +98,9 @@ const state = {
   waitingSnap: null,
   /** The first list after a welcome starts the re-attach. */
   welcomed: false,
+  /** The height of the right side's header (`#cards .card-header`, a hook of contract 2.9) as
+   *  last shown; 0 before any (Z1, item 5). */
+  headerHeight: 0,
   /**
    * The session whose terminal a resume or new of this page is bringing (S2 11.3): set by its
    * result, ended when that terminal is shown, when another session is selected, or when the
@@ -268,8 +271,11 @@ function area() {
   const cellWidth = cell.width / 20 || 8;
   const cellHeight = cell.height || 17;
   const box = dom.rightZone.getBoundingClientRect();
-  const header = dom.cards.getBoundingClientRect();
-  const height = state.pane.kind === 'terminal' ? box.height - header.height : box.height;
+  // Above a terminal stands what the cards show (the header, an ended bar); for another pane the
+  // terminal it brings will have the header above it: its height as last seen (Z1, item 5).
+  const above =
+    state.pane.kind === 'terminal' ? dom.cards.getBoundingClientRect().height : state.headerHeight;
+  const height = box.height - above;
   return {
     cols: Math.max(1, Math.min(MAX_COLS, Math.floor(box.width / cellWidth))),
     rows: Math.max(1, Math.min(MAX_ROWS, Math.floor(height / cellHeight))),
@@ -722,7 +728,16 @@ function render() {
   }
   // What had the keyboard was replaced or hidden (a card): the zone takes it back.
   keepKeyboard();
+  rememberHeader();
   focusChanged();
+}
+
+/** Remembers the header's height while it is shown, for `area()` of any pane (Z1, item 5). */
+function rememberHeader() {
+  const header = dom.cards.querySelector('.card-header');
+  if (header instanceof HTMLElement && header.checkVisibility()) {
+    state.headerHeight = header.getBoundingClientRect().height;
+  }
 }
 
 // --- zones --------------------------------------------------------------------------------------
@@ -928,7 +943,11 @@ function doChord(chord, event) {
       terminalView.copy();
       return;
     case 'paste-raw':
-      terminalView.pasteRaw();
+      // A key of S2 9.1 that sends bytes acts only while the terminal itself has the keyboard:
+      // never from the list, the form or the help (Z1, item 7).
+      if (state.zone === 'terminal' && terminalHasKeyboard()) {
+        terminalView.pasteRaw();
+      }
       return;
     case 'help':
       help.toggle();
@@ -958,7 +977,10 @@ function doListKey(action, event) {
       return true;
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
-      // back to the terminal.
+      // back to the terminal; a held Esc does only the first step (Z1, item 6).
+      if (event.repeat) {
+        return true;
+      }
       if (state.view.filter !== '') {
         list.key(action);
         if (state.view.filter !== '') {
@@ -981,6 +1003,9 @@ function doListKey(action, event) {
  * @returns {boolean}
  */
 function chordOf(event) {
+  if (pressedOutside.has(event.code) && terminalHasKeyboard() && !MODIFIER_KEYS.has(event.key)) {
+    return true; // a held key that went into the terminal: the view drops it too (Z1, item 6)
+  }
   const chord = windowChord(event, state.zone);
   if (chord === null) {
     return false;
@@ -1001,9 +1026,15 @@ function chordOf(event) {
  * @param {KeyboardEvent} event
  */
 function onKeyDown(event) {
+  if (heldIntoTerminal(event)) {
+    return; // swallowed: a held key that went into the terminal (Z1, item 6)
+  }
   const zone = state.zone;
   let handled = false;
   const chord = windowChord(event, zone);
+  if (chord !== null && chord.kind === 'paste-raw' && isTextField(document.activeElement)) {
+    return; // in a text field the browser's own Ctrl+Shift+V stands (Z1, item 7)
+  }
   if (chord !== null) {
     if (!actedOn.has(event)) {
       actedOn.add(event);
@@ -1040,6 +1071,53 @@ function onKeyDown(event) {
   }
 }
 addEventListener('keydown', onKeyDown, true);
+addEventListener('keypress', (event) => void heldIntoTerminal(event), true);
+addEventListener('keyup', (event) => void heldIntoTerminal(event), true);
+
+/**
+ * Keys pressed while the keyboard was not in a terminal, by `code`, until they are released. A
+ * key the page acted on can move the keyboard into a terminal — Enter on a running row or one
+ * that resumes, Esc back to the terminal, the form's Enter, a card's button pressed by key —, and
+ * held, its auto-repeats, its keypress and its keyup would then reach the program (an Esc that
+ * interrupts Claude Code, an Enter that submits its prompt): they are swallowed until the key is
+ * released; the next press passes (ruled, Z1 item 6). Modifiers are left alone.
+ * @type {Set<string>}
+ */
+const pressedOutside = new Set();
+const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph']);
+
+/** Whether the keyboard is on the terminal view (inside its root `#terminal`). */
+function terminalHasKeyboard() {
+  return dom.terminal.contains(document.activeElement);
+}
+
+/**
+ * Keeps `pressedOutside` and swallows (preventDefault, stopPropagation) an event of a held key
+ * that went into the terminal. True when it swallowed the event.
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function heldIntoTerminal(event) {
+  if (MODIFIER_KEYS.has(event.key)) {
+    return false;
+  }
+  const held = pressedOutside.has(event.code);
+  const swallow = held && (event.type !== 'keydown' || event.repeat) && terminalHasKeyboard();
+  if (event.type === 'keyup') {
+    pressedOutside.delete(event.code);
+  } else if (event.type === 'keydown' && !event.repeat) {
+    if (terminalHasKeyboard()) {
+      pressedOutside.delete(event.code);
+    } else {
+      pressedOutside.add(event.code);
+    }
+  }
+  if (swallow) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  return swallow;
+}
 
 function openNew() {
   state.newOpen = true;

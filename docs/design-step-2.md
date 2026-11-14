@@ -2050,7 +2050,13 @@ be on nothing; the next plain click, a zone chord, or the next render once nothi
 gives it back. The user's own actions move it whatever is selected: a zone chord, Esc closing the
 new form, and the terminal of a resume or new started from the page (11.3), unlike one that only
 a list brought (ruled, plan task 26's review 2). That holds while the user waits for it: once they
-select another session, or the connection is lost, its terminal is like one a list brought.
+select another session, or the connection is lost, its terminal is like one a list brought. A key
+that the page acted on and that moved the keyboard into a terminal (Enter on a running row or one
+that resumes, Esc back to the terminal, the new form's Enter) does not reach the program while it
+is held: its repeats and its release are the page's, and the next press is the program's; a held
+Esc on the list with a filter only clears the filter. Ctrl+Shift+V sends its raw Ctrl+V only while
+the terminal has the keyboard — never from the list, the form or the help; in a text field the
+browser's own Ctrl+Shift+V stands (ruled, Z1 of plan task 26).
 
 ### 12.10 Done
 
