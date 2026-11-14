@@ -206,6 +206,9 @@ describe('keeper: caps', { concurrency: true }, () => {
     }
 
     // A server slow to read the claim's 3 MB tail is not closed for it when a live record comes.
+    // Only what is logged from here on counts: a connection above, destroyed while the program
+    // still wrote, may have been closed for the cap before the keeper saw it go (ruled on #53).
+    const logged = box.logLines().length;
     const { client: second } = await k.claim();
     second.socket.pause();
     second.send('I', 'x');
@@ -220,7 +223,7 @@ describe('keeper: caps', { concurrency: true }, () => {
     );
     assert.equal(second.output().endsWith('ax'), true);
     assert.equal(second.isClosed(), false);
-    assert.equal(box.logLines().length, 0, 'nothing closed for the send cap');
+    assert.deepEqual(box.logLines().slice(logged), [], 'nothing closed for the send cap');
   });
 
   test('the send-queue cap closes a connection that does not read; the pty is still read', async (t) => {
