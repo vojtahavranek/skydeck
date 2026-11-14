@@ -1,0 +1,318 @@
+// The list's text (S2 12.1, 12.2, stage A; plan task 27): what a row and its state line say, a
+// section header, the footer and the title bar's counts — from exactly what the server's `list`
+// says (S2 8.2.3); web/list.js draws it. Pure: no DOM and no clock, so that node:test and the root
+// type check load it (test/web/list.test.ts).
+//
+// The server sanitised every string when it built the list (design 7.4); the page passes each one
+// through the same rule again before showing it (`sanitize`, a copy of src/text/sanitize.ts that
+// the test holds to the server's): a page that shows foreign text decides that for itself.
+
+/** @import { ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
+import { ageBetween } from './format.js';
+
+// --- the sanitiser (a copy of src/text/sanitize.ts: web/ never imports code from src/) ----------
+
+/** An escape sequence: a control string to its end, a CSI, or ESC and the one character after it. */
+const ESCAPE_SEQUENCE =
+  /(?:\x1b[\]PX^_]|[\u009d\u0090\u0098\u009e\u009f])[^]*?(?:\x07|\x1b\\|\u009c|$)|(?:\x1b\[|\u009b)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[^]?/gu;
+const LINE_BREAKS_AND_TABS = /[\t\n\r]/g;
+const CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
+const BIDIRECTIONAL_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/g;
+
+/**
+ * Design 7.4's sanitiser, as src/text/sanitize.ts has it: escape sequences removed, each tab and
+ * line break one space, the other control characters and the bidirectional controls removed. No
+ * trim, no collapsing of spaces.
+ * @param {string} text
+ * @returns {string}
+ */
+export function sanitize(text) {
+  return text
+    .replace(ESCAPE_SEQUENCE, '')
+    .replace(LINE_BREAKS_AND_TABS, ' ')
+    .replace(CONTROLS, '')
+    .replace(BIDIRECTIONAL_CONTROLS, '');
+}
+
+/**
+ * @param {unknown} text
+ * @returns {string} the text sanitised and trimmed; '' for anything that is not a string
+ */
+function clean(text) {
+  return typeof text === 'string' ? sanitize(text).trim() : '';
+}
+
+// --- rows (S2 12.2) -------------------------------------------------------------------------------
+
+/**
+ * @typedef {'working' | 'waiting' | 'running' | 'starting' | 'not-running' | 'crashed'} RowIcon
+ * @typedef {{ kind: string, text: string, tip: string }} MarkText
+ * @typedef {{ text: string, tip: string, dotted: boolean }} ChipText
+ * @typedef {object} RowText
+ * @property {RowIcon} icon the state icon
+ * @property {string} slot the slot number, '' when the row's terminal has none
+ * @property {string} key the ticket key the title starts with (dim, monospaced), '' when none
+ * @property {string} group the group printed dim before a title that does not start with it, or ''
+ * @property {string} title the title, after its key when it has one
+ * @property {MarkText[]} marks design 6.3's marks in words, then `done`
+ * @property {ChipText | null} chip design 7.3's chip
+ * @property {string | null} note null without a note; else the note's first line, the ✎'s tooltip
+ * @property {string} age a one-line row's age (its last activity); '' on a row of two lines
+ * @property {string | null} stateLine the second line of a running or starting row, else null
+ */
+
+/** Design 6.3's marks in words (S2 12.2), in design 6.3's order, and what their tooltips say. */
+const MARKS = /** @type {const} */ ([
+  ['ended-unexpectedly', 'crashed', 'crashed', 'it ended unexpectedly'],
+  ['continued', 'continued', 'continued', 'it continues another session (/clear or a fork)'],
+  ['expired', 'expired', 'expired', 'its transcript is gone: it cannot be resumed'],
+  // Stage A (ruled, plan task 27): the row carries only that the session is expiring, not when
+  // its transcript is deleted, so no number of days.
+  [
+    'expiring',
+    'expiring',
+    'expires soon',
+    'its transcript will be deleted soon unless the session is resumed',
+  ],
+  ['duplicate', 'duplicate', '2 processes', 'two live processes hold it'],
+]);
+const KNOWN_MARKS = new Set([...MARKS.map(([mark]) => mark), 'was-working']);
+
+/**
+ * @param {RowPayload} row
+ * @returns {MarkText[]}
+ */
+function marksOf(row) {
+  const marks = Array.isArray(row.marks) ? row.marks : [];
+  /** @type {MarkText[]} */
+  const shown = [];
+  for (const [mark, kind, text, tip] of MARKS) {
+    if (!marks.includes(mark)) {
+      continue;
+    }
+    // was-working is the kind of crash, not a mark of its own (design 6.3).
+    shown.push(
+      mark === 'ended-unexpectedly' && marks.includes('was-working')
+        ? {
+            kind,
+            text: 'crashed mid-turn',
+            tip: 'it ended unexpectedly in the middle of a turn',
+          }
+        : { kind, text, tip },
+    );
+  }
+  for (const mark of marks) {
+    const text = clean(mark);
+    if (!KNOWN_MARKS.has(mark) && text !== '') {
+      shown.push({ kind: 'other', text, tip: text });
+    }
+  }
+  if (row.done) {
+    shown.push({ kind: 'done', text: 'done', tip: 'marked done' });
+  }
+  return shown;
+}
+
+/** A pull request's level of design 7.3 in S2 12.3's words. */
+const LEVEL_WORDS = /** @type {Record<string, string>} */ ({
+  'cant-read': "can't read",
+  unfetched: 'not fetched',
+  'checks-failing': 'failing',
+  'changes-requested': 'changes',
+  'checks-pending': 'pending',
+  'review-required': 'review',
+  draft: 'draft',
+  'approved-green': 'approved',
+  merged: 'merged',
+  closed: 'closed',
+});
+
+/**
+ * @param {string} level
+ * @returns {string}
+ */
+function levelWords(level) {
+  return Object.hasOwn(LEVEL_WORDS, level) ? (LEVEL_WORDS[level] ?? level) : clean(level);
+}
+
+/**
+ * The words of design 7.3's chip (the worst state among a row's attached pull requests and their
+ * count) in S2 12.3's words: `PR · failing` for one, `3 PRs · failing` for several. Exported so
+ * that the header (task 29) shows the same chip with the same words.
+ * @param {{ level: string, count: number }} chip a row's `chip`
+ * @returns {string}
+ */
+export function chipText(chip) {
+  const words = levelWords(chip.level);
+  return chip.count === 1 ? `PR · ${words}` : `${chip.count} PRs · ${words}`;
+}
+
+/**
+ * A row's chip: `chipText`, drawn dotted when it is `can't read` (S2 12.3); the tooltip names each
+ * attached pull request with its own state (S2 12.3).
+ * @param {RowPayload} row
+ * @returns {ChipText | null}
+ */
+function chipOf(row) {
+  if (row.chip === null || typeof row.chip !== 'object') {
+    return null;
+  }
+  const tip = (Array.isArray(row.prs) ? row.prs : [])
+    .map((pr) =>
+      [`${clean(pr.repo)} #${pr.number}`, levelWords(pr.level), clean(pr.error)]
+        .filter((part) => part !== '')
+        .join(' · '),
+    )
+    .join('\n');
+  return { text: chipText(row.chip), tip, dotted: row.chip.level === 'cant-read' };
+}
+
+/** What may stand between a title's ticket key and the rest of it. */
+const AFTER_KEY = /^[\s:–—-]+/u;
+/** A character that continues a word: a key ends before none of these. */
+const WORD = /[\p{L}\p{N}_-]/u;
+
+/**
+ * S2 12.2: a title that starts with its group (a ticket key) shows the key apart, dim and
+ * monospaced, then the rest of the title; a group the title does not start with is printed dim
+ * before the title. A title that starts with the group in the middle of a word (`ORB-21070` and
+ * the group `ORB-2107`) is shown whole, and the group not again.
+ * @param {RowPayload} row
+ * @returns {{ key: string, group: string, title: string }}
+ */
+function titleOf(row) {
+  const title = clean(row.title);
+  const group = clean(row.group);
+  if (group === '') {
+    return { key: '', group: '', title };
+  }
+  if (!title.startsWith(group)) {
+    return { key: '', group, title };
+  }
+  const next = title.slice(group.length);
+  if (next !== '' && WORD.test(next[0] ?? '')) {
+    return { key: '', group: '', title };
+  }
+  return { key: group, group: '', title: next.replace(AFTER_KEY, '') };
+}
+
+/**
+ * The second line of a running or starting row (S2 12.2, stage A: states only): `starting…` (or
+ * S2 7.5's `started, not reported`), `running in another terminal`, else the state, its detail
+ * and its time (`working 4m`, `waiting · permission · 3m`).
+ * @param {RowPayload} row
+ * @param {string} nowNs
+ * @param {TerminalPayload | null} terminal
+ * @returns {string}
+ */
+function stateLineOf(row, nowNs, terminal) {
+  if (row.starting) {
+    return terminal?.notReported === true ? 'started, not reported' : 'starting…';
+  }
+  if (row.elsewhere !== null) {
+    return 'running in another terminal';
+  }
+  const detail = clean(row.stateDetail);
+  const age = ageBetween(nowNs, row.sinceNs);
+  const head = detail === '' ? row.state : `${row.state} · ${detail} ·`;
+  return age === '' ? (detail === '' ? head : `${row.state} · ${detail}`) : `${head} ${age}`;
+}
+
+/**
+ * Everything a row shows (S2 12.2, stage A). A running or starting row has two lines — the first,
+ * then its state line —, any other one line that ends with its age. Every string from the server
+ * is sanitised again; nothing becomes markup (web/list.js sets text only).
+ * @param {RowPayload} row
+ * @param {string} nowNs the server's time now, estimated (S2 8.2.3: ages are the page's, A18)
+ * @param {TerminalPayload | null} terminal the row's terminal (`row.terminal` in `list.terminals`)
+ * @returns {RowText}
+ */
+export function rowText(row, nowNs, terminal) {
+  const twoLines = row.starting || row.state !== 'not-running';
+  const marks = marksOf(row);
+  /** @type {RowIcon} */
+  const icon = row.starting
+    ? 'starting'
+    : row.state !== 'not-running'
+      ? row.state
+      : marks.some((mark) => mark.kind === 'crashed')
+        ? 'crashed'
+        : 'not-running';
+  const noteHead = Array.isArray(row.noteHead) ? row.noteHead : [];
+  return {
+    icon,
+    slot: typeof row.slot === 'number' ? String(row.slot) : '',
+    ...titleOf(row),
+    marks,
+    chip: chipOf(row),
+    note: row.hasNote ? clean(noteHead[0] ?? '') : null,
+    age: twoLines ? '' : ageBetween(nowNs, row.lastActivityNs),
+    stateLine: twoLines ? stateLineOf(row, nowNs, terminal) : null,
+  };
+}
+
+// --- sections, the footer, the counts (S2 12.1) -------------------------------------------------
+
+const SECTION_TITLES = { open: 'Open', week: 'This week', earlier: 'Earlier' };
+
+/**
+ * A section's header: its name and count, and while folded the time span of its rows (S2 12.1:
+ * "the folded header shows the count and the time span"), newest first: `8d–41d ago`.
+ * @param {SectionPayload} section
+ * @param {string} nowNs
+ * @returns {{ title: string, count: string, span: string }}
+ */
+export function sectionText(section, nowNs) {
+  const newest = section.folded ? ageBetween(nowNs, section.lastNs) : '';
+  const oldest = section.folded ? ageBetween(nowNs, section.firstNs) : '';
+  const span =
+    newest === '' || oldest === ''
+      ? ''
+      : newest === oldest
+        ? `${newest} ago`
+        : `${newest}–${oldest} ago`;
+  return {
+    title: Object.hasOwn(SECTION_TITLES, section.name)
+      ? SECTION_TITLES[section.name]
+      : clean(section.name),
+    count: String(section.count),
+    span,
+  };
+}
+
+/**
+ * The footer under the list (S2 12.1): `17 done hidden · show`; while done sessions are shown,
+ * `done sessions shown · hide`; nothing when there is nothing to show or hide.
+ * @param {number} doneHidden
+ * @param {boolean} showDone
+ * @returns {{ text: string, action: 'show' | 'hide' } | null}
+ */
+export function footerText(doneHidden, showDone) {
+  if (showDone) {
+    return { text: 'done sessions shown', action: 'hide' };
+  }
+  return doneHidden > 0 ? { text: `${doneHidden} done hidden`, action: 'show' } : null;
+}
+
+/** The title bar's states in the order shown, and their words (S2 12.1, 19 stage A). */
+const COUNTS = /** @type {const} */ ([
+  ['working', 'working', 'working'],
+  ['waiting', 'waiting', 'waiting'],
+  ['running', 'running', 'running'],
+  ['starting', 'starting', 'starting'],
+  ['elsewhere', 'elsewhere', 'in another terminal'],
+  ['notRunning', 'not-running', 'not running'],
+]);
+
+/**
+ * The title bar's counts per state (S2 12.1, stage A: states only; "needs you" comes with stage
+ * B): each state that has sessions, `3 working`, `2 in another terminal`, `14 not running`.
+ * @param {ListMessage['counts']} counts
+ * @returns {{ state: string, text: string }[]}
+ */
+export function countsText(counts) {
+  return COUNTS.filter(([field]) => (counts[field] ?? 0) > 0).map(([field, state, words]) => ({
+    state,
+    text: `${counts[field]} ${words}`,
+  }));
+}
