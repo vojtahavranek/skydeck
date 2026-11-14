@@ -94,7 +94,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
 - **Windows programs.** Step 2 is the first time skydeck starts Windows programs by itself, through
   WSL interop. It starts exactly two, and only these: `msedge.exe` (the window, 5.3, and links the
   user Ctrl+clicks, 9.6) and `wsl.exe` (the keep-alive, 6.1). Never `cmd.exe`, `powershell.exe` or
-  a shell; arguments are passed as an argument list. skydeck **writes nothing on the Windows side**:
+  a shell; arguments are passed as an argument list. Every such start goes through one function
+  (`startWindowsProgram`), which refuses an argument that is empty, holds a `"` or a control
+  character, or ends with a backslash: the program receives one command line and splits it
+  itself, and each of these can change how it does. skydeck **writes nothing on the Windows side**:
   Edge writes into the profile folder it is given (5.4). A Start-menu shortcut is only proposed
   (20), and needs the user's agreement.
 - **"No runtime dependencies" (design 10) is amended, not dropped.** Step 2 adds:
@@ -389,7 +392,13 @@ directory, so no "UNC path" warning), and the arguments:
 
 When the program does not exist, `skydeck window` says `Edge was not found at <path>; set
 window.edge in <config path>, or open the window in any browser with skydeck window --print-url`
-and exits 1. The server keeps running.
+and exits 1. The server keeps running. A profile folder that would change how Edge splits its
+command line (2: a `"`, a control character, a backslash at the end — `C:\Users\Me Name\x\`) is
+not passed: `the Edge profile folder "<folder>" cannot be passed to Edge (a '"', a control
+character or a backslash at the end); set window.profileDir in <config path>`, exit 1. One that
+cannot be derived (5.4) gives the derivation's error followed by ` in <config path>`; another
+failure to start Edge, `Edge could not be started from <path> (<reason>); open the window in any
+browser with skydeck window --print-url`.
 
 ### 5.4 The profile folder
 
@@ -430,8 +439,11 @@ With configuration `window.keepAlive` `"wsl"` (the default), the server keeps on
 of the distribution alive while the window has anything to keep:
 
 - It starts `/mnt/c/Windows/System32/wsl.exe -d <$WSL_DISTRO_NAME> -u <user> --exec /bin/sh
-  <checkout>/bin/skydeck-keepalive <runtimeDir>` through interop, detached, with stdio ignored
-  (`-u`: the distribution's default user need not be the user skydeck runs as). The script first
+  <checkout>/bin/skydeck-keepalive <runtimeDir>` through interop, detached, with stdio ignored,
+  in `/mnt/c` as Edge (5.3) (`-u`: the distribution's default user need not be the user skydeck
+  runs as). The keep-alive is `starting` until the script's line appears, with no time limit, so
+  that no second `wsl.exe` is ever started beside a slow one; it is `starting` too before the
+  server's first check. The script first
   writes its own line to `keepalive.pid` (pid, process start, boot id, 4.2) and its `$WSL_INTEROP`
   to `keepalive.interop` (6.4), each through a temporary name and a rename.
 - The script loops: every 10 seconds it checks whether `server.pid` or any `terms/*.pid` names a
@@ -444,7 +456,12 @@ of the distribution alive while the window has anything to keep:
   while terminals run even after `skydeck window --stop`. A stale file from an earlier boot or of a
   reused pid counts as dead.
 - When the keep-alive ends while the server runs, the server starts it again after 5 s, 30 s, then
-  every 5 minutes, and tells every page (`notice keepalive-lost`).
+  every 5 minutes, and tells every page (`notice keepalive-lost`). A keep-alive that ran for 5
+  minutes starts the schedule over at 5 s, so that one that dies right after each start is not
+  restarted every 5 seconds for ever. It has ended when its `keepalive.pid` line is dead, or when
+  the `wsl.exe` this server started has ended: the script inside WSL can outlive a `wsl.exe` ended
+  on the Windows side, and then nothing holds WSL, so that script's line no longer counts as a
+  running keep-alive (the next one writes its own).
 
 That a `wsl.exe` started from inside WSL counts as a Windows client is **UNVERIFIED** (section 21;
 check W14). The design does not depend on it:
@@ -499,7 +516,10 @@ interop.
 Every terminal's program therefore gets `WSL_INTEROP=<runtimeDir>/interop`, a symbolic link the
 server points, when it starts a terminal and every 30 seconds, at the first of these that accepts
 a connection: `/run/WSL/1_interop`; the keep-alive's own `$WSL_INTEROP` (from `keepalive.interop`;
-it lives as long as the keep-alive); the server's own `$WSL_INTEROP`. The server uses the same link for the Windows
+it lives as long as the keep-alive); the server's own `$WSL_INTEROP`. The link points at the socket
+the candidate leads to, symbolic links resolved, so that it never points at another link or at
+itself (the server's own `$WSL_INTEROP` is the link when the server was started from a terminal of
+the window); when none accepts, the link is removed. The server uses the same link for the Windows
 programs it starts. That the link works for the interop client, and survives the closing of the
 first terminal, is **UNVERIFIED** (check W7). Without `WSL_INTEROP` (interop disabled) nothing is
 linked and the window's Windows-side features (Edge, links, keep-alive, image paste) do not work;

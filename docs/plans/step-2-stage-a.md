@@ -263,6 +263,12 @@ export interface FileInfo {
   mode: number; // permission bits (stat.mode & 0o7777)
   uid: number;
 }
+export interface Files {
+  // remove() (step 1's) changes (ruled, task 19): it unlinks, so it NEVER FOLLOWS a symbolic link —
+  // a dangling one is removed too (Node.js 24.12's rmSync followed it and left it in place) — and
+  // refuses a directory; a missing path is no error.
+  remove(path: string): void;
+}
 export interface Proc {
   // bootId() and stat() (step 1's) change (ruling, for task 8's three-valued pidLineState): null
   // only when the file is not there (ENOENT, ENOTDIR, ESRCH); any other failure (EACCES, EMFILE …)
@@ -2549,11 +2555,25 @@ at a live interop socket.
 
 ```ts
 // src/window/edge.ts
+/** THE one way stage A starts a Windows program (S2 2; ruled, task 19): `args` as an argument
+ *  list, detached, stdio /dev/null, cwd /mnt/c, the platform's environment with WSL_INTEROP =
+ *  `interop` when given (else unchanged). Rejects, starting nothing, when an argument is empty,
+ *  holds a '"' or a control character, or ends with a backslash; otherwise as startDetached. */
+export function startWindowsProgram(platform: Platform, command: string, args: readonly string[], interop: string | null): Promise<Detached>;
+/** RangeError (ruled, task 19) for a port outside 1–65535 or a token that is not base64url: the
+ *  caller's mistake, nothing started. { ok: false, line } for a missing program (S2 5.3's line),
+ *  a profile folder that cannot be derived or cannot be passed to Edge (S2 5.3, 5.4), any other
+ *  start failure. */
 export function startEdge(platform: Platform, window: WindowConfig, configPath: string, port: number, token: string, interop: string | null): Promise<{ ok: true } | { ok: false; line: string }>;
 export function openLink(platform: Platform, window: WindowConfig, url: string, interop: string | null): Promise<boolean>;
 // src/window/interop.ts
+/** refresh(): the link points at the SOCKET a candidate leads to (its realpath; ruled, task 19),
+ *  never at another link or at itself; with no candidate accepting, the link is removed and null. */
 export interface Interop { refresh(): Promise<string | null>; current(): string | null }
 export function createInterop(platform: Platform, files: RuntimeFiles): Interop;
+/** createInterop with the first candidate given (ruled, task 19): task 23 passes `interopFirst`
+ *  (A32), tests a path in their sandbox; createInterop is this with '/run/WSL/1_interop'. */
+export function createInteropFrom(platform: Platform, files: RuntimeFiles, first: string): Interop;
 // src/window/keepalive.ts
 export interface KeepAlive { state(): KeepAlivePayload; tick(): Promise<void>; onChange(listener: (state: KeepAlivePayload) => void): void }
 export function createKeepAlive(deps: { platform: Platform; window: WindowConfig; files: RuntimeFiles; appRoot: string; interop: Interop }): KeepAlive;
@@ -2561,6 +2581,9 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
 
 **Files**
 - Create: `src/window/edge.ts`, `src/window/interop.ts`, `src/window/keepalive.ts`
+- Modify (ruled, task 19): `src/platform/real.ts` (`Files.remove` unlinks: Node.js 24.12's
+  `rmSync` left a dangling symbolic link in place), `test/platform/real.test.ts`; `docs/design-step-2.md`
+  2, 5.3, 6.1, 6.4 (the rulings below)
 - Test: `test/window/edge.test.ts`, `test/window/interop.test.ts`, `test/window/keepalive.test.ts`
   (fake processes; never a Windows program)
 
@@ -2568,19 +2591,27 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
 - Edge: `startDetached` called with `window.edge`, exactly `edgeArgs(...)`, cwd `/mnt/c`, stdio
   ignored, `WSL_INTEROP` = the link when there is one; a missing program → S2 5.3's line naming
   `window.edge`, `<configPath>` and `--print-url`; the profile folder from `window.profileDir`
-  or derived (task 8); derivation failing → the error naming `window.profileDir`.
+  or derived (task 8); derivation failing → the error naming `window.profileDir`; a profile
+  folder that would change how Edge splits its command line → S2 5.3's line naming
+  `window.profileDir`, nothing started; a bad port or token → `RangeError`, nothing started.
+- `startWindowsProgram`: each refused argument (empty, `"`, a control character, a trailing
+  backslash) → rejected, nothing started.
 - `openLink`: an allowed URL → `window.edge` with that URL as the only argument; a refused one
   (task 8's `linkToOpen`) → nothing started, false.
 - Keep-alive: mode `wsl` and no live `keepalive.pid` → `wsl.exe -d <WSL_DISTRO_NAME> -u
-  <userName> --exec /bin/sh <appRoot>/bin/skydeck-keepalive <runtimeDir>`; a live `keepalive.pid`
-  (a process the test started) → nothing started, state `running`; the started process gone at a
-  tick → `notice` through `onChange` and restarts after 5 s, 30 s, then every 5 minutes (fake
-  clock), state `failed` with the error while it is down; mode `off` → never started, state `off`;
-  no `WSL_DISTRO_NAME` → `failed` with a reason.
-- Interop: candidates in S2 6.4's order — `/run/WSL/1_interop` (the path is a parameter of a
-  private helper so the test points it into the sandbox), `keepalive.interop`'s content, the
-  server's own `WSL_INTEROP` — the link points at the first that accepts a unix connection (test
-  sockets); none → no link, `null`; a later refresh moves the link when the first one dies.
+  <userName> --exec /bin/sh <appRoot>/bin/skydeck-keepalive <runtimeDir>` in `/mnt/c`; a live
+  `keepalive.pid` (a process the test started) → nothing started, state `running`; the started
+  process gone at a tick → `notice` through `onChange` and restarts after 5 s, 30 s, then every 5
+  minutes (fake clock), state `failed` with the error while it is down; after 5 minutes running
+  the schedule starts over at 5 s; the line of a `wsl.exe` seen to end does not count as running;
+  mode `off` → never started, state `off`; no `WSL_DISTRO_NAME` → `failed` with a reason.
+- Interop: candidates in S2 6.4's order — `/run/WSL/1_interop` (the first candidate is
+  `createInteropFrom`'s parameter, so the test points it into the sandbox), `keepalive.interop`'s
+  content, the server's own `WSL_INTEROP` — the link points at the first that accepts a unix
+  connection (test sockets); none → no link, `null`; a later refresh moves the link when the
+  first one dies; a candidate leading through the link never makes it point at itself.
+- `Files.remove` (`test/platform/real.test.ts`): a dangling symbolic link is removed and a link's
+  target is not; a directory is refused.
 
 **Done when:** every Windows-side start of stage A goes through these functions, and the tests
 start no Windows program.
@@ -3541,3 +3572,21 @@ Rulings on task 12's findings (2026-11-13):
     stays for what cannot be corrected from outside. Three smaller differences become named
     limits in S2 7.2 (an alternate-screen line marked wrapped, DECAWM off with a wide character at
     the margin, `38;5;n` below 16).
+
+Rulings on task 19's review 1 (2026-11-14), each recorded in task 19's contract and in the design:
+
+- `startWindowsProgram` (`src/window/edge.ts`) is the one way stage A starts a Windows program;
+  it refuses an empty argument, a `"`, a control character and a trailing backslash (S2 2).
+- `createInteropFrom(platform, files, first)` is exported: task 23 calls it with `interopFirst`
+  (A32), since `createInterop(platform, files)` cannot take the first candidate.
+- `Files.remove` unlinks and never follows a symbolic link (contract 2.2): Node.js 24.12's
+  `rmSync` left a dangling one in place, which kept a dead interop link; `src/platform/real.ts`
+  joins task 19's files.
+- `startEdge` throws a `RangeError` for a bad port or token, and refuses a profile folder that
+  would change how Edge splits its command line with a line naming `window.profileDir` (S2 5.3).
+- The keep-alive (S2 6.1): the retry schedule starts over once a keep-alive has run for 5
+  minutes; the line of a `wsl.exe` this server saw end does not count as running; `wsl.exe`
+  starts in `/mnt/c`; a started `wsl.exe` stays `starting`, with no timeout, until its script's
+  line appears or it ends; before its first tick a keep-alive in mode `wsl` reports `starting`.
+- The interop link points at the socket a candidate leads to (its realpath), never at another
+  link or at itself (S2 6.4).
