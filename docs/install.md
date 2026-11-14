@@ -1,8 +1,9 @@
 # Installing skydeck on another machine
 
 This guide is enough on its own. It covers the prerequisites, the install, what the install changes,
-the configuration, updating and uninstalling. The design is in [design.md](design.md); the checks to
-run by hand after an install are in [manual-checks.md](manual-checks.md).
+the configuration, the window of step 2, updating and uninstalling. The design is in
+[design.md](design.md) (step 2: [design-step-2.md](design-step-2.md)); the checks to run by hand
+after an install are in [manual-checks.md](manual-checks.md).
 
 Commands are shown as typed. Paths such as `/home/you/...` are examples: skydeck prints yours.
 
@@ -43,6 +44,9 @@ The commands skydeck prints are quoted for `sh`, `bash` and `zsh`; `fish` is not
 
 See "WezTerm on WSL" below for the configuration.
 
+The window of step 2 needs no terminal program either: it is an Edge window on the Windows side,
+and every session started in it runs in a terminal of skydeck's own (see "The window (step 2)").
+
 ## Prerequisites
 
 - **Linux, or Windows with WSL2 (Ubuntu).** skydeck reads `/proc`. Native Windows and macOS are not
@@ -58,6 +62,9 @@ See "WezTerm on WSL" below for the configuration.
   everything else works; pull requests stay "not fetched" or show "can't read", and `skydeck doctor`
   reports a problem.
 - **WezTerm, optional.** Only for tabs; see above.
+- **For the window only: python3 3.9 or newer and Microsoft Edge.** python3 from the distribution
+  (Ubuntu ships it) inside WSL, and Edge on the Windows side. The commands do not need either. See
+  "The window (step 2)".
 
 The hook uses `sh`, `date`, `cat`, `base64`, `mkdir` and `mv`, which a standard Ubuntu has.
 
@@ -65,11 +72,11 @@ The hook uses `sh`, `date`, `cat`, `base64`, `mkdir` and `mv`, which a standard 
 
 Skip what you already have. Do this before the first `bin/skydeck` command, which needs Node.js.
 
-`git` and `curl`, from Ubuntu's own packages:
+`git` and `curl`, from Ubuntu's own packages, and `python3` for the window:
 
 ```sh
 sudo apt update
-sudo apt install git curl
+sudo apt install git curl python3
 ```
 
 Node.js 24 with nvm (the version number in the URL is nvm's latest release as of this writing; see
@@ -268,9 +275,13 @@ skydeck ls
 The steps to try by hand are in [manual-checks.md](manual-checks.md).
 
 **7. Optional: check that this machine can run the tests.** `npm ci` is needed for development only:
-it installs TypeScript, Prettier and `@types/node`, which `npm run check` (format check, type check,
-tests) uses. skydeck itself has no runtime dependencies and runs without it. `npm` runs the tests with
-the `node` on your `PATH`, which therefore must be 24.12 or newer here (`SKYDECK_NODE` is not used).
+it installs TypeScript, Prettier, `@types/node`, `ws`, Playwright and the `@xterm/*` packages,
+which `npm run check` (format check, type check, tests, the page tests) uses. skydeck itself, the
+window included, has no runtime dependencies and runs without it (the window's xterm.js files are
+committed under `vendor/`). `npm` runs the tests with the `node` on your `PATH`, which therefore
+must be 24.12 or newer here (`SKYDECK_NODE` is not used). The page tests need Playwright's
+Chromium in `~/.cache/ms-playwright`; when they say it is missing, `npx playwright install
+chromium` downloads it (no `sudo`).
 
 ```sh
 npm ci
@@ -348,7 +359,8 @@ ignored.
 | `restoreMinFreeMb` | `4096` | `restore` stops (exit 5) before a batch when less memory than this (MiB, `MemAvailable`) is free. |
 | `restoreStartTimeoutSeconds` | `120` | How long `restore` waits for the sessions of a batch to report their start. |
 | `claudeHome` | `null` | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
-| `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. |
+| `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
+| `window` | see the window's section | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
 
 The numbers must be positive integers. An example that uses WezTerm tabs and a lower-case ticket key:
 
@@ -382,6 +394,8 @@ skydeck: /home/you/.config/skydeck/config.json: "claudeHome" must be an absolute
 | `NODE_COMPILE_CACHE`, `XDG_CACHE_HOME` | Where the cache of compiled modules is kept: `$NODE_COMPILE_CACHE`, else `$XDG_CACHE_HOME/skydeck/compile-cache`, else `~/.cache/skydeck/compile-cache`. |
 | `TMPDIR` | Where the launcher puts the short-lived file it uses to hand `claude` the terminal (`--here`). `/tmp` when it is not an existing absolute path. |
 | `VISUAL`, `EDITOR` | The editor of `skydeck note <ref>`: `$VISUAL`, else `$EDITOR`, else `vi`. |
+| `XDG_RUNTIME_DIR` | Where the window's server keeps its sockets (`$XDG_RUNTIME_DIR/skydeck-<id>`), when it is yours, not readable by others, and kept while you have no login session (you linger); else `<stateDir>/run-<id>`, and with `SKYDECK_HOME` set always `$SKYDECK_HOME/run`. `skydeck doctor` names the one in use. |
+| `SKYDECK_TEST_*` | The tests' own. Do not set them. |
 
 `SKYDECK_HOME`, the `XDG_*` variables and `CLAUDE_CONFIG_DIR` count only when they are non-empty and
 an absolute path; otherwise they are treated as unset. The hook is started by Claude Code and reads
@@ -428,6 +442,315 @@ is WezTerm's business and depends on your WezTerm configuration. Whether a tab o
 what item 5 of [manual-checks.md](manual-checks.md) tests. When it does not, leave `terminal` at
 `"here"`: nothing else in skydeck depends on it.
 
+## The window (step 2)
+
+`skydeck window` opens **the window**: an Edge app window on the Windows side, showing a page that
+skydeck's own server serves from inside WSL. The session list is on the left, the selected
+session's real terminal on the right. Sessions are resumed and started in the window, and they keep
+running when the window or skydeck's server is closed or restarted: each terminal is held by a small
+python3 process of its own, its **keeper**. A session ends only when you end it inside `claude`; the
+window has no action that stops one.
+
+This is stage A of step 2 ([design-step-2.md](design-step-2.md), section 19): the list, the
+terminals, resume and new. Attention marks and notifications, restoring into the window, editing
+the label, group, note and done mark in the window, and the search beyond one text come in later
+stages. The commands of step 1 stay as they are, also while the window runs: `skydeck resume`,
+`new` and `restore` start `claude` in the terminal you type them in, not in the window.
+
+### Before you rely on it
+
+Two things only you can check decide whether the window is safe for real work:
+
+- **WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
+  window. The keep-alive ("Keeping WSL running" below) is meant to prevent that, but that it does is
+  **not verified** until manual check W14 of [manual-checks.md](manual-checks.md). Until W14 has
+  passed, keep one WSL terminal of your own open while the window runs, or set
+  `instanceIdleTimeout=-1` (below).
+- **Try it first with a throwaway session** in a throwaway folder: W1 (the window opens), W20 (the
+  PC's privilege management lets Edge and `wsl.exe` start) and W4 (Claude Code in the window). Then
+  resume real sessions into it.
+
+### What it needs
+
+- **python3 3.9 or newer**, the distribution's (Ubuntu ships it): it runs the keepers. Check with
+  `python3 --version`; when it is missing, `sudo apt install python3`. The commands do not need it.
+  Without it the window still lists the sessions, but no terminal opens (the resume card says
+  `python3 3.9 or newer is needed to open terminals in the window (sudo apt install python3)`),
+  and `skydeck install` prints `the window (skydeck window) needs python3 3.9 or newer; the
+  commands do not`. The server itself is started through `/usr/bin/python3`, which keeps it from
+  writing crash dumps (a dump would hold every screen); without that file it starts all the same,
+  and `skydeck doctor` says so.
+- **Microsoft Edge** on the Windows side, at `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+  (`window.edge` names another place). Without Edge, `skydeck window --print-url` gives an address
+  for any browser.
+- **WSL with the C: drive at `/mnt/c` and interop on**, as WSL sets it up by default: skydeck starts
+  two Windows programs, and only these, through interop: `msedge.exe` (the window, and links you
+  Ctrl+click) and `wsl.exe` (the keep-alive). It writes nothing on the Windows side; Edge writes its
+  profile folder (below).
+
+Nothing is fetched or installed for the window. xterm.js, the terminal in the page, and its addons
+are committed in the repository under `vendor/`, with their licences and a list of their hashes
+(`vendor/MANIFEST.json`, which `doctor` checks). `npm ci` is still for development only. An
+installation of step 1 needs no `skydeck install` again: the hook entries are unchanged.
+
+### Starting it: `skydeck window`
+
+In a WSL terminal of your own:
+
+```sh
+skydeck window
+```
+
+Not as a `!` command inside a Claude Code session: every session in the window would inherit that
+session's environment, so the command refuses there (exit 1):
+
+```
+skydeck: the window's server is not started from inside a Claude Code session: every session in the window would inherit that session's environment; run skydeck window in a terminal of your own
+```
+
+What it does:
+
+1. It starts the window's server when none runs (`skydeck serve`, in the background; its log is
+   `<stateDir>/server.log`), or uses the one that runs.
+2. When no window is open, it starts Edge with a launch address that works once, and waits up to 30
+   seconds for the window's page to connect. A cold Edge on a managed PC can take several of them.
+3. It prints one line and exits 0:
+
+   ```
+   skydeck window: http://127.0.0.1:47613/ (server pid 12345)
+   ```
+
+   When a window is already open, it starts nothing: `skydeck window: a window is already open`.
+   Edge cannot be asked to bring an open window to the front; `--new-window` opens another one.
+
+**The server's environment becomes every session's.** The server gets the environment of the shell
+you ran `skydeck window` in, and every program started in the window inherits it: a shell with a
+project's `direnv`, a Python virtual environment or an `AWS_PROFILE` gives them to every session.
+Run it from a plain shell. `skydeck doctor` says where the environment came from
+(`environment of skydeck window run in <directory> at <time>`). A change reaches new sessions only
+after `skydeck window --restart`, which says so:
+
+```
+skydeck: restarting the window's server for the new build; new sessions in the window get the environment of this shell (/home/you)
+```
+
+(the same line comes after an update, below). Sessions that run keep their environment.
+
+| Option | What it does |
+|---|---|
+| (none) | As above. |
+| `--print-url` | Makes sure the server runs and prints an address for any browser, `http://127.0.0.1:<port>/#t=<token>`, valid once and for 10 minutes; starts nothing on Windows. Paste it into a browser on this PC. In a normal browser tab the browser keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab and their Shift forms, so the page names Ctrl+Shift+O for the previous session and shows a `+ New` button. |
+| `--new-window` | Opens another window, also when one is open. Several windows can be open at once. |
+| `--restart` | Stops the server and starts a new one; also a server of another checkout, or one that does not answer. Sessions keep running, and open windows reconnect by themselves: `skydeck's server restarted; your sessions kept running`. |
+| `--stop` | Stops the server and starts nothing: `stopped skydeck's window server; 2 terminals in the window keep running` (or `the window's server is not running`). Sessions keep running in their keepers; open windows say that the server is not answering. |
+| `--new-secret` | Replaces skydeck's key, then opens a window as without options. Windows opened before cannot connect any more and say so: close them. For when skydeck says that its key may be known to another program (below). |
+
+`--stop` goes with no other option, and `--print-url` not with `--new-window`: either is a usage
+error (exit 2). Exit codes: 0, 1 (a failure; the line says what), 2 (usage). Standard output carries
+only the one result line; every other line goes to standard error, with the `skydeck: ` prefix.
+
+Closing the window (its ×, Alt+F4) ends nothing: the server and every session keep running, and
+`skydeck window` opens a new window onto them. The server runs until `skydeck window --stop` or
+`--restart`, `skydeck uninstall`, or WSL stopping. When it is gone, an open window says
+
+```
+skydeck's server is not answering (since 14:02:11). Sessions in the window keep running unless WSL has stopped. To get back, open a WSL terminal and run: skydeck window
+```
+
+and connects again by itself once a server runs.
+
+### The profile folder
+
+Edge runs the window with a profile folder of its own, so that your extensions do not run on the
+page and the window has its own taskbar button. It is a Windows folder, by default
+`C:\Users\<you>\AppData\Local\skydeck\edge-profile`, where `<you>` is the one Windows user under
+`/mnt/c/Users` that has an Edge folder (`AppData/Local/Microsoft/Edge`). skydeck finds it without
+starting a Windows program. With none or several such users, `skydeck window` and `doctor` say so
+and name `window.profileDir`: set it (below). A folder with a `"`, a control character or a
+backslash at its end cannot be passed to Edge and is refused with a line that names
+`window.profileDir`.
+
+Edge creates the folder at the window's first start and writes it; skydeck never creates, writes
+or removes it, also not on `uninstall` (which names it). The window keeps its key there, as a key
+that cannot be read out. `skydeck doctor` prints the folder:
+
+```
+ok       the window's Edge profile folder: C:\Users\you\AppData\Local\skydeck\edge-profile (derived)
+```
+
+### The `window` keys
+
+In `config.json` ("Configuration" above), all optional:
+
+| Key | Default | What it does |
+|---|---|---|
+| `window.port` | `47613` | The server's port on `127.0.0.1`: a whole number from 1 to 65535. Keep it unchanged once windows were opened: a window keeps its key per port, so after a change the old windows cannot connect (close them) and `skydeck window` opens a new one. |
+| `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program: an absolute path in WSL. Links you Ctrl+click in a terminal open with it too, in your own Edge profile. |
+| `window.profileDir` | `null` | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
+| `window.keepAlive` | `"wsl"` | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
+
+`terminal` stays `"here"` or `"wezterm"` in this stage; resuming into the window from the command
+line comes later. An example, for a PC with two Windows users that have Edge (so the profile folder
+cannot be found by itself) and another program on port 47613:
+
+```json
+{
+  "window": {
+    "port": 47614,
+    "profileDir": "C:\\Users\\me\\AppData\\Local\\skydeck\\edge-profile"
+  }
+}
+```
+
+A key inside `window` that skydeck does not know is an error, as everywhere in the file
+(`skydeck: /home/you/.config/skydeck/config.json: unknown key "window.prot"`). The server reads the
+file when it starts: after a change, run `skydeck window --restart`.
+
+### Keeping WSL running
+
+WSL stops a distribution 15 seconds (`instanceIdleTimeout`) after its last Windows client has
+ended, the last WSL terminal or other `wsl.exe`; processes inside WSL do not count, systemd
+included. When it stops, every process in it ends: the window's server, every keeper and every
+`claude` in the window. The window itself, an Edge window, stays and says what happened.
+
+So with `window.keepAlive` `"wsl"` (the default) the server starts one hidden `wsl.exe` through
+interop, the **keep-alive**: it runs a small script of skydeck's (`bin/skydeck-keepalive`) as long
+as the server or any terminal of the window runs, also after `skydeck window --stop`, and ends by
+itself when nothing is left. It shows in the Task Manager as `wsl.exe`. When it ends while the
+server runs, the server starts it again after 5 seconds, 30 seconds, then every 5 minutes, and the
+window says `WSL is not kept running: <reason>; skydeck tries again` (its title bar shows `WSL is
+not kept running` meanwhile). **That a `wsl.exe` started from inside WSL keeps WSL running is not
+verified yet**: manual check W14.
+
+The alternative does not depend on it: WSL's own setting, which skydeck never writes. In
+`%USERPROFILE%\.wslconfig` on Windows (`C:\Users\<you>\.wslconfig`; create the file when there is
+none):
+
+```ini
+[general]
+instanceIdleTimeout=-1
+```
+
+It takes effect at the next WSL restart by itself (a restart of the PC). `wsl --shutdown` in
+PowerShell restarts WSL at once, but it ends EVERY session and terminal in WSL: run it only when
+nothing is running that you want to keep. With the setting in effect `window.keepAlive` can be
+`"off"`. `skydeck doctor` says which protection is in effect:
+
+```
+ok       .wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)
+info     keep-alive wsl.exe running (pid 4242, since 2026-11-14T09:12:03.000Z); that it keeps WSL running is unverified (manual check W14)
+```
+
+and a `problem` line that names the setting while a server or a terminal runs and neither is in
+effect.
+
+### Using the window
+
+- **The list**, on the left, has three sections: **Open** (running or starting, in the window or in
+  another terminal; the window's terminals carry the slots 1–9), **This week** and **Earlier**
+  (folded; a click on its header unfolds it). Done sessions are hidden: the footer's `show`, or
+  `a`, shows them.
+- **A session that is not running**: one click selects it and shows its resume card, with the
+  exact command it will run. Enter, a double click or `Resume here` resumes it into the window.
+- **A running session** of the window: a click shows its terminal. A session that runs in another
+  terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
+  can be resumed here.
+- **A new session**: Ctrl+Shift+N (in a browser tab also the `+ New` button), with its directory,
+  label, group and `claude` flags.
+- **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
+- **Keys** (Ctrl+Shift+H shows them all): Ctrl+Shift+1 … 9 the session in that slot, Ctrl+Tab or
+  Ctrl+Shift+O the previous session, Ctrl+Shift+L between list and terminal, Ctrl+Shift+F find in
+  the scrollback, Ctrl+Shift+C copy, Ctrl+Shift+V Claude Code's image paste (it reads the Windows
+  clipboard itself), Ctrl+V paste text, Shift+Enter a new line, Ctrl+click a link (it opens in your
+  own Edge). In the list: ↑ ↓ `j` `k`, Home, End, PgUp, PgDn, ← → (fold, unfold), `/` filter,
+  Enter, Esc (clear the filter, then back to the terminal). Ctrl+Shift+P, Ctrl+Shift+J and the list
+  keys `l` `g` `n` `p` `d` and F2 are the window's already and say `<key>: comes in a later stage`.
+  Every other key goes to Claude Code: Alt chords, Ctrl with a letter, function keys, Esc in the
+  terminal. The key bar at the bottom says where the keyboard is (`Focus: list`, `Focus: terminal`).
+
+### Known limits of stage A
+
+- **The keep-alive is not verified** (above; W14).
+- **A second window** can open when `skydeck window` starts a server while an old window is still
+  open: after the server died or was stopped (`--stop`), or after a WSL restart. The command sees no
+  page and starts Edge, and the old window connects again a moment later. Close one of them. (After
+  `--restart` or an update the command waits for the open windows, so none opens then.)
+- **Ctrl+C on a waiting `skydeck window`** leaves its launch address usable until its 30 seconds
+  are over.
+- **Another program on skydeck's port.** A program that listens on `127.0.0.1:<port>` on the Windows
+  side, or inside WSL while no server runs, gets the window's page loads instead of skydeck's server
+  (design-step-2.md, 15.3). An open window sends it nothing and says `something answers on port
+  <n> that is not skydeck's server; nothing was sent to it`; a window opened meanwhile shows that
+  program's page. Such a page can leave a service worker in the window's profile that keeps
+  answering later loads: Chromium keeps it even when skydeck's server answers its script with 404
+  (the page tests show it); whether Edge drops it is not known (W25). The way out: close every
+  skydeck window, **delete the window's profile folder**, and run `skydeck window --new-secret`.
+  `--new-secret` alone does not remove a worker.
+- **A rebuilt screen.** After a server restart, or when a terminal is shown again after the page
+  let it go (it keeps at most 8 attached), the screen is rebuilt from a snapshot. Not rebuilt: the
+  scroll region, the saved cursor, the character sets and the tab stops; links written before the
+  snapshot are not clickable after it (the rest of a link that was open comes out as plain text);
+  underline styles and colours; and a few rarer cases (design-step-2.md, 7.2), among them a
+  character cut off from the emoji it modifies at the moment of the snapshot, which takes a cell of
+  its own. Most of it heals when the program draws that part again (W26).
+- **Keys.** Ctrl+C with text selected in the terminal interrupts the program; Ctrl+Shift+C copies.
+  On a keyboard layout whose letters are not Latin (Russian, Greek) the Ctrl+Shift letter chords,
+  Ctrl+R and Ctrl+V are not recognised; US and Czech are not affected.
+- **The list.** An expiring session says `expires soon`, without the number of days. From an empty
+  filter field it is two Escs to the terminal. The ended bar of a selected session that the filter
+  hides offers no Resume, and Close only once the end is known: clear the filter. In one rare case
+  (a click outside the list and, within a double click's time, a click on a row a list update has
+  just moved under the pointer) that row is resumed as by a double click.
+- **A flood of output.** When a program writes faster than skydeck can show (megabytes at once), a
+  key pressed in that moment can be lost: press it again, Ctrl+C included.
+- **The command line does not use the window yet.** `skydeck resume`, `new` and `restore` start
+  `claude` in the terminal you are in. After a WSL restart, resume the sessions one by one in the
+  window (or run `skydeck restore` in a terminal, which brings them back there). A `skydeck resume`
+  of a session whose window terminal still shows `starting…` is not refused because of it: wait
+  until it runs.
+
+### What `doctor` says about the window
+
+After the lines of step 1, `skydeck doctor` prints the window's. It starts no program for them but
+`python3 --version`, nothing on Windows, signals nothing, never connects to a keeper and creates
+nothing. Until the window's server has run once (skydeck's key is made then), every one of these
+lines that would be a `problem` is `info`, so that an installation that uses only the commands is
+judged as before.
+
+| Check | A `problem` means |
+|---|---|
+| python3 | `python3` on `PATH` is missing, older than 3.9, or gives no version: the window opens no terminal. |
+| `/usr/bin/python3` | It is missing or not executable: the server would run without the core limit that keeps it from writing crash dumps. |
+| the window's server | Normally `info`: whether one runs, its pid, checkout, build, up time, pages, terminals, and where its environment came from. A problem when it runs another build of this checkout (`skydeck window --restart`), runs from another checkout, is alive but does not answer, answers its ping but not its status, or is starting and did not finish within 5 seconds. |
+| port | Something that is not this installation's server listens on `127.0.0.1:<window.port>` inside WSL (`doctor` only reads `/proc/net/tcp`; a program on the Windows side cannot be seen from WSL). Stop it, or set `window.port`. |
+| launch alarm | A launch address was used twice, so another program may have skydeck's key: run `skydeck window --new-secret`. |
+| keep-alive | A server or a terminal runs and neither the keep-alive nor `instanceIdleTimeout=-1` is in effect (above). |
+| interop | `WSL_INTEROP` is not set in this shell (it cannot start Windows programs), or `<runtimeDir>/interop`, the link the sessions' Windows programs (an image paste) go through, points at nothing that answers: `skydeck window --restart`. |
+| the C: drive | It is not mounted at `/mnt/c`. |
+| Edge | `window.edge` does not exist or is not a file. |
+| profile folder | It cannot be found and `window.profileDir` is not set. |
+| runtime directory | The directory of the server's and the keepers' sockets is not yours or not mode 700, or a socket path in it would be 108 bytes or longer. `info` when `XDG_RUNTIME_DIR` is passed over because you do not linger (`loginctl enable-linger <you>` makes it usable). |
+| vendored files | A file of `vendor/MANIFEST.json` is missing or changed: a broken checkout (`git status`). |
+| keepers | Never a problem: how many terminals run, and one line each. |
+
+### Updating while the window runs
+
+```sh
+cd ~/skydeck
+git pull
+skydeck window
+```
+
+The commands run the new code at once, as before. The server keeps running the code it started
+with until `skydeck window` finds that it is of another build and restarts it, with the line of
+"Starting it" above. Sessions keep running; every terminal's screen is rebuilt (see "Known
+limits"), and the open windows reload themselves for the new page and connect again: the command
+waits up to 7 seconds for them, so it opens no second window. Keepers that run keep the code they
+started with; new terminals get the new keeper. No `npm ci`, no `skydeck install`.
+
+When a command of the new code upgrades the database while the old server still runs, that server
+stops by itself (its windows say that it is not answering): run `skydeck window`.
+
 ## Checking: `skydeck doctor`
 
 `doctor` prints one line per check, `ok`, `info` or `problem`, and exits 1 when any line is a
@@ -458,7 +781,9 @@ git pull
 
 That is all. The links point into the checkout, so the command and the hook are the new code at
 once, and the database upgrades itself the next time a command runs. `npm ci` is needed only for
-development (`npm run check`); skip it otherwise. Then `skydeck doctor`.
+development (`npm run check`); skip it otherwise. Then `skydeck doctor`. When you use the window,
+run `skydeck window` too: it restarts the window's server for the new code ("Updating while the
+window runs").
 
 A database written by a newer skydeck is not opened by an older one: the command stops with
 `the database ... was written by a newer skydeck ...; update skydeck`.
@@ -488,7 +813,12 @@ prints `hook entries already present` and changes nothing there.
 skydeck uninstall
 ```
 
-It undoes the install, in this order:
+First the window: when the window's server runs, `uninstall` stops it as `skydeck window --stop`
+does and says `stopped skydeck's window server; <n> terminals in the window keep running` (the
+sessions in the window and their keepers are never stopped), and when the window's Edge profile
+folder exists it names it: `the window's Edge profile is in
+C:\Users\you\AppData\Local\skydeck\edge-profile; Edge wrote it and skydeck leaves it (delete it
+yourself)`. Then it undoes the install, in this order:
 
 1. **Settings.** When the settings file is still exactly what install wrote, and the backup install
    made still exists, the file is replaced by that backup (`restored ... from ...`). Otherwise (you
@@ -522,7 +852,11 @@ others are still purged, and the last line says which folder stayed and why (`sk
 uninstalled, but --purge did not remove …`, exit 1). It refuses, changing nothing, while `HOME`,
 `SKYDECK_HOME` or one of `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR` is
 set but empty or not an absolute path: skydeck ignores such a value (see "Environment variables"),
-or for `HOME` takes it as it is, and would purge the installation it then finds. It leaves the backups (they are in Claude
+or for `HOME` takes it as it is, and would purge the installation it then finds. It also refuses,
+before anything is undone, while a terminal of the window may still run (`uninstall --purge removed
+nothing: terminals of the window may still run: …; end those sessions first`): purging would remove
+their keepers' sockets, and their screens could not be shown again. End those sessions in `claude`
+first. It leaves the backups (they are in Claude
 Code's folder) and the compile cache (`~/.cache/skydeck`, see "Environment variables"). To remove
 skydeck altogether, delete the checkout last.
 
@@ -546,8 +880,14 @@ kept the backup /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 | The hook's own errors | `<stateDir>/hook.log` |
 | The settings file and its backups | `<claudeHome>/settings.json`, `<claudeHome>/settings.json.skydeck-backup-*` |
 | The compile cache | `~/.cache/skydeck/compile-cache` (see "Environment variables") |
+| The window's server and keepers: their own diagnostics, never conversation content | `<stateDir>/server.log`, `<stateDir>/keepers.log` (at 1 MiB copied to `.1` and emptied) |
+| The window's sockets and `.pid` files (`server.json`, `server.sock`, `terms/`, the keep-alive's files, the `interop` link) | The runtime directory, which `skydeck doctor` names (see `XDG_RUNTIME_DIR` under "Environment variables") |
+| The window's Edge profile | The profile folder on Windows ("The profile folder"); Edge's, not skydeck's |
+| The window's xterm.js | `vendor/` in the checkout |
 
-Sessions and transcripts live in Claude Code's folder, and skydeck only reads them.
+Sessions and transcripts live in Claude Code's folder, and skydeck only reads them. The screens of
+the window's terminals live only in memory (the server's, the keepers', the page's), never in a
+file.
 
 ## If something goes wrong
 
@@ -561,3 +901,16 @@ Sessions and transcripts live in Claude Code's folder, and skydeck only reads th
 | `skydeck: <id> is running (pid <n>)` when you resume | The session runs in another terminal. skydeck never resumes a session twice (exit 4). |
 | The same, but you see no such terminal | A scripted run (print mode such as `claude -p --resume <id>`, an SDK host, an editor extension) holds that session. skydeck shows it as `running`, `skydeck show <ref>` says `(scripted run)` next to the holder, and `resume` is refused until that process ends. |
 | `skydeck: <id> is being resumed (<n> s ago); try again in <m> s` | A resume of that session started less than a minute ago. When skydeck printed a command for you to run, the same hold applies for that minute. |
+| `skydeck: the window's server is not started from inside a Claude Code session: …` | `skydeck window` was run as a `!` command of a Claude Code session, or from a shell that inherited `CLAUDECODE`. Run it in a WSL terminal of your own. |
+| `skydeck: Edge was not found at <path>; set window.edge in <config path>, or open the window in any browser with skydeck window --print-url` | Edge is not at the default place: set `window.edge`. The server keeps running. |
+| `skydeck: Edge was started, but no window connected within 30 seconds; open the window in any browser with skydeck window --print-url` | Edge did not open the page in time (a slow cold start, a blocked start: write down what Windows showed, manual check W20). Run `skydeck window` again, or use `--print-url`. |
+| `skydeck: port <n> on 127.0.0.1 is used by another program; set window.port in <config path>` | Another program inside WSL holds the port: stop it, or set `window.port`. |
+| `skydeck: the window's server runs from <checkout>; run skydeck window there, or skydeck window --restart here to replace it` | A server of another checkout runs. |
+| `skydeck: the window's server (pid <n>) does not answer; skydeck window --restart stops it` | The server hangs. `--restart` stops it (only that process, after checking it is the server); the sessions keep running. `<stateDir>/server.log` may say why. |
+| `skydeck: the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log` | Read the log; `skydeck doctor`. |
+| `skydeck: the runtime directory <dir> cannot be used: <reason>; see skydeck doctor` | The sockets' directory is not yours or not mode 700, or its paths are too long (a long `SKYDECK_HOME`). |
+| `skydeck: this window's launch address was used by another program, which may now have skydeck's key; run skydeck window --new-secret` (also in the window, and as `doctor`'s launch alarm) | A launch address was presented twice. Run `skydeck window --new-secret`, which replaces the key; close the windows opened before. |
+| The window says `this window's key is not valid; run skydeck window again` | Its key was replaced (`--new-secret`), or a launch address was used too late. Close it and run `skydeck window`. |
+| The window says `something answers on port <n> that is not skydeck's server; nothing was sent to it` | Another program holds the port (see "Known limits"). Find and stop it; if a window was opened while it held the port, close every window, delete the window's profile folder and run `skydeck window --new-secret`. |
+| The window says `WSL has restarted since <time>: the sessions that were running have ended.` | WSL stopped (all its processes ended) and a new server answered. Resume the sessions in the window, or run `skydeck restore` in a terminal. Then see "Keeping WSL running". |
+| A resume card says `python3 3.9 or newer is needed to open terminals in the window (sudo apt install python3)` | Install python3 (`sudo apt install python3`); the next terminal opens with it. |

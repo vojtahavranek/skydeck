@@ -3,12 +3,16 @@ docs/manual-checks.md is the procedure (W2, W14, W15); this is the short version
 Run everything from WSL, in your checkout (cd ~/skydeck). Download nothing with the browser: a
 browser download marks a file as coming from the internet, a file written from WSL is not marked.
 
+THE KEY LOG: the test page's server (serve.py) writes every key you press ON THE TEST PAGE into
+docs/check-kit/keylog.jsonl, also what you type into its text box. Never type a password or
+anything private there. The file is not committed (.gitignore) and skydeck never reads it.
+Delete it when the check is done:
+     rm docs/check-kit/keylog.jsonl
+
 0. Stand-in server for the key-test page (a WSL terminal of its own; leave it open). It never
    starts claude and binds 127.0.0.1 only:
      python3 docs/check-kit/serve.py          # listening on http://127.0.0.1:8765/
-   It appends every key press the page sees to docs/check-kit/keylog.jsonl (your own key
-   presses, also what you type into the text box). When the results are written down:
-     rm docs/check-kit/keylog.jsonl
+   Ctrl+C stops it. It writes the key log above.
 
 1. Key test (W2).
    a. A normal Edge tab: open http://127.0.0.1:8765/ in a window of your own Edge, in a tab of

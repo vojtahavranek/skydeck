@@ -4,8 +4,12 @@ skydeck is one developer's tool for working with many Claude Code sessions at on
 sessions that matter, says what each one is doing, carries a label, a group, a note and its pull
 requests, and brings a session back with one action, also after a PC restart or a WSL shutdown.
 
-It is a command line tool for the terminal (step 1). The window that step 2 adds is designed in
-[docs/design-step-2.md](docs/design-step-2.md).
+It is a command line tool for the terminal (step 1) and, since step 2, a window: `skydeck window`
+opens an Edge app window with the session list on the left and the real terminal of the selected
+session on the right, where sessions are resumed, started and switched between. Its sessions run in
+terminals of skydeck's own inside WSL, so they keep running when the window or its server is closed
+or restarted ([docs/install.md](docs/install.md), "The window (step 2)"; design in
+[docs/design-step-2.md](docs/design-step-2.md)).
 
 ```
 ABC-123
@@ -29,7 +33,8 @@ bin/skydeck install
 ```
 
 If the default `node` is older than 24.12, put `SKYDECK_NODE=/path/to/node` in front of
-`bin/skydeck install`. [docs/install.md](docs/install.md) is the complete guide: prerequisites, what
+`bin/skydeck install`. The window also needs python3 3.9 or newer inside WSL and Microsoft Edge on
+the Windows side; then `skydeck window`. [docs/install.md](docs/install.md) is the complete guide: prerequisites, what
 install changes, `config.json`, WezTerm on WSL, updating, uninstalling.
 
 ## Is it tied to WezTerm?
@@ -43,19 +48,21 @@ command to run by hand, and `restore` resumes the first session in this terminal
 
 ## Commands
 
-| Command                                                                               | Effect                                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skydeck`                                                                             | The interactive list on a terminal; otherwise the same as `skydeck ls`.                                                                                                                      |
-| `skydeck ls [--all] [--json] [--refresh]`                                             | Print the list. `--all` includes sessions marked done; `--json` prints stable, versioned JSON; `--refresh` first reads the status of the pull requests that are not merged or closed (`gh`). |
-| `skydeck show <ref> [--json] [--refresh]`                                             | One session: state, marks, project directory, launch command, links, note, pull requests, holders.                                                                                           |
-| `skydeck label <ref> [<text>]` / `skydeck group <ref> [<text>]`                       | Set. Without text, clear. The text is all the arguments after `<ref>`, joined by one space.                                                                                                  |
-| `skydeck note <ref> [--set <text>]`                                                   | Edit in `$VISUAL`, else `$EDITOR`, else `vi`; or set directly (`--set ''` clears).                                                                                                           |
-| `skydeck done <ref>` / `skydeck undone <ref>`                                         | Hide / show. Never stops a process.                                                                                                                                                          |
-| `skydeck pr add <ref> <url>` / `skydeck pr rm <ref> <url>` / `skydeck pr refresh`     | Attach and read the status now / detach / read the status of every pull request that is not merged or closed.                                                                                |
-| `skydeck new [--label <text>] [--group <text>] [--here \| --tab] [-- <claude flags>]` | Start a new session in the current directory, with a label and a group from the start.                                                                                                       |
-| `skydeck resume <ref> [--here \| --tab]`                                              | Resume a session that is not running, in its own directory and with the flags it was started with.                                                                                           |
-| `skydeck restore [--all] [--dry-run] [--yes]`                                         | Bring back what was open before the last restart.                                                                                                                                            |
-| `skydeck install` / `skydeck uninstall [--purge]` / `skydeck doctor`                  | Set up, undo and check the installation.                                                                                                                                                     |
+| Command                                                                               | Effect                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skydeck`                                                                             | The interactive list on a terminal; otherwise the same as `skydeck ls`.                                                                                                                                                                                              |
+| `skydeck ls [--all] [--json] [--refresh]`                                             | Print the list. `--all` includes sessions marked done; `--json` prints stable, versioned JSON; `--refresh` first reads the status of the pull requests that are not merged or closed (`gh`).                                                                         |
+| `skydeck show <ref> [--json] [--refresh]`                                             | One session: state, marks, project directory, launch command, links, note, pull requests, holders.                                                                                                                                                                   |
+| `skydeck label <ref> [<text>]` / `skydeck group <ref> [<text>]`                       | Set. Without text, clear. The text is all the arguments after `<ref>`, joined by one space.                                                                                                                                                                          |
+| `skydeck note <ref> [--set <text>]`                                                   | Edit in `$VISUAL`, else `$EDITOR`, else `vi`; or set directly (`--set ''` clears).                                                                                                                                                                                   |
+| `skydeck done <ref>` / `skydeck undone <ref>`                                         | Hide / show. Never stops a process.                                                                                                                                                                                                                                  |
+| `skydeck pr add <ref> <url>` / `skydeck pr rm <ref> <url>` / `skydeck pr refresh`     | Attach and read the status now / detach / read the status of every pull request that is not merged or closed.                                                                                                                                                        |
+| `skydeck new [--label <text>] [--group <text>] [--here \| --tab] [-- <claude flags>]` | Start a new session in the current directory, with a label and a group from the start.                                                                                                                                                                               |
+| `skydeck resume <ref> [--here \| --tab]`                                              | Resume a session that is not running, in its own directory and with the flags it was started with.                                                                                                                                                                   |
+| `skydeck restore [--all] [--dry-run] [--yes]`                                         | Bring back what was open before the last restart.                                                                                                                                                                                                                    |
+| `skydeck install` / `skydeck uninstall [--purge]` / `skydeck doctor`                  | Set up, undo and check the installation.                                                                                                                                                                                                                             |
+| `skydeck window [--print-url] [--new-window] [--restart] [--stop] [--new-secret]`     | Open the window: start its server when none runs, and an Edge window when none is open. `--print-url` prints an address for any browser instead; `--restart` and `--stop` restart or stop the server (sessions keep running); `--new-secret` replaces skydeck's key. |
+| `skydeck serve [--foreground]`                                                        | The window's server, started by `skydeck window`; `--foreground` runs it in the terminal, logging to stderr, for debugging.                                                                                                                                          |
 
 `skydeck --help` lists the commands, `skydeck <command> --help` shows the options of one, and
 `skydeck --version` prints the version.
@@ -81,8 +88,9 @@ pull requests again.
 - [docs/install.md](docs/install.md): setting skydeck up on another machine.
 - [docs/design.md](docs/design.md): the design, the source of truth for the behaviour.
 - [docs/design-step-2.md](docs/design-step-2.md): the design of step 2, the window.
-- [docs/manual-checks.md](docs/manual-checks.md): the checks that need a real Claude Code session,
-  run by hand.
+- [docs/manual-checks.md](docs/manual-checks.md): the checks that need a real Claude Code session
+  or the Windows desktop, run by hand; [docs/check-kit/](docs/check-kit/) holds what some of them
+  use.
 
 ## Development
 
@@ -91,8 +99,18 @@ no build step.
 
 ```sh
 npm ci
-npm run check   # format check, type check, then the tests
-npm run format  # rewrite files with Prettier
+npm run check      # format check, type check, the tests, then the page tests
+npm test           # the tests only
+npm run test:page  # the page tests only (web/, in headless Chromium)
+npm run format     # rewrite files with Prettier
+```
+
+The page tests need Playwright's Chromium in `~/.cache/ms-playwright` (Playwright is pinned to
+1.60.0, whose Chromium is build 1223). When they say `Chromium for Playwright is not installed`,
+download it once, without `sudo`:
+
+```sh
+npx playwright install chromium
 ```
 
 Run the CLI from a checkout with `bin/skydeck --help`. If the `node` on your `PATH` is older than

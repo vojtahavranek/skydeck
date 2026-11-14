@@ -2,7 +2,9 @@
 
 The short checklist to run by hand after installing skydeck on a machine, and before trusting a new
 Claude Code version. It covers what the tests cannot: they never start `claude`, never open a
-terminal tab and never restart WSL. Each item gives the command and the expected result.
+terminal tab, never restart WSL and never start a Windows program. Each item gives the command and
+the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 check the window of
+step 2 (stage A) and start at "The window (step 2, stage A)" below.
 
 Setup:
 
@@ -255,3 +257,497 @@ to show all rows: the done session is back; select it and press `d` to undo.
 
 Press `r`: the list refreshes at once, puts the rows in order again, and reads the status of the
 pull requests again. Press `q` to leave.
+
+## The window (step 2, stage A)
+
+The checks of the design's section 18 (design-step-2.md) that stage A needs: W1–W10, W12–W15,
+W17, W18, W20 and W22–W26, and one more that came with the page's ping rule ("Minimised for half
+an hour", after W15). W11, W16, W19 and W21 come with the stages that build what they check. Each
+check says what to set up, what to type, what to look at and what to write down.
+
+Setup:
+
+- skydeck is installed and up to date (`git pull`), and the window's needs are met
+  ([install.md](install.md), "The window (step 2)": python3 3.9 or newer, Edge, the C: drive at
+  `/mnt/c`). `skydeck doctor` shows the window's lines.
+- **The first time, in this order**: W1, W20 and W4, with a throwaway session; then W14, before
+  you resume real sessions into the window. The rest in any order. Until W14 has passed, keep one
+  WSL terminal of your own open while the window runs (or set `instanceIdleTimeout=-1`,
+  install.md, "Keeping WSL running").
+- Terminals: **W** is a WSL terminal of your own, where you type the `skydeck` commands (never a
+  `!` command inside Claude Code). **P** is Windows PowerShell, not as administrator, for the few
+  commands on the Windows side.
+- **A throwaway session in the window**: in the window press Ctrl+Shift+N, put the full path of the
+  throwaway folder (`/home/<you>/skydeck-try`; `mkdir -p ~/skydeck-try` first) in the directory
+  field, and press Enter. Send it one prompt. The items marked **real claude** use such a session,
+  never one of your real work.
+- Write down, besides each result: the date, the skydeck commit (`git -C ~/skydeck log -1
+  --format=%h`), the Claude Code version (`claude --version`), the Edge version
+  (`edge://settings/help` in your own Edge), the Windows version and your keyboard layout.
+- When a check fails, run `skydeck doctor` first, then read `<stateDir>/server.log` and
+  `<stateDir>/keepers.log` (by default under `~/.local/state/skydeck/`). They never hold
+  conversation content, so they can be shared.
+- **The check kit** is in `docs/check-kit/` of the checkout: a key-test page (`keytest.html`,
+  `keytest.js`), its server (`serve.py`), a script that opens it in an Edge app window
+  (`edge-app.sh`) and an optional PowerShell script (`lifetime/lifetime.ps1`). `STEPS.txt` there
+  is its short guide. **The PowerShell script is optional: on a managed company PC it needs the
+  agreement of the PC's owner, and no check requires it.** Nothing here asks you to bypass or
+  change PowerShell's execution policy; when PowerShell refuses to run a script, leave that part
+  out.
+- **The key log.** The test page's server (`serve.py`) writes every key you press ON THE TEST PAGE
+  into `docs/check-kit/keylog.jsonl`, also what you type into its text box. Never type a password
+  or anything private there. The file is not committed (git ignores it) and skydeck never reads it.
+  Delete it when the check is done: `rm docs/check-kit/keylog.jsonl`.
+
+## W1. The window opens
+
+Setup: no skydeck window open. In W, start the server first, so that the time below is Edge's
+alone (the address it prints is not needed):
+
+```sh
+skydeck window --print-url
+time skydeck window
+```
+
+Expected: an Edge window without an address bar opens, titled `skydeck`, with the session list on
+the left; `skydeck window` prints `skydeck window: http://127.0.0.1:47613/ (server pid <n>)` and
+exits 0. `skydeck window` once more prints `skydeck window: a window is already open` and opens
+nothing. `skydeck doctor` now names the profile folder (`the window's Edge profile folder: …`),
+and that folder exists on Windows.
+
+Then close the window, wait 10 seconds, and `time skydeck window` again.
+
+Write down: the `real` time of each run, minus 2 seconds (after the page used its address the
+command watches it 2 seconds more), the first after a Windows restart or sign-in ("cold"), the
+second ("warm"). The command waits at most 30 seconds for the page; when it says
+`Edge was started, but no window connected within 30 seconds; …` instead, write down how long Edge
+took until the page showed, and anything Windows showed meanwhile (W20).
+
+## W2. The keys reach the page
+
+**In the window.** The page owns every key of the design's table from stage A on, also those whose
+action comes later. Setup: the window open with the throwaway session in slot 1 (its number shows
+at the left of its row in Open). Press each key; the page must do what the table says, and Edge
+nothing of its own (no new window or tab, find bar, print dialog, devtools pane, history, reload):
+
+| Key | Expected |
+|---|---|
+| Ctrl+Shift+L | the key bar's `Focus: list` and `Focus: terminal` change places |
+| Ctrl+Shift+1 | the session in slot 1; Ctrl+Shift+9 with no session there: `no session in slot 9` |
+| Ctrl+Tab, Ctrl+Shift+O | the previously selected session (`no previous session` when there is none) |
+| Ctrl+Shift+N | the new form; Esc closes it |
+| Ctrl+Shift+F | the find bar over the terminal; Esc closes it |
+| Ctrl+Shift+C | with text selected in the terminal: copies it (paste it into Notepad) |
+| Ctrl+Shift+V | Claude Code's image paste (W6) |
+| Ctrl+Shift+H | the key help; again: it goes |
+| Ctrl+Shift+P, Ctrl+Shift+J | the key bar says `Ctrl+Shift+P: comes in a later stage` (`…J…`) |
+| in the list (Ctrl+Shift+L first): `l`, `g`, `n`, `p`, `d`, F2 | `l: comes in a later stage`, and so on |
+| in the list: F5, Ctrl+R, Ctrl+F5, Shift+F5, Ctrl+Shift+R | the page reloads itself (the terminals come back) after it has checked the server |
+| in the terminal: F5, Ctrl+R | they reach Claude Code; Ctrl+Shift+R reloads the page |
+| Alt+F4 | the window closes (`skydeck window` opens it again) |
+
+**The browser's own reload keys.** The design does not know two things. On an ordinary web page in
+a normal Edge tab (not skydeck's, not the key-test page: those cancel the keys), press Shift+F5:
+does Edge reload? If your keyboard has a Refresh key (BrowserRefresh), press it alone, with Shift
+and with Ctrl: does Edge reload? Then, on the key-test page in an app window (below), press the
+Refresh key: when "window loads this session" goes up, a Refresh key the page cancelled still
+reloaded.
+
+**In a normal browser tab.** In W, start the key-test page's server (read "The key log" in the setup
+first) and leave it running:
+
+```sh
+cd ~/skydeck
+python3 docs/check-kit/serve.py
+```
+
+Open `http://127.0.0.1:8765/` in a tab of its own in your own Edge window and press the chords on
+the page: each one it received turns green; some close the tab or open a window (that is what is
+looked at). What the page received, in another W (`sudo apt install jq` when `jq` is missing):
+
+```sh
+jq -r 'select(.kind=="keydown").chord' ~/skydeck/docs/check-kit/keylog.jsonl | sort -u
+```
+
+To compare with an app window, `sh docs/check-kit/edge-app.sh` opens the same page in one (it
+starts `msedge.exe` with a profile folder of its own, `%LOCALAPPDATA%\skydeck-check\edge-profile`;
+delete that folder afterwards). Ctrl+C stops the server; then `rm docs/check-kit/keylog.jsonl`.
+
+And skydeck's page in a tab: `skydeck window --print-url`, paste the address into a normal tab.
+The key bar shows `Ctrl+Shift+O previous` and a `+ New` button; Ctrl+Shift+O and `+ New` work.
+
+Write down: every key the window did not act on as the table says, or on which Edge acted too; the
+answers on Shift+F5 and the Refresh key; the chords the normal tab kept for the browser (Chromium's
+source says Ctrl+W, Ctrl+F4, Ctrl+Shift+W, Alt+F4, Ctrl+N, Ctrl+Shift+N, Ctrl+T, Ctrl+Shift+T,
+Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn and Ctrl+PgUp).
+
+## W3. One window, its own taskbar button
+
+With the window open: it has a taskbar button of its own, apart from your own Edge's (the icon is
+Edge's until a later stage gives the page its own; the title is `skydeck`). `skydeck window` again
+opens no second window (`a window is already open`). `skydeck window --restart`: the same window
+stays, with the same button, and says `skydeck's server restarted; your sessions kept running`.
+When a check makes WSL restart (W14's third part), look at the button again after `skydeck window`.
+
+Write down: whether the window and your Edge share a button, and whether the button changed.
+
+## W4. Claude Code in a window terminal (real claude)
+
+In the throwaway session: send a prompt that makes Claude Code work for a while and use a subagent
+(`use a subagent to list the files here and describe each`). Watch the status line, the subagent's
+display and the spinner. Drag the window's edge to make it narrower and wider: the screen is drawn
+again at each width. Then take a screenshot of the window (Win+Shift+S) and, in W:
+
+```sh
+skydeck window --restart
+```
+
+Expected: the window says `skydeck's server restarted; your sessions kept running`, and the
+terminal shows exactly what it showed before: compare with the screenshot. Type into it: it still
+answers.
+
+Write down: what was drawn wrong, before or after the restart.
+
+## W5. The screen side answering alone (real claude)
+
+Three questions about how Claude Code talks to the terminal skydeck gives it.
+
+- **Does Claude Code use synchronized output?** In W, in the throwaway folder, record what a
+  session writes to its terminal: `cd ~/skydeck-try && script -q -c claude claude-output.txt`.
+  Send one prompt, `/exit`, then `grep -c $'\e\\[?2026h' claude-output.txt`: a number above 0 means
+  it does. The file holds what the screen showed: `rm claude-output.txt`.
+- **Does the colour answer make its automatic theme right?** When your Claude Code has a theme
+  that follows the terminal (look in `/config` or `/theme`), choose it. The window is dark while
+  Windows is in dark mode and light in light mode (Settings > Personalization > Colors). Start a new
+  throwaway session in the window in each mode, after a click into the window: Claude Code should
+  pick the matching theme.
+- **An XTVERSION answer** (`xterm.js(6.0.0)`) would make Claude Code treat the terminal as xterm.js
+  (design-step-2.md, 9.3). That is a change of skydeck's code, for a branch, not for this check:
+  write down only whether wheel scrolling and link clicks in the window behave as you expect.
+
+Write down the three answers.
+
+## W6. Typing, pasting and copying (real claude)
+
+In the throwaway session:
+
+- Shift+Enter in Claude Code's prompt inserts a new line (it does not send).
+- Copy some text in Notepad, Ctrl+V in the prompt: the text arrives as one paste.
+- Take a screenshot (Win+Shift+S), then Ctrl+Shift+V in the prompt: Claude Code shows that it has
+  an image (`[Image #1]` or similar). It reads the Windows clipboard itself.
+- Select text in the terminal with the mouse, Ctrl+Shift+C, Ctrl+V into Notepad: the text arrives.
+  (Plain Ctrl+C with a selection interrupts the program: a known limit.)
+- A program's clipboard write (OSC 52): when your Claude Code has `/copy` (its documentation says
+  it writes the clipboard through the terminal), run it and paste into Notepad. On WSL Claude Code
+  may use a Windows program for it instead, so a paste that works says that the copy arrived, not
+  which way. The window writes the clipboard only for the terminal it shows, while it has the focus.
+
+Write down each that does not work, and what happened instead.
+
+## W7. Image paste after the first terminal is closed (real claude)
+
+After W6: close the WSL terminal you ran `skydeck window` from (the one that started the server;
+keep another WSL terminal open, so that WSL does not stop). In the throwaway session, and in a new
+throwaway session, Ctrl+Shift+V a screenshot again. Then in W, `skydeck doctor`: its interop line
+reads `<runtimeDir>/interop -> … answers`.
+
+Write down: whether the paste worked in both sessions; the interop line.
+
+## W8. A Czech keyboard
+
+Add the Czech keyboard in Windows (Settings > Time & language > Language & region) and switch to it
+(Win+Space) while the window has the focus. In the throwaway session's prompt: the AltGr characters
+`\ [ ] { } @ # ~ |` and the dead keys (háček: `ě š č ř ž`; čárka: `á é í ó ú ý`) arrive as typed.
+Ctrl+Shift with a digit (the number row, which types the digits with Shift on this layout) selects
+that slot; Ctrl+Shift+H shows the key help; Ctrl+Shift+- reaches Claude Code (its undo of the last
+edit in the prompt).
+
+Write down every key that arrived wrong or did something else.
+
+## W9. Claude Code's symbols are drawn (real claude)
+
+In the throwaway session, send a prompt that makes Claude Code use a tool (`list the files here`).
+Its tool lines start with `⏺`, their results with `⎿`; Shift+Tab shows `⏵⏵` in the mode line.
+Expected: drawn as symbols, not as empty boxes.
+
+Write down which symbols show as boxes.
+
+## W10. Emoji line up (real claude)
+
+In the throwaway session: `print a table with two columns, a symbol and its name, with the rows
+🙂, ❤️, 👍🏽, 👨‍👩‍👧 and 🇨🇿`. Expected: the right edges of the table's lines are in one column.
+Compare with the same prompt in a session in your usual terminal (Windows Terminal, WezTerm).
+
+Write down which rows are off, and by how many columns.
+
+## W12. Links open in your own Edge (real claude)
+
+In the throwaway session: `print the address https://github.com/` (or any page where you are
+logged in). Ctrl+click it in the terminal. Expected: it opens in your own Edge window, where you
+are logged in, not in skydeck's window. A link whose text is not its address shows the address at
+the first Ctrl+click and opens at the second.
+
+Write down where it opened, and whether you were logged in there.
+
+## W13. What the company's Edge policy does to the window
+
+In your own Edge, open `edge://policy` and look for entries named `URLBlocklist`, `BrowserSignin`,
+`SyncDisabled`, or starting with `WebApp` or `Extension`. Then open a normal Edge window on the
+window's own profile folder (the one `skydeck doctor` names), in P:
+
+```powershell
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --user-data-dir="C:\Users\<you>\AppData\Local\skydeck\edge-profile"
+```
+
+In that window's address bar: `edge://extensions` (which extensions run there, put in by the
+company's policy) and `edge://settings/profiles` (whether the profile is signed in and syncs its
+history). Close that window afterwards; the skydeck window stays.
+
+Write down: the policy entries found (their names and values), the extensions listed, signed in
+and syncing or not.
+
+## W14. WSL keeps running when every WSL terminal is closed
+
+**The first form, the one that matters; it needs no script.** It needs a `.wslconfig` without
+`instanceIdleTimeout=-1` (with that setting WSL never stops by itself, and the check shows nothing).
+Do it while only throwaway sessions run: if the keep-alive does not hold, WSL stops and every
+session in it ends (they can be resumed afterwards, as after any WSL restart).
+
+1. In W, `skydeck doctor`: the keep-alive line reads `keep-alive wsl.exe running (pid <n>, since
+   <time>); …`. Write the pid down.
+2. A throwaway session in the window, with one prompt sent.
+3. Close every WSL terminal: every terminal window or tab that runs WSL (Windows Terminal, WezTerm,
+   VS Code's WSL terminals and its WSL window too, which is a client of WSL as well). Keep the
+   skydeck window open. Look at the window's title bar meanwhile: closing the terminal that started
+   the server must not make it say `WSL is not kept running`.
+4. Wait two minutes (WSL stops 15 seconds after its last client).
+5. In the window: no `skydeck's server is not answering` bar. Type a prompt into the throwaway
+   session: it answers.
+6. In P: `wsl -l -v` shows your distribution `Running`. Then open a WSL terminal again.
+
+**The second part: a keep-alive whose Windows side ends.** With one WSL terminal open (so that WSL
+cannot stop meanwhile), open the Task Manager, Details, show the column "Command line", and end the
+`wsl.exe` whose command line names `skydeck-keepalive`. Then in W, within about 10 seconds:
+`skydeck doctor` shows a keep-alive with another pid, and `ps -p <the pid of step 1>` shows no such
+process any more (the script ended with its `wsl.exe`, or the server ended it). Then:
+
+```sh
+dmesg | tail -n 40
+```
+
+(when it says `Operation not permitted`: `sudo dmesg | tail -n 40`). skydeck asks the sockets of
+WSL's interop now and then whether they answer, connecting and sending nothing; look for lines of
+WSL about connections to an interop socket.
+
+**The third part, optional: without the keep-alive WSL stops.** This ends EVERY session and terminal
+in WSL: do it only when nothing is running that you want to keep. Set `"keepAlive": "off"` in the
+`window` of `config.json`, run `skydeck window --restart`, end the keep-alive's `wsl.exe` in the
+Task Manager as above, close every WSL terminal, wait one minute. Expected: `wsl -l -v` in P shows
+the distribution `Stopped`, and the window shows the bar. Then take `"keepAlive"` out of
+`config.json` again, open a WSL terminal and run `skydeck window`: the window says `WSL has
+restarted since <time>: the sessions that were running have ended.` (A second window may open
+beside it, a known limit of stage A: close one.)
+
+Write down: for the first form, passed or WSL stopped (then the window showed the bar); the
+keep-alive's pids; whether the old script was gone; the `dmesg` lines about interop; for the third
+part, whether WSL stopped.
+
+**The second form, optional: measure WSL's idle rule** with `docs/check-kit/lifetime/lifetime.ps1`
+against a throwaway distribution, which it imports and removes again. **On a managed company PC
+only with the agreement of the PC's owner; no check requires it. Do not bypass or change
+PowerShell's execution policy for it.** It needs Alpine's mini root filesystem, which is not in
+the repository: `https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz`,
+sha256 `cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012` (Alpine publishes the
+same in the `.sha256` file beside it). Download it from WSL, not with the browser. In W (put your
+Windows user name for `<you>`):
+
+```sh
+W=/mnt/c/Users/<you>/AppData/Local/skydeck-check/wsl
+mkdir -p "$W"
+cp ~/skydeck/docs/check-kit/lifetime/lifetime.ps1 "$W/"
+curl -fL -o "$W/alpine-minirootfs-3.24.4-x86_64.tar.gz" https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz
+sha256sum "$W/alpine-minirootfs-3.24.4-x86_64.tar.gz"
+```
+
+The hash must be the one above; otherwise delete the file and stop. In P:
+
+```powershell
+cd $env:LOCALAPPDATA\skydeck-check\wsl
+(Get-FileHash .\alpine-minirootfs-3.24.4-x86_64.tar.gz -Algorithm SHA256).Hash
+powershell.exe -NoProfile -File .\lifetime.ps1
+```
+
+`Get-FileHash` prints the hash in capitals: the same letters. When PowerShell answers that running
+scripts is disabled on this system, this form is not for this PC: stop here. Otherwise it prints
+timestamped lines for about 4 minutes. Expected: A, the distribution leaves the running list
+within 90 seconds (its source says about 15); B, still running after 60 seconds with a hidden
+`wsl.exe` child; C, that child ends within seconds of `wsl --terminate`; D, the distribution leaves
+the list about 15 seconds after the child was killed. It removes the throwaway distribution at the
+end. If it stops halfway, in P: `wsl --unregister skydeck-test`, exactly this name
+(`--unregister` deletes a distribution and everything in it: never give it your own one's name).
+Afterwards delete `%LOCALAPPDATA%\skydeck-check`.
+
+Write down: the lines it printed.
+
+## W15. Sleep
+
+With the window open and the throwaway session in it: lock the PC, or let it sleep, for a few
+minutes. Come back. Expected: the window recovers by itself (when it showed the bar `skydeck's
+server is not answering`, the bar goes once it is connected again), keys work, the terminal is
+drawn again, the session still runs (send it a prompt).
+
+The key-test page can do the same: `docs/check-kit/STEPS.txt`, step 3.
+
+Write down: what the window showed after the wake, and how long it took to work again.
+
+## Minimised for half an hour
+
+The page judges that the server is silent only against a ping it really sent, so a window whose
+timers Chromium holds back (hidden, minimised, covered) must keep its connection. Minimise the
+window (or cover it with another window) for half an hour. Meanwhile, in W, `skydeck doctor`
+says `1 page` in its server line, and `skydeck window` says `a window is already open` and opens
+no second one. Then bring the window back. Expected: no `skydeck's server is not answering` bar
+and no `restarted` notice; the terminal answers at once.
+
+Write down: anything the window showed when it came back; whether a second window opened.
+
+## W17. The full-screen mode comes back after a restart (real claude)
+
+In the throwaway session, `/tui fullscreen` (or whatever your Claude Code calls its full-screen
+mode). Scroll with the mouse wheel, take a screenshot, then in W: `skydeck window --restart`.
+Expected: the full-screen screen is back as it was, and the mouse wheel acts as before.
+
+Write down: what differed.
+
+## W18. A terminal query answered late (real claude)
+
+Claude Code asks its terminal a few questions when it starts. Make the server be away while it
+does: have `skydeck window --stop` typed in W, open a new throwaway session in the window (Ctrl+Shift+N,
+Enter), and press Enter in W right after. Wait 5 seconds, then `skydeck window` (or
+`skydeck window --restart`), and look at the new session's prompt.
+
+Expected: no characters you did not type in the prompt (such as `[?62;c`, `0;276;0c`, `[1;1R` or
+`rgb:`), and the first keys you type arrive.
+
+Write down: any stray characters; whether a key was swallowed.
+
+## W20. Privilege management lets Edge and wsl.exe start
+
+The PC's privilege management (BeyondTrust on the development PC) must neither block nor ask for
+`msedge.exe` started by `skydeck window` (W1) or for the keep-alive's `wsl.exe`, which the server
+starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`). Watch for a dialog
+during W1 and right after a `skydeck window --restart`.
+
+Write down: any dialog's exact text, and what you chose.
+
+## W22. A session from another terminal (real claude)
+
+In W: `cd ~/skydeck-try && claude`, send one prompt. In the window its row shows `running in another
+terminal`; select it: a card with its pid, its terminal device and its directory, and no way to
+show or resume it in the window (Enter shows the card). In a second W, `skydeck resume <ref>` is
+refused with the guard's message (`skydeck: <short id> is running (pid <n>)`, exit 4). Then `/exit`
+the session in the first W. Within a few seconds its row in the window is not running and shows the
+resume card; Enter resumes it into the window, with its conversation.
+
+Write down: what the card showed; whether the resume into the window worked.
+
+## W23. What Claude Code sets for the programs it runs (real claude)
+
+In the throwaway session, the names only (never the values):
+
+```
+! env | cut -d= -f1 | grep '^CLAUDE' | sort
+```
+
+and in W the same without the `!`. Write down the names that only the session has, and compare
+them with the list in design-step-2.md, section 7.4 (the names skydeck takes out of a window
+program's environment). Then, in the session, `! skydeck window`: it refuses with
+`skydeck: the window's server is not started from inside a Claude Code session: …` (exit 1).
+
+Write down: the names; whether `skydeck window` refused.
+
+## W24. No crash dumps
+
+A crashing process's dump on WSL goes to a Windows folder, `%Temp%\wsl-crashes` (or the folder
+`crashDumpFolder` in `.wslconfig` names). skydeck's keepers and server must leave none: a dump
+would hold the screens. Before you start, in W, look at the folder (put your Windows user name for
+`<you>`) and write down what is there:
+
+```sh
+ls -l /mnt/c/Users/<you>/AppData/Local/Temp/wsl-crashes
+```
+
+**A keeper.** This ends that session. In `skydeck doctor`'s keeper lines, find the keeper of the
+throwaway session (`keeper <id>: running (pid <n>, …) …, session <id>`), then `kill -SEGV <that
+pid>`. Expected: the window shows that terminal's bar `the terminal's keeper ended unexpectedly;
+claude ended with it`.
+
+**The server's Node.js.** A throwaway server in a trial installation, so that the window's own
+server is not touched. In W:
+
+```sh
+T=$(mktemp -d); echo "$T"
+mkdir -p "$T/config"
+printf '{ "window": { "port": 47699, "keepAlive": "off" } }\n' > "$T/config/config.json"
+SKYDECK_HOME="$T" skydeck serve --foreground
+```
+
+In a second W (put the directory the first one printed for `$T`):
+
+```sh
+T=/tmp/tmp.XXXXXXXXXX
+grep 'Max core file size' /proc/$(cut -d' ' -f1 "$T/run/server.pid")/limits
+kill -SEGV "$(cut -d' ' -f1 "$T/run/server.pid")"
+rm -r "$T"
+```
+
+Expected: the soft limit is `1` (bytes), and the server in the first W ends.
+
+Then look at the folder again: no new file. Write down: the folder before and after; the limit.
+
+## W25. A Windows program on skydeck's port
+
+This puts a program of yours on skydeck's port on the Windows side for a few minutes. **On a
+managed company PC only with the agreement of the PC's owner.** It is a PowerShell line typed at
+the prompt: no script file, no change to the execution policy. In W first:
+`skydeck window --stop` (the sessions keep running).
+
+In P, with your `window.port` if you changed it, and leave it running:
+
+```powershell
+$l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 47613); $l.Start(); 'listening on 127.0.0.1:47613; Ctrl+C stops'; try { while ($true) { Start-Sleep -Seconds 1 } } finally { $l.Stop() }
+```
+
+In W: `skydeck window`. The server starts (WSL does not see the Windows program), Edge opens, but
+the page does not load: the program takes the connection and answers nothing, so the command ends
+with `Edge was started, but no window connected within 30 seconds; …`. In a second P:
+
+```powershell
+curl.exe -s -m 5 -o NUL -w "%{http_code}`n" http://127.0.0.1:47613/
+curl.exe -s -m 5 -o NUL -w "%{http_code}`n" "http://[::1]:47613/"
+```
+
+The first prints `000` (the program answers nothing). The second: a number such as `421` means that
+skydeck's server in WSL answers on Windows' IPv6 loopback — the case in which a program could sit
+between window and server (design-step-2.md, 15.3); `000` means it does not.
+
+Then Ctrl+C in the first P (the program stops), close the window that did not load, and in W
+`skydeck window --restart`. The program served no page, so nothing of skydeck's key reached it.
+
+The design's second question, whether Edge drops a service worker that a program like this left in
+the window's profile once skydeck's server answers its script with 404: the page tests answer it
+for Chromium — it is NOT dropped, it keeps answering the window's loads — and for Edge it stays
+open: the kit plants no worker in your profile. The known limit and the way out are those of
+install.md ("Known limits"): close every skydeck window, delete the window's profile folder, and
+run `skydeck window --new-secret`.
+
+Write down: the two answers of `curl.exe`; what the window showed.
+
+## W26. A restart while the alternate screen shows (real claude)
+
+In the throwaway session, `/tui fullscreen` (as in W17). Take a screenshot, run `skydeck window
+--restart` in W, and compare. Then leave the full-screen mode and compare the normal screen with
+how it looked before. What a rebuilt screen does not restore (the scroll region, the saved cursor,
+the character sets) would show as a cursor in the wrong place, or lines scrolled or drawn wrong.
+
+Write down: what differed, in the full-screen mode and after it.

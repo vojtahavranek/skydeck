@@ -2676,8 +2676,8 @@ What only the real Claude Code or the Windows desktop can settle: the lists of t
 tracks (terminals, window, UI), merged. Each check names the stage that needs it (19) and the
 sections it can change. They join [manual-checks.md](manual-checks.md) when their stage is built;
 the research's check kit (an Edge key-test page, a lifetime script for a throwaway distribution) is
-kept with the research notes. Items marked **real claude** use a real session in a throwaway
-folder, as in manual-checks.md.
+in the repository, in `docs/check-kit/` (ruled by the plan owner, stage A's plan task 30). Items
+marked **real claude** use a real session in a throwaway folder, as in manual-checks.md.
 
 | # | Check | Stage | Decides |
 |---|---|---|---|
