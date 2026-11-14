@@ -812,3 +812,24 @@ describe('install: arguments', () => {
     assert.equal(command.summary, 'Install the hooks and links');
   });
 });
+
+describe('install: python3 that cannot be started (review 2)', () => {
+  test('a python3 the system refuses to start (EACCES): install succeeds with the info line', async (t) => {
+    const d = testPlatform(t);
+    const runner = fakeRunner((call) => {
+      if (call.command === 'python3') {
+        throw Object.assign(new Error('spawn python3 EACCES'), { code: 'EACCES' });
+      }
+      return runResult({});
+    });
+
+    const r = await run({ ...d.platform, runner }, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(
+      r.stdout,
+      /^the window \(skydeck window\) needs python3 3\.9 or newer; the commands do not$/m,
+    );
+    assert.match(r.stdout, /skydeck is installed\n$/);
+  });
+});

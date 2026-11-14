@@ -2,6 +2,7 @@
 // with `python3 --version` — the only program install starts, and the one doctor starts besides
 // gh and wezterm (S2 16.1, 16.3). 3.9 is the oldest the keeper's code allows.
 import type { Env, Platform } from '../platform/types.ts';
+import { describeError } from '../sessions/problems.ts';
 
 const TIMEOUT_MS = 10_000;
 /** `Python 3.12.3`: what `--version` prints (python 3 on stdout, python 2 on stderr). */
@@ -20,12 +21,21 @@ function definedEnv(env: Env): Record<string, string> {
   );
 }
 
-/** `python3 --version` in the platform's environment, and what it says. Never throws for its result. */
+/**
+ * `python3 --version` in the platform's environment, and what it says. Never throws: a python3 the
+ * system refuses to start (EACCES: no execute bit, a PATH directory that cannot be searched) is
+ * `failed`, with the error's code (describeError, never a message that could quote anything).
+ */
 export async function probePython3(platform: Platform): Promise<Python3> {
-  const result = await platform.runner.run('python3', ['--version'], {
-    timeoutMs: TIMEOUT_MS,
-    env: definedEnv(platform.env),
-  });
+  let result: Awaited<ReturnType<Platform['runner']['run']>>;
+  try {
+    result = await platform.runner.run('python3', ['--version'], {
+      timeoutMs: TIMEOUT_MS,
+      env: definedEnv(platform.env),
+    });
+  } catch (error) {
+    return { kind: 'failed', why: describeError(error) };
+  }
   if (result.notFound) {
     return { kind: 'missing' };
   }

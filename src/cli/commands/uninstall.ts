@@ -12,14 +12,14 @@
 // `.pid` lines in every directory that can be the runtime directory and refuses, before it does
 // anything, while one may live; otherwise it also removes those directories.
 import { createHash } from 'node:crypto';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import { removeHookEntries, rewriteReport, settingsPath } from '../../claude/settings.ts';
 import type { Config } from '../../platform/config.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import { runtimeDirCandidates, storeId } from '../../platform/paths.ts';
 import type { Places } from '../../platform/paths.ts';
-import type { Files, Platform } from '../../platform/types.ts';
+import type { FileInfo, Files, Platform } from '../../platform/types.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import type { Deck } from '../../sessions/deck.ts';
 import { describeError } from '../../sessions/problems.ts';
@@ -243,28 +243,71 @@ function refuseWhileKeepersMayLive(
   }
 }
 
-/** What a runtime directory holds (S2 4.2), and the temporaries its writers leave (`.<name>.tmp`). */
-const RUNTIME_ENTRY =
-  /^(?:server\.json|server\.sock|server\.pid|keepalive\.pid|keepalive\.interop|interop|terms|keeper-[A-Za-z0-9_-]+\.py|\..+\.tmp)$/;
-const TERMS_ENTRY = /^(?:[0-9a-f]{12}\.(?:sock|pid)|\..+\.tmp)$/;
+type Kind = FileInfo['kind'];
+
+/** What a runtime directory holds (S2 4.2), each of its kind (a socket is 'other'). */
+const RUNTIME_ENTRIES: Readonly<Record<string, Kind>> = {
+  'server.json': 'file',
+  'server.pid': 'file',
+  'server.sock': 'other',
+  'keepalive.pid': 'file',
+  'keepalive.interop': 'file',
+  interop: 'symlink',
+  terms: 'dir',
+};
+const KEEPER_CODE = /^keeper-[A-Za-z0-9_-]+\.py$/;
+/**
+ * The temporaries its writers leave when a write is cut short: Files.writeText's and symlink's
+ * `.<name>.<12 hex>.tmp`, the keep-alive script's `.<name>.<pid>.tmp`.
+ */
+const RUNTIME_TEMP =
+  /^\.(?:server\.json|server\.pid|keepalive\.pid|keepalive\.interop|interop|keeper-[A-Za-z0-9_-]+\.py)\.(?:[0-9a-f]{12}|[0-9]+)\.tmp$/;
+/** In terms/: `<terminal id>.sock` (a socket) and `.pid` (a file). */
+const TERMS_ENTRY = /^[0-9a-f]{12}\.(sock|pid)$/;
+/** The keeper's `.<id>.<pid>.tmp` and Files.writeText's `.<id>.pid.<12 hex>.tmp`. */
+const TERMS_TEMP = /^\.[0-9a-f]{12}(?:\.pid)?\.(?:[0-9a-f]{12}|[0-9]+)\.tmp$/;
+
+/** The kinds an entry of a runtime directory may have; null for a name it does not hold. */
+function runtimeKinds(name: string): readonly Kind[] | null {
+  const kind = Object.hasOwn(RUNTIME_ENTRIES, name) ? RUNTIME_ENTRIES[name] : undefined;
+  if (kind !== undefined) return [kind];
+  if (KEEPER_CODE.test(name)) return ['file'];
+  if (RUNTIME_TEMP.test(name)) return ['file', 'symlink'];
+  return null;
+}
+
+function termsKinds(name: string): readonly Kind[] | null {
+  const entry = TERMS_ENTRY.exec(name);
+  if (entry !== null) return [entry[1] === 'sock' ? 'other' : 'file'];
+  return TERMS_TEMP.test(name) ? ['file'] : null;
+}
 
 /**
- * Removes a runtime directory, only when it is a directory of the user's (never a symbolic link
- * followed) holding nothing but what a runtime directory holds: the store's record is only a path,
- * and a directory it names that holds anything else is not skydeck's to remove.
+ * Removes a runtime directory only when it is a plain path (no trailing `/`, `.` or `..`: such a
+ * path is followed through a symbolic link), a directory of the user's that is not a symbolic link,
+ * holding nothing but what a runtime directory holds, each of its kind: the store's record is only
+ * a path, and nothing of the user's is destroyed (A38, principle 6). Otherwise, and when it cannot
+ * be looked at, it is left alone and named, and the purge goes on.
  */
 function removeRuntimeDir(ctx: Context, platform: Platform, dir: string): void {
   const { files } = platform;
-  const info = files.lstat(dir);
-  if (info === null) return;
-  let foreign: string | null;
-  if (info.kind !== 'dir') {
-    foreign = info.kind === 'symlink' ? 'is a symbolic link' : 'is not a directory';
-  } else if (info.uid !== platform.uid) {
-    foreign = `belongs to uid ${info.uid}`;
-  } else {
-    const other = foreignEntry(files, dir);
-    foreign = other === null ? null : `holds ${other}, which skydeck does not write`;
+  let foreign: string | null = null;
+  try {
+    const info = resolve(dir) === dir ? files.lstat(dir) : undefined;
+    if (info === undefined) {
+      foreign = 'is not a plain path (a trailing /, or a . or .. in it)';
+    } else if (info === null) {
+      return;
+    } else if (info.kind !== 'dir') {
+      foreign = info.kind === 'symlink' ? 'is a symbolic link' : 'is not a directory';
+    } else if (info.uid !== platform.uid) {
+      foreign = `belongs to uid ${info.uid}`;
+    } else {
+      const other = foreignEntry(files, dir);
+      foreign = other === null ? null : `holds ${other}, which skydeck did not write`;
+    }
+  } catch (error) {
+    foreign = `cannot be looked at (${describeError(error)})`;
   }
   if (foreign !== null) {
     ctx.io.stdout(`left ${sanitize(dir)} alone: it ${sanitize(foreign)}\n`);
@@ -274,17 +317,19 @@ function removeRuntimeDir(ctx: Context, platform: Platform, dir: string): void {
   ctx.io.stdout(`removed ${sanitize(dir)}\n`);
 }
 
-/** The first entry of a runtime directory that is not one of its own (`terms/<name>` inside terms/). */
+/** The first entry that a runtime directory does not hold, or not of that kind (`terms/<name>` inside terms/). */
 function foreignEntry(files: Files, dir: string): string | null {
+  const odd = (path: string, kinds: readonly Kind[] | null): boolean => {
+    const kind = files.lstat(path)?.kind;
+    return kinds === null || (kind !== undefined && !kinds.includes(kind));
+  };
   for (const name of files.list(dir)) {
-    if (!RUNTIME_ENTRY.test(name)) return name;
+    if (odd(join(dir, name), runtimeKinds(name))) return name;
   }
   const terms = join(dir, 'terms');
-  const info = files.lstat(terms);
-  if (info === null) return null;
-  if (info.kind !== 'dir') return 'terms';
+  if (files.lstat(terms)?.kind !== 'dir') return null;
   for (const name of files.list(terms)) {
-    if (!TERMS_ENTRY.test(name)) return `terms/${name}`;
+    if (odd(join(terms, name), termsKinds(name))) return `terms/${name}`;
   }
   return null;
 }

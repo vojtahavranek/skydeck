@@ -995,3 +995,168 @@ describe('doctor and uninstall read nothing under /mnt/ in a test sandbox', () =
     });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// From review 2
+
+describe('doctor: from review 2', () => {
+  test('a python3 that cannot be started (EACCES): python3 --version failed, and the checks go on', async (t) => {
+    const m = machine(t);
+    const runner = {
+      ...m.platform.runner,
+      run: (
+        command: string,
+        args: readonly string[],
+        options?: Parameters<Platform['runner']['run']>[2],
+      ) =>
+        command === 'python3'
+          ? Promise.reject(Object.assign(new Error('spawn python3 EACCES'), { code: 'EACCES' }))
+          : m.platform.runner.run(command, args, options),
+    };
+
+    const r = await doctor(m, { runner });
+
+    lineOf(
+      r,
+      'problem',
+      /^problem {2}python3 --version failed \(EACCES\): the window \(skydeck window\) needs python3 3\.9 or newer/,
+    );
+    noLine(r, /python3: could not be checked/);
+  });
+
+  test('a keepalive.pid that cannot be read is "cannot be told", never "no keep-alive"', async (t) => {
+    if (process.getuid?.() === 0) return t.skip('root reads anything');
+    const m = machine(t);
+    const files = m.makeRuntime();
+    writeKeeperLine(files, ID_A, (await liveProcess(t, m)).line);
+    writeFileSync(files.keepalivePid, formatPidLine((await liveProcess(t, m)).line));
+    chmodSync(files.keepalivePid, 0o000);
+
+    const r = await doctor(m);
+
+    lineOf(
+      r,
+      'info',
+      /^info {5}keep-alive: keepalive\.pid cannot be read, so whether it runs cannot be told$/,
+    );
+    noLine(r, /WSL is not kept running/);
+  });
+
+  test('lines that cannot be judged (no boot id) are never counted dead: keepers and the keep-alive', async (t) => {
+    const m = machine(t);
+    const files = m.makeRuntime();
+    const keeper = await liveProcess(t, m);
+    writeKeeperLine(files, ID_A, keeper.line);
+    const script = await liveProcess(t, m);
+    writeFileSync(files.keepalivePid, formatPidLine(script.line));
+
+    const r = await doctor(m, { proc: { ...m.platform.proc, bootId: () => null } });
+
+    lineOf(r, 'info', /^info {5}keepers: 0 running, 1 cannot be told$/);
+    lineOf(
+      r,
+      'info',
+      new RegExp(`^info {5}keeper ${ID_A}: whether it runs cannot be told \\(pid ${keeper.pid};`),
+    );
+    lineOf(
+      r,
+      'info',
+      new RegExp(`^info {5}keep-alive: whether it runs cannot be told \\(pid ${script.pid};`),
+    );
+    noLine(r, /not running; its \.pid line is removed/);
+    noLine(r, /WSL is not kept running/);
+  });
+
+  test('a keep-alive whose wsl.exe is gone (keepalive.interop refused) is not running: the problem while a keeper lives', async (t) => {
+    const m = machine(t);
+    const files = m.makeRuntime();
+    writeKeeperLine(files, ID_A, (await liveProcess(t, m)).line);
+    writeFileSync(files.keepalivePid, formatPidLine((await liveProcess(t, m)).line));
+    writeFileSync(files.keepaliveInterop, join(m.s.root, 'gone-interop.sock'));
+
+    const r = await doctor(m);
+
+    const line = lineOf(
+      r,
+      'problem',
+      /^problem {2}WSL is not kept running while the window has terminals/,
+    );
+    assert.match(line, /the keep-alive's wsl\.exe is gone/);
+    noLine(r, /keep-alive wsl\.exe running/);
+  });
+
+  test('a keep-alive whose keepalive.interop socket accepts, or gives no judgement, is running', async (t) => {
+    const m = machine(t);
+    const files = m.makeRuntime();
+    writeKeeperLine(files, ID_A, (await liveProcess(t, m)).line);
+    writeFileSync(files.keepalivePid, formatPidLine((await liveProcess(t, m)).line));
+    const socket = join(m.s.root, 'live-interop.sock');
+    const listening = await countingSocket(t, socket);
+    writeFileSync(files.keepaliveInterop, socket);
+
+    lineOf(await doctor(m), 'info', /keep-alive wsl\.exe running/);
+    assert.equal(listening.connections(), 1, 'one connection, nothing sent');
+
+    writeFileSync(files.keepaliveInterop, '');
+    lineOf(await doctor(m), 'info', /keep-alive wsl\.exe running/);
+  });
+
+  test('keepalive.interop naming a socket in the runtime directory is never connected to', async (t) => {
+    const m = machine(t);
+    const files = m.makeRuntime();
+    const keeper = await countingSocket(t, files.termSock(ID_A));
+    writeKeeperLine(files, ID_A, (await liveProcess(t, m)).line);
+    writeFileSync(files.keepalivePid, formatPidLine((await liveProcess(t, m)).line));
+    writeFileSync(files.keepaliveInterop, files.termSock(ID_A));
+
+    await doctor(m);
+
+    assert.equal(keeper.connections(), 0);
+  });
+
+  test('the keep-alive problem line does not advise wsl --shutdown while sessions run without saying what it does', async (t) => {
+    const m = machine(t);
+    writeKeeperLine(m.makeRuntime(), ID_A, (await liveProcess(t, m)).line);
+
+    const line = lineOf(await doctor(m), 'problem', /WSL is not kept running/);
+
+    assert.match(line, /run wsl --shutdown once when no session runs \(it ends every session\)$/);
+  });
+
+  test('a server that answers on another port than window.port, which a foreign listener holds: a problem', async (t) => {
+    const listener = createServer();
+    listener.listen(0, '127.0.0.1');
+    await once(listener, 'listening');
+    t.after(() => listener.close());
+    const address = listener.address();
+    assert.ok(typeof address === 'object' && address !== null);
+    const m = machine(t, { window: { port: address.port } });
+    await startFakeServe(t, m); // its ping says port 47613
+
+    const r = await doctor(m);
+
+    lineOf(
+      r,
+      'problem',
+      new RegExp(
+        `something that is not this installation's window server listens on 127\\.0\\.0\\.1:${address.port}`,
+      ),
+    );
+  });
+
+  test('text from the server is shown sanitised: no escape, no bidi control, no forged line', async (t) => {
+    const m = machine(t);
+    const hostile = '/x\u001b[31m\nproblem  forged‮\u001b]8;;http://e\u0007y';
+    await startFakeServe(t, m, {
+      FAKE_SERVE_CHECKOUT: hostile,
+      FAKE_SERVE_TERMINALS: '1',
+      SKYDECK_ENV_ORIGIN: hostile,
+    });
+
+    const r = await doctor(m);
+
+    assert.doesNotMatch(r.stdout, /[\u001b\u009b‪-‮⁦-⁩]/);
+    assert.ok(!r.lines.some((line) => line.startsWith('problem  forged')), r.stdout);
+    lineOf(r, 'problem', /the window's server runs from \/x problem {2}forged/);
+  });
+});

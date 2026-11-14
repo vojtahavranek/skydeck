@@ -38,7 +38,7 @@ import type { RuntimeFiles } from '../window/runtime.ts';
 import { verifyVendored } from '../window/vendor.ts';
 import { deriveProfileDirUnder } from '../window/windows.ts';
 import { instanceIdleTimeout } from '../window/wslconfig.ts';
-import { probePython3 } from './python.ts';
+import { PYTHON3_NEEDED, probePython3 } from './python.ts';
 
 type Kind = 'ok' | 'info' | 'problem';
 type Report = (kind: Kind, text: string) => void;
@@ -84,8 +84,6 @@ export interface WindowCheck {
 }
 
 const NOT_MOUNTED = 'the C: drive is not mounted at /mnt/c';
-const PYTHON3_NEEDED =
-  'the window (skydeck window) needs python3 3.9 or newer for its terminals; the commands do not';
 /** Where systemd marks a user whose runtime directory outlives their last login session (S2 4.2). */
 const LINGER_DIR = '/var/lib/systemd/linger';
 /** The python3 the launcher starts `serve` through (S2 2); a test sandbox may name another (A31). */
@@ -321,7 +319,8 @@ function checkAlarm(view: WindowView, report: Report): void {
 /**
  * S2 16.3 keep-alive (6.1): a problem when a server or a keeper runs and neither protection is in
  * effect — `.wslconfig`'s instanceIdleTimeout=-1 (read from the Windows profile folder found as in
- * 5.4), or a running keep-alive (by the server's own word when it answers, else by its pid line).
+ * 5.4), or a running keep-alive: by the server's own word when it answers, else by its pid line and,
+ * as the server judges one it did not start, its `keepalive.interop` socket.
  */
 async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
   const { config } = view.deck ?? unreachable();
@@ -331,20 +330,23 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
     return;
   }
   const server = await view.server();
-  const keepAlive = keepAliveState(view, server);
-  if (keepAlive.kind === 'running') {
-    report(
-      'info',
-      `keep-alive wsl.exe running (pid ${keepAlive.pid}, since ${keepAlive.since}); that it keeps WSL running is unverified (manual check W14)`,
-    );
-    return;
-  }
-  if (keepAlive.kind === 'unknown') {
-    report(
-      'info',
-      `keep-alive: whether it runs cannot be told (pid ${keepAlive.pid}; the boot id or its /proc entry cannot be read)`,
-    );
-    return;
+  const keepAlive = await keepAliveState(view, server);
+  switch (keepAlive.kind) {
+    case 'running':
+      report(
+        'info',
+        `keep-alive wsl.exe running (pid ${keepAlive.pid}, since ${keepAlive.since}); that it keeps WSL running is unverified (manual check W14)`,
+      );
+      return;
+    case 'unknown':
+      report(
+        'info',
+        `keep-alive: whether it runs cannot be told (pid ${keepAlive.pid}; the boot id or its /proc entry cannot be read)`,
+      );
+      return;
+    case 'unreadable':
+      report('info', 'keep-alive: keepalive.pid cannot be read, so whether it runs cannot be told');
+      return;
   }
   const serverRuns = server.kind !== 'none';
   const terminals = view.keepers().some((keeper) => keeper.state !== 'dead');
@@ -354,7 +356,7 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
   }
   const what =
     serverRuns && terminals ? 'a server and terminals' : serverRuns ? 'a server' : 'terminals';
-  const why = ['no keep-alive runs'];
+  const why = [keepAlive.why];
   if (config.window.keepAlive === 'off') why.push('window.keepAlive is off');
   if (answered(server) && server.status?.keepAlive.error) {
     why.push(`the keep-alive ${server.status.keepAlive.state}: ${server.status.keepAlive.error}`);
@@ -362,25 +364,21 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
   why.push(wslconfig.why);
   report(
     'problem',
-    `WSL is not kept running while the window has ${what} (${why.join('; ')}): WSL stops 15 s after its last Windows client and ends every session; set instanceIdleTimeout=-1 under [general] in ${wslconfig.windowsPath} and run wsl --shutdown once`,
+    `WSL is not kept running while the window has ${what} (${why.join('; ')}): WSL stops 15 s after its last Windows client and ends every session; set instanceIdleTimeout=-1 under [general] in ${wslconfig.windowsPath} and run wsl --shutdown once when no session runs (it ends every session)`,
   );
 }
 
 type KeepAliveState =
   | { kind: 'running'; pid: number | string; since: string }
-  | { kind: 'unknown'; pid: number }
-  | { kind: 'none' };
+  | { kind: 'unknown'; pid: number } // its line cannot be judged
+  | { kind: 'unreadable' } // keepalive.pid is there but cannot be read: cannot tell (as the server)
+  | { kind: 'none'; why: string };
 
-function keepAliveState(view: WindowView, server: Server): KeepAliveState {
+const NO_KEEP_ALIVE = 'no keep-alive runs';
+
+async function keepAliveState(view: WindowView, server: Server): Promise<KeepAliveState> {
   const { platform } = view.facts;
   const { files } = view.runtime();
-  let line: PidLine | null = null;
-  try {
-    const text = platform.files.readText(files.keepalivePid);
-    line = text === null ? null : parsePidLine(text);
-  } catch {
-    line = null;
-  }
   const modified = (): string => {
     try {
       const info = platform.files.stat(files.keepalivePid);
@@ -389,21 +387,65 @@ function keepAliveState(view: WindowView, server: Server): KeepAliveState {
       return 'an unknown time';
     }
   };
+  let text: string | null = null;
+  let unreadable = false;
+  try {
+    text = platform.files.readText(files.keepalivePid);
+  } catch {
+    unreadable = true;
+  }
+  const line = text === null ? null : parsePidLine(text);
   if (answered(server) && server.status !== null) {
     // The server judges its keep-alive itself, an orphan's wsl.exe included (S2 6.1).
     const { state, since } = server.status.keepAlive;
-    if (state !== 'running') return { kind: 'none' };
+    if (state !== 'running') return { kind: 'none', why: NO_KEEP_ALIVE };
     return {
       kind: 'running',
       pid: line?.pid ?? '?',
       since: since === null ? modified() : timeOf(since),
     };
   }
-  if (line === null) return { kind: 'none' };
+  if (unreadable) return { kind: 'unreadable' };
+  if (line === null) return { kind: 'none', why: NO_KEEP_ALIVE };
   const state = pidLineState(line, platform.proc, bootIdOf(platform));
-  if (state === 'alive') return { kind: 'running', pid: line.pid, since: modified() };
   if (state === 'unknown') return { kind: 'unknown', pid: line.pid };
-  return { kind: 'none' };
+  if (state === 'dead') return { kind: 'none', why: NO_KEEP_ALIVE };
+  if ((await keepAliveSocket(view)) === 'refused') {
+    return {
+      kind: 'none',
+      why: "the keep-alive's wsl.exe is gone (its keepalive.interop socket refuses); no keep-alive runs",
+    };
+  }
+  return { kind: 'running', pid: line.pid, since: modified() };
+}
+
+/**
+ * S2 6.1's judgement of a keep-alive no answering server watches: one connection, sending nothing,
+ * to the socket `keepalive.interop` names. 'refused' when it is refused or not there (its wsl.exe is
+ * gone); anything else — no file, an empty one, one that cannot be read, a path that is not
+ * absolute, no answer in 2 s — is no judgement, and so is a socket inside the runtime directory,
+ * which is never connected to (a keeper's, S2 7.1).
+ */
+async function keepAliveSocket(view: WindowView): Promise<'refused' | 'no judgement'> {
+  const { files: fs } = view.facts.platform;
+  const { files } = view.runtime();
+  let path: string | null;
+  try {
+    path = fs.readText(files.keepaliveInterop);
+  } catch {
+    return 'no judgement';
+  }
+  if (path === null || !path.startsWith('/') || /[\0\n\r]/.test(path)) return 'no judgement';
+  let real: string | null;
+  try {
+    real = fs.realpath(path);
+  } catch {
+    return 'no judgement';
+  }
+  if (real === null) return 'refused'; // the path is not there
+  const dir = fs.realpath(files.dir) ?? files.dir;
+  if (real === dir || real.startsWith(`${dir}/`)) return 'no judgement';
+  return (await probeSocket(view.facts.platform, real)) === 'refused' ? 'refused' : 'no judgement';
 }
 
 /** `.wslconfig` in the Windows user's folder (S2 6.1): whether it keeps WSL running, and if not why. */

@@ -10,6 +10,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -440,5 +441,135 @@ describe('uninstall --purge', () => {
 
     assert.equal(live.connections(), 0);
     assert.equal(dead.connections(), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// From review 2
+
+describe('uninstall --purge: from review 2', () => {
+  test('without a database, a live keeper line in <stateDir>/run-<id> refuses before anything is undone', async (t) => {
+    const m = await installed(t);
+    const dir = join(m.places.stateDir, `run-${storeId(m.places.dbPath)}`);
+    writeKeeperLine(runtimeAt(dir), ID_A, (await liveProcess(t, m)).line);
+    rmSync(m.places.dbPath); // the test's own connection keeps its file open; the path is gone
+
+    const r = await uninstall(m, ['--purge']);
+
+    assert.equal(r.code, 1, r.stdout);
+    assert.match(
+      r.stderr,
+      /uninstall --purge removed nothing: terminals of the window may still run: aaaaaaaaaaaa/,
+    );
+    stillInstalled(m);
+  });
+
+  test('a terms/ that cannot be listed refuses before anything is undone', async (t) => {
+    if (process.getuid?.() === 0) return t.skip('root reads anything');
+    const m = await installed(t);
+    const files = m.makeRuntime();
+    chmodSync(files.termsDir, 0o000);
+    try {
+      const r = await uninstall(m, ['--purge']);
+
+      assert.equal(r.code, 1, r.stdout);
+      assert.match(
+        r.stderr,
+        /uninstall --purge removed nothing: the terminals in .*\/terms cannot be listed \(EACCES\)/,
+      );
+      stillInstalled(m);
+    } finally {
+      chmodSync(files.termsDir, 0o700);
+    }
+  });
+
+  test('a runtime directory that cannot be looked at is left alone and named; the purge goes on', async (t) => {
+    if (process.getuid?.() === 0) return t.skip('root reads anything');
+    const m = await installed(t);
+    const files = m.makeRuntime();
+    chmodSync(files.dir, 0o300); // terms/ can still be listed, the directory itself cannot
+    try {
+      const r = await uninstall(m, ['--purge']);
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok(
+        r.lines.some((line) =>
+          line.startsWith(`left ${files.dir} alone: it cannot be looked at (EACCES`),
+        ),
+        r.stdout,
+      );
+      assert.equal(existsSync(m.places.dataDir), false, 'the rest of the purge is done');
+    } finally {
+      chmodSync(files.dir, 0o700);
+    }
+  });
+
+  test('a recorded directory with a trailing slash through a symbolic link: the target is never emptied', async (t) => {
+    const m = await installed(t);
+    const target = join(m.s.root, 'target');
+    const files = runtimeAt(target);
+    writeFileSync(files.serverJson, '{}');
+    symlinkSync(target, join(m.s.root, 'link'));
+    const recorded = `${join(m.s.root, 'link')}/`;
+    m.deck.store.setKv('window_runtime_dir', recorded);
+
+    const r = await uninstall(m, ['--purge']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(existsSync(files.serverJson) && existsSync(files.termsDir), 'the target stays whole');
+    assert.ok(
+      r.lines.includes(
+        `left ${recorded} alone: it is not a plain path (a trailing /, or a . or .. in it)`,
+      ),
+      r.stdout,
+    );
+  });
+
+  test('an entry of the wrong kind, an odd temporary or a foreign file inside terms/: left alone', async (t) => {
+    for (const make of [
+      (files: RuntimeFiles) => writeFileSync(join(files.termsDir, 'notes.txt'), 'mine'),
+      (files: RuntimeFiles) => mkdirSync(files.termPid(ID_A)),
+      (files: RuntimeFiles) => mkdirSync(join(files.dir, 'keeper-0123abcd.py')),
+      (files: RuntimeFiles) => writeFileSync(join(files.dir, '.mine.tmp'), 'mine'),
+      (files: RuntimeFiles) => writeFileSync(files.interop, 'not a link'),
+    ]) {
+      const m = await installed(t);
+      const files = m.makeRuntime();
+      make(files);
+
+      const r = await uninstall(m, ['--purge']);
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok(existsSync(files.termsDir), `${make.toString()}\n${r.stdout}`);
+      assert.ok(
+        r.lines.some((line) => line.startsWith(`left ${files.dir} alone: it holds `)),
+        r.stdout,
+      );
+    }
+  });
+
+  test('what a runtime directory holds, temporaries of its writers included, is removed', async (t) => {
+    const m = await installed(t);
+    const files = m.makeRuntime();
+    for (const name of [
+      'server.json',
+      'server.pid',
+      'keepalive.pid',
+      'keepalive.interop',
+      'keeper-0123abcd4567ef89.py',
+      '.server.json.0123456789ab.tmp',
+      '.keepalive.pid.4242.tmp',
+    ]) {
+      writeFileSync(join(files.dir, name), '');
+    }
+    symlinkSync(join(m.s.root, 'gone.sock'), files.interop);
+    writeKeeperLine(files, ID_A, await endedLine(t, m));
+    writeFileSync(join(files.termsDir, `.${ID_B}.4242.tmp`), '');
+    await countingSocket(t, files.termSock(ID_C));
+
+    const r = await uninstall(m, ['--purge']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(existsSync(files.dir), false, r.stdout);
   });
 });
