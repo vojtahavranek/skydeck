@@ -1,1 +1,302 @@
-/* The header and the cards (S2 7.8, 7.9, 12.5, 12.6): task 29 fills this file. */
+/* The header and the cards (S2 7.8, 7.9, 12.5, 12.6) and the key help's content (S2 12.9);
+   task 29. The help's box itself (`.help`, its place over the page) is in style.css. Text stays
+   selectable everywhere here (S2 12.9: a header's or a card's text can be copied), and a command,
+   a path, a terminal device and a result's lines keep every space they have (pre-wrap): copied, a
+   collapsed `My  Project` would name another directory. */
+
+.card-header {
+  padding: 8px 14px 7px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.header-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.header-title {
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.header-group {
+  font:
+    12px 'Cascadia Mono',
+    Consolas,
+    monospace;
+  background: var(--kbd);
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.header-state {
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  background: var(--kbd);
+  color: var(--dim);
+}
+.header-chip {
+  font-size: 11px;
+  border-radius: 9px;
+  padding: 0 6px;
+  line-height: 16px;
+  border: 1px solid var(--line2);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.header-chip[data-level='checks-failing'] {
+  color: var(--crash);
+  border-color: var(--crash);
+  background: var(--crash-bg);
+}
+.header-chip[data-level='changes-requested'],
+.header-chip[data-level='checks-pending'] {
+  color: var(--wait);
+  border-color: var(--wait);
+}
+.header-chip[data-level='cant-read'] {
+  border-style: dotted;
+}
+.header-chip[data-level='draft'],
+.header-chip[data-level='unfetched'] {
+  border-style: dashed;
+}
+.header-sub {
+  /* One line whatever the directory and the width, so that the header has one height (ruled):
+     the directory is cut with an ellipsis (whole in the page and its tooltip), the id never. */
+  display: flex;
+  gap: 12px;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--dim);
+  align-items: center;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.header-dir,
+.header-id,
+.card-command,
+.card-dir,
+.mono {
+  font-family: var(--term-font);
+}
+.card-command,
+.card-dir,
+.card-where,
+.card-warning,
+.card-ended,
+.card-lines {
+  white-space: pre-wrap;
+  /* A long word (a path, a flag) breaks anywhere rather than run past the card (review 2). */
+  overflow-wrap: anywhere;
+}
+.header-dir {
+  font-size: 11.5px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.header-id {
+  flex: none;
+  white-space: pre;
+  font-size: 11.5px;
+  color: var(--faint);
+  cursor: pointer;
+}
+.header-id:hover {
+  color: var(--text);
+}
+.header-copied {
+  flex: none;
+  white-space: nowrap;
+  color: var(--faint);
+}
+
+.card {
+  margin: 24px auto;
+  max-width: 600px;
+  width: calc(100% - 40px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px 22px;
+}
+/* Above a terminal the card is the ended bar: one line, full width. */
+.right-zone[data-pane='terminal'] .card {
+  margin: 0;
+  max-width: none;
+  width: auto;
+  border-radius: 0;
+  border-width: 0 0 1px;
+  padding: 6px 14px;
+  background: var(--panel2);
+}
+.card-title {
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.card-ended {
+  color: var(--dim);
+}
+.card[data-card='resume'] .card-ended,
+.card[data-card='elsewhere'] .card-title {
+  margin-bottom: 10px;
+}
+.card-fact {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  margin: 4px 0;
+  font-size: 12.5px;
+}
+.card-label {
+  color: var(--faint);
+}
+.card-fact > :last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card-command {
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+.card-warning {
+  color: var(--wait);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.card-why {
+  color: var(--dim);
+  margin-top: 10px;
+}
+.card-actions,
+.card-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.card-actions {
+  margin-top: 14px;
+}
+.card-hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+.card-button {
+  border: 1px solid var(--line2);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.card-button:hover {
+  border-color: var(--selline);
+}
+.card-button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+.card-button[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+.card-lines {
+  color: var(--crash);
+  font-size: 12.5px;
+  margin-top: 8px;
+}
+.card-lines:empty {
+  display: none;
+}
+.card-bar + .card-lines {
+  margin-top: 4px;
+}
+
+.card-new {
+  margin: 0;
+}
+.card-form-line {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  align-items: center;
+  margin: 6px 0;
+  font-size: 12.5px;
+}
+.card-field {
+  font: inherit;
+  color: inherit;
+  background: var(--panel2);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+.card-field:focus {
+  outline: 2px solid var(--selline);
+  outline-offset: -1px;
+}
+
+/* The key help's content (web/help.js). */
+.help-box {
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  max-width: 720px;
+  font-size: 12.5px;
+}
+.help-title {
+  font-weight: 650;
+  font-size: 14px;
+}
+.help-close {
+  font-weight: normal;
+  color: var(--faint);
+  font-size: 12px;
+}
+.help-heading {
+  margin: 12px 0 4px;
+  font-weight: 650;
+  color: var(--dim);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.help-line {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  gap: 14px;
+  margin: 3px 0;
+}
+.help-keys {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.help-line.later .help-what {
+  color: var(--faint);
+}
+.help-notes {
+  margin-top: 12px;
+  color: var(--dim);
+  max-width: 680px;
+}
+.help-note {
+  margin: 6px 0;
+}

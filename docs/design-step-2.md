@@ -1929,6 +1929,12 @@ id), where the title comes from. Each open pull request on a line of its own
 merged and closed ones fold into `30 merged ▸`; `+ PR`. The note's first three lines (a click
 edits it). Buttons Note and Done / Undone.
 
+Stage A's header (19) has one height for every session and window width, so that the terminal
+area under it does not jump between sessions and the page knows its size before a terminal is
+shown: the directory is one line, cut with an ellipsis when it is long (the whole path stays in
+the page, is selected and copied whole, and is its tooltip); the short id is never cut (ruled by
+the plan owner, review of plan task 29).
+
 Editing (stage D) uses the step 1 rules and functions: a label or group that design 7.1 refuses is
 refused with the same message; a note is edited in a text box instead of `$VISUAL`, saved as typed
 (an empty note is no note), and a save is refused when the stored note changed since the edit
@@ -1949,7 +1955,12 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
   button is disabled. A single click on a row selects it and shows this card; it does not resume
   (a resume costs a process, and history is easy to misclick). Enter, a double click or "Resume
   here" resumes (11.3). Refusals and launch failures show their lines on the card.
-- **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close).
+- **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close). Until
+  the page has the terminal's exit the bar says `claude is not running in this terminal`. Known
+  limit of stage A: when the selected session's row is not in the list (a filter excludes it)
+  while the window shows its ended terminal, the bar has no Resume, and Close only once the page
+  has the terminal's exit — the bar is drawn from the row, not from the terminal (stage A's plan,
+  contract 2.9 `endedBar(row, exit)`; accepted by the plan owner, review 2 of plan task 29).
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
   the label, the group and extra flags. A label or group left empty, or holding only white space,
