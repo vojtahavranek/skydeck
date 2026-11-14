@@ -287,7 +287,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         },
         started() {},
         exited(term) {
+          // Once per terminal (task 16): its hello is needed no more after this.
           const hello = hellos.get(term.id);
+          hellos.delete(term.id);
           if (hello !== undefined) tick?.ended(hello);
         },
       },

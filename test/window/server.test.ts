@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 import { buildNewCommand } from '../../src/claude/launch.ts';
-import type { Platform } from '../../src/platform/types.ts';
+import type { Detached, Platform } from '../../src/platform/types.ts';
 import { launchSpec } from '../../src/sessions/launch.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import { lockKey, readLock } from '../../src/sessions/resume.ts';
@@ -26,7 +26,7 @@ import { parsePidLine } from '../../src/window/pidline.ts';
 import type { ListMessage, RowPayload } from '../../src/window/protocol.ts';
 import { readServerJson } from '../../src/window/runtime.ts';
 import { ServeExit } from '../../src/window/server.ts';
-import { procStartOf, startProgram, until } from '../helpers/keeper.ts';
+import { procStartOf, sleep, startProgram, stillRuns, until } from '../helpers/keeper.ts';
 import { S1, S2 } from '../helpers/platform.ts';
 import { readRecords, waitForRecord } from '../helpers/standin.ts';
 import {
@@ -38,6 +38,8 @@ import {
 } from '../helpers/window.ts';
 import type { TestPage } from '../helpers/window.ts';
 
+/** S2 6.1: the Windows client the keep-alive is. */
+const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
 const KEEPER_CODE = readFileSync(new URL('../../bin/skydeck-keeper', import.meta.url), 'utf8');
 const NS_TEXT = /^[1-9][0-9]*$/;
 
@@ -268,8 +270,8 @@ describe('resume and new in the window (S2 11.3)', () => {
     page.send({ t: 'input', term: term.id, data: '/busy\r' });
     const started = performance.now();
     await page.list((l) => rowOf(l, S1)?.state === 'working', 'the row working', WAIT_MS);
-    // Two ticks are 4 s; on this loaded machine allow some more before calling it slow.
-    assert.ok(performance.now() - started < 8000, 'within about two ticks');
+    // Ruled (review 1): two ticks are 4 s; the bound asserted is 8 s, for a loaded machine.
+    assert.ok(performance.now() - started < 8000, 'within 8 s');
   });
 
   test("act new: the stand-in gets buildNewCommand's arguments; the row titled with the label is starting, then running", async (t) => {
@@ -328,14 +330,22 @@ describe('resume and new in the window (S2 11.3)', () => {
     const test = await d.start();
     const page = await connectTestPage(t, d, test.server);
     const base = { kind: 'new' as const, label: '', group: '', cols: 80, rows: 24 };
-    for (const action of [
-      { ...base, dir, flags: '-r x' },
-      { ...base, dir: 'relative/dir', flags: '' },
-      { ...base, dir, flags: '--model "opus' },
-    ]) {
+    const cases: [typeof base & { dir: string; flags: string }, RegExp][] = [
+      [
+        { ...base, dir, flags: '-r x' },
+        /^cannot pass -r( \(--resume\))? to claude: it picks an existing session; use skydeck resume$/,
+      ],
+      [
+        { ...base, dir: 'relative/dir', flags: '' },
+        /^the directory relative\/dir is not absolute$/,
+      ],
+      [{ ...base, dir, flags: '--model "opus' }, /^the flags have an unclosed "$/],
+    ];
+    for (const [action, message] of cases) {
       const result = await page.act(action);
       assert.equal(result.ok, false, JSON.stringify(action));
-      assert.ok(result.lines.length > 0 && result.error !== null, JSON.stringify(result));
+      assert.match(result.error ?? '', message);
+      assert.deepEqual(result.lines, [result.error]);
       assert.equal(result.sessionId, null);
     }
     assert.deepEqual(test.server.hub.list(), []);
@@ -477,7 +487,20 @@ describe('Windows programs (A32)', () => {
 });
 
 describe('places (S2 4.2, 17.3)', () => {
-  test('with SKYDECK_HOME set the server and its keepers create nothing outside the sandbox', async (t) => {
+  test('with SKYDECK_HOME set the server, its keepers and the keep-alive script create nothing outside the sandbox', async (t) => {
+    // The keep-alive (S2 6.1) is set to "wsl" on FAKE processes (ruled, review 1): wsl.exe is
+    // never run; the script it would run (`--exec /bin/sh <checkout>/bin/skydeck-keepalive
+    // <runtimeDir>`) runs here in its place, a process this test started and ends itself. The
+    // server's signals are recorded and never sent (task 19's rule for such tests).
+    let script: { child: Detached; procStart: number | null } | null = null;
+    t.after(async () => {
+      const own = script;
+      if (own === null) return;
+      if (own.procStart !== null && stillRuns(own.child.pid, own.procStart)) {
+        process.kill(own.child.pid, 'SIGTERM'); // it traps TERM and removes its pid file
+      }
+      await Promise.race([own.child.exited, sleep(10_000)]);
+    });
     // Every XDG directory points at an empty directory of the sandbox: none may be used.
     const xdg = [
       'XDG_RUNTIME_DIR',
@@ -486,10 +509,12 @@ describe('places (S2 4.2, 17.3)', () => {
       'XDG_CONFIG_HOME',
       'XDG_CACHE_HOME',
     ];
-    const d = serverSandbox(t);
+    const d = serverSandbox(t, { env: { WSL_DISTRO_NAME: 'Test' }, window: { keepAlive: 'wsl' } });
     const dirs = xdg.map((name) => join(d.s.root, name.toLowerCase()));
     for (const dir of dirs) mkdirSync(dir, { mode: 0o700 });
     const written: string[] = [];
+    const windows: string[][] = [];
+    const signals: number[] = [];
     const recording = (p: Platform): Platform => {
       const record =
         <A extends unknown[], R>(call: (path: string, ...rest: A) => R) =>
@@ -518,12 +543,23 @@ describe('places (S2 4.2, 17.3)', () => {
           },
         },
         processes: {
-          ...p.processes,
-          startDetached(command, args, options) {
+          async startDetached(command, args, options) {
             for (const path of [options.stdoutTo, options.stderrTo]) {
               if (path !== undefined) written.push(path);
             }
-            return p.processes.startDetached(command, args, options);
+            if (command !== WSL_EXE) return p.processes.startDetached(command, args, options);
+            windows.push([command, ...args]);
+            const at = args.indexOf('--exec');
+            const child = await p.processes.startDetached(args[at + 1] ?? '', args.slice(at + 2), {
+              ...options,
+              cwd: d.s.root, // for /mnt/c, which CI does not have
+            });
+            script = { child, procStart: procStartOf(child.pid) };
+            return child;
+          },
+          signal(pid) {
+            signals.push(pid);
+            return false;
           },
         },
         net: {
@@ -541,13 +577,39 @@ describe('places (S2 4.2, 17.3)', () => {
     const page = await connectTestPage(t, d, test.server);
     const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
     assert.equal(result.ok, true, JSON.stringify(result));
+    const client = controlClient(d.platform.net, d.files.serverSock);
+    const deadline = performance.now() + WAIT_MS;
+    let state = (await client.status()).keepAlive;
+    while (state.state !== 'running') {
+      assert.ok(performance.now() < deadline, `the keep-alive running: ${JSON.stringify(state)}`);
+      await sleep(100);
+      state = (await client.status()).keepAlive;
+    }
+    assert.deepEqual(windows, [
+      [
+        WSL_EXE,
+        '-d',
+        'Test',
+        '-u',
+        d.platform.userName,
+        '--exec',
+        '/bin/sh',
+        join(d.platform.appRoot, 'bin', 'skydeck-keepalive'),
+        d.box.runtimeDir,
+      ],
+    ]);
     await test.server.stop('done');
+
     assert.ok(written.length > 0);
     for (const path of written) {
       assert.ok(path.startsWith(`${d.s.root}/`), `${path} is outside the sandbox`);
     }
+    // The script's own files are in the runtime directory, and it wrote nowhere else.
+    assert.ok(existsSync(d.files.keepalivePid), 'keepalive.pid');
+    assert.ok(existsSync(d.files.keepaliveInterop), 'keepalive.interop');
     for (const dir of dirs) {
       assert.deepEqual(readdirSync(dir), [], `${dir} stays empty`);
     }
+    assert.deepEqual(signals, [], 'the server signalled nothing');
   });
 });

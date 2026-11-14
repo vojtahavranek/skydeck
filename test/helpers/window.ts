@@ -65,7 +65,10 @@ export interface TestServer {
    * The server as a crash would leave it: every timer stopped, every socket and listener closed
    * (pages and keeper connections cut, nothing parked), its lock left behind naming a process that
    * is dead by design 5.5's rule (in this process the pid itself lives on). server.json and
-   * server.pid stay. Its store connection is left idle: nothing calls it any more.
+   * server.pid stay. Its store connection is NOT closed (ruled, task 23's review 1): runServer's
+   * contract gives no handle to it, and a seam for tests alone would change that contract. With
+   * every timer and connection gone nothing calls it any more, and an idle WAL connection holds
+   * no lock, so the next server sees what it would see after a crash.
    */
   drop(): Promise<void>;
 }
