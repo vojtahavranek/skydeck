@@ -107,7 +107,8 @@ describe('doctor on a complete installation', () => {
 
     assert.deepEqual(
       r.runner.calls.map((call) => [call.command, ...call.args].join(' ')),
-      ['gh --version', 'gh auth status'],
+      // S2 16.3 adds python3 --version (ruled by the plan owner, task 24); nothing else.
+      ['gh --version', 'gh auth status', 'python3 --version'],
     );
   });
 
