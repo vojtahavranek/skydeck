@@ -2163,10 +2163,8 @@ research already drove its mockup in headless Chromium. The cost is a developmen
 a browser download in CI, never at install time. So `playwright` (pinned exactly: 1.60.0, the
 version whose Chromium is build 1223, the build already installed on the development machine)
 drives Chromium headless against a real server and keepers running the stand-in, in a small suite
-(`npm run test:page`). The suite is `node:test` files that use the `playwright` library
-(`chromium.launch()`), not `@playwright/test`: the repository keeps one test runner. Chromium is
-not Edge: what only Edge decides (keys an app window keeps, its policy, notifications on the PC)
-stays a manual check.
+(`npm run test:page`). Chromium is not Edge: what only Edge decides (keys an app window keeps,
+its policy, notifications on the PC) stays a manual check.
 
 In the browser suite, besides those:
 
@@ -2196,9 +2194,11 @@ In the browser suite, besides those:
 
 - `node:test` tests stay under `test/` and are what `npm test` runs (`test/**/*.test.ts`). The
   browser suite lives in `test-page/`, outside that glob, and runs with `npm run test:page`
-  (`test-page/**/*.test.ts`). Each of its files launches one headless Chromium
-  (`test-page/helpers/browser.ts`) with a test sandbox's environment, in which no host name
-  resolves, so that a page under test reaches nothing but the test's server on `127.0.0.1`. Its
+  (`test-page/**/*.test.ts`). It is `node:test` files that use the `playwright` library
+  (`chromium.launch()`), not `@playwright/test`: the repository keeps one test runner. Each of its
+  files launches one headless Chromium (`test-page/helpers/browser.ts`) with a test sandbox's
+  environment, in which no host name or address other than `127.0.0.1` resolves, so that a page
+  under test reaches nothing but the test's server on `127.0.0.1` (never `localhost`). Its
   TypeScript is type-checked with the root project; the plain JavaScript of the pages it serves
   (`test-page/fixtures/`) runs in the browser and is not.
 - `web/` has its own `web/tsconfig.json` (the DOM library, `checkJs`, the vendored type
@@ -2215,10 +2215,11 @@ In the browser suite, besides those:
   name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
   bin/skydeck*` would also match the python keeper. Each is a step of its own: CI does not run
   `npm run check`, which ends with the page suite. Only the newest leg (Node 24) runs the page
-  suite, and it runs on Ubuntu 24.04, the development machine's system, while the other leg runs
-  on the newest Ubuntu: Playwright 1.60.0 installs Chromium's system libraries on no later one. It
-  reads the installed Playwright's version, restores `~/.cache/ms-playwright` from the
-  cache keyed by the runner's system and that version, runs `npx playwright install --with-deps
+  suite, and it runs on Ubuntu 24.04 (the development machine's system) while the other leg runs
+  on the newest Ubuntu (26.04), because Playwright 1.60.0 has no Chromium for Ubuntu 26.04; the pin
+  of that leg's runner is dropped when Playwright is upgraded. The leg reads the installed
+  Playwright's version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
+  `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
   are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 20
   minutes.
