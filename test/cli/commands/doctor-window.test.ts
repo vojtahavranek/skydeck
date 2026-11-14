@@ -1114,13 +1114,16 @@ describe('doctor: from review 2', () => {
     assert.equal(keeper.connections(), 0);
   });
 
-  test('the keep-alive problem line does not advise wsl --shutdown while sessions run without saying what it does', async (t) => {
+  test('the keep-alive problem line never advises wsl --shutdown bare (ruled by the plan owner, task 24)', async (t) => {
     const m = machine(t);
     writeKeeperLine(m.makeRuntime(), ID_A, (await liveProcess(t, m)).line);
 
     const line = lineOf(await doctor(m), 'problem', /WSL is not kept running/);
 
-    assert.match(line, /run wsl --shutdown once when no session runs \(it ends every session\)$/);
+    assert.match(
+      line,
+      /set instanceIdleTimeout=-1 under \[general\] in C:\\Users\\me\\\.wslconfig; it takes effect at the next WSL restart by itself — wsl --shutdown restarts WSL at once but ends EVERY session and terminal in WSL, so run it only when nothing is running that you want to keep$/,
+    );
   });
 
   test('a server that answers on another port than window.port, which a foreign listener holds: a problem', async (t) => {

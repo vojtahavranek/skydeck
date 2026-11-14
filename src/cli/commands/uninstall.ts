@@ -102,10 +102,12 @@ export const command: Command = {
       // only after the stop, so it refuses only the purge: the uninstall is done, the data stays.
       refuseWhileKeepersMayLive(platform, runtimeDirs, AFTER);
       const own = [places.dataDir, places.stateDir, places.configDir];
+      const unseen: string[] = [];
       for (const dir of runtimeDirs) {
         // One inside skydeck's own directories goes with them.
         if (!own.some((parent) => dir === parent || dir.startsWith(`${parent}/`))) {
-          removeRuntimeDir(ctx, platform, dir);
+          const failed = removeRuntimeDir(ctx, platform, dir);
+          if (failed !== null) unseen.push(failed);
         }
       }
       // The store is closed by now.
@@ -114,6 +116,10 @@ export const command: Command = {
           attempt(`cannot remove ${dir}`, () => platform.files.removeTree(dir));
           ctx.io.stdout(`removed ${sanitize(dir)}\n`);
         }
+      }
+      if (unseen.length > 0) {
+        // A look that came after the undo: it refuses only that directory, and says so (ruled).
+        throw new SkydeckError(`${AFTER_UNSEEN} ${unseen.join('; ')}`);
       }
     }
     return EXIT.ok;
@@ -192,8 +198,14 @@ function showProfileFolder(ctx: Context, config: Config): void {
  * server did.
  */
 function runtimeDirsOf(platform: Platform, places: Places, recorded: string | null): string[] {
+  // Normalised — repeated and trailing slashes dropped — so that a link is seen as a link
+  // (`<link>/` would be followed); `.` and `..` are kept, and such a path is never removed.
+  const record =
+    recorded !== null && recorded.startsWith('/')
+      ? recorded.replace(/\/+/g, '/').replace(/(.)\/$/, '$1')
+      : null;
   const dirs = [
-    ...(recorded !== null && recorded.startsWith('/') ? [recorded] : []),
+    ...(record !== null ? [record] : []),
     ...runtimeDirCandidates(platform.env, places.stateDir, storeId(places.dbPath)),
   ];
   return [...new Set(dirs)];
@@ -202,6 +214,7 @@ function runtimeDirsOf(platform: Platform, places: Places, recorded: string | nu
 /** What a refusal of `--purge` says was done: before anything (S2 16.2), or after the stop. */
 const BEFORE = 'uninstall --purge removed nothing';
 const AFTER = 'skydeck is uninstalled, but --purge removed no directory';
+const AFTER_UNSEEN = 'skydeck is uninstalled, but --purge did not remove';
 
 /**
  * S2 16.2: `--purge` refuses (exit 1), before it changes anything — and once more after the
@@ -283,21 +296,21 @@ function termsKinds(name: string): readonly Kind[] | null {
 }
 
 /**
- * Removes a runtime directory only when it is a plain path (no trailing `/`, `.` or `..`: such a
- * path is followed through a symbolic link), a directory of the user's that is not a symbolic link,
- * holding nothing but what a runtime directory holds, each of its kind: the store's record is only
- * a path, and nothing of the user's is destroyed (A38, principle 6). Otherwise, and when it cannot
- * be looked at, it is left alone and named, and the purge goes on.
+ * Removes a runtime directory only when it is a plain path (no `.` or `..`), a directory of the
+ * user's that is not a symbolic link, holding nothing but what a runtime directory holds, each of
+ * its kind: the store's record is only a path, and nothing of the user's is destroyed (A38,
+ * principle 6); otherwise it is left alone and named. A look that fails refuses this directory's
+ * removal: the reason is returned for the command's last line (ruled), and the purge goes on.
  */
-function removeRuntimeDir(ctx: Context, platform: Platform, dir: string): void {
+function removeRuntimeDir(ctx: Context, platform: Platform, dir: string): string | null {
   const { files } = platform;
   let foreign: string | null = null;
   try {
     const info = resolve(dir) === dir ? files.lstat(dir) : undefined;
     if (info === undefined) {
-      foreign = 'is not a plain path (a trailing /, or a . or .. in it)';
+      foreign = 'is not a plain path (a . or .. in it)';
     } else if (info === null) {
-      return;
+      return null;
     } else if (info.kind !== 'dir') {
       foreign = info.kind === 'symlink' ? 'is a symbolic link' : 'is not a directory';
     } else if (info.uid !== platform.uid) {
@@ -307,14 +320,15 @@ function removeRuntimeDir(ctx: Context, platform: Platform, dir: string): void {
       foreign = other === null ? null : `holds ${other}, which skydeck did not write`;
     }
   } catch (error) {
-    foreign = `cannot be looked at (${describeError(error)})`;
+    return `${dir}: it cannot be looked at (${describeError(error)})`;
   }
   if (foreign !== null) {
     ctx.io.stdout(`left ${sanitize(dir)} alone: it ${sanitize(foreign)}\n`);
-    return;
+    return null;
   }
   attempt(`cannot remove ${dir}`, () => files.removeTree(dir));
   ctx.io.stdout(`removed ${sanitize(dir)}\n`);
+  return null;
 }
 
 /** The first entry that a runtime directory does not hold, or not of that kind (`terms/<name>` inside terms/). */

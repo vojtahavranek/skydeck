@@ -483,7 +483,7 @@ describe('uninstall --purge: from review 2', () => {
     }
   });
 
-  test('a runtime directory that cannot be looked at is left alone and named; the purge goes on', async (t) => {
+  test('a runtime directory that cannot be looked at: its removal is refused, truthfully, never an internal error', async (t) => {
     if (process.getuid?.() === 0) return t.skip('root reads anything');
     const m = await installed(t);
     const files = m.makeRuntime();
@@ -491,14 +491,17 @@ describe('uninstall --purge: from review 2', () => {
     try {
       const r = await uninstall(m, ['--purge']);
 
-      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.code, 1, r.stdout + r.stderr);
       assert.ok(
-        r.lines.some((line) =>
-          line.startsWith(`left ${files.dir} alone: it cannot be looked at (EACCES`),
+        r.stderr.startsWith(
+          `skydeck: skydeck is uninstalled, but --purge did not remove ${files.dir}: it cannot be looked at (EACCES)`,
         ),
-        r.stdout,
+        r.stderr,
       );
-      assert.equal(existsSync(m.places.dataDir), false, 'the rest of the purge is done');
+      assert.doesNotMatch(r.stderr, /internal error/);
+      assert.ok(existsSync(files.termsDir), 'that directory stays');
+      assert.equal(existsSync(settingsFile(m.places)), false, 'the uninstall is done');
+      assert.equal(existsSync(m.places.dataDir), false, 'the other directories are removed');
     } finally {
       chmodSync(files.dir, 0o700);
     }
@@ -517,10 +520,27 @@ describe('uninstall --purge: from review 2', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.ok(existsSync(files.serverJson) && existsSync(files.termsDir), 'the target stays whole');
+    // The record is normalised (no trailing slash) before the link check: the link is seen.
     assert.ok(
-      r.lines.includes(
-        `left ${recorded} alone: it is not a plain path (a trailing /, or a . or .. in it)`,
-      ),
+      r.lines.includes(`left ${join(m.s.root, 'link')} alone: it is a symbolic link`),
+      r.stdout,
+    );
+  });
+
+  test('a recorded directory with . or .. in it is left alone and named', async (t) => {
+    const m = await installed(t);
+    const target = join(m.s.root, 'target');
+    runtimeAt(target);
+    mkdirSync(join(m.s.root, 'x'));
+    const recorded = `${m.s.root}/x/../target`;
+    m.deck.store.setKv('window_runtime_dir', recorded);
+
+    const r = await uninstall(m, ['--purge']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(existsSync(join(target, 'terms')));
+    assert.ok(
+      r.lines.includes(`left ${recorded} alone: it is not a plain path (a . or .. in it)`),
       r.stdout,
     );
   });

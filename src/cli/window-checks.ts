@@ -364,7 +364,7 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
   why.push(wslconfig.why);
   report(
     'problem',
-    `WSL is not kept running while the window has ${what} (${why.join('; ')}): WSL stops 15 s after its last Windows client and ends every session; set instanceIdleTimeout=-1 under [general] in ${wslconfig.windowsPath} and run wsl --shutdown once when no session runs (it ends every session)`,
+    `WSL is not kept running while the window has ${what} (${why.join('; ')}): WSL stops 15 s after its last Windows client and ends every session; set instanceIdleTimeout=-1 under [general] in ${wslconfig.windowsPath}; it takes effect at the next WSL restart by itself — wsl --shutdown restarts WSL at once but ends EVERY session and terminal in WSL, so run it only when nothing is running that you want to keep`,
   );
 }
 
