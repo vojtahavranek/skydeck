@@ -179,6 +179,11 @@ export function createTerminalView(root, deps) {
     xterm.onData((data) => sendInput(t, data, false));
     xterm.onBinary((data) => sendInput(t, data, true));
     xterm.open(screen);
+    // xterm.js 6.0.0 sends a paste but does not cancel it, so the browser also puts the pasted
+    // text into xterm.js's hidden textarea, after xterm.js has emptied it: a large paste then
+    // holds megabytes there and makes the page slow at everything it does after. The page
+    // cancels the paste once xterm.js has taken it (its listener on the textarea runs first).
+    xterm.textarea?.addEventListener('paste', (event) => event.preventDefault());
     return t;
   };
 
