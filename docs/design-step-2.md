@@ -2215,7 +2215,9 @@ In the browser suite, besides those:
   name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
   bin/skydeck*` would also match the python keeper. Each is a step of its own: CI does not run
   `npm run check`, which ends with the page suite. Only the newest leg (Node 24) runs the page
-  suite: it reads the installed Playwright's version, restores `~/.cache/ms-playwright` from the
+  suite, and it runs on Ubuntu 24.04, the development machine's system, while the other leg runs
+  on the newest Ubuntu: Playwright 1.60.0 installs Chromium's system libraries on no later one. It
+  reads the installed Playwright's version, restores `~/.cache/ms-playwright` from the
   cache keyed by the runner's system and that version, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
   are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 20

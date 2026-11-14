@@ -14,14 +14,20 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     # The page suite's browser download and run (S2 17.5).
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # The oldest Node the launcher accepts, and the newest 24.x.
-        node: ['24.12', '24']
+        include:
+          # The oldest Node the launcher accepts, on the newest Ubuntu.
+          - node: '24.12'
+            os: ubuntu-latest
+          # The newest 24.x, with the page suite: Playwright 1.60.0 installs Chromium's system
+          # libraries up to Ubuntu 24.04 (the development machine's) and refuses 26.04.
+          - node: '24'
+            os: ubuntu-24.04
     name: check (node ${{ matrix.node }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
