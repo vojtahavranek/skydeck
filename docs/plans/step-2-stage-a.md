@@ -1263,7 +1263,10 @@ export function cancels(e, zone, handled) {}
 // `#counts` of index.html (S2 12.1; the minimal list leaves it empty). app.js hands it `escape` (with `key`) while a filter is set, so that the
 // list clears its field with the filter; with no filter app.js goes back to the terminal itself.
 // app.js applies list keys only while the keyboard is on the list itself, not on a control of it
-// (a button, a link, a field: Enter presses a button; review 2 of task 26).
+// (a button, a link, a field: Enter presses a button; review 2 of task 26). Accepted for task 26:
+// switching to the terminal zone never focuses a card's own control (the zone holds the keyboard,
+// so that an Enter resumes nothing by accident); a refused `open-link` says its error in the key
+// bar; Esc in the new form closes it.
 /** @param {HTMLElement} root
  *  @param {{ select(id: string, how: 'click' | 'key'): void, activate(id: string): void,
  *           view(change: { filter?: string, unfolded?: string[], showDone?: boolean }): void }} hooks */
@@ -1281,7 +1284,8 @@ export function createTerminalView(root, deps) {}
 // After a reconnect (S2 8.2.5) app.js itself sends `attach` for each id of `attached()`, the shown
 // terminal first and the next once the previous one's `snap` arrived, proposing the terminal's
 // size of the new `list`; an id the new `list` lacks is skipped, and a `list` without the terminal
-// the queue waits for moves it on. The view then gets a second `snap` for a terminal it shows: it
+// the queue waits for moves it on; an id the view detached meanwhile (`attached()` lacks it, or
+// the view sent its `detach`) is skipped or moves the queue on in the same way. The view then gets a second `snap` for a terminal it shows: it
 // resets that terminal, applies the snap, and sends its own `resize` when its fitted size differs;
 // `attached()` keeps its ids across the reconnect (ruled, task 26).
 

@@ -1856,7 +1856,8 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
   inside one word);
   `'…'` and `"…"` group words (no escapes, no variables); a NUL is refused (no program can be given
   it); design 7.7's refusals apply. It starts in
-  the window (11.3).
+  the window (11.3). Esc in the form closes it: the form is the page's own, not the terminal's
+  (12.9; accepted by the plan owner, review of plan task 26).
 
 ### 12.7 The restore banner
 
@@ -1932,7 +1933,8 @@ binding; the help says so.
 
 Two focus zones; the terminal is the default. Clicking a running row focuses its terminal;
 clicking a row that is not running focuses the list (so Enter resumes). Ctrl+Shift+L toggles; Esc
-never leaves the terminal. In the list: as in step 1's interactive list, ↑ ↓ `j` `k` move, `/`
+never leaves the terminal — while xterm.js has the keyboard; Esc in the page's own new form closes
+the form (12.6). In the list: as in step 1's interactive list, ↑ ↓ `j` `k` move, `/`
 filters, `l` label, `g` group, `n` note, `p` attach a pull request, `d` done, `a` show done; new in
 the window, Home, End, PgUp, PgDn, ← → (fold, unfold), F2 (label) and Esc (clear the filter, then
 back to the terminal). Enter changes meaning: it shows a running session's terminal, or resumes one
