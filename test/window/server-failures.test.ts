@@ -22,6 +22,7 @@ import { Worker } from 'node:worker_threads';
 import type { Terminal } from '@xterm/headless';
 import WebSocket from 'ws';
 
+import { SkydeckError } from '../../src/platform/errors.ts';
 import type { Platform } from '../../src/platform/types.ts';
 import { attachManualPr } from '../../src/sessions/meta.ts';
 import { readLock } from '../../src/sessions/resume.ts';
@@ -32,7 +33,7 @@ import { encodeFrame, frameReader, parseHello } from '../../src/window/frames.ts
 import type { KeeperHello } from '../../src/window/frames.ts';
 import type { ListMessage, SnapMessage } from '../../src/window/protocol.ts';
 import { listKeeperLines } from '../../src/window/runtime.ts';
-import { keepAliveNotices } from '../../src/window/server.ts';
+import { keepAliveNotices, ServeExit } from '../../src/window/server.ts';
 import { loadXterm } from '../../src/window/xterm.ts';
 import { sleep, until, within } from '../helpers/keeper.ts';
 import { freshNonce } from '../helpers/pages.ts';
@@ -248,6 +249,20 @@ async function helloCloseCode(t: TestContext, d: ServerSandbox, port: number): P
   return closed;
 }
 
+/**
+ * Opens a held start and waits for it to be done (or to fail), so that its server is in the
+ * sandbox's list, which the cleanup stops: called in a `finally`, a test that fails while the
+ * start is held never leaves a half-started server behind (review 2, R1).
+ */
+async function finishStart(held: { open(): void }, starting: Promise<unknown>): Promise<void> {
+  held.open();
+  await within(
+    starting.catch(() => {}),
+    'the held start to end',
+    WAIT_MS,
+  );
+}
+
 describe('python3 missing (S2 14)', () => {
   test("the server runs and lists; a resume answers S2 14's message; status says python3 is not found", async (t) => {
     const d = serverSandbox(t);
@@ -281,7 +296,7 @@ describe('stopping (S2 5.5) and starting again (S2 7.3, 14)', () => {
     for (const p of [page, other]) {
       const bye = await p.next('bye');
       assert.equal(bye.reason, 'skydeck window --stop');
-      await p.closed;
+      await within(p.closed, 'the page closed', WAIT_MS);
     }
     assert.equal(await first.server.done, 0);
     const lines = listKeeperLines(d.platform, d.files);
@@ -322,7 +337,7 @@ describe('stopping (S2 5.5) and starting again (S2 7.3, 14)', () => {
     const first = await d.start();
     const { page, termId, screen } = await resumedAndTyped(t, d, first);
     await first.drop();
-    await page.closed;
+    await within(page.closed, 'the page closed', WAIT_MS);
     assert.equal(existsSync(d.files.serverJson), true, 'a crash leaves server.json');
     await rediscovered(t, d, termId, screen);
   });
@@ -342,25 +357,32 @@ describe('while the server starts (S2 5.2, 7.3)', () => {
 
     const held = heldStart();
     const starting = d.start({ platform: held.change });
-    await held.reached;
-    assert.ok(held.port() > 0, 'the port is bound');
-    const origin = `http://127.0.0.1:${held.port()}`;
-    const ws = new WebSocket(`ws://127.0.0.1:${held.port()}/ws`, { origin });
-    t.after(() => {
-      ws.terminate();
-    });
-    ws.on('error', () => {});
-    const status = await new Promise<number>((resolve, reject) => {
-      ws.once('open', () => reject(new Error('the upgrade was accepted while starting')));
-      ws.once('unexpected-response', (req, res) => {
-        resolve(res.statusCode ?? 0);
-        res.resume();
-        req.destroy();
+    let status = 0;
+    try {
+      await within(held.reached, 'the start reaching its python3 check', WAIT_MS);
+      assert.ok(held.port() > 0, 'the port is bound');
+      const origin = `http://127.0.0.1:${held.port()}`;
+      const ws = new WebSocket(`ws://127.0.0.1:${held.port()}/ws`, { origin });
+      t.after(() => {
+        ws.terminate();
       });
-    });
+      ws.on('error', () => {});
+      status = await within(
+        new Promise<number>((resolve, reject) => {
+          ws.once('open', () => reject(new Error('the upgrade was accepted while starting')));
+          ws.once('unexpected-response', (req, res) => {
+            resolve(res.statusCode ?? 0);
+            res.resume();
+            req.destroy();
+          });
+        }),
+        'the answer to the upgrade',
+        WAIT_MS,
+      );
+    } finally {
+      await finishStart(held, starting); // also when the test fails here (review 2, R1)
+    }
     assert.equal(status, 503, 'the server is starting');
-
-    held.open();
     const test = await starting;
     const page = await connectTestPage(t, d, test.server);
     const list = await page.next('list', 'the first list');
@@ -379,9 +401,12 @@ describe('while the server starts (S2 5.2, 7.3)', () => {
     const d = serverSandbox(t);
     const held = heldStart();
     const starting = d.start({ platform: held.change });
-    await held.reached;
-    await controlClient(d.platform.net, d.files.serverSock).shutdown();
-    held.open();
+    try {
+      await within(held.reached, 'the start reaching its python3 check', WAIT_MS);
+      await controlClient(d.platform.net, d.files.serverSock).shutdown();
+    } finally {
+      await finishStart(held, starting);
+    }
     const test = await starting;
     assert.equal(await within(test.server.done, 'the stop asked for during the start', WAIT_MS), 0);
     assert.equal(existsSync(d.files.serverJson), false);
@@ -404,7 +429,7 @@ describe('what the server wires together', () => {
       WAIT_MS,
     );
     // Two ticks; the lock itself would hold for 60 s.
-    await until(() => readLock(d.deck, S1) === null, 'the lock given back', 6000);
+    await until(() => readLock(d.deck, S1) === null, 'the lock given back', WAIT_MS);
   });
 
   test('an exit not settled yet when the server stops is settled by the stop', async (t) => {
@@ -472,7 +497,7 @@ describe('what the server wires together', () => {
     d.resumable(S2, join(d.s.home, 'other'));
     const result = await page.act({ kind: 'resume', sessionId: S3, cols: 80, rows: 24 });
     assert.equal(result.ok, false, 'S3 is no session');
-    await page.list((list) => listed(list, S2), 'the new session listed', 6000);
+    await page.list((list) => listed(list, S2), 'the new session listed', WAIT_MS);
   });
 
   test("a late keeper's decision reloads the rows (A24's sixth trigger)", async (t) => {
@@ -513,7 +538,7 @@ describe('what the server wires together', () => {
       'the late keeper started its program',
       WAIT_MS,
     );
-    await page.list((list) => listed(list, S2), 'the new session listed', 6000);
+    await page.list((list) => listed(list, S2), 'the new session listed', WAIT_MS);
   });
 
   test('a launch token presented a second time raises the alarm (window_alarm)', async (t) => {
@@ -676,6 +701,27 @@ describe('the store (S2 10.1, 14)', () => {
       1,
       'one log line while it lasts',
     );
+  });
+
+  test('a start that meets a store another process keeps locked fails at once with a line that says so, and leaves nothing (ruled)', async (t) => {
+    const d = serverSandbox(t);
+    const lock = holdWriteLock(t, d);
+    await lock.held;
+    const began = performance.now();
+    await assert.rejects(d.start(), (error: unknown) => {
+      assert.ok(error instanceof SkydeckError && !(error instanceof ServeExit), String(error));
+      assert.equal(
+        error.message,
+        "the window's server cannot start: skydeck's database is busy (another skydeck holds it); try again",
+      );
+      return true;
+    });
+    assert.ok(performance.now() - began < 3000, 'without waiting out 5 s');
+    lock.release();
+    assert.equal(d.deck.store.getKv('window_server'), null, 'no lock');
+    for (const path of [d.files.serverJson, d.files.serverPid, d.files.serverSock]) {
+      assert.equal(existsSync(path), false, `no ${path}`);
+    }
   });
 
   test('a found keeper whose decision meets a locked store is not refused: it is decided again once the store is free', async (t) => {

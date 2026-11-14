@@ -18,6 +18,7 @@ import { sanitize } from '../text/sanitize.ts';
 import { createActions } from './actions.ts';
 import { httpHandler, loadAssets } from './assets.ts';
 import { createTokens, ensureSecret, failureKind, raiseAlarm } from './auth.ts';
+import { isBusy } from './busy.ts';
 import { controlHandler } from './control.ts';
 import { openLink } from './edge.ts';
 import { serverEnvironment } from './env.ts';
@@ -103,6 +104,9 @@ const IN_CLAUDE_CODE =
 const SERVER_ID_BYTES = 8;
 /** The server's own store connection waits this long for another process's write lock (ruled). */
 const BUSY_TIMEOUT_MS = 250;
+/** S2 5.2, 14 (ruled): the line of a start that met a store another process keeps locked. */
+const BUSY_AT_START =
+  "the window's server cannot start: skydeck's database is busy (another skydeck holds it); try again";
 /** How long the python3 check at start may take. */
 const PYTHON_CHECK_MS = 5000;
 
@@ -619,6 +623,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     };
   } catch (error) {
     await giveBack();
+    // Ruled (review 2): the start's own writes wait the same 250 ms; a store another process keeps
+    // locked longer fails the start at once (S2 5.2's "did not start", exit 1), nothing left.
+    if (isBusy(error)) throw new SkydeckError(BUSY_AT_START);
     throw error;
   }
 }

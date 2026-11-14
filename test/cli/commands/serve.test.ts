@@ -26,7 +26,7 @@ import { uncaughtLine } from '../../../src/cli/commands/serve.ts';
 import { ensureSecret, pageProof } from '../../../src/window/auth.ts';
 import { readServerJson } from '../../../src/window/runtime.ts';
 import type { ServerJson } from '../../../src/window/runtime.ts';
-import { procStartOf, sleep, stillRuns, until } from '../../helpers/keeper.ts';
+import { procStartOf, sleep, stillRuns, until, within } from '../../helpers/keeper.ts';
 import { killKeepersIn } from '../../helpers/kill.ts';
 import { freshNonce } from '../../helpers/pages.ts';
 import { readRecords, waitForRecord } from '../../helpers/standin.ts';
@@ -308,7 +308,7 @@ describe('skydeck serve (S2 5.2)', () => {
 
     const one = await connect(false);
     one.ws.send(`{"t":"hello","protocol":1,"mode":"key","nonce":"${MARKER}","proof":"${MARKER}`);
-    await one.closed;
+    await within(one.closed, 'the first connection closed', WAIT_MS);
     const two = await connect(true);
     two.ws.send(
       JSON.stringify({
@@ -319,10 +319,10 @@ describe('skydeck serve (S2 5.2)', () => {
         theme: { fg: MARKER, bg: MARKER },
       }),
     );
-    await two.closed;
+    await within(two.closed, 'the second connection closed', WAIT_MS);
     const page = await connectTestPage(t, d, server.json);
     page.sendRaw(JSON.stringify({ t: 'input', term: MARKER, data: MARKER }));
-    await page.closed;
+    await within(page.closed, 'the page closed', WAIT_MS);
 
     const log = readFileSync(join(d.s.skydeckHome, 'state', 'server.log'), 'utf8');
     assert.ok(log.includes('hello refused'), log);
@@ -337,7 +337,7 @@ describe('skydeck serve (S2 5.2)', () => {
     process.kill(server.json.pid, 'SIGTERM');
     const bye = await page.next('bye', 'the bye', WAIT_MS);
     assert.match(bye.reason, /stopped/);
-    assert.equal(await server.exited, 0, server.stderr());
+    assert.equal(await within(server.exited, 'serve to exit', WAIT_MS), 0, server.stderr());
     for (const path of [d.files.serverJson, d.files.serverPid, d.files.serverSock]) {
       assert.equal(existsSync(path), false, `${path} is gone`);
     }
@@ -362,7 +362,7 @@ describe('skydeck serve (S2 5.2)', () => {
       ].join('\n'),
     );
     const entry = serve({ env: { NODE_OPTIONS: `--import=${preload}` } });
-    assert.equal(await entry.exited, 1, entry.stderr());
+    assert.equal(await within(entry.exited, 'serve to exit', WAIT_MS), 1, entry.stderr());
     const lines = entry
       .stderr()
       .split('\n')
@@ -386,7 +386,7 @@ describe('skydeck serve (S2 5.2)', () => {
     const node = serveNode(entry.child);
     assert.ok(node !== null, "the child's node process");
     process.kill(node, 'SIGTERM');
-    assert.equal(await entry.exited, 0, entry.stderr());
+    assert.equal(await within(entry.exited, 'serve to exit', WAIT_MS), 0, entry.stderr());
     for (const path of [d.files.serverJson, d.files.serverPid, d.files.serverSock]) {
       assert.equal(existsSync(path), false, `${path} is gone`);
     }
@@ -398,7 +398,7 @@ describe('skydeck serve (S2 5.2)', () => {
     const server = await started(serve());
     assert.ok(ownServer(d, server.child) !== null);
     process.kill(server.json.pid, 'SIGINT');
-    assert.equal(await server.exited, 0, server.stderr());
+    assert.equal(await within(server.exited, 'serve to exit', WAIT_MS), 0, server.stderr());
     assert.equal(existsSync(d.files.serverJson), false);
     assert.equal(d.deck.store.getKv('window_server'), null);
   });

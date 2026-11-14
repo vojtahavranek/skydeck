@@ -41,7 +41,9 @@ const FRAME = /^\s+at /;
  * rule): the stack's header — `<name>: <message>` as the message is, however many lines; Node.js's
  * `<name> [<code>]: <message>`; the name alone for an empty message — is removed exactly, and only
  * the lines after it that match `/^\s+at /` are kept. A stack that does not begin with its header
- * gives no frame at all. Exported for its test.
+ * gives no frame at all. (Not covered, and not known to happen: an error whose message is cut to
+ * its first lines after its stack was first read — the rest of the old message then follows the
+ * shorter header, and a line of it that looks like a frame would be kept.) Exported for its test.
  */
 export function uncaughtLine(error: unknown): string {
   if (!(error instanceof Error)) {

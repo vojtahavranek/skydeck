@@ -336,7 +336,11 @@ it turns into one fixed line:
 | 13 | `the window's server is not started from inside a Claude Code session` |
 | anything else, or no answer in 10 seconds | `the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log`; after a timeout the process is left running, and the next `skydeck window` finds it or reports it as not answering (5.1) |
 
-These codes are `serve`'s own; they never reach a user through another command.
+These codes are `serve`'s own; they never reach a user through another command. A store that
+another process keeps write-locked for longer than the server's 250 ms (14) fails the start at
+once — `the window's server cannot start: skydeck's database is busy (another skydeck holds it);
+try again`, exit 1 (the table's last row), nothing left behind — rather than a server that would
+freeze (ruled, plan task 23).
 
 **Its environment** is that of the `skydeck window` command that started it, without
 `SKYDECK_HANDOFF` and without the compile-cache variable the launcher sets for Node.js alone. When
@@ -1967,7 +1971,7 @@ taskbar button show it is check W3. Low priority: stage E (19).
 | **The keep-alive cannot start or dies** | The server retries (6.1), pages show `WSL is not kept running`, and `doctor` reports it. The window keeps working while any WSL terminal is open. |
 | **A page falls behind** | 8.2.8: it gets a fresh snapshot instead of the bytes it missed. |
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
-| **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows (ruled, plan task 23). |
+| **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |
