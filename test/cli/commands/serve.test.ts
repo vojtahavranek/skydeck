@@ -432,6 +432,7 @@ describe('a marked test sandbox ends its server by itself (ruled, task 25, revie
       renameSync(moved, d.s.skydeckHome); // the sandbox's own cleanup looks there
     }
     assert.match(server.stderr(), /server: stopping: the test sandbox is gone/);
+    assert.match(server.stderr(), /server: stopped/, 'the orderly stop of S2 5.5, not an exit');
     assert.equal(code, 0, server.stderr());
   });
 
