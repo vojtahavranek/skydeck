@@ -79,7 +79,7 @@ export const command: Command = {
     }
     const { platform } = ctx;
     const purge = parsed.flags['purge'] === true;
-    if (purge) refuseOnIgnoredVariables(platform.env);
+    if (purge) refuseOnUnusablePlaceVariables(platform.env);
     const { places, config } = resolveDeckPlaces(platform);
     let runtimeDirs: string[];
     if (platform.files.stat(places.dbPath) === null) {
@@ -298,9 +298,11 @@ const PLACE_VARIABLES = [
 /**
  * Design 9.1 (D26) ignores a place variable that is empty or not absolute, so `SKYDECK_HOME=sandbox
  * skydeck uninstall --purge` would purge the installation found without it: most likely the real
- * one. Before anything is done, `--purge` refuses while one of them is set but ignored.
+ * one. HOME is not ignored but taken as it is, so an empty or relative one puts every place under
+ * the working directory. Before anything is done, `--purge` refuses while one of them is set but
+ * empty or not absolute, each named with what it would do.
  */
-function refuseOnIgnoredVariables(env: Env): void {
+function refuseOnUnusablePlaceVariables(env: Env): void {
   const ignored = PLACE_VARIABLES.flatMap((name) => {
     const value = env[name];
     if (value === undefined || (value !== '' && isAbsolute(value))) return [];

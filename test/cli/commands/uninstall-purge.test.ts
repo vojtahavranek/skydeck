@@ -383,7 +383,7 @@ describe('uninstall --purge with SKYDECK_HOME at the user’s own places', () =>
 // ---------------------------------------------------------------------------------------------
 // A variable that is set but ignored (D26)
 
-describe('uninstall --purge refuses on a SKYDECK_HOME or XDG_* that is set but ignored', () => {
+describe('uninstall --purge refuses on a HOME, SKYDECK_HOME or XDG_* that is set but empty or relative', () => {
   const VARIABLES = [
     'HOME', // ruled (review 2): os.homedir() gives HOME as it is, '' or relative too
     'SKYDECK_HOME',
@@ -454,6 +454,34 @@ describe('uninstall --purge refuses on a SKYDECK_HOME or XDG_* that is set but i
 
     assert.equal(r.code, 0, r.stderr);
     for (const dir of dirsOf(d)) gone(dir);
+  });
+
+  test('HOME unset is no refusal (the home directory then comes from the password database)', async (t) => {
+    const d = await realLooking(t);
+    const platform = { ...d.platform, env: { ...d.platform.env, HOME: undefined } };
+
+    const r = await purge(platform);
+
+    assert.equal(r.code, 0, r.stderr);
+    for (const dir of dirsOf(d)) gone(dir);
+  });
+
+  test('HOME and another variable together: each clause gives its own reason', async (t) => {
+    const d = await realLooking(t);
+    const platform = { ...d.platform, env: { ...d.platform.env, HOME: '', XDG_STATE_HOME: 'rel' } };
+
+    const r = await purge(platform);
+
+    assert.equal(r.code, 1);
+    assert.ok(
+      r.stderr.startsWith(
+        'skydeck: uninstall --purge removed nothing: HOME is set to "" (empty), which skydeck takes as it is, so every place would be relative to the working directory; ' +
+          'XDG_STATE_HOME is set to "rel" but ignored (not an absolute path), so skydeck would find the installation it finds without it; ' +
+          'it does not purge the installation it would then find.',
+      ),
+      r.stderr,
+    );
+    intact(d);
   });
 });
 
