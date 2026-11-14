@@ -1,1 +1,158 @@
-/* The terminal view (S2 9, 12.6): task 28 fills this file. */
+/* The terminal view (S2 9, 12.6; plan task 28): one box per attached terminal in #terminal, only
+   the shown one visible; the notices, the "sized by another window" hint and the find bar lie
+   over the terminal, so that they never change the size the page proposes. The ANSI colours of
+   the terminal's theme are variables here (the foreground and background are style.css's, which
+   app.js reports to the server). */
+:root {
+  --tv-black: #24292f;
+  --tv-red: #cf222e;
+  --tv-green: #116329;
+  --tv-yellow: #7d4e00;
+  --tv-blue: #0969da;
+  --tv-magenta: #8250df;
+  --tv-cyan: #1b7c83;
+  --tv-white: #6e7781;
+  --tv-bright-black: #57606a;
+  --tv-bright-red: #a40e26;
+  --tv-bright-green: #1a7f37;
+  --tv-bright-yellow: #633c01;
+  --tv-bright-blue: #218bff;
+  --tv-bright-magenta: #a475f9;
+  --tv-bright-cyan: #3192aa;
+  --tv-bright-white: #8c959f;
+  --tv-selection: #b6d3fb;
+  --tv-overlay: rgba(255, 255, 255, 0.94);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tv-black: #2e3436;
+    --tv-red: #e5534b;
+    --tv-green: #6bc46d;
+    --tv-yellow: #d9b44a;
+    --tv-blue: #539bf5;
+    --tv-magenta: #b083f0;
+    --tv-cyan: #39c5cf;
+    --tv-white: #d3d7cf;
+    --tv-bright-black: #6e7681;
+    --tv-bright-red: #ff7b72;
+    --tv-bright-green: #8ae234;
+    --tv-bright-yellow: #fce94f;
+    --tv-bright-blue: #79c0ff;
+    --tv-bright-magenta: #d2a8ff;
+    --tv-bright-cyan: #56d4dd;
+    --tv-bright-white: #f0f3f6;
+    --tv-selection: #2f4a73;
+    --tv-overlay: rgba(29, 32, 37, 0.94);
+  }
+}
+
+.terminal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tv-term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.tv-screen {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* Its size comes from the area, never from the terminal in it (xterm.js's screen has a fixed
+     width): else the proposal measures the terminal, and one narrowing of the window became a
+     resize per two columns (review 2 of task 28). */
+  contain: size;
+}
+/* On xterm.js's element, not its parent: the fit addon counts this padding out. */
+.tv-screen .xterm {
+  padding: 2px 0 0 4px;
+}
+/* S2 7.8: an ended terminal's last screen, dimmed. */
+.tv-term.over .tv-screen {
+  opacity: 0.55;
+}
+
+.tv-bars {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 16px;
+  max-height: 50%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+.tv-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--wait-bg);
+  color: var(--wait);
+  border-bottom: 1px solid var(--line2);
+  pointer-events: auto;
+  overflow-wrap: anywhere;
+}
+.tv-bar[data-kind='link'] {
+  background: var(--sel);
+  color: var(--text);
+}
+.tv-bar-close {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.tv-hint {
+  position: absolute;
+  right: 20px;
+  bottom: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--dim);
+  background: var(--tv-overlay);
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+}
+
+.tv-find {
+  position: absolute;
+  top: 6px;
+  right: 22px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(20, 30, 50, 0.18);
+}
+.tv-find-input {
+  width: 220px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel2);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.tv-find-count {
+  min-width: 64px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.tv-find-button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 0 4px;
+}
