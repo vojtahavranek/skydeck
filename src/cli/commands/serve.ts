@@ -5,7 +5,8 @@
 // stack frames, never its message, and ends the server with exit 1.
 import { join } from 'node:path';
 
-import type { Env } from '../../platform/types.ts';
+import { MAX_TIMER_MS } from '../../platform/time.ts';
+import type { Env, Platform } from '../../platform/types.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { failureKind } from '../../window/auth.ts';
@@ -80,6 +81,80 @@ function testPort(env: Env): number | undefined {
   return port <= 65535 ? port : undefined;
 }
 
+/** The seam's default: no test runs a server longer, so none can forget to end it. */
+const SANDBOX_MAX_SECONDS = 600;
+/** How often a marked sandbox's server looks whether its SKYDECK_HOME is still there: the tick's. */
+const SANDBOX_LOOK_MS = 1000;
+
+/**
+ * A31, the seam ruled for task 25 (review 2): a test run that is killed must not leave a real
+ * server running for good (it is detached, in a session of its own). In a marked test sandbox
+ * (SKYDECK_TEST_NO_WINDOWS=1) the server stops itself in the orderly way (S2 5.5) after
+ * SKYDECK_TEST_SERVE_MAX_SECONDS seconds (`maxMs`; 600 by default, also for a value that is not
+ * a whole number of seconds a timer can wait — `invalid` then, for one log line) and once its
+ * SKYDECK_HOME (`home`, when absolute) is gone. null outside a marked sandbox: neither exists.
+ * Exported for its test.
+ */
+export function sandboxLimits(
+  env: Env,
+): { maxMs: number; home: string | null; invalid: boolean } | null {
+  if (env.SKYDECK_TEST_NO_WINDOWS !== '1') return null;
+  const text = env.SKYDECK_TEST_SERVE_MAX_SECONDS;
+  const valid =
+    text !== undefined && /^[1-9][0-9]{0,6}$/.test(text) && Number(text) * 1000 <= MAX_TIMER_MS;
+  const home = env.SKYDECK_HOME;
+  return {
+    maxMs: (valid ? Number(text) : SANDBOX_MAX_SECONDS) * 1000,
+    home: home !== undefined && home.startsWith('/') ? home : null,
+    invalid: text !== undefined && !valid,
+  };
+}
+
+/** Whether `path` is gone; a look that fails is no answer (it is not gone). */
+function isGone(platform: Platform, path: string): boolean {
+  try {
+    return platform.files.stat(path) === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * sandboxLimits applied to a running server: its stop after `maxMs` and once SKYDECK_HOME is gone,
+ * both given up when the server is done.
+ */
+function endInSandbox(
+  platform: Platform,
+  server: RunningServer,
+  log: (line: string) => void,
+): void {
+  const limits = sandboxLimits(platform.env);
+  if (limits === null) return;
+  if (limits.invalid) {
+    log(
+      `server: SKYDECK_TEST_SERVE_MAX_SECONDS is not a whole number of seconds; it stops after ${SANDBOX_MAX_SECONDS} s`,
+    );
+  }
+  const stopWith = (reason: string): void => {
+    log(`server: stopping: ${reason}`);
+    void server.stop(reason);
+  };
+  const cancelMax = platform.clock.after(limits.maxMs, () => {
+    stopWith(`the test sandbox's ${limits.maxMs / 1000} s are over`);
+  });
+  const home = limits.home;
+  const cancelLook =
+    home === null
+      ? (): void => {}
+      : platform.clock.every(SANDBOX_LOOK_MS, () => {
+          if (isGone(platform, home)) stopWith('the test sandbox is gone');
+        });
+  void server.done.then(() => {
+    cancelMax();
+    cancelLook();
+  });
+}
+
 export const command: Command = {
   name: 'serve',
   summary: "The window's server (started by skydeck window)",
@@ -132,6 +207,7 @@ export const command: Command = {
       throw error;
     }
     if (asked !== null) void server.stop(asked);
+    endInSandbox(platform, server, log);
     return server.done;
   },
 };

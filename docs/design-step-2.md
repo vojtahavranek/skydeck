@@ -260,14 +260,18 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    answer; skydeck window --restart stops it` (exit 1). A socket that refuses, or a request that
    fails, is tried again every 100 ms within those 5 seconds — a server in its orderly stop (5.5)
    no longer accepts connections but still lives for a moment — and a server that is gone
-   meanwhile counts as none. Otherwise a new one is started.
+   meanwhile counts as none. Otherwise a new one is started, and the command goes on only once
+   that server can be found by the next command, its `server.json` written (5.2; ruled by the plan
+   owner, stage A's plan task 25).
 2. when no page is connected to the server, asks it for a launch token (`POST /token`, 8.3),
    starts Edge with it (5.3), and waits up to 30 seconds — a cold Edge on a managed PC can take
    several (W1 records the real time) — for the token to be used by a page (`GET /token/<id>`).
    Once it is used, the command waits 2 seconds more for a second use (`reused`), so that a window
    that lost its token to another program is not reported as a success. When the wait ends —
    used, the alarm, or the 30 seconds gone — it gives the token up (`POST /token/drop`), so no
-   unused token is left on Edge's command line. On the alarm for its own token it says so, names
+   unused token is left on Edge's command line. A command interrupted meanwhile (Ctrl+C) gives
+   nothing up: its token lives out its 30 seconds (a known limit; ruled by the plan owner, stage
+   A's plan task 25). On the alarm for its own token it says so, names
    `--new-secret` (8.2.2), and exits 1. An alarm set earlier (`window_alarm`) does not stop it: it
    goes on as usual and prints one more line, `skydeck's key may be known to another program since
    <time>; run skydeck window --new-secret`. Only one command starts Edge at a time: it
@@ -351,6 +355,14 @@ started and waits, at most 10 seconds, for the first of: `server.sock` answering
 the current boot id, this checkout and the current build, as 5.1 compares them (two checkouts at
 the same commit have the same build) — started; or the process exiting, whose code says why, and which
 it turns into one fixed line:
+A ping counts only once `server.json` names the server that answered it — the same pid, server id
+and boot id, its process alive by design 5.5's rule — within the same 10 seconds: a server answers
+its ping before it writes `server.json`, and every other command (`--stop`, `--restart`,
+`--new-secret`, `doctor`, `uninstall`) finds a server by `server.json`, so a command that returned
+earlier would leave a server that the next command cannot see. One that answers but has not
+recorded itself in that time gives `the window's server (pid <n>) answers, but did not record itself
+in <server.json> within 10 s; see <stateDir>/server.log` (exit 1) and is left running (ruled by the
+plan owner, stage A's plan task 25).
 
 | `serve` exits | `skydeck window` says (exit 1) |
 |---|---|

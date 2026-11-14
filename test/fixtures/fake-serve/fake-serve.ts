@@ -14,6 +14,8 @@
 //   FAKE_SERVE_RECORD       an absolute path: written first, JSON { argv, cwd, env, stdin,
 //                           sessionLeader }
 //   FAKE_SERVE_DELAY_MS     waits this long before it takes the runtime directory
+//   FAKE_SERVE_JSON_DELAY_MS  waits this long after server.sock answers before it writes
+//                           server.json (the real server's gap between the two, S2 5.2)
 //   FAKE_SERVE_BUILD        the build /ping and server.json report (default: this app root's)
 //   FAKE_SERVE_CHECKOUT     the checkout they report (default: this app root)
 //   FAKE_SERVE_BOOT_ID      the boot id /ping reports (default: the current one; server.json
@@ -172,6 +174,10 @@ async function serve(silent: boolean): Promise<void> {
     platform.files.remove(files.serverPid);
     await listener.close();
   };
+  const jsonDelay = Number(env.FAKE_SERVE_JSON_DELAY_MS ?? '0');
+  if (jsonDelay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, jsonDelay));
+  }
   writeServerJson(platform.files, files.serverJson, {
     pid: platform.pid,
     procStart,

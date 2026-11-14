@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -1195,6 +1195,67 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     assert.match(secret.stdout, SUCCESS);
     assert.ok(secret.ms < 30_000, `--new-secret: no wait (${secret.ms} ms)`);
     assert.equal(h.edgeRuns().length, 3);
+  });
+});
+
+/**
+ * The sandbox's python3 made slow (3 s) for the server's version check (`python3 -I -c …`), which
+ * it makes between answering its first ping and writing server.json (S2 5.2): the gap widened.
+ * Everything else (the keepers: `python3 -I <keeper>`) runs the real python3 at once.
+ */
+function slowServerStart(h: Harness): void {
+  const link = join(h.d.s.bin, 'python3');
+  const real = realpathSync(link);
+  unlinkSync(link);
+  writeFileSync(
+    link,
+    `#!/bin/sh\nif [ "$1" = -I ] && [ "$2" = -c ]; then sleep 3; fi\nexec '${real}' "$@"\n`,
+    { mode: 0o755 },
+  );
+}
+
+describe('a started server is findable when the command returns (ruled, task 25, review 2)', () => {
+  test('with the gap between the ping and server.json widened: --stop right after --print-url finds the server', async (t) => {
+    const h = windowHarness(t);
+    slowServerStart(h);
+
+    const url = await h.run(['--print-url']);
+    assert.equal(url.code, 0, url.stderr);
+    assert.ok(h.server() !== null, 'server.json is written when the command returns');
+    const stop = await h.run(['--stop']);
+
+    assert.equal(stop.code, 0, stop.stderr);
+    assert.equal(
+      stop.stdout,
+      "stopped skydeck's window server; 0 terminals in the window keep running\n",
+    );
+  });
+
+  test('with the gap widened: --restart right after a start restarts, and --new-secret stops the server, so a token minted before opens nothing', async (t) => {
+    const h = windowHarness(t);
+    slowServerStart(h);
+    const first = await h.run(['--print-url']);
+    assert.equal(first.code, 0, first.stderr);
+    const old = h.server();
+    assert.ok(old !== null);
+
+    const restarted = await h.run(['--restart', '--print-url']);
+    assert.equal(restarted.code, 0, restarted.stderr);
+    assert.equal(restarted.stderr, restartLine(h));
+    assert.notEqual(h.server()?.pid, old.pid);
+    const token = /#t=([A-Za-z0-9_-]{43})/.exec(restarted.stdout)?.[1];
+    assert.ok(token !== undefined);
+
+    const renewed = await h.run(['--new-secret', '--print-url']);
+    assert.equal(renewed.code, 0, renewed.stderr);
+    const now = h.server();
+    assert.ok(now !== null);
+    const late = await present(now.port, bytesOf(token), 'launch');
+    assert.equal(
+      late.outcome === 'closed' ? late.code : late.outcome,
+      4003,
+      'the old token is gone',
+    );
   });
 });
 

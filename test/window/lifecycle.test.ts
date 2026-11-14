@@ -25,7 +25,12 @@ import { createTokens } from '../../src/window/auth.ts';
 import { findServer, startServe, stopServer } from '../../src/window/lifecycle.ts';
 import { formatPidLine } from '../../src/window/pidline.ts';
 import type { PingAnswer, StatusAnswer } from '../../src/window/protocol.ts';
-import { resolveRuntimeDir, runtimeFiles, writeServerJson } from '../../src/window/runtime.ts';
+import {
+  readServerJson,
+  resolveRuntimeDir,
+  runtimeFiles,
+  writeServerJson,
+} from '../../src/window/runtime.ts';
 import type { RuntimeFiles } from '../../src/window/runtime.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import { BOOT_A, realTestPlatform, statLine } from '../helpers/platform.ts';
@@ -559,6 +564,30 @@ test('startServe: serve that never answers gives the no-answer line and is left 
   assert.equal(h.started.length, 1);
   assert.equal(h.started[0]?.exited, false);
   assert.ok(startOf(h.base.proc, h.started[0].child.pid) !== null);
+  assert.deepEqual(h.signals, []);
+});
+
+test('startServe returns only once server.json names the server it pinged (ruled, task 25): a server answers before it records itself', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_JSON_DELAY_MS: '1500' }));
+  const result = await startServe(h.deck, { startMs: START_MS });
+  assert.ok(result.ok, result.ok ? '' : result.line);
+  const json = readServerJson(h.base.platform.files, h.files().serverJson);
+  assert.ok(json !== null, 'server.json is there when startServe returns');
+  assert.equal(json.pid, result.ping.pid);
+  assert.equal(json.serverId, result.ping.serverId);
+  assert.equal(json.bootId, result.ping.bootId);
+});
+
+test('startServe: a server that answers but never records itself in server.json within startMs gives its line, and is left running', async (t) => {
+  const h = harness(t, () => ({ FAKE_SERVE_JSON_DELAY_MS: '60000' }));
+  const result = await startServe(h.deck, { startMs: 2000 });
+  assert.equal(result.ok, false);
+  const pid = h.started[0]?.child.pid;
+  assert.deepEqual(result, {
+    ok: false,
+    line: `the window's server (pid ${pid}) answers, but did not record itself in ${h.files().serverJson} within 2 s; see ${logPath(h)}`,
+  });
+  assert.equal(h.started[0]?.exited, false);
   assert.deepEqual(h.signals, []);
 });
 
