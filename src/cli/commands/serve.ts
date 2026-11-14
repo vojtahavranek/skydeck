@@ -35,34 +35,38 @@ const FRAME = /^\s+at /;
 
 /**
  * S2 5.2: an uncaught error for the log — its name and code (failureKind) and its stack frames,
- * without the message: a message can span several lines and quote what a peer sent (Node.js's
- * JSON.parse error quotes its input), so only lines that are frames are kept (ruled, task 15), and
- * only from the part of the stack AFTER the message's own text: a message can hold a line that
- * looks like a frame (a pasted stack trace; review 2). When the stack does not hold the message
- * where it can be found, no frame is kept. Exported for its test.
+ * never its message. A message can span several lines, quote what a peer sent (Node.js's
+ * JSON.parse error quotes its input) and hold a line that looks like a frame (a pasted stack
+ * trace), so frames are not found by their pattern alone (ruled, review 2; this replaces task 15's
+ * rule): the stack's header — `<name>: <message>` as the message is, however many lines; Node.js's
+ * `<name> [<code>]: <message>`; the name alone for an empty message — is removed exactly, and only
+ * the lines after it that match `/^\s+at /` are kept. A stack that does not begin with its header
+ * gives no frame at all. Exported for its test.
  */
 export function uncaughtLine(error: unknown): string {
   if (!(error instanceof Error)) {
     return `a value that is not an Error (${typeof error})`;
   }
-  let stack = '';
-  let message = '';
+  let frames: string[] = [];
   try {
-    stack = typeof error.stack === 'string' ? error.stack : '';
-    message = typeof error.message === 'string' ? error.message : '';
-  } catch {
-    // a stack or a message that cannot be read: the name alone
-    stack = '';
-  }
-  const at = message === '' ? 0 : stack.indexOf(message);
-  const frames =
-    at === -1
-      ? []
-      : stack
-          .slice(at + message.length)
+    const { stack, name, message } = error;
+    const code = (error as { code?: unknown }).code;
+    if (typeof stack === 'string' && typeof name === 'string' && typeof message === 'string') {
+      const tail = message === '' ? '' : `: ${message}`;
+      const headers = [`${name}${tail}`];
+      if (typeof code === 'string') headers.push(`${name} [${code}]${tail}`);
+      const header = headers.find((h) => stack === h || stack.startsWith(`${h}\n`));
+      if (header !== undefined) {
+        frames = stack
+          .slice(header.length)
           .split('\n')
           .filter((line) => FRAME.test(line))
           .map((line) => line.trim());
+      }
+    }
+  } catch {
+    frames = []; // a stack, name or message that cannot be read: the name alone
+  }
   return [failureKind(error), ...frames].join(' ');
 }
 

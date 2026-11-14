@@ -3,7 +3,15 @@
 // a store migrated under the server, a locked store, a keep-alive that cannot start. In the test
 // process (A19) on realTestPlatform, with real keepers running the stand-in.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
@@ -27,7 +35,8 @@ import { keepAliveNotices } from '../../src/window/server.ts';
 import { loadXterm } from '../../src/window/xterm.ts';
 import { sleep, until, within } from '../helpers/keeper.ts';
 import { freshNonce } from '../helpers/pages.ts';
-import { S1, S2 } from '../helpers/platform.ts';
+import { S1, S2, S3 } from '../helpers/platform.ts';
+import { waitForRecord } from '../helpers/standin.ts';
 import { assertSameScreen } from '../helpers/registry.ts';
 import { connectTestPage, rowsOf, serverSandbox, WAIT_MS } from '../helpers/window.ts';
 import type { ServerSandbox, TestPage, TestServer } from '../helpers/window.ts';
@@ -165,6 +174,31 @@ function heldStart(): {
   };
 }
 
+/** S2 6.1: the Windows client the keep-alive is. */
+const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
+
+/** claudeCommand becomes a script `name` of the sandbox with `text`. */
+function claudeCommandScript(d: ServerSandbox, name: string, text: string): void {
+  const script = join(d.s.bin, name);
+  writeFileSync(script, text, { mode: 0o755 });
+  const configPath = join(d.s.skydeckHome, 'config', 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  writeFileSync(configPath, JSON.stringify({ ...config, claudeCommand: script }));
+}
+
+/** claudeCommand becomes a script that ends at once (exit 3), as a claude that fails at start. */
+function failingClaude(d: ServerSandbox): void {
+  claudeCommandScript(d, 'claude-fails', '#!/bin/sh\nexit 3\n');
+}
+
+/** A unix socket that accepts connections (an interop socket, S2 6.4), closed at the test's end. */
+async function listeningSocket(t: TestContext, path: string): Promise<{ path: string }> {
+  const server = createServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => server.listen(path, resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  return { path };
+}
+
 describe('python3 missing (S2 14)', () => {
   test("the server runs and lists; a resume answers S2 14's message; status says python3 is not found", async (t) => {
     const d = serverSandbox(t);
@@ -246,7 +280,7 @@ describe('stopping (S2 5.5) and starting again (S2 7.3, 14)', () => {
 });
 
 describe('while the server starts (S2 5.2, 7.3)', () => {
-  test('a page that connects before the keepers are found waits for them: no second terminal of a session', async (t) => {
+  test('an upgrade before the keepers are found and the rows loaded is answered 503; then a resume of a session whose terminal runs is refused', async (t) => {
     const d = serverSandbox(t);
     d.resumable(S1);
     // A terminal of S1 an earlier server opened: its program runs and holds no live file (claude
@@ -261,16 +295,25 @@ describe('while the server starts (S2 5.2, 7.3)', () => {
     const starting = d.start({ platform: held.change });
     await held.reached;
     assert.ok(held.port() > 0, 'the port is bound');
-    let connected = false;
-    const connecting = connectTestPage(t, d, { port: held.port() }).then((page) => {
-      connected = true;
-      return page;
+    const origin = `http://127.0.0.1:${held.port()}`;
+    const ws = new WebSocket(`ws://127.0.0.1:${held.port()}/ws`, { origin });
+    t.after(() => {
+      ws.terminate();
     });
-    await sleep(500);
-    assert.equal(connected, false, 'the page waits while the server starts');
+    ws.on('error', () => {});
+    const status = await new Promise<number>((resolve, reject) => {
+      ws.once('open', () => reject(new Error('the upgrade was accepted while starting')));
+      ws.once('unexpected-response', (req, res) => {
+        resolve(res.statusCode ?? 0);
+        res.resume();
+        req.destroy();
+      });
+    });
+    assert.equal(status, 503, 'the server is starting');
+
     held.open();
     const test = await starting;
-    const page = await connecting;
+    const page = await connectTestPage(t, d, test.server);
     const list = await page.next('list', 'the first list');
     assert.deepEqual(
       list.terminals.map((term) => [term.id, term.state]),
@@ -301,11 +344,7 @@ describe('what the server wires together', () => {
   test('an exit is settled: a resumed program that ends before it reports a start gives its lock back', async (t) => {
     const d = serverSandbox(t);
     d.resumable(S1);
-    const script = join(d.s.bin, 'claude-fails');
-    writeFileSync(script, '#!/bin/sh\nexit 3\n', { mode: 0o755 });
-    const configPath = join(d.s.skydeckHome, 'config', 'config.json');
-    const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-    writeFileSync(configPath, JSON.stringify({ ...config, claudeCommand: script }));
+    failingClaude(d);
     const test = await d.start();
     const page = await connectTestPage(t, d, test.server);
     const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
@@ -317,6 +356,115 @@ describe('what the server wires together', () => {
     );
     // Two ticks; the lock itself would hold for 60 s.
     await until(() => readLock(d.deck, S1) === null, 'the lock given back', 6000);
+  });
+
+  test('an exit not settled yet when the server stops is settled by the stop', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    failingClaude(d);
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    await until(
+      () => test.server.hub.list().some((term) => term.exit !== null),
+      'the program ended',
+      WAIT_MS,
+    );
+    await test.server.stop('at once'); // before the next refresh tick could settle it
+    assert.equal(readLock(d.deck, S1), null, 'the stop gave the lock back');
+  });
+
+  test('the interop link is pointed before the first keep-alive check (S2 6.4; task 19)', async (t) => {
+    const d = serverSandbox(t, { env: { WSL_DISTRO_NAME: 'Test' }, window: { keepAlive: 'wsl' } });
+    const socket = await listeningSocket(t, join(d.s.root, 'interop-socket'));
+    const envs: (string | undefined)[] = [];
+    await d.start({
+      interopFirst: socket.path,
+      platform: (p) => ({
+        ...p,
+        processes: {
+          startDetached(command, args, options) {
+            if (command !== WSL_EXE) return p.processes.startDetached(command, args, options);
+            envs.push(options.env.WSL_INTEROP); // nothing is started: a wsl.exe that runs on
+            return Promise.resolve({ pid: 2147483646, exited: new Promise(() => {}) });
+          },
+          signal: () => false,
+        },
+      }),
+    });
+    assert.deepEqual(envs, [d.files.interop], 'the first wsl.exe already has the link');
+    assert.equal(realpathSync(d.files.interop), socket.path);
+  });
+
+  test('the interop link is pointed again when a terminal opens (S2 6.4)', async (t) => {
+    const d = serverSandbox(t);
+    const path = join(d.s.root, 'interop-socket');
+    d.resumable(S1);
+    const test = await d.start({ interopFirst: path });
+    assert.equal(existsSync(d.files.interop), false, 'nothing accepts yet: no link');
+    await listeningSocket(t, path);
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const start = await waitForRecord(d.record, (record) => record.ev === 'start', WAIT_MS);
+    assert.ok(start.ev === 'start');
+    assert.equal(start.env.WSL_INTEROP, d.files.interop);
+  });
+
+  test("an action's own writes reload the rows (A24's sixth trigger)", async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    await page.list((list) => listed(list, S1), 'the first list');
+    // A transcript that only the action's refresh (prepareResumeById) saves: the tick's next
+    // refresh then finds nothing new, and no change mark moves.
+    d.resumable(S2, join(d.s.home, 'other'));
+    const result = await page.act({ kind: 'resume', sessionId: S3, cols: 80, rows: 24 });
+    assert.equal(result.ok, false, 'S3 is no session');
+    await page.list((list) => listed(list, S2), 'the new session listed', 6000);
+  });
+
+  test("a late keeper's decision reloads the rows (A24's sixth trigger)", async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    // A program that writes no live file and does not end: nothing but the decision's own
+    // refresh changes the store, and no change mark moves.
+    claudeCommandScript(d, 'claude-sleeps', '#!/bin/sh\nexec sleep 120\n');
+    // The keeper's socket refuses connections for 6 s after the first try: its hello comes after
+    // spawn's 5 s, as a late one, and goes through decideFoundKeeper (which refreshes).
+    let unblockAt: number | null = null;
+    const test = await d.start({
+      platform: (p) => ({
+        ...p,
+        net: {
+          ...p.net,
+          async connectUnix(path) {
+            if (path.startsWith(`${d.files.termsDir}/`)) {
+              unblockAt ??= performance.now() + 6000;
+              if (performance.now() < unblockAt) {
+                throw Object.assign(new Error('refused for the test'), { code: 'ECONNREFUSED' });
+              }
+              if (!existsSync(join(d.s.claudeHome, 'projects', 'project', `${S2}.jsonl`))) {
+                // Only the decision's refresh can save it before the tick's refresh comes.
+                d.resumable(S2, join(d.s.home, 'other'));
+              }
+            }
+            return p.net.connectUnix(path);
+          },
+        },
+      }),
+    });
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'resume', sessionId: S1, cols: 80, rows: 24 });
+    assert.equal(result.ok, false, 'no hello within 5 s: answered as a timeout');
+    await until(
+      () => test.server.hub.list().some((term) => term.program !== null),
+      'the late keeper started its program',
+      WAIT_MS,
+    );
+    await page.list((list) => listed(list, S2), 'the new session listed', 6000);
   });
 
   test('a launch token presented a second time raises the alarm (window_alarm)', async (t) => {

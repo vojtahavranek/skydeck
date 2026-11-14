@@ -722,9 +722,11 @@ export class ServeExit extends Error { readonly code: 0 | 10 | 11 | 12 | 13 }
 export function keepAliveNotices(): (state: KeepAlivePayload) => { kind: 'keepalive-lost' | 'keepalive-back'; text: string } | null;
 
 // src/cli/commands/serve.ts, exported for its test (ruled, task 23): an uncaught error for the
-// log — its name and code (failureKind) and the stack lines that are frames (/^\s+at /), taken
-// only from the stack after the message's own text (review 2: a message line can look like a
-// frame), never its message; no frame when the message is not found in the stack.
+// log — its name and code (failureKind) and its stack frames, never its message (ruled at review
+// 2, replacing task 15's rule): the stack's header (`<name>: <message>` however many lines the
+// message has; Node.js's `<name> [<code>]: <message>`; the name alone for an empty message) is
+// removed exactly and the lines after it matching /^\s+at / are kept; a stack that does not begin
+// with that header gives no frames.
 export function uncaughtLine(error: unknown): string;
 ```
 
@@ -3377,11 +3379,13 @@ interop link; a failed tick logged by kind and sent once as `notice tick-failed`
 `keepers.log` at start and once a minute on the tick (the keepers only append to it). `listFor` is
 `buildListMessage` (task 13) with task 32's `selectedPayload` for the page's selected row. The `serve` command
 installs process handlers: an uncaught error is logged by name and stack frames without the
-message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5). (Review 2:) an
-upgrade that comes while the server starts waits — at most 64, the oldest dropped — until the
-keepers are found and the first tick has loaded the rows, and is then handed to the pages, so that
-no page acts on a hub that does not list the terminals yet; a `POST /shutdown` or a signal during
-the start stops the server once the start is done.
+message line and ends the server with exit 1; SIGTERM and SIGINT stop it (S2 5.5). Ruled at review 2: until
+`rediscover()` has settled and the first tick has loaded the rows, an upgrade with the right Host
+is answered 503, as after `bye` (`PagesDeps.starting`), so that no page acts on a hub that does not
+list the terminals yet; a `POST /shutdown` or a signal during the start stops the server once the
+start is done, never lost. An exit the registry makes up for a keeper that never sent a hello is
+not settled (accepted): there is no hello to take the lock value from, and the lock expires by
+itself (LOCK_TTL_NS).
 
 **Tests** (platform: `realTestPlatform`; in process through `startTestServer` and `TestPage` unless marked)
 - Start: `server.json` (mode 0o600, every field of 2.8), `server.pid`, `server.sock`, the keeper

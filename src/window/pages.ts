@@ -92,6 +92,9 @@ export interface PagesDeps {
    *  terminal's `ownsSize` from its own size state, whatever `listFor` put there. */
   listFor(page: PageState): ListMessage;
   log: (line: string) => void;
+  /** While it returns true the server is still starting (S2 5.2: its keepers not found yet): an
+   *  upgrade with the right Host is answered 503, as after `bye` (ruled, task 23). Default false. */
+  starting?: () => boolean;
 }
 
 export interface Pages {
@@ -819,7 +822,7 @@ export function createPages(deps: PagesDeps): Pages {
       // node:http's 'upgrade' listener: a throw here would end the server.
       try {
         const port = deps.port();
-        const refusal = refusalOf(req, port, stopping);
+        const refusal = refusalOf(req, port, stopping || deps.starting?.() === true);
         if (refusal !== null) {
           refuse(socket, port, refusal);
           return;

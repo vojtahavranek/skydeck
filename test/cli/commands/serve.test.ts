@@ -416,6 +416,29 @@ describe('uncaughtLine (S2 5.2)', () => {
     assert.equal(line.includes('position 3'), false, line);
   });
 
+  test("Node.js's own JSON.parse message, which quotes its input, leaves none of it in the line", () => {
+    let line = '';
+    try {
+      JSON.parse(`\n    at ${MARKER} (pasted.js:1:2)\n{`);
+    } catch (error) {
+      line = uncaughtLine(error);
+    }
+    assert.match(line, /^SyntaxError at JSON\.parse/, line);
+    assert.equal(line.includes(MARKER), false, line);
+  });
+
+  test("a stack that does not begin with the error's header gives no frame", () => {
+    const error = new Error('m');
+    error.stack = `something else\n    at ${MARKER} (x.js:1:1)`;
+    assert.equal(uncaughtLine(error), 'Error');
+  });
+
+  test('a Node.js error with its code in the header keeps its frames', () => {
+    const error = Object.assign(new TypeError('bad'), { code: 'ERR_X' });
+    error.stack = 'TypeError [ERR_X]: bad\n    at f (a.js:1:1)';
+    assert.equal(uncaughtLine(error), 'TypeError (ERR_X) at f (a.js:1:1)');
+  });
+
   test('something thrown that is not an Error', () => {
     assert.equal(uncaughtLine(`${MARKER}`), 'a value that is not an Error (string)');
   });

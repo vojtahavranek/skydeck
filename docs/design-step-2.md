@@ -377,8 +377,11 @@ peer's data — a frame, a message, a request body that does not parse or does n
 by its kind and where it came from (`page <window id>: malformed message`), never by its message,
 because a message can quote the data: Node.js's `JSON.parse` error quotes its input, which could be
 a proof, a typed prompt or a pasted text. An uncaught error is logged by its name and its stack
-frames without the message, and ends the server (exit 1): only the lines of the stack that are
-frames (`    at …`) are kept, since a message can span several lines. The headless terminals of the
+frames without the message, and ends the server (exit 1). A message can span several lines and
+hold a line that looks like a frame (a pasted stack trace), so the stack's header — the name and
+the message, as many lines as the message has — is removed exactly and only the lines after it
+that are frames (`    at …`) are kept; a stack that does not begin with that header gives no
+frames at all (ruled, plan task 23). The headless terminals of the
 screen sides (7.2) log nothing: xterm.js's own log is turned off, because its messages quote the
 program's output (a parsing error names the character and the parameters; section 21). What
 reaches the log through stdout and stderr is only what Node.js itself writes there (its warnings).
@@ -436,11 +439,15 @@ under `/mnt/<letter>/` maps to `<LETTER>:\`). None or several is an error that n
 
 ### 5.5 Stopping the server
 
-On `POST /shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connections; parks a
-snapshot in every keeper (7.3); closes its keeper connections (the keepers and their programs keep
-running); sends every page `bye` with the reason; removes `server.json`, `server.pid` and
-`server.sock`; releases the `window_server` lock (5.2); and exits 0. After `bye`, an upgrade with
-the right `Host` is answered 503 (8.2.1). It does not stop the keep-alive, which ends by itself
+On `POST /shutdown` (8.3), SIGTERM or SIGINT the server, in this order: stops its tick; closes
+`server.sock` (no command reaches a server that is stopping; the file goes with it); sends every
+page `bye` with the reason and then closes the port — after `bye` an upgrade with the right `Host`
+is answered 503 (8.2.1); parks a snapshot in every keeper (7.3) and closes its keeper connections
+(the keepers and their programs keep running); settles the terminals that ended since the last tick
+(7.8); removes `server.json` and `server.pid`; releases the `window_server` lock (5.2); and exits 0.
+The pages go before the park so that no page can type between the park and the close (ruled, plan
+task 23). A stop asked for while the server starts is made once the start is done; a second one
+during a stop is the same stop. It does not stop the keep-alive, which ends by itself
 (6.1). The three are the same stop, so a command that stops a server (5.1 `--restart`) sends
 SIGTERM instead of the request to one that does not answer `GET /ping`. A server that crashes
 leaves `server.json` and its lock behind: whoever reads them checks the pid, process start and
@@ -1027,8 +1034,11 @@ headers above 16 KiB; `CONNECT` is closed without an answer. They only refuse, s
 protect nothing there (ruled, plan task 17); server tests pin them, so that a Node.js release that
 changes them is noticed. Every request with `Connection: Upgrade` and an `Upgrade` header goes to
 the upgrade handler whatever its path, method or `Host`; that handler applies this section's checks
-itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`. After `bye`
-(5.5), an upgrade with the right `Host` is answered 503 (ruled, plan task 17). When 64
+itself (421, 403, 405, 404) and its refusals carry the headers above and `no-store`. While the
+server starts — until it has found its keepers (7.3) and loaded its first list — and after `bye`
+(5.5), an upgrade with the right `Host` is answered 503 (ruled, plan tasks 17 and 23): no page acts
+on a server that does not know its terminals yet, and a page tries again on a 503 as on any lost
+connection. When 64
 connections are waiting for their `hello` (8.2.2) and another upgrade passes the checks above, the
 server drops the one that has waited longest and accepts the newcomer: a local process that holds
 idle connections which prove nothing can neither use up the server's descriptors nor lock a new or
