@@ -11,6 +11,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { once } from 'node:events';
@@ -62,7 +63,7 @@ function machine(t: TestContext, options: MachineOptions = {}): WindowMachine {
 /** A python3 in the sandbox's bin that answers `--version` with `answer`. */
 function pythonStub(m: WindowMachine, answer: string): void {
   const path = join(m.s.bin, 'python3');
-  rmSync(path, { force: true });
+  unlinkSync(path);
   writeFileSync(path, `#!/bin/sh\necho '${answer}'\n`, { mode: 0o755 });
 }
 
@@ -81,7 +82,7 @@ describe('doctor: python3', () => {
 
   test('python3 missing: a problem naming the window and 3.9', async (t) => {
     const m = machine(t);
-    rmSync(join(m.s.bin, 'python3'));
+    unlinkSync(join(m.s.bin, 'python3'));
 
     const r = await doctor(m);
 
@@ -103,7 +104,7 @@ describe('doctor: python3', () => {
 
   test('python3 missing while the window was never used (no window_secret): info', async (t) => {
     const m = machine(t, { used: false });
-    rmSync(join(m.s.bin, 'python3'));
+    unlinkSync(join(m.s.bin, 'python3'));
 
     const r = await doctor(m);
 

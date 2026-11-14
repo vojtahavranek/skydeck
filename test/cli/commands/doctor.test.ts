@@ -6,6 +6,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -176,7 +177,7 @@ describe('doctor: each problem alone', () => {
     const d = await installedMachine(t);
     const temporary = join(d.sandbox.root, 'temporary-hook');
     writeFileSync(temporary, '#!/bin/sh\n');
-    rmSync(d.places.hookPath);
+    unlinkSync(d.places.hookPath);
     symlinkSync(temporary, d.places.hookPath);
     rmSync(temporary);
     const r = await doctor(d);
