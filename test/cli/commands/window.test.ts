@@ -1072,8 +1072,8 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     const status = unreadable.requests.find((q) => q.path === '/status');
     assert.equal(
       (status?.answer?.body as { pages?: unknown } | undefined)?.pages,
-      -1,
-      'the fake answered a count the client refuses',
+      '3',
+      'the fake answered a count the client refuses, which taken as it is would mean a wait',
     );
   });
 
