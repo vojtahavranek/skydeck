@@ -1240,7 +1240,10 @@ export function findServer(deck: Deck, checkout: string, build: string, times?: 
  *  id that cannot be read rejects with a SkydeckError before anything is started. */
 export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: true; ping: PingAnswer } | { ok: false; line: string }>;
 /** A server that answers ping: POST /shutdown, wait 10 s; then SIGTERM and after 5 s SIGKILL. A server that gives no
- *  ping answer gets no POST /shutdown and SIGTERM at once, without the 10 s (ruled, task 22). Each
+ *  ping answer within the ping wait (a refused or failed ping is tried again every 100 ms, as
+ *  findServer does; one that times out is not — ruled by the plan owner, follow-up
+ *  "server-findable", third ruling; a server gone meanwhile is stopped) gets no POST /shutdown
+ *  and SIGTERM at once, without the 10 s (ruled, task 22). Each
  *  signal only after server.json's pid, process start and boot id are confirmed alive at that moment
  *  (S2 5.1 --restart). Never signals a keeper (an identity a keeper's .pid line holds), this process
  *  or pid 1: rejects with a SkydeckError instead, as for an 'unknown' line and for a server that
@@ -1254,8 +1257,7 @@ export function startServe(deck: Deck, times?: LifecycleTimes): Promise<{ ok: tr
  *  SIGTERM comes at once. Left out, or another pid: as above.
  *  A server that is starting (ruled by the plan owner, follow-up "server-findable"): found as
  *  findServer finds it. One that records itself within pingMs is pinged in what is left of pingMs
- *  (a refused ping tried again every 100 ms: it listens a moment after it records itself) and
- *  stopped as above; one still not recorded then, or whose pid is `hungPid`, gets SIGTERM at once
+ *  and stopped as above; one still not recorded then, or whose pid is `hungPid`, gets SIGTERM at once
  *  and SIGKILL after killMs to the identity the lock names, each after it was confirmed alive and
  *  never to a keeper, this process or pid 1 (the refusal names "skydeck's window_server lock"). */
 export function stopServer(deck: Deck, times?: LifecycleTimes, options?: { hungPid?: number }): Promise<{ stopped: boolean; keepers: number }>;

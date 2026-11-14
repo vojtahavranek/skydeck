@@ -1688,3 +1688,86 @@ test('startServe: serve exiting 11 while a server of another checkout starts (it
     line: `a window server already runs (pid ${pid}, from /elsewhere/skydeck)`,
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// stopServer's ping, tried again as findServer's is (ruled, server-findable, third ruling): a
+// server writes server.json a moment before server.sock listens, and one in its orderly stop no
+// longer accepts; only a ping that times out, or none answered within pingMs, means SIGTERM.
+
+test('stopServer: a refused ping, then an answer — POST /shutdown, and no signal', async (t) => {
+  const { d, ping } = fakeServerDeck(t);
+  d.processes.live.add(4242);
+  const paths: string[] = [];
+  const net: Net = {
+    ...d.deck.platform.net,
+    requestUnix(_path, request) {
+      paths.push(`${request.method} ${request.path}`);
+      if (request.path === '/ping') {
+        return paths.length === 1 ? refused() : Promise.resolve({ status: 200, body: ping });
+      }
+      d.clock.after(200, () => {
+        d.proc.setProcess(4242, null);
+      });
+      return Promise.resolve({ status: 200, body: { ok: true } });
+    },
+  };
+  const deck = { ...d.deck, platform: { ...d.deck.platform, net } };
+  assert.deepEqual(await stopServer(deck, { pingMs: 1000, stopMs: 10_000, killMs: 500 }), {
+    stopped: true,
+    keepers: 0,
+  });
+  assert.deepEqual(paths, ['GET /ping', 'GET /ping', 'POST /shutdown']);
+  assert.deepEqual(d.processes.signals, []);
+});
+
+test('stopServer: a ping refused to the end of pingMs — SIGTERM then, not at once', async (t) => {
+  const { d } = fakeServerDeck(t);
+  d.processes.live.add(4242);
+  const asked = withRequests(d.deck, refused);
+  const before = d.clock.nowNs();
+  let termAt = -1;
+  const deck = onSignals(asked.deck, (pid, signal) => {
+    if (signal === 'SIGTERM') {
+      termAt = msSince(d, before);
+      d.proc.setProcess(pid, null);
+    }
+  });
+  assert.deepEqual(await stopServer(deck, { pingMs: 1000, stopMs: 10_000, killMs: 500 }), {
+    stopped: true,
+    keepers: 0,
+  });
+  assert.deepEqual(d.processes.signals, [{ pid: 4242, signal: 'SIGTERM' }]);
+  assert.equal(asked.attempts(), 10, 'tried again every 100 ms');
+  assert.ok(termAt >= 1000, `SIGTERM at ${termAt} ms`);
+});
+
+test('stopServer: a server gone while its refused ping is tried again: stopped, no signal', async (t) => {
+  const { d } = fakeServerDeck(t);
+  d.processes.live.add(4242);
+  const asked = withRequests(d.deck, (attempt) => {
+    if (attempt === 3) d.proc.setProcess(4242, null); // its orderly stop ends it
+    return refused();
+  });
+  assert.deepEqual(await stopServer(asked.deck, { pingMs: 1000 }), { stopped: true, keepers: 0 });
+  assert.equal(asked.attempts(), 3);
+  assert.deepEqual(d.processes.signals, []);
+});
+
+test('stopServer: a ping that times out is not tried again — SIGTERM at once', async (t) => {
+  const { d } = fakeServerDeck(t);
+  d.processes.live.add(4242);
+  const asked = withRequests(d.deck, () =>
+    Promise.reject(Object.assign(new Error('no answer'), { code: 'ETIMEDOUT' })),
+  );
+  const before = d.clock.nowNs();
+  const deck = onSignals(asked.deck, (pid) => {
+    d.proc.setProcess(pid, null);
+  });
+  assert.deepEqual(await stopServer(deck, { pingMs: 1000, stopMs: 10_000, killMs: 500 }), {
+    stopped: true,
+    keepers: 0,
+  });
+  assert.equal(asked.attempts(), 1);
+  assert.deepEqual(d.processes.signals, [{ pid: 4242, signal: 'SIGTERM' }]);
+  assert.ok(msSince(d, before) < 100, `${msSince(d, before)} ms`);
+});

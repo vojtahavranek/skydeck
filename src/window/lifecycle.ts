@@ -213,8 +213,6 @@ type Found =
       line: PidLine;
       checkout: string;
       files: RuntimeFiles;
-      /** Found only after a wait: it was starting, and listens a moment after it records itself. */
-      waited: boolean;
     }
   | { kind: 'starting'; line: PidLine; checkout: string };
 
@@ -223,7 +221,7 @@ type Found =
  * alive by design 5.5's rule; otherwise the holder of the window_server lock, when it is alive — a
  * server that is starting: server.json is looked at again every POLL_MS (where the store's record
  * says, looked up again: the start records its directory) until it names a live process (then
- * that one, `waited`), or until `deadline` is over or `stopWaiting` says so for the holder's line
+ * that one), or until `deadline` is over or `stopWaiting` says so for the holder's line
  * (then 'starting', with the identity the lock names). null when neither names a live process:
  * no lock, a value skydeck does not write, its holder dead — also when that comes about during
  * the wait. Rejects with judge's SkydeckError for a server.json line or a holder that cannot be
@@ -235,11 +233,11 @@ async function serverWithin(
   stopWaiting: (line: PidLine) => boolean = () => false,
 ): Promise<Found | null> {
   const { platform } = deck;
-  for (let waited = false; ; waited = true) {
+  for (;;) {
     const files = serverFiles(deck);
     const server = recordedServer(deck, files);
     if (server !== null && judge(platform, server.line) === 'alive') {
-      return { kind: 'recorded', ...server, files, waited };
+      return { kind: 'recorded', ...server, files };
     }
     const holder = readServerLock(deck.store);
     if (holder === null || judge(platform, holder.line) === 'dead') return null;
@@ -516,8 +514,10 @@ function refusalReason(platform: Platform, dir: string): string | null {
 
 /**
  * S2 5.1 `--restart` and `--stop`, 16.2: a server that answers `GET /ping` is asked to stop
- * (`POST /shutdown`) and is given `stopMs` to end. One that does not answer, or does not end in
- * time, gets SIGTERM and, `killMs` later, SIGKILL; each only after server.json's pid, process start
+ * (`POST /shutdown`) and is given `stopMs` to end. A ping that is refused or fails is tried again
+ * every 100 ms within `pingMs`, as findServer's is (ruled, server-findable, third ruling); one that
+ * times out is not; a server gone meanwhile is stopped. One that does not answer within `pingMs`,
+ * or does not end in time, gets SIGTERM and, `killMs` later, SIGKILL; each only after server.json's pid, process start
  * and boot id were confirmed alive at that moment, and never when they name a keeper of the
  * runtime directory, this process or pid 1. `stopped` is true when a server was running and is
  * gone. `keepers` is what keeps running in the window (ruled): the keepers whose .pid line in the
@@ -532,8 +532,7 @@ function refusalReason(platform: Platform, dir: string): string | null {
  * Without it, or for another pid, the server is pinged as above.
  * A server that is starting (ruled, server-findable): while server.json names no live process, a
  * live holder of the window_server lock is waited for within `pingMs` to record itself — then it
- * is pinged in what is left of `pingMs`, a refused ping tried again every 100 ms (it listens a
- * moment after it records itself), and stopped as above; one that has not recorded itself by
+ * is pinged in what is left of `pingMs` and stopped as above; one that has not recorded itself by
  * then, or whose pid is `options.hungPid`, gets SIGTERM at once and SIGKILL after `killMs`, to the
  * identity the lock names, under the same checks. A holder that cannot be judged rejects as an
  * unknown server.json line does; nothing is signalled on it.
@@ -588,16 +587,14 @@ async function stopTarget(
   const found = await serverWithin(deck, deadline, (line) => line.pid === hungPid);
   if (found === null) return 'none';
   if (found.kind === 'starting' || found.line.pid === hungPid) return { found, answered: false };
-  const client = controlClient(deck.platform.net, found.files.serverSock);
-  let answered: boolean;
-  if (found.waited) {
-    const ping = await pingWithin(deck, found.files, found.line, pingMs, deadline);
-    if (ping === 'dead') return 'gone';
-    answered = typeof ping === 'object';
-  } else {
-    answered = typeof (await pingOnce(client, pingMs)) === 'object';
-  }
+  // Ruled (server-findable, third ruling): a refused or failed ping is tried again within pingMs,
+  // as findServer's is — a server listens a moment after it records itself, and one in its orderly
+  // stop no longer accepts; only one that times out, or none answered in time, is no answer.
+  const ping = await pingWithin(deck, found.files, found.line, pingMs, deadline);
+  if (ping === 'dead') return 'gone';
+  const answered = typeof ping === 'object';
   if (answered) {
+    const client = controlClient(deck.platform.net, found.files.serverSock);
     await client.shutdown().catch((error: unknown) => {
       if (!(error instanceof SkydeckError)) throw error;
     });

@@ -333,8 +333,12 @@ Options:
   hint naming Ctrl+Shift+O for "previous session" and the "+ New" button.
 - `--restart`: stop the running server and start a new one; also a server of another checkout or
   one that does not answer. Stopping: a server that answers `GET /ping` is sent `POST /shutdown`
-  (5.5) and waited for until its process is gone (at most 10 seconds); a server that does not
-  answer the ping is sent no request and gets SIGTERM at once (it would not answer the request
+  (5.5) and waited for until its process is gone (at most 10 seconds); a server that gives no ping
+  answer within the ping wait (5 seconds; a refused ping or a request that fails is tried again
+  every 100 ms, as step 1 does — a server listens a moment after it writes `server.json` (5.2) and
+  one in its orderly stop no longer accepts; a ping that times out is not tried again; a server
+  gone meanwhile is stopped; ruled by the plan owner, follow-up "server-findable") is sent no
+  request and gets SIGTERM at once (it would not answer the request
   either, and SIGTERM is the same orderly stop, 5.5); one that does not end in time gets SIGTERM
   too. Either one, still running 5 seconds after SIGTERM, gets SIGKILL — each signal only once its pid, process start
   and boot id from `server.json` are confirmed alive at that moment, so no other process is ever
