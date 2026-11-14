@@ -31,6 +31,7 @@ import { pidLineState } from '../../../src/window/pidline.ts';
 import { listKeeperLines, readServerJson } from '../../../src/window/runtime.ts';
 import type { ServerJson } from '../../../src/window/runtime.ts';
 import { present } from '../../fixtures/fake-edge/page.ts';
+import type { Presented } from '../../fixtures/fake-edge/page.ts';
 import { run as runSkydeck } from '../../helpers/install.ts';
 import { procStartOf, sleep, stillRuns, until } from '../../helpers/keeper.ts';
 import { killKeepersIn } from '../../helpers/kill.ts';
@@ -56,12 +57,13 @@ interface WindowTimes {
   pageMs?: number;
   reuseMs?: number;
   launchingMs?: number;
+  reconnectMs?: number;
 }
 /**
  * The waits the tests give the command: a real server's start on a loaded machine; a page wait
  * that a passing case never waits out; a second-use wait shorter than the design's 2 s.
  */
-const TIMES: WindowTimes = { startMs: 30_000, pageMs: 20_000, reuseMs: 1000 };
+const TIMES: WindowTimes = { startMs: 30_000, pageMs: 20_000, reuseMs: 1000, reconnectMs: 2000 };
 
 /** `times` as SKYDECK_TEST_WINDOW_TIMES says it: `name=ms` pairs, separated by commas. */
 function timesText(times: WindowTimes): string {
@@ -104,6 +106,10 @@ interface Result {
   code: number;
   stdout: string;
   stderr: string;
+  /** The control requests of this run. */
+  requests: Request[];
+  /** How long it took, in ms. */
+  ms: number;
 }
 
 interface RunOptions {
@@ -129,6 +135,11 @@ interface Harness {
   presentations(): Presentation[];
   /** The server server.json names, and a client of server.sock. */
   server(): ServerJson | null;
+  /**
+   * server.json once the server answering on server.sock has written it: a server answers its
+   * ping before it writes server.json (S2 5.2), so a command can be done before the file is there.
+   */
+  running(): Promise<ServerJson>;
   client(): ControlClient;
   /** A fake serve started by the test itself, with `env` over the sandbox's; once it is ready. */
   fakeServe(env: Record<string, string>): Promise<ChildProcess>;
@@ -319,8 +330,16 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
         net,
         appRoot: options.appRoot ?? d.platform.appRoot,
       };
+      const before = requests.length;
+      const startedAt = performance.now();
       const r = await runSkydeck(platform, ['window', ...args]);
-      return { code: r.code, stdout: r.stdout, stderr: r.stderr };
+      return {
+        code: r.code,
+        stdout: r.stdout,
+        stderr: r.stderr,
+        requests: requests.slice(before),
+        ms: performance.now() - startedAt,
+      };
     },
     edgeRuns: () =>
       readJsonLines<EdgeRun & { presented?: number }>().filter((e) => e.argv !== undefined),
@@ -330,6 +349,19 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
       return readServerJson(d.platform.files, d.files.serverJson);
     },
     client: () => controlClient(d.platform.net, d.files.serverSock),
+    async running() {
+      const deadline = performance.now() + WAIT_MS;
+      for (;;) {
+        const json = h.server();
+        const ping = await h
+          .client()
+          .ping(1000)
+          .catch(() => null);
+        if (json !== null && typeof ping === 'object' && ping?.pid === json.pid) return json;
+        if (performance.now() > deadline) assert.fail('no server answering with its server.json');
+        await sleep(50);
+      }
+    },
     async fakeServe(env) {
       const child = spawn(FAKE_SERVE, ['serve'], {
         env: d.s.env({ SKYDECK_NODE: process.execPath, ...env }),
@@ -393,6 +425,52 @@ function mintedId(h: Harness): string {
 /** The decoded bytes of a base64url key. */
 function bytesOf(text: string): Uint8Array {
   return new Uint8Array(Buffer.from(text, 'base64url'));
+}
+
+/** The `POST /token` requests of a run. */
+function tokensAsked(r: Result): Request[] {
+  return r.requests.filter((q) => q.method === 'POST' && q.path === '/token');
+}
+
+/**
+ * A page that comes back as a window does after its server restarted (S2 6.3): once a server
+ * other than `oldPid` has written server.json, it connects to that server's port (the tests' port
+ * is chosen anew by each server) in mode key with the stored secret, retrying the 503 of a start
+ * that is not done. Closed when the test ends.
+ */
+function reconnectingPage(t: TestContext, h: Harness, oldPid: number): Promise<Presented> {
+  const done = (async (): Promise<Presented> => {
+    const deadline = performance.now() + WAIT_MS;
+    for (;;) {
+      const json = h.server();
+      const secret = h.d.deck.store.getKv('window_secret');
+      if (json !== null && json.pid !== oldPid && secret !== null) {
+        return present(json.port, bytesOf(secret), 'key');
+      }
+      if (performance.now() > deadline) assert.fail('no new server to reconnect to');
+      await sleep(50);
+    }
+  })();
+  t.after(async () => {
+    const presented = await done.catch(() => null);
+    if (presented?.outcome === 'welcome') presented.ws.terminate();
+  });
+  return done;
+}
+
+/** A page of the running server in mode key with the stored secret; closed when the test ends. */
+async function keyPage(t: TestContext, h: Harness): Promise<void> {
+  const json = await h.running();
+  const secret = h.d.deck.store.getKv('window_secret');
+  assert.ok(secret !== null);
+  const presented = await present(json.port, bytesOf(secret), 'key');
+  assert.equal(presented.outcome, 'welcome');
+  if (presented.outcome === 'welcome') {
+    const { ws } = presented;
+    t.after(() => {
+      ws.terminate();
+    });
+  }
 }
 
 const SUCCESS = /^skydeck window: http:\/\/127\.0\.0\.1:([0-9]+)\/ \(server pid ([0-9]+)\)\n$/;
@@ -540,6 +618,24 @@ describe('skydeck window: no server running (S2 5.1, 5.2, 5.3)', () => {
     assert.ok(typeof ping === 'object', 'the server keeps running');
   });
 
+  test('the server stops before a window used the token: the line saying so, exit 1', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run(['--print-url']);
+    assert.equal(first.code, 0, first.stderr);
+
+    const pending = h.run([]); // the fake Edge only records: no page comes
+    await until(() => h.edgeRuns().length === 1, 'Edge started', WAIT_MS);
+    await h.client().shutdown();
+    const r = await pending;
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stdout, '');
+    assert.equal(
+      r.stderr,
+      "skydeck: the window's server stopped or restarted before a window used its launch address; run skydeck window again\n",
+    );
+  });
+
   test("a serve that exits: S2 5.2's line for its code, exit 1, Edge not started", async (t) => {
     const h = windowHarness(t);
     const config = `${h.d.s.skydeckHome}/config/config.json`;
@@ -567,16 +663,18 @@ describe('skydeck window: no server running (S2 5.1, 5.2, 5.3)', () => {
     );
   });
 
-  test('CLAUDECODE set: the refusal, exit 1, nothing started', async (t) => {
+  test('CLAUDECODE set: the refusal, exit 1, nothing started — with every option, --stop included', async (t) => {
     const h = windowHarness(t);
 
-    const r = await h.run([], { env: { CLAUDECODE: '1' } });
+    for (const args of [[], ['--stop'], ['--print-url'], ['--restart'], ['--new-secret']]) {
+      const r = await h.run(args, { env: { CLAUDECODE: '1' } });
 
-    assert.equal(r.code, 1);
-    assert.equal(
-      r.stderr,
-      "skydeck: the window's server is not started from inside a Claude Code session: every session in the window would inherit that session's environment; run skydeck window in a terminal of your own\n",
-    );
+      assert.equal(r.code, 1, args.join(' '));
+      assert.equal(
+        r.stderr,
+        "skydeck: the window's server is not started from inside a Claude Code session: every session in the window would inherit that session's environment; run skydeck window in a terminal of your own\n",
+      );
+    }
     assert.deepEqual(h.started, []);
     assert.deepEqual(h.requests, []);
     assert.equal(h.server(), null);
@@ -611,8 +709,7 @@ describe('skydeck window: a server running (S2 5.1, 14)', () => {
     const r = await h.run(['--print-url']);
 
     assert.equal(r.code, 0, r.stderr);
-    const json = h.server();
-    assert.ok(json !== null);
+    const json = await h.running();
     const match = /^http:\/\/127\.0\.0\.1:([0-9]+)\/#t=([A-Za-z0-9_-]{43})\n$/.exec(r.stdout);
     assert.ok(match !== null, r.stdout);
     assert.equal(Number(match[1]), json.port);
@@ -685,20 +782,28 @@ describe('skydeck window: a server running (S2 5.1, 14)', () => {
     assert.ok(old !== null);
     assert.equal(old.checkout, checkout);
     writeFileSync(join(checkout, 'src', 'added.ts'), 'export {};\n');
+    const back = reconnectingPage(t, h, old.pid);
 
-    const r = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' }, appRoot: checkout });
+    const r = await h.run([], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      appRoot: checkout,
+      times: { reconnectMs: 15_000 },
+    });
 
     assert.equal(r.code, 0, r.stderr);
-    const lines = r.stdout.split('\n');
     assert.equal(
-      lines[0],
-      `restarting the window's server for the new build; new sessions in the window get the environment of this shell (${h.project})`,
+      r.stdout,
+      `restarting the window's server for the new build; new sessions in the window get the environment of this shell (${h.project})\n` +
+        'skydeck window: a window is already open\n',
+      'the window that was open came back: no second one (ruled, task 25)',
     );
+    assert.equal((await back).outcome, 'welcome');
     const now = h.server();
     assert.ok(now !== null);
     assert.notEqual(now.pid, old.pid, 'a new server');
     assert.notEqual(now.build, old.build);
-    assert.match(`${lines[1]}\n`, SUCCESS);
+    assert.equal(h.edgeRuns().length, 1, 'Edge not started again');
+    assert.deepEqual(tokensAsked(r), [], 'no token minted');
   });
 });
 
@@ -839,6 +944,128 @@ describe('skydeck window --restart, --stop, --new-secret (S2 5.1, 5.5)', () => {
   });
 });
 
+describe('--restart replaces any server (S2 5.1)', () => {
+  test('--restart with no server running: no restart line, a server and a window', async (t) => {
+    const h = windowHarness(t);
+
+    const r = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' } });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, SUCCESS);
+    assert.equal(h.edgeRuns().length, 1);
+  });
+
+  test('--restart replaces a server that does not answer: SIGTERM to it only, no wait for its pages', async (t) => {
+    const h = windowHarness(t);
+    const fake = await h.fakeServe({ FAKE_SERVE_MODE: 'silent', FAKE_SERVE_CHECKOUT: REPOSITORY });
+    const exited = once(fake, 'exit');
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { pingMs: 1000, reconnectMs: 60_000 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    const lines = r.stdout.split('\n');
+    assert.match(lines[0] ?? '', /^restarting the window's server /);
+    assert.match(`${lines[1]}\n`, SUCCESS);
+    await exited;
+    assert.deepEqual(h.signals, [{ pid: fake.pid, signal: 'SIGTERM' }]);
+    assert.notEqual(h.server()?.pid, fake.pid);
+    assert.ok(r.ms < 30_000, 'no wait for a page of a server that did not answer');
+    assert.equal(h.edgeRuns().length, 1);
+  });
+
+  test('--restart replaces a server of another checkout', async (t) => {
+    const h = windowHarness(t);
+    const fake = await h.fakeServe({ FAKE_SERVE_CHECKOUT: '/elsewhere/skydeck' });
+    const exited = once(fake, 'exit');
+
+    const r = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' } });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout.split('\n')[0] ?? '', /^restarting the window's server /);
+    await exited;
+    assert.deepEqual(h.signals, [], 'it stopped on POST /shutdown');
+    assert.equal(h.server()?.checkout, REPOSITORY);
+  });
+});
+
+describe('after a restart, the window that was open comes back (ruled, task 25)', () => {
+  test('--restart with a window open: its page reconnects within the wait — "already open", no token, no Edge', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
+    assert.equal(first.code, 0, first.stderr);
+    const old = h.server();
+    assert.ok(old !== null);
+    const back = reconnectingPage(t, h, old.pid);
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { reconnectMs: 15_000 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stdout.split('\n').slice(1).join('\n'),
+      'skydeck window: a window is already open\n',
+    );
+    assert.equal((await back).outcome, 'welcome');
+    assert.deepEqual(tokensAsked(r), [], 'no token minted');
+    assert.equal(h.edgeRuns().length, 1, 'Edge not started again');
+  });
+
+  test('--restart with a window open whose page does not come back: Edge only after the wait', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
+    assert.equal(first.code, 0, first.stderr);
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { reconnectMs: 3000 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout.split('\n')[1] ?? '', /^skydeck window: http:/);
+    assert.ok(r.ms >= 3000, `waited for the page to come back (${r.ms} ms)`);
+    assert.equal(tokensAsked(r).length, 1);
+    assert.equal(h.edgeRuns().length, 2);
+  });
+
+  test('no wait: an old server with no page, --new-window, --print-url, --new-secret', async (t) => {
+    const h = windowHarness(t);
+    const times = { reconnectMs: 60_000 };
+    const url = await h.run(['--print-url']); // a server with no page
+    assert.equal(url.code, 0, url.stderr);
+
+    const none = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' }, times });
+    assert.equal(none.code, 0, none.stderr);
+    assert.ok(none.ms < 30_000, `no page before: no wait (${none.ms} ms)`);
+    assert.equal(h.edgeRuns().length, 1);
+
+    // From here a window is open (the fake Edge's page of the run above).
+    const another = await h.run(['--restart', '--new-window'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times,
+    });
+    assert.equal(another.code, 0, another.stderr);
+    assert.ok(another.ms < 30_000, `--new-window: no wait (${another.ms} ms)`);
+    assert.equal(h.edgeRuns().length, 2);
+
+    const printed = await h.run(['--restart', '--print-url'], { times });
+    assert.equal(printed.code, 0, printed.stderr);
+    assert.match(printed.stdout.split('\n')[1] ?? '', /^http:\/\/127\.0\.0\.1:[0-9]+\/#t=/);
+    assert.ok(printed.ms < 30_000, `--print-url: no wait (${printed.ms} ms)`);
+
+    await keyPage(t, h);
+    const secret = await h.run(['--new-secret'], { env: { FAKE_EDGE_PAGE: 'once' }, times });
+    assert.equal(secret.code, 0, secret.stderr);
+    assert.match(secret.stdout, SUCCESS);
+    assert.ok(secret.ms < 30_000, `--new-secret: no wait (${secret.ms} ms)`);
+    assert.equal(h.edgeRuns().length, 3);
+  });
+});
+
 describe('skydeck window: usage', () => {
   test('--help prints the usage; an unknown option or argument and the contradicting options are usage errors (exit 2)', async (t) => {
     const h = windowHarness(t);
@@ -931,6 +1158,51 @@ describe('window_launching (S2 5.1: one command starts Edge at a time)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.ok(performance.now() - startedAt >= 2000, 'it waited for the other command');
     assert.equal(h.edgeRuns().length, 1, 'then started Edge itself');
+  });
+
+  test("held by a live command: done when that command's page connects — no token, no Edge", async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run(['--print-url']);
+    assert.equal(first.code, 0, first.stderr);
+    const live = await h.liveProcess();
+    const held = launchingValue(h, live, h.d.platform.clock.nowNs());
+    h.d.deck.store.setKv('window_launching', held);
+    const statuses = h.asked('GET', '/status').length;
+
+    const pending = h.run([], { times: { launchingMs: 60_000 } });
+    // The second look at the pages is the wait's own: the command waits for the other's page.
+    await until(() => h.asked('GET', '/status').length >= statuses + 2, 'waiting', WAIT_MS);
+    await keyPage(t, h);
+    const r = await pending;
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, SUCCESS);
+    assert.deepEqual(tokensAsked(r), [], 'no token minted');
+    assert.equal(h.edgeRuns().length, 0, 'Edge not started');
+    assert.equal(
+      h.d.deck.store.getKv('window_launching'),
+      held,
+      "the other command's lock is left as it is",
+    );
+  });
+
+  test("--new-window is not done by another command's page: it waits for the lock, then starts Edge", async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run(['--print-url']);
+    assert.equal(first.code, 0, first.stderr);
+    await keyPage(t, h);
+    const live = await h.liveProcess();
+    h.d.deck.store.setKv('window_launching', launchingValue(h, live, h.d.platform.clock.nowNs()));
+
+    const r = await h.run(['--new-window'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { launchingMs: 2500 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, SUCCESS);
+    assert.ok(r.ms >= 2000, `it waited for the lock (${r.ms} ms)`);
+    assert.equal(h.edgeRuns().length, 1);
   });
 
   test('a value that does not parse holds nothing', async (t) => {

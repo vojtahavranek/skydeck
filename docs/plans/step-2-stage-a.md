@@ -3570,7 +3570,12 @@ with `--print-url`, `--new-window`, `--restart`, `--stop` and `--new-secret`.
 tokens and the page count, `startEdge` for Edge, and `kv` `window_launching` (one transaction,
 stale after 45 s) around starting Edge and waiting. The 30-second wait and the 2-second second-use
 wait are parameters (A31). `--new-secret`: `stopServer`, `replaceSecret` (clears the alarm), then
-as without options. Exit codes 0, 1, 2.
+as without options. Exit codes 0, 1, 2. Ruled by the plan owner (task 25): before it stops a
+server (`--restart`, another build) the command reads its `status().pages`; when it answered with
+pages > 0 and the run is not `--new-secret`, `--new-window` or `--print-url`, it waits up to 7 s (a
+parameter, A31) for a page on the new server, which is then "a page is already connected" (no
+token, no Edge); `--stop` combines with no other option and `--print-url` not with `--new-window`
+(usage); the `CLAUDECODE` refusal holds for every option.
 
 **Tests** (platform: `realTestPlatform`; a real server through `bin/skydeck serve` with `SKYDECK_TEST_PORT=0`
 and `SKYDECK_TEST_INTEROP_FIRST` in the sandbox, the port read from `server.json`; the config
@@ -3593,6 +3598,9 @@ written by `writeWindowConfig` with `window.edge` = the fake Edge and `keepAlive
   `src/` of a fixture checkout) → restarted with the line.
 - Edge missing → S2 5.3's line, exit 1, the server keeps running. `CLAUDECODE` set → the refusal,
   exit 1, nothing started. Two `skydeck window` at once → one server, one Edge start.
+- Ruled (task 25): a window open, then `--restart` or another build → its page reconnects within
+  the wait → "a window is already open", no token, no Edge; no page comes → Edge after the wait;
+  `--new-secret`, `--new-window`, `--print-url` and an old server with 0 pages → no wait.
 
 **Done when:** every path of S2 5.1 has a test and no Windows program is started by the tests.
 

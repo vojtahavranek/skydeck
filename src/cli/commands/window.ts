@@ -75,17 +75,20 @@ interface Options {
 
 /**
  * The waits of S2 5.1 (A31), the design's values by default: a page has `pageMs` (30 s) to use
- * the launch token, a used token is watched `reuseMs` (2 s) more for a second use, and a
+ * the launch token, a used token is watched `reuseMs` (2 s) more for a second use, a
  * `window_launching` older than `launchingMs` (45 s, longer than the wait it guards) holds
- * nothing. The lifecycle's own times (ping, start, stop, kill) are passed on as they are.
+ * nothing, and after a restart the pages the old server had get `reconnectMs` (7 s: the page's
+ * longest retry interval is 5 s, S2 6.3; ruled, task 25) to come back. The lifecycle's own times
+ * (ping, start, stop, kill) are passed on as they are.
  */
 interface Times extends LifecycleTimes {
   pageMs: number;
   reuseMs: number;
   launchingMs: number;
+  reconnectMs: number;
 }
 
-const DEFAULT_WAITS = { pageMs: 30_000, reuseMs: 2000, launchingMs: 45_000 };
+const DEFAULT_WAITS = { pageMs: 30_000, reuseMs: 2000, launchingMs: 45_000, reconnectMs: 7000 };
 const TIME_NAMES: readonly string[] = [
   'pingMs',
   'startMs',
@@ -94,6 +97,7 @@ const TIME_NAMES: readonly string[] = [
   'pageMs',
   'reuseMs',
   'launchingMs',
+  'reconnectMs',
 ];
 
 /**
@@ -185,7 +189,7 @@ async function openWindow(
     await stopServer(deck, times);
     replaceSecret(deck.store, platform.randomBytes);
   }
-  const ping = await serverToUse(ctx, deck, options.restart, times);
+  const { ping, pagesBefore } = await serverToUse(ctx, deck, options.restart, times);
   // Looked up again: a server that replaced a stale record listens elsewhere (S2 4.2).
   const client = controlClient(
     platform.net,
@@ -203,7 +207,14 @@ async function openWindow(
     say(`http://127.0.0.1:${ping.port}/#t=${token}`);
     return EXIT.ok;
   }
-  if (!options.newWindow && (await client.status()).pages > 0) {
+  // After a restart the windows of the old server come back once the new one's start is done
+  // (S2 6.3): waited for, so that an update does not open a second window (ruled, task 25). After
+  // --new-secret they cannot: the old key is refused.
+  const comeBack = pagesBefore > 0 && !options.newSecret;
+  if (
+    !options.newWindow &&
+    (await pageWithin(platform, client, comeBack ? times.reconnectMs : 0))
+  ) {
     say('skydeck window: a window is already open');
     return EXIT.ok;
   }
@@ -231,27 +242,23 @@ function timeOf(ns: string): string {
  * S2 5.1 step 1: the server to use — one of this checkout, the current build and boot found
  * answering; otherwise a new one, after the one of another build (or any one, `--restart`) was
  * stopped with S2 5.1's line. A server of another checkout, or one that does not answer, is
- * reported (exit 1) unless `--restart` replaces it.
+ * reported (exit 1) unless `--restart` replaces it. `pagesBefore`: the pages the stopped server
+ * reported (GET /status) just before its stop — 0 when none was stopped, or it did not answer, or
+ * its answer had no page count that can be read (ruled, task 25).
  */
 async function serverToUse(
   ctx: Context,
   deck: Deck,
   restart: boolean,
   times: Times,
-): Promise<PingAnswer> {
+): Promise<{ ping: PingAnswer; pagesBefore: number }> {
   const { platform } = deck;
-  const restarting = (): void =>
-    ctx.io.stdout(
-      `restarting the window's server for the new build; new sessions in the window get the environment of this shell (${sanitize(platform.cwd)})\n`,
-    );
-  if (restart) {
-    if ((await stopServer(deck, times)).stopped) restarting();
-  } else {
-    const checkout = platform.appRoot;
-    const found = await findServer(deck, checkout, computeBuild(platform.files, checkout), times);
+  const checkout = platform.appRoot;
+  const found = await findServer(deck, checkout, computeBuild(platform.files, checkout), times);
+  if (!restart) {
     switch (found.kind) {
       case 'ours':
-        return found.ping;
+        return { ping: found.ping, pagesBefore: 0 };
       case 'other-checkout':
         throw new SkydeckError(
           `the window's server runs from ${sanitize(found.ping.checkout)}; run skydeck window there, or skydeck window --restart here to replace it`,
@@ -261,18 +268,55 @@ async function serverToUse(
           `the window's server (pid ${found.pid}) does not answer; skydeck window --restart stops it`,
         );
       case 'other-build':
-        restarting();
-        await stopServer(deck, times);
-        break;
       case 'none':
         break;
     }
+  }
+  let pagesBefore = 0;
+  if (found.kind !== 'none') {
+    // A hung server would only make the command wait out the client's 5 s once more.
+    if (found.kind !== 'hung') pagesBefore = await pagesOf(deck);
+    ctx.io.stdout(
+      `restarting the window's server for the new build; new sessions in the window get the environment of this shell (${sanitize(platform.cwd)})\n`,
+    );
+    await stopServer(deck, times);
   }
   const started = await startServe(deck, times);
   if (!started.ok) {
     throw new SkydeckError(sanitize(started.line));
   }
-  return started.ping;
+  return { ping: started.ping, pagesBefore };
+}
+
+/** The running server's page count (GET /status); 0 when it cannot be had. */
+async function pagesOf(deck: Deck): Promise<number> {
+  const client = controlClient(
+    deck.platform.net,
+    runtimeFiles(resolveRuntimeDir(deck, 'follow').dir).serverSock,
+  );
+  try {
+    return (await client.status()).pages;
+  } catch (error) {
+    if (error instanceof SkydeckError) return 0;
+    throw error;
+  }
+}
+
+/**
+ * Whether a page is connected (GET /status `pages`), looking again every POLL_MS until `ms` is
+ * over (0: one look).
+ */
+async function pageWithin(platform: Platform, client: ControlClient, ms: number): Promise<boolean> {
+  const wait = deadline(platform, ms);
+  try {
+    for (;;) {
+      if ((await client.status()).pages > 0) return true;
+      if (ms === 0 || wait.over()) return false;
+      await platform.clock.sleep(POLL_MS);
+    }
+  } finally {
+    wait.cancel();
+  }
 }
 
 /**

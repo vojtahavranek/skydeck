@@ -242,7 +242,8 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 skydeck window [--print-url] [--new-window] [--restart] [--stop] [--new-secret]
 ```
 
-Run inside WSL, in a terminal of the user's own. It refuses (exit 1) when `CLAUDECODE` is set —
+Run inside WSL, in a terminal of the user's own. It refuses (exit 1) when `CLAUDECODE` is set, with
+every option (`--stop` included) —
 `the window's server is not started from inside a Claude Code session: every session in the window
 would inherit that session's environment; run skydeck window in a terminal of your own` — because
 the server's environment becomes every program's (5.2, 7.4). Without options it:
@@ -277,6 +278,17 @@ the server's environment becomes every program's (5.2, 7.4). Without options it:
    token — and exits 0. When Edge was started but no page connected in time it says so, names
    `--print-url`, and exits 1.
 
+After a restart (`--restart`, or a server of another build replaced in step 1) the windows of the
+old server come back only once the new server's start is done (8.2.1 answers 503 until then; the
+pages retry, 6.3), so step 2's "no page is connected", looked at right after the start, would open a
+second window at every update. So before it stops a server the command reads that server's `pages`
+(`GET /status`); when the server answered with more than 0 and the run is not `--new-secret` (the
+old windows are refused then), `--new-window` or `--print-url`, it waits up to 7 seconds — the
+page's longest retry interval is 5 (6.3) — for a page on the new server before it asks for a token.
+A page that comes back in that time is "a page is already connected" (below): the same line and
+exit code, no token, no Edge. An old server that did not answer, or whose answer has no page count
+that can be read, counts as none: no wait (ruled by the plan owner, stage A's plan task 25).
+
 When a page is already connected it starts nothing on Windows and says
 `skydeck window: a window is already open`; `--new-window` opens another one anyway (several
 windows are supported, 8.2.7). A command cannot bring an existing window to the front: Edge's
@@ -305,6 +317,9 @@ Options:
 - `--new-secret`: stop the server (which forgets every token), replace the secret (15.2), clear the
   alarm (8.2.2), start a server and a window. Windows opened before cannot connect any more and say
   so; their stored key is replaced when the new window's token is used in the same profile.
+
+`--stop` combines with no other option, and `--print-url` not with `--new-window`: either is a
+usage error (ruled by the plan owner, stage A's plan task 25).
 
 Exit codes as design 7.5: 0, 1 (failure), 2 (usage).
 
