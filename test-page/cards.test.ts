@@ -265,50 +265,120 @@ test('the right side', async (t) => {
   );
 
   await t.test(
-    'the header has one height: a short and a very long directory, a wide and a narrow window; the directory is cut with an ellipsis but whole in the page and its tooltip, the short id never cut',
+    'the header has one height and stays inside the window: a short directory, one of 340 characters, a title of 800, a window of 1280 and of 900 px; the directory and the title are cut with an ellipsis but whole in the page, the short id never cut, the terminal area unchanged',
     async (t) => {
       const s = await scripted(t, chromium);
-      const long = `/home/u/${'a-very-long-directory-name/'.repeat(12)}end`;
-      const show = (dir: string): void =>
+      await s.page.setViewportSize({ width: 1280, height: 800 });
+      const longDir = `/home/u/${'a-very-long-directory-name/'.repeat(13)}end`;
+      assert.ok(longDir.length >= 340);
+      const longTitle = `a title ${'that goes on '.repeat(61)}end`;
+      assert.ok(longTitle.length >= 800);
+      const show = (dir: string, title: string): void =>
         s.serve(
           listWith(
             [[{ id: S1, terminal: TERM_A, slot: 1 }], [{ id: TERM_A, slot: 1, sessionId: S1 }]],
-            {
-              rows: { [S1]: { dir, title: 'a title' } },
-            },
+            { rows: { [S1]: { dir, title } } },
           ),
         );
-      const measure = (): Promise<{ height: number; id: boolean; title: string; text: string }> =>
+      /** The last terminal area the page reported (S2 8.2.3 `focus.area`), once it settled. */
+      const lastArea = async (): Promise<unknown> => {
+        await sleep(600); // the page reports a resize 200 ms after it settles
+        return s.sent.filter((message) => message['t'] === 'focus').at(-1)?.['area'];
+      };
+      const measure = (): Promise<{
+        height: number;
+        zoneInside: boolean;
+        idInside: boolean;
+        pageFits: boolean;
+        dirCut: boolean;
+        titleCut: boolean;
+        dirTitle: string;
+        dirText: string;
+        titleText: string;
+      }> =>
         s.page.evaluate(() => {
-          const header = document.querySelector('#cards .card-header') as HTMLElement;
-          const id = document.querySelector('#cards .header-id') as HTMLElement;
-          const dir = document.querySelector('#cards .header-dir') as HTMLElement;
-          const box = header.getBoundingClientRect();
+          const part = (selector: string): HTMLElement =>
+            document.querySelector(selector) as HTMLElement;
+          const id = part('#cards .header-id');
+          const dir = part('#cards .header-dir');
+          const title = part('#cards .header-title');
           const idBox = id.getBoundingClientRect();
           return {
-            height: box.height,
-            id: id.scrollWidth <= id.clientWidth && idBox.right <= box.right && idBox.width > 0,
-            title: dir.title,
-            text: dir.textContent ?? '',
+            height: part('#cards .card-header').getBoundingClientRect().height,
+            zoneInside: part('#right-zone').getBoundingClientRect().right <= innerWidth,
+            idInside:
+              idBox.width > 0 && idBox.right <= innerWidth && id.scrollWidth <= id.clientWidth,
+            pageFits: document.documentElement.scrollWidth === innerWidth,
+            dirCut: dir.scrollWidth > dir.clientWidth,
+            titleCut: title.scrollWidth > title.clientWidth,
+            dirTitle: dir.title,
+            dirText: dir.textContent ?? '',
+            titleText: title.textContent ?? '',
           };
         });
-      show('/home/u/short');
+      const inside = (m: Awaited<ReturnType<typeof measure>>, what: string): void => {
+        assert.ok(m.zoneInside, `${what}: the right zone stays inside the window`);
+        assert.ok(m.idInside, `${what}: the short id is whole and inside the window`);
+        assert.ok(m.pageFits, `${what}: the page is no wider than the window`);
+      };
+
+      show('/home/u/short', 'a title');
       await clickRow(s.page, S1);
       await showsText(s.page, '#cards .header-dir', /^\/home\/u\/short$/);
       const short = await measure();
-      assert.ok(short.id, 'the short id is whole');
-      show(long);
+      inside(short, 'a short directory');
+      const area = await lastArea();
+      assert.ok(area !== undefined);
+
+      show(longDir, 'a title');
       await showsText(s.page, '#cards .header-dir', /end$/);
-      const wide = await measure();
-      assert.equal(wide.height, short.height, 'a long directory does not change the height');
-      assert.equal(wide.text, long, 'the whole directory is in the page');
-      assert.equal(wide.title, long, 'and in its tooltip');
-      assert.ok(wide.id, 'the short id is whole');
+      const dir = await measure();
+      inside(dir, 'a directory of 340 characters');
+      assert.ok(dir.dirCut, 'the directory is cut');
+      assert.equal(dir.height, short.height, 'a long directory does not change the height');
+      assert.equal(dir.dirText, longDir, 'the whole directory is in the page');
+      assert.equal(dir.dirTitle, longDir, 'and in its tooltip');
+      assert.deepEqual(await lastArea(), area, 'the terminal area does not change');
+      await s.page.locator('#cards .header-dir').click({ clickCount: 3 });
+      assert.equal(
+        await s.page.evaluate(() => getSelection()?.toString().replace(/\n$/, '')),
+        longDir,
+        'a selection copies the whole directory',
+      );
+      await s.page.evaluate(() => getSelection()?.removeAllRanges());
+
+      show('/home/u/short', longTitle);
+      await showsText(s.page, '#cards .header-title', /end$/);
+      const title = await measure();
+      inside(title, 'a title of 800 characters');
+      assert.ok(title.titleCut, 'the title is cut');
+      assert.equal(title.titleText, longTitle);
+      assert.equal(title.height, short.height);
+      assert.deepEqual(await lastArea(), area, 'the terminal area does not change');
+
+      show(longDir, longTitle);
       await s.page.setViewportSize({ width: 900, height: 700 });
-      await sleep(200);
+      await sleep(300);
       const narrow = await measure();
+      inside(narrow, 'both long at 900 px');
       assert.equal(narrow.height, short.height, 'a narrow window does not change the height');
-      assert.ok(narrow.id, 'the short id is whole at 900 px');
+
+      // The cards wrap what they show: a resume card with a long unbroken command, flags and
+      // directory stays inside the window too.
+      s.serve(
+        listWith([[{ id: S1, terminal: null, slot: null }], []], {
+          rows: { [S1]: { dir: longDir, title: longTitle } },
+          list: {
+            selected: selectedOf(S1, {
+              command: `cd ${longDir} && claude --resume ${S1}`,
+              unknownFlags: [`--${'x'.repeat(400)}`],
+            }),
+          },
+        }),
+      );
+      await s.page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await showsText(s.page, '#cards .card-command', /--resume/);
+      inside(await measure(), 'a resume card with long texts at 900 px');
     },
   );
 
