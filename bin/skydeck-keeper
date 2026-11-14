@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-KEEPER_VERSION = "1"
+KEEPER_VERSION = "2"
 PROTOCOL = 1
 # skydeck keeper: owns one terminal's pty and program (design-step-2 7.1, 7.8, 8.1; plan task 9).
 #
@@ -358,6 +358,8 @@ class Keeper:
             "rows": self.rows,
             "seq": self.seq,
             "snapSeq": self.snap_seq,
+            # the first record the tail holds: after the snapshot, or after what the cap dropped
+            "tailFrom": self.tail[0][0] if self.tail else self.seq + 1,
             "gap": self.dropped > self.snap_seq,
             "meta": {name: spec["meta"][name] for name in META_FIELDS},
             "exited": self.exit,

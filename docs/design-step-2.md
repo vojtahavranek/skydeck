@@ -750,11 +750,38 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
 - **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
   passed with output since the last park, and for every terminal when it stops (5.5). A park names
   the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
-  about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by design.
+  about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by design. The keeper's
+  first size is in no frame (a hello carries the current size), so the server that spawns a keeper
+  parks its empty screen at record 0 right after the first `hello`: every later claim gets that
+  size in `S`, and a rebuild without any other park starts at the right width (stage A's plan,
+  task 16).
+- **Reading.** The server reads a keeper no faster than its screen side applies the records: while
+  more than 4 MiB of records wait for the screen side it stops reading that keeper's socket, and
+  reads again below 1 MiB. The keeper then does what 7.1 step 7 designs for a slow reader: it
+  closes the connection at its send cap and goes on reading the pty; the server reconnects and
+  takes the rest from the tail (gap and redraw if the tail overflowed meanwhile). The memory of a
+  terminal stays bounded, and the program is never paused (stage A's plan, task 16, review 2).
+  Reconnections to one keeper are at most one a second, except after a claim that fell behind (the
+  server had stopped reading it, and did not end it itself for a frame it refuses): that one is
+  claimed again at once. A claim whose tail stops coming (no frame for 10 s while the server reads) counts as a
+  lost connection. A gap found after such a cycle is shown as "part of this terminal's output was
+  skipped: it came faster than skydeck could show it". Known limit: input written in the short
+  moment between the keeper closing a claim and the server noticing it is lost, and `full` is
+  answered while the next claim is being made; in a flood faster than the screen side, a key press
+  may have to be repeated.
+- **A claim that rebuilds.** A hello whose tail does not follow the screen the server holds (a
+  first claim, or records lost for that screen) drops that screen at once; a page that attaches
+  before the snapshot or the first record has made the new one waits for it, and gets the empty
+  screen and the exit if the keeper is lost first. A hello whose tail does follow it (a reconnect)
+  goes on with that screen and skips the records it has.
 - **Gap.** A keeper that reports gap (7.1, step 6) has lost records. The server rebuilds from what
   is left, shows "part of this terminal's output was lost while skydeck's server was not running"
-  on the terminal, and makes the program redraw by changing the pty's width by one column and back.
-  The scrollback above the redraw may be wrong.
+  on the terminal, and makes the program redraw by changing the pty's width by one column and back,
+  with a pause of at least 50 ms between the two (two quick SIGWINCH collapse into one, and a
+  program that reads its size when it handles the signal sees no change; measured with the
+  stand-in, plan task 3). When the connection breaks inside that pause, the way back is sent on the
+  next connection once its claim has settled; a page's resize that reaches the keeper meanwhile
+  replaces it. The scrollback above the redraw may be wrong.
 
 A server restart therefore shows every screen exactly as it was (verified with the prototype for
 every viewport cell, colour, attribute, 119 lines of scrollback, wrap flags and modes after two
@@ -868,8 +895,9 @@ keeper that is alive but slow to answer is reconnected to, with the bar `reconne
 terminal`, never declared lost. `keepers.log` holds the keeper's own last error, if it wrote one.
 
 Socket files whose connect is refused, and their `.pid` lines (a keeper that died, files from
-another boot under a runtime directory that survives one), are removed by the server; they are
-skydeck's own transient files.
+another boot under a runtime directory that survives one), are removed by the server when it
+starts, and when the user closes a lost terminal whose line is dead; they are skydeck's own
+transient files.
 
 ### 7.9 Sessions running outside the window
 
@@ -893,12 +921,12 @@ keeper). Protocol version 1:
 | Type | Direction | Payload |
 |---|---|---|
 | `C` claim | server → keeper | Empty. The connection becomes the screen side (7.1, step 3). The first frame of every connection. |
-| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers, 0 for none), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
+| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers; 0 both for none and for the empty screen parked at record 0, 7.3 — see `S`), `tailFrom` (the number of the tail's first record: `snapSeq` + 1, or later when records were dropped, `seq` + 1 for an empty tail), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
 | `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
 | `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output (when
 `exec` then fails, `X` with code 127 follows); a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
 | `N` do not start | server → keeper | UTF-8 reason, at most 1,024 bytes (a longer one closes the connection, as any frame the keeper cannot parse). The program is never started (7.1, step 2). |
-| `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. |
+| `S` snapshot | keeper → server | 8-byte record number, 2-byte cols, 2-byte rows, the parked snapshot (UTF-8). Right after `H`, only when one is parked. With `snapSeq` above 0 it always comes. With `snapSeq` 0 it comes only when the empty screen was parked at record 0 (7.3), and the server tells by the frame after `H`: `S` (the first size), or the tail's first record (never parked; the screen starts at the hello's size). When the tail is empty as well (`tailFrom` is `seq` + 1) the server makes the empty screen at the hello's size at once and ignores an `S` that follows: it can only be that empty screen, at an older size. |
 | `D` output | keeper → server | One record: bytes as read from the pty, except that a record never ends inside a UTF-8 character: the first bytes of a character the program has not finished writing go with the next record (7.1 step 4). After `H` (and `S`) come the tail's records, then live ones. |
 | `R` resize | keeper → server | One record: JSON `{cols, rows}`, the size the pty was set to. |
 | `X` exit | keeper → server | JSON `{code, signal, atNs, notStarted}`: after the last `D`. `notStarted` is null, or the reason the program was never started (the deadline passed, or `N`). |
@@ -907,9 +935,15 @@ keeper). Protocol version 1:
 | `P` park | server → keeper | 8-byte record number, 2-byte cols, 2-byte rows, snapshot. The keeper keeps it and drops the tail's records up to that number. |
 | `A` acknowledge | server → keeper | The server has the exit; the keeper may end (7.8). |
 
-A connection whose first frame is not `C` is closed. Records are numbered from 1 in the order the
+A connection whose first frame is not `C` is closed. The server closes a connection whose keeper
+sends what the codec refuses, a first frame that is not `H`, a `hello` of another terminal, a
+missing or wrong `S`, a frame no keeper sends, or a size above 1,000 columns or 500 rows in `H`,
+`S` or `R` (a keeper is only ever given sizes within that, 8.2.6); it logs the kind once while the
+same problem repeats. Records are numbered from 1 in the order the
 keeper produced them. The server's position after an
-attach is `seq`: the snapshot covers records up to `snapSeq` and the tail brings it to `seq`.
+attach is `seq`: the snapshot covers records up to `snapSeq` and the tail, records `tailFrom` to
+`seq`, brings it to `seq`; after a gap the records between are lost, and the numbers still tell
+the server where the tail ends and which record a park names.
 
 ### 8.2 Page and server
 
@@ -1191,7 +1225,10 @@ page last proposed (`attach`, `resize`). The rules:
   it to the screen side and sends `size` to every attached page. A page sets its xterm.js size only
   from `snap` and `size` — never from its own fitting — so page and screen side reflow at the same
   point of the stream. A page that is not the owner shows the terminal at the owner's size (cut off
-  or with a margin) and a hint "sized by another window"; typing makes it the owner.
+  or with a margin) and a hint "sized by another window"; typing makes it the owner. A proposed
+  size is first clamped to at most 1,000 columns and 500 rows (a wider one is not an error): 65,535
+  columns would make the screen side allocate gigabytes of scrollback (ruled, plan task 12's
+  review).
 
 The page's xterm.js keeps 5,000 lines of scrollback, as the screen side does (7.2), so that both
 reflow alike and find (9.7) sees what the snapshot holds.
@@ -1204,23 +1241,27 @@ page's `view` state is its own. Notifications go to one page only (13).
 
 #### 8.2.8 Backpressure
 
-The server never pauses a keeper for a slow page. When a record for a page (output, a size, an
-exit) or its `list` finds more than 1 MiB queued on the page's socket, the server stops
-forwarding records to that page, marks the terminals whose records it drops **behind**, and holds
-the page's `list`. A `snap`'s own bytes do not count toward the 1 MiB: a large screen is not a
-slow page, and counting it would make the fresh snap put the page behind again. When the queue
-has drained (Node.js's `drain`: nothing is left queued, so below 64 KiB), the server sends the
-page's current `list` at once and attaches each terminal that is behind again: its fresh `snap`
-follows when the hub gives it, then the state the terminal is in (its `exit`, a `gap` or
-`newer-keeper` notice), and records are forwarded again; a terminal that lost nothing keeps its
-stream. With more than 64 MiB queued, not counting what is still queued of the latest `snap`, the
-server drops the connection, and the page reconnects (6.3, 8.2.5). The latest snap is left out
-because one screen can be that large: 5,000 lines of image-like output (each cell its own
-colours) give a snap of about 40 MiB at 200 columns and 60 MiB at 300 (measured with the screen
-side, 7.2), and counting it would make such a screen a reconnect loop; a page that lets snap
-after snap pile up without reading is still cut. These rules were ruled in plan task 17. A page
-attaches only to terminals it shows or has shown recently (12.6), so a hidden terminal costs
-nothing.
+The server never pauses a program; it may stop reading a keeper's connection (7.3, Reading), which
+only fills the keeper's send queue until the keeper closes that connection. When a record for a
+page (output, a size, an exit) or its `list` finds more than 1 MiB queued on the page's socket,
+the server stops forwarding records to that page, marks the terminals whose records it drops
+**behind**, and holds the page's `list`. A `snap`'s own bytes do not count toward the 1 MiB: a
+large screen is not a slow page, and counting it would make the fresh snap put the page behind
+again. When the queue has drained (Node.js's `drain`: nothing is left queued, so below 64 KiB),
+the server sends the page's current `list` at once and attaches each terminal that is behind
+again: its fresh `snap` follows when the hub gives it, then the state the terminal is in (its
+`exit`, a `gap` or `newer-keeper` notice), and records are forwarded again; a terminal that lost
+nothing keeps its stream. With more than 64 MiB queued, not counting what is still queued of the
+latest `snap`, the server drops the connection, and the page reconnects (6.3, 8.2.5). The latest
+snap is left out because one screen can be that large: 5,000 lines of image-like output (each
+cell its own colours) give a snap of about 40 MiB at 200 columns and 60 MiB at 300 (measured
+with the screen side, 7.2), and counting it would make such a screen a reconnect loop; a page
+that lets snap after snap pile up without reading is still cut. The snaps of several terminals
+attached at the same moment count, all but the latest, so a page that attached about nine of the
+densest screens at once would be cut: the page therefore attaches its visible terminal first and
+the others one at a time, each after the previous `snap` has arrived (a named limit). These rules
+were ruled in plan task 17. A page attaches only to terminals it shows or has shown recently
+(12.6), so a hidden terminal costs nothing.
 
 ### 8.3 Command line and server
 
@@ -1845,7 +1886,7 @@ taskbar button show it is check W3. Low priority: stage E (19).
 | **WSL stops** | Every process in WSL ends, so every session in the window ends (marked `ended-unexpectedly`). The window stays and shows 6.3's bar; after `skydeck window` it shows the new boot and the restore banner (12.7). |
 | **The keep-alive cannot start or dies** | The server retries (6.1), pages show `WSL is not kept running`, and `doctor` reports it. The window keeps working while any WSL terminal is open. |
 | **A page falls behind** | 8.2.8: it gets a fresh snapshot instead of the bytes it missed. |
-| **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
+| **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. |
 | **skydeck is updated** | 16.5. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |

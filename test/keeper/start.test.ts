@@ -42,7 +42,7 @@ describe('keeper: what starts the program', { concurrency: true }, () => {
   test('a connection alone, and a claim alone, start nothing', async (t) => {
     const box = keeperSandbox(t);
     const k = await box.start();
-    assert.deepEqual(k.pidLine()?.keeper, { version: '1', started: false });
+    assert.deepEqual(k.pidLine()?.keeper, { version: '2', started: false });
     assert.equal(statSync(k.spec.socket).mode & 0o777, 0o600, 'the socket is the user’s only');
     assert.equal(statSync(k.pidFile).mode & 0o777, 0o600);
 
@@ -56,7 +56,7 @@ describe('keeper: what starts the program', { concurrency: true }, () => {
     assert.equal(hello.procStart, null);
     assert.equal(hello.exited, null);
     assert.equal(hello.protocol, 1);
-    assert.equal(hello.keeper, '1');
+    assert.equal(hello.keeper, '2');
     assert.equal(hello.id, k.spec.id);
     assert.equal(hello.startBy, k.spec.startBy);
     assert.equal(hello.lock, k.spec.lock);
@@ -72,7 +72,7 @@ describe('keeper: what starts the program', { concurrency: true }, () => {
       ['H'],
     );
     assert.equal(existsSync(k.record), false, 'the program never ran');
-    assert.deepEqual(k.pidLine()?.keeper, { version: '1', started: false });
+    assert.deepEqual(k.pidLine()?.keeper, { version: '2', started: false });
   });
 
   test('G before the deadline starts the program once: T first, then its output', async (t) => {

@@ -162,12 +162,21 @@ describe('keeper: caps', { concurrency: true }, () => {
     assert.deepEqual(tail.map(frameKey), all.slice(all.length - tail.length), 'the newest stay');
     const size = tail.reduce((sum, f) => sum + f.payload.length, 0);
     assert.ok(size <= cap, `the tail holds ${size} bytes, at most ${cap}`);
+    // The hello names the first record of the tail (ruled, task 16): the server can number it.
+    assert.equal(hello.tailFrom, all.length - tail.length + 1);
+
+    // A park within the tail: the tail starts right after it again.
+    second.send('P', encodeSnapshot(all.length - 2, 80, 24, 'screen'));
+    const afterPark = await k.claim();
+    assert.equal(afterPark.hello.gap, false);
+    assert.equal(afterPark.hello.tailFrom, all.length - 1);
 
     // A park that covers the lost records: the snapshot leads to the screen again.
-    second.send('P', encodeSnapshot(all.length, 80, 24, 'screen'));
+    afterPark.client.send('P', encodeSnapshot(all.length, 80, 24, 'screen'));
     const third = await k.claim();
     assert.equal(third.hello.gap, false);
     assert.equal(third.hello.snapSeq, all.length);
+    assert.equal(third.hello.tailFrom, all.length + 1, 'an empty tail starts after seq');
   });
 
   test('a claim’s snapshot and tail are not held to the send cap; its live records are', async (t) => {

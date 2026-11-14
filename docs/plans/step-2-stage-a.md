@@ -208,6 +208,7 @@ Each is binding for the implementer. The last column names the task that records
 | A34 | Test helpers signal only through `killKeepersIn(s, runtimeDir)` (task 5, `test/helpers/kill.ts`), which asserts that the real path of `runtimeDir` lies under `s.root` before it reads a single `.pid` line, and signals only pids whose lines are alive by design 5.5's rule; a test signals other processes only through the child handles it started itself. | If a runtime directory were ever resolved wrongly, a cleanup would kill the user's real keepers and their sessions. | — |
 | A35 | Every module the server uses is loaded before it listens, the vendored xterm modules (`loadXterm`) included; no `import()` runs after start. | S2 16.5: the server must never read new code from a checkout that `git pull` changed under it. | — |
 | A36 | Two test platforms (task 5, 2.2): `testPlatform` — fake clock, fake `/proc`, fake processes — for logic; `realTestPlatform` — real clock, real `/proc`, `process.pid`, real processes that refuse Windows programs always, the needed programs linked into the sandbox — for every test that starts a keeper, the stand-in or a server, or judges a real process alive. `realTestPlatform({ bootId })` overrides only the boot id `proc.bootId()` reports, so that a test can show a server what WSL restarting looks like (S2 6.3) while every other `/proc` read stays real. Each task's **Tests** heading names the platform its tests use. | With the fake clock a keeper's `startBy` lies in its real past and its pid lines count as dead (review B). | 5 (17) |
+| A37 | The terminal core (task 16, ruled by the plan owner at review 1): right after a fresh keeper's first `hello` the server parks the empty screen at record 0 (`P` with record 0), so that every later claim learns the terminal's first size from its `S` (a hello carries only the current size); the forced redraw of a gap pauses 100 ms between its two resizes (two quick SIGWINCH collapse: 0 of 20 redraws back to back, 20 of 20 from 5 ms, task 3's review); a requested size is clamped to 1,000 columns and 500 rows before it reaches the keeper and the screen side; the keeper's hello names its tail's first record, `tailFrom` (2.3). | Without the first size a rebuild that had no other park starts at the wrong width; without `tailFrom` a server cannot number the tail after a gap; 65,535 columns would allocate gigabytes of scrollback. | 16 (7.3, 8.1, 8.2.6) |
 
 ## 2. Contracts
 
@@ -453,6 +454,7 @@ export interface KeeperExit { code: number | null; signal: number | null; atNs: 
 export interface KeeperHello {
   protocol: number; keeper: string; id: string; started: boolean; startBy: string; lock: string | null;
   pid: number | null; procStart: number | null; cols: number; rows: number; seq: number; snapSeq: number;
+  tailFrom: number; // the first record the tail holds (ruled by the plan owner, task 16)
   gap: boolean; meta: KeeperMeta; exited: KeeperExit | null;
 }
 export interface KeeperStarted { pid: number; procStart: number; atNs: string }
@@ -486,7 +488,10 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
 - **`hello`**: `protocol` a whole number from 0 (any value: the caller decides, S2 7.7); `id` 12
   lower-case hex characters (A21); `pid` a whole number from 1 or null, `procStart` from 0 or
   null, both null exactly when `started` is false (S2 8.1: null before the start); `snapSeq` ≤
-  `seq`; `meta.sessionId` passes `isSessionId`; `meta.kind` `resume` or `new`; `meta.slot` 1–9 or
+  `seq`; `tailFrom` (ruled by the plan owner, task 16) from `snapSeq + 1` to `seq + 1`, above
+  `snapSeq + 1` exactly when `gap` — the keeper sends the number of its tail's first record
+  (`seq + 1` for an empty tail), so that after a gap the server still knows where the tail ends and
+  which record a park names; `meta.sessionId` passes `isSessionId`; `meta.kind` `resume` or `new`; `meta.slot` 1–9 or
   null (S2 7.6); `exited`, when not null, as `X` below, with `notStarted` set exactly when
   `started` is false. The keeper refuses a spec that would make it write a `hello` these rules
   refuse (ruled by the plan owner, task 9): `id`, `startBy`, `lock` and every `meta` field are
@@ -636,6 +641,9 @@ export interface TerminalInfo {
   notReported: boolean;
 }
 export interface StreamSink {
+  /** Always the first call on a sink: the screen at the point of the terminal's chain where
+   *  `attach` was called. Never called when the terminal is forgotten before it was made. */
+  snapshot(cols: number, rows: number, data: string): void;
   /** One record of output, after the screen side applied it. */
   output(bytes: Uint8Array): void;
   /** A resize record, in stream order. */
@@ -645,9 +653,16 @@ export interface StreamSink {
 }
 export interface TerminalHub {
   list(): readonly TerminalInfo[];
-  /** The snapshot at the current point of the terminal's chain, then every later record to `sink`
-   *  (S2 8.2.4) until `detach`. null for an unknown terminal. */
-  attach(termId: string, sink: StreamSink): { cols: number; rows: number; data: string; detach(): void } | null;
+  /** Registers `sink` at the current point of the terminal's chain. The sink gets `snapshot`
+   *  for that point first, then every later record in stream order (S2 8.2.4), until `detach`.
+   *  Nothing is called on the sink before `snapshot` or after `detach`. null for an unknown
+   *  terminal. (Ruled by the plan owner, task 16: the screen side snapshots asynchronously, so
+   *  the snapshot is the sink's first call. The state the terminal is in at the attach point
+   *  follows it: an ended, lost or not-started terminal gives `snapshot`, then `exit`; one with a
+   *  gap or a newer keeper gives `snapshot`, then that `notice`.) */
+  attach(termId: string, sink: StreamSink): { detach(): void } | null;
+  /** 'full': not taken now — more than 4 MiB unwritten, no connection to the keeper at the
+   *  moment, or a newer keeper (ruled by the plan owner, task 16). */
   input(termId: string, data: Uint8Array): 'ok' | 'full' | 'ended' | 'unknown';
   /** Sends Z to the keeper; the size reaches every sink when the R record comes back (S2 8.2.6). */
   resize(termId: string, cols: number, rows: number): void;
@@ -1808,7 +1823,8 @@ input queue, no caps — all of which S2 7.1 requires).
 
 **Files**
 - Create: `bin/skydeck-keeper` (mode 755, `#!/usr/bin/env python3`, first lines name its keeper
-  version `KEEPER_VERSION = "1"` and `PROTOCOL = 1`)
+  version `KEEPER_VERSION = "1"` and `PROTOCOL = 1`; task 16 made it "2" when the hello gained
+  `tailFrom`, the protocol staying 1)
 - Create: `test/helpers/keeper.ts` (spawn a keeper with a spec in the sandbox's runtime directory;
   a frame client over `node:net` using task 1's codec; helpers to wait for frames; cleanup through
   `killKeepersIn`, A34)
@@ -2355,6 +2371,9 @@ export interface RegistryEvents {
    *  through decideFoundKeeper (task 23). */
   hello(term: TerminalInfo, hello: KeeperHello, origin: 'spawned' | 'late' | 'found'): void;
   started(term: TerminalInfo, started: KeeperStarted): void;
+  /** A lost keeper sent no X: its exit is made up (ruled by the plan owner) — a started program
+   *  `{ code: null, signal: 1 }` (SIGHUP, S2 7.8), one never started `{ code: null, signal: null,
+   *  notStarted: 'the keeper ended before the program started' }`. */
   exited(term: TerminalInfo, exit: KeeperExit, lost: boolean): void;
 }
 export interface RegistryDeps {
@@ -2375,11 +2394,14 @@ export interface Registry extends TerminalHub {
    *  may still be starting, so the registry KEEPS the terminal, goes on claiming its socket, and
    *  reports its hello through `events.hello` when it comes. Sends no G. */
   spawn(spec: KeeperSpec): Promise<TerminalInfo>;
-  /** S2 7.3: connects to every keeper of terms/ whose .pid line is alive; removes dead ones' files. */
+  /** S2 7.3: connects to every keeper of terms/ whose .pid line is alive or unknown (ruled by the
+   *  plan owner: nothing is removed on unknown); removes dead ones' files. Resolves once each
+   *  found screen is rebuilt. */
   rediscover(): Promise<TerminalInfo[]>;
   start(termId: string): void; // G
   refuse(termId: string, reason: string): void; // N
-  /** The lowest free slot 1–9, or null (S2 7.6). */
+  /** The lowest free slot 1–9, or null (S2 7.6). A slot is held until `close` forgets its
+   *  terminal (ruled by the plan owner), also while the terminal is ended. */
   nextSlot(): number | null;
   /** From the mapping (task 21): the session the terminal shows, and "started, not reported". */
   setSession(termId: string, sessionId: string | null, notReported: boolean): void;
@@ -2393,7 +2415,12 @@ export function createRegistry(deps: RegistryDeps): Registry;
 ```
 
 **Files**
-- Create: `src/window/keeper-link.ts`, `src/window/terminals.ts`
+- Create: `src/window/keeper-link.ts`, `src/window/terminals.ts`, `test/helpers/registry.ts`
+  (registries over a keeper sandbox, a mirror sink, the checked keeper signal; ruled by the plan
+  owner)
+- Modify (ruled by the plan owner): `src/window/hub.ts` (`StreamSink.snapshot`, `attach`),
+  `src/window/frames.ts` and `bin/skydeck-keeper` (`tailFrom`, keeper version "2"), their tests,
+  `src/window/env.ts` (`SKYDECK_CORE_SOFT` at most 20 digits)
 - Test: `test/window/terminals.test.ts`, `test/window/terminals-recovery.test.ts`
 
 **Behaviour** (the design sections above; the plan's additions): park when the tail has grown
@@ -2403,8 +2430,33 @@ with a newer protocol → state `newer-keeper` and `notice newer-keeper` with S2
 attached; a gap → `notice gap` with S2 7.3's text to every sink and the width changed by one
 column and back; a connection that ends without `X` → `lost` only when the `.pid` line is dead or
 the socket refuses, else `reconnecting` and a new claim every second; `input` returns `'full'`
-while more than 4 MiB is unwritten to the keeper (S2 7.1 step 5); after `X` the registry sends `A`
-and keeps the last screen until `close`.
+while more than 4 MiB is unwritten to the keeper (S2 7.1 step 5), and also while there is no
+connection or the keeper is newer (ruled); after `X` the registry sends `A`
+and keeps the last screen until `close`; `close` of a lost terminal also removes its keeper's
+socket and `.pid` when the line is `dead`, never on `unknown` or `alive` (ruled; otherwise the next
+`rediscover` does). A37: the park of record 0, the redraw's pause, the size clamp, `tailFrom`. Test
+settings (A31, ruled): `SKYDECK_TEST_PARK_BYTES` and `SKYDECK_TEST_PARK_MS` in the platform's
+environment shorten the park rules; the 1 MiB rule is tested with the design's values.
+Ruled at review 2: the registry reads a keeper no faster than its screen side applies — above 4 MiB
+of records waiting for the screen side it pauses that socket, below 1 MiB it reads again (S2 7.3,
+"Reading"; `SKYDECK_TEST_BACKLOG_BYTES` sets the high mark in tests, the low one is a quarter of
+it); reconnect attempts to one keeper are at most one a second, the claim that just ended
+counting as one; a claim whose tail stops coming (no frame for 10 s while the server reads) is
+given up as a lost connection, so `rediscover` always settles; one exit per terminal (a second
+`X` only gets its `A`, at once, while the first `X`'s `A` follows the applied exit); a claim's
+wait for its hello, like the stall, counts only time while the server reads, and `stopAll`
+reads again before it closes; a sink attached inside the change that announces an exit or a
+newer keeper gets that exit or notice once. Ruled (K1): a claim that fell behind (the server
+had stopped reading it) is claimed again at once (exempt from the one-a-second rule) unless the
+server ended it itself (a frame it refuses, no hello, a stalled tail), and a gap found after
+it carries the text "part of this terminal's output was skipped: it came faster than skydeck could
+show it"; the input lost in the moment before the close is noticed is a named limit (S2 7.3). An attach while a claim rebuilds the screen
+waits for that screen, and a terminal that is over without one gives the empty screen at the
+known size, then its `exit`. Also ruled (review 1's check of the review-2 commit): a keeper's
+`hello`, `S` or `R` with a size above 1000 × 500 is refused and the claim closed (S2 8.1); the gap
+redraw's way back waits for the next settled claim when the connection broke, and a page's
+`resize` that is sent replaces it (one that sends nothing does not; S2 7.3); a hello that does not
+continue the screen drops the old screen at once, attaches waiting for the new one (S2 7.3).
 
 **Tests** (platform: `realTestPlatform`; real keepers running the stand-in through `standinCommand`; `G` sent by the test)
 - spawn, `G`, type `/red hi\r`: an attached sink gets the output records after the snapshot, in
@@ -2416,9 +2468,14 @@ and keeps the last screen until `close`.
   connection destroyed), a new registry `rediscover`s → the screen equals the old one cell by
   cell (with two resizes and the alternate screen in between); after `stopAll` and a rediscover →
   equal too, from the parked snapshot.
-- `/lines 30000` → at least one park (the keeper's next hello has `snapSeq` > 0).
+- `/lines 30000` → at least one park (the keeper's next hello has `snapSeq` > 0), by the 30 s rule
+  shortened through `SKYDECK_TEST_PARK_MS`; `/flood` of more than 1 MiB → a park by the 1 MiB rule
+  with the design's values (ruled by the plan owner: 30,000 lines are about 350 KB).
 - the keeper killed → `exited(lost: true)` and the stand-in ended; the keeper stopped with
-  `SIGSTOP` for 3 s → `reconnecting`, then running again, never `lost`.
+  `SIGSTOP` for 3 s while its connection ends (the test closes it: a stopped keeper keeps its
+  connection open, and the registry reconnects only when it ends, S2 7.8; ruled by the plan owner)
+  → `reconnecting`, then running again, never `lost`, the reconnect's hello of origin `found`.
+  A test signals only a keeper it started, checked by pid and process start first.
 - `/exit` → `exited` with code 0, `A` sent, the keeper's socket and pid line gone; `close` then
   forgets it; `close` of a running terminal → `'running'`.
 - A keeper whose hello comes late (python3 replaced by a sandbox script that sleeps 7 s and then
