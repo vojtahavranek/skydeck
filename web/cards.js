@@ -425,10 +425,10 @@ export function createCards(root, deps) {
             `started with flags skydeck does not know, not passed on resume: ${selected.unknownFlags.join(' ')}`,
           );
         }
+        // The words of the list's `expires soon` (ruled for task 27): no number the server did not
+        // send — it sends only that the transcript is expiring.
         if (!expired && (selected?.expiring === true || row.marks.includes('expiring'))) {
-          warned.push(
-            "its transcript is deleted soon by Claude Code's cleanup (cleanupPeriodDays); resuming it keeps it",
-          );
+          warned.push('its transcript will be deleted soon unless the session is resumed');
         }
         const now = [...warnings.children].map((line) => line.textContent).join('\n');
         if (now !== warned.join('\n')) {

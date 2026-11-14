@@ -301,7 +301,8 @@ test('the right side', async (t) => {
         String(warnings),
       );
       assert.ok(
-        warnings.some((line) => /transcript/.test(line) && /deleted/.test(line)),
+        warnings.includes('its transcript will be deleted soon unless the session is resumed') &&
+          warnings.every((line) => !/[0-9]/.test(line)),
         String(warnings),
       );
 
@@ -827,6 +828,14 @@ function outsideProgram(
   return child;
 }
 
+/**
+ * The page of a real server with the real web/ reported no problem: no console error, nothing
+ * uncaught, no failed load (ruled for tasks 27-29, 14:19Z).
+ */
+function noProblems(l: Launched): void {
+  assert.deepEqual(l.problems, [], 'the page reports no problem');
+}
+
 async function realServerCases(
   t: TestContext,
   chromium: Parameters<typeof newPage>[1],
@@ -844,6 +853,7 @@ async function realServerCases(
 
       await clickRow(l.page, S1);
       await showsText(l.page, '#cards .card-command', new RegExp(`^${escape(command)}$`));
+      noProblems(l); // once the card has rendered
       await l.page.locator('#cards button', { hasText: 'Resume here' }).click();
       const term = await terminalIn(l, S1, 'running');
       await showsTerminal(l.page, term);
@@ -864,6 +874,7 @@ async function realServerCases(
         0,
         'nothing started',
       );
+      noProblems(l);
     },
   );
 
@@ -912,6 +923,7 @@ async function realServerCases(
         [],
         'the terminal is forgotten',
       );
+      noProblems(l);
     },
   );
 
@@ -957,6 +969,7 @@ async function realServerCases(
       await sleep(500);
       assert.equal(l.server.hub.list().length, 1, 'nothing more started');
       assert.equal(readRecords(l.d.record).filter((record) => record.ev === 'start').length, 1);
+      noProblems(l);
     },
   );
 }
