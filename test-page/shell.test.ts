@@ -19,6 +19,7 @@ import type { ServerSandbox } from '../test/helpers/window.ts';
 import { browser } from './helpers/browser.ts';
 import {
   active,
+  actsWorld,
   after,
   assetBase,
   buildOf,
@@ -989,7 +990,7 @@ test('the page shell', async (t) => {
       await mark(page, 'held');
 
       const now = await page.evaluate(() => Date.now());
-      await page.clock.pauseAt(now + 100);
+      await page.clock.pauseAt(now + 5000); // a margin a loaded machine cannot eat
       await sleep(2000); // no timer runs
       await page.clock.fastForward(60_000); // one late tick
       await page.clock.resume();
@@ -1021,7 +1022,7 @@ test('the page shell', async (t) => {
       await sleep(1500);
 
       const now = await page.evaluate(() => Date.now());
-      await page.clock.pauseAt(now + 100);
+      await page.clock.pauseAt(now + 5000); // a margin a loaded machine cannot eat
       answering = false;
       await sleep(1000);
       await page.clock.fastForward(60_000);
@@ -2059,6 +2060,622 @@ test('the page shell', async (t) => {
       t.diagnostic(
         `service worker (Chromium): the first load after the real server came back was answered by ${first}; registration.update() ${updated}; the next load by ${second}; registrations left: ${registrations}`,
       );
+    },
+  );
+
+  for (const how of ['another session is selected', 'the connection is lost'] as const) {
+    await t.test(
+      `the mark of the page's own resume ends when ${how} before its terminal is shown: a list that brings that terminal later does not take the keyboard while text is selected (Z1)`,
+      async (t) => {
+        const secret = new Uint8Array(32).fill(22);
+        const page = await newPage(t, chromium);
+        await page.addInitScript(RECORDER);
+        await pinModules(t, page, {
+          'terminal-view.js': fixture('textarea-view.js'),
+          'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
+        });
+        const terms: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B };
+        const running = new Set<string>([S1]);
+        const listFor = (selected: string | null): Record<string, unknown> =>
+          scriptedList(
+            [S1, S2].map((id) => ({
+              id,
+              terminal: running.has(id) ? (terms[id] ?? null) : null,
+              slot: running.has(id) ? [S1, S2].indexOf(id) + 1 : null,
+            })),
+            [...running].map((id) => ({
+              id: terms[id] ?? '',
+              slot: [S1, S2].indexOf(id) + 1,
+              sessionId: id,
+            })),
+            selected === null || running.has(selected)
+              ? null
+              : {
+                  sessionId: selected,
+                  command: `claude --resume ${selected}`,
+                  flagsKnown: true,
+                  unknownFlags: [],
+                  ended: 'exited',
+                  expiring: false,
+                  expired: false,
+                },
+          );
+        let shown: string | null = null;
+        /** Set by the resume in the first variant: S2's list goes out with the view naming S1. */
+        let listS2WhenS1 = false;
+        let listedS2WhileS1 = false;
+        const standin = await standinServer(t, {
+          socket: honest(secret, {
+            serverId: (n) => `${n}`.repeat(16).slice(0, 16),
+            open: (conn, message) => {
+              if (message['t'] === 'view') {
+                shown = (message['selected'] as string | null) ?? null;
+                conn.send(listFor(shown));
+                if (listS2WhenS1 && shown === S1) {
+                  // S2's terminal is listed only now that S1 is selected: never shown meanwhile.
+                  listS2WhenS1 = false;
+                  running.add(S2);
+                  conn.send(listFor(shown));
+                  listedS2WhileS1 = true;
+                }
+              } else if (message['t'] === 'attach') {
+                conn.send({
+                  t: 'snap',
+                  term: message['term'],
+                  ch: 1,
+                  cols: 80,
+                  rows: 24,
+                  data: '',
+                });
+              } else if (message['t'] === 'act' && message['kind'] === 'resume') {
+                const result = JSON.stringify({
+                  t: 'result',
+                  id: message['id'],
+                  ok: true,
+                  lines: [],
+                  error: null,
+                  sessionId: message['sessionId'],
+                });
+                if (how === 'the connection is lost') {
+                  // Once the result is written, the connection goes: S2's terminal is not listed.
+                  conn.ws.send(result, () => conn.ws.terminate());
+                } else {
+                  conn.ws.send(result);
+                  listS2WhenS1 = true;
+                }
+              }
+            },
+          }),
+        });
+        await page.goto(standin.url);
+        await storeKey(page, secret);
+        await page.goto(standin.url);
+        await connection(page, 'open');
+        await page.waitForSelector('#terminal .xterm-helper-textarea', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        const holderHasIt = (): Promise<boolean> =>
+          page.evaluate(
+            () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+          );
+        const selected = (): Promise<string> =>
+          page.evaluate(() => getSelection()?.toString() ?? '');
+
+        // Resume S2 from the list (the page's own action: the mark is set).
+        await clickRow(page, S2);
+        await page.keyboard.press('Enter');
+        if (how === 'another session is selected') {
+          // The result came (the page goes to the terminal zone with S2's card, its terminal not
+          // listed yet); at once, before the list, S1 in slot 1.
+          await showsText(page, '#focus-zone', /^Focus: terminal$/);
+          assert.equal(await selectedRow(page), S2);
+          await page.keyboard.press('Control+Shift+Digit1');
+          await page.waitForFunction(
+            (id) =>
+              document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') ===
+              id,
+            S1,
+          );
+          await until(
+            () => listedS2WhileS1,
+            "S2's terminal listed while S1 is shown",
+            PAGE_WAIT_MS,
+          );
+          await sleep(300);
+          running.delete(S2); // and goes again, never shown
+          standin.connections.at(-1)?.send(listFor(shown));
+          await sleep(300);
+          await clickRow(page, S2); // S2 again: its resume card
+        } else {
+          // The page received the result (its mark is set) before the connection went.
+          const deadline = performance.now() + PAGE_WAIT_MS;
+          while (!(await logOf(page)).some((entry) => entry.e === 'in' && entry.t === 'result')) {
+            assert.ok(performance.now() < deadline, 'the result reached the page');
+            await sleep(50);
+          }
+          await showsText(page, '#info-text', RESTARTED); // reconnected (another server)
+          await connection(page, 'open');
+          assert.equal(await selectedRow(page), S2);
+        }
+        await toZone(page, 'terminal');
+        await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+
+        // Text of the page selected; then a list brings S2's terminal (as if from a command line).
+        await page.keyboard.press('Control+Shift+H');
+        await page.locator('#help .help-line').first().dblclick();
+        await sleep(300);
+        const text = await selected();
+        assert.notEqual(text, '');
+        running.add(S2);
+        standin.connections.at(-1)?.send(listFor(S2));
+        await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+        await sleep(300);
+
+        assert.equal(await selected(), text, 'the selection stays');
+        assert.equal(await holderHasIt(), false, 'the list did not move the keyboard');
+      },
+    );
+  }
+
+  /**
+   * `actsWorld` (helpers/shell.ts) on a pinned page whose view is `view` (pinned over the minimal
+   * one) and whose cards' stylesheet is `cardsCss` if given; `got`, `clear` and `holderGetsIt` read
+   * the text-control view's holder.
+   */
+  const keysWorld = async (
+    t: Parameters<typeof newPage>[0],
+    view: 'textarea-view.js' | 'chord-view.js' | 'fits-view.js',
+    cardsCss?: string,
+  ) => {
+    const page = await newPage(t, chromium);
+    await pinModules(t, page, {
+      'terminal-view.js': fixture(view),
+      'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
+      ...(cardsCss === undefined ? {} : { 'cards.css': cardsCss }),
+    });
+    const world = await actsWorld(t, page);
+    const got = async (): Promise<string[]> =>
+      ((await page.evaluate(() => Reflect.get(globalThis, 'programGot'))) as string[]) ?? [];
+    const holderGetsIt = (): Promise<unknown> =>
+      page.waitForFunction(
+        () => document.activeElement?.classList.contains('xterm-helper-textarea') === true,
+        null,
+        { timeout: 5000 },
+      );
+    /** Forgets what the program got so far (the setup's own keys). */
+    const clear = (): Promise<unknown> =>
+      page.evaluate(() => ((Reflect.get(globalThis, 'programGot') as string[]).length = 0));
+    return { page, ...world, got, clear, holderGetsIt };
+  };
+
+  for (const held of [
+    'Enter on a running row',
+    'Enter that resumes',
+    'Esc on the list with a filter',
+    'Esc on the list without a filter',
+    'Enter in the new form',
+    "Esc in the view's own find field",
+    "Enter in the view's own find field",
+    "Enter on a button of the view's own",
+  ] as const) {
+    await t.test(
+      `a held ${held}: once the keyboard is in the terminal, no further event of that key reaches the program until it is released; the next press does (Z1, ruled 15:46Z)`,
+      async (t) => {
+        const w = await keysWorld(t, 'textarea-view.js');
+        const { page } = w;
+        const key = held.startsWith('Esc') ? 'Escape' : 'Enter';
+        if (held === 'Enter on a running row') {
+          await toZone(page, 'list'); // S1, running, is selected
+          await w.clear();
+          await page.keyboard.down(key); // shows S1's terminal and gives it the keyboard
+          await w.holderGetsIt();
+        } else if (held === 'Enter that resumes') {
+          await clickRow(page, S2);
+          await w.clear();
+          await page.keyboard.down(key); // resumes S2; its terminal takes the keyboard
+          await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
+            state: 'attached',
+          });
+          await w.holderGetsIt();
+        } else if (held === 'Esc on the list with a filter') {
+          await toZone(page, 'list');
+          await page.keyboard.press('/');
+          await page.keyboard.type('x');
+          await page.focus('#list');
+          await w.clear();
+          await page.keyboard.down(key); // the first step: the filter is cleared
+          await page.keyboard.down(key); // held: no second step
+          assert.equal(await zone(page), 'Focus: list', 'a held Esc does only the first step');
+          assert.equal(await page.inputValue('#list input'), '');
+          await page.keyboard.up(key);
+          assert.deepEqual(await w.got(), []);
+          await page.keyboard.down(key); // a new press: back to the terminal
+          await w.holderGetsIt();
+        } else if (held === 'Esc on the list without a filter') {
+          await toZone(page, 'list');
+          await w.clear();
+          await page.keyboard.down(key); // back to the terminal
+          await w.holderGetsIt();
+        } else if (held.endsWith("in the view's own find field")) {
+          // A field of the view inside #terminal whose Esc and Enter give the view's holder the
+          // keyboard, as the find bar's do (task 28).
+          await page.evaluate(() => {
+            const field = document.createElement('input');
+            field.className = 'own-find';
+            field.addEventListener('keydown', (event) => {
+              if (!event.repeat && (event.key === 'Escape' || event.key === 'Enter')) {
+                document.querySelector<HTMLElement>('#terminal .xterm-helper-textarea')?.focus();
+              }
+            });
+            document.querySelector('#terminal')?.append(field);
+          });
+          await page.focus('#terminal .own-find');
+          await w.clear();
+          await page.keyboard.down(key); // the view's own key: its holder takes the keyboard
+          await w.holderGetsIt();
+        } else if (held === "Enter on a button of the view's own") {
+          // A button of the view inside #terminal whose click gives the view's holder the
+          // keyboard, as a find bar's close button may (task 28).
+          await page.evaluate(() => {
+            const button = document.createElement('button');
+            button.className = 'own-button';
+            button.textContent = 'close';
+            button.addEventListener('click', () => {
+              document.querySelector<HTMLElement>('#terminal .xterm-helper-textarea')?.focus();
+            });
+            document.querySelector('#terminal')?.append(button);
+          });
+          await page.focus('#terminal .own-button');
+          await w.clear();
+          await page.keyboard.down(key); // Enter clicks the button: its holder takes the keyboard
+          await w.holderGetsIt();
+        } else {
+          await page.keyboard.press('Control+Shift+N');
+          await page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+          await page.fill('input[name="directory"]', '/home/u/project');
+          await page.focus('input[name="directory"]');
+          await w.clear();
+          await page.keyboard.down(key); // submits: the new terminal takes the keyboard
+          await page.waitForSelector('#right-zone[data-pane-term="' + TERM_C + '"]', {
+            state: 'attached',
+          });
+          await w.holderGetsIt();
+        }
+        await page.keyboard.down(key); // held: an auto-repeat (repeat: true)
+        await page.keyboard.down(key);
+        await page.keyboard.up(key);
+        await sleep(200);
+        assert.deepEqual(await w.got(), [], 'nothing of the held key reached the program');
+
+        await page.keyboard.press(key); // the next press reaches the program
+        await sleep(200);
+        assert.deepEqual(
+          await w.got(),
+          key === 'Enter' ? ['Enter', 'keypress Enter', 'keyup Enter'] : ['Escape', 'keyup Escape'],
+        );
+      },
+    );
+  }
+
+  await t.test(
+    "Ctrl+Shift+V sends its raw Ctrl+V only while the terminal zone has the keyboard: not from the list, and in the filter field or a field of the view's own the browser keeps the key (Z1, item 7)",
+    async (t) => {
+      const w = await keysWorld(t, 'chord-view.js');
+      const { page } = w;
+      const pastes = async (): Promise<number> =>
+        page.evaluate(
+          () => (Reflect.get(globalThis, 'viewCalls') as { pasteRaw: number }).pasteRaw,
+        );
+      /**
+       * Watches for the next keydown of V (not of the modifiers before it): the listener is in
+       * place when this resolves, and the function it gives says whether that keydown was
+       * cancelled, failing when none came within 5 s.
+       */
+      const watchV = async (): Promise<() => Promise<boolean>> => {
+        await page.evaluate(() => {
+          const seen = new Promise<boolean>((resolve) => {
+            const onV = (event: KeyboardEvent): void => {
+              if (event.code !== 'KeyV') {
+                return;
+              }
+              removeEventListener('keydown', onV, true);
+              setTimeout(() => resolve(event.defaultPrevented), 0);
+            };
+            addEventListener('keydown', onV, true);
+          });
+          Reflect.set(globalThis, 'keyVPrevented', seen);
+        });
+        return () =>
+          page.evaluate(() =>
+            Promise.race([
+              Reflect.get(globalThis, 'keyVPrevented') as Promise<boolean>,
+              new Promise<boolean>((_resolve, reject) =>
+                setTimeout(() => reject(new Error('no keydown of V came')), 5000),
+              ),
+            ]),
+          );
+      };
+
+      await toZone(page, 'list');
+      await page.keyboard.press('Control+Shift+V');
+      assert.equal(await pastes(), 0, 'not from the list');
+
+      await page.keyboard.press('/');
+      const inField = await watchV();
+      await page.keyboard.press('Control+Shift+V');
+      assert.equal(await inField(), false, "the filter field keeps the browser's own key");
+      assert.equal(await pastes(), 0, 'not from the filter field');
+
+      await page.keyboard.press('Escape'); // the filter closes; the list has the keyboard
+      await page.keyboard.press('Escape'); // back to the terminal
+      // A field of the view's own inside #terminal (a find field): the view hands its key events
+      // to `deps.chord`, as this one hands all of #terminal's.
+      await page.evaluate(() => {
+        const field = document.createElement('input');
+        field.className = 'own-find';
+        document.querySelector('#terminal')?.append(field);
+      });
+      await page.focus('#terminal .own-find');
+      const inOwnField = await watchV();
+      await page.keyboard.press('Control+Shift+V');
+      assert.equal(await inOwnField(), false, "the view's own field keeps the browser's own key");
+      assert.equal(await pastes(), 0, "not from the view's own field");
+
+      await page.focus('#terminal .terminal-placeholder');
+      await page.keyboard.press('Control+Shift+V');
+      assert.equal(await pastes(), 1, 'from the terminal');
+    },
+  );
+
+  await t.test(
+    "the size a resume or a new form asks for is the terminal area's once the terminal is shown: the header's height is taken off for every pane (Z1, item 5)",
+    async (t) => {
+      const w = await keysWorld(
+        t,
+        'textarea-view.js',
+        '.card-header { height: 60px; overflow: hidden; }\n',
+      );
+      const { page } = w;
+      const lastFocus = async (): Promise<{ cols: number; rows: number }> => {
+        await sleep(500);
+        const focus = w.focuses.at(-1);
+        assert.ok(focus !== undefined);
+        return focus;
+      };
+
+      // A resume from S2's card ("Resume here").
+      await clickRow(page, S2);
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
+        state: 'attached',
+      });
+      const resumed = await lastFocus();
+      const resume = w.acts.find((act) => act['kind'] === 'resume');
+      assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, resumed);
+
+      // A new session from the form.
+      await page.keyboard.press('Control+Shift+N');
+      await page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await page.fill('input[name="directory"]', '/home/u/project');
+      await page.locator('#cards button', { hasText: 'Start' }).click();
+      await page.waitForSelector('#right-zone[data-pane-term="' + TERM_C + '"]', {
+        state: 'attached',
+      });
+      const started = await lastFocus();
+      const made = w.acts.find((act) => act['kind'] === 'new');
+      assert.deepEqual({ cols: made?.['cols'], rows: made?.['rows'] }, started);
+    },
+  );
+
+  await t.test(
+    'a held chord acts once, at its first keydown: Ctrl+Shift+L and Ctrl+Shift+H, from the terminal and from the list, do not flip again at their auto-repeats (Z1, C2)',
+    async (t) => {
+      const w = await keysWorld(t, 'textarea-view.js');
+      const { page } = w;
+      /** Presses `key` with Ctrl+Shift and holds it for one auto-repeat. */
+      const hold = async (key: string): Promise<void> => {
+        await page.keyboard.down('Control');
+        await page.keyboard.down('Shift');
+        await page.keyboard.down(key);
+        await page.keyboard.down(key); // an auto-repeat (repeat: true)
+        await page.keyboard.up(key);
+        await page.keyboard.up('Shift');
+        await page.keyboard.up('Control');
+        await sleep(200);
+      };
+      const help = page.locator('#help');
+      await toZone(page, 'terminal');
+      await hold('KeyL');
+      assert.equal(await zone(page), 'Focus: list', 'from the terminal: the zone flipped once');
+      await hold('KeyL');
+      assert.equal(await zone(page), 'Focus: terminal', 'from the list: the zone flipped once');
+      await hold('KeyH');
+      assert.equal(await help.isHidden(), false, 'from the terminal: the help opened once');
+      await page.keyboard.press('Control+Shift+H');
+      await page.waitForSelector('#help[hidden]', { state: 'attached' });
+      await toZone(page, 'list');
+      await hold('KeyH');
+      assert.equal(await help.isHidden(), false, 'from the list: the help opened once');
+    },
+  );
+
+  await t.test(
+    "the size a resume asks for after the header's height changed with no render (a narrower window) is the terminal area's once shown: the header is measured as it is (Z1, item 5)",
+    async (t) => {
+      const w = await keysWorld(
+        t,
+        'textarea-view.js',
+        '.card-header { height: 60px; overflow: hidden; }\n' +
+          '@media (max-width: 900px) { .card-header { height: 140px; } }\n',
+      );
+      const { page } = w;
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await clickRow(page, S2);
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await sleep(300);
+      await page.setViewportSize({ width: 800, height: 720 }); // the header grows; no render
+      await sleep(500);
+      await page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
+        state: 'attached',
+      });
+      await sleep(500);
+      const shown = w.focuses.at(-1);
+      const resume = w.acts.find((act) => act['kind'] === 'resume');
+      assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, shown);
+    },
+  );
+
+  await t.test(
+    "the size Resume on the ended bar asks for is the terminal area's once the terminal runs again: the header alone is taken off, not the ended bar (Z1, item 5)",
+    async (t) => {
+      const w = await keysWorld(t, 'textarea-view.js');
+      const { page } = w;
+      w.end(S1); // S1, shown, ends: its ended bar shows under the header
+      await page.locator('#cards button', { hasText: /^Resume$/ }).waitFor();
+      await sleep(500);
+      const endedArea = w.focuses.at(-1);
+      await page.locator('#cards button', { hasText: /^Resume$/ }).click();
+      await page.locator('#cards button', { hasText: /^Resume$/ }).waitFor({ state: 'hidden' });
+      await sleep(500);
+      const shown = w.focuses.at(-1);
+      assert.notDeepEqual(
+        shown,
+        endedArea,
+        'the ended bar took rows (else this case tests nothing)',
+      );
+      const resume = w.acts.find((act) => act['kind'] === 'resume');
+      assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, shown);
+    },
+  );
+
+  await t.test(
+    "with a view that has `fits(width, height)`, the size is the view's: asked for the terminal area's box in CSS pixels (the header taken off), and a null answer leaves the page's own arithmetic (Z1, item 5)",
+    async (t) => {
+      const w = await keysWorld(
+        t,
+        'fits-view.js',
+        '.card-header { height: 60px; overflow: hidden; }\n',
+      );
+      const { page } = w;
+      const asked = async (): Promise<number[][]> =>
+        page.evaluate(() => Reflect.get(globalThis, 'fitsAsked') as number[][]);
+      /** `#terminal`'s box, as the view is asked about it. */
+      const terminalBox = async (): Promise<number[]> =>
+        page.evaluate(() => {
+          const box = document.querySelector('#terminal')?.getBoundingClientRect();
+          return [box?.width ?? 0, box?.height ?? 0];
+        });
+      await sleep(500);
+      assert.deepEqual(w.focuses.at(-1), { cols: 77, rows: 33 }, "focus.area is the view's answer");
+      assert.deepEqual((await asked()).at(-1), await terminalBox(), "asked for #terminal's box");
+
+      // A resume from S2's card asks for the view's answer, for the box its terminal has once shown
+      // (the zone less the header).
+      await clickRow(page, S2);
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', { cols: 66, rows: 22 }));
+      const before = (await asked()).length;
+      await page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
+        state: 'attached',
+      });
+      const resume = w.acts.find((act) => act['kind'] === 'resume');
+      assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, { cols: 66, rows: 22 });
+      assert.deepEqual((await asked())[before], await terminalBox());
+
+      // A view that cannot tell: the page's own arithmetic, a size of at least 1 × 1.
+      await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', null));
+      await page.setViewportSize({ width: 1100, height: 700 });
+      await sleep(700);
+      const own = w.focuses.at(-1);
+      assert.ok(own !== undefined && own !== null, 'a size is sent');
+      assert.notDeepEqual(own, { cols: 66, rows: 22 });
+      assert.ok(own.cols >= 1 && own.rows >= 1, JSON.stringify(own));
+    },
+  );
+
+  /** Sizes the server refuses (whole numbers 1–65535 only), as a view's `fits` may answer them. */
+  const refused = [
+    ['0 rows (an area lower than one cell)', { cols: 80, rows: 0 }],
+    ['a fraction', { cols: 80.5, rows: 24.5 }],
+    ['no number (a cell not measured yet)', { cols: Number.NaN, rows: 24 }],
+  ] as const;
+  /** Whether `size` is one the server takes. */
+  const whole = (size: unknown): boolean => {
+    const { cols, rows } = (size ?? {}) as { cols?: unknown; rows?: unknown };
+    return [cols, rows].every((n) => Number.isInteger(n) && (n as number) >= 1);
+  };
+
+  await t.test(
+    'a `fits` answer the server would refuse (0 rows, a fraction, no number) is held to whole numbers from 1 up, in `focus` and in an act; the view is never asked about an area under 1 px (Z1, item 5)',
+    async (t) => {
+      const w = await keysWorld(
+        t,
+        'fits-view.js',
+        '.card-header { height: 60px; overflow: hidden; }\n',
+      );
+      const { page } = w;
+      let width = 1000;
+      for (const [what, answer] of refused) {
+        await page.evaluate((a) => Reflect.set(globalThis, 'fitsAnswer', a), answer);
+        width += 50;
+        await page.setViewportSize({ width, height: 700 }); // the area changed: focus is sent
+        await sleep(700);
+        assert.ok(whole(w.focuses.at(-1)), `${what}: focus ${JSON.stringify(w.focuses.at(-1))}`);
+      }
+
+      await clickRow(page, S2);
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await page.evaluate(() => Reflect.set(globalThis, 'fitsAnswer', { cols: 80.5, rows: 0 }));
+      await page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await page.waitForSelector('#right-zone[data-pane-term="' + TERM_B + '"]', {
+        state: 'attached',
+      });
+      const resume = w.acts.find((act) => act['kind'] === 'resume');
+      assert.deepEqual({ cols: resume?.['cols'], rows: resume?.['rows'] }, { cols: 80, rows: 1 });
+
+      // A window lower than the header: the view is asked about 1 px, not less.
+      await page.setViewportSize({ width, height: 40 });
+      await sleep(700);
+      const asked = await page.evaluate(() => Reflect.get(globalThis, 'fitsAsked') as number[][]);
+      const last = asked.at(-1);
+      assert.ok(last !== undefined && last[0]! >= 1 && last[1]! >= 1, JSON.stringify(last));
+      assert.equal(last[1], 1, 'the area under the header is less than 1 px high');
+    },
+  );
+
+  await t.test(
+    'with a real server, a `fits` answer the server would refuse does not close the connection: the page sends the size held to whole numbers (Z1, item 5)',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        modules: {
+          ...MINIMAL_MODULES,
+          'terminal-view.js': fixture('fits-view.js'),
+          'terminal-view-real.js': MINIMAL_MODULES['terminal-view.js'],
+        },
+      });
+      await sleep(500);
+      let width = 1000;
+      for (const [, answer] of refused) {
+        await l.page.evaluate((a) => Reflect.set(globalThis, 'fitsAnswer', a), answer);
+        width += 50;
+        await l.page.setViewportSize({ width, height: 700 });
+        await sleep(1500);
+      }
+      const log = await logOf(l.page);
+      assert.ok(
+        log.filter((e) => e.e === 'out' && e['t'] === 'focus').length >= refused.length,
+        'focus was sent for each answer',
+      );
+      assert.deepEqual(
+        log.filter((e) => e.e === 'close' || e.e === 'ws').map((e) => e.e),
+        ['ws'],
+        'one socket, never closed',
+      );
+      assert.equal(await shownText(l.page, '#gone'), '');
     },
   );
 
