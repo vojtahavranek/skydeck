@@ -11,8 +11,11 @@ export interface ControlClient {
    * `GET /ping` (S2 5.1), waiting `timeoutMs` (5 s by default). 'refused' when nothing listens on
    * the socket or it is missing (ECONNREFUSED, ENOENT); 'timeout' when the server does not answer
    * in time, or its queue of connections is full (EAGAIN: it lives, but does not answer now).
-   * Rejects with a SkydeckError for any other failure, another status or an answer that cannot be
-   * read, and passes on the RangeError of a time no timer can wait.
+   * Rejects with a SkydeckError for any other failure — also while the server is closing (EPIPE,
+   * ECONNRESET), which a caller that waits for a server must catch — another status or an answer
+   * that cannot be read (one that is not HTTP included), and passes on the RangeError of a time no
+   * timer can wait. An answer of another `protocol` cannot be read: whoever adds protocol 2 makes
+   * ping accept both, since ping is how S2 5.1 recognises another build to restart it.
    */
   ping(timeoutMs?: number): Promise<PingAnswer | 'refused' | 'timeout'>;
   /** The others wait 5 s and reject with a SkydeckError that says what went wrong. */
@@ -64,7 +67,7 @@ export function controlClient(net: Net, sockPath: string): ControlClient {
           `the window's server did not answer ${what} within ${REQUEST_TIMEOUT_MS / 1000} s`,
         );
       }
-      throw transportError(error, code, sockPath);
+      throw transportError(error, code, sockPath, what);
     }
     return readAnswer(answer, what, read);
   };
@@ -82,7 +85,7 @@ export function controlClient(net: Net, sockPath: string): ControlClient {
         if (code === 'ETIMEDOUT' || code === 'EAGAIN') {
           return 'timeout';
         }
-        throw transportError(error, code, sockPath);
+        throw transportError(error, code, sockPath, 'GET /ping');
       }
       return readAnswer(answer, 'GET /ping', readPing);
     },
@@ -121,11 +124,28 @@ function systemCode(error: unknown): string | null {
   return typeof code === 'string' && /^E[A-Z0-9]+$/.test(code) ? code : null;
 }
 
-/** A system error as a SkydeckError naming its code; any other error passes unchanged. */
-function transportError(error: unknown, code: string | null, sockPath: string): unknown {
+/**
+ * What a failed request becomes: an answer Node's HTTP parser refused (`HPE_…`, a peer that does
+ * not speak HTTP) cannot be read; a system error is a SkydeckError naming its code; any other
+ * error (a RangeError of the caller) passes unchanged.
+ */
+function transportError(
+  error: unknown,
+  code: string | null,
+  sockPath: string,
+  what: string,
+): unknown {
+  const raw: unknown = error instanceof Error ? (error as { code?: unknown }).code : undefined;
+  if (typeof raw === 'string' && raw.startsWith('HPE_')) {
+    return unreadable(what);
+  }
   return code === null
     ? error
     : new SkydeckError(`the window's server cannot be asked on ${sockPath} (${code})`);
+}
+
+function unreadable(what: string): SkydeckError {
+  return new SkydeckError(`the window's server gave an answer to ${what} that cannot be read`);
 }
 
 function readAnswer<T>(
@@ -140,7 +160,7 @@ function readAnswer<T>(
   }
   const value = read(answer.body);
   if (value === null) {
-    throw new SkydeckError(`the window's server gave an answer to ${what} that cannot be read`);
+    throw unreadable(what);
   }
   return value;
 }

@@ -20,7 +20,11 @@ export interface ControlDeps {
   ping(): PingAnswer;
   status(): StatusAnswer;
   tokens: Tokens;
-  /** S2 5.5; called once, after the answer to the first `POST /shutdown` has been sent. */
+  /**
+   * S2 5.5; called once, when the first answer to a `POST /shutdown` has been handed to the
+   * socket. What it throws is not caught (the server's uncaught error, S2 5.2); an asynchronous
+   * shutdown handles its own failure, since its rejection would be no more than an unhandled one.
+   */
   shutdown(): void;
   log: (line: string) => void;
 }
@@ -40,14 +44,15 @@ interface Answer {
  * `POST /token` answers the token in base64url and `expiresAtNs` as decimal text; tokens stay in
  * `deps.tokens`, in memory (S2 15.2). `GET /token/<id>` is 404 for an id the tokens do not know.
  * `POST /token/drop` answers `{ ok }`, false for such an id. `POST /shutdown` answers
- * `{ ok: true }` and then calls `deps.shutdown` once the answer has been handed to the socket;
- * a later `POST /shutdown` gets the same answer and calls nothing. What `deps.shutdown` throws is
- * not caught: the server's uncaught error (S2 5.2) is what then ends it.
+ * `{ ok: true }`; `deps.shutdown` is called once, when the first such answer has been handed to
+ * the socket (or its asker went away), and every other request for it calls nothing. What
+ * `deps.shutdown` throws is not caught: the server's uncaught error (S2 5.2) is what then ends it.
  */
 export function controlHandler(
   deps: ControlDeps,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   let shutdownAsked = false;
+  let shutdownCalled = false;
 
   const refusal = (status: number, kind: string): Answer => {
     deps.log(`server.sock: refused a request (${kind})`);
@@ -79,12 +84,17 @@ export function controlHandler(
         if (!shutdownAsked) {
           shutdownAsked = true;
           deps.log('server.sock: shutdown asked for');
-          // 'close' follows 'finish', when the answer has been handed to the socket; it also comes
-          // when the asker went away first, and the server stops all the same.
-          res.once('close', () => {
-            deps.shutdown();
-          });
         }
+        // 'close' follows 'finish', when the answer has been handed to the socket; it also comes
+        // when the asker went away first, and the server stops all the same. Every request waits
+        // for its own answer, and the first answer out calls: one asker that does not read its
+        // answers cannot keep the next one waiting.
+        res.once('close', () => {
+          if (!shutdownCalled) {
+            shutdownCalled = true;
+            deps.shutdown();
+          }
+        });
         return { status: 200, value: { ok: true } };
     }
   };

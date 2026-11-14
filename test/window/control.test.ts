@@ -1,8 +1,10 @@
 // server.sock (S2 8.3, 15.1): the server's control handler and the command line's client, over a
 // real unix socket in a runtime directory of mode 0o700; the clock is the test platform's fake.
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { linkSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
+import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { test } from 'node:test';
@@ -363,6 +365,40 @@ test('shutdown through the client resolves, and a second request does not call d
   );
 });
 
+test('a connection that does not read its answers does not keep POST /shutdown from the next asker', async (t) => {
+  // Answers big enough that 80 of them fill the socket: the stalled connection's /shutdown is
+  // parsed, but its answer waits behind them for as long as nobody reads.
+  const big: StatusAnswer = {
+    ...STATUS,
+    terminals: Array.from({ length: 200 }, (_, n) => ({
+      id: n.toString(16).padStart(12, '0'),
+      slot: null,
+      state: 'running',
+      sessionId: S1,
+      pid: 5001 + n,
+    })),
+  };
+  const c = await startControl(t, () => ({ status: () => big }));
+  const stalled = createConnection({ path: c.files.serverSock });
+  t.after(() => {
+    stalled.destroy();
+  });
+  await once(stalled, 'connect');
+  stalled.pause();
+  const status = 'GET /status HTTP/1.1\r\nHost: skydeck\r\n\r\n';
+  stalled.write(
+    status.repeat(80) + 'POST /shutdown HTTP/1.1\r\nHost: skydeck\r\nContent-Length: 0\r\n\r\n',
+  );
+  await waitFor(() => c.logs.includes('server.sock: shutdown asked for'));
+  assert.equal(c.calls.shutdown, 0);
+  await c.client.shutdown();
+  await waitFor(() => c.calls.shutdown === 1);
+  await c.client.shutdown();
+  stalled.destroy(); // its answer is given up now: still no second call
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(c.calls.shutdown, 1);
+});
+
 async function waitFor(condition: () => boolean): Promise<void> {
   const start = performance.now();
   while (!condition()) {
@@ -510,17 +546,23 @@ test('a dependency that throws is 500, logged by its name without its message; t
 // ---------------------------------------------------------------------------------------------
 // Tokens in memory only; the socket's place
 
-test('tokens are never written to a file or the store', async (t) => {
+test('tokens are never written to a file, the store or the log', async (t) => {
   const c = await startControl(t);
   const kvBefore = c.d.deck.store.kvEntries('');
   const filesBefore = filesUnder(c.d.sandbox.root);
   const minted = [await c.client.token(30), await c.client.token(600)];
+  for (const { id } of minted) {
+    await c.client.tokenState(id);
+  }
+  await c.client.dropToken(minted[0]?.id ?? '');
   const filesAfter = filesUnder(c.d.sandbox.root);
   assert.deepEqual(filesAfter, filesBefore);
   assert.deepEqual(c.d.deck.store.kvEntries(''), kvBefore);
+  // deps.log is the handler's one way to write (server.log, in the server).
+  const logged = Buffer.from(c.logs.join('\n'), 'utf8');
   for (const { id, token } of minted) {
     const needles = [Buffer.from(token), Buffer.from(token, 'base64url'), Buffer.from(id)];
-    for (const [path, bytes] of filesAfter) {
+    for (const [path, bytes] of [...filesAfter, ['the log', logged] as const]) {
       for (const needle of needles) {
         assert.equal(bytes.indexOf(needle), -1, `${path} holds a token`);
       }
@@ -620,6 +662,7 @@ test('ping rejects with a SkydeckError for another failure, another status or an
   const cases: [string, () => Promise<{ status: number; body: unknown }>, RegExp][] = [
     ['EACCES', failing('EACCES'), /EACCES/],
     ['ECONNRESET', failing('ECONNRESET'), /ECONNRESET/],
+    ['not HTTP', failing('HPE_INVALID_CONSTANT'), /answer to GET \/ping that cannot be read/],
     ['500', answering(500, { error: 'failed' }), /500/],
     ['text', answering(200, 'pong'), /cannot be read/],
     ['no build', answering(200, { ...PING, build: undefined }), /cannot be read/],
@@ -632,6 +675,27 @@ test('ping rejects with a SkydeckError for another failure, another status or an
     await assert.rejects(controlClient(net, SOCK).ping(), (error: unknown) => {
       assert.ok(error instanceof SkydeckError, name);
       assert.match(error.message, message, name);
+      return true;
+    });
+  }
+});
+
+test('a peer that does not speak HTTP gives an answer that cannot be read', async (t) => {
+  const c = await startControl(t);
+  const path = join(c.files.dir, 'garbage.sock');
+  const garbage = createServer((socket) => {
+    socket.end('garbage that is not HTTP\r\n\r\n');
+  });
+  garbage.listen(path);
+  await once(garbage, 'listening');
+  t.after(() => {
+    garbage.close();
+  });
+  const client = controlClient(c.d.platform.net, path);
+  for (const call of [() => client.ping(), () => client.status()]) {
+    await assert.rejects(call(), (error: unknown) => {
+      assert.ok(error instanceof SkydeckError, String(error));
+      assert.match(error.message, /that cannot be read/);
       return true;
     });
   }
@@ -655,6 +719,7 @@ test('the other requests reject with a SkydeckError that says what went wrong, n
     [failing('ENOENT'), /does not run.*server\.sock/],
     [failing('ETIMEDOUT'), /did not answer .* within 5 s/],
     [failing('EACCES'), /EACCES/],
+    [failing('HPE_INVALID_CONSTANT'), /cannot be read/],
     [answering(400, { error: 'body: unknown field' }), /refused .*\(400: body: unknown field\)/],
     [answering(404, 'not found'), /refused .*\(404\)/],
     [answering(200, { surprise: TOKEN_TEXT }), /cannot be read/],
