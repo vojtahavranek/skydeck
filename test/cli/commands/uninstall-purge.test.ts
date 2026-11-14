@@ -512,3 +512,76 @@ describe('uninstall --purge touches nothing outside the test’s sandbox', () =>
     });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Each condition on each directory (review 1)
+
+describe('uninstall --purge: each of the three directories, each way it is left alone', () => {
+  const which = ['dataDir', 'stateDir', 'configDir'] as const;
+
+  for (const name of which) {
+    test(`${name} is a symbolic link: left alone, its target whole, the other two purged`, async (t) => {
+      const d = testPlatform(t);
+      claudeFolders(d.places);
+      const target = join(d.sandbox.root, 'elsewhere');
+      mkdirSync(target);
+      writeFileSync(join(target, 'mine.txt'), 'mine');
+      mkdirSync(join(d.places[name], '..'), { recursive: true });
+      symlinkSync(target, d.places[name]);
+      assert.equal((await run(d.platform, ['install'], { lines: ['y'] })).code, 0);
+
+      const r = await purge(d.platform);
+
+      assert.equal(r.code, 1, r.stdout);
+      assert.ok(
+        r.stderr.includes(`did not remove ${d.places[name]}: it is a symbolic link`),
+        r.stderr,
+      );
+      still(join(target, 'mine.txt'));
+      for (const other of dirsOf(d).filter((dir) => dir !== d.places[name])) gone(other);
+    });
+
+    test(`${name} belongs to another user: left alone, the other two purged`, async (t) => {
+      const d = await installed(t);
+      const dir = d.places[name];
+      const files: Files = {
+        ...d.platform.files,
+        lstat(path) {
+          const info = d.platform.files.lstat(path);
+          return path === dir && info !== null ? { ...info, uid: info.uid + 1 } : info;
+        },
+      };
+
+      const r = await purge({ ...d.platform, files });
+
+      assert.equal(r.code, 1, r.stdout);
+      assert.ok(
+        r.stderr.includes(`did not remove ${dir}: it belongs to uid ${d.platform.uid + 1}`),
+        r.stderr,
+      );
+      still(dir);
+      for (const other of dirsOf(d).filter((o) => o !== dir)) gone(other);
+    });
+
+    test(`${name} cannot be looked at: left alone, the other two purged, no internal error`, async (t) => {
+      if (isRoot) return t.skip('root reads anything');
+      const d = await installed(t);
+      const dir = d.places[name];
+      chmodSync(dir, 0o300);
+      try {
+        const r = await purge(d.platform);
+
+        assert.equal(r.code, 1, r.stdout);
+        assert.ok(
+          r.stderr.includes(`did not remove ${dir}: it cannot be looked at (EACCES)`),
+          r.stderr,
+        );
+        assert.doesNotMatch(r.stderr, /internal error/);
+        for (const other of dirsOf(d).filter((o) => o !== dir)) gone(other);
+      } finally {
+        chmodSync(dir, 0o700);
+      }
+      still(dir);
+    });
+  }
+});
