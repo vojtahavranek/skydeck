@@ -19,6 +19,7 @@ import { browser, newPage } from './helpers/browser.ts';
 import {
   PAGE_WAIT_MS,
   RECORDER,
+  active,
   after,
   connection,
   honest,
@@ -169,6 +170,10 @@ test('the terminal view', async (t) => {
       const l = await launched(t, chromium);
       l.d.resumable(S1);
       await resumeHere(l.page, S1);
+      // The hook of the shared helpers (resumeFromList): the shown terminal has the keyboard
+      // inside #terminal (xterm.js's textarea).
+      assert.equal(await active(l.page), 'in #terminal');
+      assert.deepEqual(l.problems, [], 'no problem once the terminal is shown');
       await untilScreen(l.page, promptOf(S1));
       await l.page.keyboard.type('/red x');
       await l.page.keyboard.press('Enter');
@@ -226,6 +231,7 @@ test('the terminal view', async (t) => {
       );
       assert.equal(sent.length, 1, 'the page sent only the Enter');
       assert.ok(readRecords(l.d.record).length > 0);
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
   await t.test(
@@ -383,6 +389,7 @@ test('the terminal view', async (t) => {
       );
       await sleep(1500);
       assert.equal(await clipboardText(page), 'from-the-shown-one', 'the clipboard is as it was');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
@@ -418,6 +425,7 @@ test('the terminal view', async (t) => {
       await clickAt(page, link, true);
       await untilOpened(d, 'https://example.com/target');
       assert.equal(await noticeText(page, 'link'), '', 'the target is no longer shown');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
@@ -450,6 +458,7 @@ test('the terminal view', async (t) => {
       await page.keyboard.press('Escape');
       await untilTerminalOf(page, S1);
       assert.equal(await page.locator('.tv-find').isHidden(), true);
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
@@ -482,6 +491,7 @@ test('the terminal view', async (t) => {
         'gone once input is taken',
         60_000,
       );
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
@@ -532,6 +542,7 @@ test('the terminal view', async (t) => {
       await page.keyboard.press('w');
       await until(async () => (await noticeText(page, 'input-full')) === '', 'input taken again');
       await until(() => inputOf(d.record, S1).endsWith(hexOf('w')), 'the key reached the program');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
@@ -582,6 +593,12 @@ test('the terminal view', async (t) => {
       await untilScreen(page, /^after$/m);
       assert.equal(await noticeText(page, 'newer-keeper'), '', 'not repeated: no longer holds');
       assert.equal(await noticeText(page, 'gap'), '', 'dismissed: not shown for a repeat');
+      // The connection lost and made again while the server restarted is no problem of the page.
+      assert.deepEqual(
+        l.problems.filter((p) => !/ERR_CONNECTION_REFUSED|WebSocket/.test(p)),
+        [],
+        'the page reports no problem',
+      );
     },
   );
 
@@ -639,6 +656,7 @@ test('the terminal view', async (t) => {
       await untilScreen(page, /\/title not the window title/);
       await sleep(300);
       assert.ok(!(await page.title()).includes('not the window title'));
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
@@ -658,5 +676,6 @@ test('the terminal view', async (t) => {
       after(await logOf(page), 'ended').filter((entry) => entry.e === 'out' && entry.t === 'input'),
       [],
     );
+    assert.deepEqual(l.problems, [], 'the page reports no problem');
   });
 });

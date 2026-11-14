@@ -158,6 +158,7 @@ test('keys in the terminal view', async (t) => {
       0,
       'nothing of the paste is left in the textarea',
     );
+    assert.deepEqual(l.problems, [], 'the page reports no problem');
   });
 
   await t.test(
@@ -209,6 +210,7 @@ test('keys in the terminal view', async (t) => {
         );
         assert.equal(inputSince(d.record, before), '', `${key} reached no program`);
       }
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
@@ -254,6 +256,7 @@ test('keys in the terminal view', async (t) => {
       assert.notEqual(last.rows, firstRows, 'the size of the window that typed');
       await until(async () => (await rowsOf(other)) === last.rows, 'the second window at its size');
       assert.equal(await rowsOf(page), last.rows, 'the first window at the new owner’s size');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 });
