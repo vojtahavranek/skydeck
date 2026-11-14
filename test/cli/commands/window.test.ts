@@ -1788,14 +1788,20 @@ describe('a server that is starting is found by every command (ruled, server-fin
     });
   }
 
-  test('doctor while a server starts: it waits for it and reports it running', async (t) => {
+  test('doctor while a server starts: it waits for it to record itself and reports it — running, or still starting once it answers', async (t) => {
     const h = windowHarness(t);
     const first = await startingServer(h, 2000);
 
     const r = await h.exec(['doctor']);
     await first.done;
 
-    assert.match(r.stdout, new RegExp(`the window's server runs: pid ${first.pid}, from `));
+    assert.match(
+      r.stdout,
+      new RegExp(
+        `^info +the window's server (runs: pid ${first.pid}, from |\\(pid ${first.pid}\\) is starting, from )`,
+        'm',
+      ),
+    );
     assert.doesNotMatch(r.stdout, /no window server runs/);
   });
 
