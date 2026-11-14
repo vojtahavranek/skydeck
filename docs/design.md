@@ -764,7 +764,8 @@ could not be resumed; see above`).
   there must join), then the folder. A folder that is a symbolic link, is another user's, cannot be
   looked at, or holds anything else — `notes.txt`, an editor's backup, a directory where skydeck
   keeps a file — is left alone, whole; the others are still purged, and the command ends with
-  `skydeck is uninstalled, but --purge did not remove <folder>: it <why>` and exit 1. Before
+  `skydeck is uninstalled, but --purge did not remove <folder>: it <why>` (the entry in the way
+  when there is one) and exit 1. The window's runtime folders are purged the same way (S2 16.2). Before
   anything is undone, `--purge` refuses (exit 1, nothing changed) while `SKYDECK_HOME`,
   `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` or `XDG_RUNTIME_DIR` is set but ignored by
   9.1's rule: it names the variable and does not purge the installation it would find without it.

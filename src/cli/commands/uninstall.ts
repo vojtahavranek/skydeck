@@ -117,10 +117,10 @@ export const command: Command = {
         if (!own.some((parent) => dir === parent || dir.startsWith(`${parent}/`))) {
           const purged = purgeDir(platform, dir, RUNTIME_DIR);
           if (purged.kind === 'removed') ctx.io.stdout(`removed ${sanitize(dir)}\n`);
-          // A38: a runtime directory not skydeck's is left alone and named, and that is all.
-          if (purged.kind === 'left')
-            ctx.io.stdout(`left ${sanitize(dir)} alone: it ${sanitize(purged.why)}\n`);
-          if (purged.kind === 'failed') notRemoved.push(`${dir}: it ${purged.why}`);
+          // Ruled (purge-care): any directory left alone is named in the last line, exit 1.
+          if (purged.kind === 'left' || purged.kind === 'failed') {
+            notRemoved.push(`${dir}: it ${purged.why}`);
+          }
         }
       }
       // The store is closed by now. Step 1's directories, each with only what skydeck writes there;

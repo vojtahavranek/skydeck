@@ -161,7 +161,8 @@ describe('purgeDir: a link to a directory is never followed', () => {
 
         const purged = purgeDir(platform, `${join(root, 'link')}${suffix}`, spec);
 
-        assert.equal(purged.kind, 'left');
+        // The slash reaches purgeDir and is dropped there before the link check.
+        assert.deepEqual(purged, { kind: 'left', why: 'is a symbolic link' });
         assert.ok(existsSync(join(target, 'config.json')), 'the target stays whole');
       });
     }
@@ -221,7 +222,10 @@ describe('purgeDir: what it does not remove', () => {
 
     const purged = purgeDir({ ...platform, files }, dir, CONFIG_DIR);
 
-    assert.equal(purged.kind, 'failed');
+    assert.deepEqual(purged, {
+      kind: 'failed',
+      why: 'still holds late.txt, which came while it was purged',
+    });
     assert.ok(existsSync(join(dir, 'late.txt')));
   });
 });

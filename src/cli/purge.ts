@@ -1,7 +1,8 @@
 // What `skydeck uninstall --purge` may remove (docs/design.md 8, 9.1; S2 4.2, plan A38): the
 // directories skydeck keeps, each only with what skydeck itself writes there. Principle 6: nothing
 // of the user's is destroyed — a directory that is a symbolic link, is another user's, cannot be
-// looked at, or holds anything else is left alone, and the caller names it.
+// looked at, or holds anything else is left alone, and the caller names it in its last line with
+// exit 1, whatever directory it is (ruled, purge-care).
 //
 // THE LISTS BELOW ARE THE ONE PLACE that says what skydeck writes into its directories. Whoever
 // makes skydeck write a new file or directory into one of them adds it here (name and kind), or
@@ -28,7 +29,7 @@ const SESSION_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const SPOOL_FILE = '[0-9]+-[0-9]+-[0-9]+\\.ev';
 
 // ---------------------------------------------------------------------------------------------
-// The runtime directory (S2 4.2, plan A38)
+// The runtime directory (S2 4.2): plan A38's list lives here
 
 /** terms/: keepers' sockets and `.pid` lines, the keeper's `.<id>.<pid>.tmp` and Files.writeText's temporary. */
 const TERMS: Spec = [
@@ -118,15 +119,17 @@ function ruleFor(spec: Spec, name: string): Entry | undefined {
 }
 
 /**
- * Removes `dir` when it is a plain path (no `.` or `..`: such a path can be followed through a
- * symbolic link), a directory of the user's that is not a symbolic link, and every entry below it is
+ * Removes `given` when it is a plain path (no `.` or `..`, which can lead through a symbolic link;
+ * repeated and trailing slashes are dropped first), a directory of the user's that is not a symbolic link, and every entry below it is
  * one `spec` allows, of its kind, each directory the user's: first those entries, then each
  * directory once it is empty. Otherwise nothing of it is removed: 'left', with why. A look that
  * fails is 'failed'; so is a removal that fails, and an entry that appeared while it was purged (it
  * stays, and so does the directory holding it).
  */
-export function purgeDir(platform: Platform, dir: string, spec: Spec): Purged {
+export function purgeDir(platform: Platform, given: string, spec: Spec): Purged {
   const { files } = platform;
+  // Repeated and trailing slashes dropped first: `<link>/` would be followed through the link.
+  const dir = given.replace(/\/+/g, '/').replace(/(.)\/$/, '$1');
   let why: string | null;
   try {
     if (resolve(dir) !== dir) {
@@ -141,8 +144,9 @@ export function purgeDir(platform: Platform, dir: string, spec: Spec): Purged {
   if (why !== null) return { kind: 'left', why };
   try {
     removeEntries(files, dir, spec);
-    if (files.list(dir).length > 0) {
-      return { kind: 'failed', why: 'was given a new entry while it was purged, which stays' };
+    const [late] = files.list(dir);
+    if (late !== undefined) {
+      return { kind: 'failed', why: `still holds ${late}, which came while it was purged` };
     }
     files.removeTree(dir); // empty: nothing else can go with it
   } catch (error) {

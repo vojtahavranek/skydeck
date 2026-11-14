@@ -335,12 +335,14 @@ describe('uninstall --purge with SKYDECK_HOME at the user’s own places', () =>
     assert.equal(r.code, 1, r.stdout);
     for (const path of [...own, join(d.places.dataDir, 'my-data.csv')]) still(path);
     assert.ok(
-      r.stderr.includes(`did not remove ${d.places.dataDir}: it holds my-data.csv`),
+      r.stderr.includes(`${d.places.dataDir}: it holds my-data.csv, which skydeck did not write`),
       r.stderr,
     );
     assert.ok(
-      r.stdout.includes(`left ${join(d.sandbox.home, 'run')} alone: it holds mine.txt`),
-      r.stdout,
+      r.stderr.includes(
+        `${join(d.sandbox.home, 'run')}: it holds mine.txt, which skydeck did not write`,
+      ),
+      r.stderr,
     );
   });
 
@@ -354,7 +356,11 @@ describe('uninstall --purge with SKYDECK_HOME at the user’s own places', () =>
     for (const path of own) still(path);
     for (const name of ['home', 'skydeck-home', 'claude-home', 'bin'])
       still(join(d.sandbox.root, name));
-    assert.ok(r.stdout.includes(`left ${join(d.sandbox.root, 'run')} alone`), r.stdout);
+    assert.equal(r.code, 1, r.stdout);
+    assert.ok(
+      r.stderr.includes(`did not remove ${join(d.sandbox.root, 'run')}: it holds`),
+      r.stderr,
+    );
     const after = readdirSync(d.sandbox.root).sort();
     assert.deepEqual(
       after,
@@ -584,4 +590,90 @@ describe('uninstall --purge: each of the three directories, each way it is left 
       still(dir);
     });
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// The runtime directory under the shared purge (ruled, purge-care)
+
+describe('uninstall --purge: the runtime directory under the shared purge', () => {
+  /** `$SKYDECK_HOME/run` with a server.json and terms/, as a server leaves it. */
+  function runtimeDir(d: TestPlatform): string {
+    const dir = join(d.sandbox.skydeckHome, 'run');
+    mkdirSync(join(dir, 'terms'), { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
+    chmodSync(join(dir, 'terms'), 0o700);
+    writeFileSync(join(dir, 'server.json'), '{}');
+    return dir;
+  }
+
+  test('its terms/ belongs to another user: left alone, named, exit 1; the rest purged', async (t) => {
+    const d = await installed(t);
+    const dir = runtimeDir(d);
+    const files: Files = {
+      ...d.platform.files,
+      lstat(path) {
+        const info = d.platform.files.lstat(path);
+        return path === join(dir, 'terms') && info !== null ? { ...info, uid: info.uid + 1 } : info;
+      },
+    };
+
+    const r = await purge({ ...d.platform, files });
+
+    assert.equal(r.code, 1, r.stdout);
+    assert.ok(
+      r.stderr.includes(
+        `did not remove ${dir}: it holds terms, which belongs to uid ${d.platform.uid + 1}`,
+      ),
+      r.stderr,
+    );
+    still(join(dir, 'server.json'));
+    for (const other of dirsOf(d)) gone(other);
+  });
+
+  test('a removal that fails is named in the last line, never an abort; the rest purged', async (t) => {
+    const d = await installed(t);
+    const dir = runtimeDir(d);
+    const files: Files = {
+      ...d.platform.files,
+      remove(path) {
+        if (path === join(dir, 'server.json')) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        d.platform.files.remove(path);
+      },
+    };
+
+    const r = await purge({ ...d.platform, files });
+
+    assert.equal(r.code, 1, r.stdout);
+    assert.ok(r.stderr.includes(`did not remove ${dir}: it cannot be removed (EACCES)`), r.stderr);
+    assert.doesNotMatch(r.stderr, /cannot remove|internal error/);
+    for (const other of dirsOf(d)) gone(other);
+  });
+
+  test('an entry that appears while it is purged stays, named, and so does the directory', async (t) => {
+    const d = await installed(t);
+    const dir = runtimeDir(d);
+    let looks = 0;
+    const files: Files = {
+      ...d.platform.files,
+      list(path) {
+        // The look lists it first, the removal next: the entry comes in between.
+        if (path === dir && ++looks === 2) writeFileSync(join(dir, 'late.txt'), 'mine');
+        return d.platform.files.list(path);
+      },
+    };
+
+    const r = await purge({ ...d.platform, files });
+
+    assert.equal(r.code, 1, r.stdout);
+    assert.ok(
+      r.stderr.includes(
+        `did not remove ${dir}: it still holds late.txt, which came while it was purged`,
+      ),
+      r.stderr,
+    );
+    still(join(dir, 'late.txt'));
+    gone(join(dir, 'server.json'));
+  });
 });
