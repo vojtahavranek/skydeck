@@ -37,8 +37,12 @@ const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
 const RETRY_MS = [5_000, 30_000, 300_000] as const;
 /** A keep-alive that ran this long has ended once, not again: the schedule starts over at 5 s. */
 const SCHEDULE_RESET_NS = 300n * NS_PER_SECOND;
-/** A found keep-alive's socket that accepted is asked again after this long (ruled, review 2). */
-const SOCKET_TRUSTED_MS = 30_000;
+/**
+ * A found keep-alive's socket that accepted is asked again after this long (ruled, review 2). WSL
+ * stops 15 s after its last Windows client (S2 6): 3 s + one tick + the first 5 s retry starts a
+ * new wsl.exe by 9 s, with room for its own start. Do not raise it without redoing that sum.
+ */
+const SOCKET_TRUSTED_MS = 3_000;
 /** The script's file name: the SIGTERM goes only to a process running it for this directory. */
 const SCRIPT_NAME = 'skydeck-keepalive';
 const NO_DISTRO =
@@ -108,7 +112,7 @@ export function createKeepAlive(deps: {
   let retries = 0;
   let runningSinceNs: Ns | null = null;
   let ticking: Promise<void> | null = null;
-  /** A found keep-alive's socket accepted less than 30 s ago: it is not asked again yet. */
+  /** A found keep-alive's socket accepted less than 3 s ago: it is not asked again yet. */
   let socketTrusted = false;
   let stopTrusting = (): void => {};
 
@@ -210,7 +214,7 @@ export function createKeepAlive(deps: {
     return probeSocket(platform, text);
   };
 
-  /** No connection again for 30 s after one that was accepted (ruled: it sends nothing). */
+  /** No connection again for 3 s after one that was accepted (ruled: it sends nothing). */
   const trustSocket = (trusted: boolean): void => {
     stopTrusting();
     stopTrusting = (): void => {};
@@ -224,7 +228,7 @@ export function createKeepAlive(deps: {
 
   /**
    * Whether the Windows side of a keep-alive this server did not start is gone. One being watched
-   * whose socket accepted less than 30 s ago is not asked again; any other is asked now.
+   * whose socket accepted less than 3 s ago is not asked again; any other is asked now.
    */
   const windowsSideGone = async (watching: boolean): Promise<boolean> => {
     if (watching && socketTrusted) {

@@ -901,8 +901,8 @@ test('a keep-alive found running whose socket later goes: failed, one SIGTERM, r
   await s.keepAlive.tick();
   assert.equal(s.keepAlive.state().state, 'running');
   await socket.close();
-  s.clock.advanceMs(29_999);
-  await s.keepAlive.tick(); // an accepting socket is asked again only after 30 s
+  s.clock.advanceMs(2_999);
+  await s.keepAlive.tick(); // an accepting socket is asked again only after 3 s
   assert.equal(s.keepAlive.state().state, 'running');
   s.clock.advanceMs(1);
   await s.keepAlive.tick();
@@ -912,7 +912,7 @@ test('a keep-alive found running whose socket later goes: failed, one SIGTERM, r
   assert.deepEqual(s.processes.signals, TERM_SCRIPT, 'exactly one SIGTERM');
 });
 
-test('a found keep-alive whose socket accepts is asked again every 30 s; after any other answer at once', async (t) => {
+test('a found keep-alive whose socket accepts is asked again every 3 s; after any other answer at once', async (t) => {
   let connects = 0;
   let refuse: string | null = null;
   const s = setup(t, {
@@ -930,22 +930,40 @@ test('a found keep-alive whose socket accepts is asked again every 30 s; after a
   await interopAccepts(t, s);
   await s.keepAlive.tick();
   assert.equal(connects, 1);
-  for (let i = 0; i < 29; i++) {
+  for (let i = 0; i < 2; i++) {
     s.clock.advanceMs(1_000);
     await s.keepAlive.tick();
   }
-  assert.equal(connects, 1, 'not again within 30 s');
+  assert.equal(connects, 1, 'not again within 3 s');
   s.clock.advanceMs(1_000);
   await s.keepAlive.tick();
-  assert.equal(connects, 2, 'again after 30 s');
+  assert.equal(connects, 2, 'again after 3 s');
   refuse = 'EACCES'; // no judgement: running, and asked again at the next tick
-  s.clock.advanceMs(30_000);
+  s.clock.advanceMs(3_000);
   await s.keepAlive.tick();
   s.clock.advanceMs(1_000);
   await s.keepAlive.tick();
   assert.equal(connects, 4);
   assert.equal(s.keepAlive.state().state, 'running');
   assert.deepEqual(s.processes.signals, []);
+});
+
+test("a found keep-alive's wsl.exe gone right after its socket accepted is replaced within 9 s, inside WSL's 15 s", async (t) => {
+  // S2 6: WSL stops 15 s after its last Windows client. 3 s until the socket is asked again, one
+  // tick, the first 5 s retry: the new wsl.exe starts by 9 s, with room left for its own start.
+  const s = setup(t);
+  scriptWritesItsLine(s);
+  const socket = await interopAccepts(t, s);
+  await s.keepAlive.tick(); // accepted at 0 s
+  await socket.close(); // its wsl.exe, and with it the session's socket, goes at once
+  let ms = 0;
+  while (s.processes.calls.length === 0 && ms < 15_000) {
+    s.clock.advanceMs(1_000); // the server's tick, every second
+    ms += 1_000;
+    await s.keepAlive.tick();
+  }
+  assert.equal(s.processes.calls.length, 1);
+  assert.ok(ms <= 9_000, `the new wsl.exe started after ${ms} ms`);
 });
 
 test('after a found keep-alive is lost, the next one found is asked at every tick until its socket accepts', async (t) => {
@@ -964,7 +982,7 @@ test('after a found keep-alive is lost, the next one found is asked at every tic
   });
   scriptWritesItsLine(s);
   await interopAccepts(t, s);
-  await s.keepAlive.tick(); // accepted: not asked again for 30 s
+  await s.keepAlive.tick(); // accepted: not asked again for 3 s
   scriptEnds(s);
   await s.keepAlive.tick();
   assert.equal(s.keepAlive.state().state, 'failed');

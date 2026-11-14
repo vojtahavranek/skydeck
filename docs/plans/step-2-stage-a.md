@@ -2601,7 +2601,8 @@ export function createInteropFrom(platform: Platform, files: RuntimeFiles, first
 export function probeSocket(platform: Platform, path: string | null): Promise<'accepts' | 'refused' | 'unknown'>;
 // src/window/keepalive.ts — S2 6.1 (ruled, review 2): a keep-alive this server did not start is also
 // judged by keepalive.interop (probeSocket 'refused': its wsl.exe is gone; an accepting socket is
-// asked again after 30 s, any other answer at the next tick); a script whose wsl.exe is gone is an
+// asked again after 3 s — 3 s + a tick + the 5 s retry = 9 s, inside WSL's 15 s (S2 6) — any other
+// answer at the next tick); a script whose wsl.exe is gone is an
 // orphan — its line no longer counts, and ONE SIGTERM when its line is 'alive' (never on
 // 'unknown'), its cmdline has an argument named skydeck-keepalive and one that is files.dir, and
 // the end is known (its line was seen while its wsl.exe ran, or the socket says refused — a line
@@ -2645,8 +2646,9 @@ export function createKeepAlive(deps: { platform: Platform; window: WindowConfig
   (running) for no file, an empty or relative or several-line one, an unreadable one, another
   error, no answer in time; exactly one SIGTERM to an orphan whose line is alive, none for an
   `unknown` line, none for a line of another boot; a found keep-alive whose socket later goes →
-  `failed`, one SIGTERM, restarted after 5 s; an accepting socket asked again after 30 s, after any
-  other answer at the next tick; a line only inferred at the end tick signalled only when its
+  `failed`, one SIGTERM, restarted after 5 s; an accepting socket asked again after 3 s, after any
+  other answer at the next tick; a found keep-alive's `wsl.exe` gone right after an accepted probe
+  replaced within 9 s (inside WSL's 15 s); a line only inferred at the end tick signalled only when its
   socket is refused; a SIGTERM only for a command line naming `skydeck-keepalive` and this runtime
   directory (none for another program, a keeper, another runtime directory, a script named like
   it, an empty or unreadable command line); a SIGTERM that throws does not stop the start.
@@ -3650,6 +3652,12 @@ Rulings on review 2's re-check (2026-11-14): a line only inferred to be a starte
 script (first seen at the tick that sees its end) is signalled only when its socket says refused;
 before any SIGTERM the process's command line must name `skydeck-keepalive` and this runtime
 directory, so the signal never reaches a keeper, `claude` or anything else; an accepting socket of
-a found keep-alive is asked again only after 30 s (any other answer at the next tick); "a control
+a found keep-alive is asked again only after 30 s (any other answer at the next tick) — superseded
+by N3 below; "a control
 character" is U+0000–U+001F, U+007F and U+0080–U+009F everywhere (S2 2). All in S2 6.1 and task
 19's contract.
+
+N3 (2026-11-14, from review 2): 30 s was longer than WSL's 15 s idle timeout, so a found
+keep-alive's end was noticed after WSL had stopped. Ruled: an accepting socket is asked again
+after 3 s (3 s + one tick + the first 5 s retry = 9 s before the new `wsl.exe` starts, inside the
+15 s with room for the start); S2 6.1 gives that sum, so that the number is not tuned without it.
