@@ -16,7 +16,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
@@ -464,6 +464,26 @@ describe('uninstall --purge when two places are one directory', () => {
   });
 });
 
+describe('uninstall --purge when one place lies inside another', () => {
+  test('XDG_STATE_HOME inside the data directory: the deeper one first, both go in one run', async (t) => {
+    const d = await installed(t, {
+      env: (s) => ({
+        SKYDECK_HOME: undefined,
+        XDG_DATA_HOME: join(s.root, 'x'),
+        XDG_STATE_HOME: join(s.root, 'x', 'skydeck'),
+      }),
+    });
+    assert.equal(d.places.stateDir, join(d.places.dataDir, 'skydeck'));
+    everythingSkydeckWrites(d);
+
+    const r = await purge(d.platform);
+
+    assert.equal(r.code, 0, r.stderr);
+    gone(d.places.stateDir);
+    gone(d.places.dataDir);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------
 // Nothing outside the sandbox
 
@@ -471,7 +491,10 @@ describe('uninstall --purge touches nothing outside the test’s sandbox', () =>
   /** The platform's Files with every path outside the sandbox refused and recorded. */
   function sandboxOnly(files: Files, s: Sandbox): { files: Files; touched: string[] } {
     const touched: string[] = [];
-    const inside = (path: string): boolean => path === s.root || path.startsWith(`${s.root}/`);
+    const inside = (given: string): boolean => {
+      const path = resolve(given); // `<root>/../x` is outside
+      return path === s.root || path.startsWith(`${s.root}/`);
+    };
     const wrapped = Object.fromEntries(
       Object.entries(files).map(([name, fn]) => [
         name,
@@ -512,9 +535,12 @@ describe('uninstall --purge touches nothing outside the test’s sandbox', () =>
       everythingSkydeckWrites(d);
       const guard = sandboxOnly(d.platform.files, d.sandbox);
 
-      await purge({ ...d.platform, files: guard.files });
+      const r = await purge({ ...d.platform, files: guard.files });
 
       assert.deepEqual(guard.touched, []);
+      // And the purge went the whole way: it cannot pass by ending early.
+      assert.equal(r.code, 0, r.stderr);
+      for (const dir of dirsOf(d)) gone(dir);
     });
   }
 });
@@ -646,7 +672,10 @@ describe('uninstall --purge: the runtime directory under the shared purge', () =
     const r = await purge({ ...d.platform, files });
 
     assert.equal(r.code, 1, r.stdout);
-    assert.ok(r.stderr.includes(`did not remove ${dir}: it cannot be removed (EACCES)`), r.stderr);
+    assert.ok(
+      r.stderr.includes(`did not remove ${dir}: it cannot be removed: server.json (EACCES)`),
+      r.stderr,
+    );
     assert.doesNotMatch(r.stderr, /cannot remove|internal error/);
     for (const other of dirsOf(d)) gone(other);
   });
@@ -669,7 +698,7 @@ describe('uninstall --purge: the runtime directory under the shared purge', () =
     assert.equal(r.code, 1, r.stdout);
     assert.ok(
       r.stderr.includes(
-        `did not remove ${dir}: it still holds late.txt, which came while it was purged`,
+        `did not remove ${dir}: it still holds late.txt: something came into it while it was purged`,
       ),
       r.stderr,
     );

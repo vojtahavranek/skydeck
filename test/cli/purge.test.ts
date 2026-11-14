@@ -231,7 +231,7 @@ describe('purgeDir: what it does not remove', () => {
 
     assert.deepEqual(purged, {
       kind: 'failed',
-      why: 'still holds late.txt, which came while it was purged',
+      why: 'still holds late.txt: something came into it while it was purged',
     });
     assert.ok(existsSync(join(dir, 'late.txt')));
   });
@@ -261,7 +261,7 @@ describe('purgeDir removes directories only with rmdir', () => {
 
     const purged = purgeDir({ ...platform, files }, dir, stateDirSpec(STORE_ID));
 
-    assert.deepEqual(purged, { kind: 'failed', why: 'cannot be removed (ENOTDIR)' });
+    assert.deepEqual(purged, { kind: 'failed', why: 'cannot be removed: spool (ENOTDIR)' });
     assert.deepEqual(readdirSync(full), ['precious.txt']);
     assert.ok(existsSync(spool), 'the link stays');
   });
@@ -339,5 +339,69 @@ describe('purgeDir: from review 2', () => {
       );
       assert.ok(existsSync(join(elsewhere, inside)), `${name}: the target stays whole`);
     }
+  });
+});
+
+describe('purgeDir: from review 2, part 2', () => {
+  test('a relative path is never purged: left alone as not absolute, nothing touched', (t) => {
+    const { platform } = platformOf(t);
+    const files = {
+      ...platform.files,
+      lstat(path: string) {
+        throw new Error(`looked at ${path}`);
+      },
+    };
+    assert.deepEqual(purgeDir({ ...platform, files }, 'no/such/dir', CONFIG_DIR), {
+      kind: 'left',
+      why: 'is not an absolute path',
+    });
+  });
+
+  test('a removal that fails half-way names the entry that failed', (t) => {
+    const { platform, root } = platformOf(t);
+    const dir = join(root, 'state');
+    mkdirSync(join(dir, 'spool', 'bad'), { recursive: true });
+    writeFileSync(join(dir, 'hook.log'), '');
+    writeFileSync(join(dir, 'spool', 'bad', '1-2-4.ev'), '');
+    const files = {
+      ...platform.files,
+      remove(path: string) {
+        if (path.endsWith('1-2-4.ev')) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        platform.files.remove(path);
+      },
+    };
+
+    const purged = purgeDir({ ...platform, files }, dir, stateDirSpec(STORE_ID));
+
+    assert.deepEqual(purged, {
+      kind: 'failed',
+      why: 'cannot be removed: spool/bad/1-2-4.ev (EACCES)',
+    });
+  });
+
+  test('a nested directory into which something came while it was purged is named so', (t) => {
+    const { platform, root } = platformOf(t);
+    const dir = join(root, 'state');
+    const spool = join(dir, 'spool');
+    mkdirSync(spool, { recursive: true });
+    writeFileSync(join(spool, '1-2-3.ev'), '');
+    let looks = 0;
+    const files = {
+      ...platform.files,
+      list(path: string) {
+        if (path === spool && ++looks === 2) writeFileSync(join(spool, 'late.txt'), 'mine');
+        return platform.files.list(path);
+      },
+    };
+
+    const purged = purgeDir({ ...platform, files }, dir, stateDirSpec(STORE_ID));
+
+    assert.deepEqual(purged, {
+      kind: 'failed',
+      why: 'still holds spool: something came into it while it was purged',
+    });
+    assert.ok(existsSync(join(spool, 'late.txt')));
   });
 });

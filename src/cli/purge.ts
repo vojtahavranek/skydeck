@@ -4,14 +4,16 @@
 // looked at, or holds anything else is left alone, and the caller names it in its last line with
 // exit 1, whatever directory it is (ruled, purge-care).
 //
-// It uses only lstat, readdir (Files.list), unlink (Files.remove) and rmdir (Files.rmdir), whose
-// behaviour on symbolic links is the same in every Node.js 24 (none follows a link at the path it is
-// given): never removeTree or rmSync, which Node.js 24.12 let follow a link (ruled, purge-care).
+// It uses only lstat, readdir (Files.list), unlink (Files.remove) and rmdir (Files.rmdir), which
+// behave alike on symbolic links in every Node.js 24: lstat never follows a link, unlink removes
+// the link itself, rmdir refuses one (ENOTDIR). readdir does follow a link, so it is called only on
+// a path lstat has just shown to be a directory. Never removeTree or rmSync, which Node.js 24.12 let
+// follow a link (ruled, purge-care).
 //
 // THE LISTS BELOW ARE THE ONE PLACE that says what skydeck writes into its directories. Whoever
 // makes skydeck write a new file or directory into one of them adds it here (name and kind), or
 // `--purge` leaves that directory alone from then on.
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import type { FileInfo, Files, Platform } from '../platform/types.ts';
 import { describeError } from '../sessions/problems.ts';
@@ -136,6 +138,7 @@ export function purgeDir(platform: Platform, given: string, spec: Spec): Purged 
   const dir = given.replace(/\/+/g, '/').replace(/(.)\/$/, '$1');
   let why: string | null;
   try {
+    if (!isAbsolute(dir)) return { kind: 'left', why: 'is not an absolute path' };
     if (resolve(dir) !== dir) {
       return { kind: 'left', why: 'is not a plain path (a . or .. in it)' };
     }
@@ -147,13 +150,22 @@ export function purgeDir(platform: Platform, given: string, spec: Spec): Purged 
   }
   if (why !== null) return { kind: 'left', why };
   try {
-    removeEntries(files, dir, spec);
+    removeEntries(files, dir, spec, '');
     const [late] = files.list(dir);
     if (late !== undefined) {
-      return { kind: 'failed', why: `still holds ${late}, which came while it was purged` };
+      return {
+        kind: 'failed',
+        why: `still holds ${late}: something came into it while it was purged`,
+      };
     }
     files.rmdir(dir); // rmdir(2): refuses a link, never follows one, and nothing else can go with it
   } catch (error) {
+    if (error instanceof RemovalFailed) {
+      return {
+        kind: 'failed',
+        why: `cannot be removed: ${error.entry} (${describeError(error.failure)})`,
+      };
+    }
     return { kind: 'failed', why: `cannot be removed (${describeError(error)})` };
   }
   return { kind: 'removed' };
@@ -188,18 +200,41 @@ function foreignIn(platform: Platform, dir: string, spec: Spec, prefix: string):
   return null;
 }
 
-/** Removes what `spec` allows below `dir`; an entry that is not (one that appeared since the look) stays. */
-function removeEntries(files: Files, dir: string, spec: Spec): void {
+/**
+ * Removes what `spec` allows below `dir` (`prefix` names it from the purged directory); an entry
+ * that is not (one that appeared since the look) stays. A removal that fails is a RemovalFailed.
+ */
+function removeEntries(files: Files, dir: string, spec: Spec, prefix: string): void {
   for (const name of files.list(dir)) {
     const path = join(dir, name);
+    const entry = `${prefix}${name}`;
     const info = files.lstat(path);
     const rule = ruleFor(spec, name);
     if (info === null || rule === undefined || !rule.kinds.includes(info.kind)) continue;
     if (info.kind === 'dir') {
-      removeEntries(files, path, rule.inside ?? []);
-      if (files.list(path).length === 0) files.rmdir(path);
+      removeEntries(files, path, rule.inside ?? [], `${entry}/`);
+      if (files.list(path).length === 0) removing(entry, () => files.rmdir(path));
     } else {
-      files.remove(path);
+      removing(entry, () => files.remove(path));
     }
+  }
+}
+
+/** A removal that failed, and the entry (named from the purged directory) it failed on. */
+class RemovalFailed extends Error {
+  readonly entry: string;
+  readonly failure: unknown;
+  constructor(entry: string, failure: unknown) {
+    super(`cannot remove ${entry}`);
+    this.entry = entry;
+    this.failure = failure;
+  }
+}
+
+function removing(entry: string, remove: () => void): void {
+  try {
+    remove();
+  } catch (error) {
+    throw new RemovalFailed(entry, error);
   }
 }

@@ -133,7 +133,9 @@ export const command: Command = {
       ] as const) {
         specs.set(dir, [...(specs.get(dir) ?? []), ...spec]);
       }
-      for (const [dir, spec] of specs) {
+      // The deepest first: a place inside another (XDG_STATE_HOME under the data directory) goes
+      // before the one that holds it, so that one run removes both.
+      for (const [dir, spec] of [...specs].sort(([a], [b]) => b.length - a.length)) {
         const purged = purgeDir(platform, dir, spec);
         if (purged.kind === 'removed') ctx.io.stdout(`removed ${sanitize(dir)}\n`);
         if (purged.kind === 'left' || purged.kind === 'failed') {
