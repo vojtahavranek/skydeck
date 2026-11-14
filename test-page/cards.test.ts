@@ -970,6 +970,117 @@ test('the right side', async (t) => {
   );
 
   await t.test(
+    'a 300-character word in every field of the cards, the bar and the form wraps inside its box: nothing is wider than its box, the cards do not scroll sideways, the text is copied whole',
+    async (t) => {
+      const s = await scripted(t, chromium);
+      await s.page.setViewportSize({ width: 1280, height: 800 });
+      const path = `/${'p'.repeat(299)}`;
+      s.answer.act = () => ({
+        ok: false,
+        lines: [`cannot use ${path}`],
+        error: `cannot use ${path}`,
+        sessionId: null,
+      });
+      s.serve(
+        listWith(
+          [
+            [
+              { id: S1, terminal: null, slot: null },
+              { id: S2, terminal: null, slot: null },
+              { id: S3, terminal: TERM_A, slot: 1 },
+            ],
+            [{ id: TERM_A, slot: 1, sessionId: S3 }],
+          ],
+          {
+            rows: {
+              [S1]: { dir: path },
+              [S2]: { state: 'running', elsewhere: { pid: 9, tty: path, dir: path } },
+            },
+            terminals: { [TERM_A]: { state: 'not-started' } },
+            list: {
+              selected: selectedOf(S1, {
+                command: `cd ${path} && claude --resume ${S1}`,
+                unknownFlags: [`--x=${path}`],
+              }),
+            },
+          },
+        ),
+      );
+      const fits = async (where: string): Promise<void> => {
+        const wide = await s.page.evaluate(() =>
+          [...document.querySelectorAll('#cards .card, #cards .card *')]
+            .filter(
+              (element): element is HTMLElement =>
+                element instanceof HTMLElement &&
+                element.checkVisibility() &&
+                element.clientWidth > 0 &&
+                element.scrollWidth > element.clientWidth,
+            )
+            .map(
+              (element) => `${element.className}: ${element.scrollWidth} > ${element.clientWidth}`,
+            ),
+        );
+        assert.deepEqual(wide, [], `${where}: nothing wider than its box`);
+        const cards = await s.page.evaluate(() => {
+          const element = document.getElementById('cards') as HTMLElement;
+          return [element.scrollWidth, element.clientWidth];
+        });
+        assert.equal(cards[0], cards[1], `${where}: the cards do not scroll sideways`);
+      };
+      const copied = async (selector: string, text: string): Promise<void> => {
+        await s.page.locator(`#cards ${selector}`).first().click({ clickCount: 3 });
+        assert.equal(
+          await s.page.evaluate(() => getSelection()?.toString().replace(/\n$/, '')),
+          text,
+          `${selector} is copied whole`,
+        );
+        await s.page.evaluate(() => getSelection()?.removeAllRanges());
+      };
+
+      await clickRow(s.page, S1);
+      await showsText(s.page, '#cards .card-command', /--resume/);
+      await fits('the resume card');
+      await copied(
+        '.card-warning',
+        `started with flags skydeck does not know, not passed on resume: --x=${path}`,
+      );
+      await copied('.card-dir', path);
+      await s.page.locator('#cards button', { hasText: 'Resume here' }).click();
+      await showsText(s.page, '#cards .card-lines', /cannot use/);
+      await fits('a refusal on the resume card');
+      await copied('.card-lines', `cannot use ${path}`);
+
+      await clickRow(s.page, S2);
+      await showsText(s.page, '#cards .card-where', /pid 9/);
+      await fits('the elsewhere card');
+
+      await clickRow(s.page, S3);
+      await s.page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      s.conn().send({
+        t: 'exit',
+        term: TERM_A,
+        code: null,
+        signal: null,
+        atNs: String(NOW_NS),
+        lost: false,
+        notStarted: path,
+      });
+      await showsText(s.page, '#cards .card-ended', /^not started: /);
+      await fits('the ended bar');
+      await copied('.card-ended', `not started: ${path}`);
+      await s.page.locator('#cards .card-bar button', { hasText: 'Resume' }).click();
+      await showsText(s.page, '#cards .card-lines', /cannot use/);
+      await fits("the ended bar's refusal");
+
+      await s.page.keyboard.press('Control+Shift+N');
+      await s.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await s.page.locator('#cards button', { hasText: 'Start' }).click();
+      await showsText(s.page, '#cards .card-new .card-lines', /cannot use/);
+      await fits("the form's refusal");
+    },
+  );
+
+  await t.test(
     "the times on the right side by the page's clock: today, yesterday, an older day, another year",
     async (t) => {
       const s = await scripted(t, chromium);
