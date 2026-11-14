@@ -1057,24 +1057,33 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     assert.equal(h.edgeRuns().length, 2);
   });
 
-  test('the old server answered /status with no page count that can be read: 0 pages, no wait; one with a page count: the wait', async (t) => {
+  test('the old server answered /status with a page count the client refuses ("3", 2.5, beyond the safe integers): 0 pages, no wait', async (t) => {
     const h = windowHarness(t);
-    await h.fakeServe({ FAKE_SERVE_CHECKOUT: REPOSITORY, FAKE_SERVE_PAGES: 'unreadable' });
+    // Each would count as pages > 0 if it were taken as it is: refused, it must mean no wait.
+    for (const [pages, answered] of [
+      ['json:"3"', '3'],
+      ['json:2.5', 2.5],
+      ['json:9007199254740993', 9007199254740992],
+    ] as const) {
+      await h.fakeServe({ FAKE_SERVE_CHECKOUT: REPOSITORY, FAKE_SERVE_PAGES: pages });
 
-    const unreadable = await h.run(['--restart'], {
-      env: { FAKE_EDGE_PAGE: 'once' },
-      times: { reconnectMs: 60_000 },
-    });
+      const r = await h.run(['--restart'], {
+        env: { FAKE_EDGE_PAGE: 'once' },
+        times: { reconnectMs: 60_000 },
+      });
 
-    assert.equal(unreadable.code, 0, unreadable.stderr);
-    assert.ok(unreadable.ms < 30_000, `no wait (${unreadable.ms} ms)`);
-    assert.equal(h.edgeRuns().length, 1);
-    const status = unreadable.requests.find((q) => q.path === '/status');
-    assert.equal(
-      (status?.answer?.body as { pages?: unknown } | undefined)?.pages,
-      '3',
-      'the fake answered a count the client refuses, which taken as it is would mean a wait',
-    );
+      assert.equal(r.code, 0, `${pages}: ${r.stderr}`);
+      assert.ok(r.ms < 30_000, `${pages}: no wait (${r.ms} ms)`);
+      const status = r.requests.find((q) => q.path === '/status');
+      assert.equal(
+        (status?.answer?.body as { pages?: unknown } | undefined)?.pages,
+        answered,
+        `${pages}: the fake answered a count the client refuses`,
+      );
+      const stop = await h.run(['--stop']);
+      assert.equal(stop.code, 0, stop.stderr);
+    }
+    assert.equal(h.edgeRuns().length, 3);
   });
 
   test('a fake old server with pages (the control for the case above): the command waits for them', async (t) => {
