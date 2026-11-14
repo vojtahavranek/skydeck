@@ -1350,13 +1350,19 @@ export function cancels(e, zone, handled) {}
 // a zone chord, Esc closing the new form, and a terminal that the page's own resume or new
 // brings (S2 11.3 comes first) — until that terminal is shown, another session is selected or the
 // connection is lost; a terminal that only a list brought does not.
-// A key the page acted on that moved the keyboard into a terminal is swallowed, every further
-// event of it (auto-repeat keydowns, keypress, keyup), until it is released — at the window's
-// capture phase, and `chord(e)` answers true for such an event so that the view drops it too
-// (task 28); a card's button or the form's Enter that starts a terminal is such a key (task 29).
+// A key pressed while the keyboard was not on the program's own holder (xterm.js's, or a view's
+// holder that is no text field — not the find field) reaches the program only when it is pressed
+// again: once the holder has the keyboard, every further event of it (auto-repeat keydowns,
+// keypress, keyup) is swallowed at the window's capture phase, before the view sees it, until it
+// is released. A key the page acted on that moved the keyboard there is such a key; so are a
+// card's button or the form's Enter that starts a terminal (task 29) and the find bar's Esc or
+// Enter (task 28). A window chord acts at its first keydown only, not at its auto-repeats.
 // Ctrl+Shift+V reaches `pasteRaw()` only while the keyboard is in `#terminal` (Z1).
 // `area()` takes off the height of `#cards .card-header` — a hook: cards.js keeps that class on
-// its header (task 29) — as last shown, for every pane; above a shown terminal, the cards'. A module that hides or removes its own keyboard holder in its OWN handler
+// its header (task 29) — as it is while shown, else as last shown: for an act's first size and
+// for every pane but a shown terminal; for `focus` while a terminal is shown, all the cards show
+// above it. Before any header was shown it is 0, and that first terminal is resized once (a
+// known limit, Z1). A module that hides or removes its own keyboard holder in its OWN handler
 // (the find bar's Esc, a card's own button) is followed by no call of app.js: it moves the
 // keyboard itself to another element of its own — there is no hook for it. The page's chrome (the
 // title bar, the key bar, a notice's ×) takes no keyboard on a mouse click, so a click there
