@@ -44,8 +44,11 @@ const TERMINAL_PREFIXES: readonly string[] = ['WEZTERM_', 'KONSOLE_', 'VSCODE_']
 /** Set beside GIT_ASKPASS by an editor's integrated terminal: GIT_ASKPASS is then the editor's. */
 const EDITOR_ASKPASS_MARKER = 'VSCODE_GIT_ASKPASS_MAIN';
 
-/** A core limit as the launcher writes it: decimal bytes, or `unlimited`. */
-const CORE_LIMIT = /^(?:[0-9]+|unlimited)$/;
+/**
+ * A core limit as the launcher writes it: decimal bytes, or `unlimited`. At most 20 digits, as the
+ * keeper accepts in its spec (a longer value would make it refuse the spec as `bad-spec`).
+ */
+const CORE_LIMIT = /^(?:[0-9]{1,20}|unlimited)$/;
 
 /**
  * Removes the launcher's variables in place: the handoff file, and the compile cache the launcher

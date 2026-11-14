@@ -93,6 +93,13 @@ test('serverEnvironment takes SKYDECK_CORE_SOFT out and returns it: a number of 
   );
 });
 
+test('serverEnvironment refuses a SKYDECK_CORE_SOFT of more than 20 digits, as the keeper does', () => {
+  assert.equal(serverEnvironment({ SKYDECK_CORE_SOFT: '9'.repeat(20) }).coreSoft, '9'.repeat(20));
+  const result = serverEnvironment({ HOME: '/h', SKYDECK_CORE_SOFT: '1'.repeat(21) });
+  assert.equal(result.coreSoft, null);
+  assert.deepEqual(result.env, { HOME: '/h' });
+});
+
 test('serverEnvironment gives coreSoft null when SKYDECK_CORE_SOFT is absent', () => {
   assert.equal(serverEnvironment({ HOME: '/h' }).coreSoft, null);
 });
