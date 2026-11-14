@@ -6,7 +6,7 @@ import type { TestContext } from 'node:test';
 
 import { procStartFromStat } from '../../src/claude/procstat.ts';
 import { DEFAULT_CONFIG } from '../../src/platform/config.ts';
-import type { Detached, Platform, Proc } from '../../src/platform/types.ts';
+import type { Detached, Net, Platform, Proc } from '../../src/platform/types.ts';
 import type { Interop } from '../../src/window/interop.ts';
 import { createKeepAlive } from '../../src/window/keepalive.ts';
 import type { KeepAlive } from '../../src/window/keepalive.ts';
@@ -88,6 +88,7 @@ function setup(
     /** Answers startDetached; default: a new Child each time, pids from 5001. */
     handler?: (call: DetachedCall) => Detached | Promise<Detached>;
     proc?: (proc: FakeProc) => Proc;
+    net?: (net: Net) => Net;
   } = {},
 ): Setup {
   const tp = testPlatform(t, { env: { WSL_DISTRO_NAME: DISTRO, ...options.env } });
@@ -104,6 +105,7 @@ function setup(
     ...tp.platform,
     processes,
     proc: options.proc?.(tp.proc) ?? tp.proc,
+    net: options.net?.(tp.platform.net) ?? tp.platform.net,
   };
   const dir = join(tp.sandbox.root, 'run');
   mkdirSync(join(dir, 'terms'), { recursive: true, mode: 0o700 });
@@ -526,11 +528,58 @@ test("the script's line of a wsl.exe that ended is not taken for a running keep-
   await settle();
   await s.keepAlive.tick();
   assert.equal(s.keepAlive.state().state, 'failed');
+  // The server ends its own orphaned helper: one SIGTERM, its identity known alive.
+  const term = [{ pid: SCRIPT_PID, signal: 'SIGTERM' }];
+  assert.deepEqual(s.processes.signals, term);
+  await s.keepAlive.tick(); // the fake TERM ends nothing: the orphan's line still lives
   await startsAgainAfter(s, 5_000);
+  assert.deepEqual(s.processes.signals, term, 'exactly one SIGTERM');
   // The new script writes its own line; that one counts.
   scriptWritesItsLine(s, SCRIPT_PID + 1, SCRIPT_START + 1);
   await s.keepAlive.tick();
   assert.equal(s.keepAlive.state().state, 'running');
+  assert.deepEqual(s.processes.signals, term);
+});
+
+test("an orphan's line still there when the next wsl.exe ends before its script started gets no second SIGTERM", async (t) => {
+  const s = setup(t);
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  lastChild(s).exit(null, 'SIGTERM');
+  await settle();
+  await s.keepAlive.tick(); // one SIGTERM; the fake ends nothing, so the line stays
+  await startsAgainAfter(s, 5_000);
+  lastChild(s).exit(1); // before its own script wrote a line: the orphan's is the one there
+  await settle();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  assert.deepEqual(s.processes.signals, [{ pid: SCRIPT_PID, signal: 'SIGTERM' }]);
+});
+
+test('an orphan whose line cannot be judged gets no SIGTERM', async (t) => {
+  let unreadable = false;
+  const s = setup(t, {
+    proc: (proc) => ({
+      ...proc,
+      stat: (pid) => {
+        if (unreadable) {
+          throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+        }
+        return proc.stat(pid);
+      },
+    }),
+  });
+  await s.keepAlive.tick();
+  scriptWritesItsLine(s);
+  await s.keepAlive.tick();
+  unreadable = true; // the line is now 'unknown'
+  lastChild(s).exit(null, 'SIGTERM');
+  await settle();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  await startsAgainAfter(s, 5_000);
+  assert.deepEqual(s.processes.signals, []);
 });
 
 test("the script's line first seen at the tick that sees wsl.exe's end is not taken for a running keep-alive", async (t) => {
@@ -609,6 +658,180 @@ test('a start that fails is failed with the reason and retried on the same sched
     s.changes.map((c) => c.state),
     ['failed', 'starting'],
   );
+});
+
+// ---------------------------------------------------------------------------------------------
+// A keep-alive this server did not start, judged by its keepalive.interop (ruled, review 2)
+
+/** keepalive.interop names a unix socket in the sandbox that accepts connections. */
+async function interopAccepts(t: TestContext, s: Setup): Promise<{ close(): Promise<void> }> {
+  const path = join(s.tp.sandbox.root, 'ka.sock');
+  const listener = await s.platform.net.listenHttp(
+    { path },
+    {
+      request: (_req, res) => {
+        res.end();
+      },
+    },
+  );
+  let closed = false;
+  const close = async (): Promise<void> => {
+    if (!closed) {
+      closed = true;
+      await listener.close(); // removes the socket file: the path is then gone
+    }
+  };
+  t.after(close);
+  writeFileSync(s.files.keepaliveInterop, path);
+  return { close };
+}
+
+const TERM_SCRIPT = [{ pid: SCRIPT_PID, signal: 'SIGTERM' }];
+
+test('a keep-alive found running is taken when its keepalive.interop socket accepts', async (t) => {
+  const s = setup(t);
+  scriptWritesItsLine(s);
+  await interopAccepts(t, s);
+  await s.keepAlive.tick();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'running');
+  assert.deepEqual(s.processes.calls, []);
+  assert.deepEqual(s.processes.signals, []);
+});
+
+for (const [name, arrange] of [
+  [
+    'refuses a connection',
+    (s: Setup) => {
+      const path = join(s.tp.sandbox.root, 'not-a-socket');
+      writeFileSync(path, '');
+      writeFileSync(s.files.keepaliveInterop, path);
+    },
+  ],
+  [
+    'is gone',
+    (s: Setup) => {
+      writeFileSync(s.files.keepaliveInterop, join(s.tp.sandbox.root, 'gone.sock'));
+    },
+  ],
+] as const) {
+  test(`a keep-alive found running whose keepalive.interop socket ${name} is an orphan: one SIGTERM, then a start`, async (t) => {
+    const s = setup(t);
+    scriptWritesItsLine(s);
+    arrange(s);
+    await s.keepAlive.tick();
+    assert.deepEqual(s.processes.signals, TERM_SCRIPT);
+    assert.equal(s.processes.calls.length, 1);
+    assert.equal(s.keepAlive.state().state, 'starting');
+    await s.keepAlive.tick(); // the fake TERM ends nothing: the orphan's line still lives
+    s.clock.advanceMs(300_000);
+    await s.keepAlive.tick();
+    assert.deepEqual(s.processes.signals, TERM_SCRIPT, 'exactly one SIGTERM');
+    assert.equal(s.processes.calls.length, 1);
+  });
+}
+
+const NOT_JUDGED: [string, (s: Setup) => void, ((net: Net) => Net)?][] = [
+  ['no keepalive.interop', () => {}],
+  [
+    'an empty keepalive.interop',
+    (s) => {
+      writeFileSync(s.files.keepaliveInterop, '');
+    },
+  ],
+  [
+    'a relative path',
+    (s) => {
+      writeFileSync(s.files.keepaliveInterop, 'run/WSL/1_interop');
+    },
+  ],
+  [
+    'more than one line',
+    (s) => {
+      writeFileSync(s.files.keepaliveInterop, '/x\n/y');
+    },
+  ],
+  [
+    'an unreadable keepalive.interop',
+    (s) => {
+      mkdirSync(s.files.keepaliveInterop);
+    },
+  ],
+  [
+    'another error (ENOTDIR)',
+    (s) => {
+      const file = join(s.tp.sandbox.root, 'file');
+      writeFileSync(file, '');
+      writeFileSync(s.files.keepaliveInterop, join(file, 'sock'));
+    },
+  ],
+];
+for (const [name, arrange] of NOT_JUDGED) {
+  test(`a keep-alive found running with ${name} is not judged: running, nothing started or signalled`, async (t) => {
+    const s = setup(t);
+    scriptWritesItsLine(s);
+    arrange(s);
+    await s.keepAlive.tick();
+    assert.equal(s.keepAlive.state().state, 'running');
+    assert.deepEqual(s.processes.calls, []);
+    assert.deepEqual(s.processes.signals, []);
+  });
+}
+
+test('a keepalive.interop connection that does not answer in time is not judged: running', async (t) => {
+  const s = setup(t, {
+    net: (net) => ({ ...net, connectUnix: () => new Promise(() => {}) }),
+  });
+  scriptWritesItsLine(s);
+  writeFileSync(s.files.keepaliveInterop, '/run/WSL/99_interop');
+  const ticked = s.keepAlive.tick();
+  s.clock.advanceMs(2_000);
+  const outcome = await Promise.race([
+    ticked.then(() => 'answered'),
+    new Promise((resolve) => {
+      setTimeout(resolve, 2_000, 'hung'); // the test's own wait, not the code's clock
+    }),
+  ]);
+  assert.equal(outcome, 'answered', 'the tick waits no longer than the probe');
+  assert.equal(s.keepAlive.state().state, 'running');
+  assert.deepEqual(s.processes.calls, []);
+  assert.deepEqual(s.processes.signals, []);
+});
+
+test('an unknown line whose keepalive.interop is refused does not count as running, and gets no SIGTERM', async (t) => {
+  const s = setup(t, { proc: (proc) => ({ ...proc, bootId: () => null }) });
+  scriptWritesItsLine(s);
+  writeFileSync(s.files.keepaliveInterop, join(s.tp.sandbox.root, 'gone.sock'));
+  await s.keepAlive.tick();
+  assert.equal(s.processes.calls.length, 1);
+  assert.deepEqual(s.processes.signals, []);
+});
+
+test('a line of another boot is never signalled', async (t) => {
+  const s = setup(t);
+  s.proc.setProcess(SCRIPT_PID, { stat: statLine(SCRIPT_PID, SCRIPT_START), cmdline: [] });
+  writeFileSync(
+    s.files.keepalivePid,
+    formatPidLine({ pid: SCRIPT_PID, procStart: SCRIPT_START, bootId: BOOT_B }),
+  );
+  writeFileSync(s.files.keepaliveInterop, join(s.tp.sandbox.root, 'gone.sock'));
+  await s.keepAlive.tick();
+  assert.equal(s.processes.calls.length, 1);
+  assert.deepEqual(s.processes.signals, []);
+});
+
+test('a keep-alive found running whose socket later goes: failed, one SIGTERM, restarted after 5 s', async (t) => {
+  const s = setup(t);
+  scriptWritesItsLine(s);
+  const socket = await interopAccepts(t, s);
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'running');
+  await socket.close();
+  await s.keepAlive.tick();
+  assert.equal(s.keepAlive.state().state, 'failed');
+  assert.deepEqual(s.processes.signals, TERM_SCRIPT);
+  await startsAgainAfter(s, 5_000);
+  assert.deepEqual(s.processes.signals, TERM_SCRIPT, 'exactly one SIGTERM');
 });
 
 // ---------------------------------------------------------------------------------------------

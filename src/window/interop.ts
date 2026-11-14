@@ -11,6 +11,8 @@ import type { RuntimeFiles } from './runtime.ts';
 
 /** The first candidate of S2 6.4: the interop socket of the distribution's init. */
 const FIRST_CANDIDATE = '/run/WSL/1_interop';
+/** How long a connection to a socket may take before the probe says nothing (a local socket answers at once). */
+const PROBE_MS = 2_000;
 
 export interface Interop {
   /**
@@ -31,6 +33,50 @@ export function createInterop(platform: Platform, files: RuntimeFiles): Interop 
 /** A path a candidate may be: absolute, one line, no NUL. */
 function isSocketPath(text: string | null | undefined): text is string {
   return typeof text === 'string' && text.startsWith('/') && !/[\0\n\r]/.test(text);
+}
+
+function errorCode(error: unknown): unknown {
+  return (error as { code?: unknown } | null | undefined)?.code;
+}
+
+/**
+ * One unix connection to `path`, closed at once: 'accepts'; 'refused' when the connection is
+ * refused or the path is gone (ECONNREFUSED, ENOENT) — nothing listens there any more; 'unknown'
+ * for anything else (another error, no answer within 2 s, a `path` that is not an absolute
+ * one-line path): no judgement. The interop link (S2 6.4) and the keep-alive (S2 6.1) both judge
+ * a socket by it.
+ */
+export function probeSocket(
+  platform: Platform,
+  path: string | null,
+): Promise<'accepts' | 'refused' | 'unknown'> {
+  if (!isSocketPath(path)) {
+    return Promise.resolve('unknown');
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let cancel = (): void => {};
+    const settle = (answer: 'accepts' | 'refused' | 'unknown'): void => {
+      if (!settled) {
+        settled = true;
+        cancel();
+        resolve(answer);
+      }
+    };
+    cancel = platform.clock.after(PROBE_MS, () => {
+      settle('unknown');
+    });
+    platform.net.connectUnix(path).then(
+      (connection) => {
+        connection.destroy();
+        settle('accepts');
+      },
+      (error: unknown) => {
+        const code = errorCode(error);
+        settle(code === 'ECONNREFUSED' || code === 'ENOENT' ? 'refused' : 'unknown');
+      },
+    );
+  });
 }
 
 /**
@@ -63,22 +109,16 @@ export function createInteropFrom(platform: Platform, files: RuntimeFiles, first
     }
   };
 
-  const accepts = async (socket: string): Promise<boolean> => {
-    try {
-      const connection = await platform.net.connectUnix(socket);
-      connection.destroy();
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   /** The first socket, in S2 6.4's order, that accepts a connection now. */
   const choose = async (): Promise<string | null> => {
     const candidates = [first, keepAliveInterop(), platform.env.WSL_INTEROP].filter(isSocketPath);
     for (const candidate of candidates) {
       const socket = socketOf(candidate);
-      if (socket !== null && socket !== files.interop && (await accepts(socket))) {
+      if (
+        socket !== null &&
+        socket !== files.interop &&
+        (await probeSocket(platform, socket)) === 'accepts'
+      ) {
         return socket;
       }
     }

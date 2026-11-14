@@ -8,9 +8,12 @@
  * The server calls `tick` every second (S2 10.1); everything happens on a tick, the retry timers
  * only say that a start is due. Whether a keep-alive lives is judged by its `keepalive.pid` line
  * (design 5.5's rule, three-valued): a line that cannot be judged counts as alive, so that no
- * second keep-alive is started beside one that may run (S2 4.2). For a `wsl.exe` this server
- * started, its end counts too: the script inside WSL can outlive a `wsl.exe` ended on the Windows
- * side, and then nothing holds WSL any more.
+ * second keep-alive is started beside one that may run (S2 4.2). The script inside WSL can outlive
+ * a `wsl.exe` ended on the Windows side, and then nothing holds WSL any more (ruled, S2 6.1): for
+ * a `wsl.exe` this server started its end counts; a keep-alive it did not start is judged by its
+ * `keepalive.interop` socket too (refused or gone: its `wsl.exe` is gone). Such a script is an
+ * orphan: its line no longer counts, and when its identity is known alive it gets one SIGTERM —
+ * the server ending its own helper (S2 2, principle 6) — before the schedule starts a new one.
  */
 
 import { join } from 'node:path';
@@ -20,6 +23,7 @@ import { NS_PER_SECOND } from '../platform/time.ts';
 import type { Detached, Ns, Platform } from '../platform/types.ts';
 import { describeError } from '../sessions/problems.ts';
 import { startWindowsProgram } from './edge.ts';
+import { probeSocket } from './interop.ts';
 import type { Interop } from './interop.ts';
 import { parsePidLine, pidLineState } from './pidline.ts';
 import type { PidLine } from './pidline.ts';
@@ -56,7 +60,7 @@ interface Watched {
 
 /** What `keepalive.pid` says now. */
 type LineState =
-  | { kind: 'alive'; line: PidLine | null } // alive, or cannot be judged (line null: unreadable)
+  | { kind: 'live'; line: PidLine | null } // alive, or cannot be judged (line null: unreadable)
   | { kind: 'dead' }; // missing, garbled, another boot, gone, reused pid
 
 function sameLine(a: PidLine, b: PidLine): boolean {
@@ -92,7 +96,7 @@ export function createKeepAlive(deps: {
           error: distro === '' ? NO_DISTRO : null,
         };
   let watched: Watched | null = null;
-  /** The line of a keep-alive whose wsl.exe ended: it holds nothing, whatever it says. */
+  /** The line of a script whose wsl.exe is gone: it holds nothing, whatever it says. */
   let orphan: PidLine | null = null;
   let startDue = true;
   /** How many starts after an end so far: the index into RETRY_MS. */
@@ -122,26 +126,64 @@ export function createKeepAlive(deps: {
     }
   };
 
-  const readLine = (): LineState => {
-    let text: string | null;
-    try {
-      text = platform.files.readText(files.keepalivePid);
-    } catch {
-      return { kind: 'alive', line: null }; // it is there but cannot be read: cannot tell
-    }
-    const line = text === null ? null : parsePidLine(text);
-    if (line === null) {
-      return { kind: 'dead' };
-    }
+  /** design 5.5's rule for `line` now: the boot id read afresh (null, so unknown, when it cannot be). */
+  const stateOf = (line: PidLine): 'alive' | 'dead' | 'unknown' => {
     let bootId: string | null;
     try {
       bootId = platform.proc.bootId();
     } catch {
       bootId = null;
     }
-    return pidLineState(line, platform.proc, bootId) === 'dead'
-      ? { kind: 'dead' }
-      : { kind: 'alive', line };
+    return pidLineState(line, platform.proc, bootId);
+  };
+
+  const readLine = (): LineState => {
+    let text: string | null;
+    try {
+      text = platform.files.readText(files.keepalivePid);
+    } catch {
+      return { kind: 'live', line: null }; // it is there but cannot be read: cannot tell
+    }
+    const line = text === null ? null : parsePidLine(text);
+    if (line === null || stateOf(line) === 'dead') {
+      return { kind: 'dead' };
+    }
+    return { kind: 'live', line };
+  };
+
+  /**
+   * `line`'s script holds nothing (its wsl.exe is gone): from now on its line does not count, and
+   * when its identity is known alive — never on 'unknown' — it gets ONE SIGTERM (its trap removes
+   * its own files at once). A line that is already the orphan is left as it is.
+   */
+  const orphaned = (line: PidLine | null): void => {
+    if (line === null || (orphan !== null && sameLine(line, orphan))) {
+      return;
+    }
+    orphan = line;
+    if (stateOf(line) !== 'alive') {
+      return;
+    }
+    try {
+      platform.processes.signal(line.pid, 'SIGTERM');
+    } catch {
+      // Nothing more to do: it no longer counts, and a new keep-alive is started all the same.
+    }
+  };
+
+  /**
+   * Whether the Windows side of a keep-alive this server did not start is gone: keepalive.interop
+   * names a socket that refuses connections or is not there (ruled). Anything else — no file, one
+   * that cannot be read, not an absolute path, another error, no answer — is no judgement: false.
+   */
+  const windowsSideGone = async (): Promise<boolean> => {
+    let text: string | null;
+    try {
+      text = platform.files.readText(files.keepaliveInterop);
+    } catch {
+      return false;
+    }
+    return (await probeSocket(platform, text)) === 'refused';
   };
 
   /** The keep-alive is gone: failed with `error`, and a start due after the schedule's wait. */
@@ -188,20 +230,18 @@ export function createKeepAlive(deps: {
 
   const check = async (): Promise<void> => {
     const now = readLine();
-    const seen = now.kind === 'alive' ? now.line : null;
-    const alive =
-      now.kind === 'alive' && !(seen !== null && orphan !== null && sameLine(seen, orphan));
-    if (watched !== null) {
-      const watch = watched;
+    const seen = now.kind === 'live' ? now.line : null;
+    const live =
+      now.kind === 'live' && !(seen !== null && orphan !== null && sameLine(seen, orphan));
+    const watch = watched;
+    if (watch !== null && watch.child !== null) {
+      // A wsl.exe this server started: its end counts, and its script's line.
       if (watch.ended !== null) {
-        // Its script may live on: its line no longer means that WSL is held. A live line seen now
-        // is that script's too, even if no earlier tick saw it (the script wrote it and wsl.exe
-        // ended between two ticks): a start happens only while no live line other than an
-        // orphan's exists, and only the script writes keepalive.pid.
+        // Its script may live on. A live line seen now is that script's too, even if no earlier
+        // tick saw it (the script wrote it and wsl.exe ended between two ticks): a start happens
+        // only while no live line other than an orphan's exists, and only the script writes it.
         const line = watch.line ?? seen;
-        if (line !== null) {
-          orphan = line;
-        }
+        orphaned(line);
         lost(
           line === null
             ? `wsl.exe ended before the keep-alive started (${howItEnded(watch.ended)})`
@@ -209,25 +249,34 @@ export function createKeepAlive(deps: {
         );
         return;
       }
-      if (alive) {
+      if (live) {
         watch.line ??= seen;
         set('running', null);
-        return;
-      }
-      if (watch.child === null || watch.line !== null) {
+      } else if (watch.line !== null) {
         lost('the keep-alive ended (its process is gone)');
-      }
-      return; // started, and its script has not written its line yet
-    }
-    if (!startDue) {
+      } // else: started, and its script has not written its line yet
       return;
     }
-    if (alive) {
-      watched = { child: null, ended: null, line: seen };
+    if (watch === null && !startDue) {
+      return;
+    }
+    // A keep-alive this server did not start: its line, and its Windows side.
+    const gone = live && (await windowsSideGone());
+    if (gone) {
+      orphaned(seen);
+    }
+    if (live && !gone) {
+      watched ??= { child: null, ended: null, line: seen };
       set('running', null);
-      return;
+    } else if (watch !== null) {
+      lost(
+        gone
+          ? "the keep-alive's wsl.exe is gone (its keepalive.interop socket refuses)"
+          : 'the keep-alive ended (its process is gone)',
+      );
+    } else {
+      await start();
     }
-    await start();
   };
 
   return {
