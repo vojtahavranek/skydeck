@@ -364,17 +364,21 @@ cd ~/skydeck
 python3 docs/check-kit/serve.py
 ```
 
-Open `http://127.0.0.1:8765/` in a tab of its own in your own Edge window and press the chords on
-the page: each one it received turns green; some close the tab or open a window (that is what is
-looked at). What the page received, in another W (`sudo apt install jq` when `jq` is missing):
+Ctrl+Shift+W and Alt+F4 close a whole Edge window with all its tabs. So open a new Edge window for
+this check (Ctrl+N in your Edge), with `http://127.0.0.1:8765/` as its only tab, and press the chords
+on the page: each one it received turns green; some close the tab or open a window (that is what is
+looked at). What the page received, in another W (`sudo apt install jq` when `jq` is missing; `jq`
+prints the names quoted, so that no byte of the log reaches the terminal raw):
 
 ```sh
-jq -r 'select(.kind=="keydown").chord' ~/skydeck/docs/check-kit/keylog.jsonl | sort -u
+jq 'select(.kind=="keydown").chord' ~/skydeck/docs/check-kit/keylog.jsonl | sort -u
 ```
 
 To compare with an app window, `sh docs/check-kit/edge-app.sh` opens the same page in one (it
 starts `msedge.exe` with a profile folder of its own, `%LOCALAPPDATA%\skydeck-check\edge-profile`;
-delete that folder afterwards). Ctrl+C stops the server; then `rm docs/check-kit/keylog.jsonl`.
+delete that folder afterwards; when several Windows users have an Edge folder it asks for your
+Windows user name as its second argument: `sh docs/check-kit/edge-app.sh http://127.0.0.1:8765/
+<you>`). Ctrl+C stops the server; then `rm docs/check-kit/keylog.jsonl`.
 
 And skydeck's page in a tab: `skydeck window --print-url`, paste the address into a normal tab.
 The key bar shows `Ctrl+Shift+O previous` and a `+ New` button; Ctrl+Shift+O and `+ New` work.
@@ -415,10 +419,23 @@ Write down: what was drawn wrong, before or after the restart.
 
 Three questions about how Claude Code talks to the terminal skydeck gives it.
 
-- **Does Claude Code use synchronized output?** In W, in the throwaway folder, record what a
-  session writes to its terminal: `cd ~/skydeck-try && script -q -c claude claude-output.txt`.
+- **Does Claude Code use synchronized output?** The window's server logs nothing of what a program
+  writes, so this is recorded in W with `script`, under the environment the window gives its
+  programs (design-step-2.md 7.4, `src/window/env.ts`): the variables that name a terminal taken
+  out, `TERM=xterm-256color` and `COLORTERM=truecolor` set. In W:
+
+  ```sh
+  cd ~/skydeck-try
+  (for v in $(env | cut -d= -f1 | grep -E '^(TERM_PROGRAM|TERM_PROGRAM_VERSION|WT_SESSION|WT_PROFILE_ID|TMUX|TMUX_PANE|STY|VTE_VERSION|KITTY_WINDOW_ID|ITERM_SESSION_ID|CLAUDE_CODE_SSE_PORT|ENABLE_IDE_INTEGRATION|GPG_TTY|SSH_TTY|WEZTERM_.*|KONSOLE_.*|VSCODE_.*)$'); do unset "$v"; done
+   TERM=xterm-256color COLORTERM=truecolor exec script -q -c claude claude-output.txt)
+  ```
+
   Send one prompt, `/exit`, then `grep -c $'\e\\[?2026h' claude-output.txt`: a number above 0 means
-  it does. The file holds what the screen showed: `rm claude-output.txt`.
+  it does. The file holds what the screen showed: `rm claude-output.txt`. One thing still differs
+  from the window: here W's terminal answers Claude Code's questions (which terminal it is, whether
+  it supports synchronized output), in the window skydeck's screen side does (xterm.js, which
+  supports it). If Claude Code asks before it uses it, a 0 in a terminal that does not support it
+  says nothing about the window. Write down which terminal W is, with its version.
 - **Does the colour answer make its automatic theme right?** When your Claude Code has a theme
   that follows the terminal (look in `/config` or `/theme`), choose it. The window is dark while
   Windows is in dark mode and light in light mode (Settings > Personalization > Colors). Start a new
@@ -570,26 +587,30 @@ only with the agreement of the PC's owner; no check requires it. Do not bypass o
 PowerShell's execution policy for it.** It needs Alpine's mini root filesystem, which is not in
 the repository: `https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz`,
 sha256 `cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012` (Alpine publishes the
-same in the `.sha256` file beside it). Download it from WSL, not with the browser. In W (put your
-Windows user name for `<you>`):
+same in the `.sha256` file beside it). It is fetched in WSL with curl and its sha256 compared
+before it is used. When Windows or PowerShell warns about, asks about or refuses the script or the
+tarball, do not unblock it and change no setting: leave this form out. In W (put your Windows user
+name for `<you>`):
 
 ```sh
 W=/mnt/c/Users/<you>/AppData/Local/skydeck-check/wsl
 mkdir -p "$W"
 cp ~/skydeck/docs/check-kit/lifetime/lifetime.ps1 "$W/"
 curl -fL -o "$W/alpine-minirootfs-3.24.4-x86_64.tar.gz" https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz
-sha256sum "$W/alpine-minirootfs-3.24.4-x86_64.tar.gz"
+echo "cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012  $W/alpine-minirootfs-3.24.4-x86_64.tar.gz" | sha256sum -c
 ```
 
-The hash must be the one above; otherwise delete the file and stop. In P:
+The last line must end with `OK`; with `FAILED`, delete the file and stop. In P:
 
 ```powershell
 cd $env:LOCALAPPDATA\skydeck-check\wsl
-(Get-FileHash .\alpine-minirootfs-3.24.4-x86_64.tar.gz -Algorithm SHA256).Hash
+if ((Get-FileHash .\alpine-minirootfs-3.24.4-x86_64.tar.gz -Algorithm SHA256).Hash -eq 'cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012') { 'same' } else { 'different' }
 powershell.exe -NoProfile -File .\lifetime.ps1
 ```
 
-`Get-FileHash` prints the hash in capitals: the same letters. When PowerShell answers that running
+The second line must print `same`; with `different`, stop. When the script says that the tarball
+is not there or that `wsl.exe --import` failed, it stops before it measures anything: the check
+has not been run. When PowerShell answers that running
 scripts is disabled on this system, this form is not for this PC: stop here. Otherwise it prints
 timestamped lines for about 4 minutes. Expected: A, the distribution leaves the running list
 within 90 seconds (its source says about 15); B, still running after 60 seconds with a hidden
@@ -634,9 +655,11 @@ Write down: what differed.
 ## W18. A terminal query answered late (real claude)
 
 Claude Code asks its terminal a few questions when it starts. Make the server be away while it
-does: have `skydeck window --stop` typed in W, open a new throwaway session in the window (Ctrl+Shift+N,
-Enter), and press Enter in W right after. Wait 5 seconds, then `skydeck window` (or
-`skydeck window --restart`), and look at the new session's prompt.
+does. Have `skydeck window --stop` typed in W (not sent yet). In the window, select the throwaway
+session (its row in Open) and press Ctrl+Shift+N: the directory field must say
+`/home/<you>/skydeck-try`, the folder of the setup (type it in when it says anything else) — a real
+`claude` starts in that folder. Press Enter in the form, and Enter in W right after. Wait 5 seconds,
+then `skydeck window` (or `skydeck window --restart`), and look at the new session's prompt.
 
 Expected: no characters you did not type in the prompt (such as `[?62;c`, `0;276;0c`, `[1;1R` or
 `rgb:`), and the first keys you type arrive.
@@ -689,10 +712,21 @@ would hold the screens. Before you start, in W, look at the folder (put your Win
 ls -l /mnt/c/Users/<you>/AppData/Local/Temp/wsl-crashes
 ```
 
-**A keeper.** This ends that session. In `skydeck doctor`'s keeper lines, find the keeper of the
-throwaway session (`keeper <id>: running (pid <n>, …) …, session <id>`), then `kill -SEGV <that
-pid>`. Expected: the window shows that terminal's bar `the terminal's keeper ended unexpectedly;
-claude ended with it`.
+**A keeper.** This ends that session, and a wrong pid would end a real one: when in doubt, do it
+while only throwaway sessions are open in the window. Find the pid in skydeck's own record:
+
+1. In the window, select the throwaway session. Its header shows its short id (8 characters) and
+   the directory `/home/<you>/skydeck-try`.
+2. In W, `skydeck doctor | grep 'keeper .*session '`. Take the one line whose `session <id>` starts
+   with that short id (`keeper <t>: running (pid <n>, …); the server shows it in slot <s>, …,
+   session <id>`); `<s>` is the number at the left of the session's row. No such line, or more than
+   one: stop.
+3. The record behind that line is `<runtime directory>/terms/<t>.pid`, the runtime directory named
+   in doctor's `runtime directory …` line: `cut -d' ' -f1 <runtime directory>/terms/<t>.pid` prints
+   the same `<n>`. Only then: `kill -SEGV <n>`.
+
+Expected: the window shows that terminal's bar `the terminal's keeper ended unexpectedly; claude
+ended with it`.
 
 **The server's Node.js.** A throwaway server in a trial installation, so that the window's own
 server is not touched. In W:
@@ -736,7 +770,10 @@ $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 476
 
 In W: `skydeck window`. The server starts (WSL does not see the Windows program), Edge opens, but
 the page does not load: the program takes the connection and answers nothing, so the command ends
-with `Edge was started, but no window connected within 30 seconds; …`. In a second P:
+with `Edge was started, but no window connected within 30 seconds; …`. (With
+`networkingMode=mirrored` in `.wslconfig`, WSL shares Windows' ports, and the server may not get
+the port the Windows program holds: then `skydeck window` fails with `port 47613 on 127.0.0.1 is
+used by another program; …`. Write that line down; it answers the question too.) In a second P:
 
 ```powershell
 curl.exe -s -m 5 -o NUL -w "%{http_code}`n" http://127.0.0.1:47613/

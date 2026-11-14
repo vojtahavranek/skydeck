@@ -1,7 +1,9 @@
 skydeck window check kit - what each file is for, in the order docs/manual-checks.md uses them.
 docs/manual-checks.md is the procedure (W2, W14, W15); this is the short version.
-Run everything from WSL, in your checkout (cd ~/skydeck). Download nothing with the browser: a
-browser download marks a file as coming from the internet, a file written from WSL is not marked.
+Run everything from WSL, in your checkout (cd ~/skydeck). The kit's files come from the checkout;
+the one file from outside, the Alpine tarball of step 2, is fetched in WSL with curl and checked
+against its sha256 before it is used. When Windows or PowerShell warns about, asks about or refuses
+a file of the kit, do not unblock it and change no setting: leave that optional step out.
 
 THE KEY LOG: the test page's server (serve.py) writes every key you press ON THE TEST PAGE into
 docs/check-kit/keylog.jsonl, also what you type into its text box. Never type a password or
@@ -15,18 +17,22 @@ Delete it when the check is done:
    Ctrl+C stops it. It writes the key log above.
 
 1. Key test (W2).
-   a. A normal Edge tab: open http://127.0.0.1:8765/ in a window of your own Edge, in a tab of
-      its own (some chords close the tab or open a window: that is what is being looked at).
+   a. A normal Edge tab: Ctrl+Shift+W and Alt+F4 close a WHOLE Edge window with all its tabs, so
+      open a new Edge window for the check (Ctrl+N in your Edge) and the page as its only tab:
+      http://127.0.0.1:8765/ (some chords close the tab or open a window: that is what is being
+      looked at).
    b. An Edge app window with a profile folder of its own, the way skydeck starts its window:
         sh docs/check-kit/edge-app.sh        # starts msedge.exe --app=... (a Windows program)
+      When several Windows users have an Edge folder, it asks for yours:
+        sh docs/check-kit/edge-app.sh http://127.0.0.1:8765/ <windows-user>
       Its profile folder is %LOCALAPPDATA%\skydeck-check\edge-profile; Edge writes it, delete
       it when you are done.
    Press every chord on the page. Each one turns green when the page received it. Watch the
    window: did it close, open a new window or tab, show a find bar, a print dialog, a devtools
    pane, reload? "window loads this session" going up means a reload got through. Type
    \ [ ] { } @ # ~ | and your accented letters in the text box (AltGr, dead keys).
-   What the page received:
-     jq -r 'select(.kind=="keydown").chord' docs/check-kit/keylog.jsonl | sort -u
+   What the page received (quoted, so that no byte of the log reaches your terminal raw):
+     jq 'select(.kind=="keydown").chord' docs/check-kit/keylog.jsonl | sort -u
    The buttons Notification, Clipboard write, Clipboard read and Keyboard Lock say whether the
    browser allows them on http://127.0.0.1 (the log line under the buttons).
 

@@ -655,7 +655,8 @@ effect.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here.
-- **A new session**: Ctrl+Shift+N (in a browser tab also the `+ New` button), with its directory,
+- **A new session**: Ctrl+Shift+N (in a browser tab the browser keeps Ctrl+Shift+N for itself:
+  use the `+ New` button there), with its directory,
   label, group and `claude` flags.
 - **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
 - **Keys**: **Ctrl+Shift+H shows every key of the window**, those that come in later stages

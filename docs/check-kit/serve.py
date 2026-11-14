@@ -3,7 +3,9 @@
 
 GET  /          the key-test page
 GET  /ping      {t, boot_id, uptime_s, pid}  (the page polls this once a second)
-POST /log       appends one JSON line to keylog.jsonl next to this file
+POST /log       appends one JSON line to keylog.jsonl next to this file: only a JSON object
+                (Content-Type application/json, at most 64 KiB) sent to 127.0.0.1:<port> or
+                localhost:<port>, as the page sends it; anything else is refused
 Run:  python3 serve.py [port]      (default 8765)
 """
 import json
@@ -14,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+HOSTS = ("127.0.0.1:%d" % PORT, "localhost:%d" % PORT)
 LOG = os.path.join(HERE, "keylog.jsonl")
 STATIC = {"/": ("keytest.html", "text/html; charset=utf-8"),
           "/keytest.js": ("keytest.js", "text/javascript; charset=utf-8")}
@@ -53,12 +56,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/log":
             return self._send(404, b"not found", "text/plain")
-        n = min(int(self.headers.get("Content-Length", "0") or 0), 65536)
+        # Only what the key-test page sends: JSON (another site's page cannot send that without a
+        # preflight, which this server never answers), to this host and port (no DNS rebinding),
+        # one small object.
+        ctype = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if ctype != "application/json" or self.headers.get("Host") not in HOSTS:
+            return self._send(403, b"forbidden", "text/plain")
+        try:
+            n = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            return self._send(400, b"bad length", "text/plain")
+        if n < 0 or n > 65536:
+            return self._send(413, b"too large", "text/plain")
         raw = self.rfile.read(n)
         try:
             entry = json.loads(raw)
         except ValueError:
             return self._send(400, b"bad json", "text/plain")
+        if not isinstance(entry, dict):
+            return self._send(400, b"not an object", "text/plain")
         entry["server_t"] = time.time()
         entry["peer"] = self.client_address[0]
         with open(LOG, "a") as f:

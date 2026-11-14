@@ -32,7 +32,15 @@ function WaitList {
 }
 
 Stamp 'import throwaway distro'
-& wsl.exe --import $name $dir $Tar --version 2 | Out-Null
+# PowerShell does not stop on a program's exit code: without these checks A-D would measure a
+# distro that does not exist and print an answer that looks like a result.
+if (-not (Test-Path -LiteralPath $Tar -PathType Leaf)) {
+  throw "the tarball $Tar is not there: the check has not been run"
+}
+& wsl.exe --import $name $dir $Tar --version 2
+if ($LASTEXITCODE -ne 0) {
+  throw "wsl.exe --import failed (exit $LASTEXITCODE; its message is above): the check has not been run"
+}
 
 try {
   # A. background process only, no wsl.exe session left open
