@@ -56,9 +56,10 @@ export async function present(
   port: number,
   key: Uint8Array,
   mode: 'launch' | 'key',
+  retry503Ms = UPGRADE_TRIES_MS, // 0: one upgrade, as a page that tries again on its own schedule
 ): Promise<Presented> {
   const origin = `http://127.0.0.1:${port}`;
-  const until = performance.now() + UPGRADE_TRIES_MS;
+  const until = performance.now() + retry503Ms;
   let opened: { ws: WebSocket; early: string[] } | number;
   for (;;) {
     opened = await upgrade(port, origin);

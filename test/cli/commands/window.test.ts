@@ -37,13 +37,13 @@ import { stopServer } from '../../../src/window/lifecycle.ts';
 import { pidLineState } from '../../../src/window/pidline.ts';
 import { listKeeperLines, readServerJson } from '../../../src/window/runtime.ts';
 import type { ServerJson } from '../../../src/window/runtime.ts';
-import { present } from '../../fixtures/fake-edge/page.ts';
+import { outcomeOf, present } from '../../fixtures/fake-edge/page.ts';
 import type { Presented } from '../../fixtures/fake-edge/page.ts';
 import { run as runSkydeck } from '../../helpers/install.ts';
 import { procStartOf, sleep, stillRuns, until } from '../../helpers/keeper.ts';
 import { killKeepersIn } from '../../helpers/kill.ts';
 import { readRecords } from '../../helpers/standin.ts';
-import { connectTestPage, serverSandbox, WAIT_MS } from '../../helpers/window.ts';
+import { connectTestPage, serverSandbox, untilStartDone, WAIT_MS } from '../../helpers/window.ts';
 import type { ServerSandbox } from '../../helpers/window.ts';
 
 const FAKE_EDGE = fileURLToPath(new URL('../../fixtures/fake-edge/msedge', import.meta.url));
@@ -154,8 +154,9 @@ interface Harness {
   /** The server server.json names, and a client of server.sock. */
   server(): ServerJson | null;
   /**
-   * server.json once the server answering on server.sock has written it (a server writes it
-   * before server.sock answers: ruled, server-findable; the check stays for the fake serve).
+   * server.json once the server answering on server.sock has written it and its start is done
+   * (untilStartDone: server.json comes before server.sock answers and pages are served only once
+   * the start is done; ruled, server-findable).
    */
   running(): Promise<ServerJson>;
   client(): ControlClient;
@@ -402,7 +403,10 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
           .client()
           .ping(1000)
           .catch(() => null);
-        if (json !== null && typeof ping === 'object' && ping?.pid === json.pid) return json;
+        if (json !== null && typeof ping === 'object' && ping?.pid === json.pid) {
+          await untilStartDone(() => d.serverLog().join('\n'), json.serverId);
+          return json;
+        }
         if (performance.now() > deadline) assert.fail('no server answering with its server.json');
         await sleep(50);
       }
@@ -1890,7 +1894,115 @@ describe('a server that is starting is found by every command (ruled, server-fin
   });
 });
 
+/**
+ * A page that comes back as a window does after its server restarted, on its own schedule: once a
+ * server other than `oldPid` has written server.json, ONE upgrade in mode key with the stored
+ * secret every `everyMs` — the page's longest retry interval is 5 s (S2 6.3) — until one is not
+ * refused with 503. `tries` records the outcome of each. Closed when the test ends.
+ */
+function pageOnItsSchedule(
+  t: TestContext,
+  h: Harness,
+  oldPid: number,
+  everyMs: number,
+): { done: Promise<Presented>; tries: string[] } {
+  const tries: string[] = [];
+  const done = (async (): Promise<Presented> => {
+    const deadline = performance.now() + 4 * WAIT_MS;
+    let json = h.server();
+    while (json === null || json.pid === oldPid) {
+      if (performance.now() > deadline) assert.fail('no new server to reconnect to');
+      await sleep(50);
+      json = h.server();
+    }
+    const secret = h.d.deck.store.getKv('window_secret');
+    assert.ok(secret !== null);
+    for (;;) {
+      const presented = await present(json.port, bytesOf(secret), 'key', 0);
+      tries.push(outcomeOf(presented));
+      if (presented.outcome !== 'refused' || presented.status !== 503) return presented;
+      if (performance.now() > deadline) assert.fail(`never welcomed: ${tries.join(', ')}`);
+      await sleep(everyMs);
+    }
+  })();
+  t.after(async () => {
+    const presented = await done.catch(() => null);
+    if (presented?.outcome === 'welcome') presented.ws.terminate();
+  });
+  return { done, tries };
+}
+
 describe('a server that answers but has not finished its start (ruled, server-findable, 10:16Z)', () => {
+  test('--restart with a window open whose page tries again only every 5 s, while the new server still starts: with the design’s 7 s the page comes back — "already open", no token, no Edge', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
+    assert.equal(first.code, 0, first.stderr);
+    const old = h.server();
+    assert.ok(old !== null);
+    // The server gives its python3 check 5 s: its start ends at least 5 s after server.json, so
+    // the page's first try meets the start and its next one comes 5 s later.
+    slowServerStart(h, 12);
+    const page = pageOnItsSchedule(t, h, old.pid, 5000);
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { reconnectMs: 7000 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, 'skydeck window: a window is already open\n');
+    assert.equal((await page.done).outcome, 'welcome');
+    assert.equal(
+      page.tries[0],
+      'refused 503',
+      `its first try met the start: ${page.tries.join(', ')}`,
+    );
+    assert.deepEqual(tokensAsked(r), [], 'no token minted');
+    assert.equal(h.edgeRuns().length, 1, 'Edge not started again');
+  });
+
+  test('--restart onto a server of an older build, whose /status says nothing of `starting`: done when it answers — no wait for its start', async (t) => {
+    const h = windowHarness(t);
+    // The fake serve answers /status without `starting`, as a server before this field does.
+    await h.fakeServe({ FAKE_SERVE_CHECKOUT: FAKE_ROOT, FAKE_SERVE_PAGES: '2' });
+
+    const r = await h.run(['--restart'], {
+      appRoot: FAKE_ROOT,
+      times: { startMs: 30_000, reconnectMs: 500, pageMs: 500 },
+    });
+
+    // The new (fake) server's pages do not come back and its Edge page never connects: what must
+    // not happen is a wait of the 30 s start wait for a server that cannot say it is starting.
+    assert.equal(r.code, 1, r.stderr);
+    assert.match(r.stderr, /Edge was started, but no window connected within/);
+    assert.ok(r.ms < 15_000, `no wait for a start: ${r.ms} ms`);
+    const statuses = r.requests.filter((q) => q.method === 'GET' && q.path === '/status');
+    for (const look of statuses) {
+      assert.equal((look.answer?.body as { starting?: unknown }).starting, undefined);
+    }
+  });
+
+  test('doctor with a server of an older build, whose /status says nothing of `starting`: it runs, and its missing interop link is a problem as before', async (t) => {
+    const h = windowHarness(t);
+    const first = await h.run(['--print-url']); // a database and a key: the window has been used
+    assert.equal(first.code, 0, first.stderr);
+    const stop = await h.run(['--stop']);
+    assert.equal(stop.code, 0, stop.stderr);
+    const fake = await h.fakeServe({ FAKE_SERVE_CHECKOUT: REPOSITORY });
+
+    const r = await h.exec(['doctor']);
+
+    assert.match(
+      r.stdout,
+      new RegExp(`^info +the window's server runs: pid ${fake.pid}, from `, 'm'),
+    );
+    assert.doesNotMatch(r.stdout, /is starting/);
+    assert.match(
+      r.stdout,
+      /^problem +\S+\/interop does not exist although the window's server runs/m,
+    );
+  });
+
   test('--restart with a window open while the new server still starts after writing server.json: the wait for the page counts from the end of the start — "already open", no token, no Edge', async (t) => {
     const h = windowHarness(t);
     const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });

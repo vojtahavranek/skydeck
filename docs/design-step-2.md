@@ -387,7 +387,7 @@ it turns into one fixed line:
 |---|---|
 | 0 | nothing: a server of this checkout holds the lock — another `skydeck window` started it at the same moment — and that one is used (it is waited for within the same 10 seconds) |
 | 10 | `port <n> on 127.0.0.1 is used by another program; set window.port in <config path>` |
-| 11 | `a window server already runs (pid <n>, from <checkout>)` (from `server.json`): a server of another checkout |
+| 11 | `a window server already runs (pid <n>, from <checkout>)` (from `server.json`, or — while that server is starting and has written none yet — from its `window_server` lock; ruled by the plan owner, follow-up "server-findable"): a server of another checkout |
 | 12 | `the runtime directory <dir> cannot be used: <reason>; see skydeck doctor` (mode, owner, or a socket path of 108 bytes or more) |
 | 13 | `the window's server is not started from inside a Claude Code session` |
 | anything else, or no answer in 10 seconds | `the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log`; after a timeout the process is left running, and the next `skydeck window` finds it or reports it as not answering (5.1) |

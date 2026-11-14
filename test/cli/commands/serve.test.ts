@@ -31,7 +31,7 @@ import { procStartOf, sleep, stillRuns, until, within } from '../../helpers/keep
 import { killKeepersIn } from '../../helpers/kill.ts';
 import { freshNonce } from '../../helpers/pages.ts';
 import { readRecords, waitForRecord } from '../../helpers/standin.ts';
-import { connectTestPage, serverSandbox, WAIT_MS } from '../../helpers/window.ts';
+import { connectTestPage, serverSandbox, startDone, WAIT_MS } from '../../helpers/window.ts';
 import type { ServerSandbox } from '../../helpers/window.ts';
 
 const LAUNCHER = fileURLToPath(new URL('../../../bin/skydeck', import.meta.url));
@@ -154,10 +154,9 @@ function serveSandbox(t: TestContext): {
         }
         json = ownServer(d, entry.child);
         if (json === null) return false;
-        const done = `server: ${json.serverId} listening on`;
         return (
-          entry.stderr().includes(done) ||
-          (existsSync(log) && readFileSync(log, 'utf8').includes(done))
+          startDone(entry.stderr(), json.serverId) ||
+          (existsSync(log) && startDone(readFileSync(log, 'utf8'), json.serverId))
         );
       },
       'server.json of the child, and its start done',
@@ -448,21 +447,30 @@ describe('a marked test sandbox ends its server by itself (ruled, task 25, revie
     assert.equal(d.deck.store.getKv('window_server'), null);
   });
 
-  test('once its SKYDECK_HOME is gone: the orderly stop within a tick or two', async (t) => {
-    const { d, serve, started } = serveSandbox(t);
-    const server = await started(serve());
-    const moved = `${d.s.skydeckHome}.moved`;
-    renameSync(d.s.skydeckHome, moved);
-    let code: number | null;
-    try {
-      code = await within(server.exited, 'serve to exit', WAIT_MS);
-    } finally {
-      renameSync(moved, d.s.skydeckHome); // the sandbox's own cleanup looks there
-    }
-    assert.match(server.stderr(), /server: stopping: the test sandbox is gone/);
-    assert.match(server.stderr(), /server: stopped/, 'the orderly stop of S2 5.5, not an exit');
-    assert.equal(code, 0, server.stderr());
-  });
+  for (const slow of [false, true]) {
+    test(`once its SKYDECK_HOME is gone: the orderly stop within a tick or two${slow ? ' — also when its start goes on for 3 s after server.json (the home moved only once the start is done)' : ''}`, async (t) => {
+      const { d, serve, started } = serveSandbox(t);
+      if (slow) {
+        // The python3 check comes after server.json (ruled, server-findable): a home moved as soon as
+        // server.json is there would vanish under the rest of the start.
+        const python = join(d.s.bin, 'python3');
+        unlinkSync(python);
+        writeFileSync(python, '#!/bin/sh\nsleep 3\nexec /usr/bin/python3 "$@"\n', { mode: 0o755 });
+      }
+      const server = await started(serve());
+      const moved = `${d.s.skydeckHome}.moved`;
+      renameSync(d.s.skydeckHome, moved);
+      let code: number | null;
+      try {
+        code = await within(server.exited, 'serve to exit', WAIT_MS);
+      } finally {
+        renameSync(moved, d.s.skydeckHome); // the sandbox's own cleanup looks there
+      }
+      assert.match(server.stderr(), /server: stopping: the test sandbox is gone/);
+      assert.match(server.stderr(), /server: stopped/, 'the orderly stop of S2 5.5, not an exit');
+      assert.equal(code, 0, server.stderr());
+    });
+  }
 
   test('sandboxLimits: only in a marked sandbox; 600 s by default; a value that is not whole seconds gives the default and says so', () => {
     assert.equal(sandboxLimits({ SKYDECK_HOME: '/s/home' }), null);

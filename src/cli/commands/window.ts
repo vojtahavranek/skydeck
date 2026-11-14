@@ -246,7 +246,9 @@ async function useServer(
   // before its start is done: the wait counts from the end of the start (ruled, server-findable),
   // and a start that is not done within the start wait is not waited for any longer.
   const comeBack = pagesBefore > 0 && !options.newSecret;
-  if (comeBack && startWait !== null) await whileStarting(platform, client, startWait);
+  if (comeBack && !options.newWindow && startWait !== null) {
+    await whileStarting(platform, client, startWait);
+  }
   if (
     !options.newWindow &&
     (await pageWithin(platform, client, comeBack ? times.reconnectMs : 0))

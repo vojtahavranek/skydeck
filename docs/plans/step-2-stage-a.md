@@ -1228,8 +1228,13 @@ export interface LifecycleTimes { pingMs?: number; startMs?: number; stopMs?: nu
 export function findServer(deck: Deck, checkout: string, build: string, times?: LifecycleTimes): Promise<FoundServer>;
 /** Starts `<appRoot>/bin/skydeck serve` detached (S2 5.2) and waits at most 10 s for a ping of this
  *  checkout (ruled, task 22), the current build and boot id, which counts only once server.json
- *  names that server — pid, server id, boot id, its process alive (ruled by the plan owner, task 25:
- *  a server answers before it writes server.json; else its own line); one fixed line per exit code. Each
+ *  names that server — pid, server id, boot id, its process alive (ruled by the plan owner, task 25;
+ *  else its own line). A server of this build writes server.json before server.sock answers, so for
+ *  it the check passes at its first answer — it stays for any server that answers before it
+ *  records itself (ruled by the plan owner, follow-up "server-findable"). One fixed line per exit
+ *  code; for exit 11 the running server of another checkout is named from server.json or, while
+ *  that server is starting and has written none yet, from the window_server lock (sanitised;
+ *  ruled, follow-up "server-findable"). Each
  *  ping of that wait waits at most 1 s (then the runtime directory is looked up again), and the one
  *  open when the wait ends is aborted: nothing outlives the call (ruled, task 22, review 2). A boot
  *  id that cannot be read rejects with a SkydeckError before anything is started. */
@@ -3445,10 +3450,13 @@ status answers and the stop of S2 5.5.
 **Behaviour.** `runServer` in this order: refuse with `CLAUDECODE` set (13); `serverEnvironment`;
 `openDeck(platform, { guardSchema: true })`; take the lock (0 or 11); the runtime directory
 (`take`) and `prepareRuntimeDir` (12); `loadAssets` and the keeper file; `ensureSecret`; bind the
-port (10, releasing the lock); remove a `server.sock` that refuses and listen there (the HTTP and page handlers read the bound
-port through a function, A6: with port 0 it is known only now); `rediscover`
-and `decideFoundKeeper` for every keeper not started; the interop link and the keep-alive; write
-`server.json` and `server.pid`; start the tick. The actions are task 32's `createActions`, given
+port (10, releasing the lock); write `server.json` and `server.pid` (before `server.sock` answers,
+so that a server that answers can always be found by them; a start that fails after this removes
+them: ruled by the plan owner, follow-up "server-findable"); remove a `server.sock` that refuses
+and listen there (the HTTP and page handlers read the bound port through a function, A6: with
+port 0 it is known only now); the python3 check; `rediscover` and `decideFoundKeeper` for every
+keeper not started; the interop link and the keep-alive; start the tick (until it has run,
+`/status` says `starting` and a page's upgrade gets 503). The actions are task 32's `createActions`, given
 `windowTerminal(deps, size)` as its terminal factory and `openLink` (task 19). The registry's
 `events` keep each terminal's latest `hello` and send a hello of origin `late` or `found` whose
 `started` is false through `decideFoundKeeper` (task 21); a `spawned` hello is `open()`'s. `tick.ts`: every second the keep-alive; every second tick the refresh,
