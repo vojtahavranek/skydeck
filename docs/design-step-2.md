@@ -879,7 +879,13 @@ The server, on `exit`:
 
 - keeps the terminal's last screen in memory and shows it in the terminal pane dimmed, under a bar
   `claude exited (status <n>) at <time> · Resume · Close` (12.6), until the user closes it,
-  resumes the session, or the server restarts;
+  resumes the session, or the server restarts. When its session runs again the ended terminal is
+  dropped — forgotten as `close-terminal` forgets it, its slot freed, its keeper allowed to end
+  (ruled by the plan owner, review of plan task 13): a resume from the window closes the
+  session's terminals whose program is over (ended, lost, not started) once the guard and the
+  lock have let it through and before it opens the new one (a refused resume leaves them), and
+  the tick closes an ended terminal whose session is seen running anywhere else. A terminal whose
+  program may still run is never dropped this way;
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
   and the session's lock is still the one this launch took, releases that lock, and for a new

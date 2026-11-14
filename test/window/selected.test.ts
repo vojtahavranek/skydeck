@@ -72,14 +72,20 @@ test('selectedPayload: no command for a directory with a control character, or n
 
 test('selectedPayload: no command when a recorded flag holds a control character', (t) => {
   const d = testDeck(t);
-  const payload = selectedPayload(d.deck, row({ launch: ['claude', '--model', 'op\x1b]0;x\x07us'] }));
+  const payload = selectedPayload(
+    d.deck,
+    row({ launch: ['claude', '--model', 'op\x1b]0;x\x07us'] }),
+  );
   assert.equal(payload.command, null);
   assert.equal(payload.flagsKnown, true);
 });
 
 test('selectedPayload gives no command, and does not throw, for a row whose id is not a session id', (t) => {
   const d = testDeck(t);
-  const odd = listRow({ id: 'not-a-session', session: ds({ id: 'not-a-session', launch: ['claude'] }) });
+  const odd = listRow({
+    id: 'not-a-session',
+    session: ds({ id: 'not-a-session', launch: ['claude'] }),
+  });
   const payload = selectedPayload(d.deck, odd);
   assert.equal(payload.command, null);
   assert.equal(payload.sessionId, 'not-a-session');
@@ -114,7 +120,12 @@ test('selectedPayload: how the session ended', async (t) => {
       lastHolding: endedHolding('other'),
       ended: 'unexpectedly',
     },
-    { name: 'exited: an end of kind exit', marks: [], lastHolding: endedHolding('exit'), ended: 'exited' },
+    {
+      name: 'exited: an end of kind exit',
+      marks: [],
+      lastHolding: endedHolding('exit'),
+      ended: 'exited',
+    },
     { name: 'left through /clear', marks: [], lastHolding: endedHolding('clear'), ended: null },
     { name: 'moved on', marks: [], lastHolding: endedHolding('moved-on'), ended: null },
     { name: 'no holding known', marks: [], lastHolding: null, ended: null },

@@ -3103,7 +3103,11 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload;
 
 **Behaviour.** `resume` → `prepareResumeById` → `launchPrepared(deck, prepared, terminalFor({ cols,
 rows }))` → `{ ok: code === 0, lines, error: null, sessionId }`; a `SkydeckError` (the guard, the
-lock, `RefError`) → `{ ok: false, lines: [message], error: message, sessionId: null }`. `new` →
+lock, `RefError`) → `{ ok: false, lines: [message], error: message, sessionId: null }`. Once
+`prepareResumeById` has let it through, and before `launchPrepared`, the resume closes the
+session's terminals whose program is over (ended, lost, not started; `hub.close`) — ruled by the
+plan owner (review of task 13, S2 7.8): an ended terminal is dropped when its session runs again;
+a refused resume leaves it. `new` →
 `splitFlags` (an error → `ok: false`) → `prepareNew` with the form's directory, label and group
 (empty means none) → `launchPrepared`. `close-terminal` → `hub.close`; `'running'` → `ok: false`
 with "the program still runs; end it inside claude" (principle 6). `open-link` → `linkToOpen`,
@@ -3115,7 +3119,9 @@ exit, else null; `expiring` and `expired` from the marks.
 - `resume` of a session that is not running → the fake terminal got the spec of
   `buildResumeCommand` with the size given, the lock taken, `ok` with the session id; the
   terminal failing → `launchPrepared`'s lines (the command to run by hand); a running session →
-  the guard's message, the terminal never called, no lock; an unknown id → the `RefError` message.
+  the guard's message, the terminal never called, no lock; an unknown id → the `RefError` message;
+  the session's ended, lost and not-started terminals closed before the new one opens, its other
+  terminals and other sessions' kept, nothing closed on a refusal (ruled, S2 7.8).
 - `new` with a directory, label `fix`, group `ABC-1` and flags `--model opus` → `buildNewCommand`'s
   arguments, the meta stored, `sessionId` the new id; flags `-r x`, `--name y`, `'unclosed`, a
   relative or missing directory → `ok: false` with the message, nothing stored, the terminal never
