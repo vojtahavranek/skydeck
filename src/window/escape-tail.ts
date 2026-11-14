@@ -245,7 +245,9 @@ export function escapeTail(): EscapeTail {
    * A DCS payload run has begun in this push. xterm.js's table ignores DEL in a DCS payload, but
    * its read-ahead loop, once a payload character began a run, passes every DEL that follows in the
    * same write to the handler: so DEL is kept only inside such a run. The screen side pushes
-   * exactly the writes xterm.js parses.
+   * exactly the writes xterm.js parses. (xterm.js parses a write longer than 131,072 units in
+   * pieces, and a run ends at each: only a snapshot is that long, and only a DEL right after such
+   * a boundary inside a DCS payload at the snapshot's very end would differ.)
    */
   let run = false;
 
@@ -288,15 +290,13 @@ export function escapeTail(): EscapeTail {
     oscId = -1;
   }
 
-  /** What of the parameters a later byte can see. */
-  function paramsState(): string {
-    if (rejectDigits) return `${count},${subCount},r,${lastParam},${lastSub}`;
-    const sub = digitIsSub ? (rejectSubDigits ? 'S' : 's') : 'p';
-    return `${count},${subCount},${sub},${lastParam},${lastSub}`;
-  }
-
-  /** `Params.addParam`, `addSubParam` and `addDigit`, for one parameter character. */
-  function param(cp: number): void {
+  /**
+   * `Params.addParam`, `addSubParam` and `addDigit` for one parameter character; whether it changed
+   * anything a later byte can see. Once xterm.js rejects further parameters nothing does; while
+   * the digits go to the parameters, whether further sub-parameters are rejected does not show.
+   */
+  function param(cp: number): boolean {
+    if (rejectDigits) return false;
     if (cp === 0x3b) {
       digitIsSub = false;
       if (count >= MAX_PARAMS) {
@@ -305,21 +305,26 @@ export function escapeTail(): EscapeTail {
         count++;
         lastParam = 0;
       }
-    } else if (cp === 0x3a) {
-      digitIsSub = true;
-      if (rejectDigits || subCount >= MAX_SUB_PARAMS) {
-        rejectSubDigits = true;
-      } else {
-        subCount++;
-        lastSub = -1;
-      }
-    } else if (!rejectDigits && !(digitIsSub && (subCount === 0 || rejectSubDigits))) {
-      const digit = cp - 0x30;
-      const at = (value: number): number =>
-        value === -1 ? digit : Math.min(value * 10 + digit, MAX_VALUE);
-      if (digitIsSub) lastSub = at(lastSub);
-      else lastParam = at(lastParam);
+      return true;
     }
+    if (cp === 0x3a) {
+      const seen = digitIsSub && rejectSubDigits;
+      digitIsSub = true;
+      if (subCount >= MAX_SUB_PARAMS) {
+        rejectSubDigits = true;
+        return !seen;
+      }
+      subCount++;
+      lastSub = -1;
+      return true;
+    }
+    if (digitIsSub && (subCount === 0 || rejectSubDigits)) return false;
+    const digit = cp - 0x30;
+    const before = digitIsSub ? lastSub : lastParam;
+    const after = before === -1 ? digit : Math.min(before * 10 + digit, MAX_VALUE);
+    if (digitIsSub) lastSub = after;
+    else lastParam = after;
+    return after !== before;
   }
 
   /** `OscParser.put` for one code point; whether it changed anything. */
@@ -408,12 +413,9 @@ export function escapeTail(): EscapeTail {
           begin('');
         }
         break;
-      case PARAM: {
-        const before = paramsState();
-        param(cp);
-        if (next !== state || paramsState() !== before) params += String.fromCodePoint(cp);
+      case PARAM:
+        if (param(cp) || next !== state) params += String.fromCodePoint(cp);
         break;
-      }
       case COLLECT:
         if ((state === CSI_ENTRY || state === DCS_ENTRY) && cp >= 0x3c) {
           prefix = String.fromCodePoint(cp);
