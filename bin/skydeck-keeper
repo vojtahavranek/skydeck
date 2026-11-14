@@ -358,6 +358,8 @@ class Keeper:
             "rows": self.rows,
             "seq": self.seq,
             "snapSeq": self.snap_seq,
+            # the first record the tail holds: after the snapshot, or after what the cap dropped
+            "tailFrom": self.tail[0][0] if self.tail else self.seq + 1,
             "gap": self.dropped > self.snap_seq,
             "meta": {name: spec["meta"][name] for name in META_FIELDS},
             "exited": self.exit,

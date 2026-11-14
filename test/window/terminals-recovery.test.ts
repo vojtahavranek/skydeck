@@ -197,6 +197,14 @@ describe('registry: rebuilding after a restart', () => {
     const r1 = box.registry({ platform: small });
     const { spec, mirror } = await startStandin(box, r1);
     await typeLine(r1, spec.id, mirror, '/lines 4000');
+    // A reconnect of a registry that has every record: the keeper's gap lost nothing for it.
+    r1.sockets.at(-1)?.destroy();
+    await until(() => r1.events.hello.length === 2, 'the reconnect');
+    assert.equal(r1.events.hello[1]?.hello.gap, true);
+    assert.ok((r1.events.hello[1]?.hello.tailFrom ?? 0) > 1, 'the tail starts after the dropped');
+    await typeLine(r1, spec.id, mirror, '/idle');
+    assert.deepEqual(mirror.notices, [], 'no gap notice for a screen that lost nothing');
+    assert.equal(r1.terminals.length, 1, 'not rebuilt');
     r1.drop();
     const r2 = box.registry();
     await r2.registry.rediscover();
@@ -222,6 +230,17 @@ describe('registry: rebuilding after a restart', () => {
       [80, 24],
     ]);
     assert.ok(r2.log.some((line) => line.includes('gap')));
+    assert.deepEqual(
+      readRecords(spec.env['STANDIN_RECORD'] ?? '').filter((x) => x.ev === 'resize').length,
+      2,
+      'the first registry made no redraw',
+    );
+    // The count is exact after a gap (tailFrom): a park clears it for the next server.
+    await r2.registry.stopAll();
+    const r3 = box.registry();
+    await r3.registry.rediscover();
+    assert.equal(r3.events.hello[0]?.hello.gap, false);
+    assert.ok((r3.events.hello[0]?.hello.snapSeq ?? 0) > 0);
   });
 });
 
@@ -254,6 +273,7 @@ describe('registry: a keeper with a newer protocol', () => {
               rows: 30,
               seq: 3,
               snapSeq: 0,
+              tailFrom: 1,
               gap: false,
               meta: {
                 sessionId: SESSION,

@@ -10,8 +10,8 @@
  * Record numbers: the keeper numbers its records from 1 (S2 8.1). After a claim the snapshot
  * covers records up to `snapSeq` and the tail brings the stream to the hello's `seq`. The server
  * counts every record it hands to the screen side; a park names the last record its snapshot
- * covers. When the keeper reports a gap the tail starts at a number the hello does not give, so the
- * count is not exact: such a terminal is not parked until a later claim gives an exact position.
+ * covers. The tail's first record is the hello's `tailFrom` (ruled, task 16): `snapSeq + 1`, or
+ * later when the keeper dropped records (gap), so the count is exact after a gap too.
  */
 import { dirname } from 'node:path';
 
@@ -111,6 +111,8 @@ const MAX_ROWS = 500;
 const SOCKET_PATH_LIMIT = 108;
 /** The forced redraw's two resizes need a pause between them (stand-in review, #40: ≥ 50 ms). */
 const REDRAW_PAUSE_MS = 100;
+/** How long a claim whose snapshot may or may not come waits for it before it does without. */
+const NO_SNAPSHOT_MS = 1000;
 /** How long stopAll waits for a connection to take its park before it is closed anyway. */
 const STOP_WAIT_MS = 2000;
 
@@ -168,7 +170,7 @@ interface Claim {
   phase: 'hello' | 'snapshot' | 'maybe' | 'records';
   /** Whether a snapshot that comes rebuilds the screen (false: the screen is built already). */
   useS: boolean;
-  /** The keeper's number of the last record read on this connection (exact only without gap). */
+  /** The keeper's number of the last record read on this connection. */
   position: number;
   /** Records up to this keeper number are on the screen already (a reconnect continues it). */
   skipUntil: number;
@@ -183,9 +185,8 @@ interface Term {
   screen: ScreenSide | null;
   /** Records handed to the screen side so far (internal count, never reset). */
   count: number;
-  /** The keeper's number of the last record handed to the screen side, when exact. */
+  /** The keeper's number of the last record handed to the screen side (or that it stands for). */
   keeperSeq: number;
-  exact: boolean;
   /** Query answers go to the keeper (false while a claim's tail is replayed). */
   answering: boolean;
   /** The last forwarding step, so that what comes after a record waits for it. */
@@ -359,7 +360,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const screen = term.screen;
     if (term.parking !== null) return term.parking;
     if (
-      !term.exact ||
       claim === null ||
       claim.phase !== 'records' ||
       screen === null ||
@@ -433,7 +433,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
       screen: null,
       count: 0,
       keeperSeq: 0,
-      exact: true,
       answering: false,
       last: Promise.resolve(),
       sinks: new Set(),
@@ -559,9 +558,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
       case 'D':
       case 'R':
         claim.position += 1;
-        if (!(term.exact && claim.position <= claim.skipUntil)) {
+        if (claim.position > claim.skipUntil) {
           // (records up to skipUntil are on the screen already: a reconnect continues it)
-          if (term.exact) term.keeperSeq = claim.position;
+          term.keeperSeq = claim.position;
           record(term, frame);
         }
         replayed(term, claim);
@@ -632,25 +631,25 @@ export function createRegistry(deps: RegistryDeps): Registry {
       claim.settle?.(true);
       return;
     }
+    // A screen that holds every record before the tail goes on (a reconnect): nothing was lost
+    // for it, whatever the keeper dropped meanwhile; the records it has are skipped.
     const continues =
-      term.screen !== null &&
-      term.exact &&
-      !hello.gap &&
-      term.keeperSeq >= hello.snapSeq &&
-      term.keeperSeq <= hello.seq;
+      term.screen !== null && term.keeperSeq >= hello.tailFrom - 1 && term.keeperSeq <= hello.seq;
     // Answers wait until the tail is on the screen: its queries were answered when they were new,
     // or went unanswered while no server was there (S2 7.3, 14).
     term.answering = false;
-    claim.position = hello.snapSeq;
+    // The tail's records are numbered from tailFrom (ruled, task 16).
+    claim.position = hello.tailFrom - 1;
     claim.phase = hello.snapSeq > 0 ? 'snapshot' : 'maybe';
+    const lost = !continues && hello.gap;
     if (continues) {
-      // The screen holds every record up to keeperSeq: the snapshot and those are skipped.
       claim.useS = false;
       claim.skipUntil = term.keeperSeq;
     } else {
       claim.useS = true;
-      term.exact = !hello.gap;
-      term.keeperSeq = hello.snapSeq;
+      claim.skipUntil = 0;
+      // The rebuilt screen stands for every record up to the tail's start, lost ones included.
+      term.keeperSeq = hello.tailFrom - 1;
       if (hello.seq === 0) {
         // Nothing written yet: the screen is empty at the hello's size. Park that at once
         // (record 0), so that every later claim learns the first size from its snapshot.
@@ -665,7 +664,19 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const state: TerminalState = hello.started ? 'running' : 'starting';
     if (!isOver(info.state)) setState(term, state);
     changed();
-    if (hello.gap) {
+    if (claim.phase === 'maybe' && claim.useS && hello.tailFrom > hello.seq) {
+      // An empty tail and maybe no snapshot (never parked, everything dropped): no frame may
+      // follow the hello, so the screen is made at its size unless a snapshot comes first.
+      clock.after(NO_SNAPSHOT_MS, () => {
+        if (term.claim === claim && claim.phase === 'maybe') {
+          claim.phase = 'records';
+          newScreen(term, hello.cols, hello.rows, null);
+          setSize(term, hello.cols, hello.rows);
+          replayed(term, claim);
+        }
+      });
+    }
+    if (lost) {
       term.gap = true;
       log(id, 'gap');
       toAllSinks(term, (sink) => {
@@ -690,8 +701,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const hello = claim.hello;
     if (hello === null || claim.settle === null || term.screen === null) return;
     if (claim.phase === 'snapshot') return;
-    if (claim.phase === 'maybe' && hello.seq > hello.snapSeq) return;
-    if (term.exact && claim.position < hello.seq) return;
+    if (claim.position < hello.seq) return;
     if (hello.exited !== null && term.info.exit === null) return; // its X follows the tail
     const settle = claim.settle;
     claim.settle = null;

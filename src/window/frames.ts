@@ -205,6 +205,9 @@ export interface KeeperHello {
   rows: number;
   seq: number;
   snapSeq: number;
+  /** The number of the first record the tail holds: `snapSeq + 1` unless records were dropped
+   *  (then `gap`), `seq + 1` for an empty tail (ruled, task 16). */
+  tailFrom: number;
   gap: boolean;
   meta: KeeperMeta;
   exited: KeeperExit | null;
@@ -358,6 +361,7 @@ export function parseHello(
       rows: field(where, fields, 'rows', 'number', isSize),
       seq: field(where, fields, 'seq', 'number', isCount),
       snapSeq: field(where, fields, 'snapSeq', 'number', isCount),
+      tailFrom: field(where, fields, 'tailFrom', 'number', isCount),
       gap: field(where, fields, 'gap', 'boolean'),
       meta: readMeta(object(`${where}.meta`, field(where, fields, 'meta', 'object'))),
       exited: null,
@@ -373,6 +377,14 @@ export function parseHello(
       throw new Refusal(`${where}.pid: wrong value`);
     }
     if (hello.snapSeq > hello.seq) throw new Refusal(`${where}.snapSeq: wrong value`);
+    // The tail starts right after the snapshot, or later exactly when records were dropped (gap).
+    if (
+      hello.tailFrom <= hello.snapSeq ||
+      hello.tailFrom > hello.seq + 1 ||
+      hello.gap !== hello.tailFrom > hello.snapSeq + 1
+    ) {
+      throw new Refusal(`${where}.tailFrom: wrong value`);
+    }
     // A program that started cannot end as not started, nor one that never started otherwise.
     if (hello.exited !== null && hello.started !== (hello.exited.notStarted === null)) {
       throw new Refusal(`${where}.exited: wrong value`);

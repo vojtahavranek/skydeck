@@ -441,6 +441,7 @@ export interface KeeperExit { code: number | null; signal: number | null; atNs: 
 export interface KeeperHello {
   protocol: number; keeper: string; id: string; started: boolean; startBy: string; lock: string | null;
   pid: number | null; procStart: number | null; cols: number; rows: number; seq: number; snapSeq: number;
+  tailFrom: number; // the first record the tail holds (ruled by the plan owner, task 16)
   gap: boolean; meta: KeeperMeta; exited: KeeperExit | null;
 }
 export interface KeeperStarted { pid: number; procStart: number; atNs: string }
@@ -474,7 +475,10 @@ nothing these refuse; the parsers return `{ ok: false, kind }` (A22), the encode
 - **`hello`**: `protocol` a whole number from 0 (any value: the caller decides, S2 7.7); `id` 12
   lower-case hex characters (A21); `pid` a whole number from 1 or null, `procStart` from 0 or
   null, both null exactly when `started` is false (S2 8.1: null before the start); `snapSeq` ≤
-  `seq`; `meta.sessionId` passes `isSessionId`; `meta.kind` `resume` or `new`; `meta.slot` 1–9 or
+  `seq`; `tailFrom` (ruled by the plan owner, task 16) from `snapSeq + 1` to `seq + 1`, above
+  `snapSeq + 1` exactly when `gap` — the keeper sends the number of its tail's first record
+  (`seq + 1` for an empty tail), so that after a gap the server still knows where the tail ends and
+  which record a park names; `meta.sessionId` passes `isSessionId`; `meta.kind` `resume` or `new`; `meta.slot` 1–9 or
   null (S2 7.6); `exited`, when not null, as `X` below, with `notStarted` set exactly when
   `started` is false. The keeper refuses a spec that would make it write a `hello` these rules
   refuse (ruled by the plan owner, task 9): `id`, `startBy`, `lock` and every `meta` field are
@@ -624,6 +628,9 @@ export interface TerminalInfo {
   notReported: boolean;
 }
 export interface StreamSink {
+  /** Always the first call on a sink: the screen at the point of the terminal's chain where
+   *  `attach` was called. Never called when the terminal is forgotten before it was made. */
+  snapshot(cols: number, rows: number, data: string): void;
   /** One record of output, after the screen side applied it. */
   output(bytes: Uint8Array): void;
   /** A resize record, in stream order. */
@@ -633,9 +640,13 @@ export interface StreamSink {
 }
 export interface TerminalHub {
   list(): readonly TerminalInfo[];
-  /** The snapshot at the current point of the terminal's chain, then every later record to `sink`
-   *  (S2 8.2.4) until `detach`. null for an unknown terminal. */
-  attach(termId: string, sink: StreamSink): { cols: number; rows: number; data: string; detach(): void } | null;
+  /** Registers `sink` at the current point of the terminal's chain. The sink gets `snapshot`
+   *  for that point first, then every later record in stream order (S2 8.2.4), until `detach`.
+   *  Nothing is called on the sink before `snapshot` or after `detach`. null for an unknown
+   *  terminal. (Ruled by the plan owner, task 16: the screen side snapshots asynchronously, so
+   *  the snapshot is the sink's first call; a terminal that ended before the attach gives
+   *  `snapshot` and no `exit` call, the exit being in `list()`.) */
+  attach(termId: string, sink: StreamSink): { detach(): void } | null;
   input(termId: string, data: Uint8Array): 'ok' | 'full' | 'ended' | 'unknown';
   /** Sends Z to the keeper; the size reaches every sink when the R record comes back (S2 8.2.6). */
   resize(termId: string, cols: number, rows: number): void;

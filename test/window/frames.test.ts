@@ -316,6 +316,7 @@ const HELLO: KeeperHello = {
   rows: 40,
   seq: 17,
   snapSeq: 12,
+  tailFrom: 13,
   gap: false,
   meta: { ...META },
   exited: null,
@@ -337,10 +338,18 @@ describe('parseHello', () => {
       procStart: null,
       seq: 0,
       snapSeq: 0,
+      tailFrom: 1,
       meta: { ...META, kind: 'new', slot: null, label: null },
       exited: { code: null, signal: null, atNs: '1', notStarted: 'the deadline passed' },
     };
     assert.deepEqual(parseHello(json(hello)), { ok: true, value: hello });
+  });
+
+  test('a gap: the tail starts after the records the keeper dropped (ruled, task 16)', () => {
+    for (const tailFrom of [14, 18]) {
+      const hello = { ...HELLO, gap: true, tailFrom };
+      assert.deepEqual(parseHello(json(hello)), { ok: true, value: hello });
+    }
   });
 
   test('protocol 2 → ok: the caller decides (S2 7.7)', () => {
@@ -378,6 +387,12 @@ describe('parseHello', () => {
     ['rows above 65535', { ...HELLO, rows: 65536 }],
     ['seq negative', { ...HELLO, seq: -1 }],
     ['snapSeq beyond seq', { ...HELLO, snapSeq: 18 }],
+    ['tailFrom missing', { ...HELLO, tailFrom: undefined }],
+    ['tailFrom not whole', { ...HELLO, tailFrom: 13.5 }],
+    ['tailFrom inside the snapshot', { ...HELLO, tailFrom: 12 }],
+    ['tailFrom beyond seq + 1', { ...HELLO, tailFrom: 19 }],
+    ['tailFrom past snapSeq + 1 without gap', { ...HELLO, tailFrom: 15 }],
+    ['gap with tailFrom at snapSeq + 1', { ...HELLO, gap: true }],
     ['gap missing', { ...HELLO, gap: undefined }],
     ['meta.sessionId not a session id', { ...HELLO, meta: { ...META, sessionId: MARKER } }],
     ['meta.kind unknown', { ...HELLO, meta: { ...META, kind: MARKER } }],
