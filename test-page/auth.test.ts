@@ -6,23 +6,26 @@ import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import type { TestContext } from 'node:test';
 
-import type { Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 
 import { controlClient } from '../src/window/client.ts';
 import { sleep } from '../test/helpers/keeper.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import type { StartedServer } from '../test/helpers/window.ts';
-import { browser, newPage } from './helpers/browser.ts';
+import { browser, newPage as newUnpinnedPage } from './helpers/browser.ts';
 import {
   assetBase,
   escape,
   connection,
   logOf,
+  MINIMAL_MODULES,
   holdWriteLock,
   honest,
   PAGE_WAIT_MS,
   pageUrl,
+  pinModules,
   RECORDER,
   shownText,
   showsText,
@@ -32,6 +35,14 @@ import {
   wrongProof,
 } from './helpers/shell.ts';
 import type { Logged } from './helpers/shell.ts';
+
+// ONE place for the whole file: these tests of the page's key run on the pinned minimal modules
+// (test-page/fixtures/minimal-*), so that the real modules of tasks 27–29 change nothing here.
+async function newPage(t: TestContext, chromium: Browser): Promise<Page> {
+  const page = await newUnpinnedPage(t, chromium);
+  await pinModules(page, MINIMAL_MODULES);
+  return page;
+}
 
 /** The vector of S2 8.2.2 (pinned by test/window/auth.test.ts with Node.js's crypto). */
 const VECTOR = {
