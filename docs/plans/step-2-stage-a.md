@@ -1274,6 +1274,12 @@ export function createTerminalView(root, deps) {}
 //     find(), copy(), pasteRaw(), focus(), setHidden(hidden), attached(): string[] }
 // The terminal view also shows, from `show(term)`: the `reconnecting` bar (S2 7.8) and "sized by
 // another window" (S2 8.2.6).
+// After a reconnect (S2 8.2.5) app.js itself sends `attach` for each id of `attached()`, the shown
+// terminal first and the next once the previous one's `snap` arrived, proposing the terminal's
+// size of the new `list`; an id the new `list` lacks is skipped, and a `list` without the terminal
+// the queue waits for moves it on. The view then gets a second `snap` for a terminal it shows: it
+// resets that terminal, applies the snap, and sends its own `resize` when its fitted size differs;
+// `attached()` keeps its ids across the reconnect (ruled, task 26).
 
 // web/cards.js — replaced by task 29
 /** @param {HTMLElement} root @param {{ act(action: object): Promise<ResultMessage>, select(id: string): void }} deps */
@@ -3661,7 +3667,7 @@ with `@import` and `@typedef`, ruling 5).
   all against a stand-in server without one; a dropped file does not navigate the window; the
   server stopped → the bar of S2 6.3 within 4 s; started again (same boot) → "skydeck's server
   restarted; your sessions kept running" and the list back; a server started with another boot
-  id (`startTestServer(t, { bootId })`, A36) → "WSL restarted at <time>…" (S2 6.3); the keep-alive `failed`
+  id (`startTestServer(t, { bootId })`, A36) → "WSL has restarted since <time>…" (S2 6.3; ruled, the time the page lost the old server); the keep-alive `failed`
   in `welcome` and a `keepalive-lost` notice → "WSL is not kept running" in the title bar until
   `keepalive-back`; a `tick-failed` notice shown until the next `list`; a server with another asset version
   → the page reloads; the service-worker case of S2 17.4 (a stand-in server that registers a

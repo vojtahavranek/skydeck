@@ -559,12 +559,20 @@ answer counts only once the server has proven itself (8.2.2); then the page comp
 - **same boot id, new server id**: "skydeck's server restarted; your sessions kept running". It
   reconnects, re-attaches (every terminal gets a fresh snapshot), and reloads itself first when the
   server's asset version differs from its own (8.2.2).
-- **new boot id**: "WSL restarted at <time>: the sessions that were running have ended." The
+- **new boot id**: "WSL has restarted since <time>: the sessions that were running have ended."
+  The `welcome` carries no boot time, so `<time>` is the moment the page lost the old server, the
+  time of the bar above; "restarted at" would state a time nobody knows (ruled, plan task 26). The
   terminal pane shows each ended terminal's last screen no longer (the server that held it is
   gone), the list shows the sessions `not-running` with their marks, and the restore banner offers
   them (12.7; before stage C: "run skydeck restore", or resume them one by one).
 
-The page itself never starts WSL or a program; it says what to type.
+The page itself never starts WSL or a program; it says what to type. It stops trying altogether,
+in either mode, once something answered that could not prove itself (8.2.2 step 5): trying again
+every second would hand that program a `hello` each time; the warning stays until the page is
+reloaded or closed (ruled, plan task 26). A 503 at the upgrade (the server starts or stops, 8.2.1),
+a close 1013 at the `hello` (its database is busy, 8.2.2) and a close right after the challenge (a
+waiting connection dropped for a newcomer, 8.2.1) are lost connections like any other: the page
+tries again and never says that something else answers on the port.
 
 ### 6.4 A stable interop socket for sessions
 
@@ -1122,8 +1130,10 @@ the server's proof.
    worthless.
 5. The page checks `pS`. Until it has, it sends nothing else, shows nothing the server sent, and
    does not reload itself on the server's word. A wrong `pS` makes it close the connection and say
-   `something answers on port <n> that is not skydeck's server; nothing was sent to it`. In mode
-   `launch` it then keeps the secret from `key` (below); later connections use mode `key`.
+   `something answers on port <n> that is not skydeck's server; nothing was sent to it`, and it
+   opens no further connection until it is reloaded, in either mode (6.3; ruled, plan task 26).
+   Once `pS` checks out, in mode `launch` it keeps the secret from `key` (below); later
+   connections use mode `key`.
 6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
    "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
    connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
@@ -1178,7 +1188,12 @@ marked **not extractable**, stores that key object in the origin's IndexedDB, an
 A page presents its token **once**: whatever happens after its one `hello` with that token — a
 close, a timeout, a wrong server proof — it never sends a proof with that token again, and, unless
 it received a key, says `run skydeck window again` instead of retrying (a second presentation by
-the page itself would raise a false alarm).
+the page itself would raise a false alarm); it does not fall back to a stored key either. Two ends
+are no presentation (ruled, plan task 26): a connection that ended before the page sent its `hello`
+(a 503 at the upgrade, a refused connection, a close before the challenge), and a close 1013 after
+it — the server reads the secret before it looks at any token ("Reading the secret" above), so the
+token still waits and no alarm can follow. After either the page tries again with the token, on
+6.3's schedule; an expired or dropped token then answers 4003, which ends it.
 The secret's bytes never reach the page's code: the page can make proofs with the key but cannot
 read it, and neither can any other page at that origin. A reload, and a window opened later in the
 same profile, find the key there. A page that has neither a token nor a stored key says `this
