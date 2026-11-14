@@ -2436,7 +2436,13 @@ of records waiting for the screen side it pauses that socket, below 1 MiB it rea
 it); reconnect attempts to one keeper are at most one a second, the claim that just ended
 counting as one; a claim whose tail stops coming (no frame for 10 s while the server reads) is
 given up as a lost connection, so `rediscover` always settles; one exit per terminal (a second
-`X` only gets its `A`); an attach while a claim rebuilds the screen waits for that screen.
+`X` only gets its `A`, sent once the exit is applied); an attach while a claim rebuilds the screen
+waits for that screen, and a terminal that is over without one gives the empty screen at the
+known size, then its `exit`. Also ruled (review 1's check of the review-2 commit): a keeper's
+`hello`, `S` or `R` with a size above 1000 × 500 is refused and the claim closed (S2 8.1); the gap
+redraw's way back waits for the next settled claim when the connection broke, and a page's
+`resize` that is sent replaces it (one that sends nothing does not; S2 7.3); a hello that does not
+continue the screen drops the old screen at once, attaches waiting for the new one (S2 7.3).
 
 **Tests** (platform: `realTestPlatform`; real keepers running the stand-in through `standinCommand`; `G` sent by the test)
 - spawn, `G`, type `/red hi\r`: an attached sink gets the output records after the snapshot, in

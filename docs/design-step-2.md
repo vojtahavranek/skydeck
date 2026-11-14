@@ -761,12 +761,21 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   closes the connection at its send cap and goes on reading the pty; the server reconnects and
   takes the rest from the tail (gap and redraw if the tail overflowed meanwhile). The memory of a
   terminal stays bounded, and the program is never paused (stage A's plan, task 16, review 2).
+  Reconnections to one keeper are at most one a second; a claim whose tail stops coming (no frame
+  for 10 s while the server reads) counts as a lost connection.
+- **A claim that rebuilds.** A hello whose tail does not follow the screen the server holds (a
+  first claim, or records lost for that screen) drops that screen at once; a page that attaches
+  before the snapshot or the first record has made the new one waits for it, and gets the empty
+  screen and the exit if the keeper is lost first. A hello whose tail does follow it (a reconnect)
+  goes on with that screen and skips the records it has.
 - **Gap.** A keeper that reports gap (7.1, step 6) has lost records. The server rebuilds from what
   is left, shows "part of this terminal's output was lost while skydeck's server was not running"
   on the terminal, and makes the program redraw by changing the pty's width by one column and back,
   with a pause of at least 50 ms between the two (two quick SIGWINCH collapse into one, and a
   program that reads its size when it handles the signal sees no change; measured with the
-  stand-in, plan task 3). The scrollback above the redraw may be wrong.
+  stand-in, plan task 3). When the connection breaks inside that pause, the way back is sent on the
+  next connection once its claim has settled; a page's resize that reaches the keeper meanwhile
+  replaces it. The scrollback above the redraw may be wrong.
 
 A server restart therefore shows every screen exactly as it was (verified with the prototype for
 every viewport cell, colour, attribute, 119 lines of scrollback, wrap flags and modes after two
@@ -920,7 +929,11 @@ keeper). Protocol version 1:
 | `P` park | server → keeper | 8-byte record number, 2-byte cols, 2-byte rows, snapshot. The keeper keeps it and drops the tail's records up to that number. |
 | `A` acknowledge | server → keeper | The server has the exit; the keeper may end (7.8). |
 
-A connection whose first frame is not `C` is closed. Records are numbered from 1 in the order the
+A connection whose first frame is not `C` is closed. The server closes a connection whose keeper
+sends what the codec refuses, a first frame that is not `H`, a `hello` of another terminal, a
+missing or wrong `S`, a frame no keeper sends, or a size above 1,000 columns or 500 rows in `H`,
+`S` or `R` (a keeper is only ever given sizes within that, 8.2.6); it logs the kind once while the
+same problem repeats. Records are numbered from 1 in the order the
 keeper produced them. The server's position after an
 attach is `seq`: the snapshot covers records up to `snapSeq` and the tail, records `tailFrom` to
 `seq`, brings it to `seq`; after a gap the records between are lost, and the numbers still tell
@@ -1200,7 +1213,9 @@ page's `view` state is its own. Notifications go to one page only (13).
 
 #### 8.2.8 Backpressure
 
-The server never pauses a keeper for a slow page. When more than 1 MiB is queued on a page's
+The server never pauses a program; it may stop reading a keeper's connection (7.3, Reading), which
+only fills the keeper's send queue until the keeper closes that connection. When more than 1 MiB is
+queued on a page's
 socket, the server stops forwarding output to that page and marks its attached terminals
 **behind**; when the queue has drained below 64 KiB, it sends a fresh `snap` for each of them and
 forwards again. A page attaches only to terminals it shows or has shown recently (12.6), so a
@@ -1829,7 +1844,7 @@ taskbar button show it is check W3. Low priority: stage E (19).
 | **WSL stops** | Every process in WSL ends, so every session in the window ends (marked `ended-unexpectedly`). The window stays and shows 6.3's bar; after `skydeck window` it shows the new boot and the restore banner (12.7). |
 | **The keep-alive cannot start or dies** | The server retries (6.1), pages show `WSL is not kept running`, and `doctor` reports it. The window keeps working while any WSL terminal is open. |
 | **A page falls behind** | 8.2.8: it gets a fresh snapshot instead of the bytes it missed. |
-| **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
+| **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. |
 | **skydeck is updated** | 16.5. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |

@@ -780,6 +780,7 @@ describe('registry: the forced redraw', () => {
     const box = await registrySandbox(t);
     const id = 'c00000000008';
     const gapHello = (): string => helloOf(box, id, { seq: 3, snapSeq: 0, tailFrom: 3, gap: true });
+    let onFirstZ = (): void => {};
     const fake = await scriptedKeeper(t, box, id, (conn, n) => {
       conn.send('H', gapHello());
       conn.send('D', 'three\r\n');
@@ -788,11 +789,17 @@ describe('registry: the forced redraw', () => {
           if (conn.received.some((f) => f.type === 'Z')) {
             clearInterval(check);
             conn.end(); // inside the 100 ms between the two resizes
+            onFirstZ();
           }
         }, 5);
+        t.after(() => clearInterval(check));
       }
     });
     const r = box.registry();
+    // A page's resize that sends nothing (here a size that is no size) does not cancel the way back.
+    onFirstZ = () => {
+      r.registry.resize(id, Number.NaN, 24);
+    };
     await r.registry.rediscover();
     await until(() => fake.conns.length === 2, 'the reconnect', 5000);
     const sizes = (conn: FakeConn | undefined): string[] =>
@@ -844,5 +851,78 @@ describe('registry: reading a keeper no faster than its screen side applies', ()
     });
     await page.settled();
     assertSameScreen(screen, page.term);
+  });
+});
+
+describe('registry: after the exit, and a keeper lost before its screen', () => {
+  test('rediscover of a keeper whose program ended returns it ended, with its exit reported and its screen rebuilt', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c00000000009';
+    const exit = { code: 0, signal: null, atNs: '5', notStarted: null };
+    await scriptedKeeper(t, box, id, (conn) => {
+      conn.send('H', helloOf(box, id, { seq: 1, exited: exit }));
+      conn.send('D', 'bye\r\n');
+      conn.send('X', JSON.stringify(exit));
+      const check = setInterval(() => {
+        if (conn.received.some((f) => f.type === 'A')) {
+          clearInterval(check);
+          conn.end(); // the keeper ends on A (S2 7.8)
+        }
+      }, 1);
+      t.after(() => clearInterval(check));
+    });
+    // A slow screen side: the keeper's closing on A must not cut the rebuild short.
+    const r = box.registry({ slowWriteMs: 50 });
+    const found = await r.registry.rediscover();
+    assert.deepEqual(
+      found.map((x) => [x.id, x.state, x.exit?.code]),
+      [[id, 'ended', 0]],
+    );
+    assert.equal(r.events.exited.length, 1, 'the exit was reported when rediscover resolved');
+    assert.deepEqual(screenLines(await screenOf(r)), ['bye']);
+  });
+
+  test('a keeper lost between its hello and its snapshot: every attach gets an empty snapshot, then the loss', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c0000000000a';
+    let fake: { stop(): Promise<void> } | null = null;
+    fake = await scriptedKeeper(t, box, id, (conn) => {
+      conn.send('H', helloOf(box, id, { seq: 7, snapSeq: 5, tailFrom: 6 }));
+      setTimeout(() => void fake?.stop(), 200); // gone before its snapshot: the socket refuses
+    });
+    const r = box.registry();
+    let early: Mirror | null = null;
+    r.registry.onChange(() => {
+      if (early === null && r.registry.list().some((x) => x.id === id)) {
+        early = mirror(box.modules);
+        assert.ok(r.registry.attach(id, early));
+      }
+    });
+    await r.registry.rediscover();
+    await until(() => info(r.registry, id).state === 'lost', 'lost', 10_000);
+    const late = mirror(box.modules);
+    assert.ok(r.registry.attach(id, late));
+    const first = early as Mirror | null;
+    assert.ok(first);
+    await until(() => first.calls.length === 2 && late.calls.length === 2, 'both answered');
+    assert.deepEqual(first.calls, ['S', 'x']);
+    assert.deepEqual(late.calls, ['S', 'x']);
+    assert.deepEqual([late.term.cols, late.term.rows], [80, 24], "the hello's size");
+    assert.equal(late.exits[0]?.lost, true);
+    assert.equal(r.events.exited.length, 1);
+  });
+
+  test('a keeper whose stream fails right after a settled claim is claimed at most once a second, and logged once', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'c0000000000b';
+    const fake = await scriptedKeeper(t, box, id, (conn) => {
+      conn.send('H', helloOf(box, id));
+      setTimeout(() => conn.raw(Uint8Array.of(0x51, 0, 0, 0, 0)), 5); // settled, then garbage
+    });
+    const r = box.registry();
+    await r.registry.rediscover();
+    await sleep(2500);
+    assert.ok(fake.conns.length <= 4, `${fake.conns.length} claims in 2.5 s`);
+    assert.equal(r.log.filter((line) => line.endsWith('codec refuses (unknown-type)')).length, 1);
   });
 });

@@ -585,6 +585,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
     term.cooling = true;
     clock.after(RECONNECT_MS, () => {
       term.cooling = false;
+      // A claim that settled and still stands a second later: a later problem is news again.
+      if (term.claim === claim && claim.settle === null && claim.hello !== null) term.note = null;
     });
     const cancel = clock.after(helloMs, () => {
       if (claim !== null && claim.hello === null && term.claim === claim) {
@@ -838,7 +840,6 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.claim === claim) {
         term.answering = true;
-        term.note = null;
         claim.stopIdle?.();
         redrawBack(term); // a redraw cut short by a broken connection goes on here
         settle(true);
@@ -878,11 +879,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
   }
 
   function onExit(term: Term, claim: Claim, exit: KeeperExit): void {
-    // S2 8.1: the server has the exit; the keeper may end (7.8). Sent at once, so that a
-    // connection that breaks before the screen side caught up does not keep the keeper waiting.
-    claim.link.send('A');
     // One exit per terminal: a second X (a keeper that repeats it) only gets its A.
-    if (term.info.exit !== null) return;
+    if (term.info.exit !== null) {
+      claim.link.send('A');
+      return;
+    }
+    // Stored at once: a connection that breaks before the screen side caught up is not
+    // reconnected to, nor the terminal made lost (onClosed, lose).
     term.info.exit = exit;
     void term.last.then(() => {
       if (term.forgotten) return;
@@ -892,7 +895,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
         sink.exit(exit, false);
       });
       emit('exited', () => events.exited(copy(term), exit, false));
+      for (const restart of term.waiting.splice(0)) restart(); // over: attaches wait no more
       replayed(term, claim);
+      // S2 8.1: the server has the exit; the keeper may end (7.8). Sent once the exit is applied
+      // and the claim settled, so that the keeper's closing cannot cut the claim short.
+      claim.link.send('A');
     });
   }
 
@@ -1004,6 +1011,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
         sink.exit(exit, true);
       });
       emit('exited', () => events.exited(copy(term), exit, true));
+      // Attaches that waited for a screen this terminal will never get: the empty snapshot at
+      // the known size, then the exit (restarted after the exit went out, so it comes once).
+      for (const restart of term.waiting.splice(0)) restart();
     });
   }
 
@@ -1250,7 +1260,12 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const take = (): void => {
       if (stopped) return; // a stopping server has no screens to give
       const screen = term.screen;
-      if (screen === null && term.hello !== null && term.info.state !== 'newer-keeper') {
+      if (
+        screen === null &&
+        term.hello !== null &&
+        term.info.state !== 'newer-keeper' &&
+        !isOver(term.info.state)
+      ) {
         // A claim is rebuilding the screen (its hello came, S or the first record not yet):
         // wait for it, so that the snapshot is the screen of this point of the stream.
         term.waiting.push(restart);
@@ -1290,10 +1305,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     resize(termId, cols, rows) {
       const term = terms.get(termId);
-      if (term !== undefined) term.redrawTo = null; // a page's size wins over the redraw's
       const size = clampSize(cols, rows);
       const claim = term === undefined ? null : usable(term);
-      if (claim !== null && size !== null && !isOver(term?.info.state ?? 'ended')) {
+      if (term !== undefined && claim !== null && size !== null && !isOver(term.info.state)) {
+        term.redrawTo = null; // a page's size, sent, wins over the redraw's way back
         claim.link.send('Z', encodeResize(size.cols, size.rows));
       }
     },
