@@ -10,7 +10,7 @@
  * with `Allow: GET`, a path other than `/ws` (the query ignored) 404, then an Origin other than
  * `http://127.0.0.1:<port>` (for port 80 also `http://127.0.0.1`) 403. Each refusal carries the
  * headers of every answer (`securityHeaders`) and `Cache-Control: no-store`. Once `bye` has run,
- * an upgrade is answered 503. What Node.js answers before any listener (a request without Host, an
+ * an upgrade with the right Host is answered 503 (a wrong Host still 421). What Node.js answers before any listener (a request without Host, an
  * unknown method, headers above 16 KiB …) stays Node.js's own (ruled, task 17; S2 8.2.1).
  *
  * The handshake (S2 8.2.2). A proof is checked only through `auth.ts` (ruled, task 11): mode `key`
@@ -98,7 +98,7 @@ export interface Pages {
   notice(kind: NoticeMessage['kind'], text: string): void;
   /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
    *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS).
-   *  From then on an upgrade is answered 503 (ruled). */
+   *  From then on an upgrade with the right Host is answered 503 (ruled). */
   bye(reason: string): Promise<void>;
 }
 

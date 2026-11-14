@@ -2455,7 +2455,8 @@ header) has its `Host` (421), method (OPTIONS 403, any other but GET 405 with `A
 path (`/ws`, query ignored, else 404) checked there, then its `Origin` (403); the refusals carry
 `securityHeaders` and `no-store`. `bye` keeps a `'close'` listener on the raw upgrade socket, as a
 listener only, to resolve once the socket has really closed (ruled); every write and close goes
-through the WebSocket connection. After `bye` an upgrade is answered 503 (ruled, S2 8.2.1, 5.5).
+through the WebSocket connection. After `bye` an upgrade with the right `Host` is answered 503
+(ruled, S2 8.2.1, 5.5); a wrong `Host` still gets 421.
 
 Pages calls `hub.setTheme` with a page's theme (from its `start`) when that page starts focused
 and whenever it reports `focus` with `focused` true: `FocusMessage` carries no theme, so the one
@@ -2490,7 +2491,7 @@ export interface Pages {
   notice(kind: NoticeMessage['kind'], text: string): void;
   /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
    *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS).
-   *  From then on an upgrade is answered 503 (ruled). */
+   *  From then on an upgrade with the right Host is answered 503 (ruled). */
   bye(reason: string): Promise<void>;
 }
 export function createPages(deps: PagesDeps): Pages;
