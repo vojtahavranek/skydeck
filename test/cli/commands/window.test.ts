@@ -1872,11 +1872,10 @@ describe('a server that is starting is found by every command (ruled, server-fin
 
     const r = await h.exec(['doctor']);
 
-    const json = join(h.d.box.runtimeDir, 'server.json');
     const log = join(h.d.s.skydeckHome, 'state', 'server.log');
     assert.ok(
       r.stdout.includes(
-        `the window's server (pid ${live.pid}) is starting: it holds the window_server lock but has not written ${json} within 5 s; see ${log}; skydeck window --restart stops it\n`,
+        `the window's server (pid ${live.pid}) is starting and did not finish within 5 s (it holds the window_server lock and has not answered yet); see ${log}; skydeck window --restart stops it\n`,
       ),
       r.stdout,
     );
@@ -2190,18 +2189,31 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     assert.match(r.stdout, /^problem +WSL is not kept running while the window has a server/m);
   });
 
-  test('doctor while a server finishes its start, with window.keepAlive "wsl": its keep-alive is not started yet — info, not the problem', async (t) => {
-    const h = windowHarness(t, { keepAlive: 'wsl' });
-    slowServerStart(h, 8);
-    const url = await h.run(['--print-url']); // done once the server answers; its start goes on
-    assert.equal(url.code, 0, url.stderr);
+  for (const distro of [true, false]) {
+    test(`doctor while a server finishes its start, with window.keepAlive "wsl" and ${distro ? 'WSL_DISTRO_NAME set: its keep-alive is starting — info' : 'no WSL_DISTRO_NAME: its keep-alive failed — the problem, also while it starts'} (by the server's own word)`, async (t) => {
+      const h = windowHarness(t, { keepAlive: 'wsl' });
+      slowServerStart(h, 8);
+      const url = await h.run(['--print-url'], {
+        env: distro ? { WSL_DISTRO_NAME: 'skydeck-test' } : { WSL_DISTRO_NAME: undefined },
+      }); // done once the server answers; its start goes on
+      assert.equal(url.code, 0, url.stderr);
+      const state = (await h.client().status()).keepAlive.state;
+      assert.equal(state, distro ? 'starting' : 'failed');
 
-    const r = await h.exec(['doctor']);
+      const r = await h.exec(['doctor']);
 
-    assert.match(
-      r.stdout,
-      /^info +WSL is not kept running yet: the window's server is starting, and its first check starts the keep-alive$/m,
-    );
-    assert.doesNotMatch(r.stdout, /WSL is not kept running while the window has/);
-  });
+      const info =
+        /^info +WSL is not kept running yet: the window's server is starting, and its first check starts the keep-alive$/m;
+      if (distro) {
+        assert.match(r.stdout, info);
+        assert.doesNotMatch(r.stdout, /WSL is not kept running while the window has/);
+      } else {
+        assert.doesNotMatch(r.stdout, info);
+        assert.match(
+          r.stdout,
+          /^problem +WSL is not kept running while the window has a server \(.*the keep-alive failed: WSL_DISTRO_NAME is not set/m,
+        );
+      }
+    });
+  }
 });

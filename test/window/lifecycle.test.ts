@@ -1862,6 +1862,38 @@ test('startServe: serve exiting 0 while a live holder of the lock has not record
   assert.ok(performance.now() - before >= 1400);
 });
 
+test('startServe: serve exiting 0 while the lock names a holder that cannot be judged, or server.json cannot be read: it may live — waited for, never the stopped line', async (t) => {
+  for (const how of ['unknown holder', 'unreadable server.json'] as const) {
+    const h = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '0' }));
+    let deck = h.deck;
+    if (how === 'unknown holder') {
+      const holder = await liveSleep(t, h);
+      const { pid, procStart, bootId } = holder.line;
+      h.deck.store.setKv('window_server', `${pid}:${procStart}:${bootId}:${FAKE_ROOT}`);
+      deck = deckWith(h.deck, {
+        proc: {
+          stat: (asked) => {
+            if (asked === pid) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+            return h.base.proc.stat(asked);
+          },
+        },
+      });
+    } else {
+      mkdirSync(h.files().serverJson, { recursive: true }); // a directory where the file would be
+    }
+    const before = performance.now();
+    assert.deepEqual(
+      await startServe(deck, { startMs: 1500 }),
+      {
+        ok: false,
+        line: `the window's server did not start (no answer in 1.5 s); see ${logPath(h)}`,
+      },
+      how,
+    );
+    assert.ok(performance.now() - before >= 1400, how);
+  }
+});
+
 test('startServe: a server that answered, then stopped before it recorded itself: the stopped line, never "answers, but did not record itself"', async (t) => {
   const h = harness(t, () => ({ FAKE_SERVE_JSON_DELAY_MS: '60000' })); // answers, never records
   const starting = startServe(h.deck, { startMs: START_MS });

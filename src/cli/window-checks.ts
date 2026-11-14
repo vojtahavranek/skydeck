@@ -244,7 +244,7 @@ async function checkServer(view: WindowView, report: Report): Promise<void> {
       report(
         'problem',
         server.starting === true
-          ? `the window's server (pid ${server.pid}) is starting: it holds the window_server lock but has not written ${view.runtime().files.serverJson} within ${PING_S} s; see ${join(view.facts.places.stateDir, 'server.log')}; skydeck window --restart stops it`
+          ? `the window's server (pid ${server.pid}) is starting and did not finish within ${PING_S} s (it holds the window_server lock and has not answered yet); see ${join(view.facts.places.stateDir, 'server.log')}; skydeck window --restart stops it`
           : `the window's server (pid ${server.pid}) is alive but does not answer; skydeck window --restart stops it`,
       );
       return;
@@ -365,9 +365,10 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
       report('info', 'keep-alive: keepalive.pid cannot be read, so whether it runs cannot be told');
       return;
   }
-  if (stillStarting(server) && config.window.keepAlive !== 'off') {
-    // Its first check starts the keep-alive (S2 6.1) — until then none runs (ruled, server-findable,
-    // review 2). With window.keepAlive off none will: that stays the problem below.
+  if (stillStarting(server) && answered(server) && server.status?.keepAlive.state === 'starting') {
+    // By the server's own word (ruled, server-findable, review 2): its keep-alive is starting —
+    // its first check starts it (S2 6.1). One that is off, or failed (it cannot start: no
+    // WSL_DISTRO_NAME, …), stays the problem below, also while the server starts.
     report(
       'info',
       "WSL is not kept running yet: the window's server is starting, and its first check starts the keep-alive",
