@@ -89,11 +89,21 @@ export const RECORDER = `(() => {
   addEventListener('pagehide', () => log({ e: 'unload' }));
 })();`;
 
-/** What the recorder logged so far (across reloads). */
+/**
+ * What the recorder logged so far (across reloads). A read that meets a navigation (the page
+ * reloading itself) is made again on the next document.
+ */
 export async function logOf(page: Page): Promise<Logged[]> {
-  return page.evaluate(
-    () => JSON.parse(sessionStorage.getItem('skydeck-test-log') ?? '[]') as Logged[],
-  );
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await page.evaluate(
+        () => JSON.parse(sessionStorage.getItem('skydeck-test-log') ?? '[]') as Logged[],
+      );
+    } catch (error) {
+      if (attempt >= 50 || !/context was destroyed|navigat/i.test(String(error))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
 }
 
 /** Puts a mark into the log, so that a test can look at what came after it. */

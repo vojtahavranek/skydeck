@@ -715,7 +715,7 @@ test('the page shell', async (t) => {
         await mark(page, name);
         await press(page, cdp, key);
         const deadline = performance.now() + PAGE_WAIT_MS;
-        while (!after(await logOf(page).catch(() => []), name).some((e) => e.e === 'unload')) {
+        while (!after(await logOf(page), name).some((e) => e.e === 'unload')) {
           assert.ok(performance.now() < deadline, `${name} reloads`);
           await sleep(100);
         }
