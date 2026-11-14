@@ -6,11 +6,13 @@
  * runtime directory's interop link (S2 6.4) when there is one.
  */
 
+import { join } from 'node:path';
+
 import type { WindowConfig } from '../platform/config.ts';
 import type { Detached, Env, Platform } from '../platform/types.ts';
 import { describeError } from '../sessions/problems.ts';
 import { driveC } from './drive.ts';
-import { deriveProfileDir, edgeArgs, linkToOpen } from './windows.ts';
+import { deriveProfileDirUnder, edgeArgs, linkToOpen } from './windows.ts';
 
 /** A launch token as the address carries it: base64url (S2 8.2.2). */
 const TOKEN = /^[A-Za-z0-9_-]+$/;
@@ -110,7 +112,16 @@ export async function startEdge(
   }
   let profileDir = window.profileDir;
   if (profileDir === null) {
-    const derived = deriveProfileDir(platform.files);
+    // On the C: drive as driveC gives it: /mnt/c, or in a test sandbox its stand-in, so that a
+    // sandbox never reads the Windows side (review 2 of task 25; as uninstall and doctor do).
+    const drive = driveC(platform.env);
+    if (drive === null) {
+      return {
+        ok: false,
+        line: `the C: drive is not mounted, so the Edge profile folder cannot be derived; set window.profileDir to the folder for the window's Edge profile (an absolute Windows path) in ${configPath}`,
+      };
+    }
+    const derived = deriveProfileDirUnder(platform.files, join(drive, 'Users'));
     if (!derived.ok) {
       return { ok: false, line: `${derived.error} in ${configPath}` };
     }

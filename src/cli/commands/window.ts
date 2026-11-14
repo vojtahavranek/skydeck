@@ -292,18 +292,33 @@ async function serverToUse(
   return { ping: started.ping, pagesBefore };
 }
 
-/** The running server's page count (GET /status); 0 when it cannot be had. */
+/** How long the old server's page count is waited for (the client's own wait for an answer). */
+const STATUS_MS = 5000;
+
+/**
+ * The running server's page count, read on its own from `GET /status` (ruled, task 25): the server
+ * about to be stopped can be of an older build, whose /status the client's reader would refuse whole
+ * for another field. 0 when it does not answer, or its answer holds no `pages` that is a whole
+ * number ≥ 0.
+ */
 async function pagesOf(deck: Deck): Promise<number> {
-  const client = controlClient(
-    deck.platform.net,
-    runtimeFiles(resolveRuntimeDir(deck, 'follow').dir).serverSock,
-  );
+  const sock = runtimeFiles(resolveRuntimeDir(deck, 'follow').dir).serverSock;
+  let answer: { status: number; body: unknown };
   try {
-    return (await client.status()).pages;
-  } catch (error) {
-    if (error instanceof SkydeckError) return 0;
-    throw error;
+    answer = await deck.platform.net.requestUnix(sock, {
+      method: 'GET',
+      path: '/status',
+      timeoutMs: STATUS_MS,
+    });
+  } catch {
+    return 0; // refused, gone, no answer in time: no page that could come back
   }
+  const body = answer.body;
+  const pages =
+    answer.status === 200 && typeof body === 'object' && body !== null && !Array.isArray(body)
+      ? (body as { pages?: unknown }).pages
+      : undefined;
+  return typeof pages === 'number' && Number.isSafeInteger(pages) && pages >= 0 ? pages : 0;
 }
 
 /**

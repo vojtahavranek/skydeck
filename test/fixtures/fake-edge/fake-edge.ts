@@ -12,6 +12,7 @@
 //                              keeps that page open; twice: as once, then presents the same token
 //                              on a second connection
 //   FAKE_EDGE_SECOND_DELAY_MS  how long `twice` waits after the first welcome (default 0)
+// It never connects to port 47613, the default port of a real server (it records that and exits).
 // It ends itself when SKYDECK_HOME is gone (checked every 200 ms) or 120 s after it started; the
 // tests also kill it through the handle of the process their platform started.
 import { appendFileSync, existsSync } from 'node:fs';
@@ -40,6 +41,9 @@ const record = (entry: Record<string, unknown>): void => {
 };
 record({ argv, cwd: process.cwd(), wslInterop: env.WSL_INTEROP ?? null });
 
+/** window.port's default (S2 5.2): never connected to. */
+const DEFAULT_PORT = 47613;
+
 const page = env.FAKE_EDGE_PAGE ?? 'none';
 if (page === 'once' || page === 'twice') {
   const app = argv.find((arg) => arg.startsWith('--app='));
@@ -47,6 +51,11 @@ if (page === 'once' || page === 'twice') {
   const token = url?.hash.startsWith('#t=') === true ? url.hash.slice('#t='.length) : null;
   if (url === null || token === null) {
     record({ presented: 1, outcome: 'no launch token in the address' });
+  } else if (Number(url.port) === DEFAULT_PORT) {
+    // Tests run their servers on ports the system picks: 47613 is where the user's own server
+    // may listen, and nothing of a test may knock there.
+    record({ presented: 1, outcome: `not connected: ${DEFAULT_PORT} is the default port of a real server` });
+    process.exit(0);
   } else {
     const port = Number(url.port);
     const key = new Uint8Array(Buffer.from(token, 'base64url'));

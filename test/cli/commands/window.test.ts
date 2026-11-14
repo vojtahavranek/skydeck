@@ -23,7 +23,14 @@ import { fileURLToPath } from 'node:url';
 
 import { parentPidFromStat } from '../../../src/claude/procstat.ts';
 import { realPlatform } from '../../../src/platform/real.ts';
-import type { Detached, Net, Platform, Proc, Processes } from '../../../src/platform/types.ts';
+import type {
+  Detached,
+  Files,
+  Net,
+  Platform,
+  Proc,
+  Processes,
+} from '../../../src/platform/types.ts';
 import { controlClient } from '../../../src/window/client.ts';
 import type { ControlClient } from '../../../src/window/client.ts';
 import { stopServer } from '../../../src/window/lifecycle.ts';
@@ -87,6 +94,8 @@ interface Request {
   path: string;
   body: unknown;
   answer: { status: number; body: unknown } | null;
+  /** When it was sent (performance.now()). */
+  atMs: number;
 }
 
 interface EdgeRun {
@@ -121,6 +130,8 @@ interface RunOptions {
   appRoot?: string;
   /** Changes the command's /proc (to make a process one that cannot be judged). */
   proc?: (proc: Proc) => Proc;
+  /** The command's working directory (default: `project`). */
+  cwd?: string;
 }
 
 interface Harness {
@@ -133,6 +144,8 @@ interface Harness {
   requests: Request[];
   /** Every signal the commands sent, and when (performance.now()). */
   signals: { pid: number; signal: string; atMs: number }[];
+  /** Every path under /mnt/ the commands asked their files for (A32: there must be none). */
+  mntAsked: string[];
   run(args: string[], options?: RunOptions): Promise<Result>;
   edgeRuns(): EdgeRun[];
   presentations(): Presentation[];
@@ -150,6 +163,8 @@ interface Harness {
   asked(method: string, path: string): Request[];
   /** `sleep 60`, a process of the test's own: its pid and process start. */
   liveProcess(): Promise<{ pid: number; procStart: number; child: ChildProcess }>;
+  /** A child the test started: killed when the test ends; its pid may be signalled. */
+  own(child: ChildProcess): void;
 }
 
 function isServe(program: StartedProgram): boolean {
@@ -199,7 +214,9 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
 
   /** A pid this test holds: a child it started, or what its commands' platforms started. */
   const allowed = (pid: number): boolean =>
-    owned.some((child) => child.pid === pid && child.exitCode === null) ||
+    owned.some(
+      (child) => child.pid === pid && child.exitCode === null && child.signalCode === null,
+    ) ||
     started.some(
       (program) =>
         !program.exited && (program.child.pid === pid || serveNodeOf(program.child.pid) === pid),
@@ -258,6 +275,23 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
   const edgeRecord = join(d.s.root, 'records', 'edge.jsonl');
   const requests: Request[] = [];
   const signals: Harness['signals'] = [];
+  const mntAsked: string[] = [];
+  // The commands' files record every path under /mnt/ they are asked for (and read nothing there).
+  const baseFiles = d.platform.files as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const files = Object.fromEntries(
+    Object.entries(baseFiles).map(([name, method]) => [
+      name,
+      (...args: unknown[]) => {
+        for (const arg of args) {
+          if (typeof arg === 'string' && (arg === '/mnt' || arg.startsWith('/mnt/'))) {
+            mntAsked.push(`${name} ${arg}`);
+            throw Object.assign(new Error(`the test reached ${arg}`), { code: 'EACCES' });
+          }
+        }
+        return method(...args);
+      },
+    ]),
+  ) as unknown as Files;
 
   const processes: Processes = {
     async startDetached(command, args, options) {
@@ -285,6 +319,7 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
         path: request.path,
         body: request.body,
         answer: null,
+        atMs: performance.now(),
       };
       requests.push(entry);
       const answer = await d.platform.net.requestUnix(path, request);
@@ -318,6 +353,7 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
     started,
     requests,
     signals,
+    mntAsked,
     async run(args, options = {}) {
       const times = timesText({ ...TIMES, ...options.times });
       const env = Object.fromEntries(
@@ -328,7 +364,8 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
       const platform: Platform = {
         ...d.platform,
         env,
-        cwd: project,
+        cwd: options.cwd ?? project,
+        files,
         processes,
         net,
         appRoot: options.appRoot ?? d.platform.appRoot,
@@ -395,6 +432,9 @@ function windowHarness(t: TestContext, window: Record<string, unknown> = {}): Ha
       return child;
     },
     asked: (method, path) => requests.filter((r) => r.method === method && r.path === path),
+    own(child) {
+      owned.push(child);
+    },
     async liveProcess() {
       const child = spawn(join(d.s.bin, 'sleep'), ['60'], { env: d.s.env(), stdio: 'ignore' });
       owned.push(child);
@@ -538,6 +578,25 @@ describe('skydeck window: no server running (S2 5.1, 5.2, 5.3)', () => {
       assert.ok(!text.includes(secret), 'no key printed');
     }
     assert.equal(h.d.deck.store.getKv('window_launching'), null, 'window_launching released');
+    assert.deepEqual(h.mntAsked, [], 'nothing under /mnt asked for');
+  });
+
+  test('without window.profileDir the profile folder is derived from the C: drive (its stand-in): nothing under /mnt is read', async (t) => {
+    const h = windowHarness(t, { profileDir: null });
+    mkdirSync(join(h.d.cDrive, 'Users', 'me', 'AppData', 'Local', 'Microsoft', 'Edge'), {
+      recursive: true,
+    });
+
+    const r = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(
+      h
+        .edgeRuns()[0]
+        ?.argv.includes('--user-data-dir=C:\\Users\\me\\AppData\\Local\\skydeck\\edge-profile'),
+      JSON.stringify(h.edgeRuns()),
+    );
+    assert.deepEqual(h.mntAsked, []);
   });
 
   test('the fake Edge does not connect: exit 1 naming --print-url, the token dropped, the server still running', async (t) => {
@@ -997,9 +1056,12 @@ describe('--restart replaces any server (S2 5.1)', () => {
     assert.equal(r.code, 0, r.stderr);
     const [term] = h.signals;
     assert.ok(term !== undefined && term.pid === fake.pid && term.signal === 'SIGTERM');
-    const after = term.atMs - r.startedAt;
-    assert.ok(after >= 3900, `SIGTERM after findServer's ping (${after} ms)`);
-    assert.ok(after < 7000, `SIGTERM without a second ping (${after} ms; two would be 8000)`);
+    const pings = r.requests.filter((q) => q.path === '/ping' && q.atMs < term.atMs);
+    assert.equal(pings.length, 1, "findServer's ping only: the stop sends none (S2 5.1: at once)");
+    assert.ok(
+      term.atMs - r.startedAt < 7000,
+      `SIGTERM within one ping wait (${term.atMs - r.startedAt} ms; two would be 8000)`,
+    );
   });
 
   test('--restart replaces a server of another checkout', async (t) => {
@@ -1057,7 +1119,7 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     assert.equal(h.edgeRuns().length, 2);
   });
 
-  test('the old server answered /status with a page count the client refuses ("3", 2.5, beyond the safe integers): 0 pages, no wait', async (t) => {
+  test('the old server answered /status with a page count that is not a whole number ("3", 2.5, beyond the safe integers): 0 pages, no wait', async (t) => {
     const h = windowHarness(t);
     // Each would count as pages > 0 if it were taken as it is: refused, it must mean no wait.
     for (const [pages, answered] of [
@@ -1078,7 +1140,7 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
       assert.equal(
         (status?.answer?.body as { pages?: unknown } | undefined)?.pages,
         answered,
-        `${pages}: the fake answered a count the client refuses`,
+        `${pages}: the fake answered a count that is not a whole number`,
       );
       const stop = await h.run(['--stop']);
       assert.equal(stop.code, 0, stop.stderr);
@@ -1105,9 +1167,11 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     const times = { reconnectMs: 60_000 };
     const url = await h.run(['--print-url']); // a server with no page
     assert.equal(url.code, 0, url.stderr);
+    await h.running();
 
     const none = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' }, times });
     assert.equal(none.code, 0, none.stderr);
+    assert.equal(none.stderr, restartLine(h), 'the server of --print-url was restarted');
     assert.ok(none.ms < 30_000, `no page before: no wait (${none.ms} ms)`);
     assert.equal(h.edgeRuns().length, 1);
 
@@ -1131,6 +1195,81 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     assert.match(secret.stdout, SUCCESS);
     assert.ok(secret.ms < 30_000, `--new-secret: no wait (${secret.ms} ms)`);
     assert.equal(h.edgeRuns().length, 3);
+  });
+});
+
+describe('foreign text, test seams and fixtures (review 2 of task 25)', () => {
+  test('the restart line names the working directory sanitised (an ESC sequence and a newline in its name)', async (t) => {
+    const h = windowHarness(t);
+    const odd = join(h.d.s.root, 'proj\x1b[31m\nx');
+    mkdirSync(odd);
+    const first = await h.run(['--print-url']);
+    assert.equal(first.code, 0, first.stderr);
+    await h.running();
+
+    const r = await h.run(['--restart', '--print-url'], { cwd: odd });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stderr,
+      `skydeck: restarting the window's server for the new build; new sessions in the window get the environment of this shell (${h.d.s.root}/proj x)\n`,
+    );
+  });
+
+  test('outside a test sandbox SKYDECK_TEST_WINDOW_TIMES changes nothing (not even a malformed value)', async (t) => {
+    const h = windowHarness(t);
+
+    const r = await h.run(['--stop'], {
+      env: { SKYDECK_TEST_NO_WINDOWS: undefined, SKYDECK_TEST_WINDOW_TIMES: 'garbage' },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, "the window's server is not running\n");
+    assert.deepEqual(h.started, []);
+  });
+
+  test("the old server's page count is read on its own: a /status without its other fields still counts its pages", async (t) => {
+    const h = windowHarness(t);
+    await h.fakeServe({
+      FAKE_SERVE_CHECKOUT: REPOSITORY,
+      FAKE_SERVE_PAGES: '2',
+      FAKE_SERVE_STATUS: 'pages-only',
+    });
+
+    const r = await h.run(['--restart'], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { reconnectMs: 2500 },
+    });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.requests.find((q) => q.path === '/status')?.answer?.body, { pages: 2 });
+    assert.ok(r.ms >= 2500, `waited for the 2 pages (${r.ms} ms)`);
+  });
+
+  test("the fake Edge never knocks at the default port 47613 (the user's real server may listen there)", async (t) => {
+    const h = windowHarness(t);
+    const record = join(h.d.s.root, 'records', 'edge-direct.jsonl');
+    const token = Buffer.alloc(32, 7).toString('base64url');
+    const child = spawn(FAKE_EDGE, [`--app=http://127.0.0.1:47613/#t=${token}`], {
+      env: h.d.s.env({
+        SKYDECK_NODE: process.execPath,
+        FAKE_EDGE_PAGE: 'once',
+        FAKE_EDGE_RECORD: record,
+      }),
+      stdio: 'ignore',
+    });
+    h.own(child);
+    const [code] = (await once(child, 'exit')) as [number | null];
+
+    assert.equal(code, 0);
+    const lines = readFileSync(record, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as { outcome?: string });
+    assert.deepEqual(
+      lines.map((line) => line.outcome).filter((o) => o !== undefined),
+      ['not connected: 47613 is the default port of a real server'],
+    );
   });
 });
 
@@ -1197,6 +1336,7 @@ describe('window_launching (S2 5.1: one command starts Edge at a time)', () => {
     const r = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' }, times: { launchingMs: 60_000 } });
 
     assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.ms < 30_000, `taken over at once, not after the 60 s (${r.ms} ms)`);
     assert.equal(h.edgeRuns().length, 1);
     assert.equal(h.d.deck.store.getKv('window_launching'), null, 'released at the end');
   });

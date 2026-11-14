@@ -20,8 +20,10 @@
 //                           always carries the current one, so that its line stays alive)
 //   FAKE_SERVE_TERMINALS    how many terminals /status lists (default 0)
 //   FAKE_SERVE_PAGES        the pages /status reports: a decimal number (default 0), or
-//                           `json:<JSON value>` for an answer the command line's client refuses
+//                           `json:<JSON value>` for a count that is not a whole number
 //                           (`json:"3"`, `json:2.5`, `json:9007199254740993`)
+//   FAKE_SERVE_STATUS       pages-only: /status answers `{ pages }` and nothing else (an old
+//                           server's answer the command line's client cannot read whole)
 //   FAKE_SERVE_ON_SHUTDOWN  exit (default): after answering, removes server.json, server.pid and
 //                           server.sock and exits 0; stay: answers and goes on
 // It writes one line to stdout and one to stderr at start (so that a test sees where they go)
@@ -147,7 +149,10 @@ async function serve(silent: boolean): Promise<void> {
   let stop = async (): Promise<void> => {};
   const handler = controlHandler({
     ping: () => ping,
-    status: () => status,
+    status: () =>
+      env.FAKE_SERVE_STATUS === 'pages-only'
+        ? ({ pages: status.pages } as unknown as StatusAnswer)
+        : status,
     tokens: createTokens(platform.clock, platform.randomBytes, () => {}),
     shutdown: () => {
       if (env.FAKE_SERVE_ON_SHUTDOWN !== 'stay') {
