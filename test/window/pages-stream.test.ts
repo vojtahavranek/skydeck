@@ -18,7 +18,7 @@ import {
   until,
   within,
 } from '../helpers/pages.ts';
-import type { HubCall, PageClient, PagesFixture, Received } from '../helpers/pages.ts';
+import type { HubCall, PageClient, PagesFixture } from '../helpers/pages.ts';
 import { BOOT_A } from '../helpers/platform.ts';
 
 const T1 = '0123456789ab';
@@ -436,27 +436,94 @@ describe('pages: size', () => {
   });
 });
 
-describe('pages: backpressure', () => {
-  test('a page that does not read gets no output while more than 1 MiB is queued, then a fresh snap per attached terminal; the hub is never paused', async (t) => {
+const T3 = '00000000000c';
+
+/** 64 KiB whose first 4 bytes are `i`. */
+function record(i: number): Uint8Array {
+  const bytes = new Uint8Array(64 * 1024);
+  new DataView(bytes.buffer).setUint32(0, i);
+  return bytes;
+}
+
+function snapsIn(client: PageClient): ServerMessage[] {
+  return client.all.flatMap((item) =>
+    'text' in item && item.text.t === 'snap' ? [item.text] : [],
+  );
+}
+
+function attachCalls(f: PagesFixture): number {
+  return f.hub.calls.filter((call) => call.kind === 'attach').length;
+}
+
+describe('pages: a page that goes', () => {
+  test('every stream of a closed page is detached even when a size hand-over throws', async (t) => {
     const f = await startPages(t);
     f.hub.add(T1);
     f.hub.add(T2);
+    const a = await openPage(t, f);
+    const b = await openPage(t, f);
+    for (const term of [T1, T2]) {
+      await attach(a.client, term);
+      await attach(b.client, term, 100, 30);
+    }
+    const resize = f.hub.resize.bind(f.hub);
+    f.hub.resize = (term, cols, rows) => {
+      resize(term, cols, rows);
+      throw new Error('the hub failed');
+    };
+    a.client.ws.close();
+    await until('a gone', () => f.pages.count() === 1);
+    assert.equal(f.hub.sinks(T1).length, 1, 'T1: only b');
+    assert.equal(f.hub.sinks(T2).length, 1, 'T2: only b');
+    assert.deepEqual(resizes(f).slice(-2), [
+      { term: T1, cols: 100, rows: 30 },
+      { term: T2, cols: 100, rows: 30 },
+    ]);
+  });
+
+  test('bye hands the size to no page', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    const a = await openPage(t, f, { view: true });
+    const b = await openPage(t, f, { view: true });
+    await attach(a.client, T1);
+    await attach(b.client, T1, 100, 30);
+    f.clock.advanceMs(1_000); // the lists' second is over: a hand-over would send one at once
+    await textsUntilPong(a.client);
+    await textsUntilPong(b.client);
+    const before = resizes(f).length;
+    const lists = (page: { client: PageClient }): number =>
+      page.client.all.filter((item) => 'text' in item && item.text.t === 'list').length;
+    const listsBefore = [lists(a), lists(b)];
+    await f.pages.bye('stopping');
+    assert.equal(resizes(f).length, before, 'no resize');
+    assert.deepEqual([lists(a), lists(b)], listsBefore, 'no list');
+    for (const page of [a, b]) {
+      const last = page.client.all.at(-1);
+      assert.ok(last !== undefined && 'text' in last && last.text.t === 'bye', 'bye comes last');
+    }
+  });
+});
+
+describe('pages: backpressure', () => {
+  test('a page that does not read gets no output while more than 1 MiB is queued, then a fresh snap for each stream that lost something; the hub is never paused', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.add(T2);
+    f.hub.add(T3);
     const { client } = await openPage(t, f);
     const old1 = await attach(client, T1);
     const old2 = await attach(client, T2);
+    const old3 = await attach(client, T3);
     const callsBefore = f.hub.calls.length;
     client.ws.pause();
 
     const RECORDS = 400;
-    const record = (i: number): Uint8Array => {
-      const bytes = new Uint8Array(64 * 1024);
-      new DataView(bytes.buffer).setUint32(0, i);
-      return bytes;
-    };
     for (let i = 0; i < RECORDS; i++) {
       f.hub.output(T1, record(i)); // the hub's call returns at once: nothing waits for the page
     }
-    // While behind: a resize and an exit; the fresh snaps carry the size, the exit follows its snap.
+    // While behind: a resize of T1 and the exit of T2 are dropped too; the fresh snaps carry the
+    // size, and the hub gives T2's exit after its snapshot. T3 has nothing: it keeps its stream.
     f.hub.size(T1, 90, 30);
     f.hub.exit(T2, EXIT, false);
     f.hub.setScreen(T1, 'fresh screen of T1');
@@ -465,36 +532,30 @@ describe('pages: backpressure', () => {
     client.ws.resume();
 
     const before: number[] = [];
-    const after: Received[] = [];
-    let snaps = 0;
-    while (snaps < 2) {
+    const after: ServerMessage[] = [];
+    while (after.filter((m) => m.t === 'snap').length < 2) {
       const item = await client.next('the fresh snaps');
       if ('binary' in item) {
         const view = new DataView(item.binary.buffer, item.binary.byteOffset);
         assert.equal(view.getUint32(1), old1, 'output before the snaps is the old stream');
         before.push(view.getUint32(5));
       } else {
-        after.push(item);
-        if (item.text.t === 'snap') snaps++;
+        after.push(item.text);
       }
     }
     assert.ok(before.length > 0, 'some output went out before the queue grew');
     assert.ok(before.length < RECORDS, `output was dropped (${before.length} of ${RECORDS} came)`);
     assert.deepEqual(before, [...before.keys()], 'what came is the stream up to a point, in order');
-    assert.ok(
-      before.length * 64 * 1024 > MiB,
-      'no output was dropped before more than 1 MiB was queued',
-    );
+    assert.ok(before.length * 64 * 1024 > MiB, 'nothing was dropped before 1 MiB was queued');
 
-    const texts = after.map((item) => ('text' in item ? item.text : null));
-    const snap1 = texts.find((m) => m?.t === 'snap' && m.term === T1);
-    const snap2 = texts.find((m) => m?.t === 'snap' && m.term === T2);
+    const snap1 = after.find((m) => m.t === 'snap' && m.term === T1);
+    const snap2 = after.find((m) => m.t === 'snap' && m.term === T2);
     assert.ok(snap1?.t === 'snap' && snap2?.t === 'snap');
     assert.equal(snap1.data, 'fresh screen of T1');
     assert.deepEqual([snap1.cols, snap1.rows], [90, 30]);
-    assert.ok(![old1, old2].includes(snap1.ch) && ![old1, old2].includes(snap2.ch));
+    assert.ok(![old1, old2, old3].includes(snap1.ch) && ![old1, old2, old3].includes(snap2.ch));
     assert.notEqual(snap1.ch, snap2.ch);
-    assert.ok(!texts.some((m) => m?.t === 'size'), 'no size while behind: the snap has it');
+    assert.ok(!after.some((m) => m.t === 'size'), 'no size while behind: the snap has it');
     assert.deepEqual(f.hub.calls.slice(callsBefore), [
       { kind: 'detach', term: T1 },
       { kind: 'attach', term: T1 },
@@ -502,27 +563,103 @@ describe('pages: backpressure', () => {
       { kind: 'attach', term: T2 },
     ]);
 
-    // T2's exit follows its fresh snap; then output flows again on the new channel.
-    const rest = await textsUntilPong(client);
-    assert.deepEqual(
-      rest.length <= 1 ? [...texts.slice(texts.indexOf(snap2) + 1), ...rest] : rest,
-      [
-        {
-          t: 'exit',
-          term: T2,
-          code: 0,
-          signal: null,
-          atNs: EXIT.atNs,
-          lost: false,
-          notStarted: null,
-        },
-      ],
-    );
+    // T2's exit follows its fresh snap; then output flows again on the new channel, and T3's on
+    // the channel it had.
+    const rest = [...after.slice(after.indexOf(snap2) + 1), ...(await textsUntilPong(client))];
+    assert.deepEqual(rest, [
+      {
+        t: 'exit',
+        term: T2,
+        code: 0,
+        signal: null,
+        atNs: EXIT.atNs,
+        lost: false,
+        notStarted: null,
+      },
+    ]);
     f.hub.output(T1, 'again');
+    f.hub.output(T3, 'three');
     assert.deepEqual(await client.nextOutput(), {
       channel: snap1.ch,
       bytes: new TextEncoder().encode('again'),
     });
+    assert.deepEqual(await client.nextOutput(), {
+      channel: old3,
+      bytes: new TextEncoder().encode('three'),
+    });
+  });
+
+  test('a second page that reads gets every record, in order, while the first is behind', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    const slow = await openPage(t, f);
+    const fast = await openPage(t, f);
+    const slowCh = await attach(slow.client, T1);
+    const ch = await attach(fast.client, T1);
+    slow.client.ws.pause();
+    const RECORDS = 300;
+    const got: number[] = [];
+    for (let i = 0; i < RECORDS; i++) {
+      f.hub.output(T1, record(i));
+      // In batches of 512 KiB that the fast page has read before the next: its queue stays small,
+      // while the slow page's grows far past 1 MiB.
+      while (i % 8 === 7 && got.length < i + 1) {
+        const { channel, bytes } = await fast.client.nextOutput(`record ${got.length}`);
+        assert.equal(channel, ch);
+        got.push(new DataView(bytes.buffer, bytes.byteOffset).getUint32(0));
+      }
+    }
+    while (got.length < RECORDS) {
+      const { channel, bytes } = await fast.client.nextOutput(`record ${got.length}`);
+      assert.equal(channel, ch);
+      got.push(new DataView(bytes.buffer, bytes.byteOffset).getUint32(0));
+    }
+    assert.deepEqual(got, [...got.keys()]);
+    assert.ok(
+      !fast.client.all.some(
+        (item) => 'text' in item && item.text.t === 'snap' && item.text.ch !== ch,
+      ),
+      'the fast page was never behind',
+    );
+    slow.client.ws.resume();
+    await until('the slow page was behind: a fresh snap', () =>
+      snapsIn(slow.client).some((m) => m.t === 'snap' && m.ch !== slowCh),
+    );
+  });
+
+  test('an idle terminal whose snap is above 1 MiB gets one snap, and is attached once', async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.setScreen(T1, 'x'.repeat(6 * MiB));
+    const { client } = await openPage(t, f);
+    const ch = await attach(client, T1);
+    await delay(500);
+    assert.equal(snapsIn(client).length, 1, 'one snap');
+    assert.equal(attachCalls(f), 1, 'one attach');
+    f.hub.output(T1, 'after');
+    assert.deepEqual(await client.nextOutput(), {
+      channel: ch,
+      bytes: new TextEncoder().encode('after'),
+    });
+  });
+
+  test('five idle terminals with snaps of 1 MiB, attached at once, get one snap each', async (t) => {
+    const f = await startPages(t);
+    const terms = ['00000000000a', '00000000000b', '00000000000c', '00000000000d', '00000000000e'];
+    for (const term of terms) {
+      f.hub.add(term);
+      f.hub.setScreen(term, term.repeat(MiB / 12));
+    }
+    const { client } = await openPage(t, f);
+    for (const term of terms) client.send({ t: 'attach', term, cols: 80, rows: 24 });
+    await until('five snaps', () => snapsIn(client).length >= 5);
+    await delay(500);
+    const snaps = snapsIn(client);
+    assert.deepEqual(
+      snaps.map((m) => m.t === 'snap' && m.term),
+      terms,
+    );
+    assert.equal(attachCalls(f), 5);
   });
 });
 

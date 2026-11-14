@@ -144,6 +144,8 @@ interface Attachment {
   detach: () => void;
   /** False once detached: what the hub still gives its sink is dropped. */
   live: boolean;
+  /** Something of it was dropped while the page was behind: it gets a fresh snap at the drain. */
+  lost: boolean;
 }
 
 /** A connection from its upgrade; a page (PageState) once it has sent `start`. */
@@ -161,7 +163,7 @@ interface Connection extends PageState {
   theme: ThemePayload | null;
   readonly attachments: Map<string, Attachment>;
   channels: number;
-  /** S2 8.2.8: more than BEHIND_BYTES were queued; no output until the socket drained. */
+  /** S2 8.2.8: a record found more than BEHIND_BYTES queued; none goes out until the drain. */
   behind: boolean;
   /** Lists are sent only after the page's first view. */
   hasView: boolean;
@@ -240,18 +242,29 @@ export function createPages(deps: PagesDeps): Pages {
     }
   };
 
-  const behindCheck = (conn: Connection): void => {
-    if (!conn.behind && conn.ws.buffered > BEHIND_BYTES) conn.behind = true;
+  /** For work on a page that is gone already: a failure is logged and the next step goes on. */
+  const attempt = (work: () => void): void => {
+    try {
+      work();
+    } catch (error) {
+      log(`page: ${failureKind(error)}`);
+    }
   };
 
   const send = (conn: Connection, message: ServerMessage): void => {
     conn.ws.sendText(JSON.stringify(message));
-    behindCheck(conn);
   };
 
-  const sendBinary = (conn: Connection, frame: Uint8Array): void => {
-    conn.ws.sendBinary(frame);
-    behindCheck(conn);
+  /**
+   * S2 8.2.8, judged when a record of a stream is about to go out: false while the page is
+   * behind, and from the moment a record finds more than BEHIND_BYTES queued; the stream is then
+   * marked lost, and only lost streams get a fresh snap at the drain. A snap never makes a page
+   * behind by itself, so a large screen does not snap again and again.
+   */
+  const mayForward = (conn: Connection, attachment: Attachment): boolean => {
+    if (!conn.behind && conn.ws.buffered > BEHIND_BYTES) conn.behind = true;
+    if (conn.behind) attachment.lost = true;
+    return !conn.behind;
   };
 
   const closeWith = (conn: Connection, code: number, line: string): void => {
@@ -321,6 +334,7 @@ export function createPages(deps: PagesDeps): Pages {
     });
     if (state.proposals.size === 0) sizes.delete(term);
     else sizes.set(term, state);
+    if (stopping) return; // bye closes every page: no size is handed over, no list sent
     if (apply !== null) hub.resize(term, apply.cols, apply.rows);
     if (state.owner !== before.owner) pushList(); // the lists' ownsSize changed
   };
@@ -329,27 +343,32 @@ export function createPages(deps: PagesDeps): Pages {
 
   const sinkFor = (conn: Connection, attachment: Attachment): StreamSink => {
     const { term } = attachment;
-    // While the page is behind (S2 8.2.8) its snap, output, sizes and exit are dropped: once its
-    // socket has drained it is attached again, and that fresh snap (and exit) holds them.
+    // While the page is behind (S2 8.2.8) a stream's snap, output, sizes and exit are dropped and
+    // the stream is marked lost: once the socket has drained it is attached again, and the fresh
+    // snap (with what the hub tells after it) holds them.
     return {
       snapshot(cols, rows, data) {
-        if (!attachment.live || conn.behind) return;
+        if (!attachment.live) return;
+        if (conn.behind) {
+          attachment.lost = true;
+          return;
+        }
         guard(conn, () =>
           send(conn, { t: 'snap', term, ch: attachment.channel, cols, rows, data }),
         );
       },
       output(bytes) {
-        if (!attachment.live || conn.behind) return;
-        guard(conn, () => sendBinary(conn, encodeOutputFrame(attachment.channel, bytes)));
+        if (!attachment.live || !mayForward(conn, attachment)) return;
+        guard(conn, () => conn.ws.sendBinary(encodeOutputFrame(attachment.channel, bytes)));
       },
       size(cols, rows) {
-        if (!attachment.live || conn.behind) return;
+        if (!attachment.live || !mayForward(conn, attachment)) return;
         guard(conn, () =>
           send(conn, { t: 'size', term, cols, rows, owner: sizes.get(term)?.owner === conn.id }),
         );
       },
       exit(exit, lost) {
-        if (!attachment.live || conn.behind) return;
+        if (!attachment.live || !mayForward(conn, attachment)) return;
         guard(conn, () =>
           send(conn, {
             t: 'exit',
@@ -374,7 +393,13 @@ export function createPages(deps: PagesDeps): Pages {
    * first call on it. null when the hub does not know the terminal.
    */
   const openStream = (conn: Connection, term: string): Attachment | null => {
-    const attachment: Attachment = { term, channel: ++conn.channels, detach: () => {}, live: true };
+    const attachment: Attachment = {
+      term,
+      channel: ++conn.channels,
+      detach: () => {},
+      live: true,
+      lost: false,
+    };
     const got = hub.attach(term, sinkFor(conn, attachment));
     if (got === null) {
       attachment.live = false;
@@ -413,11 +438,15 @@ export function createPages(deps: PagesDeps): Pages {
     sizeEvent(conn, 'detach', term);
   };
 
-  /** S2 8.2.8: the socket drained; a fresh snap (a new attach, a new channel) for each terminal. */
+  /**
+   * S2 8.2.8: the socket drained (Node.js's 'drain': nothing queued, so below 64 KiB); a fresh
+   * snap (a new attach, a new channel) for each stream that lost something. The others go on.
+   */
   const caughtUp = (conn: Connection): void => {
     if (!conn.behind || conn.phase !== 'open') return;
     conn.behind = false;
     for (const attachment of [...conn.attachments.values()]) {
+      if (!attachment.lost) continue;
       conn.attachments.delete(attachment.term);
       endStream(attachment);
       if (openStream(conn, attachment.term) === null) sizeEvent(conn, 'detach', attachment.term);
@@ -611,11 +640,12 @@ export function createPages(deps: PagesDeps): Pages {
     conn.stopListTimer?.();
     conn.stopListTimer = null;
     open.delete(conn);
-    for (const attachment of [...conn.attachments.values()]) {
-      conn.attachments.delete(attachment.term);
-      endStream(attachment);
-      sizeEvent(conn, 'detach', attachment.term);
-    }
+    // Every stream is detached first, then the sizes are handed over, each step on its own: a
+    // step that throws leaves no stream attached and no closed page owning a size.
+    const attachments = [...conn.attachments.values()];
+    conn.attachments.clear();
+    for (const attachment of attachments) attempt(() => endStream(attachment));
+    for (const attachment of attachments) attempt(() => sizeEvent(conn, 'detach', attachment.term));
   };
 
   const accept = (ws: WebSocketConnection, origin: string, closed: Promise<void>): void => {
