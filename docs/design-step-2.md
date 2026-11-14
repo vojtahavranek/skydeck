@@ -342,7 +342,10 @@ The programs of the terminals inherit it (7.4), so it matters which shell starte
 with a project's `direnv`, virtual environment or `AWS_PROFILE` gives them to every session.
 `server.json`, `GET /status` and `doctor` say where it came from (`environment of skydeck window
 run in <directory> at <time>`), and a change reaches new terminals only after `skydeck window
---restart`.
+--restart`. `serve` itself runs in `/`, so `skydeck window` passes its own working directory in
+`SKYDECK_ENV_ORIGIN`; `serve` takes the variable out of its environment (no program inherits it)
+and records that directory, with its own start time, as where its environment came from. A `serve`
+started by hand, without the variable, records its own working directory.
 
 **One server per installation.** The lock is the `kv` entry `window_server`
 (`<pid>:<process start>:<boot id>:<checkout>`), taken in one store transaction when the server it
@@ -366,7 +369,8 @@ peer's data — a frame, a message, a request body that does not parse or does n
 by its kind and where it came from (`page <window id>: malformed message`), never by its message,
 because a message can quote the data: Node.js's `JSON.parse` error quotes its input, which could be
 a proof, a typed prompt or a pasted text. An uncaught error is logged by its name and its stack
-frames without the message line, and ends the server (exit 1). The headless terminals of the
+frames without the message, and ends the server (exit 1): only the lines of the stack that are
+frames (`    at …`) are kept, since a message can span several lines. The headless terminals of the
 screen sides (7.2) log nothing: xterm.js's own log is turned off, because its messages quote the
 program's output (a parsing error names the character and the parameters; section 21). What
 reaches the log through stdout and stderr is only what Node.js itself writes there (its warnings).
