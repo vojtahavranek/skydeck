@@ -699,9 +699,11 @@ effect.
   Ctrl+R and Ctrl+V are not recognised; US and Czech are not affected. A key pressed while the
   keyboard was outside the terminal never reaches the program, also when it brings the keyboard
   into the terminal (Enter on a row, Esc from the list) and is held: press it again.
-- **Sizes.** The first session started in a window that has not shown a session's header yet is
-  resized once right after its start. With several windows open, clicking into a window can give
-  it the terminal's size while the program has asked for focus reports.
+- **Sizes.** A session started in the window (a card, the ended bar, the new form) starts at the
+  size it keeps, with one exception: in a window that has not shown a session's header yet, the
+  first terminal is asked for without the header's room, and it is resized once when it is shown.
+  With several windows open, clicking into a window can give it the terminal's size while the
+  program has asked for focus reports.
 - **The list.** An expiring session says `expires soon`, without the number of days. From an empty
   filter field it is two Escs to the terminal. The ended bar of a selected session that the filter
   hides offers no Resume, and Close only once the end is known: clear the filter. A resume card's
