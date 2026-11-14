@@ -406,7 +406,9 @@ export function createList(root, hooks) {
    */
   const fold = (folded) => {
     const earlier = current?.sections.find((section) => section.name === 'earlier');
-    if (earlier === undefined) {
+    // While a filter is set every section is unfolded (S2 12.8): nothing folds, and the
+    // selection stays on its row, which stays shown.
+    if (earlier === undefined || filter.value !== '') {
       return;
     }
     if (folded && selected !== null && earlier.rows.some((row) => row.id === selected)) {

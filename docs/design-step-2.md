@@ -1836,6 +1836,8 @@ bar at the bottom. The list has three sections:
   row (12.4), never a move.
 - **This week**: not running, last activity within 7 days, most recent first.
 - **Earlier**: the rest, folded by default; the folded header shows the count and the time span.
+  A click on its header folds and unfolds it, as ← and → do, and leaves the keyboard on the list
+  (ruled by the plan owner, plan task 27).
 
 Done sessions are hidden (design 7.1), with a footer "17 done hidden · show". Filtering and the
 switcher search done ones too (12.8).
@@ -1976,7 +1978,9 @@ restart.
 
 - `/` filters the list: title, group, note, pull-request repository and number, directory, short
   id; several words must all match; while a filter is set it includes done sessions and unfolds
-  every section and stack. (Stage A has design 7.4's filter: one text, the fields of 7.4.)
+  every section and stack. (Stage A has design 7.4's filter: one text, the fields of 7.4.) A
+  filter that leaves no row says so: `No session matches the filter.` (ruled by the plan owner,
+  plan task 27).
 - Chips: Running, Open PR, Has note, Show done.
 - Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (by slot), not
   running (most recent first), done. Enter switches to a running one and resumes one that is not
@@ -2042,7 +2046,12 @@ the window, Home, End, PgUp, PgDn, ← → (fold, unfold), F2 (label) and Esc (c
 back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
 clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
-plan task 27). Enter changes meaning: it shows a running session's terminal, or resumes one
+plan task 27). Folding Earlier (← or a click on its header) with the selection inside it first
+selects the row above it; while a filter is set nothing folds. The selection is never on a row the
+list does not show: when the selected row stops being shown otherwise (a filter, done sessions
+hidden again, the row gone from the list), no row is selected — the right side shows a terminal
+that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
+(ruled by the plan owner, plan task 27). Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a

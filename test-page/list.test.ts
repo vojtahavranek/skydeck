@@ -913,17 +913,18 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    'a filter that matches nothing says so; a folded Earlier is unfolded with a click on its header',
+    'a click on the Earlier header folds and unfolds it (ruled): ONE click, from either zone, the keyboard on #list; folded with the selection inside, the row above is selected; while a filter is set nothing folds and the selection stays; a filter that matches nothing says so',
     async (t) => {
-      let unfolded = false;
       const s = await scripted(
         t,
         chromium,
         (view) => {
-          if (typeof view['filter'] === 'string' && view['filter'] !== '') {
-            return fullList({});
-          }
-          unfolded = Array.isArray(view['unfolded']) && view['unfolded'].includes('earlier');
+          const filter = typeof view['filter'] === 'string' ? view['filter'] : '';
+          if (filter === 'nothing') return fullList({});
+          // S2 12.8: while a filter is set every section is unfolded (the server's rule).
+          const unfolded =
+            filter !== '' ||
+            (Array.isArray(view['unfolded']) && view['unfolded'].includes('earlier'));
           return fullList({
             week: [fullRow(S1)],
             earlier: unfolded ? [fullRow(S2, { lastActivityNs: ago(9n * DAY) })] : 'folded',
@@ -931,22 +932,145 @@ test('the list', async (t) => {
         },
         36,
       );
+      const header = s.page.locator('#list .list-section[data-section="earlier"]');
       await untilDrawn(s.page, (rows) => rows.length === 1, 'one row');
       assert.deepEqual(await headers(s.page), [
         'open Open 0',
         'week This week 1',
         'earlier Earlier 4 9d–30d ago',
       ]);
-      await s.page.locator('#list .list-section[data-section="earlier"]').click();
-      await untilDrawn(s.page, (rows) => rows.length === 2, 'Earlier unfolded by a click');
-      await s.page.locator('#list .list-section[data-section="earlier"]').click();
-      await untilDrawn(s.page, (rows) => rows.length === 1, 'folded again by a click');
+      assert.equal(await zone(s.page), 'Focus: terminal');
 
-      await toZone(s.page, 'list');
+      await header.click(); // once, from the terminal zone
+      await untilDrawn(s.page, (rows) => rows.length === 2, 'Earlier unfolded by a click');
+      assert.equal(await active(s.page), '#list');
+      assert.equal(await zone(s.page), 'Focus: list');
+
+      // Folded by a click with the selection inside: the row above is selected first.
+      await clickRow(s.page, S2);
+      await header.click();
+      await untilDrawn(s.page, (rows) => rows.length === 1, 'folded again by a click');
+      assert.equal(await selectedRow(s.page), S1);
+      assert.equal(await active(s.page), '#list');
+
+      // While a filter is set the server unfolds every section: ← and a click fold nothing, and
+      // the selection stays where it is.
+      await header.click();
+      await untilDrawn(s.page, (rows) => rows.length === 2, 'unfolded');
+      await clickRow(s.page, S2);
+      await s.page.keyboard.press('/');
+      await s.page.keyboard.type('se');
+      await s.page.keyboard.press('Enter');
+      assert.equal(await active(s.page), '#list');
+      const views = s.sent.filter((message) => message['t'] === 'view').length;
+      await s.page.keyboard.press('ArrowLeft');
+      await header.click();
+      await sleep(500);
+      assert.deepEqual(await drawnIds(s.page), [S1, S2]);
+      assert.equal(await selectedRow(s.page), S2, 'the selection stays');
+      assert.equal(
+        s.sent.filter((message) => message['t'] === 'view').length,
+        views,
+        'no view: nothing to fold',
+      );
+
+      await s.page.keyboard.press('Escape');
       await s.page.keyboard.press('/');
       await s.page.keyboard.type('nothing');
       await showsText(s.page, '#list .list-empty', /^No session matches the filter\.$/);
       assert.deepEqual(await drawnIds(s.page), []);
+      assert.deepEqual(await headers(s.page), []);
+    },
+  );
+
+  await t.test(
+    'the selection is never on a row the list does not show (ruled): a filter that excludes it, done sessions hidden again with `a`, the row gone from the list — no row selected, the right side empty, Enter resumes nothing, ↓ and ↑ start from the first row shown',
+    async (t) => {
+      const done = fullRow(S4, { done: true, title: 'a done one' });
+      const base = [
+        fullRow(S1),
+        fullRow(S2, { title: 'other two' }),
+        fullRow(S3, { title: 'other three' }),
+      ];
+      const s = await scripted(
+        t,
+        chromium,
+        (view) => {
+          const filter = typeof view['filter'] === 'string' ? view['filter'] : '';
+          const rows = view['showDone'] === true ? [...base, done] : base;
+          return fullList({
+            week: filter === '' ? rows : rows.filter((row) => row.title.includes(filter)),
+          });
+        },
+        37,
+      );
+      await untilDrawn(s.page, (rows) => rows.length === 3, 'three rows');
+      const pane = (): Promise<string | null> =>
+        s.page.evaluate(
+          () => document.getElementById('right-zone')?.getAttribute('data-pane') ?? null,
+        );
+      const acts = (): number => s.sent.filter((message) => message['t'] === 'act').length;
+      /** No row drawn selected, nothing on the right side, and Enter on the list resumes nothing. */
+      const nothingSelected = async (what: string): Promise<void> => {
+        await s.page.waitForFunction(
+          () => document.querySelector('#list [data-selected="true"]') === null,
+          null,
+          { timeout: PAGE_WAIT_MS },
+        );
+        assert.equal(await pane(), 'none', `${what}: the right side`);
+        assert.equal(await active(s.page), '#list', `${what}: the keyboard on the list`);
+        const before = acts();
+        await s.page.keyboard.press('Enter');
+        await sleep(300);
+        assert.equal(acts(), before, `${what}: Enter resumes nothing`);
+      };
+
+      // A filter that excludes the selected row.
+      await clickRow(s.page, S1);
+      assert.equal(await pane(), 'resume');
+      await s.page.keyboard.press('/');
+      await s.page.keyboard.type('other');
+      await untilDrawn(s.page, (rows) => rows.length === 2, 'the filter');
+      await s.page.keyboard.press('Enter'); // the keyboard back on the list
+      await nothingSelected('filtered out');
+      await s.page.keyboard.press('ArrowDown');
+      await s.page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S2,
+        { timeout: PAGE_WAIT_MS },
+      );
+      await s.page.keyboard.press('Escape'); // the filter cleared
+      await untilDrawn(s.page, (rows) => rows.length === 3, 'no filter');
+
+      // Done sessions shown, one selected, hidden again with `a`.
+      await s.page.keyboard.press('a');
+      await untilDrawn(s.page, (rows) => rows.length === 4, 'done shown');
+      await clickRow(s.page, S4);
+      await s.page.keyboard.press('a');
+      await untilDrawn(s.page, (rows) => rows.length === 3, 'done hidden again');
+      await nothingSelected('done hidden');
+      await s.page.keyboard.press('ArrowUp');
+      await s.page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S1,
+        { timeout: PAGE_WAIT_MS },
+      );
+
+      // The row gone from the server's list.
+      await clickRow(s.page, S3);
+      s.send(fullList({ week: [fullRow(S1), fullRow(S2, { title: 'other two' })] }));
+      await untilDrawn(s.page, (rows) => rows.length === 2, 'the row gone');
+      await nothingSelected('gone');
+      await s.page.keyboard.press('ArrowDown');
+      await s.page.waitForFunction(
+        (id) =>
+          document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+        S1,
+        { timeout: PAGE_WAIT_MS },
+      );
+      assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
     },
   );
 });
