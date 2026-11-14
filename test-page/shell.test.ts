@@ -1505,6 +1505,37 @@ test('the page shell', async (t) => {
     },
   );
 
+  await t.test(
+    'neither session storage nor IndexedDB, and a server of another asset version: no reload, and the line of the key that could not be stored',
+    async (t) => {
+      const secret = randomBytes(32);
+      const token = randomBytes(32);
+      const page = await newPage(t, chromium);
+      await page.addInitScript(() => {
+        for (const name of ['sessionStorage', 'indexedDB']) {
+          Object.defineProperty(globalThis, name, {
+            get() {
+              throw new DOMException(`no ${name} here`, 'SecurityError');
+            },
+          });
+        }
+      });
+      let loads = 0;
+      page.on('load', () => loads++);
+      const standin = await standinServer(t, {
+        socket: honest(secret, { token, assetVersion: 'another-build' }),
+      });
+
+      await page.goto(pageUrl(standin.port, token.toString('base64url')));
+      await showsText(page, '#problem', new RegExp(`^${escape(STALE_UNSTORED)}$`));
+      await connection(page, 'fatal');
+      await sleep(1500);
+
+      assert.equal(loads, 1, 'no reload of its own');
+      assert.equal(standin.connections.length, 1);
+    },
+  );
+
   await t.test('no pong for 3 seconds → the bar within 4 s', async (t) => {
     const secret = new Uint8Array(32).fill(5);
     const page = await newPage(t, chromium);
