@@ -218,6 +218,31 @@ describe('doctor: the server', () => {
     assert.ok(stillRuns(m, fake));
   });
 
+  test('a server that answers /ping but fails GET /status: a problem saying so', async (t) => {
+    const m = machine(t);
+    const fake = await startFakeServe(t, m);
+    // The fake serve answers every route; the platform's net answers this one 500, as a server
+    // whose status throws does (S2 8.3).
+    const net = {
+      ...m.platform.net,
+      requestUnix: (...args: Parameters<Platform['net']['requestUnix']>) =>
+        args[1].path === '/status'
+          ? Promise.resolve({ status: 500, body: { error: 'failed' } })
+          : m.platform.net.requestUnix(...args),
+    };
+
+    const r = await doctor(m, { net });
+
+    lineOf(
+      r,
+      'problem',
+      new RegExp(
+        `^problem {2}the window's server \\(pid ${fake.pid}\\) answers, but GET /status failed \\(`,
+      ),
+    );
+    noLine(r, /^info {5}the window's server runs:/);
+  });
+
   test('a server.json whose process cannot be judged (no boot id): a problem saying so, nothing given up', async (t) => {
     const d = testPlatform(t);
     claudeFolders(d.places);
@@ -306,6 +331,62 @@ describe('doctor: the port', () => {
     });
 
     lineOf(r, 'ok', /port 47613 on 127\.0\.0\.1: the window's server listens there/);
+  });
+
+  test("held while this installation's server is alive but does not answer: info; the server's own line is the problem", async (t) => {
+    const m = machine(t);
+    const fake = await startFakeServe(t, m, { FAKE_SERVE_MODE: 'silent' });
+
+    const r = await doctor(m, {
+      proc: { ...m.platform.proc, tcpListening: (port) => port === 47613 },
+    });
+
+    lineOf(
+      r,
+      'info',
+      /^info {5}port 47613 on 127\.0\.0\.1 is held; the window's server does not answer, so whether it holds it is not known$/,
+    );
+    lineOf(
+      r,
+      'problem',
+      new RegExp(`the window's server \\(pid ${fake.pid}\\) is alive but does not answer`),
+    );
+    noLine(r, /something that is not this installation's window server/);
+  });
+
+  test("held while server.json names a process that cannot be judged: info; the server's own line is the problem", async (t) => {
+    const d = testPlatform(t);
+    claudeFolders(d.places);
+    assert.equal((await run(d.platform, ['install'], { lines: ['y'] })).code, 0);
+    withStore(d.places, (store) => store.setKv('window_secret', 'A'.repeat(43)));
+    const runDir = join(d.sandbox.skydeckHome, 'run');
+    mkdirSync(runDir, { mode: 0o700 });
+    writeServerJson(d.platform.files, join(runDir, 'server.json'), {
+      pid: 4242,
+      procStart: 7,
+      bootId: BOOT_A,
+      port: 47613,
+      serverId: '0011223344556677',
+      build: 'b',
+      checkout: d.platform.appRoot,
+      startedAt: '1',
+      envOrigin: { dir: '/', atNs: '1' },
+    });
+    d.proc.setBootId(null);
+    d.proc.setTcpListening([47613]);
+
+    const r = await run(d.platform, ['doctor']);
+
+    assert.match(
+      r.stdout,
+      /^info {5}port 47613 on 127\.0\.0\.1 is held; the window's server does not answer, so whether it holds it is not known$/m,
+    );
+    assert.match(
+      r.stdout,
+      /^problem {2}cannot tell whether the window's server \(pid 4242\) still runs/m,
+    );
+    assert.doesNotMatch(r.stdout, /something that is not this installation's window server/);
+    assert.deepEqual(d.processes.signals, []);
   });
 
   test('/proc/net/tcp cannot be read: info', async (t) => {
@@ -495,6 +576,34 @@ describe('doctor: the C: drive, Edge and the profile folder', () => {
       await doctor(machine(t, { drive: false, used: false })),
       'info',
       /^info {5}the C: drive is not mounted/,
+    );
+  });
+
+  test('window.edge that exists but is not a file: a problem; before the window was used: info', async (t) => {
+    const used = machine(t);
+    const dir = join(used.s.root, 'edge-dir');
+    mkdirSync(dir);
+    writeFileSync(
+      used.places.configPath,
+      JSON.stringify({ window: { edge: dir, keepAlive: 'off' } }),
+    );
+    lineOf(
+      await doctor(used),
+      'problem',
+      new RegExp(`^problem {2}window\\.edge ${dir} is not a file; set window\\.edge in `),
+    );
+
+    const never = machine(t, { used: false });
+    const other = join(never.s.root, 'edge-dir');
+    mkdirSync(other);
+    writeFileSync(
+      never.places.configPath,
+      JSON.stringify({ window: { edge: other, keepAlive: 'off' } }),
+    );
+    lineOf(
+      await doctor(never),
+      'info',
+      new RegExp(`^info {5}window\\.edge ${other} is not a file`),
     );
   });
 
