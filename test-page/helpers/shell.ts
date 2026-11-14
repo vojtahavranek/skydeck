@@ -12,7 +12,13 @@ import type { Page } from 'playwright';
 import WebSocket, { WebSocketServer } from 'ws';
 
 import { httpHandler, loadAssets, securityHeaders } from '../../src/window/assets.ts';
-import { isNonce, keyProofMatches, pageProof, serverProof, wrapSecret } from '../../src/window/auth.ts';
+import {
+  isNonce,
+  keyProofMatches,
+  pageProof,
+  serverProof,
+  wrapSecret,
+} from '../../src/window/auth.ts';
 import { testPlatform } from '../../test/helpers/platform.ts';
 
 /** How long a page test waits for something the page or a real server does (a loaded machine). */

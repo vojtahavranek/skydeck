@@ -551,22 +551,25 @@ test('the page shell', async (t) => {
     },
   );
 
-  await t.test('a server with another boot id → "WSL has restarted since <time>…", the time the page lost the old server', async (t) => {
-    const l = await launched(t, chromium);
-    const port = l.server.port;
-    await l.server.stop('the test stops it');
-    const gone = await showsText(l.page, '#gone-text', GONE, 4000);
-    await sleep(1500); // the welcome comes in a later second than the loss
+  await t.test(
+    'a server with another boot id → "WSL has restarted since <time>…", the time the page lost the old server',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const port = l.server.port;
+      await l.server.stop('the test stops it');
+      const gone = await showsText(l.page, '#gone-text', GONE, 4000);
+      await sleep(1500); // the welcome comes in a later second than the loss
 
-    await l.d.start({
-      port,
-      platform: (p: Platform) => ({ ...p, proc: { ...p.proc, bootId: () => 'another-boot-id' } }),
-    });
-    const restarted = await showsText(l.page, '#info-text', WSL_RESTARTED);
-    await connection(l.page, 'open');
-    const time = (text: string): string | undefined => /\d\d:\d\d:\d\d/.exec(text)?.[0];
-    assert.equal(time(restarted), time(gone), 'the time the page lost the old server');
-  });
+      await l.d.start({
+        port,
+        platform: (p: Platform) => ({ ...p, proc: { ...p.proc, bootId: () => 'another-boot-id' } }),
+      });
+      const restarted = await showsText(l.page, '#info-text', WSL_RESTARTED);
+      await connection(l.page, 'open');
+      const time = (text: string): string | undefined => /\d\d:\d\d:\d\d/.exec(text)?.[0];
+      assert.equal(time(restarted), time(gone), 'the time the page lost the old server');
+    },
+  );
 
   await t.test(
     'the keep-alive failed in welcome → "WSL is not kept running" in the title bar',
