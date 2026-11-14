@@ -771,3 +771,34 @@ test('stopServer: a server whose process cannot be judged is an error, nothing s
   await assert.rejects(stopServer(deck, { pingMs: 300, stopMs: 300, killMs: 300 }), SkydeckError);
   assert.deepEqual(h.signals, []);
 });
+
+// ---------------------------------------------------------------------------------------------
+// LifecycleTimes
+
+test('a time given as undefined is the default, for every function (ruled, review 1)', async (t) => {
+  const h = harness(t);
+  const unset = { pingMs: undefined, startMs: undefined, stopMs: undefined, killMs: undefined };
+  assert.deepEqual(await findServer(h.deck, FAKE_ROOT, h.build, unset), { kind: 'none' });
+  assert.deepEqual(await stopServer(h.deck, unset), { stopped: false, terminals: 0 });
+  const quick = harness(t, () => ({ FAKE_SERVE_MODE: 'exit', FAKE_SERVE_EXIT: '7' }));
+  assert.deepEqual(await startServe(quick.deck, unset), {
+    ok: false,
+    line: `the window's server did not start (exit 7); see ${logPath(quick)}`,
+  });
+});
+
+test('a time that is not a whole number of ms a timer can wait is a RangeError, and nothing is started or sent', async (t) => {
+  const h = harness(t);
+  const fake = await startFake(t, h, { FAKE_SERVE_MODE: 'silent' });
+  for (const bad of [-1, 1.5, Number.NaN, Infinity, 2 ** 31]) {
+    for (const name of ['pingMs', 'startMs', 'stopMs', 'killMs'] as const) {
+      const times = { [name]: bad };
+      await assert.rejects(findServer(h.deck, FAKE_ROOT, h.build, times), RangeError);
+      await assert.rejects(startServe(h.deck, times), RangeError);
+      await assert.rejects(stopServer(h.deck, times), RangeError);
+    }
+  }
+  assert.deepEqual(h.started, []);
+  assert.deepEqual(h.signals, []);
+  assert.equal(startOf(h.base.proc, fake.pid), fake.procStart);
+});

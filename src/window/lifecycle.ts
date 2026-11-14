@@ -42,7 +42,11 @@ export type FoundServer =
   | { kind: 'other-checkout'; ping: PingAnswer }
   | { kind: 'hung'; pid: number };
 
-/** Timeouts in ms, the design's values by default (A31): ping 5000, start 10000, stop 10000, kill 5000. */
+/**
+ * Timeouts in ms, the design's values by default (A31): ping 5000, start 10000, stop 10000, kill
+ * 5000. A time left out or given as undefined is the default; one that is not a whole number from
+ * 0 to 2^31 − 1 makes the function reject with a RangeError before it does anything (ruled).
+ */
 export interface LifecycleTimes {
   pingMs?: number;
   startMs?: number;
@@ -71,13 +75,20 @@ const NOT_RUNNING = { stopped: false, terminals: 0 } as const;
 /** How a started `serve` ended. */
 type Exit = Awaited<Detached['exited']>;
 
-/** The design's defaults with `times` over them; RangeError for a time no timer can wait. */
+/**
+ * The design's defaults with the times `times` gives over them: a time that is missing or
+ * undefined is the default (so a caller may pass `{ startMs: options.startMs }` on); RangeError for
+ * one that is not a whole number of ms from 0 to 2^31 − 1, which no timer can wait (ruled).
+ */
 function timesOf(times: LifecycleTimes): Required<LifecycleTimes> {
-  const merged = { ...DEFAULT_TIMES, ...times };
-  for (const [name, ms] of Object.entries(merged)) {
+  const merged = { ...DEFAULT_TIMES };
+  for (const name of Object.keys(DEFAULT_TIMES) as (keyof LifecycleTimes)[]) {
+    const ms = times[name];
+    if (ms === undefined) continue;
     if (!Number.isSafeInteger(ms) || ms < 0 || ms > MAX_TIMER_MS) {
       throw new RangeError(`${name} is not a whole number of milliseconds a timer can wait: ${ms}`);
     }
+    merged[name] = ms;
   }
   return merged;
 }

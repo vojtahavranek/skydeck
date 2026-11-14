@@ -288,10 +288,14 @@ Options:
   keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab and their Shift forms (section 21), so the page shows a
   hint naming Ctrl+Shift+O for "previous session" and the "+ New" button.
 - `--restart`: stop the running server and start a new one; also a server of another checkout or
-  one that does not answer. Stopping: `POST /shutdown` (5.5), then wait until its process is gone
-  (at most 10 seconds); a server that does not answer, or does not end in time, gets SIGTERM and,
-  after 5 more seconds, SIGKILL — only once its pid, process start and boot id from `server.json`
-  are confirmed alive, so no other process is ever signalled. The server is skydeck's own process
+  one that does not answer. Stopping: a server that answers `GET /ping` is sent `POST /shutdown`
+  (5.5) and waited for until its process is gone (at most 10 seconds); a server that does not
+  answer the ping is sent no request and gets SIGTERM at once (it would not answer the request
+  either, and SIGTERM is the same orderly stop, 5.5); one that does not end in time gets SIGTERM
+  too. Either one, still running 5 seconds after SIGTERM, gets SIGKILL — each signal only once its pid, process start
+  and boot id from `server.json` are confirmed alive at that moment, so no other process is ever
+  signalled. A `server.json` whose process cannot be judged (5.5's "unknown") stops the command
+  with that error: nothing is signalled or given up on it. The server is skydeck's own process
   (2); keepers and their programs are never signalled and keep running.
 - `--stop`: stop the server the same way and start nothing. Sessions in the window keep running in
   their keepers; windows say that the server is gone (6.3).
@@ -316,7 +320,8 @@ tests may themselves run under Claude Code.
 
 **How `skydeck window` learns what happened.** It keeps the handle of the `serve` process it
 started and waits, at most 10 seconds, for the first of: `server.sock` answering `GET /ping` with
-the current boot id and build — started; or the process exiting, whose code says why, and which
+the current boot id, this checkout and the current build, as 5.1 compares them (two checkouts at
+the same commit have the same build) — started; or the process exiting, whose code says why, and which
 it turns into one fixed line:
 
 | `serve` exits | `skydeck window` says (exit 1) |
@@ -428,7 +433,9 @@ On `POST /shutdown` (8.3), SIGTERM or SIGINT the server: stops accepting connect
 snapshot in every keeper (7.3); closes its keeper connections (the keepers and their programs keep
 running); sends every page `bye` with the reason; removes `server.json`, `server.pid` and
 `server.sock`; releases the `window_server` lock (5.2); and exits 0. It does not stop the
-keep-alive, which ends by itself (6.1). A server that crashes leaves `server.json` and its lock
+keep-alive, which ends by itself (6.1). The three are the same stop, so a command that stops a
+server (5.1 `--restart`) sends SIGTERM instead of the request to one that does not answer
+`GET /ping`. A server that crashes leaves `server.json` and its lock
 behind: whoever reads them checks the pid, process start and boot id they name by design 5.5's
 rule before believing them.
 
