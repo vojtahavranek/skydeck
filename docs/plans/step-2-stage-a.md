@@ -2610,6 +2610,10 @@ Chromium with a cache and runs the page suite on Node 24 only, within 20 minutes
   (an `index.html` and a `main.js` that open an xterm.js terminal from the vendored modules and
   write `ESC[31mred`), `test-page/fixtures/launch.ts` (one test that asks for the browser, run as a
   child `node --test` by the smoke test; ruled on #51)
+- Modify: `test/keeper/limits.test.ts` (ruled on #51, a CI-reliability fix: task 9's send-queue-cap
+  test failed on loaded runners because its second claim gets the rest of the flood live under the
+  test's 256 KiB send cap and is closed itself when the test process reads too slowly; it claims
+  again until a claim sees the whole flood, and the waits on the flood's pace have a 90 s ceiling)
 - Modify: `docs/design-step-2.md` 17.4 (A5: Playwright 1.60.0), 17.5 (A13, A15: how the leg is split)
 
 **Workflow.** `timeout-minutes: 20`. Both legs: `npm ci`, `npm run format:check`,
@@ -2626,14 +2630,14 @@ stays on `ubuntu-latest` (Ubuntu 26.04), because Playwright 1.60.0 has no Chromi
 **`test-page/helpers/browser.ts`.** `browser(t)` launches headless Chromium once per test file and
 closes it in `t.after`; when Chromium is not installed it fails with exactly `Chromium for
 Playwright is not installed; run: npx playwright install chromium`. Ruled on #51, for tasks
-26–29: the file also exports that message as `NOT_INSTALLED` and `newPage(t, browser)` (a page in
-a fresh browser context, closed in `t.after`); Chromium runs with a sandbox's environment, and
+26–29: the file also exports that message as `NOT_INSTALLED` and `newPage(t, chromium)` (a page
+in a fresh browser context, closed in `t.after`); Chromium runs with a sandbox's environment, and
 nothing but `127.0.0.1` resolves in it (section 0).
 
 ```ts
 export const NOT_INSTALLED: string;
 export function browser(t: TestContext): Promise<Browser>;
-export function newPage(t: TestContext, browser: Browser): Promise<Page>;
+export function newPage(t: TestContext, chromium: Browser): Promise<Page>;
 ```
 
 **Tests** (platform: `testPlatform`, for the files and the static server's listener, which are
