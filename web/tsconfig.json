@@ -1,0 +1,34 @@
+{
+  // The page's type check (plan task 26): plain JavaScript with JSDoc types, checked as the DOM
+  // sees it. It reads the vendored typings only (their package names map to vendor/; task 2) and
+  // the message types of src/window/protocol.ts, which needs ES2024 (isWellFormed) and its .ts
+  // import of src/claude/session-id.ts.
+  "compilerOptions": {
+    "target": "es2025",
+    "lib": ["es2025", "dom", "dom.iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "paths": {
+      "@xterm/xterm": ["../vendor/xterm/xterm/typings/xterm.d.ts"],
+      "@xterm/headless": ["../vendor/xterm/headless/typings/xterm-headless.d.ts"],
+      "@xterm/addon-fit": ["../vendor/xterm/addon-fit/typings/addon-fit.d.ts"],
+      "@xterm/addon-search": ["../vendor/xterm/addon-search/typings/addon-search.d.ts"],
+      "@xterm/addon-serialize": ["../vendor/xterm/addon-serialize/typings/addon-serialize.d.ts"],
+      "@xterm/addon-unicode-graphemes": [
+        "../vendor/xterm/addon-unicode-graphemes/typings/addon-unicode-graphemes.d.ts"
+      ]
+    }
+  },
+  "include": ["."]
+}

@@ -1,0 +1,251 @@
+/* The page's base styles (S2 12.1): the regions of index.html, the bars, the zones' coloured top
+   edge, the key bar. The list, the terminal view and the cards have their own stylesheets
+   (tasks 27, 28, 29). The terminal's font and colours are variables here, so that app.js measures
+   the terminal area (`#cell-measure`) and reports the theme (`start.theme`) with what the terminal
+   view uses. */
+:root {
+  --bg: #f3f4f6;
+  --panel: #ffffff;
+  --panel2: #f8f9fb;
+  --line: #e3e5e9;
+  --line2: #d3d7dd;
+  --text: #1d2127;
+  --dim: #5d6470;
+  --faint: #8b929c;
+  --sel: #dde8fb;
+  --selline: #5b8def;
+  --accent: #2f6fde;
+  --wait: #b7791f;
+  --wait-bg: #fdf3dc;
+  --crash: #c93c37;
+  --crash-bg: #fbe3e1;
+  --kbd: #e9ebef;
+  --term-bg: #fbfbf9;
+  --term-fg: #24292f;
+  --term-font: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Segoe UI Symbol', monospace;
+  --term-font-size: 14px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c;
+    --panel: #1d2025;
+    --panel2: #22262c;
+    --line: #2c3037;
+    --line2: #3a3f47;
+    --text: #e4e6ea;
+    --dim: #a3a9b2;
+    --faint: #6f7680;
+    --sel: #253247;
+    --selline: #6ea2ff;
+    --accent: #6ea2ff;
+    --wait: #f0b941;
+    --wait-bg: #3a2f14;
+    --crash: #f2665f;
+    --crash-bg: #3d1d1c;
+    --kbd: #30353d;
+    --term-bg: #121417;
+    --term-fg: #d6d9de;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font:
+    13px/1.35 'Segoe UI Variable Text',
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+  overflow: hidden;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+kbd {
+  font:
+    11px 'Cascadia Mono',
+    Consolas,
+    monospace;
+  background: var(--kbd);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+[hidden] {
+  display: none !important;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.titlebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  background: var(--panel2);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+.logo {
+  font-weight: 650;
+}
+.spacer {
+  flex: 1;
+}
+.title-notice {
+  font-size: 12px;
+  color: var(--dim);
+}
+.title-notice.warning {
+  color: var(--wait);
+  background: var(--wait-bg);
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+
+.bar {
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line2);
+}
+.bar.gone,
+.bar.problem {
+  background: var(--crash-bg);
+  color: var(--crash);
+}
+.bar.info {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: var(--sel);
+}
+.bar code {
+  font-family: var(--term-font);
+}
+.bar-detail {
+  margin-top: 4px;
+  color: var(--dim);
+}
+.bar-close {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  min-height: 0;
+}
+.zone {
+  min-height: 0;
+  outline: none;
+  border-top: 2px solid transparent;
+}
+.zone.focused {
+  border-top-color: var(--selline);
+}
+.list-zone {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+.right-zone {
+  display: flex;
+  flex-direction: column;
+}
+.cards {
+  flex: none;
+}
+.right-zone:not([data-pane='terminal']) .cards {
+  flex: 1;
+  overflow: auto;
+}
+.terminal {
+  flex: 1;
+  min-height: 0;
+  color: var(--term-fg);
+  background: var(--term-bg);
+}
+.right-zone:not([data-pane='terminal']) .terminal {
+  display: none;
+}
+
+.keybar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--dim);
+  background: var(--panel2);
+  border-top: 1px solid var(--line);
+}
+.focus-zone {
+  color: var(--selline);
+  font-weight: 600;
+}
+[data-display='app'] .tab-only,
+[data-display='tab'] .app-only {
+  display: none;
+}
+.new-button {
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.help {
+  position: fixed;
+  inset: 60px auto auto 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  box-shadow: 0 12px 40px rgba(20, 30, 50, 0.18);
+}
+/* The selected row of the list, whichever module draws it. */
+[data-selected='true'] {
+  background: var(--sel);
+}
+/* The terminal's cell, measured by app.js for `focus.area` (S2 8.2.3). */
+.cell-measure {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  font-family: var(--term-font);
+  font-size: var(--term-font-size);
+  line-height: normal;
+}
