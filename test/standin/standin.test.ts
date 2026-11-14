@@ -143,6 +143,29 @@ function count(haystack: Buffer, needle: string): number {
   return n;
 }
 
+/** Per test, the cleanups of its ptys: run before any sandbox of the test is removed. */
+const ptyCleanups = new WeakMap<TestContext, (() => Promise<void>)[]>();
+
+/**
+ * A sandbox for a test that starts ptys. Its ptys' cleanup is registered before the sandbox's own
+ * (t.after runs first in, first out), as keeperSandbox does, so that every helper and its program
+ * are gone before the sandbox is removed: a stand-in whose directory goes first ends itself (A33)
+ * and races the pty's after hook.
+ */
+function ptySandbox(t: TestContext): Sandbox {
+  if (!ptyCleanups.has(t)) {
+    const cleanups: (() => Promise<void>)[] = [];
+    ptyCleanups.set(t, cleanups);
+    t.after(async () => {
+      for (const cleanup of cleanups) {
+        await cleanup();
+      }
+    });
+  }
+  return sandbox(t);
+}
+
+/** A program in a pty; the test made its sandbox with ptySandbox(t) first. */
 function inPty(
   t: TestContext,
   command: string,
@@ -151,6 +174,8 @@ function inPty(
   options: { cwd: string; cols?: number; rows?: number },
 ): Pty {
   assert.ok(PYTHON, 'python3 not found');
+  const cleanups = ptyCleanups.get(t);
+  assert.ok(cleanups, 'inPty: make the sandbox with ptySandbox(t) first');
   const child: ChildProcess = spawn(
     PYTHON,
     [
@@ -175,11 +200,13 @@ function inPty(
     stderr += chunk.toString('utf8');
   });
   const control = child.stdio[3] as NodeJS.WritableStream;
-  // A helper that has just gone answers a write here with EPIPE, asynchronously: no error of the
-  // test, as nothing is left to act on the line. Any other error of the pipe still fails it.
+  // A helper that has just gone answers a write here with EPIPE, asynchronously; one that is
+  // ending takes the line in without reading it, and its exit resets the socket (ECONNRESET on
+  // our read). Neither is an error of the test: nothing is left to act on the line. Any other
+  // error of the pipe still fails it (ruled at review 2 of #62).
   control.on('error', (error: NodeJS.ErrnoException) => {
     controlOpen = false;
-    if (error.code !== 'EPIPE') {
+    if (error.code !== 'EPIPE' && error.code !== 'ECONNRESET') {
       throw error;
     }
   });
@@ -189,7 +216,7 @@ function inPty(
       resolve(code);
     });
   });
-  t.after(async () => {
+  cleanups.push(async () => {
     if (!exited) {
       // Never into a pipe known to be closed: the helper's end is in, or the pipe ended or failed.
       const gone = child.exitCode !== null || child.signalCode !== null;
@@ -284,7 +311,7 @@ interface StartOptions {
 
 /** The stand-in in a pty, in a sandbox; with `answer` (the default) its prompt is on screen. */
 async function startStandin(t: TestContext, options: StartOptions = {}): Promise<Started> {
-  const s = options.s ?? sandbox(t);
+  const s = options.s ?? ptySandbox(t);
   const command = standinCommand(s, { wrapper: options.wrapper ?? false });
   const recordDir = join(s.root, 'records');
   mkdirSync(recordDir, { recursive: true });
@@ -378,6 +405,16 @@ function procState(pid: number): string | null {
     return procStat(pid)[0] ?? null;
   } catch {
     return null;
+  }
+}
+
+/** The pids of `pid`'s children, from /proc ([] when it cannot be read). */
+function childrenOf(pid: number): number[] {
+  try {
+    const text = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim();
+    return text === '' ? [] : text.split(' ').map(Number);
+  } catch {
+    return [];
   }
 }
 
@@ -497,7 +534,7 @@ describe('stand-in: start', () => {
   });
 
   test('$STANDIN_HOOK is not honoured: it always runs bin/skydeck-hook', async (t) => {
-    const s = sandbox(t);
+    const s = ptySandbox(t);
     const calls = join(s.root, 'hook-calls');
     const hook = join(s.root, 'hook-recorder');
     writeFileSync(hook, `#!/bin/sh\necho "$1" >> '${calls}'\n`);
@@ -1068,7 +1105,7 @@ describe("stand-in: this file's pty helper", () => {
   // ended … write EPIPE", seen in a full run under load).
   for (let round = 1; round <= 20; round++) {
     test(`a helper gone before its after hook runs fails nothing (round ${round})`, (t) => {
-      const s = sandbox(t);
+      const s = ptySandbox(t);
       s.link('true');
       const pty = inPty(t, join(s.bin, 'true'), [], s.env(), { cwd: s.home });
 
@@ -1076,6 +1113,28 @@ describe("stand-in: this file's pty helper", () => {
       while (procState(pty.helperPid) !== 'Z') {
         assert.ok(performance.now() < deadline, 'the pty helper did not end');
         blockFor(5);
+      }
+    });
+  }
+
+  // A moment earlier: the helper has reaped the program but not yet exited (Python is ending), so
+  // `killgroup` is taken in but never read, and the helper's exit resets the socket: Node's read
+  // of the pipe fails with ECONNRESET. It must not fail the file either (review 2 of #62).
+  for (let round = 1; round <= 20; round++) {
+    test(`a helper still ending when its after hook runs fails nothing (round ${round})`, (t) => {
+      const s = ptySandbox(t);
+      s.link('true');
+      const pty = inPty(t, join(s.bin, 'true'), [], s.env(), { cwd: s.home });
+
+      const deadline = performance.now() + 5000;
+      let started = false;
+      for (;;) {
+        const children = childrenOf(pty.helperPid);
+        started ||= children.length > 0;
+        const state = procState(pty.helperPid);
+        if (state === 'Z' || (started && children.length === 0 && state !== null)) break;
+        assert.ok(performance.now() < deadline, 'the pty helper did not reap its program');
+        blockFor(0.2);
       }
     });
   }
