@@ -505,7 +505,8 @@ describe('real files', () => {
   });
 
   test('remove takes a dangling symlink away, and never what a symlink points to', (t) => {
-    // Node.js 24.12's rmSync follows the link: it left a dangling one in place and said nothing.
+    // On Node.js 24.12.0 rmSync's check of what a path is follows the link, so it left a dangling
+    // one in place and said nothing; remove is unlink, which takes the link itself.
     const { files } = realPlatform();
     const dir = tmp(t);
     symlinkSync(join(dir, 'nothing'), join(dir, 'dangling'));

@@ -188,8 +188,10 @@ function orIfMissing<T, M>(fn: () => T, missing: M): T | M {
 
 /**
  * Removes a file or a symbolic link (never what it points to); nothing when it is not there. A
- * directory is refused (EISDIR). unlink, not rmSync: Node.js 24.12's rmSync follows a symbolic
- * link, so with `force` it left a dangling one in place without an error.
+ * directory is refused (EISDIR). unlink, not rmSync: on Node.js 24.12.0 rmSync's check of what a
+ * path is follows a symbolic link (24.19.0 looks at the link itself), so it leaves a dangling link
+ * in place without an error, with or without `force`, and throws on a link to a directory unless
+ * `recursive` is given. Its removal itself never follows a link, on either version.
  */
 function unlinkIfThere(path: string): void {
   try {

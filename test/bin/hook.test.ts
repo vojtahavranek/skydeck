@@ -9,8 +9,8 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -421,7 +421,7 @@ describe('hook: failures stay silent and exit 0', () => {
 
   test('a date that prints no number of nanoseconds drops the event and says so in hook.log', (t) => {
     const s = hookSandbox(t);
-    rmSync(join(s.bin, 'date'));
+    unlinkSync(join(s.bin, 'date'));
     writeFileSync(join(s.bin, 'date'), '#!/bin/sh\necho garbage\n', { mode: 0o755 });
 
     const ran = run(s, 'SessionStart');
@@ -436,7 +436,7 @@ describe('hook: failures stay silent and exit 0', () => {
 
   test('a write that fails leaves only the temporary file, never an .ev file', (t) => {
     const s = hookSandbox(t);
-    rmSync(join(s.bin, 'cat'));
+    unlinkSync(join(s.bin, 'cat'));
     writeFileSync(join(s.bin, 'cat'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     const state = join(s.skydeckHome, 'state');
 
@@ -453,7 +453,7 @@ describe('hook: failures stay silent and exit 0', () => {
 
   test('an error of two lines is one line of hook.log, with its time', (t) => {
     const s = hookSandbox(t);
-    rmSync(join(s.bin, 'cat'));
+    unlinkSync(join(s.bin, 'cat'));
     writeFileSync(
       join(s.bin, 'cat'),
       '#!/bin/sh\necho "cat: first line" >&2\necho "second line" >&2\nexit 1\n',

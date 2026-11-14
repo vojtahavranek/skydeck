@@ -155,6 +155,17 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
           sockets.push(socket);
           // The records this read hands to a screen side (numbered as the registry does, the ones
           // a reconnect's tail repeats left out), sampled after the registry's handler ran.
+          // This is what the registry counts only for the D records of claims that continue the
+          // screen, the one case a test relies on today. It differs in three cases:
+          // - a claim that rebuilds the screen replays its tail onto the new one: the registry
+          //   counts those records again, this spy (each position once per terminal) does not,
+          //   while `written` counts their writes, so `maxBacklog` under-reports from then on;
+          // - records still queued on a screen that a rebuild disposes never reach `write`,
+          //   while the registry takes them off as applied: it over-reports by those bytes;
+          // - R records: the registry counts their payloads until the resize is applied; this
+          //   spy neither hands nor writes them.
+          // Counting exactly would mean re-deriving the registry's skip rule, its resizes and its
+          // screens' queues here (left out, test-unlink #62).
           const reader = frameReader();
           let position = 0;
           let id = '';

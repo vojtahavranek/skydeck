@@ -9,6 +9,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -156,7 +157,7 @@ describe('uninstall', () => {
   test('a link that now points elsewhere is left alone; the others are removed', async (t) => {
     const d = testPlatform(t);
     await installed(d, null);
-    rmSync(d.places.binLink);
+    unlinkSync(d.places.binLink);
     symlinkSync('/elsewhere', d.places.binLink);
 
     const r = await run(d.platform, ['uninstall']);
@@ -170,7 +171,7 @@ describe('uninstall', () => {
   test('a regular file where a link was is left alone', async (t) => {
     const d = testPlatform(t);
     await installed(d, null);
-    rmSync(d.places.binLink);
+    unlinkSync(d.places.binLink);
     writeFileSync(d.places.binLink, 'mine');
 
     const r = await run(d.platform, ['uninstall']);

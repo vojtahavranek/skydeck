@@ -838,9 +838,16 @@ describe('registry: reading a keeper no faster than its screen side applies', ()
       'send-queue-full',
     );
     assert.ok(r.events.hello.length >= 2, 'the registry claimed it again');
+    // The registry counts complete D/R frames only and pauses inside the frame handler, and every
+    // frame of the push is handed on all the same; the frame reader hands a record whole when the
+    // push that completes it lands. So a read that lands at backlog <= mark can add the record the
+    // reader was putting together (<= 65,543 bytes buffered from earlier reads: a keeper record is
+    // at most READ_SIZE 65,536 + 3 held-back UTF-8 bytes, 65,544 with its 5-byte header) plus the
+    // read itself (<= 65,536), less two headers: 65,543 + 65,536 - 2 x 5 = 131,069 bytes above the
+    // mark. 128 KiB is 3 bytes looser.
     assert.ok(
-      r.maxBacklog() <= high + 64 * 1024 + 8 * 1024,
-      `at most one read above the mark: ${r.maxBacklog()} bytes waited`,
+      r.maxBacklog() <= high + 128 * 1024,
+      `at most one read and one record above the mark: ${r.maxBacklog()} bytes waited`,
     );
     // Nothing doubled or lost: the flood's numbered lines on the screen side follow each other.
     const screen = await screenOf(r);
@@ -1008,9 +1015,13 @@ describe('registry: a claim that starts while the screen side is behind', () => 
     assert.ok(screen);
     await until(() => screenLines(screen).includes('rec 12'), 'all 12 records applied', 30_000);
     assert.equal(r.terminals.length, 1, 'the screen went on');
+    // Two records are the most: a record (65,545 or 65,546 bytes, 5 more with its header) is
+    // longer than a read (65,536), so a read completes at most one; the backlog holds whole
+    // records and is above the mark (131,072) with two, so a read lands at one record at most and
+    // adds one. A claim that read while paused would show a third.
     assert.ok(
-      r.maxBacklog() <= high + 64 * 1024 + 8 * 1024,
-      `at most one read above the mark: ${r.maxBacklog()} bytes waited`,
+      r.maxBacklog() <= 2 * record(12).length,
+      `at most two records waited: ${r.maxBacklog()} bytes`,
     );
   });
 });
