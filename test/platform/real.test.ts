@@ -519,6 +519,63 @@ describe('real files', () => {
     assert.equal(files.readText(join(dir, 'f')), 'x');
   });
 
+  test('rmdir removes an empty directory and does not mind a missing path', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'd'));
+
+    files.rmdir(join(dir, 'd'));
+    files.rmdir(join(dir, 'missing'));
+
+    assert.deepEqual(files.list(dir), []);
+  });
+
+  test('rmdir refuses a symbolic link to a directory, and never touches what it points to', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'full'));
+    writeFileSync(join(dir, 'full', 'f'), 'x');
+    mkdirSync(join(dir, 'empty'));
+    symlinkSync(join(dir, 'full'), join(dir, 'to-full'));
+    symlinkSync(join(dir, 'empty'), join(dir, 'to-empty'));
+
+    for (const link of ['to-full', 'to-empty']) {
+      assert.throws(
+        () => {
+          files.rmdir(join(dir, link));
+        },
+        { code: 'ENOTDIR' },
+        link,
+      );
+    }
+
+    assert.deepEqual(files.list(dir), ['empty', 'full', 'to-empty', 'to-full']);
+    assert.equal(files.readText(join(dir, 'full', 'f')), 'x');
+  });
+
+  test('rmdir refuses a directory that is not empty, and a file', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    mkdirSync(join(dir, 'd'));
+    writeFileSync(join(dir, 'd', 'f'), 'x');
+    writeFileSync(join(dir, 'file'), 'x');
+
+    assert.throws(
+      () => {
+        files.rmdir(join(dir, 'd'));
+      },
+      { code: 'ENOTEMPTY' },
+    );
+    assert.throws(
+      () => {
+        files.rmdir(join(dir, 'file'));
+      },
+      { code: 'ENOTDIR' },
+    );
+    assert.equal(files.readText(join(dir, 'd', 'f')), 'x');
+    assert.equal(files.readText(join(dir, 'file')), 'x');
+  });
+
   test('remove refuses a directory and leaves it', (t) => {
     const { files } = realPlatform();
     const dir = tmp(t);

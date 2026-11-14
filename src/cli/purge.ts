@@ -4,6 +4,10 @@
 // looked at, or holds anything else is left alone, and the caller names it in its last line with
 // exit 1, whatever directory it is (ruled, purge-care).
 //
+// It uses only lstat, readdir (Files.list), unlink (Files.remove) and rmdir (Files.rmdir), whose
+// behaviour on symbolic links is the same in every Node.js 24 (none follows a link at the path it is
+// given): never removeTree or rmSync, which Node.js 24.12 let follow a link (ruled, purge-care).
+//
 // THE LISTS BELOW ARE THE ONE PLACE that says what skydeck writes into its directories. Whoever
 // makes skydeck write a new file or directory into one of them adds it here (name and kind), or
 // `--purge` leaves that directory alone from then on.
@@ -148,7 +152,7 @@ export function purgeDir(platform: Platform, given: string, spec: Spec): Purged 
     if (late !== undefined) {
       return { kind: 'failed', why: `still holds ${late}, which came while it was purged` };
     }
-    files.removeTree(dir); // empty: nothing else can go with it
+    files.rmdir(dir); // rmdir(2): refuses a link, never follows one, and nothing else can go with it
   } catch (error) {
     return { kind: 'failed', why: `cannot be removed (${describeError(error)})` };
   }
@@ -191,7 +195,7 @@ function removeEntries(files: Files, dir: string, spec: Spec): void {
     if (info === null || rule === undefined || !rule.kinds.includes(info.kind)) continue;
     if (info.kind === 'dir') {
       removeEntries(files, path, rule.inside ?? []);
-      if (files.list(path).length === 0) files.removeTree(path);
+      if (files.list(path).length === 0) files.rmdir(path);
     } else {
       files.remove(path);
     }

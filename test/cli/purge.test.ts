@@ -3,7 +3,14 @@
 // directory alone, and a path to a directory through a link (also with a trailing slash) is never
 // followed. No SQLite file here is a database: they are only names.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { join } from 'node:path';
@@ -227,5 +234,53 @@ describe('purgeDir: what it does not remove', () => {
       why: 'still holds late.txt, which came while it was purged',
     });
     assert.ok(existsSync(join(dir, 'late.txt')));
+  });
+});
+
+describe('purgeDir removes directories only with rmdir', () => {
+  test('a just-emptied directory swapped for a link to a full one before its removal: nothing behind the link goes', (t) => {
+    const { platform, root } = platformOf(t);
+    const dir = join(root, 'state');
+    const spool = join(dir, 'spool');
+    mkdirSync(spool, { recursive: true });
+    writeFileSync(join(spool, '1794474000000000000-4242-7.ev'), 'v=1');
+    const full = join(root, 'full');
+    mkdirSync(full);
+    writeFileSync(join(full, 'precious.txt'), 'mine');
+    const files = {
+      ...platform.files,
+      rmdir(path: string) {
+        if (path === spool) {
+          // Between the look (empty) and the removal, someone puts a link in its place.
+          renameSync(spool, join(root, 'spool-was'));
+          symlinkSync(full, spool);
+        }
+        platform.files.rmdir(path);
+      },
+    };
+
+    const purged = purgeDir({ ...platform, files }, dir, stateDirSpec(STORE_ID));
+
+    assert.deepEqual(purged, { kind: 'failed', why: 'cannot be removed (ENOTDIR)' });
+    assert.deepEqual(readdirSync(full), ['precious.txt']);
+    assert.ok(existsSync(spool), 'the link stays');
+  });
+
+  test('the removal of a directory never goes through removeTree', (t) => {
+    const { platform, root } = platformOf(t);
+    const dir = join(root, 'state');
+    mkdirSync(join(dir, 'spool', 'bad'), { recursive: true });
+    mkdirSync(join(dir, 'locks'));
+    const files = {
+      ...platform.files,
+      removeTree(path: string) {
+        throw new Error(`removeTree(${path}) on the purge's path`);
+      },
+    };
+
+    assert.deepEqual(purgeDir({ ...platform, files }, dir, stateDirSpec(STORE_ID)), {
+      kind: 'removed',
+    });
+    assert.equal(existsSync(dir), false);
   });
 });

@@ -64,6 +64,11 @@ export interface Files {
    * when absent; a directory is refused.
    */
   remove(path: string): void;
+  /**
+   * Removes an empty directory (rmdir(2)): a symbolic link is refused (ENOTDIR) and never followed;
+   * one that is not empty is refused (ENOTEMPTY); no error when absent.
+   */
+  rmdir(path: string): void;
   /** rm -rf; no error when absent. */
   removeTree(path: string): void;
   /** Creates `path` as a symlink to `target`, replacing an existing symlink or file at `path`. */

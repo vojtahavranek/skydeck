@@ -276,6 +276,10 @@ export interface Files {
   // a dangling one is removed too (Node.js 24.12's rmSync followed it and left it in place) — and
   // refuses a directory; a missing path is no error.
   remove(path: string): void;
+  // rmdir() is new (ruled, purge-care): rmdir(2) — removes an empty directory; a symbolic link is
+  // refused (ENOTDIR) and never followed; one that is not empty is refused (ENOTEMPTY); no error
+  // when absent. `uninstall --purge` removes directories only with it.
+  rmdir(path: string): void;
 }
 export interface Proc {
   // bootId() and stat() (step 1's) change (ruling, for task 8's three-valued pidLineState): null
