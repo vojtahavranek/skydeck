@@ -3141,7 +3141,9 @@ so this task does not wait for task 21.
 export interface ActionDeps {
   deck: Deck;
   hub: TerminalHub;
-  /** The terminal to open a launch of this size with (task 23 passes task 21's windowTerminal). */
+  /** The terminal to open a launch of this size with (task 23 passes task 21's windowTerminal).
+   *  It only BUILDS the object: nothing is spawned and no slot is taken before its open() (ruled
+   *  by the plan owner, review 1 of task 32; tasks 21 and 23 keep it so). */
   terminalFor(size: { cols: number; rows: number }): Terminal;
   /** Task 19's openLink, bound to the configuration and the interop link. */
   openLink(url: string): Promise<boolean>;
@@ -3159,17 +3161,30 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload;
 - Test: `test/window/actions.test.ts`, `test/window/selected.test.ts` (`testDeck`, a fake
   `Terminal` that records its specs and answers as the test says, a fake hub)
 
-**Behaviour.** `resume` → `prepareResumeById` → `launchPrepared(deck, prepared, terminalFor({ cols,
-rows }))` → `{ ok: code === 0, lines, error: null, sessionId }`; a `SkydeckError` (the guard, the
-lock, `RefError`) → `{ ok: false, lines: [message], error: message, sessionId: null }`. Once
+**Behaviour.** Every action is checked again where it is acted on — its kind one of these four,
+its fields of the right type, sizes 1–65,535, `sessionId` by `isSessionId`, `term` 12 lowercase hex
+— and one that is not is answered `ok: false` "skydeck cannot do that action" with one fixed log
+line (ruled by the plan owner, review 1 of task 32: an action is what a page asks the server to
+do). `resume` → `terminalFor({ cols, rows })` → `prepareResumeById` → `launchPrepared(deck,
+prepared, terminal)` → `{ ok: code === 0, lines, error: null, sessionId }` (`sessionId` null unless
+it started, A25); a `SkydeckError` (the guard, the lock, `RefError`) → `{ ok: false, lines:
+[message], error: message, sessionId: null }`. The terminal is built first (ruled, review 1 of task
+32), so that a factory that throws leaves no lock and, for `new`, no label behind; a refused
+action builds it and never opens it. Once
 `prepareResumeById` has let it through, and before `launchPrepared`, the resume closes the
 session's terminals whose program is over (ended, lost, not started; `hub.close`) — ruled by the
 plan owner (review of task 13, S2 7.8): an ended terminal is dropped when its session runs again;
 a refused resume leaves it. `new` →
-`splitFlags` (an error → `ok: false`) → `prepareNew` with the form's directory, label and group
-(empty means none) → `launchPrepared`. `close-terminal` → `hub.close`; `'running'` → `ok: false`
-with "the program still runs; end it inside claude" (principle 6). `open-link` → `linkToOpen`,
-then `openLink`; a refused link → `ok: false`. `selectedPayload`: `ended` is `mid-turn` with the
+`splitFlags` (an error → `ok: false`) → `terminalFor` → `prepareNew` with the form's directory,
+label and group (empty, or only white space, means none: ruled, review 1 of task 32 — a form field,
+which step 1's `cleanLabel` would refuse) → `launchPrepared`. `close-terminal` → `hub.close`;
+`'running'` → `ok: false` with "the program still runs; end it inside claude" (principle 6);
+`'unknown'` → `ok: false` with "this terminal is no longer there" (ruled, review 1 of task 32).
+`open-link` → `linkToOpen`, then `openLink` with the re-serialised URL; a refused link → `ok:
+false`. An unexpected error is answered `ok: false` and logged by kind (`failureKind`); a terminal
+whose `open()` rejects is not one: step 1's `launchPrepared` (`openSafely`) makes it a failed open
+whose reason line is "cannot open the terminal (…)", and nothing is logged (ruled, review 1 of task
+32; step 1's code unchanged). `selectedPayload`: `ended` is `mid-turn` with the
 mark `was-working`, `unexpectedly` with `ended-unexpectedly`, `exited` after an end event of kind
 exit, else null; `expiring` and `expired` from the marks.
 
@@ -3177,17 +3192,22 @@ exit, else null; `expiring` and `expired` from the marks.
 - `resume` of a session that is not running → the fake terminal got the spec of
   `buildResumeCommand` with the size given, the lock taken, `ok` with the session id; the
   terminal failing → `launchPrepared`'s lines (the command to run by hand); a running session →
-  the guard's message, the terminal never called, no lock; an unknown id → the `RefError` message;
+  the guard's message, the terminal built but never opened, no lock; an unknown id → the
+  `RefError` message;
   the session's ended, lost and not-started terminals closed before the new one opens, its other
   terminals and other sessions' kept, nothing closed on a refusal (ruled, S2 7.8).
 - `new` with a directory, label `fix`, group `ABC-1` and flags `--model opus` → `buildNewCommand`'s
   arguments, the meta stored, `sessionId` the new id; flags `-r x`, `--name y`, `'unclosed`, a
   relative or missing directory → `ok: false` with the message, nothing stored, the terminal never
-  called; empty label and group → no meta row.
+  opened; empty label and group, or only white space → no meta row.
 - `close-terminal` of a running terminal → refused; of an ended one → `ok`. `open-link` of
-  `https://github.com/a/b/pull/1` → `openLink` with that URL; of `javascript:alert(1)` → not called.
-- An action whose terminal throws something unexpected → `ok: false`, one log line with the kind
-  and no message text.
+  `https://github.com/a/b/pull/1` → `openLink` with that URL; of `javascript:alert(1)` → not called;
+  `close-terminal` of an unknown terminal → `ok: false`.
+- An action whose terminal factory throws something unexpected → `ok: false`, one log line with
+  the kind and no message text, no lock and no label left; a terminal whose `open()` rejects →
+  step 1's "cannot open the terminal (…)" line, `ok: false`, no log line.
+- An action that is not well formed (an unknown kind, a size of 0, a session id that is not one, a
+  terminal id that is not 12 hex) → refused, nothing done, one fixed log line.
 - `selectedPayload`: the command for a session with recorded flags; a directory with a control
   character → `command` null; unknown flags listed; each `ended` case; `expiring`, `expired`.
 

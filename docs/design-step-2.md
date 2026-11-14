@@ -1177,7 +1177,10 @@ An unknown kind or field is refused, and so is a string over its limit (in UTF-8
 URLs 4,096, `input.data` 64 KiB, other text 1,024; the action of 9.6 then opens a URL only up to
 2,048 characters) or a size that is not a whole number from 1 to 65,535. No action carries a program or an argument list to run (8.3):
 `resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
-fields that become part of a launch, checked as `skydeck new` checks them.
+fields that become part of a launch, checked as `skydeck new` checks them. The actions check every
+action again where they act on it — its kind, the types and limits of its fields — and refuse one
+that does not pass ("skydeck cannot do that action", one fixed log line; ruled by the plan owner,
+review of plan task 32).
 
 Server → page:
 
@@ -1731,7 +1734,9 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 - **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close).
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
   directories, most recent first, defaulting to the selected session's, or a typed absolute path),
-  the label, the group and extra flags. A label that starts with a ticket key gives the group
+  the label, the group and extra flags. A label or group left empty, or holding only white space,
+  is none (ruled by the plan owner, review of plan task 32: `skydeck new --label ' '` is refused,
+  a blank form field is not). A label that starts with a ticket key gives the group
   through `groupPattern` (design 7.1) unless a group is typed. Flags are words separated by
   any whitespace (spaces, tabs, line breaks, the no-break space of a pasted text: nothing can hide
   inside one word);

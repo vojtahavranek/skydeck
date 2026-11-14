@@ -27,7 +27,12 @@ import { linkToOpen } from './windows.ts';
 export interface ActionDeps {
   deck: Deck;
   hub: TerminalHub;
-  /** The terminal to open a launch of this size with (task 23 passes task 21's windowTerminal). */
+  /**
+   * The terminal to open a launch of this size with (task 23 passes task 21's windowTerminal). It
+   * only BUILDS the object: nothing is spawned and no slot is taken before its `open()` (ruled,
+   * review 1 of task 32; tasks 21 and 23 keep it so). The actions build it before the guard and
+   * the lock, so that a factory that throws leaves nothing taken; a refused action never opens it.
+   */
   terminalFor(size: { cols: number; rows: number }): Terminal;
   /** Task 19's openLink, bound to the configuration and the interop link. */
   openLink(url: string): Promise<boolean>;
@@ -46,7 +51,8 @@ const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 cha
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
 
-/** The limits `parsePageMessage` holds an action to (S2 8.2.3), checked again here. */
+/** The limits `parsePageMessage` holds an action to (S2 8.2.3), checked again where the action is
+ *  acted on (ruled, review 1 of task 32). */
 const SIZE_MAX = 65_535;
 const TERMINAL_ID = /^[0-9a-f]{12}$/;
 
@@ -98,7 +104,8 @@ function wellFormed(action: ActMessage): boolean {
   }
 }
 
-/** S2 12.6: a label or group left empty (or only spaces) is none. */
+/** A label or group left empty, or holding only white space, is none (ruled, review 1 of task 32;
+ *  S2 12.6): a form field the user may leave blank, where step 1's cleanLabel would refuse it. */
 function orNone(text: string): string | null {
   return text.trim() === '' ? null : text;
 }
@@ -115,7 +122,9 @@ function orNone(text: string): string | null {
  *
  * Never rejects (2.5): an action that is not well formed is refused with one fixed log line, and
  * an unexpected error is answered `ok: false` and logged by kind (failureKind) — never its message,
- * which can quote what the page sent or a path.
+ * which can quote what the page sent or a path. A terminal whose `open()` rejects is not such an
+ * error: step 1's `launchPrepared` (through `openSafely`) makes it a failed open whose reason line
+ * names it, and nothing is logged (ruled, review 1 of task 32).
  */
 export function createActions(deps: ActionDeps): ActionHandler {
   const { deck, hub, log } = deps;

@@ -265,12 +265,14 @@ test('resume that timed out names no command and no session', async (t) => {
   ]);
 });
 
-test('resume of a running session answers the guard: the terminal is never asked, no lock is taken', async (t) => {
+test('resume of a running session answers the guard: the terminal is built but never opened, no lock is taken', async (t) => {
   const d = testDeck(t);
   writeTranscript(d, S1);
   startRunning(d, S1, 5151);
   const h = harness(d);
   assert.deepEqual(await h.act(resume(S1)), refused(7, '0b5f3c1e is running (pid 5151)'));
+  // Ruled (review 1): terminalFor only builds the terminal; open() is what starts anything.
+  assert.deepEqual(h.events, ['terminalFor 100x30']);
   assert.deepEqual(h.specs, []);
   assert.equal(d.deck.store.getKv(lockKey(S1)), null);
 });
@@ -282,6 +284,8 @@ test('resume of a session being resumed answers the lock', async (t) => {
   void h.act(resume(S1, 1));
   const second = await h.act(resume(S1, 2));
   assert.deepEqual(second, refused(2, '0b5f3c1e is being resumed (0 s ago); try again in 60 s'));
+  // The second terminal is built, never opened.
+  assert.deepEqual(h.events, ['terminalFor 100x30', `open ${S1}`, 'terminalFor 100x30']);
   assert.equal(h.specs.length, 1);
 });
 
@@ -290,6 +294,7 @@ test('resume of an id the deck does not know answers the RefError', async (t) =>
   resumableSession(d);
   const h = harness(d);
   assert.deepEqual(await h.act(resume(S2)), refused(7, `no session matches '${S2}'`));
+  assert.deepEqual(h.events, ['terminalFor 100x30']);
   assert.deepEqual(h.specs, []);
 });
 
@@ -483,6 +488,7 @@ test('new refuses what skydeck new refuses: nothing stored, the terminal never a
       assert.match(result.error ?? '', message);
       assert.deepEqual(result.lines, [result.error]);
       assert.equal(result.sessionId, null);
+      assert.ok(!h.events.some((event) => event.startsWith('open ')), h.events.join(', '));
       assert.deepEqual(h.specs, []);
       assert.deepEqual(d.deck.store.allMeta(), []);
     });
@@ -609,6 +615,32 @@ test('a terminal factory that throws: ok false, one log line with the kind and n
       assert.deepEqual(d.deck.store.allMeta(), []);
     });
   }
+});
+
+test("a terminal whose open() rejects goes through step 1's openSafely: a failed open, its line, no log line", async (t) => {
+  // Ruled (review 1): this path is step 1's (launchPrepared's openSafely), unchanged: the
+  // rejection becomes the reason line of a definite failure, the command follows, nothing is
+  // logged and nothing is thrown on.
+  const d = testDeck(t);
+  resumableSession(d);
+  const h = harness(d, { answer: () => Promise.reject(new TypeError('it broke')) });
+  const result = await h.act(resume(S1));
+  const command = printableCommand(d.sandbox.home, ['claude', '--resume', S1, '--model', 'opus']);
+  assert.ok(command !== null);
+  assert.deepEqual(result, {
+    t: 'result',
+    id: 7,
+    ok: false,
+    lines: [
+      'skydeck: cannot open the terminal (TypeError: it broke)',
+      'skydeck: to start it yourself, run:',
+      command,
+    ],
+    error: null,
+    sessionId: null,
+  });
+  assert.deepEqual(h.logs, []);
+  assert.notEqual(d.deck.store.getKv(lockKey(S1)), null); // a printed command may be run by hand
 });
 
 test('an openLink that rejects, or a hub whose close throws: ok false and one log line by kind', async (t) => {
