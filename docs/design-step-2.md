@@ -3305,7 +3305,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W13 | `edge://policy` (any `URLBlocklist`, `BrowserSignin`, `SyncDisabled`, `WebApp*`, `Extension*` entry), `edge://extensions` in the window's profile (which extensions are forced in), and whether the window's profile is signed in and syncs its history (`edge://settings/profiles`). | A | 15.1, 15.2 |
 | W14 | WSL lifetime: the lifetime script against a throwaway distribution measures the idle rule; then, with the window open and every WSL terminal closed, WSL is still running after a minute (`wsl -l -v` in PowerShell). Without the keep-alive (`"off"`) it stops. | A | 6.1 |
 | W15 | Sleep: with the window open, lock or sleep the PC for a few minutes. The page recovers by itself, keys work, the terminal repaints, sessions still run. | A | 6.5 |
-| W16 | WSL stop drill: `wsl --shutdown` with the window open and three sessions in it. The bar of 6.3 appears; after `skydeck window` the window says WSL restarted and the banner offers the three; "Restore 3" brings them back into the window. | C | 6.3, 12.7 |
+| W16 | WSL stop drill: `wsl --shutdown` with the window open and three throwaway sessions in it (and no real session running). The bar of 6.3 appears; after `skydeck window` the old window comes back (no second one) and says WSL restarted, and the banner offers the three; "Restore 3" brings them back into the window. Optional: with the window minimised for more than 5 minutes, whether a second window opens (5.1's named limit), and Not now survives a server restart; `resume --window` opens the window by itself; after a PC restart with the window left open, whether `skydeck window` waits. | C | 5.1, 6.3, 12.7, 11.4 |
 | W17 | **Real claude**, `/tui fullscreen`: the alternate screen and the mouse mode come back after `skydeck window --restart`. | A | 7.2 |
 | W18 | **Real claude**: a terminal query answered late (the server stopped for a few seconds while Claude Code starts) — does the answer leak into the prompt? | A | 7.1, 14 |
 | W19 | **Real claude**: does `waitingFor` tell a permission prompt from a question? | B | 12.4 |
@@ -3364,9 +3364,16 @@ reasons and their marks (12.4), Ctrl+Shift+J, the title bar's `needs you` count 
 desktop notifications (13). Checks W11, W19, W21, and W3's title `(n) skydeck` on the taskbar
 button.
 
-**Stage C — restore in the window.** The restore banner (12.7); the commands' `--window`,
-configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` (11.4); `show`'s
-`(in the skydeck window)`. Check W16.
+**Stage C — restore in the window.** The restore banner (12.7) and restore run by the window's
+server, one at a time (11.3); the commands' `--window`, configuration `"terminal": "window"` with
+`restore`, the interactive list's `R` and `doctor`'s `terminal` line (11.4, 16.3, 16.4), and
+`POST /resume`, `/new` and `/restore` (8.3, 11.4); `show`'s `(in the skydeck window)`. Also three
+settlements that the plan of stage C added (its C19, C20 and C24): a renewal of a resume lock keeps
+the mark of its take, so that restore in the window can renew the lock of a window terminal (7.3,
+7.8; design.md 7.6); the server keeps a mark in the store while windows are connected, so that
+`skydeck window` after a WSL restart, a crash or `--stop` waits for the old window instead of
+opening a second one (5.1, 10.2); and a start of a session is refused while the program of its lost
+terminal may still run (7.5, 7.8). Check W16.
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
 and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3), the header's

@@ -350,7 +350,7 @@ ignored.
 
 | Key | Default | What it does |
 |---|---|---|
-| `terminal` | `"here"` | Where `resume`, `new`, `restore` and `R` start `claude` when you give neither `--here` nor `--tab`: `"here"` (this terminal) or `"wezterm"` (a new WezTerm tab). |
+| `terminal` | `"here"` | Where `resume`, `new`, `restore` and `R` start `claude` when you give none of `--here`, `--tab` and `--window`: `"here"` (this terminal), `"wezterm"` (a new WezTerm tab) or `"window"` (the skydeck window, through its server; `--tab` then means the window too, and `--here` this terminal: "Starting sessions in the window from a terminal (stage C)"). |
 | `wezterm.domain` | `null` | The WezTerm domain a tab opens in (`--domain-name`). `null` passes no domain. |
 | `groupPattern` | `"^[A-Z][A-Z0-9]+-[0-9]+"` | A JavaScript regular expression (the source, no flags). When a session has no group, the text it matches in the session's title is the group. The default takes a ticket key such as `ABC-123` at the start of the title. |
 | `firstRunDoneAfterDays` | `7` | install's one-time offer to mark sessions as done: those not running whose last activity is older than this many days. |
@@ -452,12 +452,15 @@ running when the window or skydeck's server is closed or restarted: each termina
 python3 process of its own, its **keeper**. A session ends only when you end it inside `claude`; the
 window has no action that stops one.
 
-This is stages A, D and B of step 2 ([design-step-2.md](design-step-2.md), section 19): the list,
-the terminals, resume and new (A); editing in the window — the label, group, note, done mark and
-pull requests, and the ticket link (D); and which sessions need you, with desktop notifications
-(B). Restoring into the window, and the search beyond one text, come in later stages. The commands
-of step 1 stay as they are, also while the window runs: `skydeck resume`, `new` and `restore`
-start `claude` in the terminal you type them in, not in the window.
+This is stages A, D, B and C of step 2 ([design-step-2.md](design-step-2.md), section 19): the
+list, the terminals, resume and new (A); editing in the window — the label, group, note, done mark
+and pull requests, and the ticket link (D); which sessions need you, with desktop notifications
+(B); and restore in the window after a restart, with `--window` and `"terminal": "window"` for the
+commands (C). The search beyond one text comes in a later stage. The commands of step 1 stay as
+they are, also while the window runs: `skydeck resume`, `new` and `restore` start `claude` in the
+terminal you type them in, not in the window — unless you give `resume` or `new` the option
+`--window`, or set `"terminal": "window"` ("Starting sessions in the window from a terminal (stage
+C)" below).
 
 ### Before you rely on it
 
@@ -516,6 +519,11 @@ What it does:
    `<stateDir>/server.log`), or uses the one that runs.
 2. When no window is open, it starts Edge with a launch address that works once, and waits up to 30
    seconds for the window's page to connect. A cold Edge on a managed PC can take several of them.
+   Before that, when the server expects a window back — a window was open when the server before
+   it ended: a WSL restart, a crash of the server, `--stop` — it waits up to 7 seconds for that
+   window to connect again, and says so (`skydeck: waiting up to 7 s for the open window to come
+   back; --new-window opens one now`); when it comes, Edge is not started ("Restore after a
+   restart (stage C)" below).
 3. It prints one line and exits 0:
 
    ```
@@ -591,9 +599,10 @@ In `config.json` ("Configuration" above), all optional:
 | `window.profileDir` | `null` | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
 
-`terminal` stays `"here"` or `"wezterm"` in this stage; resuming into the window from the command
-line comes later. An example, for a PC with two Windows users that have Edge (so the profile folder
-cannot be found by itself) and another program on port 47613:
+With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
+"Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
+Windows users that have Edge (so the profile folder cannot be found by itself) and another program
+on port 47613:
 
 ```json
 {
@@ -882,15 +891,156 @@ Nothing is installed for any of this: turn ends are read from Claude Code's own 
 entries stay as they were, `skydeck install` is not run again, and `skydeck doctor` says what it
 said before.
 
+#### Restore after a restart (stage C)
+
+When WSL stops — `wsl --shutdown`, a restart of the PC, or WSL's own stop after its last client
+("Keeping WSL running" above) — every `claude` of the window ends with it. The window, an Edge
+window, stays (not after a PC restart) and says `skydeck's server is not answering (since …)`. In
+a WSL terminal of your own, run `skydeck window`:
+
+- It starts the window's server. When the server before it ended while a window was open, the new
+  server expects that window back: the command says `skydeck: waiting up to 7 s for the open
+  window to come back; --new-window opens one now`, and once the old window has connected again,
+  `skydeck window: a window is already open`; it opens no second one. When none comes, it opens a
+  window after the wait. After a PC restart with the window left open it can wait those 7 seconds
+  for a window that cannot come, then it opens one.
+- The old window says `WSL has restarted since <time>: the sessions that were running have ended.`
+  (`<time>`: when it lost the old server).
+- **The banner**, at the top of the list, offers the sessions that `skydeck restore` would offer
+  (those that were open when WSL stopped, and those that ended unexpectedly shortly before;
+  design.md 7.8): `Before the restart (last activity today at 18:02) 3 sessions were open`, then
+  a checkbox per session, `<short id>  <title> · no exit recorded` (or `· ended 17:58`, with
+  `· was working` after it when a turn was cut off), ticked as `skydeck restore` preselects them,
+  and the buttons `Restore 3` (the number counts the ticked ones) and `Not now`. The time reads
+  `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02` or `on 12 Nov 2025 at 18:02`, in the
+  page's (Windows') time zone, and follows the clock: `today` becomes `yesterday` at midnight.
+- **`Restore 3`** starts the ticked sessions as `skydeck restore` does — each through the same
+  checks, `restoreBatch` at a time, the memory check before each batch — but in the window: they
+  show under Open as `starting…`, then run, each in the next free slot. Nothing is selected and the
+  keyboard stays where it is, in every window. A double click acts once.
+- **The report**, under the banner's place, shows the lines of the run as they come, those that
+  `skydeck restore` prints: `started <short id> <title>`, `timed out <short id> <title>`, `failed
+  <short id>: <why>`, `not started <short id> <title>`, a `stopped: …` line when the run stopped,
+  and last one line `restore finished: 3 started` (the counts of `started`, `timed out`, `failed`
+  and `not started` that are not 0; `restore finished: nothing was started` when all are). While
+  the run goes, the banner shows `A restore is running.` in place of its buttons, and its
+  checkboxes are disabled. The report keeps the last 200 lines; once it has ended, its × removes
+  it. Every open window shows it, also for a restore that `skydeck restore` asked for. When a run's
+  last line never reaches the page (the connection dropped, the server stopped), the report ends at
+  the next list with `the end of this report did not arrive; the list shows what started`. The
+  banner and the report take at most 40 % of the list's height and scroll inside it; they resize no
+  terminal.
+- **One restore runs at a time**, whoever asked: another one, from a window or a command, is
+  refused with `a restore is already running; wait until it has finished`.
+- **What stops a run**: too little memory before a batch (`stopped: only <n> MiB of memory
+  available, less than restoreMinFreeMb (<m> MiB)`, as in step 1); a batch in which no session
+  started while sessions are left (`stopped: no session of this batch started`: a `claudeCommand`
+  that the server cannot start would otherwise open a terminal for every session); a busy database
+  (`stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the
+  rest`). The sessions it did not open are `not started`. A session whose terminal in the window
+  ended before its start was reported is `failed` at once.
+- **A restore started from the banner cannot be stopped in the window**: `skydeck window --stop`
+  ends it (`stopped: the window's server is stopping`); the sessions it already opened go on
+  starting, the rest are `not started`. One that `skydeck restore` asked for stops with Ctrl+C in
+  its terminal, as in step 1.
+- **`Not now`** hides the banner for this restart, also across `skydeck window --restart`;
+  `skydeck restore` still offers the sessions, and the banner comes back after the next restart.
+  When the offer changed meanwhile, it says `this offer to restore is no longer shown`.
+- **The settings are the server's.** A restore in the window uses the `restoreBatch`,
+  `restoreMinFreeMb`, `restoreStartTimeoutSeconds` and `claudeCommand` that the server read when it
+  started, and its sessions get the server's environment ("Starting it" above): after a change of
+  `config.json`, run `skydeck window --restart`.
+
+#### Starting sessions in the window from a terminal (stage C)
+
+`skydeck resume <ref> --window` and `skydeck new --window` (with `--label`, `--group` and `--
+<claude flags>` as always) ask the window's server to start the session in the window, as the
+window's own Resume and New do: through the same checks, with the same refusals and exit codes
+(`skydeck: <short id> is running (pid <n>)` or `skydeck: this session is already open in the
+window`: exit 4; what `skydeck new` refuses: exit 2). The command prints on stderr the lines
+`skydeck resume` or `new` would print (such as `skydeck: original flags unknown; resuming with
+defaults`), and exits with its code. `--here`, `--tab` and `--window` exclude each other.
+
+- **It never starts the window's server**: run `skydeck window` first (the lines when it is not
+  running are below). A server of this checkout is used also when it runs an older build; one from
+  before stage C cannot take the request (below).
+- **A session started so gets the server's environment, not your shell's**: that of the shell
+  `skydeck window` ran in ("Starting it" above; `skydeck doctor` names it). To change it, run
+  `skydeck window --restart` from the shell you want.
+- In the window the session is listed under Open, in the next free slot. Nothing selects it, and
+  the keyboard stays where it is.
+- **When no window is open**, the command opens one after the server's answer, as `skydeck window`
+  does (the 7-second wait above included) — not after a usage or reference error (exit 2 or 3),
+  which started nothing. A window that cannot be opened is one line, `skydeck: the window could not
+  be opened: <reason>; run skydeck window`, and the exit code stays the answer's.
+- **Inside a Claude Code session** (a `!` command, or Claude Code's own tools) it never opens a
+  window, as `skydeck window` does not run there either. It can still start the session in your
+  window while the server runs, and with no window open it says `skydeck: no window is open; run
+  skydeck window in a terminal of your own`. So an agent's shell can start a session in your
+  window.
+
+**`"terminal": "window"`** in `config.json` (create the file as `{ "terminal": "window" }` when
+there is none) makes the window the place for every command:
+
+- `resume` and `new` with no option, and with `--tab`, go to the window; `--here` still starts
+  `claude` in this terminal. With `"here"` or `"wezterm"`, only `--window` goes to the window.
+- `restore` looks for the window's server before anything else, so that `skydeck: the window is
+  not running; run skydeck window first` comes before its list and its question. It then lists and
+  asks as in step 1, opens a window first when none is open (so that the sessions start at the
+  window's size, and a question Claude Code asks at its start can be answered there), and hands the
+  chosen sessions to the server, which runs them as the banner's Restore does. It prints each line
+  of the run on stdout as it comes, and `waiting for <n> sessions` when nothing else came for 10
+  seconds; after 30 seconds without a line, `skydeck: the window's server stopped answering; run
+  skydeck to see what started`, exit 1. The exit code is the run's (design.md 7.8: 0; 1 when a
+  session failed, timed out or was no longer offered; 5 when the run was stopped), and with 5 it
+  ends with `skydeck: restore stopped before it finished; see above`. Ctrl+C stops the run (the
+  window's report says `stopped: the command that asked for it stopped`); the sessions already
+  opened go on starting. `--dry-run` asks the server nothing.
+- `R` in the interactive list asks the server to resume the session: `opened <short id> in the
+  window`, with `; no window is open; run skydeck window` after it when no window is open (`R` opens
+  none); a refusal is the message line; a start that failed says `starting <short id> in the window
+  failed; the details are printed when the list ends`.
+- `skydeck doctor` says `ok       terminal: window (sessions start in the skydeck window; resume,
+  new and restore need skydeck window to run)`.
+- A value other than the three is refused as every mistake in the file: `skydeck:
+  /home/you/.config/skydeck/config.json: "terminal" must be "here", "wezterm" or "window"`.
+
+**When the window cannot take it**, the command starts nothing itself and exits 1 with one line
+(`restore` and `R` leave out the ending `, or use --here`, and `; use --here`):
+
+| When | The line |
+|---|---|
+| No server runs | `skydeck: the window is not running; run skydeck window first, or use --here` |
+| The server does not answer | `skydeck: the window's server (pid <n>) does not answer; skydeck window --restart stops it` |
+| It is still starting after 5 seconds | `skydeck: the window's server (pid <n>) is starting and did not finish within 5 s; run skydeck window again, or skydeck window --restart to replace it` |
+| It runs from another checkout | `skydeck: the window's server runs from <checkout>, not from this checkout; skydeck window --restart here replaces it, or use --here` |
+| It is of a build before stage C | `skydeck: the window's server is older than this command and cannot start sessions for it; run skydeck window to restart it, or use --here` |
+| It is stopping | `skydeck: the window's server is stopping; run skydeck window, or use --here` |
+| It is still starting after 30 seconds | `skydeck: the window's server did not finish its start within 30 s; it started nothing: run skydeck window again, or use --here` |
+| No answer within 30 seconds | `skydeck: the window's server did not answer within 30 s; it may have started the session: run skydeck to see whether it runs` |
+| It failed while it answered | `skydeck: the window's server failed while it answered the request (500: failed); it may have started the session: run skydeck to see whether it runs` |
+| The connection broke after the request reached it | `skydeck: the window's server cannot be asked on <socket> (<code>); it may have started the session: run skydeck to see whether it runs` |
+| A label or group over 1,024 bytes, or a request over 64 KiB (a long prompt after `--`) | `skydeck: the window's server refused the request (<kind>); use --here` |
+
+For `restore`, 30 seconds without a line is the `stopped answering` line above, a failure while
+the server answered ends `(500: failed); run skydeck to see what started`, and a connection that
+broke before the first line ends `it may have started the restore: run skydeck to see what
+started`.
+
+**`skydeck show <ref>`** marks a holder that is the program of a terminal of the window, or runs
+under it: `holder:    pid 4242 since 2026-11-12T08:58:00.000Z (in the skydeck window)`. It needs no
+running server and asks it nothing; `--json` is unchanged.
+
 ### Known limits of stage A
 
 - **The keep-alive is not verified** (above; W14).
-- **A second window** can open when `skydeck window` starts a server while an old window is still
-  open: after the server died or was stopped (`--stop`), or after a WSL restart. The command sees no
-  page and starts Edge, and the old window connects again a moment later. Close one of them. (After
-  `--restart`, or an update that does not upgrade the database, the command waits for the open
-  windows, so none opens then. An update that upgrades the database can open one: close every
-  skydeck window and tab before it, as "Updating" says.)
+- **A second window** could open when `skydeck window` started a server while an old window was
+  still open: after the server died or was stopped (`--stop`), or after a WSL restart. Since stage C
+  the new server expects that window back and the command waits for it ("Restore after a restart
+  (stage C)"); the cases that are left are in "Known limits of stage C". (After `--restart`, or an
+  update that does not upgrade the database, the command waits for the open windows, so none opens
+  then. An update that upgrades the database can open one: close every skydeck window and tab
+  before it, as "Updating" says.)
 - **Ctrl+C on a waiting `skydeck window`** leaves its launch address usable until its 30 seconds
   are over.
 - **Another program on skydeck's port.** A program that listens on `127.0.0.1:<port>` on the Windows
@@ -935,11 +1085,10 @@ said before.
   left inside a bracketed paste (it takes what follows as pasted text, Enter included). skydeck
   cannot close the open paste. A new paste sends a new end marker, which a program that follows the
   bracketed-paste convention takes as the end; whether Claude Code does is not checked (W6).
-- **The command line does not use the window yet.** `skydeck resume`, `new` and `restore` start
-  `claude` in the terminal you are in. After a WSL restart, resume the sessions one by one in the
-  window (or run `skydeck restore` in a terminal, which brings them back there). A `skydeck resume`
-  of a session whose window terminal still shows `starting…` is not refused because of it: wait
-  until it runs.
+- **A resume here of a session the window is starting.** A `skydeck resume` that starts `claude` in
+  your terminal or a tab (not `--window`) of a session whose window terminal still shows
+  `starting…` is not refused because of it: wait until it runs. (`--window` and `"terminal":
+  "window"`, stage C, are refused then: `this session is already open in the window`.)
 
 ### Known limits of stage D
 
@@ -991,6 +1140,37 @@ said before.
   unexpectedly · not seen` by the next server, without a notification. At the first start of a
   server of stage B, which has no marks yet, that can be a session that ended before the update:
   it shows `ended` once; select it, and it goes.
+
+### Known limits of stage C
+
+- **A window that connects during a restore** (opened or reloaded meanwhile) shows that one runs,
+  and its report lines from then on, not the earlier ones.
+- **A restore started from the banner has no Stop** in the window: `skydeck window --stop` ends it,
+  and the sessions it opened go on starting.
+- **`R` opens no window.** While it waits for the server's answer (up to 30 seconds while the
+  server is still starting) the list draws nothing and takes your keys only after the answer. A
+  line longer than the terminal is cut in the list's message line; `skydeck resume --window`
+  prints it whole.
+- **The waiting line names `--new-window`** also when `resume --window`, `new --window` or
+  `restore` wait for the open window: that is an option of `skydeck window`.
+- **The 7-second wait.** After a PC restart with the window left open, the first `skydeck window`
+  can wait 7 seconds for a window that cannot come. A window that was minimised or hidden for more
+  than 5 minutes is woken by Edge only once a minute (design-step-2.md 6.3), so it can come back
+  after the command has opened a new one: close one of them. A server replaced within its own 7
+  seconds (another `--restart`, a crash, another `wsl --shutdown`) no longer expects the window, and
+  the next `skydeck window` opens a second one; so does a server that died within about 2 seconds
+  of its first window's connect. When the server's start hangs, the waits add up (about half a
+  minute before Edge is started).
+- **The first update from stage A or B** can still open a second window once: their server keeps no
+  mark of its open windows. Close every skydeck window first, as "Updating" says.
+- **A terminal whose keeper ended unexpectedly** (its bar says `the terminal's keeper ended
+  unexpectedly; claude ended with it`): while its `claude` may still be running, for at most 60
+  seconds, the window refuses to start the session again — Resume, `--window`, restore — with
+  `<short id> is running (pid <n>)`. A `claude` that still runs after those 60 seconds and has not
+  reported its start is no longer seen, and a start of its session then starts a second one.
+  Closing the terminal, or restarting the server, ends the window's refusal sooner; then only the
+  session's resume lock refuses, until 60 seconds after the launch. Wait a minute before you start
+  such a session again.
 
 ### What `doctor` says about the window
 
@@ -1050,6 +1230,13 @@ hook entry (turn ends are read from the files Claude Code keeps), so `skydeck in
 again and `skydeck doctor` says what it said before. It resizes no terminal: the header keeps its
 height. Then click `Turn on notifications` once ("Which sessions need you (stage B)" above).
 
+The update that brings stage C installs nothing either and resizes no terminal. From it on, the
+server keeps a mark of its open windows, so that `skydeck window` after a WSL restart waits for the
+old window instead of opening a second one; the server it replaces keeps none, so close every
+skydeck window and tab first for this update too, as for stage B. The banner shows only after WSL
+or the PC restarted; to have every command start in the window, set `"terminal": "window"`
+("Starting sessions in the window from a terminal (stage C)" above).
+
 ## Checking: `skydeck doctor`
 
 `doctor` prints one line per check, `ok`, `info` or `problem`, and exits 1 when any line is a
@@ -1069,7 +1256,7 @@ installation.
 | last refresh | Something was skipped at the last command: a hook file, a process, or a transcript folder or file that could not be read. The line says what and why. |
 | Claude Code's folders | `<claudeHome>/sessions` or something under `<claudeHome>/projects` cannot be read. A folder that does not exist yet is only `info`. |
 | `gh` | `gh` is not installed, or not logged in, or GitHub cannot be reached. Run `gh auth status`. |
-| terminal | With `"terminal": "wezterm"`: `wezterm cli --no-auto-start list` failed. Is a WezTerm window open? With `"here"` the line is `ok`. |
+| terminal | With `"terminal": "wezterm"`: `wezterm cli --no-auto-start list` failed. Is a WezTerm window open? With `"here"` the line is `ok`, and with `"window"` too: `terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)`; whether the server runs is the window's server line. |
 
 ## Updating
 

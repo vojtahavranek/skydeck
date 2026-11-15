@@ -6,7 +6,8 @@ terminal tab, never restart WSL and never start a Windows program. Each item giv
 the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 check the window of
 step 2 (stage A) and start at "The window (step 2, stage A)" below; W27–W29 check editing in the
 window (stage D), at "The window (step 2, stage D)"; W11, W19 and W21 check which sessions need
-you and the desktop notifications (stage B), at "The window (step 2, stage B)".
+you and the desktop notifications (stage B), at "The window (step 2, stage B)"; W16 checks restore
+in the window after WSL stopped (stage C), at "The window (step 2, stage C)".
 
 Setup:
 
@@ -205,6 +206,9 @@ Expected: the same list without the command lines (only `--dry-run` prints them)
   terminal. The exit status you see afterwards is `claude`'s own. If a session could not be resumed,
   `skydeck: <n> of <m> selected sessions could not be resumed; see above` is printed before `claude`
   takes over.
+- With `"terminal": "window"`, `restore` hands the chosen sessions to the skydeck window's server,
+  and they start in the window ([install.md](install.md), "Starting sessions in the window from a
+  terminal (stage C)"); restore in the window is W16's (stage C, at the end).
 - When less than `restoreMinFreeMb` (default 4096 MiB) of memory is available, `restore` starts
   nothing, prints `stopped: only <n> MiB of memory available, ...` and the sessions `not started`,
   and exits 5. Lower the key in `config.json`, or free memory.
@@ -266,9 +270,8 @@ pull requests again. Press `q` to leave.
 
 The checks of the design's section 18 (design-step-2.md) that stage A needs: W1–W10, W12–W15,
 W17, W18, W20 and W22–W26, and one more that came with the page's ping rule ("Minimised for half
-an hour", after W15). W11, W19 and W21 are stage B's (at the end), and W16 comes with the stage
-that builds what it checks. Each check says what to set up, what to type, what to look at and what
-to write down.
+an hour", after W15). W11, W19 and W21 are stage B's and W16 is stage C's, each in its stage's part
+at the end. Each check says what to set up, what to type, what to look at and what to write down.
 
 Setup:
 
@@ -585,8 +588,10 @@ in WSL: do it only when nothing is running that you want to keep. Set `"keepAliv
 Task Manager as above, close every WSL terminal, wait one minute. Expected: `wsl -l -v` in P shows
 the distribution `Stopped`, and the window shows the bar. Then take `"keepAlive"` out of
 `config.json` again, open a WSL terminal and run `skydeck window`: the window says `WSL has
-restarted since <time>: the sessions that were running have ended.` (A second window may open
-beside it, a known limit of stage A: close one.)
+restarted since <time>: the sessions that were running have ended.` (Since stage C the command
+first says `skydeck: waiting up to 7 s for the open window to come back; …` and opens no second
+window; when one opens, write it down and close one. The banner at the top of the list offers the
+throwaway session: `Restore 1` brings it back, `Not now` leaves it; W16 checks both.)
 
 Write down: for the first form, passed or WSL stopped (then the window showed the bar); the
 keep-alive's pids; whether the old script was gone; the `dmesg` lines about interop; for the third
@@ -1107,3 +1112,134 @@ path — what a notification shows to anyone who can see your screen.
 Write down: what each step showed; in step 5, whether `finished` or a `finished` notification came
 before the answer was written, and how many notifications came. Yours to judge: the list and the
 title bar's counts call an idle session `waiting` (stage A's word); whether they should say `idle`.
+
+## The window (step 2, stage C)
+
+The check of the design's section 18 (design-step-2.md) that stage C needs: W16, restore in the
+window after WSL stopped ([install.md](install.md), "Restore after a restart (stage C)" and
+"Starting sessions in the window from a terminal (stage C)"). Its main part ends every process in
+WSL: read it to the end before you start, and run it at a moment you choose.
+
+Setup: the setup of "The window (step 2, stage A)" above, with its terminals **W** and **P**. W16
+makes three throwaway sessions of its own; every prompt goes to one of them, never to a session of
+your real work. No step changes `config.json`, Edge's or Windows' settings, and no step uses a
+list key.
+
+## W16. WSL stops with the window open
+
+**What `wsl --shutdown` ends.** Every process of every WSL distribution, at once:
+
+- every `claude`: in the window, in every WSL terminal and in VS Code's WSL window. A turn in
+  progress is cut off;
+- the shells and the editors that run in WSL: text you have not saved is lost;
+- builds and tests that run in WSL;
+- the containers of Docker Desktop when Docker uses its WSL engine;
+- SSH tunnels and port forwards;
+- VS Code's WSL window (it connects again by itself) and every WSL terminal.
+
+Windows programs stay, the skydeck window among them (it is an Edge window). A restart of the PC
+ends all of this and everything else.
+
+**Prepare**, before anything else:
+
+1. Choose a moment when ten minutes without WSL cost you nothing.
+2. Save in every editor that runs in WSL. Stop the builds, the containers and the tunnels you would
+   miss.
+3. End every real `claude` session yourself, with `/exit` once its turn is over, in the window and
+   in every terminal. A session ended so is not offered by the banner below, and you resume it
+   afterwards as always.
+
+**Set up:**
+
+1. In W:
+
+   ```sh
+   mkdir -p ~/skydeck-try
+   mkdir ~/skydeck-try/w16-a ~/skydeck-try/w16-b ~/skydeck-try/w16-c
+   ```
+
+   When `mkdir` says `File exists` for one of them, an earlier W16 left it there: it is W16's own,
+   use it as it is.
+2. Three throwaway sessions in the window, one in each folder, as stage A's "A throwaway session in
+   the window" makes one: Ctrl+Shift+N, the folder's full path (`/home/<you>/skydeck-try/w16-a`,
+   then `w16-b`, then `w16-c`) in the directory field, Enter. Once Claude Code shows its prompt,
+   send it `say hello in one word` in its terminal (click its row first when the key bar does not
+   say `Focus: terminal`).
+3. Write down the three short ids: a session's header shows its own (on its second line, at the
+   right), and `skydeck ls` in W prints them as the last column.
+4. Click the row of the session of `w16-c` (its terminal takes the keyboard: `Focus: terminal`),
+   send it `write a story of about 1,500 words about a lighthouse` (Claude Code writes for a while
+   and runs no command), and go on while its row says `working`. When the story is done before you
+   reach step 2 of the steps, send the prompt again.
+5. In W: `skydeck ls`. Nothing may be `working`, `waiting` or `running` but the three throwaway
+   sessions. If anything else is, end it as in "Prepare", step 3, or stop here.
+
+**Steps:**
+
+1. In the window, the three are under Open, in slots 1–3, the one of `w16-c` `working`.
+2. In P: `wsl --shutdown`. Expected: within a few seconds the window shows the bar `skydeck's server
+   is not answering (since <time>). …`. Write down how long it took.
+3. Open a WSL terminal again (W). In it: `skydeck window`. Expected: `skydeck: waiting up to 7 s
+   for the open window to come back; --new-window opens one now`, then `skydeck window: a window is
+   already open`, and no second window opens. When one opens, write it down and close it: the old
+   one is the window that showed the bar.
+4. Expected in the window: the bar goes; the line `WSL has restarted since <time>: the sessions
+   that were running have ended.`; and at the top of the list the banner `Before the restart (last
+   activity today at <time>) 3 sessions were open`, with a ticked checkbox for each of the three
+   (`<short id>  <title> · no exit recorded`, the one of `w16-c` with `· was working` after it),
+   `Restore 3` and `Not now`. Compare the short ids with the ones you wrote down. When a session you
+   did not make is offered, untick it (a click on its checkbox) until the button says `Restore 3`.
+5. Click `Restore 3`. Expected: the banner says `A restore is running.`; the three are under Open as
+   `starting…`, then running, in slots 1–3; the report under the banner says `started <short id>
+   <title>` for each and last `restore finished: 3 started`; then the banner goes (nothing is left
+   to offer) and the report has a ×. Nothing was selected by the restore. Click each of the three
+   rows: its terminal shows its conversation.
+
+Write down: how long the bar took to show; whether `skydeck window` printed the waiting line, and
+whether a second window opened; the banner's words, its heading and each entry; the time from the
+click on `Restore 3` to the last `started` line; anything that differed from the expected.
+
+**Second part, optional: a minimised window, and `Not now`.** It is one more `wsl --shutdown`:
+prepare as above ("Prepare", and step 5 of "Set up"; the three throwaway sessions run again after
+the first part).
+
+1. Minimise the skydeck window and leave it so for more than 5 minutes.
+2. In P: `wsl --shutdown`. Then open a WSL terminal again (W) and, with the window still
+   minimised, run `skydeck window`. Expected: the waiting line; after it, a new window may open,
+   because Edge wakes a window minimised that long only once a minute, and then the old one comes
+   back within about a minute (a known limit of stage C). Write down whether a second window opened
+   and how long the old one took to come back; close the new one.
+3. In the window, click `Not now`. Expected: the banner goes.
+4. In W: `skydeck window --restart`. Expected: the window connects again, and the banner does not
+   come back.
+5. In W: `skydeck restore --dry-run`. Expected: it still lists the three, preselected (`[x]`), and
+   starts nothing. Leave them not running.
+
+**Third part, optional, with no restart: a window that a command opens.**
+
+1. When the session of `w16-a` runs (it does after the first part, not after the second): click its
+   row (its terminal takes the keyboard: `Focus: terminal`), type `/exit` and press Enter.
+2. Close every skydeck window (its ×), also those opened with `--new-window`, and every browser tab
+   of a `--print-url` address. The server keeps running: in W, `skydeck doctor` says `the window's
+   server runs: …, 0 pages, …`.
+3. In W: `skydeck resume <the short id of w16-a> --window`, then `echo $?`. Expected: `0`, and a
+   skydeck window opens by itself, with the session under Open (`starting…`, then running); the
+   window has no session selected.
+
+**Fourth part, optional, at your next ordinary PC restart** (nothing to prepare beyond your own
+habits): leave the skydeck window open when you restart the PC. Afterwards, in W, `skydeck window`.
+Does it say `skydeck: waiting up to 7 s for the open window to come back; …` before it opens the
+window? Write it down; when it does after every restart, say so: there is a follow-up for it. The
+banner then offers what was open before the restart, your own sessions: restore them or not, as you
+like.
+
+**Clean up**, after the parts you ran:
+
+1. End each throwaway session that runs: click its row (its terminal takes the keyboard), type
+   `/exit` and press Enter; then `Close` on its ended bar.
+2. In W, with the short ids you wrote down: `skydeck done <short id>` for each of the three (it
+   prints `<short id> done`), so that they leave the list. A wrong id is taken back with `skydeck
+   undone <short id>`.
+3. In W: `rm -r ~/skydeck-try/w16-a ~/skydeck-try/w16-b ~/skydeck-try/w16-c`.
+4. Start again what you stopped in "Prepare". Your own sessions are listed by `skydeck` and in the
+   window, and resume as always.
