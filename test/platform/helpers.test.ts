@@ -95,6 +95,25 @@ describe('fakeClock', () => {
     assert.equal(clock.nowNs(), T0 + 5n);
   });
 
+  test('monotonicNs moves with advanceMs and sleep only: setNs, a step of the wall clock, leaves it', async () => {
+    const clock = fakeClock(T0);
+    const start = clock.monotonicNs();
+
+    clock.advanceMs(1500);
+    const advanced = clock.monotonicNs();
+    await clock.sleep(1000);
+    const slept = clock.monotonicNs();
+    clock.setNs(T0 - 3600n * SEC);
+    const back = clock.monotonicNs();
+    clock.setNs(T0 + 3600n * SEC);
+    const forward = clock.monotonicNs();
+
+    assert.equal(advanced - start, 1_500_000_000n);
+    assert.equal(slept - start, 2_500_000_000n);
+    assert.equal(back, slept, 'a step back moves it not');
+    assert.equal(forward, slept, 'nor a step forward');
+  });
+
   test('every is called from advanceMs once per period that passed, at its time, until stopped', () => {
     const clock = fakeClock(T0);
     const seen: bigint[] = [];
