@@ -10,6 +10,8 @@ import {
 import { MAX_MESSAGE } from '../../src/window/websocket.ts';
 import type {
   ActMessage,
+  BannerEntryPayload,
+  BannerPayload,
   ChipPayload,
   ByeMessage,
   ChallengeMessage,
@@ -17,12 +19,17 @@ import type {
   ExitMessage,
   FocusMessage,
   KeepAlivePayload,
+  LaunchAnswer,
   ListMessage,
+  NewRequest,
   NoticeMessage,
   NotifyMessage,
   PageMessage,
   PingAnswer,
   PongMessage,
+  RestoreOutcomeLine,
+  RestoreRequest,
+  RestoreStreamLine,
   ResultMessage,
   RowPayload,
   ServerMessage,
@@ -200,8 +207,8 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ t: 'welcome' }));
   });
 
-  test('act kinds of later stages and kinds it does not know (stage D adds label, group, note, done, undone, pr-add, pr-rm and pr-refresh)', () => {
-    for (const kind of ['restore', 'dismiss-restore', 'Label', MARKER]) {
+  test('act kinds it does not know (stage D adds label, group, note, done, undone, pr-add, pr-rm and pr-refresh; stage C restore and dismiss-restore, at the end of this file)', () => {
+    for (const kind of ['Label', 'Restore', MARKER]) {
       refused(page({ t: 'act', id: 1, kind, sessionId: S1, text: 'x' }));
       refused(page({ t: 'act', id: 1, kind, sessionId: S1 }));
     }
@@ -452,10 +459,8 @@ describe('parseControlRequest', () => {
     });
   }
 
+  // Stage C's /resume, /new and /restore are routes: their cases are at the end of this file.
   const noRoute: [string, string, string][] = [
-    ['POST', '/resume', `{"sessionId":"${S1}"}`],
-    ['POST', '/new', '{}'],
-    ['POST', '/restore', '{}'],
     ['GET', '/', ''],
     ['GET', '/ping/', ''],
     ['GET', '/ping?x=1', ''],
@@ -767,5 +772,445 @@ describe('types (checked by npm run typecheck)', () => {
       token,
       states,
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Stage C (plan C 2.2, C3, C9)
+
+/** `n` distinct session ids. */
+function sessionIds(n: number): string[] {
+  return Array.from(
+    { length: n },
+    (_, at) => `${at.toString(16).padStart(8, '0')}-1111-4111-8111-111111111111`,
+  );
+}
+
+/** One valid message of each stage C act kind. */
+const STAGE_C_ACTS: Record<string, PageMessage> = {
+  'act restore': { t: 'act', id: 13, kind: 'restore', sessionIds: [S1, BOOT] },
+  'act dismiss-restore': { t: 'act', id: 14, kind: 'dismiss-restore', bootId: BOOT },
+};
+
+describe("parsePageMessage: stage C's acts (plan C 2.2)", () => {
+  for (const [name, message] of Object.entries(STAGE_C_ACTS)) {
+    test(`${name} → ok and equal`, () => {
+      assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
+    });
+
+    test(`${name} with an unknown field → refused`, () => {
+      refused(page({ ...message, [MARKER]: 1 }));
+    });
+
+    for (const field of Object.keys(message)) {
+      test(`${name} without ${field} → refused`, () => {
+        const copy: Record<string, unknown> = { ...message };
+        delete copy[field];
+        refused(page(copy));
+      });
+      test(`${name} with ${field} of a wrong type → refused`, () => {
+        refused(page({ ...message, [field]: wrongType((message as never)[field]) }));
+      });
+    }
+
+    test(`${name}: its id is a whole number from 0`, () => {
+      for (const id of [-1, 1.5, 2 ** 53]) {
+        refused(page({ ...message, id }));
+      }
+      assert.equal(page({ ...message, id: Number.MAX_SAFE_INTEGER }).ok, true);
+    });
+  }
+
+  test('act restore: 1 to 1,000 distinct session ids; none, 1,001 or a repeated one is refused', () => {
+    const restore = STAGE_C_ACTS['act restore'] as PageMessage;
+    for (const ids of [[S1], sessionIds(1000)]) {
+      const message = { ...restore, sessionIds: ids };
+      assert.deepEqual(page(message), { ok: true, value: message }, `${ids.length} ids`);
+    }
+    refused(page({ ...restore, sessionIds: sessionIds(1001) }));
+    refused(page({ ...restore, sessionIds: [] }));
+    refused(page({ ...restore, sessionIds: [S1, BOOT, S1] }));
+    refused(
+      page({
+        ...restore,
+        sessionIds: [...sessionIds(999), '00000000-1111-4111-8111-111111111111'],
+      }),
+    );
+  });
+
+  test('act restore: every id passes isSessionId exactly', () => {
+    const restore = STAGE_C_ACTS['act restore'] as PageMessage;
+    for (const id of [
+      BOOT.toUpperCase(),
+      S1.slice(1),
+      `${S1}\n`,
+      `{${S1}}`,
+      ` ${S1}`,
+      MARKER,
+      '',
+    ]) {
+      assert.equal(isSessionId(id), false);
+      refused(page({ ...restore, sessionIds: [BOOT, id] }));
+      refused(page({ ...restore, sessionIds: [id] }));
+    }
+    for (const id of [7, null, [S1], { id: S1 }]) {
+      refused(page({ ...restore, sessionIds: [S1, id] }));
+    }
+  });
+
+  test('act dismiss-restore: the boot id is a lower-case UUID, the form of /proc/sys/kernel/random/boot_id', () => {
+    const dismiss = STAGE_C_ACTS['act dismiss-restore'] as PageMessage;
+    const other = '0f1e2d3c-4b5a-0968-f776-a5b4c3d2e1f0'; // any hex digit where a UUID's version goes
+    assert.deepEqual(page({ ...dismiss, bootId: other }), {
+      ok: true,
+      value: { ...dismiss, bootId: other },
+    });
+    for (const bootId of [
+      BOOT.toUpperCase(),
+      BOOT.slice(1),
+      `${BOOT}0`,
+      `${BOOT}\n`,
+      `{${BOOT}}`,
+      BOOT.replaceAll('-', ''),
+      MARKER,
+      '',
+    ]) {
+      refused(page({ ...dismiss, bootId }));
+    }
+  });
+
+  test("a stage C act with another kind's fields is refused", () => {
+    refused(page({ t: 'act', id: 1, kind: 'restore', sessionId: S1 }));
+    refused(page({ t: 'act', id: 1, kind: 'restore', sessionIds: [S1], all: true }));
+    refused(page({ t: 'act', id: 1, kind: 'restore', sessionIds: [S1], bootId: BOOT }));
+    refused(page({ t: 'act', id: 1, kind: 'dismiss-restore', sessionIds: [S1] }));
+    refused(page({ t: 'act', id: 1, kind: 'dismiss-restore', bootId: BOOT, sessionId: S1 }));
+  });
+});
+
+describe("parseControlRequest: stage C's routes (plan C3)", () => {
+  const RESUME = { sessionId: S1 };
+  const NEW = {
+    dir: '/home/u/project',
+    label: 'ORB-2107 fix',
+    group: 'ORB-2107',
+    flags: ['--model', 'opus', '--append-system-prompt', 'be brief'],
+  };
+  const RESTORE = { sessionIds: [S1, BOOT], all: false };
+  const bodies: [string, Record<string, unknown>][] = [
+    ['/resume', RESUME],
+    ['/new', NEW],
+    ['/restore', RESTORE],
+  ];
+  const post = (path: string, body: unknown): ReturnType<typeof parseControlRequest> =>
+    parseControlRequest('POST', path, JSON.stringify(body));
+
+  test('POST /resume { sessionId } → resume', () => {
+    assert.deepEqual(post('/resume', RESUME), {
+      ok: true,
+      value: { route: 'resume', sessionId: S1 },
+    });
+  });
+
+  test('POST /new { dir, label, group, flags } → new, every field as given: the flags not split, a repeated word kept, a blank or padded label and group kept', () => {
+    assert.deepEqual(post('/new', NEW), { ok: true, value: { route: 'new', ...NEW } });
+    const words = { ...NEW, flags: ['--append-system-prompt', "be brief, 'really'", ''] };
+    assert.deepEqual(post('/new', words), { ok: true, value: { route: 'new', ...words } });
+    const none = { ...NEW, flags: [] };
+    assert.deepEqual(post('/new', none), { ok: true, value: { route: 'new', ...none } });
+    // `-- --add-dir /a --add-dir /b -v -v`: the same word twice is the user's.
+    const repeated = { ...NEW, flags: ['--add-dir', '/a', '--add-dir', '/b', '-v', '-v'] };
+    assert.deepEqual(post('/new', repeated), { ok: true, value: { route: 'new', ...repeated } });
+    // C3: `--label ' '` reaches prepareNew as typed, whose refusal (exit 2) is the answer; as
+    // null it would start a session without a label. Nothing is trimmed.
+    for (const [label, group] of [
+      [' ', ''],
+      ['', ' '],
+      ['  ORB-2107 fix  ', '\tORB-2107 '],
+    ]) {
+      const blank = { ...NEW, label, group };
+      assert.deepEqual(
+        post('/new', blank),
+        { ok: true, value: { route: 'new', ...blank } },
+        JSON.stringify([label, group]),
+      );
+    }
+  });
+
+  test('POST /restore { sessionIds, all } → restore', () => {
+    for (const all of [false, true]) {
+      const body = { ...RESTORE, all };
+      assert.deepEqual(post('/restore', body), { ok: true, value: { route: 'restore', ...body } });
+    }
+  });
+
+  test('POST /new: label and group null are accepted (the option was not given), absent refused', () => {
+    const plain = { ...NEW, label: null, group: null };
+    assert.deepEqual(post('/new', plain), { ok: true, value: { route: 'new', ...plain } });
+    for (const field of ['label', 'group']) {
+      const copy: Record<string, unknown> = { ...NEW };
+      delete copy[field];
+      assert.match(refused(post('/new', copy)), /^body\b/, field);
+    }
+  });
+
+  test('the stage C routes refuse every field they do not define (argv, program, cwd, command, env)', () => {
+    const foreign: Record<string, unknown> = {
+      argv: ['/bin/sh', '-c', MARKER],
+      program: `/tmp/${MARKER}`,
+      cwd: `/tmp/${MARKER}`,
+      command: MARKER,
+      env: { PATH: `/tmp/${MARKER}` },
+      [MARKER]: 1,
+    };
+    for (const [path, body] of bodies) {
+      for (const [field, value] of Object.entries(foreign)) {
+        assert.match(
+          refused(post(path, { ...body, [field]: value })),
+          /^body\b/,
+          `${path} ${field}`,
+        );
+      }
+    }
+  });
+
+  test('each route refuses a missing field, a field of a wrong type and a body that is no JSON object', () => {
+    for (const [path, body] of bodies) {
+      for (const field of Object.keys(body)) {
+        const copy: Record<string, unknown> = { ...body };
+        delete copy[field];
+        assert.match(refused(post(path, copy)), /^body\b/, `${path} without ${field}`);
+        const wrong = { ...body, [field]: wrongType(body[field]) };
+        assert.match(refused(post(path, wrong)), /^body\b/, `${path} ${field} of a wrong type`);
+      }
+      for (const text of ['', 'null', '[]', `{"${MARKER}`, `"${MARKER}"`]) {
+        assert.match(
+          refused(parseControlRequest('POST', path, text)),
+          /^body\b/,
+          `${path} ${text}`,
+        );
+      }
+    }
+    // A wrong type that holds the marker: the kind quotes none of it.
+    for (const [path, body] of bodies) {
+      for (const field of Object.keys(body)) {
+        const value = typeof body[field] === 'string' ? [MARKER] : MARKER;
+        assert.match(
+          refused(post(path, { ...body, [field]: value })),
+          /^body\b/,
+          `${path} ${field}`,
+        );
+      }
+    }
+    // Arrays hold strings only.
+    assert.match(refused(post('/new', { ...NEW, flags: ['--model', 7] })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: [null] })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: ['--model', [MARKER]] })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: [{ [MARKER]: 1 }] })), /^body\b/);
+    assert.match(refused(post('/restore', { ...RESTORE, sessionIds: [S1, [MARKER]] })), /^body\b/);
+    assert.match(refused(post('/restore', { ...RESTORE, all: 'false' })), /^body\b/);
+  });
+
+  test('POST /new: dir 4,096 bytes ok, 4,097 refused; label and group 1,024 ok, 1,025 refused; 1,000 flags ok, 1,001 refused', () => {
+    const dir = `/${'é'.repeat(2047)}a`; // 4,096 bytes
+    assert.equal(Buffer.byteLength(dir), 4096);
+    assert.equal(post('/new', { ...NEW, dir }).ok, true);
+    assert.match(refused(post('/new', { ...NEW, dir: `${dir}a` })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, dir: `/${MARKER.repeat(400)}` })), /^body\b/);
+    for (const field of ['label', 'group']) {
+      assert.equal(post('/new', { ...NEW, [field]: '€'.repeat(341) + 'a' }).ok, true, field);
+      assert.match(refused(post('/new', { ...NEW, [field]: 'a'.repeat(1025) })), /^body\b/);
+      assert.match(refused(post('/new', { ...NEW, [field]: MARKER.repeat(100) })), /^body\b/);
+    }
+    const flags = Array.from({ length: 1000 }, (_, at) => `--f${at}`);
+    assert.equal(post('/new', { ...NEW, flags }).ok, true);
+    assert.match(refused(post('/new', { ...NEW, flags: [...flags, '--one-more'] })), /^body\b/);
+    // A flag has no limit of its own: the body's 64 KiB bounds it (the handler's 413).
+    assert.equal(
+      post('/new', { ...NEW, flags: ['--append-system-prompt', 'x'.repeat(60_000)] }).ok,
+      true,
+    );
+  });
+
+  test('POST /new: a NUL in dir or in a flag is refused, and a lone surrogate in any text', () => {
+    assert.match(refused(post('/new', { ...NEW, dir: '/home/u\u0000/x' })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, dir: `/home/${MARKER}\u0000/x` })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: ['--model', 'op\u0000us'] })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: [`${MARKER}\u0000`] })), /^body\b/);
+    const lone = (field: string, flag = false): string => {
+      const body = flag ? { ...NEW, flags: ['--model', 'LONE'] } : { ...NEW, [field]: 'LONE' };
+      return JSON.stringify(body).replace('"LONE"', `"${MARKER}\\ud800b"`);
+    };
+    for (const [field, flag] of [
+      ['dir', false],
+      ['label', false],
+      ['group', false],
+      ['flags', true],
+    ] as const) {
+      assert.match(
+        refused(parseControlRequest('POST', '/new', lone(field, flag))),
+        /^body\b/,
+        field,
+      );
+      const whole = lone(field, flag).replace('\\ud800', 'x');
+      assert.equal(parseControlRequest('POST', '/new', whole).ok, true, field);
+    }
+  });
+
+  test('POST /resume and /restore name sessions by isSessionId exactly; /restore 1 to 1,000 distinct ids', () => {
+    for (const id of [
+      BOOT.toUpperCase(),
+      S1.slice(1),
+      `${S1}\n`,
+      `{${S1}}`,
+      ` ${S1}`,
+      MARKER,
+      '',
+    ]) {
+      assert.match(refused(post('/resume', { sessionId: id })), /^body\b/, JSON.stringify(id));
+      assert.match(refused(post('/restore', { ...RESTORE, sessionIds: [S1, id] })), /^body\b/);
+    }
+    assert.equal(post('/restore', { ...RESTORE, sessionIds: [S1] }).ok, true);
+    assert.deepEqual(post('/restore', { sessionIds: sessionIds(1000), all: true }), {
+      ok: true,
+      value: { route: 'restore', sessionIds: sessionIds(1000), all: true },
+    });
+    for (const ids of [[], sessionIds(1001), [S1, BOOT, S1]]) {
+      assert.match(refused(post('/restore', { ...RESTORE, sessionIds: ids })), /^body\b/);
+    }
+  });
+
+  test('a stage C route with another method is no route', () => {
+    for (const [path] of bodies) {
+      for (const method of ['GET', 'PUT', 'post']) {
+        assert.match(
+          refused(parseControlRequest(method, path, '')),
+          /^route\b/,
+          `${method} ${path}`,
+        );
+      }
+    }
+    assert.match(refused(post('/resume/', RESUME)), /^route\b/);
+    assert.match(refused(post('/restore?all=1', RESTORE)), /^route\b/);
+  });
+});
+
+describe("stage C's types (checked by npm run typecheck)", () => {
+  const ENTRY: BannerEntryPayload = {
+    sessionId: S1,
+    shortId: S1.slice(0, 8),
+    title: 'ORB-2107 fix',
+    endedAtNs: '1700000000000000000',
+    wasWorking: true,
+    preselected: true,
+  };
+  const BANNER: BannerPayload = {
+    bootId: BOOT,
+    lastActivityNs: '1700000000000000000',
+    entries: [ENTRY, { ...ENTRY, sessionId: BOOT, endedAtNs: null, preselected: false }],
+    shown: true,
+    running: false,
+  };
+
+  test('a list with a banner, and a restore-progress notice, compile and are plain JSON', () => {
+    const list: ListMessage = {
+      t: 'list',
+      nowNs: '1700000000000000000',
+      counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 2 },
+      needYou: { count: 0, order: [] },
+      sections: [],
+      doneHidden: 0,
+      banner: BANNER,
+      terminals: [],
+      selected: null,
+      dirs: [],
+    };
+    const running: ListMessage = {
+      ...list,
+      banner: { bootId: null, lastActivityNs: null, entries: [], shown: true, running: true },
+    };
+    const none: ListMessage = { ...list, banner: null };
+    const notice: NoticeMessage = {
+      t: 'notice',
+      kind: 'restore-progress',
+      term: null,
+      text: 'restore finished: 2 started',
+    };
+    const messages: ServerMessage[] = [list, running, none, notice];
+    assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);
+  });
+
+  test("stage C's acts compile with exactly plan C 2.2's fields", () => {
+    const acts: ActMessage[] = [
+      { t: 'act', id: 1, kind: 'restore', sessionIds: [S1] },
+      { t: 'act', id: 2, kind: 'dismiss-restore', bootId: BOOT },
+    ];
+    for (const act of acts) {
+      assert.deepEqual(parsePageMessage(JSON.stringify(act)), { ok: true, value: act });
+    }
+    const misspelt = [
+      // @ts-expect-error a restore names its sessions in `sessionIds`
+      { t: 'act', id: 3, kind: 'restore', sessionId: S1 } satisfies ActMessage,
+      {
+        sessionId: S1,
+        shortId: S1.slice(0, 8),
+        title: 'x',
+        endedAtNs: null,
+        wasWorking: false,
+        // @ts-expect-error an entry's preselection is `preselected`
+        selected: true,
+      } satisfies BannerEntryPayload,
+    ];
+    assert.equal(misspelt.length, 2);
+  });
+
+  test("server.sock's stage C requests and answers compile; windowExpectedMs is optional", () => {
+    const request: NewRequest = {
+      dir: '/home/u',
+      label: null,
+      group: 'g',
+      flags: ['--model', 'opus'],
+    };
+    const restore: RestoreRequest = { sessionIds: [S1], all: false };
+    const requests: ControlRequest[] = [
+      { route: 'resume', sessionId: S1 },
+      { route: 'new', ...request },
+      { route: 'restore', ...restore },
+    ];
+    const answer: LaunchAnswer = { code: 4, lines: ['skydeck: refused'], sessionId: null };
+    const outcome: RestoreOutcomeLine = {
+      code: 5,
+      started: 1,
+      timedOut: 0,
+      failed: 0,
+      notStarted: 2,
+    };
+    const stream: RestoreStreamLine[] = [{ line: 'started 11111111 ORB-2107 fix' }, { outcome }];
+    const status: StatusAnswer = {
+      pages: 0,
+      terminals: [],
+      keepAlive: { mode: 'off', state: 'off', since: null, error: null },
+      python: { found: true, version: '3.12.3' },
+      build: '0123456789abcdef',
+      checkout: '/home/u/skydeck',
+      startedAtNs: '1',
+      envOrigin: { dir: '/home/u', atNs: '1' },
+    };
+    const statuses: StatusAnswer[] = [
+      status, // a server of an older build: no windowExpectedMs
+      { ...status, windowExpectedMs: 6500 },
+      { ...status, windowExpectedMs: null },
+    ];
+    const wrong = [
+      // @ts-expect-error the outcome's codes are design 7.8's 0, 1 and 5
+      { ...outcome, code: 2 } satisfies RestoreOutcomeLine,
+      // @ts-expect-error windowExpectedMs is a number of milliseconds
+      { ...status, windowExpectedMs: '6500' } satisfies StatusAnswer,
+      // @ts-expect-error a new session's flags are an array of words
+      { ...request, flags: '--model opus' } satisfies NewRequest,
+    ];
+    assert.equal(wrong.length, 3);
+    const all = [requests, answer, stream, statuses];
+    assert.deepEqual(JSON.parse(JSON.stringify(all)), all);
   });
 });

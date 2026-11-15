@@ -25,7 +25,7 @@ import type { PageInfo, TerminalHub, TerminalInfo, TerminalState } from '../../s
 import type { ActMessage, ResultMessage } from '../../src/window/protocol.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
+import { BOOT_A, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 import { startRunning, userRecord, writeTranscript } from '../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 
@@ -834,12 +834,14 @@ test('an openLink that rejects, or a hub whose close throws: ok false and one lo
   }
 });
 
-test('an action that is not one of stages A and D, or not well formed, is refused without acting', async (t) => {
+test('an action of no stage, or not well formed, is refused without acting', async (t) => {
   const d = testDeck(t);
   resumableSession(d);
   const h = harness(d);
   const hostile = [
-    { t: 'act', id: 9, kind: 'restore', sessionIds: [S1] },
+    { t: 'act', id: 9, kind: 'search', text: 'x' },
+    { t: 'act', id: 9, kind: 'restore', sessionIds: [S1, S1] },
+    { t: 'act', id: 9, kind: 'dismiss-restore', bootId: BOOT_A.toUpperCase() },
     { t: 'act', id: 9, kind: 'resume', sessionId: S1, cols: 0, rows: 30 },
     { t: 'act', id: 9, kind: 'resume', sessionId: S1, cols: 100, rows: 1.5 },
     { t: 'act', id: 9, kind: 'resume', sessionId: 'S1', cols: 100, rows: 30 },
@@ -1430,4 +1432,28 @@ test('an action that meets a busy database answers that it is busy, logged by ki
     JSON.stringify(h.logs),
   );
   assert.ok(h.logs.every((line) => !line.includes('marker-busy')));
+});
+
+test("stage C's restore and dismiss-restore are known but not acted on yet: each answers so and nothing is done (task 72 acts on them)", async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const h = harness(d);
+  const kvBefore = d.deck.store.kvEntries('');
+  const stageC: ActMessage[] = [
+    { t: 'act', id: 31, kind: 'restore', sessionIds: [S1, S2] },
+    { t: 'act', id: 32, kind: 'dismiss-restore', bootId: BOOT_A },
+  ];
+  for (const action of stageC) {
+    assert.deepEqual(
+      await h.act(action),
+      refused(action.id, 'skydeck cannot do that action yet'),
+      action.kind,
+    );
+  }
+  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.specs, []);
+  assert.deepEqual(h.logs, []);
+  assert.deepEqual(h.told, [], 'changed() never, no fetch');
+  assert.deepEqual(d.deck.store.kvEntries(''), kvBefore);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null);
 });

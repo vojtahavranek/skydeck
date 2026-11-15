@@ -1,16 +1,32 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
 import type { Ns } from '../../src/platform/types.ts';
 import { loadRows } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
-import { planRestore, runRestore } from '../../src/sessions/restore.ts';
-import type { RestoreEntry, RestoreOutcome } from '../../src/sessions/restore.ts';
-import { ResumeRefusedError } from '../../src/platform/errors.ts';
-import { acquireLock, lockKey, prepareResume, readLock } from '../../src/sessions/resume.ts';
+import {
+  latestEarlierBoot,
+  planRestore,
+  restorePlan,
+  runRestore,
+} from '../../src/sessions/restore.ts';
+import type {
+  ReportOutcome,
+  RestoreEntry,
+  RestoreHooks,
+  RestoreOutcome,
+} from '../../src/sessions/restore.ts';
+import { ResumeRefusedError, SkydeckError } from '../../src/platform/errors.ts';
+import {
+  acquireLock,
+  lockKey,
+  lockTakenNs,
+  prepareResume,
+  readLock,
+} from '../../src/sessions/resume.ts';
 import { handoffScript, hereTerminal } from '../../src/terminals/here.ts';
 import { shellQuote } from '../../src/text/shell.ts';
 import type { LaunchSpec, OpenResult, Terminal } from '../../src/terminals/types.ts';
@@ -343,6 +359,135 @@ test('a scripted run late in an older boot does not make it the latest earlier b
   );
 });
 
+// --- latestEarlierBoot and restorePlan (S2 11.1) -------------------------------------------------
+
+test('latestEarlierBoot: the boot other than this one whose last event is the latest, and that event', (t) => {
+  const d = restartedMachine(t);
+  // A scripted run later in the older BOOT_C, and one late in BOOT_A: neither counts (design 5.3).
+  scriptedEvent(d, BOOT_C, sid(5), T0 + HOUR, 205);
+  scriptedEvent(d, BOOT_A, sid(4), T0 + 10n * MINUTE, 204, 'scripted-end');
+  assert.deepEqual(latestEarlierBoot(d.deck.store.events(), BOOT_B), {
+    bootId: BOOT_A,
+    lastEventNs: T0,
+  });
+});
+
+test('latestEarlierBoot: none when only the current boot held a session, or there are no events', (t) => {
+  const d = restoreDeck(t);
+  addSession(d, sid(1), { boot: BOOT_B, pid: 101, startNs: NOW - HOUR });
+  assert.equal(latestEarlierBoot(d.deck.store.events(), BOOT_B), null);
+  assert.equal(latestEarlierBoot([], BOOT_B), null);
+});
+
+test('latestEarlierBoot: of two earlier boots whose last events tie, the first by its id', (t) => {
+  const d = restoreDeck(t);
+  // BOOT_C's start is stored first: the choice does not follow the order of the events.
+  addSession(d, sid(5), { boot: BOOT_C, pid: 105, startNs: T0 });
+  addSession(d, sid(1), { boot: BOOT_A, pid: 101, startNs: T0 });
+  assert.ok(BOOT_A < BOOT_C);
+  assert.deepEqual(latestEarlierBoot(d.deck.store.events(), BOOT_B), {
+    bootId: BOOT_A,
+    lastEventNs: T0,
+  });
+});
+
+test('restorePlan: planRestore’s entries over the rows in list order, and the earlier boot', (t) => {
+  const d = restartedMachine(t);
+  for (const all of [false, true]) {
+    const plan = restorePlan(d.deck, all);
+    const expected = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, all);
+    assert.deepEqual(plan.entries.map(shape), expected.map(shape), `all: ${all}`);
+    assert.deepEqual(plan.earlier, { bootId: BOOT_A, lastEventNs: T0 }, `all: ${all}`);
+  }
+  assert.deepEqual(
+    restorePlan(d.deck, false)
+      .entries.map(shape)
+      .toSorted((a, b) => String(a['id']).localeCompare(String(b['id']))),
+    [S1_ENTRY, S2_ENTRY, S3_ENTRY, S9_ENTRY],
+  );
+});
+
+test('restorePlan takes the rows it is given and puts them in list order itself', (t) => {
+  const d = restartedMachine(t);
+  const inOrder = listOrder(d).filter((row) => row.id !== sid(2));
+  const rows = loadRows(d.deck)
+    .filter((row) => row.id !== sid(2))
+    .reverse();
+  const plan = restorePlan(d.deck, false, rows);
+  assert.deepEqual(
+    plan.entries.map(shape),
+    planRestore(inOrder, d.deck.store.events(), BOOT_B, false).map(shape),
+  );
+  const ids = plan.entries.map((entry) => entry.row.id);
+  assert.deepEqual(ids.toSorted(), [sid(1), sid(3), sid(9)]);
+  assert.notDeepEqual(
+    rows.map((row) => row.id).filter((id) => ids.includes(id)),
+    ids,
+    'the rows were given out of list order',
+  );
+  for (const entry of plan.entries) {
+    assert.ok(rows.includes(entry.row), 'the entries hold the rows given');
+  }
+});
+
+test('restorePlan orders the entries as ls --all lists them: a done row can make its group the newest', (t) => {
+  const d = restoreDeck(t);
+  addSession(d, sid(1), {
+    boot: BOOT_A,
+    pid: 101,
+    startNs: T0 - HOUR,
+    activityNs: T0 - 10n * MINUTE,
+  });
+  addSession(d, sid(2), { boot: BOOT_A, pid: 102, startNs: T0 - HOUR, activityNs: T0 - MINUTE });
+  addSession(d, sid(3), {
+    boot: BOOT_A,
+    pid: 103,
+    startNs: T0 - HOUR,
+    activityNs: T0 - 5n * MINUTE,
+  });
+  d.deck.store.updateMeta(sid(1), { group: 'g1' }, T0);
+  d.deck.store.updateMeta(sid(2), { group: 'g1', doneAtNs: T0 }, T0); // done: not offered
+  d.deck.store.updateMeta(sid(3), { group: 'g2' }, T0);
+  refresh(d.deck);
+  // g1's newest row is the done sid(2), newer than g2's sid(3): g1 comes first, as in ls --all.
+  assert.deepEqual(
+    restorePlan(d.deck, false).entries.map((entry) => entry.row.id),
+    [sid(1), sid(3)],
+  );
+});
+
+test('restorePlan refreshes nothing: a start in the spool since the last refresh is not seen yet', (t) => {
+  const d = restartedMachine(t);
+  startClaude(d, sid(1), 4242);
+  const spooled = readdirSync(d.deck.places.spoolDir);
+  assert.ok(restorePlan(d.deck, false).entries.some((entry) => entry.row.id === sid(1)));
+  assert.deepEqual(readdirSync(d.deck.places.spoolDir), spooled);
+});
+
+test('restorePlan refuses rows without a boot id with the command’s message', (t) => {
+  const d = restartedMachine(t);
+  d.proc.setBootId(null);
+  assert.throws(
+    () => restorePlan(d.deck, false),
+    (error: unknown) =>
+      error instanceof SkydeckError &&
+      error.exitCode === 1 &&
+      error.message ===
+        'cannot read the boot id (/proc/sys/kernel/random/boot_id): restore cannot tell which sessions are still running',
+  );
+});
+
+test('restorePlan with no rows: no entries and no earlier boot, also without a boot id', (t) => {
+  const d = restoreDeck(t);
+  assert.deepEqual(restorePlan(d.deck, true), { entries: [], earlier: null });
+  d.proc.setBootId(null);
+  assert.deepEqual(restorePlan(d.deck, false), { entries: [], earlier: null });
+  assert.deepEqual(restorePlan(restartedMachine(t).deck, false, []), {
+    entries: [],
+    earlier: null,
+  });
+});
+
 // --- runRestore with tabs ----------------------------------------------------------------------
 
 const TAB_CONFIG = { restoreBatch: 2, restoreStartTimeoutSeconds: 3, restoreMinFreeMb: 4096 };
@@ -379,13 +524,28 @@ async function run(
   d: TestDeck,
   terminal: Terminal,
   entries: readonly RestoreEntry[],
-): Promise<{ outcome: RestoreOutcome; lines: string[] }> {
+  hooks: RestoreHooks = {},
+): Promise<{
+  outcome: RestoreOutcome;
+  lines: string[];
+  /** Each line with the outcome report() was given for it. */
+  reported: [string, ReportOutcome | undefined][];
+}> {
   const lines: string[] = [];
+  const reported: [string, ReportOutcome | undefined][] = [];
   const outcome = await runRestore(
-    { deck: d.deck, terminal, report: (line) => lines.push(line) },
+    {
+      deck: d.deck,
+      terminal,
+      report: (line, ended) => {
+        lines.push(line);
+        reported.push([line, ended]);
+      },
+      ...hooks,
+    },
     entries,
   );
-  return { outcome, lines };
+  return { outcome, lines, reported };
 }
 
 const NOTHING = {
@@ -396,6 +556,7 @@ const NOTHING = {
   handedOff: null,
   printed: [],
   stoppedForMemory: false,
+  stopped: false,
 };
 
 function titleOf(entries: readonly RestoreEntry[], id: string): string {
@@ -1225,6 +1386,597 @@ test('without tabs too little memory starts nothing', async (t) => {
     notStarted: [sid(1), sid(2)],
     stoppedForMemory: true,
   });
+});
+
+// --- runRestore's hooks (S2 11.1; C8, C23) ----------------------------------------------------
+
+const startedLine = (entries: readonly RestoreEntry[], n: number): string =>
+  `started ${sid(n).slice(0, 8)} ${titleOf(entries, sid(n))}`;
+const timedOutLine = (entries: readonly RestoreEntry[], n: number): string =>
+  `timed out ${sid(n).slice(0, 8)} ${titleOf(entries, sid(n))}`;
+const notStartedLine = (entries: readonly RestoreEntry[], n: number): string =>
+  `not started ${sid(n).slice(0, 8)} ${titleOf(entries, sid(n))}`;
+const ended = (n: number, kind: ReportOutcome['kind']): ReportOutcome => ({
+  sessionId: sid(n),
+  kind,
+});
+
+test('refuse: a session it names is failed with its reason, never locked or opened; the others start', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const asked: string[] = [];
+  const locksAtOpen: (string | null)[] = [];
+  const tabs = fakeTabs(d, {
+    onOpen: () => {
+      locksAtOpen.push(readLock(d.deck, sid(2)));
+    },
+  });
+  const { outcome, lines } = await run(d, tabs.terminal, entries.slice(0, 3), {
+    refuse: (id) => {
+      asked.push(id);
+      return id === sid(2) ? 'this session is already \x1b[31mopen in the window' : null;
+    },
+  });
+  assert.deepEqual(asked, [1, 2, 3].map(sid));
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [sid(1), sid(3)],
+    failed: [{ id: sid(2), reason: 'this session is already open in the window' }],
+  });
+  assert.deepEqual(tabs.opened, [sid(1), sid(3)]);
+  assert.deepEqual(locksAtOpen, [null, null]);
+  // sid(1) and sid(2) are the first batch: sid(2) is refused before sid(1)'s start is seen.
+  assert.deepEqual(lines, [
+    'failed 00000002: this session is already open in the window',
+    startedLine(entries, 1),
+    startedLine(entries, 3),
+  ]);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
+test('refuse is asked before the guard: a session that runs gets the hook’s reason', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  startClaude(d, sid(1), 4242);
+  const { outcome } = await run(d, fakeTabs(d).terminal, entries.slice(0, 1), {
+    refuse: () => 'this session is already open in the window',
+  });
+  assert.deepEqual(outcome.failed, [
+    { id: sid(1), reason: 'this session is already open in the window' },
+  ]);
+});
+
+test('refuse that names no session changes nothing', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d);
+  const { outcome, lines } = await run(d, tabs.terminal, entries, { refuse: () => null });
+  assert.deepEqual(outcome, { ...NOTHING, started: [1, 2, 3, 4, 5].map(sid) });
+  assert.deepEqual(tabs.opened, [1, 2, 3, 4, 5].map(sid));
+  assert.deepEqual(
+    lines,
+    [1, 2, 3, 4, 5].map((n) => startedLine(entries, n)),
+  );
+});
+
+test('without tabs refuse is asked before the hand-off: the next session is handed off', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const { outcome } = await run(d, here(d), entries.slice(0, 3), {
+    refuse: (id) => (id === sid(1) ? 'this session is already open in the window' : null),
+  });
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    failed: [{ id: sid(1), reason: 'this session is already open in the window' }],
+    handedOff: sid(2),
+    printed: [resumeLine(sid(3))],
+  });
+});
+
+test('gone: at a look of the wait the session is failed, its renewed lock given back; the batch goes on', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t, {
+    config: { ...TAB_CONFIG, restoreStartTimeoutSeconds: 10 },
+  });
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 3) {
+      startClaude(d, sid(2)); // seen at the fourth look
+    }
+  };
+  const lockAtOpen = new Map<string, string | null>();
+  let lockAtGone: string | null = null;
+  const asked: [string, number][] = [];
+  const tabs = fakeTabs(d, {
+    starts: () => false,
+    onOpen: (_count, id) => {
+      lockAtOpen.set(id, readLock(d.deck, id));
+    },
+  });
+  const { outcome, reported } = await run(d, tabs.terminal, entries.slice(0, 2), {
+    gone: (id) => {
+      asked.push([id, sleeps.length]);
+      if (id === sid(1) && sleeps.length >= 2) {
+        lockAtGone = readLock(d.deck, id);
+        return 'its terminal was \x1b[31mclosed';
+      }
+      // Asked for sid(2) at the look that sees its start, this would fail it.
+      return id === sid(2) && sleeps.length >= 3 ? 'asked after its start was seen' : null;
+    },
+  });
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [sid(2)],
+    failed: [{ id: sid(1), reason: 'its terminal was closed' }],
+  });
+  assert.deepEqual(reported, [
+    ['failed 00000001: its terminal was closed', ended(1, 'failed')],
+    [startedLine(entries, 2), ended(2, 'started')],
+  ]);
+  // One look a second: sid(1) at the first three (failed at the third), sid(2) until its start.
+  assert.deepEqual(asked, [
+    [sid(1), 0],
+    [sid(2), 0],
+    [sid(1), 1],
+    [sid(2), 1],
+    [sid(1), 2],
+    [sid(2), 2],
+  ]);
+  assert.deepEqual(sleeps, [1000, 1000, 1000]);
+  // Its lock had been renewed since the tab opened, and that value was given back.
+  assert.notEqual(lockAtGone, null);
+  assert.notEqual(lockAtGone, lockAtOpen.get(sid(1)));
+  assert.equal(d.deck.store.getKv(lockKey(sid(1))), null);
+});
+
+test('the signal is looked at before the memory check, with tabs and without: its stop is the one said', async (t) => {
+  for (const tabs of [true, false]) {
+    const what = `tabs: ${tabs}`;
+    const { d, entries } = fiveToRestore(t, { memAvailableMb: 3000 });
+    const terminal = tabs ? fakeTabs(d).terminal : here(d);
+    const { outcome, lines } = await run(d, terminal, entries.slice(0, 2), {
+      signal: AbortSignal.abort('stop'),
+    });
+    assert.deepEqual(outcome, { ...NOTHING, notStarted: [sid(1), sid(2)], stopped: true }, what);
+    assert.deepEqual(
+      lines,
+      ['stopped: stop', notStartedLine(entries, 1), notStartedLine(entries, 2)],
+      what,
+    );
+  }
+});
+
+test('the stop line’s reason is sanitised', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const { lines } = await run(d, fakeTabs(d).terminal, entries.slice(0, 1), {
+    signal: AbortSignal.abort('stop \x1b[31mred\nline two'),
+  });
+  assert.deepEqual(lines, ['stopped: stop red line two', notStartedLine(entries, 1)]);
+});
+
+test('gone for a session whose lock another skydeck took over: failed, that lock left alone', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 1) {
+      d.deck.store.setKv(lockKey(sid(1)), 'taken over');
+    }
+  };
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome, lines } = await run(d, tabs.terminal, entries.slice(0, 1), {
+    gone: () => (sleeps.length >= 2 ? 'its terminal was closed' : null),
+  });
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    failed: [{ id: sid(1), reason: 'its terminal was closed' }],
+  });
+  assert.deepEqual(lines, ['failed 00000001: its terminal was closed']);
+  assert.deepEqual(sleeps, [1000, 1000]);
+  assert.equal(d.deck.store.getKv(lockKey(sid(1))), 'taken over');
+});
+
+test('signal aborted before the run: nothing opened, the stopped line, every entry not started', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d);
+  const { outcome, reported } = await run(d, tabs.terminal, entries, {
+    signal: AbortSignal.abort("the window's server is stopping"),
+  });
+  assert.deepEqual(tabs.opened, []);
+  assert.deepEqual(outcome, { ...NOTHING, notStarted: [1, 2, 3, 4, 5].map(sid), stopped: true });
+  assert.deepEqual(reported, [
+    ["stopped: the window's server is stopping", undefined],
+    ...[1, 2, 3, 4, 5].map((n) => [notStartedLine(entries, n), ended(n, 'not-started')]),
+  ]);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
+test('signal aborted while the second batch waits: that wait ends at its next look; timed out, stopped, not started', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t, {
+    config: { ...TAB_CONFIG, restoreStartTimeoutSeconds: 10 },
+  });
+  const controller = new AbortController();
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 1) {
+      controller.abort('the command that asked for it stopped');
+    }
+  };
+  const lockAtOpen = new Map<string, string | null>();
+  const tabs = fakeTabs(d, {
+    starts: (id) => id === sid(1) || id === sid(2),
+    onOpen: (_count, id) => {
+      lockAtOpen.set(id, readLock(d.deck, id));
+    },
+  });
+  const { outcome, lines } = await run(d, tabs.terminal, entries, { signal: controller.signal });
+  assert.deepEqual(sleeps, [1000]);
+  assert.deepEqual(tabs.opened, [1, 2, 3, 4].map(sid));
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [sid(1), sid(2)],
+    timedOut: [sid(3), sid(4)],
+    notStarted: [sid(5)],
+    stopped: true,
+  });
+  assert.deepEqual(lines, [
+    startedLine(entries, 1),
+    startedLine(entries, 2),
+    timedOutLine(entries, 3),
+    timedOutLine(entries, 4),
+    'stopped: the command that asked for it stopped',
+    notStartedLine(entries, 5),
+  ]);
+  // Their terminals may still start them: each keeps its lock, renewed at the last look (its time,
+  // read to the millisecond, is that look's, a second after the open; a renewal's mark alone would
+  // make any renewed value differ from the open's).
+  for (const id of [sid(3), sid(4)]) {
+    const lock = d.deck.store.getKv(lockKey(id));
+    assert.notEqual(lock, null, id);
+    assert.equal(lockTakenNs(lock ?? ''), d.clock.nowNs(), id);
+    assert.equal(lockTakenNs(lockAtOpen.get(id) ?? ''), d.clock.nowNs() - SEC, id);
+  }
+});
+
+test('signal aborted while a tab opens: no further entry is prepared, the opened one is looked for once', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const controller = new AbortController();
+  const tabs = fakeTabs(d, { starts: () => false, onOpen: () => controller.abort('stop') });
+  const { outcome, lines } = await run(d, tabs.terminal, entries, { signal: controller.signal });
+  assert.deepEqual(tabs.opened, [sid(1)]);
+  assert.deepEqual(sleeps, []);
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    timedOut: [sid(1)],
+    notStarted: [2, 3, 4, 5].map(sid),
+    stopped: true,
+  });
+  assert.deepEqual(lines, [
+    timedOutLine(entries, 1),
+    'stopped: stop',
+    ...[2, 3, 4, 5].map((n) => notStartedLine(entries, n)),
+  ]);
+});
+
+test('signal aborted while the last batch waits: the stopped line only when a session was still waited for', async (t) => {
+  for (const startsAtNextLook of [false, true]) {
+    const what = `starts at the next look: ${startsAtNextLook}`;
+    const { d, entries, sleeps } = fiveToRestore(t);
+    const controller = new AbortController();
+    const sleep = d.clock.sleep;
+    d.clock.sleep = async (ms) => {
+      await sleep(ms);
+      controller.abort('stop');
+      if (startsAtNextLook) {
+        startClaude(d, sid(2));
+      }
+    };
+    const tabs = fakeTabs(d, { starts: (id) => id === sid(1) });
+    const { outcome, lines } = await run(d, tabs.terminal, entries.slice(0, 2), {
+      signal: controller.signal,
+    });
+    assert.deepEqual(sleeps, [1000], what);
+    if (startsAtNextLook) {
+      // Nothing was left when the run saw the abort: it ended as it would have.
+      assert.deepEqual(outcome, { ...NOTHING, started: [sid(1), sid(2)] }, what);
+      assert.deepEqual(lines, [startedLine(entries, 1), startedLine(entries, 2)], what);
+    } else {
+      assert.deepEqual(
+        outcome,
+        { ...NOTHING, started: [sid(1)], timedOut: [sid(2)], stopped: true },
+        what,
+      );
+      assert.deepEqual(
+        lines,
+        [startedLine(entries, 1), timedOutLine(entries, 2), 'stopped: stop'],
+        what,
+      );
+    }
+  }
+});
+
+test('signal first seen at the look that ends the last batch’s wait by its time: the run ends as it would have', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const controller = new AbortController();
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 3) {
+      controller.abort('stop'); // the wait's 3 s are over at the next look
+    }
+  };
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome, lines } = await run(d, tabs.terminal, entries.slice(0, 2), {
+    signal: controller.signal,
+  });
+  assert.deepEqual(sleeps, [1000, 1000, 1000]);
+  assert.deepEqual(outcome, { ...NOTHING, timedOut: [sid(1), sid(2)] });
+  assert.deepEqual(lines, [timedOutLine(entries, 1), timedOutLine(entries, 2)]);
+});
+
+test('without tabs a signal aborted before the run hands nothing off', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const { outcome, lines } = await run(d, here(d), entries.slice(0, 3), {
+    signal: AbortSignal.abort('stop'),
+  });
+  assert.deepEqual(outcome, { ...NOTHING, notStarted: [1, 2, 3].map(sid), stopped: true });
+  assert.deepEqual(lines, ['stopped: stop', ...[1, 2, 3].map((n) => notStartedLine(entries, n))]);
+  assert.equal(existsSync(join(d.sandbox.root, 'handoff')), false);
+});
+
+test('without tabs a signal aborted during the hand-off prints no line for the others', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const controller = new AbortController();
+  const handoff = here(d);
+  const aborting: Terminal = {
+    ...handoff,
+    open: (spec) => {
+      controller.abort('stop');
+      return handoff.open(spec);
+    },
+  };
+  const { outcome, lines } = await run(d, aborting, entries.slice(0, 3), {
+    signal: controller.signal,
+  });
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    handedOff: sid(1),
+    notStarted: [sid(2), sid(3)],
+    stopped: true,
+  });
+  assert.deepEqual(lines, [
+    `resuming 00000001 ${titleOf(entries, sid(1))} in this terminal`,
+    'stopped: stop',
+    notStartedLine(entries, 2),
+    notStartedLine(entries, 3),
+  ]);
+});
+
+test('stopAfterEmptyBatch: a first batch whose tabs open and never start stops the run after its wait', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const tabs = fakeTabs(d, { starts: (id) => id !== sid(1) && id !== sid(2) });
+  const { outcome, reported } = await run(d, tabs.terminal, entries, {
+    stopAfterEmptyBatch: true,
+  });
+  assert.deepEqual(tabs.opened, [sid(1), sid(2)]);
+  assert.deepEqual(sleeps, [1000, 1000, 1000]);
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    timedOut: [sid(1), sid(2)],
+    notStarted: [3, 4, 5].map(sid),
+    stopped: true,
+  });
+  assert.deepEqual(reported, [
+    [timedOutLine(entries, 1), ended(1, 'timed-out')],
+    [timedOutLine(entries, 2), ended(2, 'timed-out')],
+    ['stopped: no session of this batch started', undefined],
+    ...[3, 4, 5].map((n) => [notStartedLine(entries, n), ended(n, 'not-started')]),
+  ]);
+});
+
+test('stopAfterEmptyBatch: an empty batch after one whose sessions started stops the run', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d, { starts: (id) => id === sid(1) || id === sid(2) });
+  const { outcome, lines } = await run(d, tabs.terminal, entries, { stopAfterEmptyBatch: true });
+  assert.deepEqual(tabs.opened, [1, 2, 3, 4].map(sid));
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [sid(1), sid(2)],
+    timedOut: [sid(3), sid(4)],
+    notStarted: [sid(5)],
+    stopped: true,
+  });
+  assert.deepEqual(lines, [
+    startedLine(entries, 1),
+    startedLine(entries, 2),
+    timedOutLine(entries, 3),
+    timedOutLine(entries, 4),
+    'stopped: no session of this batch started',
+    notStartedLine(entries, 5),
+  ]);
+  // Their terminals may still start them.
+  assert.notEqual(d.deck.store.getKv(lockKey(sid(3))), null);
+  assert.notEqual(d.deck.store.getKv(lockKey(sid(4))), null);
+});
+
+test('stopAfterEmptyBatch with a signal first seen at the look that ends the wait: the signal’s stop is said', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const controller = new AbortController();
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 3) {
+      controller.abort("the window's server is stopping"); // the wait's time is up at the next look
+    }
+  };
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome, lines } = await run(d, tabs.terminal, entries, {
+    signal: controller.signal,
+    stopAfterEmptyBatch: true,
+  });
+  assert.deepEqual(sleeps, [1000, 1000, 1000]);
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    timedOut: [sid(1), sid(2)],
+    notStarted: [3, 4, 5].map(sid),
+    stopped: true,
+  });
+  assert.deepEqual(lines, [
+    timedOutLine(entries, 1),
+    timedOutLine(entries, 2),
+    "stopped: the window's server is stopping",
+    ...[3, 4, 5].map((n) => notStartedLine(entries, n)),
+  ]);
+});
+
+test('stopAfterEmptyBatch: a batch whose sessions are all gone stops the run too', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome, lines } = await run(d, tabs.terminal, entries, {
+    stopAfterEmptyBatch: true,
+    gone: () => 'claude ended before the session started (status 127)',
+  });
+  assert.deepEqual(tabs.opened, [sid(1), sid(2)]);
+  assert.deepEqual(sleeps, []);
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    failed: [1, 2].map((n) => ({
+      id: sid(n),
+      reason: 'claude ended before the session started (status 127)',
+    })),
+    notStarted: [3, 4, 5].map(sid),
+    stopped: true,
+  });
+  assert.deepEqual(lines.slice(2, 3), ['stopped: no session of this batch started']);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
+test('stopAfterEmptyBatch: a batch the guard refused whole opened nothing and does not stop the run', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  startClaude(d, sid(1), 4241);
+  startClaude(d, sid(2), 4242);
+  const tabs = fakeTabs(d);
+  const { outcome, lines } = await run(d, tabs.terminal, entries, { stopAfterEmptyBatch: true });
+  assert.deepEqual(tabs.opened, [3, 4, 5].map(sid));
+  assert.deepEqual(outcome.started, [3, 4, 5].map(sid));
+  assert.deepEqual(
+    outcome.failed.map((failure) => failure.id),
+    [sid(1), sid(2)],
+  );
+  assert.equal(outcome.stopped, false);
+  assert.equal(
+    lines.some((line) => line.startsWith('stopped:')),
+    false,
+    lines.join('\n'),
+  );
+});
+
+test('stopAfterEmptyBatch: a batch in which one session started does not stop the run', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d, { starts: (id) => id !== sid(1) });
+  const { outcome } = await run(d, tabs.terminal, entries, { stopAfterEmptyBatch: true });
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [2, 3, 4, 5].map(sid),
+    timedOut: [sid(1)],
+  });
+});
+
+test('stopAfterEmptyBatch: a last or only batch that starts nothing ends the run without a stopped line', async (t) => {
+  for (const [count, starting] of [
+    [2, []],
+    [5, [1, 2, 3, 4]],
+  ] as const) {
+    const what = `${count} entries`;
+    const { d, entries } = fiveToRestore(t);
+    const tabs = fakeTabs(d, { starts: (id) => starting.some((n) => sid(n) === id) });
+    const { outcome, lines } = await run(d, tabs.terminal, entries.slice(0, count), {
+      stopAfterEmptyBatch: true,
+    });
+    const timedOut = entries
+      .slice(0, count)
+      .map((entry) => entry.row.id)
+      .filter((id) => !starting.some((n) => sid(n) === id));
+    assert.deepEqual(outcome, { ...NOTHING, started: starting.map(sid), timedOut }, what);
+    assert.equal(
+      lines.some((line) => line.startsWith('stopped:')),
+      false,
+      `${what}\n${lines.join('\n')}`,
+    );
+  }
+});
+
+test('without stopAfterEmptyBatch a first batch that starts nothing does not stop the run', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d, { starts: (id) => id !== sid(1) && id !== sid(2) });
+  const { outcome } = await run(d, tabs.terminal, entries);
+  assert.deepEqual(tabs.opened, [1, 2, 3, 4, 5].map(sid));
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [3, 4, 5].map(sid),
+    timedOut: [sid(1), sid(2)],
+  });
+});
+
+test('report’s outcome with tabs: started, timed out, failed and not started; warnings and the stop carry none', async (t) => {
+  const d = restoreDeck(t, { config: TAB_CONFIG });
+  for (let n = 1; n <= 5; n++) {
+    addSession(d, sid(n), {
+      boot: BOOT_A,
+      pid: 100 + n,
+      startNs: T0 - HOUR,
+      activityNs: T0 - BigInt(n) * MINUTE,
+      argv: n === 1 ? ['claude', '--frob'] : ['claude'],
+    });
+  }
+  const entries = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, false);
+  startClaude(d, sid(2), 4242);
+  const tabs = fakeTabs(d, {
+    starts: (id) => id !== sid(4),
+    onOpen: (count) => {
+      if (count === 3) {
+        d.proc.setMemAvailableMb(3000);
+      }
+    },
+  });
+  const { reported } = await run(d, tabs.terminal, entries);
+  assert.deepEqual(reported, [
+    ['00000001: started with flags skydeck does not know, not passed on resume: --frob', undefined],
+    ['failed 00000002: 00000002 is running (pid 4242)', ended(2, 'failed')],
+    [startedLine(entries, 1), ended(1, 'started')],
+    [startedLine(entries, 3), ended(3, 'started')],
+    [timedOutLine(entries, 4), ended(4, 'timed-out')],
+    [
+      'stopped: only 3000 MiB of memory available, less than restoreMinFreeMb (4096 MiB)',
+      undefined,
+    ],
+    [notStartedLine(entries, 5), ended(5, 'not-started')],
+  ]);
+});
+
+test('report’s outcome without tabs: handed off, failed and printed; the header and name lines carry none', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  startClaude(d, sid(2), 4242);
+  const dir = projectDir(d);
+  const { reported } = await run(d, here(d), entries.slice(0, 3));
+  assert.deepEqual(reported, [
+    [`resuming 00000001 ${titleOf(entries, sid(1))} in this terminal`, ended(1, 'handed-off')],
+    ['failed 00000002: 00000002 is running (pid 4242)', ended(2, 'failed')],
+    ['to resume these yourself, run:', undefined],
+    [`00000003 ${shellQuote(titleOf(entries, sid(3)))} in ${shellQuote(dir)}:`, undefined],
+    [resumeLine(sid(3)), ended(3, 'printed')],
+  ]);
+  // A failed hand-off: its failure, then its own command printed, or the line that it cannot be.
+  const failing = restoreDeck(t, { config: TAB_CONFIG, env: { SKYDECK_HANDOFF: undefined } });
+  addSession(failing, sid(1), {
+    boot: BOOT_A,
+    pid: 101,
+    startNs: T0 - HOUR,
+    argv: ['claude', '--model', 'op\x1b]0;x\x07us'],
+  });
+  const one = planRestore(listOrder(failing), failing.deck.store.events(), BOOT_B, false);
+  const unprintable = await run(failing, here(failing), one);
+  assert.deepEqual(unprintable.reported, [
+    ['failed 00000001: not started through bin/skydeck', ended(1, 'failed')],
+    ['00000001: the command contains control characters and cannot be printed safely', undefined],
+  ]);
 });
 
 // The time arithmetic above relies on these.

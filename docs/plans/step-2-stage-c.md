@@ -165,8 +165,8 @@ scheduled around it:
 
 | Test file | Task | What it does |
 |---|---|---|
-| `test/window/protocol.test.ts` | 70 | new cases at the end; no fixture changes (`banner: null` still type-checks) |
-| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end; 72: new cases at the end, every existing case unchanged |
+| `test/window/protocol.test.ts` | 70 | new cases at the end; the three routes leave the "no route" list and `restore`, `dismiss-restore` the case of unknown kinds; no fixture changes (`banner: null` still type-checks) |
+| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end, and the hostile case's `restore` entry made malformed; 72: new cases at the end, every existing case unchanged |
 | `test/window/view/build.test.ts` | 73 | `banner.ts` in the pinned file list; nothing else |
 | `test/window/server.test.ts` | 80 | one line (about 549): the refusal's new words `its resume lock was taken over` |
 | `test-page/helpers/shell.ts` | 75 | a new function `bannerWorld` after `actsWorld`; `scriptedList`, the worlds and `MINIMAL_MODULES` unchanged |
@@ -194,7 +194,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C2 | `POST /resume` and `POST /new` answer `{ code, lines, sessionId }` (`LaunchAnswer`, 2.2): `lines` exactly as `skydeck resume` / `new` would print them on stderr — `launchPrepared`'s lines as they are, a refusal's message line by line with `skydeck: ` in front (as `failureText`) — and `code` the exit code the command would end with: 0, 1 (a failed launch, a busy store, an unexpected failure), 2 (`prepareNew`'s refusals), 3 (`RefError`), 4 (the guard, the lock, and the window's own "already open"). An unexpected failure is answered code 1 with `skydeck: the window's server could not start it (<kind>)` and logged by kind; a busy store with `skydeck: skydeck's database is busy; try again`. | S2 8.3 names `{ code, lines }`; the command prints them and exits with the code. A command must print something, so these are not 500. | 70 (8.3) |
 | C3 | The bodies: `POST /resume` `{ sessionId }`; `POST /new` `{ dir, label, group, flags }` with `label` and `group` null when the option was not given and passed to `prepareNew` exactly as the command passes them (a blank `--label ' '` is refused, unlike the window's form, S2 12.6), `flags` the words after `--` as an array (no splitting); `POST /restore` `{ sessionIds, all }` with 1–1,000 distinct session ids. Every session id passes `isSessionId`, as `act resume`'s does. Strings well formed; no NUL in `dir` or a flag; `dir` 4,096 bytes, `label` and `group` 1,024, at most 1,000 flags; the body's 64 KiB bounds the rest. An unknown or missing field is 400. | S2 8.3: fixed fields, no program, no argument list; a prompt after `--` is the user's and is passed on (design 7.7). | 70 (8.3) |
 | C4 | While the server starts (its upgrade answers 503) the three routes answer 503 `{ error: 'starting' }`, and the client asks again every 500 ms within its answer time; once its stop has begun, 503 `{ error: 'stopping' }`, which the command reports (`the window's server is stopping; run skydeck window, or use --here`, exit 1). | Before its keepers are found the server does not know its terminals (S2 8.2.1's reason for 503): the "already open" rule could not see one. | 70 (8.3) |
-| C5 | `POST /restore` answers 200 with JSON lines (2.2 `RestoreStreamLine`): `{ "line": … }` per report line, `{ "line": "waiting for <n> sessions" }` after 10 s without one (`1 session`), and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore is already running, the boot id unreadable, the store busy) is the same stream: its line, then an outcome with code 1. `code`: 5 when the memory check or the server's stop ended the run, else 1 when any selected session failed, was not offered any more or timed out, else 0 (design 7.8's codes). | S2 8.3 and 11.4: a stream of lines, the outcome last, a line at least every 10 s. One reading path for the client. | 70 (8.3) |
+| C5 | `POST /restore` answers 200 with JSON lines (2.2 `RestoreStreamLine`): `{ "line": … }` per report line, `{ "line": "waiting for <n> sessions" }` after 10 s without one (`1 session`), and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore is already running, the boot id unreadable, the store busy) is the same stream: its line, then an outcome with code 1. `code`: 5 when a stop ended the run — the memory check, the server's stop, the asker's close (C22), or C23's empty batch with entries left (ruled on review A's re-check) —, else 1 when any selected session failed, was not offered any more or timed out, else 0 (design 7.8's codes). | S2 8.3 and 11.4: a stream of lines, the outcome last, a line at least every 10 s. One reading path for the client. | 70 (8.3) |
 | C6 | One restore runs at a time in the server, whoever asked (a page or a command). Another request meanwhile is refused with `a restore is already running; wait until it has finished`: `act restore` answers it as its result, `POST /restore` as its one line. `act restore` answers at once (`ok`, no lines) once the run has begun; every report line of every run, whoever asked, goes to every page as `notice restore-progress` (its text sanitised). **Every run ends with exactly one line `restore finished: <n> started, <n> timed out, <n> failed, <n> not started`** (the parts that are 0 left out; `restore finished: nothing was started` when all are 0), also after a stop of either kind — the memory stop and the signal: their `timed out …` lines for the sessions still waited for, then `stopped: …`, then `not started …`, come before it — and after a run that cannot begin (its refusal line first). Heartbeats go to the command line only. | S2 11.3 ("one restore runs at a time"), 12.7 ("the banner reports each line of the run"), 8.2.3's `restore-progress`. One end mark is the page's only boundary between two reports (C10; ruled on review B). A result that waited for the whole run (minutes) would be lost by a page that reconnects meanwhile. | 73 (11.3, 12.7) |
 | C7 | The restore's set is taken on freshly refreshed rows at the moment it starts (`refresh`, then `restorePlan`, 2.3), design 7.8's default set for the banner and `all` as asked over `server.sock`; the selected ids are kept in the set's order, and an id not in the set is reported `failed <short>: no longer offered for restore` before the run. Each terminal's first size is the area the page that had focus last reported, else 120 × 40, read when that terminal is opened (S2 8.2.6). The server's configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`) is the one it read at its start. | S2 11.4 and 8.2.6 say it; the configuration is the server's like every launch it makes (S2 5.2). | 73 (11.4) |
 | C8 | `runRestore` gains optional hooks (C23 adds `stopAfterEmptyBatch` to these three) and the outcome of each report line (2.3, `RestoreHooks`): `refuse` before the guard (the window's "already open"), `gone` at every look of the wait — a session whose window terminals have all ended, were lost, were not started or were closed before restore saw its start is reported `failed <short>: <reason>` at once and restore's own lock (its last renewed value) is given back —, and `signal`, with which the server's stop ends the run at its next step (`stopped: the window's server is stopping`, the rest `not started`). The command passes none and nothing changes for it. | S2 11.1's rule must hold for restore; a window terminal that ended is known to the server, where a tab is not, so waiting the full `restoreStartTimeoutSeconds` would only make the user wait; the server's stop must not leave a restore writing into a closed store. Question 1. | 71 (4.4, 11.1, 11.3) |
@@ -212,7 +212,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C20 | **The second window after a cold start** (stage A's follow-up "a second window opens when `skydeck window` starts a server while an old window is still open", carried; ruled on review A). The server keeps `kv` `window_pages_open` while pages are connected: each refresh that works makes the store agree with its page count (`createPageMark(…).update`: the key while pages > 0, none at 0 — its FIRST call writes or removes whatever the store holds, so a mark a dead server left is removed by the next server's first refresh without a page); it leaves the key as it is when it stops or dies. **The wait is the server's fact**: a server that finds the key at its start expects a window back from the end of its start until a page connects or 7 s have passed, and says so in `GET /status` (`windowExpectedMs`, the ms left; 2.2). Every command that would open a window — `skydeck window`, a second `skydeck window` meanwhile, C12's window — waits for that same deadline when no page is connected, with one line on stderr: `waiting up to 7 s for the open window to come back; --new-window opens one now`; a page that comes back is "a window is already open". `--new-window`, `--print-url` and `--new-secret` do not wait. | It is W16's case: after `wsl --shutdown` the old window reconnects a few seconds after `skydeck window` started a server (the page tries every 5 s at most, S2 6.3). The cost: after a PC restart or shutdown with the window left open the mark may still be there (WSL can end before the server's next refresh sees the page go), and the first `skydeck window` then waits 7 s for a window that cannot come; W16 and "what only you can check" ask whether it does. The remedy if it does every day — the mark holds the boot id, and in another boot the wait asks whether Edge still runs on the profile — is a follow-up. The first update from a stage A server, which writes no mark, may still open a second window once (stage B's "Updating" order avoids it). | 81 (5.1, 8.3, 10.2) |
 | C21 | The banner lies in the list zone, above `#list`, in the list's width; it takes height from the list (the list scrolls under it), never width, so the right side, the header's one height (stage D) and every terminal's area stay as they are: its coming and going sends no `resize`. A restore selects nothing and moves no keyboard, in any page, also while a dialog of stage D is shown: its result carries no `sessionId` (stage A's `act` selects only a resume's or a new session's). | S2 12.7: "at the top of the list"; the size a restored terminal starts with is the last focused page's area (S2 8.2.6), which the banner must not change. | 73 (12.7) |
 | C22 | **A restore asked for by a command stops when its asker goes** (ruled on review A). The asker's connection closing before the outcome was written ends the run through C8's `signal`, with the reason `the command that asked for it stopped`: the server lives, the sessions already opened go on starting, the rest are `not started`, then `restore finished: …` (to the pages). So Ctrl+C in `skydeck restore` stops it, as in step 1. A restore started from the banner has no stop in stage C; `skydeck window --stop` ends it (the opened sessions go on), and `docs/install.md` says so. A Stop control in the banner is a follow-up candidate. | Otherwise Ctrl+C would end the command and the server would go on opening every batch. | 73 (11.4) |
-| C23 | **A batch in which no session started stops the run** in the server: once a batch that opened at least one terminal ends with none of its sessions started, the restore reports `stopped: no session of this batch started` and the rest `not started`, then `restore finished: …` — a hook of `runRestore` (`stopAfterEmptyBatch`), which the command does not pass, so step 1's restore is unchanged. A run that a busy store ended says `stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the rest`. | A `claudeCommand` that cannot start (the server's `PATH` after a boot) would otherwise open every keeper and fill the slots with ended terminals. The server's connection waits 250 ms for the store, not the commands' 5 s. | 71 (11.3), 73 (11.3) |
+| C23 | **A batch in which no session started stops the run** in the server: once a batch that opened at least one terminal ends with none of its sessions started **while entries are left**, the restore reports `stopped: no session of this batch started` and the rest `not started`, then `restore finished: …` — a hook of `runRestore` (`stopAfterEmptyBatch`), which the command does not pass, so step 1's restore is unchanged. A restore whose last (or only) batch starts nothing ends as any finished run with failures does: no `stopped:` line, code 1 (C5), not 5 (ruled on review A's re-check). A run that a busy store ended says `stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the rest`. | A `claudeCommand` that cannot start (the server's `PATH` after a boot) would otherwise open every keeper and fill the slots with ended terminals. The server's connection waits 250 ms for the store, not the commands' 5 s. | 71 (11.3), 73 (11.3) |
 
 ## 2. Contracts
 
@@ -322,10 +322,15 @@ export interface RestoreHooks {
   /** Once aborted: no further entry is prepared or opened, the wait ends at its next look; the
    *  sessions still waited for are reported `timed out <short> <title>` (their locks stay, renewed
    *  last), then one line `stopped: <String(signal.reason)>`, then `not started <short> <title>`
-   *  for the sessions not opened; outcome.stopped is true. */
+   *  for the sessions not opened; outcome.stopped is true. But the signal stops the run only
+   *  when it is seen while the stop changes something — a session the wait would still wait
+   *  for, or an entry not opened; otherwise (every session started, or the wait's time ran out
+   *  at that look, with no entry left) the run ends as it would have (ruled on task 71's
+   *  reviews). */
   signal?: AbortSignal;
-  /** C23: after a batch that opened at least one terminal and saw none of its sessions start, the
-   *  run stops as for the signal, with the reason `no session of this batch started`. */
+  /** C23: after a batch that opened at least one terminal and saw none of its sessions start, when
+   *  entries are left, the run stops as for the signal, with the reason `no session of this batch
+   *  started`. A last (or only) batch that starts nothing ends the run as any run with failures. */
   stopAfterEmptyBatch?: boolean;
 }
 export type ReportOutcome = { sessionId: string; kind: 'started' | 'timed-out' | 'failed' | 'not-started' | 'handed-off' | 'printed' };
@@ -575,7 +580,7 @@ The rules of the requests that start programs, and the test that holds each:
 
 ### Task 70: Contracts; the control socket's stage C routes
 
-**Depends on:** 0 · **Merges after:** D 34, B 50, B 51 · **Wave:** 1 · **Design:** S2 8.2.3 (`restore`, `dismiss-restore`, `banner`, `restore-progress`, the `list` row), 8.3 (`POST /resume`, `/new`, `/restore`, `GET /status`'s `windowExpectedMs`) · **Contracts:** 2.2, 2.3 (`ControlLaunch`) · **Decisions:** C2, C3, C4, C5, C9 (the payload), C22 (the asker's signal) · **Shared files:** `src/window/protocol.ts`, `src/window/actions.ts`, `src/store/types.ts`, `web/app.js` (one line), their tests
+**Depends on:** 0 · **Merges after:** D 34, B 50, B 51 · **Wave:** 1 · **Design:** S2 8.2.3 (`restore`, `dismiss-restore`, `banner`, `restore-progress`, the `list` row), 8.3 (`POST /resume`, `/new`, `/restore`; `GET /status`'s `windowExpectedMs` is in `StatusAnswer` here, but its row of 8.3 is task 81's — ruled on review B's re-check) · **Contracts:** 2.2, 2.3 (`ControlLaunch`) · **Decisions:** C2, C3, C4, C5, C9 (the payload), C22 (the asker's signal) · **Shared files:** `src/window/protocol.ts`, `src/window/actions.ts`, `src/store/types.ts`, `web/app.js` (one line), their tests
 
 **Goal.** Fix as code every message the other stage C tasks meet at, and the socket's side of the
 three routes, so that the server (74) only supplies `ControlLaunch` and the command line (76)
@@ -594,17 +599,26 @@ talks to the real `controlHandler` from the start (the fake serve uses it).
   `restore-progress` out, so that `tsc -p web` passes — `terminalView.notice` takes only the three
   terminal kinds; task 75 fills the branch); `docs/design-step-2.md` (8.2.3's `act` rows and `list`
   row, 8.3's table: C2–C5)
-- Test: `test/window/protocol.test.ts`, `test/window/control.test.ts`,
-  `test/window/actions.test.ts` (one case at the end)
+- Test: `test/window/protocol.test.ts` (new cases at the end; the three routes leave the "no
+  route" list and `restore`, `dismiss-restore` the case of kinds it does not know),
+  `test/window/control.test.ts` (stage A's 404 case renamed; new cases at the end),
+  `test/window/actions.test.ts` (one case at the end; the hostile case's well-formed `restore`
+  becomes a malformed one, since a well-formed one is now a known kind)
 
 **Behaviour.** The parser takes the two kinds and the three bodies with 2.2's and C3's limits.
 `controlHandler`: without `launch` the three routes are 404 `{ error: 'route: unknown' }` as
-today; with it, while `launchState()` is not null they are 503 `{ error }`; otherwise `resume` and
+today, whatever text the body holds (the fake serve stands for a server before stage C, which
+answers a body the parser would refuse 404 too; a body over 64 KiB stays 413 and one that is not
+UTF-8 400, as there); with it, a body the parser refuses is 400 first; then,
+while `launchState()` is not null they are 503 `{ error }` (not logged: the command asks again
+every 500 ms while the server starts); otherwise `resume` and
 `new` answer what `launch` resolves with (200), and a rejection is 500 `{ error: 'failed' }` with
 one log line by kind (`failureKind`); `restore` streams every `write` as a line, and a rejection
 after the first line ends the answer without an outcome (the client says the server stopped
 answering), one log line by kind. A refused body is logged by its kind, never by its text, as
-stage A's routes.
+stage A's routes. The order of the answers, as measured (ruled on review 2): 413 (a body over
+64 KiB), 400 `body: not UTF-8`, 404 (no `launch`), 400 (the parser's kind), 503 (`launchState`),
+then the route's own answer.
 
 **Tests** (platform: `testPlatform` for the parser; the real sockets of stage A's control tests)
 - Protocol: each new kind and route accepted at its limits and refused one over (1,001 ids, a
@@ -635,9 +649,15 @@ for any `launch` it is given; `npm run check` passes.
   `ServerMessage`) are B's — C's `banner` keeps its line, its types go beside `ListMessage`; the
   `LIST` fixture of `protocol.test.ts` has B's `needYou` — C changes no fixture.
 - `web/app.js`: C 70's one line lands in wave 1, before D 37 and B 55 change `received()`; they keep
-  it.
+  it. Whichever of 70 and D 37 merges second merges `origin/main` and keeps both (ruled).
+- `NOT_YET` in `src/window/actions.ts` (ruled, "Tasks 36 and 70: who holds `NOT_YET`"): D 36
+  removes the constant and its case once stage D's kinds have their own. If 70 merges first, its
+  two kinds are in that case and 36 keeps it with them; if 36 merges first, 70 adds back the one
+  line `const NOT_YET = 'skydeck cannot do that action yet';` beside `NOT_AN_ACTION` and `case
+  'restore': case 'dismiss-restore': return refusal(NOT_YET);`. No `default:` that returns it (no
+  test could reach it, and the switch would lose its exhaustiveness check).
 
-**Not in it:** acting on any of it (72–74), the client (76).
+**Not in it:** acting on any of it (72–74), the client (76), S2 8.3's `GET /status` row (81).
 
 ---
 
@@ -662,9 +682,15 @@ before `prepareResumeById` (so also for `runHere`, which the window never reache
 `awaitStarts` for each session still waited for, after `resumeStarted` was checked for it;
 `signal` is looked at before each batch, before each entry is prepared, and after each look of the
 wait; at an abort the sessions still waited for are reported `timed out …` first (as at the wait's
-end), then the `stopped:` line, then the `not started …` lines. `stopAfterEmptyBatch`: a batch that
+end), then the `stopped:` line, then the `not started …` lines. `runHere` looks at it before its
+memory check and before each entry: the hooks are `runRestore`'s as a whole. The signal stops the
+run only when it is seen while the stop changes something — a session the wait would still wait
+for, or an entry not opened; otherwise (every session started, or the wait's time ran out at that
+look, with no entry left) the run ends as it would have: no `stopped:` line, `outcome.stopped`
+false (ruled on task 71's reviews 1 and 2). `stopAfterEmptyBatch`: a batch that
 opened at least one terminal and saw none of its sessions start stops the run the same way, with
-the reason `no session of this batch started`. `report`'s second argument for every line that ends a session's part: `started`, `timed out`,
+the reason `no session of this batch started`, when entries are left; a last (or only) batch that
+starts nothing ends the run as any run with failures, with no `stopped:` line (C23). `report`'s second argument for every line that ends a session's part: `started`, `timed out`,
 `failed`, `not started`, `resuming … in this terminal` (`handed-off`) and each printed command
 (`printed`).
 
@@ -688,8 +714,9 @@ the reason `no session of this batch started`. `report`'s second argument for ev
   waited for keep their last lock (they may still start).
 - `stopAfterEmptyBatch` with a first batch whose tabs open and never start → after its wait
   `timed out` ×2, `stopped: no session of this batch started`, the second batch `not started`;
-  a first batch refused whole by the guard (nothing opened) does not stop the run; without the
-  hook the second batch runs as today.
+  a first batch refused whole by the guard (nothing opened) does not stop the run; a last (or
+  only) batch that starts nothing → its `timed out` lines, no `stopped:` line, `stopped` false;
+  without the hook the second batch runs as today.
 - `report`'s outcome: each kind once for a run that has all of them; header and warning lines
   carry none.
 
