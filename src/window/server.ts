@@ -464,13 +464,23 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     const restoreLaunches = createLaunches({ deck, hub: created, terminalFor, log: quietLog });
     // Plan C6–C9, C22 (task 73): one restore at a time, whoever asked; its report to every page.
+    // A run refreshes, ingests and writes on the server's own connection — `prepare()` before each
+    // session, the spool at every look of its wait —, which the tick's change marks do not show:
+    // each hook it calls after such a step tells the tick to load the rows again (review 2).
     const restorer = createRestorer({
       deck,
       terminalFor: (size) => restoreLaunches.restoreTerminal(size),
-      refuse: (sessionId) => restoreLaunches.refusal(sessionId),
-      gone: (sessionId) => restoreLaunches.gone(sessionId),
+      refuse: (sessionId) => {
+        tick?.reload();
+        return restoreLaunches.refusal(sessionId);
+      },
+      gone: (sessionId) => {
+        tick?.reload(); // called at every look, after its ingest
+        return restoreLaunches.gone(sessionId);
+      },
       size: firstSize,
       progress: (text) => {
+        tick?.reload(); // after each line's step (a start seen, a lock given back)
         pages.notice('restore-progress', text);
       },
       changed: () => {

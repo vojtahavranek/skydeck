@@ -1365,7 +1365,19 @@ not show, so the next refresh loads the rows again. Stage A's `--restart` case o
 12:45Z): with the mark wired, the old server had a page, so the new one expects the window back,
 and the fake page does not return; the case asserts the line and Edge's start, not a duration.
 That case alone needed it (the full run). The exit-at-once case and the pages mark's cases hold
-their promptness as the test lines above say (ruled 12:34Z).
+their promptness as the test lines above say (ruled 12:34Z). No stage A restart case of that file
+depends any more on whether the old server's refresh recorded its page before the restart (ruled
+13:22Z): the `--restart` case waits for `window_pages_open` and expects C20's line; every other
+restart case whose old server had a page waits for the mark and then takes it out of the store
+(the old server writes it again only when its page count turns to none and back, contract 2.3,
+and the fake page stays until the restart), so that the new server expects no window and the
+case's stderr and waits stay stage A's. A restore's run refreshes, ingests and writes on the
+server's own connection (`prepare()` before each session, the spool at every look of its wait),
+which the tick's change marks do not show: the restorer's `refuse`, `gone` and `progress` call
+`tick.reload()` before they answer (review 2), so that what a look ingested is in the lists
+within a refresh, not only after 60 s or the run's end (a case holds it). What no case holds,
+being promptness the tick's own push within 2 s also gives: the restorer's `changed` (a run
+begun or ended, a dismissal) calling `tick.reloadNow()`, and `launchFor`'s `tick.reload()`.
 
 **At the merge** (after D 36 and B 54; built beside them):
 - If D was merged first: `server.ts` passes D's required `changed` and `prs` to `createActions`

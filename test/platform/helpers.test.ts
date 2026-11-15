@@ -114,6 +114,20 @@ describe('fakeClock', () => {
     assert.equal(forward, slept, 'nor a step forward');
   });
 
+  test('monotonicNs moves by the advance alone when a timer steps the wall clock during it', () => {
+    for (const stepNs of [-3600n * SEC, 3600n * SEC]) {
+      const clock = fakeClock(T0);
+      clock.after(100, () => {
+        clock.setNs(clock.nowNs() + stepNs);
+      });
+      const start = clock.monotonicNs();
+
+      clock.advanceMs(200);
+
+      assert.equal(clock.monotonicNs() - start, 200_000_000n, `a step of ${stepNs} ns`);
+    }
+  });
+
   test('every is called from advanceMs once per period that passed, at its time, until stopped', () => {
     const clock = fakeClock(T0);
     const seen: bigint[] = [];

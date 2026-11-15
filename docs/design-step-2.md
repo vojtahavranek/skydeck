@@ -350,7 +350,10 @@ nothing and the command opens a second window — no worse than before; the 7 se
 that tries again at least every 5 seconds, but Chromium wakes a window hidden for more than 5
 minutes only once a minute (6.3), so such a window can come back after the command has opened a
 new one; and the waits add up when a start hangs: 10 and 17 seconds on a cold start, 10, 7 and 17
-seconds after a restart with a page.
+seconds after a restart with a page. A fourth (ruled by the plan owner, plan task 74): the entry
+follows the server's refresh, one every 2 seconds, not the page's connect, so a server that stops
+or dies within about 2 seconds of its first page's connect has not written it, and the next server
+expects no window.
 
 When a page is already connected it starts nothing on Windows and says
 `skydeck window: a window is already open`; `--new-window` opens another one anyway (several

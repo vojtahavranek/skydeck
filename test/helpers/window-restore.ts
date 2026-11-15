@@ -14,7 +14,7 @@
  * status the test gave. At the test's end every gate still shut is opened with `exit 0`, before
  * the servers are stopped and the keepers killed (the hook is registered before the sandbox's).
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 
@@ -31,7 +31,8 @@ import type { ServerSandbox, ServerSandboxOptions } from './window.ts';
 export const EARLIER_BOOT = '3f1e2d4c-5b6a-4798-8a1b-2c3d4e5f6a7b';
 /** A process start no live process of the machine has with the pids below. */
 const DEAD_PROC_START = 4242;
-/** Above every pid this machine hands out for the test's lifetime, so no such process lives. */
+/** Pids for the sessions' processes; what makes each process dead is DEAD_PROC_START (and the
+ *  invented boot): a live process may have such a pid, never with that start. */
 let nextPid = 4_100_000;
 
 /** Session `n` (1–99) of an earlier boot: `e00000nn-…`, its short id `e00000nn`. */
@@ -61,6 +62,10 @@ export interface RestoreSandbox {
   waiting(sessionId: string): boolean;
   /** Opens the gate of `sessionId`: the stand-in, or `exit` with that status. */
   open(sessionId: string, exit?: number): void;
+  /** Opens every gate for the stand-in, also of sessions not known yet (`skydeck new`'s). */
+  openAll(): void;
+  /** Shuts the gate of `sessionId` again: its next program waits (and notes it) once more. */
+  shut(sessionId: string): void;
   /**
    * Sessions of an earlier boot (`bootId`, default EARLIER_BOOT), each resumable (a transcript in
    * the sandbox, its directory `<home>/projects/<short id>`), with their events ingested on the
@@ -111,9 +116,9 @@ export function restoreSandbox(
       'done',
       `gates=${shellWord(dir)}`,
       ': > "$gates/$id.waiting"',
-      'while [ ! -e "$gates/$id.open" ]; do sleep 0.05; done',
+      'while [ ! -e "$gates/$id.open" ] && [ ! -e "$gates/all.open" ]; do sleep 0.05; done',
       'how=',
-      'read -r how < "$gates/$id.open"',
+      'if [ -e "$gates/$id.open" ]; then read -r how < "$gates/$id.open"; fi',
       'case "$how" in',
       '  exit\\ *) exit "${how#exit }" ;;',
       'esac',
@@ -212,6 +217,13 @@ export function restoreSandbox(
     waiting: (sessionId) => existsSync(join(dir, `${sessionId}.waiting`)),
     open(sessionId, exit) {
       writeFileSync(join(dir, `${sessionId}.open`), exit === undefined ? '\n' : `exit ${exit}\n`);
+    },
+    openAll() {
+      writeFileSync(join(dir, 'all.open'), '\n');
+    },
+    shut(sessionId) {
+      rmSync(join(dir, `${sessionId}.open`), { force: true });
+      rmSync(join(dir, `${sessionId}.waiting`), { force: true });
     },
     earlierBoot,
   };

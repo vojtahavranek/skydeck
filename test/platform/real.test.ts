@@ -86,7 +86,11 @@ describe('real clock', () => {
       assert.ok(now >= previous, `call ${i}: ${now} < ${previous}`);
       previous = now;
     }
-    // Measured against Node.js's own monotonic reading, not against Date.now() (WSL steps that).
+    // It is Node.js's monotonic reading (CLOCK_MONOTONIC), not the wall clock (WSL steps that).
+    const a = process.hrtime.bigint();
+    const m = clock.monotonicNs();
+    const b = process.hrtime.bigint();
+    assert.ok(a <= m && m <= b, `${a} <= ${m} <= ${b}`);
     const before = clock.monotonicNs();
     const started = performance.now();
     await new Promise((resolve) => setTimeout(resolve, 30));

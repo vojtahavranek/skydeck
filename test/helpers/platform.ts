@@ -71,9 +71,17 @@ export function fakeClock(startNs: Ns): FakeClock {
   };
   const advanceMs = (ms: number): void => {
     const endNs = now + nsFromMs(ms);
+    // monotonicNs moves by the advance itself, `ms` in all: a callback that steps the wall clock
+    // (setNs) moves `now` but takes nothing from it and adds nothing to it.
+    let leftNs = nsFromMs(ms);
+    const pass = (ns: Ns): void => {
+      const taken = ns < leftNs ? ns : leftNs;
+      mono += taken;
+      leftNs -= taken;
+    };
     for (let timer = nextDue(endNs); timer !== undefined; timer = nextDue(endNs)) {
       if (timer.dueNs > now) {
-        mono += timer.dueNs - now;
+        pass(timer.dueNs - now);
         now = timer.dueNs;
       }
       if (timer.periodNs === null) {
@@ -84,9 +92,9 @@ export function fakeClock(startNs: Ns): FakeClock {
       timer.callback();
     }
     if (endNs > now) {
-      mono += endNs - now;
       now = endNs;
     }
+    pass(leftNs);
   };
   /** Starts a timer; the returned function stops it. Sets keep insertion order: first started, first called. */
   const start = (timer: FakeTimer): (() => void) => {
