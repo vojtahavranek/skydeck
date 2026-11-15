@@ -227,7 +227,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value, the start deadline and the label; the `Terminal` names gain `window` (11.1, 11.2). | A |
 | `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). | A |
-| `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). | C |
+| `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). `runRestore` takes optional hooks, which only the server passes: a refusal before the guard, a session that can no longer start, a stop signal, and a stop after a batch in which no session started (11.1, 11.3); each report line names the session it ends and how. The command passes none, and its restore is unchanged. | C |
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
@@ -1721,7 +1721,7 @@ is the one it shows, or while it shows none the one it was opened for. The lock 
 cover it: claude can wait at a dialog before its `SessionStart` for longer than the lock holds, and
 the guard then sees no holder; step 1 accepts that hole only for terminals it cannot see.
 
-Four changes to step 1's code make that possible, with no change of behaviour for the commands
+Five changes to step 1's code make that possible, with no change of behaviour for the commands
 (4.4 lists every change step 2 makes to step 1's code, with its stage):
 
 - **Starting a prepared launch** (`launchPrepared`, in step 1 in `src/cli/launching.ts`) moves to
@@ -1748,6 +1748,20 @@ Four changes to step 1's code make that possible, with no change of behaviour fo
   function the command and the server share. It also returns the earlier boot and the time of its
   last event, which `planRestore` computes and today keeps to itself: the banner shows that time as
   the last activity before the restart (12.7) — the stop itself is not recorded.
+- **`runRestore`'s hooks** (`src/sessions/restore.ts`), optional, which only the server passes;
+  without them a restore runs as in step 1. `refuse` is asked before the guard: the window's
+  "already open" above, so that a restore opens no second terminal for a session the window is
+  starting. `gone` is asked at every look of the wait for each session whose start is not seen:
+  a session whose window terminals have all ended, were lost, were not started or were closed is
+  reported `failed <short>: <reason>` at once and restore's lock (its last renewed value) is
+  given back, instead of being waited for until `restoreStartTimeoutSeconds`, as a tab must be.
+  A `signal` lets the server end the run at its next step (its own stop, or the command that
+  asked for it going, 11.4): no further entry is prepared or opened, the wait ends at its next
+  look, the sessions still waited for are reported `timed out` (their locks stay: their terminals
+  may still start them), then one line `stopped: <reason>`, then the rest `not started`. The
+  fourth hook, a stop after a batch in which no session started, is 11.3's. Each report line also
+  names the session it ends and how (started, timed out, failed, not started, handed off,
+  printed), and the outcome says whether a hook stopped the run.
 
 ### 11.2 The window terminal
 
@@ -1796,8 +1810,13 @@ gives them back when its program never started (7.8).
   plan task 32).
 - **Restore.** The banner (12.7) → the shared restore planning (11.1: design 7.8's set and preselection, on rows
   refreshed just before) → `runRestore` with the window terminal: batches of `restoreBatch`, the
-  memory check, the wait for start events with lock renewal, exactly as from the command line. Its
-  report lines go to the banner. One restore runs at a time.
+  memory check, the wait for start events with lock renewal, exactly as from the command line,
+  and the hooks of 11.1. One more rule is the window's: once a batch that opened at least one
+  terminal ends with none of its sessions started, while entries are left, the run stops —
+  `stopped: no session of this batch started`, the rest `not started` —, because a `claudeCommand`
+  that cannot start (the server's `PATH` after a boot) would otherwise open a keeper for every
+  session in turn. A last (or only) batch that starts nothing ends the run as any run with
+  failures. Its report lines go to the banner. One restore runs at a time.
 
 ### 11.4 `skydeck resume` (and `new`, `restore`) in a terminal while the window runs
 
