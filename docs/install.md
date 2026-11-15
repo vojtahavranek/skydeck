@@ -675,7 +675,9 @@ effect.
 - **A second window** can open when `skydeck window` starts a server while an old window is still
   open: after the server died or was stopped (`--stop`), or after a WSL restart. The command sees no
   page and starts Edge, and the old window connects again a moment later. Close one of them. (After
-  `--restart` or an update the command waits for the open windows, so none opens then.)
+  `--restart`, or an update that does not upgrade the database, the command waits for the open
+  windows, so none opens then. An update that upgrades the database can open one: close every
+  skydeck window and tab before it, as "Updating" says.)
 - **Ctrl+C on a waiting `skydeck window`** leaves its launch address usable until its 30 seconds
   are over.
 - **Another program on skydeck's port.** A program that listens on `127.0.0.1:<port>` on the Windows
@@ -828,11 +830,14 @@ the command has asked it about its open windows. With every page closed there is
 
 **There is no way back to an older checkout.** A database that a newer skydeck has upgraded is not
 opened by an older one: every command of an older checkout — a second clone, or this one moved back
-with `git checkout` — stops before it reads anything, with exit 1 and
+with `git checkout` — refuses it with exit 1 and changes nothing:
 
 ```
 skydeck: the database /home/you/.local/share/skydeck/skydeck.db was written by a newer skydeck (schema version 2, this one knows 1); update skydeck
 ```
+
+and its `doctor` shows the same as a `problem` line of its report (`database … cannot be opened
+(the database … was written by a newer skydeck …); the checks that need it are skipped`).
 
 From the update that brings stage B's database (schema version 2) on, this is what every checkout
 from before it says. The way back is forward: `git pull`. skydeck keeps no copy of the database

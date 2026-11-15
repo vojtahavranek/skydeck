@@ -48,6 +48,30 @@ function schema1(t: TestContext): string {
   return path;
 }
 
+/**
+ * Every path a value of the dump names: each part of a text, split at white space, `:`, quotes,
+ * `,` and `=`, that starts with one `/` (an address's `//host/…` is none).
+ */
+function pathsIn(dump: DatabaseDump): string[] {
+  return Object.values(dump.tables)
+    .flat()
+    .flatMap((row) => Object.values(row))
+    .filter((value): value is string => typeof value === 'string')
+    .flatMap((value) => value.split(/[\s:"',=]+/))
+    .filter((part) => part.startsWith('/') && !part.startsWith('//'));
+}
+
+/** No value of the fixture names a path outside `root` (ruled on review 2: a MUST). */
+function assertInside(dump: DatabaseDump, root: string): void {
+  const paths = pathsIn(dump);
+  // the events' and the transcript's working directories, the transcript, the settings backup,
+  // the server's checkout, the runtime directory
+  assert.ok(paths.length >= 9, String(paths.length));
+  for (const path of paths) {
+    assert.ok(path.startsWith(`${root}/`), path);
+  }
+}
+
 function opened(t: TestContext, path: string, options?: { busyTimeoutMs?: number }): Store {
   const store = openStore(path, options);
   t.after(() => {
@@ -138,17 +162,18 @@ test('schema1Database leaves a database as step 1 and stage A do: WAL, mode 600,
   );
   // Every path it stores lies under the database's directory, so that a command a later test runs
   // on it stays in the sandbox.
-  const under = `${dirname(path)}/`;
-  const paths = Object.values(dump.tables)
-    .flat()
-    .flatMap((row) => Object.values(row))
-    .filter((value): value is string => typeof value === 'string' && value.startsWith('/'));
-  assert.ok(paths.length >= 5, String(paths.length));
-  for (const value of paths) {
-    assert.ok(value.startsWith(under), value);
-  }
-  const server = dump.tables['kv']?.find((row) => row['key'] === 'window_server')?.['value'];
-  assert.equal(String(server).split(':').slice(3).join(':'), join(dirname(path), 'checkout'));
+  assertInside(dump, dirname(path));
+  const kv = (key: string): unknown =>
+    dump.tables['kv']?.find((row) => row['key'] === key)?.['value'];
+  assert.equal(
+    String(kv('window_server')).split(':').slice(3).join(':'),
+    join(dirname(path), 'checkout'),
+  );
+  assert.equal(kv('window_runtime_dir'), join(dirname(path), 'runtime'));
+});
+
+test('schema1Database refuses a path that is not absolute: its paths would not be in a sandbox', () => {
+  assert.throws(() => schema1Database('skydeck.db'), RangeError);
 });
 
 test('openStore migrates a schema-1 database to 2: nothing of migration 1 changes, attention is empty', (t) => {
@@ -190,10 +215,11 @@ test('opening a migrated database again changes nothing', (t) => {
 });
 
 test("the server's own open (openDeck, guardSchema, 250 ms) migrates a schema-1 database, and its guarded connection writes into it", (t) => {
-  const { platform, places } = testPlatform(t);
+  const { platform, places, sandbox: box } = testPlatform(t);
   mkdirSync(places.dataDir, { recursive: true, mode: 0o700 });
   schema1Database(places.dbPath);
   const before = dumpDatabase(places.dbPath);
+  assertInside(before, box.root); // as tasks 52 and 54 build it: at the sandbox's places
 
   const deck = openDeck(platform, { guardSchema: true, busyTimeoutMs: 250 });
   t.after(() => {
