@@ -1961,16 +1961,36 @@ gives them back when its program never started (7.8).
 - `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other), or
   configuration `"terminal": "window"`, sends the request to the server (8.3) instead of starting
   anything itself: `resume` sends the session id its `<ref>` resolved to, `new` sends its current
-  directory, `--label`, `--group` and the flags after `--`. It never starts a server: the server's
-  environment becomes every session's (5.2), so only `skydeck window` starts one. With no server
-  running it says `the window is not running; run skydeck window first, or use --here` and exits 1.
-  It prints the answer's lines on stderr and exits with the answer's code; then, when no page is
-  connected, it starts a window as `skydeck window` does (5.3). When the server does not answer
-  within 30 seconds it says so and exits 1, printing no command (it prepared nothing; the server may
-  have started the session: `skydeck` shows whether it runs). With `"terminal": "window"`, `--tab` means the window too, and so does
-  `R` in the interactive list.
+  directory, `--label`, `--group` and the flags after `--`. It never starts, restarts or signals a
+  server: the server's environment becomes every session's (5.2), so only `skydeck window` starts
+  one. It finds the server as `skydeck window` does (5.1) and uses one of this checkout whatever its
+  build (the window's own Resume runs on that build too). With no server running it says `the
+  window is not running; run skydeck window first, or use --here` and exits 1; a server that does
+  not answer, or is still starting after the 5 seconds, gets 5.1's line; one of another checkout
+  `the window's server runs from <checkout>, not from this checkout; skydeck window --restart here
+  replaces it, or use --here`; one of a build before stage C (it answers the request 404) `the
+  window's server is older than this command and cannot start sessions for it; run skydeck window
+  to restart it, or use --here` — each exit 1, and none of them is refused under `CLAUDECODE`, since
+  no server is started (plan C11). It prints the answer's lines on stderr, sanitised (the server may
+  be of another build), and exits with the answer's code; then, when no page is connected, it
+  starts a window as `skydeck window` does (5.1 step 2, the wait of a window the server expects
+  back included; 5.3) — not after a code of 2 or 3, a refusal of usage or reference that started
+  nothing. A window that cannot be opened is one line, `the window could not be opened: <reason>;
+  run skydeck window`, and the exit code stays the answer's. **Under `CLAUDECODE` a command never
+  opens a window** (5.1 refuses `skydeck window` there, and this must not be a second door): it may
+  still ask a running server to start the session, and with no page connected it says `no window
+  is open; run skydeck window in a terminal of your own` (plan C12). When the server does not
+  answer within 30 seconds it says so and exits 1, printing no command (it prepared nothing; the
+  server may have started the session: `skydeck` shows whether it runs); while the server is
+  starting it asks again every 500 ms within those 30 seconds, and a server still starting after
+  them started nothing; one that is stopping, or refuses the request's body (a label over 1,024
+  bytes, a prompt after `--` over 64 KiB), is reported with `, or use --here` (plan C 2.5). With
+  `"terminal": "window"`, `--tab` means the window too, and so does `R` in the interactive list,
+  whose lines end before `, or use --here`; `R` opens no window.
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
-  sends the selected session ids (and `--all`) to `POST /restore`. The server takes design 7.8's
+  sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
+  after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
+  terminals start at the window's size and a start dialog can be answered. The server takes design 7.8's
   set from freshly refreshed rows, keeps the entries the user selected (an id no longer in the set
   is reported `failed <short>: no longer offered for restore`), and runs `runRestore` with the
   window terminal (11.3). The command prints each report line as it arrives and exits with design
