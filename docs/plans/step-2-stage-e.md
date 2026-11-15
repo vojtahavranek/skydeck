@@ -524,10 +524,6 @@ export function createChips(root, hooks) {}  // → { render(chips: readonly str
  *            closed(): void,                      // once whenever it closes, whatever closed it
  *            now(): string }} deps                // the server's now (stage D's serverNow), for ages */
 export function createSwitcher(root, deps) {}
-/** (Ruled on review 2, C1.) E10: whether a pick of `row` resumes it — no terminal of the window
- *  and not running elsewhere, stage A's `activate` rule; the one rule for the footer's
- *  `Enter resume here` and for app.js's pick, so that the footer says what Enter sends. */
-export function pickResumes(row) {}         // → boolean
 // → { open(): void, close(): void, shown(): boolean,
 //     update(list: ListMessage | null): void, // every list while shown, and null while the page is
 //                                        // not connected: its items, its offer; the highlight
@@ -553,6 +549,10 @@ export function pickResumes(row) {}         // → boolean
 // chip, the slot and the short id (dim). The offer shows `Restore <n> sessions from <time>`, the
 // time from stage C's `activityTime` with `Date.now()` (E12). A mousedown in the panel anywhere but
 // in the field is cancelled (E11).
+/** (Ruled on review 2, C1.) E10: whether a pick of `row` resumes it — no terminal of the window
+ *  and not running elsewhere, stage A's `activate` rule; the one rule for the footer's
+ *  `Enter resume here` and for app.js's pick, so that the footer says what Enter sends. */
+export function pickResumes(row) {}         // → boolean
 
 // web/keys.js — task 98
 // windowChord: Ctrl+Shift+P gives { kind: 'switcher' } in both zones (stage A: `later`, stage E).

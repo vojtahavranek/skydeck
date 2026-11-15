@@ -1673,6 +1673,37 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
   );
 
   await t.test(
+    "an `input` that comes after the switcher closed (an IME's, after the blur) sends no text: the next view is the reopened switcher's empty one (ruled on review 2, C3)",
+    async (t) => {
+      const d = await world(t, chromium, ORB_WORLD);
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      await openSwitcher(page);
+      await page.keyboard.press('Escape');
+      await switcherShown(page, false);
+      await page.evaluate(() => {
+        const field = document.querySelector('#switcher input.switcher-field');
+        if (!(field instanceof HTMLInputElement)) throw new Error('no switcher field');
+        field.value = 'latemark';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      // The page's messages arrive in order: the reopened switcher's view comes after anything
+      // that late `input` could have sent.
+      const before = w.sent.length;
+      await openSwitcher(page);
+      await until(
+        () => w.sent.slice(before).some((m) => m['t'] === 'view' && m['switcher'] === ''),
+        "the reopened switcher's view",
+      );
+      assert.deepEqual(
+        w.sent.filter((m) => m['t'] === 'view' && m['switcher'] === 'latemark'),
+        [],
+        'no view with the late text',
+      );
+    },
+  );
+
+  await t.test(
     'the click guard lets go again: after a pick by a click, and after a click outside closed the switcher, a later double click on a row of the list resumes it (ruled on review 1)',
     async (t) => {
       const d = await world(t, chromium, ORB_WORLD);
