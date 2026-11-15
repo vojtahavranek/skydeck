@@ -74,22 +74,20 @@ const NOT_IN_A_TICKET_URL = /[\s\u0000-\u001f\u007f-\u009f"\\]/;
 
 /**
  * The scheme, user name, password and host that the URL parser reads in `pieces` joined by `key`;
- * null when it reads no http or https URL, or when the key stands in one of those parts (compared
- * in lower case: the parser lowercases a host).
+ * null when it reads no http or https URL.
  */
 function originWith(pieces: string[], key: string): string[] | null {
   const url = URL.parse(pieces.join(key));
   if (url === null || (url.protocol !== 'http:' && url.protocol !== 'https:')) return null;
-  const parts = [url.protocol, url.username, url.password, url.host];
-  return parts.some((part) => part.toLowerCase().includes(key.toLowerCase())) ? null : parts;
+  return [url.protocol, url.username, url.password, url.host];
 }
 
 /**
  * S2 16.4: null, or a string of at most 2,048 characters holding `{key}` exactly once and no
  * white space, control character, '"' or backslash, that the URL parser reads with each of two
- * sample keys in place of `{key}` as http or https with the same scheme, user name, password and
- * host, none of which holds the key. The parser decides where the key stands, not the text: it
- * skips extra slashes, and reads `https:{key}` with the key as the host.
+ * different sample keys in place of `{key}` as http or https with the same scheme, user name,
+ * password and host — parts the key went into would differ. The parser decides where the key
+ * stands, not the text: it skips extra slashes, and reads `https:{key}` with the key as the host.
  */
 function isTicketUrl(value: unknown): value is string | null {
   if (value === null) return true;

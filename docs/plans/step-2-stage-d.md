@@ -432,15 +432,21 @@ ticket's address, and `show`'s line. The window's chip uses it from task 36 on (
 at most 2,048 characters with `{key}` exactly once and no white space, control character (S2 2:
 U+0000–U+001F, U+007F, U+0080–U+009F), `"` or backslash, that parses (`URL.parse`) with `KEY-1`
 and with `OTHER-2` in place of `{key}` into `http:` or `https:` with the same protocol, user name,
-password and host both times, none of which holds the sample key (compared in lower case: the
-parser lowercases a host). Anything else is the one message `<file>: "ticketUrl" must be null or
-an http or https address with {key} once, after its host`. `ticketAddress` as 2.3 says. `show`
-prints `ticket: <address>` after `group:` when there is one; `--json` is unchanged (D16).
+password and host both times: parts the key went into would differ. (Ruled on #77: the second
+condition of review A's F1, "none of which holds the sample key", is dropped. A fuzz of 30
+million patterns in Node 24's parser found nothing it refuses that the first one accepts but a
+pattern whose own host or user name holds a sample key's text, `https://key-1.example.net/{key}`
+— a false refusal; those are accepted cases now.) Anything else is the one message `<file>:
+"ticketUrl" must be null or an http or https address with {key} once, after its host`.
+`ticketAddress` as 2.3 says. `show` prints `ticket: <address>` after `group:` when there is one;
+`--json` is unchanged (D16).
 `test/window/windows.test.ts` keeps testing `linkToOpen` through the re-export, unchanged.
 
 **Tests** (platform: `testPlatform`)
 - Accepted: null; `https://example.atlassian.net/browse/{key}`; `http://host:8080/t?id={key}`;
-  `https://host/#/{key}`; `https://Example.net:443/{key}`.
+  `https://host/#/{key}`; `https://Example.net:443/{key}`; a host or user name of the pattern's
+  own that holds a sample key's text, `https://key-1.example.net/{key}` and
+  `https://Other-2@host/{key}` (ruled on #77).
 - Refused with the message, each a named case: `https:///{key}/x`, `https:////{key}`,
   `https:/{key}/x`, `https:{key}`, `https:///{key}@h/x` (review A's five: the parser reads the key
   as the host or the user name); `https://{key}.example.net/`; `https://user@{key}/`;

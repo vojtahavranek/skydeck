@@ -212,6 +212,10 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     'https://host/#/{key}',
     'https://Example.net:443/{key}',
     'https://user:secret@host/{key}',
+    // A host or a user name of the pattern's own that holds a sample key's text: the parts are
+    // the same for both sample keys, so the key is not in them (ruled on #77).
+    'https://key-1.example.net/{key}',
+    'https://Other-2@host/{key}',
   ]) {
     test(`accepts ${JSON.stringify(value)}, kept as it was written`, (t) => {
       const config = withTicketUrl(t, value).run() as { ticketUrl: unknown };
@@ -240,10 +244,6 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     ['the key as the user name', 'https://{key}@host/x'],
     ['the key as the password', 'https://u:{key}@host/x'],
     ['the key as the port', 'https://host:{key}/'],
-    // A named limit: a host or a user name that holds a sample key itself cannot be told from one
-    // that the key went into.
-    ['a host that holds a sample key', 'https://key-1.example.net/{key}'],
-    ['a user name that holds the other sample key', 'https://Other-2@host/{key}'],
     ['javascript:', 'javascript:{key}'],
     ['file:', 'file:///{key}'],
     ['ftp:', 'ftp://host/{key}'],
