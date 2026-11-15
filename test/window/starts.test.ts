@@ -10,7 +10,14 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import { refresh } from '../../src/sessions/refresh.ts';
-import { lockKey, prepareNew, readLock, renewLock } from '../../src/sessions/resume.ts';
+import {
+  acquireLock,
+  lockKey,
+  lockMark,
+  prepareNew,
+  readLock,
+  renewLock,
+} from '../../src/sessions/resume.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import { startDeadline } from '../../src/sessions/launch.ts';
 import type { PreparedLaunch } from '../../src/sessions/resume.ts';
@@ -100,6 +107,21 @@ function resumeLaunch(d: TestDeck): { prepared: PreparedLaunch; lock: string; he
   return { prepared, lock, hello: helloOf(d, prepared, lock) };
 }
 
+/** decideFoundKeeper's refusal when the store's lock is not of the hello's take (C19). */
+const TAKEN_OVER = '0b5f3c1e: its resume lock was taken over';
+
+/**
+ * S1's lock gone stale and taken over at `atNs` by another resume (acquireLock), with no new event
+ * since the hello's lock was taken. The new value.
+ */
+function takeOver(d: TestDeck, atNs: bigint): string {
+  d.clock.setNs(atNs);
+  acquireLock(d.deck, S1, { latestEventId: d.deck.store.latestEventIdOfSession(S1) });
+  const value = readLock(d.deck, S1);
+  assert.equal(value, `${atNs}:0`);
+  return value ?? '';
+}
+
 function newLaunch(d: TestDeck): { prepared: PreparedLaunch; hello: KeeperHello } {
   const prepared = prepareNew(d.deck, {
     dir: d.sandbox.home,
@@ -170,28 +192,64 @@ describe('decideFoundKeeper: a resume', () => {
     d.deck.store.setKv(lockKey(S1), `${T0 + SEC}:999`);
     assert.deepEqual(decideFoundKeeper(d.deck, hello), {
       start: false,
-      reason: '0b5f3c1e: its resume lock was renewed or taken over',
+      reason: TAKEN_OVER,
     });
     d.deck.store.deleteKv(lockKey(S1));
     assert.equal(decideFoundKeeper(d.deck, hello).start, false);
   });
 
-  test('a renewed lock is not the hello’s either (ruled: the exact value; S2 7.3’s limit for restore)', (t) => {
+  // Turned around by task 80 (C19). Until then, as "a renewed lock is not the hello's either
+  // (ruled: the exact value; S2 7.3's limit for restore)", a renewal was refused like a take-over.
+  test('a renewed lock is of the hello’s take → start, after one renewal and after a chain of them (C19)', (t) => {
     const d = testDeck(t);
     const { lock, hello } = resumeLaunch(d);
     d.clock.advanceMs(1000);
     const renewed = renewLock(d.deck, S1, lock);
     assert.ok(renewed !== null && renewed !== lock);
+    assert.deepEqual(decideFoundKeeper(d.deck, hello), { start: true });
+    d.clock.advanceMs(20_000);
+    const again = renewLock(d.deck, S1, renewed);
+    assert.ok(again !== null && again !== renewed);
+    assert.deepEqual(decideFoundKeeper(d.deck, hello), { start: true });
+    assert.equal(readLock(d.deck, S1), again, 'deciding takes nothing');
+  });
+
+  test('a lock taken over with no new event → “its resume lock was taken over”; also after renewals', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    takeOver(d, T0 + 61n * SEC); // stage A's "acquireLock replaces a lock older than 60 s"
+    assert.deepEqual(decideFoundKeeper(d.deck, hello), { start: false, reason: TAKEN_OVER });
+    const renewedFirst = testDeck(t);
+    const launch = resumeLaunch(renewedFirst);
+    renewedFirst.clock.setNs(T0 + 50n * SEC);
+    assert.ok(renewLock(renewedFirst.deck, S1, launch.lock) !== null);
+    takeOver(renewedFirst, T0 + 111n * SEC);
+    assert.deepEqual(decideFoundKeeper(renewedFirst.deck, launch.hello), {
+      start: false,
+      reason: TAKEN_OVER,
+    });
+  });
+
+  test('a renewal an older skydeck wrote (now, no mark) → refused as taken over, as stage A does', (t) => {
+    // Conservative across an update: nothing starts on a lock this build cannot tie to the hello.
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    assert.equal(lock, `${T0}:0`);
+    d.deck.store.setKv(lockKey(S1), `${T0 + SEC}:0`); // stage A's renewLock: the time set to now
+    assert.deepEqual(decideFoundKeeper(d.deck, hello), { start: false, reason: TAKEN_OVER });
+  });
+
+  test('a take-over at a millisecond ≡ the take’s (mod 999,999) starts nothing: the deadline passed long before', (t) => {
+    // C19's one in a million: the take-over looks like a renewal of the hello's take, but it comes
+    // 999,999 ms (16 min 40 s) after the take, far past the keeper's deadline of 55 s.
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    const over = takeOver(d, T0 + 999_999n * 1_000_000n);
+    assert.equal(lockMark(over), lockMark(lock));
     assert.deepEqual(decideFoundKeeper(d.deck, hello), {
       start: false,
-      reason: '0b5f3c1e: its resume lock was renewed or taken over',
+      reason: 'the start deadline passed',
     });
-    settleEndedTerminal(d.deck, hello);
-    assert.equal(
-      readLock(d.deck, S1),
-      renewed,
-      'settling leaves a lock that is not exactly the hello’s',
-    );
   });
 
   test('a hello without a lock skydeck wrote → not started', (t) => {
@@ -348,6 +406,55 @@ describe('settleEndedTerminal', () => {
     assert.equal(readLock(d.deck, S1), theirs);
     settleEndedTerminal(d.deck, { ...hello, lock: null });
     assert.equal(readLock(d.deck, S1), theirs);
+  });
+
+  test('an exit before the start gives back a renewed lock of its take, after two renewals (C19)', (t) => {
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    d.clock.setNs(T0 + 50n * SEC);
+    const renewed = renewLock(d.deck, S1, lock);
+    assert.ok(renewed !== null);
+    d.clock.setNs(T0 + 100n * SEC);
+    assert.ok(renewLock(d.deck, S1, renewed) !== null);
+    settleEndedTerminal(d.deck, hello);
+    assert.equal(readLock(d.deck, S1), null);
+    prepareResumeById(d.deck, S1); // at once a second resume is accepted, not "being resumed"
+  });
+
+  test('an exit before the start leaves a lock taken over, also one taken over after renewals', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    const over = takeOver(d, T0 + 61n * SEC);
+    settleEndedTerminal(d.deck, hello);
+    assert.equal(readLock(d.deck, S1), over);
+    const renewedFirst = testDeck(t);
+    const launch = resumeLaunch(renewedFirst);
+    renewedFirst.clock.setNs(T0 + 50n * SEC);
+    assert.ok(renewLock(renewedFirst.deck, S1, launch.lock) !== null);
+    const overAfter = takeOver(renewedFirst, T0 + 111n * SEC);
+    settleEndedTerminal(renewedFirst.deck, launch.hello);
+    assert.equal(readLock(renewedFirst.deck, S1), overAfter);
+  });
+
+  test('a renewed lock of a session that started (its start still in the spool) stays', (t) => {
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    d.clock.setNs(T0 + 2n * SEC);
+    const renewed = renewLock(d.deck, S1, lock);
+    spoolStart(d, S1, 4343, T0 + SEC, 1, false);
+    settleEndedTerminal(d.deck, hello);
+    assert.equal(readLock(d.deck, S1), renewed);
+  });
+
+  test('a take-over at a millisecond ≡ the take’s (mod 999,999) whose claude started stays (C19’s one in a million)', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    const over = takeOver(d, T0 + 999_999n * 1_000_000n);
+    spoolStart(d, S1, 4343, T0 + 999_999n * 1_000_000n + SEC, 1); // the taker's claude, alive
+    settleEndedTerminal(d.deck, hello);
+    assert.equal(readLock(d.deck, S1), over);
+    // And the guard refuses any further resume while it runs.
+    assert.throws(() => prepareResumeById(d.deck, S1), /is running \(pid 4343\)/);
   });
 
   test('a new session with no event: its label and group are removed', (t) => {

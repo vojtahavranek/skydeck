@@ -546,7 +546,7 @@ describe('a keeper found unstarted (S2 7.3; plan task 21)', () => {
     );
     const term = test.server.hub.list().find((candidate) => candidate.id === keeper.spec.id);
     assert.equal(term?.state, 'not-started');
-    assert.match(term?.exit?.notStarted ?? '', /renewed or taken over/);
+    assert.match(term?.exit?.notStarted ?? '', /its resume lock was taken over/);
     assert.equal(term?.program, null);
     assert.deepEqual(readRecords(keeper.record), [], 'the program never ran');
   });
