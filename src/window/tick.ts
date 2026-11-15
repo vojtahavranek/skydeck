@@ -67,6 +67,11 @@ export interface Tick {
   listed(sessionIds: Iterable<string>): void;
   /** The next refresh loads the rows again, whatever the change marks say (the server wrote). */
   reload(): void;
+  /**
+   * Plan D7: loadRows now and pages.pushList(), so that an edit shows within a second; a failure
+   * is logged by kind and the reload is left to the next refresh. Nothing after stop().
+   */
+  reloadNow(): void;
   /** One second of the tick; resolves when its work is done. start() calls it every second. */
   run(): Promise<void>;
   /** Runs the first tick (and waits for it), then one every second. */
@@ -345,6 +350,19 @@ export function createTick(deps: TickDeps): Tick {
     },
     reload() {
       reloadOwed = true;
+    },
+    reloadNow() {
+      if (stopped) return;
+      try {
+        rows = loadRows(deck);
+      } catch (error) {
+        reloadOwed = true;
+        log(`tick: the rows were not loaded again (${failureKind(error)})`);
+        return;
+      }
+      loadedAtNs = clock.nowNs();
+      reloadOwed = false;
+      pages.pushList();
     },
     run: once,
     async start() {

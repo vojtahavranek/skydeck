@@ -1656,9 +1656,13 @@ and turn ends (10.3); check the keep-alive. Every second tick: the refresh every
 (design 7.3) for the sessions the pages list, and a reload of the rows when that refresh saved
 something, a live file or its trust changed, another process committed to the store
 (`Store.dataVersion()`), or a minute passed — the interactive list's rule. The server then sends
-`list` to every page whose view model changed. A tick that fails is logged and shown once to the
-pages; the next tick tries again. The server's store connection checks the schema version at the
-start of every write transaction, and before every write that is a single statement; when the
+`list` to every page whose view model changed. An edit a page made (12.5) does not wait for that:
+the server's own writes move no change mark, so after one the server loads the rows again and
+sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
+of 12.5 that saved something; a reload that fails is logged by kind and left to the next refresh
+(stage D, plan D7). A tick that fails is logged and shown once to the pages; the next tick tries
+again. The server's store connection checks the schema version at the start of every write
+transaction, and before every write that is a single statement; when the
 store is newer than the server knows (a command of an updated checkout migrated it, 16.5), the
 write is not made and the server stops (5.5) with `bye "skydeck was updated; run skydeck window"`.
 A tick between the migration and the next write therefore writes nothing into the migrated store.
@@ -2083,7 +2087,16 @@ Editing (stage D) uses the step 1 rules and functions: a label or group that des
 refused with the same message; a note is edited in a text box instead of `$VISUAL`, saved as typed
 (an empty note is no note), and a save is refused when the stored note changed since the edit
 began ("the note was changed elsewhere while you edited it; your text is still in the box"); `+ PR`
-attaches with origin `manual` and fetches at once (design 7.3). Done shows an Undo toast.
+attaches with origin `manual` and fetches at once (design 7.3). Done shows an Undo toast. An edit
+acts only on a session the store knows (a `new` session not started yet: "this session has not
+started yet; edit it once it runs"); a note whose stored text already is the text sent is saved
+with nothing written (a save sent again after its answer was lost), and between two windows label,
+group and done are last-write-wins, as two commands are. That fetch, and ↻'s explicit refresh,
+run in the background on the server, so that the dialog answers at once: one at a time per
+server, a request the running one already covers joining it and every other waiting to run
+together when it ends, all of them ended by the server's stop; one that fails shows as `can't
+read`, as after `pr add`. A note saved in the window removes the note file a failed editor kept,
+as `note --set` does (design 7.1).
 
 **The ticket link** (asked for by the user on 2026-11-15; the details ruled by the lead that day).
 The group stays only a group (design 7.1), and nothing in the core depends on one ticket system
