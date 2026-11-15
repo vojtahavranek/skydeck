@@ -1272,3 +1272,26 @@ test('a hostile label or field in a refused body is not in the log', async (t) =
   assert.ok(!c.logs.join('\n').includes('MARKER'), c.logs.join('\n'));
   assert.deepEqual(fake.calls, []);
 });
+
+test('every field of a body reaches launch as it was sent: a group, a null label, all true', async (t) => {
+  const fake = fakeLaunch();
+  const c = await startControl(t, () => ({ launch: fake.launch }));
+  const news: NewRequest[] = [
+    { dir: '/home/dev/projects/web', label: null, group: 'ORB-2107', flags: [] },
+    { dir: '/home/dev', label: 'a label', group: 'a group', flags: ['--model', 'sonnet'] },
+  ];
+  const restores: RestoreRequest[] = [
+    { sessionIds: [S2], all: true },
+    { sessionIds: [S2, S1], all: false },
+  ];
+  for (const body of news) {
+    assert.equal((await ask(c, 'POST', '/new', body)).status, 200);
+  }
+  for (const body of restores) {
+    assert.equal((await restoreLines(c, body)).status, 200);
+  }
+  assert.deepEqual(fake.calls, [
+    ...news.map((request) => ({ route: 'new', request })),
+    ...restores.map((request) => ({ route: 'restore', request })),
+  ]);
+});

@@ -1453,6 +1453,7 @@ test("stage C's restore and dismiss-restore are known but not acted on yet: each
   assert.deepEqual(h.events, []);
   assert.deepEqual(h.specs, []);
   assert.deepEqual(h.logs, []);
+  assert.deepEqual(h.told, [], 'changed() never, no fetch');
   assert.deepEqual(d.deck.store.kvEntries(''), kvBefore);
   assert.equal(d.deck.store.getKv(lockKey(S1)), null);
 });
