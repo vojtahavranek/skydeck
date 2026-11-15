@@ -224,12 +224,20 @@ const editor = createEditor(dom.editor, {
   closed: () => dialogClosed(),
   now: () => listNow(),
 });
-// Stage B (B15): a click on a notification passes the gate of a window chord, then selects.
+// Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
+// session this page's list does not show (its filter, the folded Earlier) and that has no terminal
+// of the window is not selected (ruled on review 2): the pane would be empty, and a focused page's
+// selection is seen after 1.5 s (S2 12.4), which would clear a mark of a session never shown.
 const notifications = createNotifications(dom.notifyOn, {
   select: (id) => {
-    if (windowChordGate('notification')) {
-      select(id, 'chord');
+    if (!windowChordGate('notification')) {
+      return;
     }
+    if (rowOf(id) === undefined && !hasTerminal(id)) {
+      say('that session is hidden by the filter or the fold');
+      return;
+    }
+    select(id, 'chord');
   },
 });
 // The item hides itself once the permission is answered: pressed from the keyboard, it takes the

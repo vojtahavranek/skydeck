@@ -50,6 +50,14 @@ export function createNotifications(item, deps) {
     }
   };
 
+  // A held key asks once (S2 13: "asked once"; task 37's rule for a held key): its auto-repeats
+  // on the item do nothing, so an Enter held while the permission stays `default` (a dismissed
+  // prompt) is not one request per repeat.
+  item.addEventListener('keydown', (event) => {
+    if (event.repeat) {
+      event.preventDefault();
+    }
+  });
   item.addEventListener('click', () => {
     const Api = api();
     if (Api === null || permission() !== 'default') {

@@ -91,13 +91,23 @@ export async function browser(t: TestContext): Promise<Browser> {
 export const NOTIFICATION_DOUBLE = 'skydeckNotificationDouble';
 
 /**
- * B17's init script, run in the page: unless a double's marker is there, `Notification` is an
- * inert one — its permission `denied`, `requestPermission` answers `denied` and asks nothing, and
- * a notification made anyway shows nothing — and `showNotification` of a service worker's
- * registration refuses. Self-contained (Playwright sends its source), and configurable, so that a
- * double installed after it replaces it.
+ * B17's init script, run in the page: `showNotification` of a service worker's registration
+ * refuses, and unless a double's marker is there, `Notification` is an inert one — its permission
+ * `denied`, `requestPermission` answers `denied` and asks nothing, and a notification made anyway
+ * shows nothing. Self-contained (Playwright sends its source), and configurable, so that a double
+ * installed after it replaces it.
  */
 export function inertNotification(marker: string): void {
+  // A worker's showNotification refuses whatever else is there: the double has none of its own.
+  const registration = Reflect.get(globalThis, 'ServiceWorkerRegistration') as
+    { prototype: object } | undefined;
+  if (registration !== undefined) {
+    Object.defineProperty(registration.prototype, 'showNotification', {
+      value: () => Promise.reject(new TypeError('no notification is shown in a test')),
+      configurable: true,
+      writable: true,
+    });
+  }
   if (Reflect.get(globalThis, marker) === true) return;
   class InertNotification extends EventTarget {
     static readonly permission = 'denied';
@@ -112,15 +122,6 @@ export function inertNotification(marker: string): void {
     configurable: true,
     writable: true,
   });
-  const registration = Reflect.get(globalThis, 'ServiceWorkerRegistration') as
-    { prototype: object } | undefined;
-  if (registration !== undefined) {
-    Object.defineProperty(registration.prototype, 'showNotification', {
-      value: () => Promise.reject(new TypeError('no notification is shown in a test')),
-      configurable: true,
-      writable: true,
-    });
-  }
 }
 
 /**

@@ -133,6 +133,22 @@ export async function clickNotification(page: Page, index: number): Promise<void
   );
 }
 
+/**
+ * A `close` event on the `index`-th notification the page made, as the browser fires one later
+ * (the notification was replaced by a newer one of the same `tag`, or the user dismissed it); it is
+ * not recorded as the page's `close()`.
+ */
+export async function closedByBrowser(page: Page, index: number): Promise<void> {
+  await page.evaluate(
+    ({ made, index }) => {
+      const notification = (Reflect.get(globalThis, made) as EventTarget[])[index];
+      if (notification === undefined) throw new Error(`no notification ${index}`);
+      notification.dispatchEvent(new Event('close'));
+    },
+    { made: MADE, index },
+  );
+}
+
 /** Changes the double's permission now, as the browser's own settings would. */
 export async function setPermission(page: Page, permission: Permission): Promise<void> {
   await page.evaluate(

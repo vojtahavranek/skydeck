@@ -2473,14 +2473,21 @@ taskbar button show it is check W3. Low priority: stage E (19).
 - How the page does it (stage B, plan B15, B16). The permission is asked only by a click on `Turn
   on notifications`, in the title bar while the API exists and its permission is `default`; the
   item follows a permission changed in the browser's settings when the window comes back to the
-  front or a list comes. Pressed from the keyboard and answered at once (a policy that denies), the
-  keyboard goes back to the zone's holder and a held Enter acts on nothing there (12.9). A `notify`
+  front or a list comes. A held key asks once: its auto-repeats on the item do nothing. Pressed
+  from the keyboard and answered at once (a policy that denies), the keyboard goes back to the
+  zone's holder and a held Enter acts on nothing there (12.9). A `notify`
   is shown only with the permission `granted`, never for the session that is selected while the
   page has focus: its title is the session's title, its body `asks: <detail>` (`asks` without a
   detail), `finished` or `ended unexpectedly`, both sanitised and nothing added — the detail is the
   server's, cut at 120 units (12.4) —, and its `tag` the session id. A click calls `window.focus()`,
   closes the notification and goes through the gate of a window chord (12.9): it selects the
-  session, or while a dialog is shown says `close the edit first (Esc)` and selects nothing. The
+  session, or while a dialog is shown says `close the edit first (Esc)` and selects nothing. A
+  session that this page's list does not show (the filter, the folded Earlier) and that has no
+  terminal of the window is not selected either: the key bar says `that session is hidden by the
+  filter or the fold`, and the selection, the right side and what the page reports stay as they
+  were — the pane would be empty, and a focused page's selection is seen after 1.5 s, which would
+  clear a mark the user never saw (ruled on review 2 of plan B task 55; showing a selected session
+  the list hides is stage E's). The
   page closes a session's notification once that session no longer needs you: at a list that holds
   the session's row without attention, or in which nothing needs you (`needYou.count` 0); a session
   the list does not show (the filter, the folded Earlier) keeps its notification until a list shows
@@ -3014,8 +3021,8 @@ No test shows a desktop notification or asks for a permission (stage B, plan B17
 server sends: every browser context of the suite is made by `newContext` of
 `test-page/helpers/browser.ts` (and `newPage` with it), which gives its pages an inert
 `Notification` — its permission `denied`, `requestPermission` answers `denied` and asks nothing, a
-notification made anyway shows nothing, and a service worker's `showNotification` refuses —
-unless a recording double is there. The cases about notifications install one, and a double of
+notification made anyway shows nothing — unless a recording double is there, and in any case a
+service worker's `showNotification` that refuses. The cases about notifications install one, and a double of
 `document.hasFocus` (`test-page/helpers/notification.ts`); the double sets a marker, so that either
 order of the two init scripts ends with it (Playwright orders a context's and a page's init scripts
 in no defined way). A case pins that no context is made elsewhere under `test-page/`, and no test

@@ -18,6 +18,7 @@ import { S1, S2, S3 } from '../test/helpers/platform.ts';
 import { browser, inertNotification, newPage, NOTIFICATION_DOUBLE } from './helpers/browser.ts';
 import {
   clickNotification,
+  closedByBrowser,
   installDouble,
   notificationDouble,
   notificationsOf,
@@ -642,7 +643,12 @@ test('attention in the page', async (t) => {
       assert.ok(record.closed.includes(0), 'a clicked notification is closed');
       assert.equal(record.closed.includes(1), false);
 
-      // A list in which S1 is listed and no longer needs you closes S1's.
+      // A newer notification of a session replaces the older one (its tag); the browser's later
+      // `close` of the replaced one forgets nothing, so a list in which the session is listed and
+      // no longer needs you closes the newer one.
+      w.send({ t: 'notify', sessionId: S1, title: 'alpha', reason: 'asks', detail: null });
+      await recorded(w.page, (r) => r.made.length === 3, "alpha's newer notification");
+      await closedByBrowser(w.page, 1);
       const alphaSeen =
         (count: number) =>
         (view: { filter: string; selected: string | null }): Row => {
@@ -654,37 +660,50 @@ test('attention in the page', async (t) => {
           return list;
         };
       w.set(alphaSeen(2));
-      record = await recorded(w.page, (r) => r.closed.includes(1), "alpha's closed");
+      record = await recorded(w.page, (r) => r.closed.includes(2), "alpha's newer one closed");
       await titleIs(w.page, '(2) skydeck');
 
       // A filter that hides gamma, then gamma's notification, then a list (ruled): the list does
       // not carry gamma's row, so its notification stays; and once the row is back with its
       // attention, too.
-      await toZone(w.page, 'list');
-      await w.page.keyboard.press('/');
-      await w.page.keyboard.type('bet');
-      await w.page.waitForSelector(`#list [data-id="${S3}"]`, {
-        state: 'detached',
-        timeout: PAGE_WAIT_MS,
-      });
+      const filter = async (text: string): Promise<void> => {
+        await toZone(w.page, 'list');
+        await w.page.keyboard.press('/');
+        await w.page.keyboard.type(text);
+        await w.page.waitForSelector(`#list [data-id="${S3}"]`, {
+          state: 'detached',
+          timeout: PAGE_WAIT_MS,
+        });
+      };
+      await filter('bet');
       w.send({ t: 'notify', sessionId: S3, title: 'gamma', reason: 'finished', detail: null });
-      await recorded(w.page, (r) => r.made.length === 3, "gamma's notification");
+      await recorded(w.page, (r) => r.made.length === 4, "gamma's notification");
       w.set(alphaSeen(3)); // a list that differs: its count
       await titleIs(w.page, '(3) skydeck');
-      assert.equal((await notificationsOf(w.page)).closed.includes(2), false, "gamma's stays");
+      assert.equal((await notificationsOf(w.page)).closed.includes(3), false, "gamma's stays");
       await w.page.keyboard.press('Escape'); // the filter cleared: gamma is listed again
       await w.page.waitForSelector(`#list [data-id="${S3}"]`, { timeout: PAGE_WAIT_MS });
-      assert.equal((await notificationsOf(w.page)).closed.includes(2), false, "gamma's stays");
+      assert.equal((await notificationsOf(w.page)).closed.includes(3), false, "gamma's stays");
 
-      // A list in which nothing needs you closes every one left.
-      w.set(() =>
-        listOf(
-          { open: [running(S1, TERM_A, 1), running(S3, TERM_C, 2)], week: [row(S2)] },
+      // A list in which nothing needs you closes every one left, also one whose row it does not
+      // carry (gamma's, hidden by the filter again).
+      await filter('bet');
+      w.set((view) => {
+        const shown = (listed: Row): boolean =>
+          view.filter === '' || (listed['title'] as string).includes(view.filter);
+        return listOf(
+          {
+            open: [
+              running(S1, TERM_A, 1, { title: 'alpha' }),
+              running(S3, TERM_C, 2, { title: 'gamma' }),
+            ].filter(shown),
+            week: [row(S2, { title: 'beta' })].filter(shown),
+          },
           [terminal(TERM_A, S1, 1), terminal(TERM_C, S3, 2)],
           { count: 0, order: [] },
-        ),
-      );
-      record = await recorded(w.page, (r) => r.closed.includes(2), "gamma's closed");
+        );
+      });
+      record = await recorded(w.page, (r) => r.closed.includes(3), "gamma's closed");
 
       // Focused, with the session selected: none; another session: one.
       await titleIs(w.page, 'skydeck');
@@ -705,6 +724,92 @@ test('attention in the page', async (t) => {
       w.send({ t: 'notify', sessionId: selected, title: 'x', reason: 'finished', detail: null });
       record = await recorded(w.page, (r) => r.made.length > made + 1, 'the selected one');
       assert.equal(record.made.at(-1)?.tag, selected);
+
+      // A list of stage A (no needYou) is one in which nothing needs you: it closes both, though
+      // it carries neither row.
+      w.set(() => scriptedList([{ id: S4, terminal: null, slot: null, title: 'delta' }], []));
+      record = await recorded(
+        w.page,
+        (r) => r.closed.includes(made) && r.closed.includes(made + 1),
+        'both closed by a list without needYou',
+      );
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  await t.test(
+    "a click on the notification of a session this page's list does not show: with no window terminal it selects nothing and says it is hidden (the window still comes to the front); with one, its terminal is shown and takes the keyboard, as a window chord's",
+    async (t) => {
+      const w = await attentionWorld(t, chromium, threeNeed, (page) =>
+        notificationDouble(page, 'granted'),
+      );
+      await titleIs(w.page, '(3) skydeck');
+      assert.equal(await selectedRow(w.page), S1);
+      await toZone(w.page, 'list');
+      await w.page.keyboard.press('/');
+      await w.page.keyboard.type('alph');
+      await w.page.keyboard.press('Enter');
+      for (const hidden of [S2, S3]) {
+        await w.page.waitForSelector(`#list [data-id="${hidden}"]`, {
+          state: 'detached',
+          timeout: PAGE_WAIT_MS,
+        });
+      }
+      await showsText(w.page, '#focus-zone', /^Focus: list$/);
+      await pageFocus(w.page, false);
+      w.send({ t: 'notify', sessionId: S2, title: 'beta', reason: 'ended', detail: null });
+      w.send({ t: 'notify', sessionId: S3, title: 'gamma', reason: 'finished', detail: null });
+      await recorded(w.page, (r) => r.made.length === 2, 'two notifications');
+      const from = w.sent.length;
+
+      // beta: not running, hidden by the filter, no window terminal — nothing is selected.
+      await clearKeyMessage(w.page);
+      await clickNotification(w.page, 0);
+      await showsText(w.page, '#key-message', /^that session is hidden by the filter or the fold$/);
+      assert.equal((await notificationsOf(w.page)).focused, 1, 'the window to the front');
+      assert.equal(await selectedRow(w.page), S1, 'the selection stays');
+      assert.equal(
+        await w.page.evaluate(() => document.getElementById('right-zone')?.dataset['paneTerm']),
+        TERM_A,
+        'the right side stays',
+      );
+      assert.equal(sentWith(w.sent.slice(from), 'view', S2), false, 'no view selects it');
+      assert.equal(sentWith(w.sent.slice(from), 'focus', S2), false, 'no focus reports it');
+
+      // gamma: hidden by the filter, with a window terminal — selected, its terminal shown, and
+      // the keyboard goes to it from the list zone (a window chord's move).
+      await clickNotification(w.page, 1);
+      await w.page.waitForSelector(
+        `#right-zone[data-pane="terminal"][data-pane-term="${TERM_C}"]`,
+        { state: 'attached', timeout: PAGE_WAIT_MS },
+      );
+      await eventually(
+        async () =>
+          sentWith(w.sent.slice(from), 'view', S3) && sentWith(w.sent.slice(from), 'focus', S3),
+        'view and focus with gamma',
+      );
+      await showsText(w.page, '#focus-zone', /^Focus: terminal$/);
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  await t.test(
+    'an Enter held on `Turn on notifications` asks once: its auto-repeats ask nothing (the permission stays `default`, as after a dismissed prompt); a fresh press asks again',
+    async (t) => {
+      const w = await attentionWorld(t, chromium, threeNeed, (page) =>
+        notificationDouble(page, 'default', 'default'),
+      );
+      await titleIs(w.page, '(3) skydeck');
+      await showsText(w.page, '#notify-on', /^Turn on notifications$/);
+      await w.page.focus('#notify-on');
+      await w.page.keyboard.down('Enter');
+      await recorded(w.page, (r) => r.asked.length === 1, 'asked at the first keydown');
+      for (let repeat = 0; repeat < 3; repeat++) await w.page.keyboard.down('Enter');
+      await w.page.keyboard.up('Enter');
+      assert.equal(await active(w.page), '#notify-on', 'the item is still there');
+      await w.page.keyboard.press('Enter');
+      const record = await recorded(w.page, (r) => r.asked.length >= 2, 'a fresh press asks');
+      assert.equal(record.asked.length, 2, 'the repeats asked nothing');
       assert.deepEqual(w.problems, []);
     },
   );
@@ -845,18 +950,24 @@ test('attention in the page', async (t) => {
         };
       });
       assert.deepEqual(inert, { permission: 'denied', answer: 'denied', native: false });
-      const shown = await plain.evaluate(async () => {
-        const registration = Reflect.get(globalThis, 'ServiceWorkerRegistration') as {
-          prototype: { showNotification(this: unknown, title: string): Promise<void> };
-        };
-        try {
-          await registration.prototype.showNotification.call(null, 'nothing is shown');
-          return 'shown';
-        } catch (error) {
-          return String(error);
-        }
-      });
-      assert.equal(shown, 'TypeError: no notification is shown in a test', "a worker's refuses");
+      /** What a service worker's `showNotification` does in `page`: its error, or `shown`. */
+      const workerShows = (page: Page): Promise<string> =>
+        page.evaluate(async () => {
+          const registration = Reflect.get(globalThis, 'ServiceWorkerRegistration') as {
+            prototype: { showNotification?(this: unknown, title: string): Promise<void> };
+          };
+          try {
+            await registration.prototype.showNotification?.call(null, 'nothing is shown');
+            return 'shown';
+          } catch (error) {
+            return String(error);
+          }
+        });
+      assert.equal(
+        await workerShows(plain),
+        'TypeError: no notification is shown in a test',
+        "a worker's refuses",
+      );
       assert.equal(await plain.locator('#notify-on').isHidden(), true);
 
       const doubleArg = {
@@ -880,19 +991,33 @@ test('attention in the page', async (t) => {
       await plain.evaluate(inertNotification, NOTIFICATION_DOUBLE);
       assert.equal(await isDouble(plain), true);
 
+      // The double first, then the inert one: a worker's showNotification refuses all the same
+      // (the double has none of its own).
+      await plain.evaluate(() => {
+        const registration = Reflect.get(globalThis, 'ServiceWorkerRegistration') as {
+          prototype: object;
+        };
+        Reflect.deleteProperty(registration.prototype, 'showNotification');
+      });
+      await plain.evaluate(installDouble, doubleArg);
+      await plain.evaluate(inertNotification, NOTIFICATION_DOUBLE);
+      assert.equal(await isDouble(plain), true);
+      assert.equal(await workerShows(plain), 'TypeError: no notification is shown in a test');
+
       // Both as init scripts of one load (the page's double, the context's inert one).
       const doubled = await newPage(t, chromium);
       await notificationDouble(doubled, 'granted');
       await doubled.goto(standin.url);
       await showsText(doubled, '#problem', /^this window has no key; /);
       assert.equal(await isDouble(doubled), true);
+      assert.equal(await workerShows(doubled), 'TypeError: no notification is shown in a test');
     },
   );
 
   await t.test(
     'B17: no browser context of the page suite is made outside helpers/browser.ts',
     () => {
-      const root = new URL('./', import.meta.url).pathname;
+      const root = import.meta.dirname;
       const found: string[] = [];
       for (const name of readdirSync(root, { recursive: true, encoding: 'utf8' })) {
         if (!name.endsWith('.ts') || name === join('helpers', 'browser.ts')) continue;
