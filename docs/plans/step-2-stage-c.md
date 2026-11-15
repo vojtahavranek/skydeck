@@ -602,7 +602,7 @@ talks to the real `controlHandler` from the start (the fake serve uses it).
 
 **Behaviour.** The parser takes the two kinds and the three bodies with 2.2's and C3's limits.
 `controlHandler`: without `launch` the three routes are 404 `{ error: 'route: unknown' }` as
-today, whatever JSON the body holds (the fake serve stands for a server before stage C, which
+today, whatever text the body holds (the fake serve stands for a server before stage C, which
 answers a body the parser would refuse 404 too; a body over 64 KiB stays 413 and one that is not
 UTF-8 400, as there); with it, a body the parser refuses is 400 first; then,
 while `launchState()` is not null they are 503 `{ error }` (not logged: the command asks again

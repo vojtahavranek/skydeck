@@ -78,7 +78,7 @@ interface Answer {
  * (failureKind), never its message.
  *
  * Stage C's routes (plan C2–C5, C22): without `deps.launch` they are 404 `route: unknown` whatever
- * JSON the body holds, as a server before stage C answers them (413 and `body: not UTF-8` stay as
+ * text the body holds, as a server before stage C answers them (413 and `body: not UTF-8` stay as
  * for every route). With it, a body the parser refuses is 400;
  * then, while `launchState()` is not null, 503 `{ error: 'starting' | 'stopping' }` (not logged:
  * a command asks again every 500 ms while the server starts); otherwise `POST /resume` and `/new`
@@ -258,7 +258,7 @@ export function controlHandler(
     const path = req.url ?? '';
     const parsed = parseControlRequest(method, path, text);
     if (!parsed.ok) {
-      // Without `launch`, a stage C route is unknown whatever JSON its body holds (a server before
+      // Without `launch`, a stage C route is unknown whatever text its body holds (a server before
       // stage C; a body over 64 KiB is 413 and one that is not UTF-8 is 400, as there).
       const kind =
         deps.launch === undefined && method === 'POST' && LAUNCH_PATHS.has(path)

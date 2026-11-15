@@ -1534,7 +1534,7 @@ timed out, else 0. A restore asked for here stops when the asker's connection cl
 outcome: the sessions already opened go on, the rest are not started (11.4).
 
 A refused request answers `{ error: <kind> }`: 404 for an unknown route (a server of a build before
-stage C answers `/resume`, `/new` and `/restore` so, whatever JSON the body holds), 400 for a bad
+stage C answers `/resume`, `/new` and `/restore` so, whatever text the body holds), 400 for a bad
 body, 413 for a body over 64 KiB, which is not read on; `GET /token/<id>` is 404 for a token the
 server does not know. When answering a request fails inside the server (`ping`, `status`, the tokens
 or a launch throw or reject), the answer is 500 `{ error: 'failed' }` — a restore whose answer has
