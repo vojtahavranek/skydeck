@@ -190,8 +190,12 @@ describe('pull requests in the window (S2 12.5, design 7.3; plan D8)', () => {
     await gh.started(1);
     const stopping = performance.now();
     const stopped = test.server.stop('the test stops it').then(() => true);
-    const late = new Promise<false>((resolve) => setTimeout(() => resolve(false), 5000));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), 5000);
+    });
     const inTime = await Promise.race([stopped, late]);
+    clearTimeout(timer); // the file's process does not wait for it
     const took = performance.now() - stopping;
     if (!inTime) gh.release();
     await stopped;
