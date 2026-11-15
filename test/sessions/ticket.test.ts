@@ -12,6 +12,8 @@ const JIRA = 'https://example.atlassian.net/browse/{key}';
 const DEFAULT_PATTERN = DEFAULT_CONFIG.groupPattern;
 /** A pattern that takes the group's whole first word: a wide pattern a user might set. */
 const WORD = '^\\S+';
+/** A pattern that takes the whole group, whatever it holds. */
+const ANYTHING = '^[\\s\\S]+';
 
 describe('ticketAddress (S2 12.5): a group that holds a ticket key', () => {
   test('the default pattern on the group of a title "ABC-12 fix" gives the ticket', () => {
@@ -109,6 +111,21 @@ describe('ticketAddress: no link', () => {
       assert.equal(ticketAddress(group, WORD, JIRA), null);
     });
   }
+
+  test('a key holds only letters, digits, ".", "_" and "-": every other character inside is none', () => {
+    const allowed = /[A-Za-z0-9._-]/;
+    const others = [...Array(0x7f - 0x20).keys()]
+      .map((i) => String.fromCharCode(0x20 + i))
+      .filter((c) => !allowed.test(c));
+    assert.equal(others.length, 95 - 65, 'every printable ASCII character but the 65 of a key');
+    for (const c of [...others, '\u00e4', '\u00a0', '\u2028']) {
+      assert.equal(ticketAddress(`a${c}b`, ANYTHING, JIRA), null, JSON.stringify(c));
+    }
+    assert.equal(
+      ticketAddress('a._-b', ANYTHING, JIRA),
+      'https://example.atlassian.net/browse/a._-b',
+    );
+  });
 
   test('an address that would be over 2,048 characters; one of exactly 2,048 is given', () => {
     const base = 'https://example.net/';

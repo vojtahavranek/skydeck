@@ -320,6 +320,22 @@ test('show prints the ticket address of a group taken from the title', async (t)
   );
 });
 
+test('show finds the key with the configured groupPattern', async (t) => {
+  const d = twoSessions(t, { config: { ticketUrl: JIRA, groupPattern: '[a-z]+-[0-9]+' } });
+  d.deck.store.updateMeta(S1, { group: 'abc-12 cleanup' }, T0);
+
+  assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+
+  assert.ok(
+    d
+      .stdout()
+      .includes(
+        '\ngroup:     abc-12 cleanup\nticket:    https://example.atlassian.net/browse/abc-12\n',
+      ),
+    d.stdout(),
+  );
+});
+
 test('show prints no ticket line without ticketUrl, or without a ticket key in the group', async (t) => {
   const without = twoSessions(t);
   without.deck.store.updateMeta(S1, { group: 'ABC-12' }, T0);

@@ -257,7 +257,7 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     ['an escape character', 'https://host/\x1b[31m/{key}'],
     ['a DEL', 'https://host/a\x7f/{key}'],
     ['a C1 control', 'https://host/a\u009b/{key}'],
-    ['a no-break space', 'https://host/a b/{key}'],
+    ['a no-break space', 'https://host/a\u00a0b/{key}'],
     ['2,049 characters', `https://example.net/{key}/${'a'.repeat(2049 - 26)}`],
     ['the empty string', ''],
     ['a number', 3],
