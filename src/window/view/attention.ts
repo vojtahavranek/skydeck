@@ -5,13 +5,15 @@
  * gathers the facts, the page shows what these functions say (S2 4.3).
  *
  * Imports (S2 4.3, plan B 2.1): types of `sessions`, `text`'s `sanitize`, the window's message
- * types. Not the store's types: `AttentionMarks` has the fields of the store's `AttentionRow`, and
- * the server passes those rows as they are.
+ * types, and the view model's one cut (`capLine` and DETAIL_MAX of `./sections.ts`). Not the
+ * store's types: `AttentionMarks` has the fields of the store's `AttentionRow`, and the server
+ * passes those rows as they are.
  */
 import type { Ns } from '../../platform/types.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import type { AttentionPayload, AttentionReason, NsText } from '../protocol.ts';
+import { DETAIL_MAX, capLine } from './sections.ts';
 
 /** What the store holds of a session (S2 10.2): the fields of the store's AttentionRow. */
 export interface AttentionMarks {
@@ -36,10 +38,6 @@ export interface AttentionFacts {
 
 /** No facts: no row needs you (stage A's and D's callers, which pass none). */
 export const NO_ATTENTION: AttentionFacts = { marks: new Map(), live: new Map() };
-
-/** The longest detail a row and a notification carry, in UTF-16 units, the ellipsis included
- *  (plan B13, ruled): a waitingFor has no length limit, and the list is sent whole. */
-const DETAIL_MAX = 120;
 
 /** B5: the status that wins among a session's holders, the strongest first. */
 const STATUS_STRENGTH: readonly string[] = ['waiting', 'busy', 'idle'];
@@ -83,27 +81,16 @@ export function liveStatuses(
   return statuses;
 }
 
-/** B13: a waitingFor sanitised and trimmed, then cut to DETAIL_MAX units with the cut marked by
- *  '…', never inside a surrogate pair; null when there is none or it is blank once sanitised
- *  (empty, or only white space: the page would write `needs you ·  · 3m`; ruled). Trimmed (ruled
- *  on review 2), so that leading white space can neither show nor fill the cut. */
+/** B13: a waitingFor sanitised and trimmed, then cut to DETAIL_MAX units (`capLine`: the cut
+ *  marked by '…', never inside a surrogate pair); null when there is none or it is blank once
+ *  sanitised (empty, or only white space: the page would write `needs you ·  · 3m`; ruled).
+ *  Trimmed (ruled on review 2), so that leading white space can neither show nor fill the cut. */
 function detailOf(waitingFor: string | null): string | null {
   if (waitingFor === null) {
     return null;
   }
   const clean = sanitize(waitingFor).trim();
-  if (clean === '') {
-    return null;
-  }
-  if (clean.length <= DETAIL_MAX) {
-    return clean;
-  }
-  let cut = DETAIL_MAX - 1;
-  const last = clean.charCodeAt(cut - 1);
-  if (last >= 0xd800 && last <= 0xdbff) {
-    cut -= 1;
-  }
-  return `${clean.slice(0, cut)}…`;
+  return clean === '' ? null : capLine(clean, DETAIL_MAX);
 }
 
 function nsText(ns: Ns | null): NsText | null {
