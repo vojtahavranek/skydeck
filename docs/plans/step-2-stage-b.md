@@ -159,7 +159,7 @@ same as its row here.
 | 52 | `src/window/attention.ts`, `src/window/notify.ts`, `test/window/attention.test.ts`, `test/window/notify.test.ts` | `docs/design-step-2.md` (10.3, 12.4, 13) |
 | 55 | `web/attention-text.js`, `web/notify.js`, `web/attention.css`, `test/web/attention-text.test.ts`, `test-page/attention.test.ts`, `test-page/helpers/notification.ts` | `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts`; `docs/design-step-2.md` (12.2, 12.4, 13, 17.4) |
 | 57 | — | `src/window/mapping.ts`, `src/window/tick.ts` (the comment of `map()` only); `test/window/mapping.test.ts`, `test/window/tick.test.ts`; `docs/design-step-2.md` (7.5) |
-| 54 | `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`, `test-page/attention-server.test.ts` | `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.7) |
+| 54 | `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`, `test-page/attention-server.test.ts` | `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.7; 10.1 and 12.4 for part (b) of the ruling of 2026-11-15 09:47Z) |
 | 56 | — | `docs/install.md` (all but task 50's paragraphs), `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (19, and any decision of 1d still missing) |
 
 **Shared source files** (changed by another stage too; never two stage B tasks of one wave):

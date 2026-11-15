@@ -225,15 +225,12 @@ function attentionParts(deps: {
       failing = kind;
     }
   };
+  // A listener must not throw (contract 2.5): seenNow never does, pushList guards each page and
+  // check is wrapped.
   seen.onChange(() => {
-    // A listener must not throw (contract 2.5): seenNow never does, the pages guard each page.
-    try {
-      if (attention.seenNow()) {
-        deps.pages().pushList();
-        check();
-      }
-    } catch (error) {
-      log(`attention: the seen could not be shown (${failureKind(error)})`);
+    if (attention.seenNow()) {
+      deps.pages().pushList();
+      check();
     }
   });
   return {

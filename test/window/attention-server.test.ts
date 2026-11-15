@@ -3,8 +3,9 @@
 // focused page's selection and by typing, window ends of a terminal whose program failed and of one
 // whose keeper was lost, `notify` to the page that had focus last, a restart, a busy store and a
 // migrated one. In the test process (A19) on realTestPlatform, with real keepers running the
-// stand-in. Every wait is for a fact (a list, a record, a process gone), never for a time: the
-// one-second look and the two-second refresh are held by test/window/tick.test.ts.
+// stand-in. Every wait is for a fact (a list, a record, a process gone, a refresh that listed a new
+// session), never for a time: the one-second look and the two-second refresh are held by
+// test/window/tick.test.ts.
 import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,6 +20,7 @@ import { setLabel } from '../../src/sessions/meta.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import type { AttentionRow } from '../../src/store/types.ts';
 import type { ListMessage, NotifyMessage, RowPayload } from '../../src/window/protocol.ts';
+import { SEEN_AFTER_MS } from '../../src/window/seen.ts';
 import {
   procStartOf,
   sleep,
@@ -119,6 +121,20 @@ async function roundTrip(page: TestPage): Promise<void> {
   }
 }
 
+let probes = 0;
+
+/**
+ * A refresh that ran, as a fact, not a time: a new resumable session the next refresh's scan finds,
+ * and a list to `page` with its row. The server runs in this process (A19) and a refresh with its
+ * judgements and checks is one synchronous step, so all of that refresh is done once its list is
+ * here, and everything the server sent `page` before it has come.
+ */
+async function aRefresh(d: ServerSandbox, page: TestPage): Promise<void> {
+  const probe = `00000000-0000-4000-8000-${String(++probes).padStart(12, '0')}`;
+  d.resumable(probe);
+  await page.list((list) => rowOf(list, probe) !== undefined, `the refresh that lists ${probe}`);
+}
+
 /** Every `notify` the page got so far. */
 function notifies(page: TestPage): NotifyMessage[] {
   return page.all.flatMap((item) =>
@@ -182,10 +198,14 @@ describe('a turn end in a window terminal (S2 10.3, 12.4)', () => {
     assert.ok(ended?.turnEndedSeq !== null && ended?.turnEndedSeq !== undefined, 'a turn end');
     assert.equal(ended.seenSeq, null);
 
-    // Selected in a page that has no focus: nothing is seen.
+    // Selected in a page that has no focus: nothing is seen. Once the server has the focus (the
+    // round trip), a hold it started would end SEEN_AFTER_MS later on a timer of this process; the
+    // test's own timer of that length is set after it, so it fires after it — and the next round
+    // trip brings any list that hold pushed.
     const before = lists(page).length;
     show(page, false, S1);
-    await sleep(2500);
+    await roundTrip(page);
+    await sleep(SEEN_AFTER_MS);
     await roundTrip(page);
     assert.ok(
       lists(page)
@@ -307,8 +327,8 @@ describe('window ends (S2 12.4 reason 2, 14; B10)', () => {
     );
     await page.list((list) => rowOf(list, S2)?.state === 'not-running', 'S2 no longer runs');
     const seq = counter(d);
-    await sleep(4500); // two more refreshes: the end is judged and not recorded
-    await roundTrip(page);
+    await aRefresh(d, page); // a refresh with S2's row not running and its holder gone: judged
+    await aRefresh(d, page);
     assert.equal(stored(d, S2), undefined, 'an end the user chose is no window end');
     assert.equal(counter(d), seq, 'and nothing else was written');
     assert.equal(reasonOf(lists(page).at(-1) as ListMessage, S2), null);
@@ -349,8 +369,8 @@ describe('window ends (S2 12.4 reason 2, 14; B10)', () => {
     const found = second.server.hub.list()[0];
     assert.ok(found?.exit !== null && found?.exit !== undefined && end !== undefined);
     assert.equal(end.windowEndNs, BigInt(found.exit.atNs), "the keeper's exit time");
-    await sleep(4500); // two more refreshes
-    await roundTrip(next);
+    await aRefresh(d, next); // refreshes and looks, each followed by the notifier's check
+    await aRefresh(d, next);
     assert.deepEqual(notifies(next), [], 'the first judgement notifies nothing (B12)');
     assert.equal(rowOf(ended, S1)?.attention?.reason, 'ended');
 
@@ -358,8 +378,8 @@ describe('window ends (S2 12.4 reason 2, 14; B10)', () => {
     const third = await d.start();
     const last = await connectTestPage(t, d, third.server, { focused: false });
     await last.list((list) => reasonOf(list, S1) === 'ended', 'S1 still ended');
-    await sleep(4500);
-    await roundTrip(last);
+    await aRefresh(d, last);
+    await aRefresh(d, last);
     assert.equal(Number(counter(d)), Number(before ?? '0') + 1, 'still one');
     assert.deepEqual(stored(d, S1), end, 'the mark as before');
     assert.deepEqual(notifies(last), [], 'what needed you before the restart notifies nothing');
@@ -442,8 +462,8 @@ describe('window ends (S2 12.4 reason 2, 14; B10)', () => {
       (list) => list.terminals.find((info) => info.id === term)?.state === 'lost',
       'the terminal lost',
     );
-    await sleep(2500); // a refresh while the program lives on
-    await roundTrip(page);
+    await aRefresh(d, page); // refreshes while the program lives on (checked below: still alive)
+    await aRefresh(d, page);
     assert.deepEqual(
       readRecords(record).filter(
         (entry) => entry.pid === holder && (entry.ev === 'hup' || entry.ev === 'exit'),
@@ -470,8 +490,8 @@ describe('window ends (S2 12.4 reason 2, 14; B10)', () => {
     assert.equal(notified.title, rowOf(ended, S1)?.title);
 
     const seq = counter(d);
-    await sleep(4500); // two more refreshes judge nothing again
-    await roundTrip(page);
+    await aRefresh(d, page); // two more refreshes judge nothing again
+    await aRefresh(d, page);
     assert.equal(counter(d), seq, 'one window end');
     assert.equal(notifies(page).length, 1, 'one notify');
   });
@@ -626,7 +646,8 @@ describe('the start, the store (S2 10.1, 13, 14; B1, B11, B12)', () => {
     await page.list((list) => reasonOf(list, S1) === 'finished', 'S1 finished once free');
     assert.equal(Number(counter(d)), Number(before ?? '0') + 1, 'one value given: recorded once');
     assert.equal(stored(d, S1)?.turnEndedSeq, Number(counter(d)));
-    await sleep(2500);
+    await aRefresh(d, page); // each tick looks before its refresh: more looks, the kept write gone
+    await aRefresh(d, page);
     assert.equal(Number(counter(d)), Number(before ?? '0') + 1, 'and not again');
     const marked = test.logs().filter((line) => line.includes('marker-54'));
     assert.deepEqual(marked, [], 'no title, no detail in the log');
@@ -646,7 +667,13 @@ describe('the start, the store (S2 10.1, 13, 14; B1, B11, B12)', () => {
       String(SCHEMA_VERSION + 1),
     );
     db.close();
-    await sleep(3000); // nothing else writes: no bye before the turn end
+    // A refresh after the migration that has nothing to write (a live file changed: the rows are
+    // loaded again, `working`), and a look that sees `busy`: no bye before the turn end.
+    await typeLine(client, '/busy');
+    await page.list(
+      (list) => rowOf(list, S1)?.state === 'working' && reasonOf(list, S1) === null,
+      'S1 working',
+    );
     await roundTrip(page);
     assert.equal(
       page.all.some((item) => 'text' in item && item.text.t === 'bye'),

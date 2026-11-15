@@ -14,7 +14,6 @@ import type { Browser, Page } from 'playwright';
 import { setLabel } from '../src/sessions/meta.ts';
 import type { AttentionRow } from '../src/store/types.ts';
 import { controlClient } from '../src/window/client.ts';
-import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import type { StartedServer } from '../test/helpers/window.ts';
@@ -36,6 +35,10 @@ import {
   selectedRow,
 } from './helpers/shell.ts';
 import { inputOf, promptOf, resumeHere, untilScreen, until } from './helpers/terminal.ts';
+
+/** Sessions a refresh lists, to show that it ran. */
+const PROBE_1 = '00000000-0000-4000-8000-000000000001';
+const PROBE_2 = '00000000-0000-4000-8000-000000000002';
 
 interface Attended extends Omit<StartedServer, 'page'> {
   page: Page;
@@ -176,8 +179,8 @@ test('attention against the server', async (t) => {
       await until(async () => (await selectedRow(page)) === S1, 'S1 selected');
       // The selection put the keyboard into the terminal: xterm.js reports the focus to the program.
       await until(() => focusIns() > ins, 'the program read the focus report');
+      // The server took that input before the program read it, and a typing writes its seen at once.
       assert.equal(stored(l, S1)?.seenSeq ?? null, null, 'nothing seen: the report is no typing');
-      await sleep(500);
       assert.equal(
         (await rowAttention(page, S1))?.attention,
         'finished',
@@ -216,7 +219,11 @@ test('attention against the server', async (t) => {
         shown.made.map(({ title, body, tag }) => ({ title, body, tag })),
         [{ title: 'fix the parser', body: 'finished', tag: S1 }],
       );
-      await sleep(2500); // two refreshes more: no second one
+      // Two refreshes more, each shown by a session it lists: a notify of either came before it.
+      for (const probe of [PROBE_1, PROBE_2]) {
+        d.resumable(probe);
+        await page.locator(`#list [data-id="${probe}"]`).waitFor({ timeout: PAGE_WAIT_MS });
+      }
       assert.equal((await notificationsOf(page)).made.length, 1, 'one notification');
 
       await clickNotification(page, 0);
