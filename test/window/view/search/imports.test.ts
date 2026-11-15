@@ -20,8 +20,8 @@ const SESSIONS = /^\.\.\/\.\.\/\.\.\/sessions\/[\w-]+\.ts$/;
 const TYPE_SOURCES = new Set(['../../protocol.ts', '../../hub.ts', '../sections.ts']);
 
 /** `import … from '…'` and `export … from '…'`, over several lines too. An `export` counts only
- *  before `*` or `{` (a re-export), so that a `from '…'` in an exported declaration's comment or
- *  string is no import. The clause takes a block comment, a line comment with its line end or a
+ *  before `*` or `{` (a re-export), so that a `from '…'` in an exported declaration's template (or
+ *  any text the clause does not take whole) is no import. The clause takes a block comment, a line comment with its line end or a
  *  string whole, and anything else but `;`, `/` and quotes: a `;` or a `from '…'` inside a
  *  comment or a string of the clause neither ends it nor names its source, so whatever the clause
  *  holds is judged, and each comment has one reading (a statement that reaches no source is read
@@ -124,6 +124,8 @@ test('the check itself: what it lets through', () => {
     'import {\n  a, // from \'node:fs\'\n} from "./filter.ts";',
     'import { a /* from \'node:fs\' */ } from "./filter.ts";',
     'import { "from \'node:fs\'" as a } from "./filter.ts";',
+    // An exported declaration is no statement here, whatever its text holds: a template too.
+    "export const t = `x from 'y'`;",
   ].join('\n');
   assert.deepEqual(violations(source), []);
 });
@@ -198,6 +200,11 @@ test('the check itself: what it refuses', () => {
     ["export { /* all; */ readFileSync } from 'node:fs';", "import from 'node:fs'"],
     // A single-quoted string name is taken whole too.
     ["import { 'isListed' as isListed } from '../../../sessions/list.ts';", 'value import'],
+    // A block comment ends at its first `*/`: the next comment does not hide a statement.
+    [
+      "import { readFileSync /* a */ } from 'node:fs';\n/* b */\nimport { x } from './filter.ts';",
+      "import from 'node:fs'",
+    ],
   ];
   for (const [source, expected] of cases) {
     const found = violations(source);
