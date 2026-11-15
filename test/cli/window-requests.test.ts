@@ -27,21 +27,24 @@ import type {
   RestoreStreamLine,
 } from '../../src/window/protocol.ts';
 import { capture } from '../helpers/capture.ts';
+import { deckWith } from '../helpers/deck.ts';
 import { until } from '../helpers/keeper.ts';
 import { S1, S2 } from '../helpers/platform.ts';
 import { writeWindowConfig } from '../helpers/window-config.ts';
 import { liveProcess, startFakeServe, windowMachine } from '../helpers/window-machine.ts';
 import type { WindowMachine } from '../helpers/window-machine.ts';
 
-/** The waits of these cases: a ping wait of 1 s, an answer time of 2 s. */
+/** The waits of these cases: long, so that no load runs them out where a case expects none. */
 const TIMES: WindowTimes = {
-  pingMs: 1000,
+  pingMs: 5000,
   pageMs: 300,
   reuseMs: 100,
   launchingMs: 45_000,
   reconnectMs: 7000,
-  answerMs: 2000,
+  answerMs: 20_000,
 };
+/** The cases that wait for a wait to run out: a ping wait of 1 s, an answer time of 2 s. */
+const SHORT: WindowTimes = { ...TIMES, pingMs: 1000, answerMs: 2000 };
 const ANSWER: LaunchAnswer = { code: 0, lines: ['skydeck: started'], sessionId: S1 };
 const NEW: NewRequest = { dir: '/home/dev/projects/api', label: null, group: null, flags: [] };
 
@@ -95,8 +98,8 @@ describe('windowServer: the server a command sends to (plan C11, 2.5)', () => {
     const m = windowMachine(t);
     const fake = await startFakeServe(t, m, { FAKE_SERVE_MODE: 'silent' });
     const line = `the window's server (pid ${fake.pid}) does not answer; skydeck window --restart stops it`;
-    await rejectsWith(windowServer(m.deck, TIMES, true), line);
-    await rejectsWith(windowServer(m.deck, TIMES, false), line);
+    await rejectsWith(windowServer(m.deck, SHORT, true), line);
+    await rejectsWith(windowServer(m.deck, SHORT, false), line);
   });
 
   test('a server starting past the ping wait: S2 5.1’s line with the ping wait’s seconds', async (t) => {
@@ -105,8 +108,8 @@ describe('windowServer: the server a command sends to (plan C11, 2.5)', () => {
     const { pid, procStart, bootId } = holder.line;
     m.deck.store.setKv('window_server', `${pid}:${procStart}:${bootId}:${m.platform.appRoot}`);
     const line = `the window's server (pid ${pid}) is starting and did not finish within 1 s; run skydeck window again, or skydeck window --restart to replace it`;
-    await rejectsWith(windowServer(m.deck, TIMES, true), line);
-    await rejectsWith(windowServer(m.deck, TIMES, false), line);
+    await rejectsWith(windowServer(m.deck, SHORT, true), line);
+    await rejectsWith(windowServer(m.deck, SHORT, false), line);
   });
 
   test('a server of another checkout: its line, the checkout sanitised', async (t) => {
@@ -149,6 +152,30 @@ async function serverOf(
 }
 
 describe('requestResume and requestNew (plan C11, 2.5)', () => {
+  test('a socket that fails after the request reached the server: the may-have-started line, the same for both (ruled, task 76)', async (t) => {
+    for (const here of [true, false]) {
+      const m = windowMachine(t);
+      const file = join(m.s.root, 'requests.jsonl');
+      const fake = await startFakeServe(t, m, {
+        FAKE_SERVE_REQUESTS: file,
+        FAKE_SERVE_LAUNCH: 'silent',
+      });
+      const server = await windowServer(m.deck, TIMES, here);
+      const asked = requestResume(server, S1, TIMES);
+      await until(() => existsSync(file) && readFileSync(file, 'utf8') !== '', 'sent', 10_000);
+      fake.child.kill('SIGKILL');
+      await assert.rejects(asked, (error: unknown) => {
+        assert.ok(error instanceof SkydeckError, String(error));
+        assert.match(
+          error.message,
+          /^the window's server cannot be asked on \S+ \(E[A-Z]+\); it may have started the session: run skydeck to see whether it runs$/,
+          String(here),
+        );
+        return true;
+      });
+    }
+  });
+
   test('the answer as it came, whatever its code; the request as sent', async (t) => {
     const s = await serverOf(t, {
       FAKE_SERVE_LAUNCH: `answer:${JSON.stringify({ ...ANSWER, code: 4 })}`,
@@ -233,13 +260,21 @@ interface RestoreBench {
   edgeCalls(): string[][];
   requests(): unknown[];
   /** restoreInWindow for `sessionIds` (all false) with a captured context. */
-  restore(sessionIds?: string[]): Promise<{ code: number; stdout: string; stderr: string }>;
+  restore(
+    sessionIds?: string[],
+    times?: WindowTimes,
+  ): Promise<{ code: number; stdout: string; stderr: string }>;
 }
 
 async function restoreBench(
   t: TestContext,
   env: Record<string, string>,
-  options: { platformEnv?: Record<string, string>; window?: Record<string, unknown> } = {},
+  options: {
+    platformEnv?: Record<string, string>;
+    window?: Record<string, unknown>;
+    /** Changes the deck the function is given. */
+    deck?: (deck: Deck) => Deck;
+  } = {},
 ): Promise<RestoreBench> {
   const m = windowMachine(t);
   const stub = writeWindowConfig(m.s, options.window ?? {});
@@ -255,10 +290,11 @@ async function restoreBench(
   };
   const platform = { ...m.platform, net, env: { ...m.platform.env, ...options.platformEnv } };
   // Opened after config.json names the Edge stub (the machine's own deck read it before).
-  const deck = openDeck(platform);
+  const opened = openDeck(platform);
   t.after(() => {
-    deck.store.close();
+    opened.store.close();
   });
+  const deck = options.deck?.(opened) ?? opened;
   return {
     m,
     deck,
@@ -271,15 +307,15 @@ async function restoreBench(
             .filter((line) => line !== '')
             .map((line) => JSON.parse(line) as unknown)
         : [],
-    async restore(sessionIds = [S1, S2]) {
+    async restore(sessionIds = [S1, S2], times = TIMES) {
       const captured = capture();
-      const server = await windowServer(deck, TIMES, false);
+      const server = await windowServer(deck, times, false);
       const code = await restoreInWindow(
         { io: captured.io, platform },
         deck,
         server,
         { sessionIds, all: false },
-        TIMES,
+        times,
       );
       return { code, stdout: captured.stdout(), stderr: captured.stderr() };
     },
@@ -319,6 +355,38 @@ describe('restoreInWindow (plan C12, C14)', () => {
     assert.ok(r.stderr.endsWith('; run skydeck window\n'), r.stderr);
     assert.ok(r.stdout.endsWith('restore finished: 2 started\n'), r.stdout);
     assert.equal(b.requests().length, 1);
+  });
+
+  test('the store fails while the window’s lock is taken: C12’s line with the failure, and the restore still sends its request (review 2)', async (t) => {
+    const locked = Object.assign(new Error('database is locked'), {
+      code: 'ERR_SQLITE_ERROR',
+      errcode: 5,
+    });
+    const b = await restoreBench(
+      t,
+      { FAKE_SERVE_RESTORE: JSON.stringify(STREAM) },
+      {
+        deck: (deck) =>
+          deckWith(deck, {
+            store: {
+              transaction: () => {
+                throw locked;
+              },
+            },
+          }),
+      },
+    );
+
+    const r = await b.restore();
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stderr,
+      `skydeck: the window could not be opened: the database ${b.deck.store.path} failed: database is locked; run skydeck window\n`,
+    );
+    assert.ok(r.stdout.endsWith('restore finished: 2 started\n'), r.stdout);
+    assert.equal(b.requests().length, 1);
+    assert.deepEqual(b.edgeCalls(), []);
   });
 
   test('under CLAUDECODE: no window, C12’s line, the request sent', async (t) => {
@@ -381,7 +449,7 @@ describe('restoreInWindow (plan C12, C14)', () => {
       FAKE_SERVE_RESTORE: 'silent-after:1',
     });
     await rejectsWith(
-      silent.restore(),
+      silent.restore(undefined, SHORT),
       "the window's server stopped answering; run skydeck to see what started",
     );
   });

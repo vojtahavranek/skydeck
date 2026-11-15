@@ -2,26 +2,41 @@
  * The window's view model (S2 12, stage A): the rows step 1 loads, the window's terminals and one
  * page's view state become that page's `list` message. Pure: it needs nothing but its input.
  *
- * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed` and `matchesFilter` (stage
- * A's filter is design 7.4's, one implementation), the window's message and hub types, and `text`.
- * Stage B adds attention (`./attention.ts`, plan B 2.4): each row's, and the page's `needYou`.
+ * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed`, the window's message and hub
+ * types, and `text`. Stage B adds attention (`./attention.ts`, plan B 2.4): each row's, and the
+ * page's `needYou`. Stage E adds search (`./search/`, plan E1): the filter's words and chips, the
+ * stacks and the switcher's ranking; design 7.4's `matchesFilter` stays for `ls` and the
+ * interactive list.
  */
 import type { Ns } from '../../platform/types.ts';
-import { isListed, matchesFilter } from '../../sessions/list.ts';
+import { isListed } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import type { DerivedSession } from '../../sessions/types.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import type { TerminalInfo } from '../hub.ts';
 import type {
   AttentionPayload,
+  HiddenBy,
   ListMessage,
   RowPayload,
+  SearchChip,
   SectionPayload,
   SelectedPayload,
+  SwitcherPayload,
   TerminalPayload,
 } from '../protocol.ts';
 import { attentionOf, attentionOrder, NO_ATTENTION } from './attention.ts';
 import type { AttentionFacts } from './attention.ts';
+import {
+  isFiltering,
+  matchesChips,
+  matchesWords,
+  searchable,
+  searchWords,
+} from './search/filter.ts';
+import { stackRows } from './search/stacks.ts';
+import { switcherPayload } from './search/switcher.ts';
+import type { SwitchCandidate } from './search/switcher.ts';
 import { MAY_START, projectDirs, rowPayload, sectionOf } from './sections.ts';
 
 export interface ViewInput {
@@ -29,7 +44,18 @@ export interface ViewInput {
   terminals: readonly TerminalInfo[];
   /** Holders that belong to no terminal of the window, by session id (from the mapping, task 21). */
   elsewhere: ReadonlyMap<string, { pid: number; tty: string | null }>;
-  view: { filter: string; unfolded: readonly string[]; showDone: boolean; selected: string | null };
+  view: {
+    filter: string;
+    unfolded: readonly string[];
+    showDone: boolean;
+    selected: string | null;
+    /** Stage E (plan E 2.4), each optional so that every caller of stages A–D compiles unchanged:
+     *  absent `chips` is none (E4); absent `opened` is no stacks at all (E6); `switcher` is the
+     *  switcher's text while it is shown, null or absent while it is not (E8). */
+    chips?: readonly SearchChip[];
+    opened?: readonly string[];
+    switcher?: string | null;
+  };
   /** The resume card of the selected row (task 32's selectedPayload). */
   selected: SelectedPayload | null;
   nowNs: Ns;
@@ -48,6 +74,13 @@ interface Entry {
   row: ListRow;
   terminal: TerminalInfo | null;
   payload: RowPayload;
+}
+
+/** A row the switcher may list (every row listed with done ones shown, E9) and what it needs. */
+interface SwitchEntry {
+  entry: Entry;
+  open: boolean;
+  hiddenBy: HiddenBy[];
 }
 
 function compareNs(a: Ns, b: Ns): number {
@@ -189,10 +222,13 @@ function compareRecent(a: Entry, b: Entry): number {
   return compareNs(b.row.lastActivityNs, a.row.lastActivityNs) || compareText(a.row.id, b.row.id);
 }
 
+/** A section of `entries` (in the section's order): `count`, `firstNs` and `lastNs` over all of
+ *  them, `rows` the drawn ones (none while folded). */
 function sectionPayload(
   name: SectionName,
   entries: readonly Entry[],
   folded: boolean,
+  drawn: () => RowPayload[],
 ): SectionPayload {
   let firstNs: Ns | null = null;
   let lastNs: Ns | null = null;
@@ -210,8 +246,29 @@ function sectionPayload(
     firstNs: firstNs === null ? null : String(firstNs),
     lastNs: lastNs === null ? null : String(lastNs),
     count: entries.length,
-    rows: folded ? [] : entries.map((entry) => entry.payload),
+    rows: folded ? [] : drawn(),
   };
+}
+
+/**
+ * E6 for This week or Earlier: the rows drawn, each head and open member with its `stack`. A row
+ * that a terminal of the window holds or that needs you is `held` and never stacks; `opened` is
+ * `view.opened` as it comes (absent: no stacks at all).
+ */
+function stacked(
+  entries: readonly Entry[],
+  opened: readonly string[] | undefined,
+  selected: string | null,
+): RowPayload[] {
+  const stackable = entries.map(({ payload }) => ({
+    id: payload.id,
+    group: payload.group,
+    held: payload.terminal !== null || payload.attention !== null,
+    payload,
+  }));
+  return stackRows(stackable, opened, selected).map(({ entry, stack }) =>
+    stack === null ? entry.payload : { ...entry.payload, stack },
+  );
 }
 
 /**
@@ -222,16 +279,26 @@ function sectionPayload(
  *   the row of a `new` terminal's own session while the terminal is there, one of its own when
  *   the session has none yet (A28), unless it is done and stopped.
  * - Sections (S2 12.1, `sectionOf`): Open, This week, Earlier; Earlier folded unless the view
- *   unfolds it or a filter is set (S2 12.8, ruled), a folded one with its count and time span and
+ *   unfolds it or the view is filtering (S2 12.8), a folded one with its count and time span and
  *   no rows.
- * - The filter (design 7.4, `matchesFilter`) chooses the rows of the sections and `doneHidden`; it
- *   never shows a done session in stage A. `counts` are the title bar's: every listed row once,
- *   by state, the starting ones and those running elsewhere apart, whatever the filter.
+ * - Search (S2 12.8, plan E2–E5): the view's words (`searchWords` of `filter`) and chips choose the
+ *   rows of the sections; with either set the view is `filtering`: done rows are listed too (with
+ *   their done mark), `doneHidden` is 0, no section is folded and no stack is formed. `counts` are
+ *   the title bar's: every row listed without the filter once, by state, the starting ones and
+ *   those running elsewhere apart, whatever the filter or the chips list.
+ * - Stacks (S2 12.2, plan E6): in This week and Earlier while not filtering, `stackRows` over the
+ *   section's rows with `view.opened` as it comes; a section's `count` and time span are all its
+ *   rows', its `rows` the drawn ones.
+ * - The switcher (S2 12.8, plan E8, E9): while `view.switcher` is a string, `switcherPayload` over
+ *   every row listed with done ones shown (Open's in Open's order, then the others most recent
+ *   first), each with what hides it from this page's list; else null. Its `restore` is null here.
  * - `selected` is the resume card given only when it is the card of the view's selected session.
  * - Attention (S2 12.4, plan B7): a row's `attention` is `attentionOf` over `input.attention`.
- *   `needYou.count` counts the listed rows that need you, whatever the filter or the fold, and
- *   such a row is in no field of `counts` (the title bar's parts add up); `needYou.order` holds the
- *   ids of the rows the sections carry that need you, in B6's order (`attentionOrder`).
+ *   `needYou.count` counts the rows listed without the filter that need you, whatever the filter
+ *   or the fold, and such a row is in no field of `counts` (the title bar's parts add up);
+ *   `needYou.order` holds the ids of the rows the sections carry that need you, in B6's order
+ *   (`attentionOrder`) — also a done one a filter lists, which `needYou.count` does not count
+ *   (E5: the title bar does not move with the filter).
  */
 export function buildListMessage(
   input: ViewInput,
@@ -251,9 +318,18 @@ export function buildListMessage(
     }
   }
 
+  const words = searchWords(view.filter);
+  const chips = view.chips ?? [];
+  const filtering = isFiltering(words, chips);
+  const unfolded = new Set(view.unfolded);
+  // Earlier as the view has it once the filter is cleared; while filtering nothing is folded.
+  const earlierFolded = !unfolded.has('earlier');
+  const switching = typeof view.switcher === 'string';
+
   const counts = { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 };
   let needYouCount = 0;
   const shown = new Map<SectionName, Entry[]>(SECTIONS.map((name) => [name, []]));
+  const switchable: SwitchEntry[] = [];
   let doneHidden = 0;
   for (const row of candidates) {
     const claimed = bySession.get(row.id) ?? null;
@@ -263,51 +339,72 @@ export function buildListMessage(
       claimed !== null && (MAY_START.has(claimed.state) || row.state === 'not-running')
         ? claimed
         : null;
+    // A `new` terminal keeps its own session's row while it is there (A28, ruled), also a row step
+    // 1 does not list (a session that ended before its first prompt has no transcript); a done one
+    // is hidden as any done row that stopped.
+    const ownNew =
+      terminal !== null && terminal.kind === 'new' && terminal.expectedSessionId === row.id;
+    if (!ownNew && !isListed(row, true)) {
+      continue; // not listed even with done ones shown: no row, no count, no switcher item
+    }
     const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
     const payload: RowPayload = {
       ...rowPayload(row, { terminal, elsewhere }),
       attention: attentionOf(row, facts),
     };
     const open = payload.starting || row.state !== 'not-running';
-    const matches = matchesFilter(row, view.filter);
-    // A `new` terminal keeps its own session's row while it is there (A28, ruled), also a row step
-    // 1 does not list (a session that ended before its first prompt has no transcript); a done one
-    // is hidden as any done row that stopped.
-    const ownNew =
-      terminal !== null && terminal.kind === 'new' && terminal.expectedSessionId === row.id;
+    // Listed without the filter (stage A's rule with the view's showDone): the counts' rows.
     const listed =
       isListed(row, open || view.showDone) || (ownNew && (open || view.showDone || !row.done));
-    if (!listed) {
-      if (matches && (ownNew || isListed(row, true))) {
-        doneHidden += 1;
+    // No Searchable is made while no word is set (task 90's review).
+    const matches =
+      (words.length === 0 || matchesWords(searchable(row), words)) &&
+      matchesChips(row, open, chips);
+    const name = sectionOf(row, nowNs, open);
+    const entry: Entry = { row, terminal, payload };
+    if (listed) {
+      if (payload.attention !== null) {
+        needYouCount += 1;
+      } else if (payload.starting) {
+        counts.starting += 1;
+      } else if (payload.elsewhere !== null) {
+        counts.elsewhere += 1;
+      } else if (row.state === 'not-running') {
+        counts.notRunning += 1;
+      } else {
+        counts[row.state] += 1;
       }
-      continue;
     }
-    if (payload.attention !== null) {
-      needYouCount += 1;
-    } else if (payload.starting) {
-      counts.starting += 1;
-    } else if (payload.elsewhere !== null) {
-      counts.elsewhere += 1;
-    } else if (row.state === 'not-running') {
-      counts.notRunning += 1;
-    } else {
-      counts[row.state] += 1;
+    // While filtering a done row the words and chips match is listed too (E5).
+    const inSection = matches && (listed || filtering);
+    if (inSection) {
+      shown.get(name)?.push(entry);
+    } else if (!filtering) {
+      doneHidden += 1; // not filtering, so it is done and the view hides done ones
     }
-    if (matches) {
-      shown.get(sectionOf(row, nowNs, open))?.push({ row, terminal, payload });
+    if (switching) {
+      // While filtering, a row the words and chips match is shown, done or in Earlier: nothing
+      // hides it. Otherwise each part names what hides it now or once the filter is cleared.
+      const hiddenBy: HiddenBy[] = [];
+      if (!filtering || !matches) {
+        if (!matches) hiddenBy.push('filter');
+        if (!listed) hiddenBy.push('done');
+        if (name === 'earlier' && earlierFolded) hiddenBy.push('folded');
+      }
+      switchable.push({ entry, open, hiddenBy });
     }
   }
 
-  // S2 12.8 (ruled for stage A): while a filter is set every section is unfolded, so that a match
-  // in Earlier is seen.
-  const unfolded = new Set(view.unfolded);
-  const folded = (name: SectionName) =>
-    name === 'earlier' && view.filter === '' && !unfolded.has(name);
   const sections = SECTIONS.map((name) => {
     const entries = shown.get(name) ?? [];
     entries.sort(name === 'open' ? compareOpen : compareRecent);
-    return sectionPayload(name, entries, folded(name));
+    const folded = name === 'earlier' && !filtering && earlierFolded;
+    // S2 12.2: running sessions never stack, and a filter flattens every stack.
+    const drawn =
+      name === 'open' || filtering
+        ? () => entries.map((entry) => entry.payload)
+        : () => stacked(entries, view.opened, view.selected);
+    return sectionPayload(name, entries, folded, drawn);
   });
   const needing: { id: string; attention: AttentionPayload }[] = [];
   for (const section of sections) {
@@ -339,5 +436,38 @@ export function buildListMessage(
     selected:
       input.selected !== null && input.selected.sessionId === view.selected ? input.selected : null,
     dirs: projectDirs(input.rows),
+    filtering,
+    switcher: typeof view.switcher === 'string' ? switcher(view.switcher, switchable, facts) : null,
   };
+}
+
+/**
+ * E9's input: every row listed with done ones shown, Open's in Open's order and then the others
+ * most recent first, each once with its payload (the list's, without a stack) and what hides it;
+ * `needOrder` is B6's order (`attentionOrder`) over those that need you.
+ */
+function switcher(
+  query: string,
+  switchable: readonly SwitchEntry[],
+  facts: AttentionFacts,
+): SwitcherPayload {
+  const ordered = [
+    ...switchable.filter((one) => one.open).sort((a, b) => compareOpen(a.entry, b.entry)),
+    ...switchable.filter((one) => !one.open).sort((a, b) => compareRecent(a.entry, b.entry)),
+  ];
+  const needing: { id: string; attention: AttentionPayload }[] = [];
+  const candidates: SwitchCandidate[] = ordered.map(({ entry, open, hiddenBy }) => {
+    const { attention } = entry.payload;
+    if (attention !== null) {
+      needing.push({ id: entry.payload.id, attention });
+    }
+    return {
+      row: entry.payload,
+      searchable: searchable(entry.row),
+      open,
+      need: attention !== null,
+      hiddenBy,
+    };
+  });
+  return switcherPayload(query, candidates, attentionOrder(needing, facts));
 }

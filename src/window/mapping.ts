@@ -155,13 +155,7 @@ export function mapTerminals(input: {
   const programs = new Map<number, { procStart: number; termId: string }>();
   for (const terminal of terminals) {
     const { program } = terminal;
-    if (
-      program !== null &&
-      (terminal.exit === null ||
-        (!keeperExitApplied(terminal) &&
-          lostLately(terminal.exit.atNs, nowNs) &&
-          lives(program, proc)))
-    ) {
+    if (program !== null && (terminal.exit === null || lostProgramMayRun(terminal, proc, nowNs))) {
       programs.set(program.pid, { procStart: program.procStart, termId: terminal.id });
     }
   }
@@ -221,13 +215,37 @@ export function mapTerminals(input: {
 }
 
 /**
+ * S2 7.5 and 7.8 (plan task 57; shared by task 82): whether a terminal that has an exit its keeper
+ * did not send — a lost keeper's, made up at once (`keeperExitApplied` false) — still has a program
+ * that may run: the one its keeper reported, alive by design 5.5 or not readable (`lives`), and the
+ * loss less than 60 s before `nowNs` (`lostLately`). False for a terminal without an exit (its
+ * program is not lost), without a program (a keeper lost before `T`), or with an exit its keeper
+ * sent (it reaped the program). The one rule for such a program: the mapping counts it as its
+ * terminal's, the tick does not settle its exit yet, and the window refuses a start of its session.
+ */
+export function lostProgramMayRun(
+  terminal: Pick<TerminalInfo, 'state' | 'program' | 'exit'>,
+  proc: Proc,
+  nowNs: Ns,
+): boolean {
+  const { program, exit } = terminal;
+  return (
+    program !== null &&
+    exit !== null &&
+    !keeperExitApplied(terminal) &&
+    lostLately(exit.atNs, nowNs) &&
+    lives(program, proc)
+  );
+}
+
+/**
  * Whether the terminal's exit is one its keeper sent, applied (`ended`, `not-started`): the keeper
  * reaped the program before it sent it (S2 7.8), so the program is over whatever /proc says. Any
  * other exit is a lost keeper's, made up at once (`lost`), or one still on its way through the
  * screen side (the state not over yet); its program counts while it may still run and the loss is
  * less than 60 s old (plan task 57) — which a sent exit's reaped program never does.
  */
-function keeperExitApplied(terminal: TerminalInfo): boolean {
+function keeperExitApplied(terminal: Pick<TerminalInfo, 'state'>): boolean {
   return terminal.state === 'ended' || terminal.state === 'not-started';
 }
 
@@ -248,9 +266,10 @@ function lostLately(atNs: string, nowNs: Ns): boolean {
  * start. What cannot be told — a read that throws, a stat line without a readable start — may still
  * run and counts (ruled on task 57's review 2; Proc's contract: a process that could not be read is
  * never taken for one that is gone). It errs only towards keeping: `holderPlace` matches a program
- * by pid AND start, so a pid another process took never reaches it.
+ * by pid AND start, so a pid another process took never reaches it. Exported for `launches.ts`'s
+ * `gone` (plan task 82: one rule, not a second copy of it).
  */
-function lives(program: { pid: number; procStart: number }, proc: Proc): boolean {
+export function lives(program: { pid: number; procStart: number }, proc: Proc): boolean {
   let stat: string | null;
   try {
     stat = proc.stat(program.pid);

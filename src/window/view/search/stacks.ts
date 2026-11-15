@@ -1,26 +1,16 @@
 /**
  * Stacks (S2 12.2, plan E6): in This week and in Earlier, each on its own, the rows of one group
- * stack under the newest. Pure; imports nothing.
+ * stack under the newest. Pure.
  *
  * Which rows reach this rule is the caller's (`build.ts`, task 96): only This week's and Earlier's
  * (running sessions never stack), and none while filtering (S2 12.8: a filter flattens every
  * stack; the caller then gives every row `stack: null`). A view without `opened` is this rule's own
  * (ruled by the plan owner): `view.opened` is passed as it comes, and `undefined` gives no stacks
  * at all, so that a page which cannot draw stacks never has a session hidden in one.
+ *
+ * Imports (plan 2.1): types only, from `protocol.ts`.
  */
-
-/** RowPayload.stack (E6; task 96 moves this type into protocol.ts, unchanged). */
-export interface StackPayload {
-  /** The group the stack is of (the rows' group, as sanitised). */
-  group: string;
-  /** Its rows, the head included: at least 2. */
-  size: number;
-  /** E6: `opened` names the group, or a member other than the head is selected. */
-  open: boolean;
-  role: 'head' | 'member';
-  /** The head's session id. */
-  head: string;
-}
+import type { StackPayload } from '../../protocol.ts';
 
 export interface StackEntry {
   readonly id: string;

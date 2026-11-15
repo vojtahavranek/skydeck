@@ -12,44 +12,18 @@
  *
  * Imports (plan 2.1): values only from this directory; types from `protocol.ts`.
  */
-import type { NsText, RowPayload } from '../../protocol.ts';
+import type {
+  HiddenBy,
+  NsText,
+  RestoreOffer,
+  RowPayload,
+  SwitchItem,
+  SwitchRank,
+  SwitcherPayload,
+} from '../../protocol.ts';
 import { foundIn, matchesWords, searchWords } from './filter.ts';
 import type { Searchable } from './filter.ts';
 
-export type SwitchRank = 'need' | 'open' | 'not-running' | 'done';
-/** E10: what the page changes so that its list shows the row, in this order of meaning:
- *  `filter` — its words or chips do not match the row; `done` — the row is done and not open and
- *  the view shows no done sessions once the filter is cleared; `folded` — the row is in Earlier
- *  and Earlier is folded once the filter is cleared. [] when the list shows the row. */
-export type HiddenBy = 'filter' | 'done' | 'folded';
-export interface SwitchItem {
-  rank: SwitchRank;
-  row: RowPayload;
-  /** foundIn(row.title, words). */
-  found: [number, number][];
-  hiddenBy: HiddenBy[];
-}
-/** E12: stage C's offer, listed in the switcher. */
-export interface RestoreOffer {
-  /** The preselected entries: at least 1. */
-  count: number;
-  /** The banner's `lastActivityNs`. */
-  lastActivityNs: NsText | null;
-  /** The preselected entries' ids, in the banner's order. */
-  sessionIds: string[];
-}
-export interface SwitcherPayload {
-  /** The text it answers (view.switcher), as the page sent it; E10's picks compare it. */
-  query: string;
-  /** E12 (ruled): the text is in command form — its first character is `>` — so `items` is []
-   *  and `more` 0; the page says so from this field and never tests the text itself. */
-  command: boolean;
-  items: SwitchItem[];
-  /** How many matching sessions were left out after MAX_ITEMS. */
-  more: number;
-  /** E12: switcherPayload gives null; the server's listFor sets it (task 98). */
-  restore: RestoreOffer | null;
-}
 export const MAX_ITEMS = 50;
 
 /** The one command of the switcher's command form (E12). */

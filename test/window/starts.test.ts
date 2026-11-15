@@ -22,6 +22,7 @@ import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import { startDeadline } from '../../src/sessions/launch.ts';
 import type { PreparedLaunch } from '../../src/sessions/resume.ts';
 import type { KeeperHello, KeeperSpec } from '../../src/window/frames.ts';
+import type { TerminalInfo } from '../../src/window/hub.ts';
 import { decideFoundKeeper, settleEndedTerminal } from '../../src/window/starts.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
@@ -106,6 +107,8 @@ function resumeLaunch(d: TestDeck): { prepared: PreparedLaunch; lock: string; he
   assert.ok(lock !== null);
   return { prepared, lock, hello: helloOf(d, prepared, lock) };
 }
+
+type LostTerminal = Pick<TerminalInfo, 'state' | 'program' | 'exit'>;
 
 /** decideFoundKeeper's refusal when the store's lock is not of the hello's take (C19). */
 const TAKEN_OVER = '0b5f3c1e: its resume lock was taken over';
@@ -541,6 +544,144 @@ describe('settleEndedTerminal', () => {
     spoolStart(d, prepared.sessionId, 4343, T0 + SEC, 1, false);
     settleEndedTerminal(d.deck, hello);
     assert.equal(d.deck.store.meta(prepared.sessionId)?.label, 'fix the build');
+  });
+});
+
+describe('settleEndedTerminal: a lost keeper’s exit while its program may still run (task 82; S2 7.8)', () => {
+  // A keeper that died sent no X: the server made the exit up at once (SIGHUP). Nobody reaped the
+  // program; before its SessionStart it holds nothing the guard can see, so the lock is all the
+  // command line has.
+  const PROGRAM = { pid: 6161, procStart: 7777 };
+  /** What the registry listed for the terminal when its exit came: lost, its program, its exit. */
+  const lostAt = (atNs: bigint, over: Partial<LostTerminal> = {}): LostTerminal => ({
+    state: 'lost',
+    program: PROGRAM,
+    exit: { code: null, signal: 1, atNs: String(atNs), notStarted: null },
+    ...over,
+  });
+  const alive = (d: TestDeck, start = 7777): void => {
+    d.proc.setProcess(6161, { stat: statLine(6161, start), cmdline: ['claude'] });
+  };
+
+  test('not started and its program lives: the lock is kept and the exit is left for later (false); once the program is gone it is released (true)', (t) => {
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    alive(d);
+    const lost = lostAt(T0);
+    d.clock.advanceMs(2000);
+    assert.equal(settleEndedTerminal(d.deck, hello, lost), false);
+    assert.equal(readLock(d.deck, S1), lock);
+    assert.throws(() => prepareResumeById(d.deck, S1), /is being resumed/);
+    d.proc.setProcess(6161, null); // it ran its end and is gone
+    assert.equal(settleEndedTerminal(d.deck, hello, lost), true);
+    assert.equal(readLock(d.deck, S1), null);
+    prepareResumeById(d.deck, S1); // at once a second resume is accepted
+  });
+
+  test('what cannot be told may still run: a stat read that throws, a stat line without a start — kept', (t) => {
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    d.proc.setProcess(6161, { stat: '6161 (claude) S', cmdline: ['claude'] });
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false, 'no start');
+    const failing = deckWith(d.deck, {
+      proc: {
+        stat: () => {
+          throw Object.assign(new Error('too many open files'), { code: 'EMFILE' });
+        },
+      },
+    });
+    assert.equal(settleEndedTerminal(failing, hello, lostAt(T0)), false, 'unreadable');
+    assert.equal(readLock(d.deck, S1), lock);
+  });
+
+  test('its pid with another start is another process: released at once', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    alive(d, 8888);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), true);
+    assert.equal(readLock(d.deck, S1), null);
+  });
+
+  test('only for less than 60 s after the loss by the server’s clock: kept at 59 s and with the clock stepped back, released at 60 s (the named limit)', (t) => {
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    alive(d);
+    d.clock.setNs(T0 + 59n * SEC);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false, '59 s');
+    d.clock.setNs(T0 - 3600n * SEC);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false, 'stepped back');
+    assert.equal(readLock(d.deck, S1), lock);
+    d.clock.setNs(T0 + 60n * SEC);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), true, '60 s');
+    assert.equal(readLock(d.deck, S1), null);
+  });
+
+  test('its program reported its start meanwhile: the settling still waits (ruled: the whole of it); once the program is gone it is settled and releases nothing', (t) => {
+    const d = testDeck(t);
+    const { lock, hello } = resumeLaunch(d);
+    alive(d);
+    spoolStart(d, S1, 4343, T0 + SEC, 1); // its child, below a wrapper, holds the session
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false);
+    assert.equal(readLock(d.deck, S1), lock);
+    d.proc.setProcess(6161, null);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), true);
+    assert.equal(readLock(d.deck, S1), lock, 'started: the settlement keeps it (design 7.6)');
+    assert.throws(() => prepareResumeById(d.deck, S1), /is running \(pid 4343\)/);
+  });
+
+  test('a new session (ruled: it waits as a resume does): its label and group stay while the program may still run; kept for good once it reported its start', (t) => {
+    const d = testDeck(t);
+    const { prepared, hello } = newLaunch(d);
+    alive(d);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false);
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.label, 'fix the build');
+    // Its SessionStart within the 60 s: the session is the program's now.
+    spoolStart(d, prepared.sessionId, 4343, T0 + SEC, 1);
+    d.clock.setNs(T0 + 30n * SEC);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false);
+    d.proc.setProcess(6161, null);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), true);
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.label, 'fix the build');
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.group, 'ops');
+  });
+
+  test('a new session with no start: settled as before once its program is gone, or 60 s after the loss — its label and group removed', (t) => {
+    const gone = testDeck(t);
+    const first = newLaunch(gone);
+    alive(gone);
+    assert.equal(settleEndedTerminal(gone.deck, first.hello, lostAt(T0)), false);
+    gone.proc.setProcess(6161, null);
+    assert.equal(settleEndedTerminal(gone.deck, first.hello, lostAt(T0)), true);
+    assert.equal(gone.deck.store.meta(first.prepared.sessionId), null, 'program gone');
+    const late = testDeck(t);
+    const second = newLaunch(late);
+    alive(late);
+    late.clock.setNs(T0 + 59n * SEC);
+    assert.equal(settleEndedTerminal(late.deck, second.hello, lostAt(T0)), false, '59 s');
+    late.clock.setNs(T0 + 60n * SEC);
+    assert.equal(settleEndedTerminal(late.deck, second.hello, lostAt(T0)), true, '60 s');
+    assert.equal(late.deck.store.meta(second.prepared.sessionId), null, '60 s past');
+  });
+
+  test('an exit the keeper sent (it reaped the program), a keeper lost before T, or no terminal: released as before', (t) => {
+    for (const terminal of [
+      lostAt(T0, {
+        state: 'ended',
+        exit: { code: 0, signal: null, atNs: String(T0), notStarted: null },
+      }),
+      lostAt(T0, {
+        state: 'not-started',
+        exit: { code: null, signal: null, atNs: String(T0), notStarted: 'x' },
+      }),
+      lostAt(T0, { program: null }),
+      null,
+    ]) {
+      const d = testDeck(t);
+      const { hello } = resumeLaunch(d);
+      alive(d); // the pid and start live: only the exit the keeper sent tells it is over
+      assert.equal(settleEndedTerminal(d.deck, hello, terminal), true, terminal?.state ?? 'none');
+      assert.equal(readLock(d.deck, S1), null, terminal?.state ?? 'none');
+    }
   });
 });
 

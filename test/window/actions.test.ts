@@ -25,7 +25,7 @@ import type { PageInfo, TerminalHub, TerminalInfo, TerminalState } from '../../s
 import type { ActMessage, ResultMessage } from '../../src/window/protocol.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { BOOT_A, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
+import { BOOT_A, S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
 import { startRunning, userRecord, writeTranscript } from '../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 
@@ -1700,4 +1700,30 @@ describe('restore and dismiss-restore reach their deps (plan C 2.3)', () => {
     }
     assert.deepEqual(h.calls, []);
   });
+});
+
+test("resume is refused while a lost terminal's program may still run (task 82): the guard's words, nothing built or taken", async (t) => {
+  // The program outlived its keeper's death before its SessionStart: the guard sees no holder, the
+  // window sees the program its keeper reported.
+  const d = testDeck(t);
+  resumableSession(d);
+  d.proc.setProcess(6161, { stat: statLine(6161, 7777), cmdline: ['claude'] });
+  const terminals = [
+    info('aaaaaaaaaaa1', 'lost', {
+      program: { pid: 6161, procStart: 7777 },
+      exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+    }),
+  ];
+  const h = harness(d, { terminals });
+  assert.deepEqual(
+    await h.act(resume(S1, 3)),
+    refused(3, `${S1.slice(0, 8)} is running (pid 6161)`),
+  );
+  assert.deepEqual(h.events, []);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+  assert.deepEqual(h.hub.closed, []);
+  assert.deepEqual(h.logs, []);
+  d.proc.setProcess(6161, null); // the program has ended
+  assert.equal((await h.act(resume(S1, 4))).ok, true);
+  assert.deepEqual(h.hub.closed, ['aaaaaaaaaaa1']);
 });

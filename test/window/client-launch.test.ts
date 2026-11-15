@@ -15,6 +15,7 @@ import type { Net } from '../../src/platform/types.ts';
 import { controlClient } from '../../src/window/client.ts';
 import type { ControlClient } from '../../src/window/client.ts';
 import type { LaunchAnswer, NewRequest, RestoreOutcomeLine } from '../../src/window/protocol.ts';
+import { until } from '../helpers/keeper.ts';
 import { S1, S2 } from '../helpers/platform.ts';
 import { startFakeServe, windowMachine } from '../helpers/window-machine.ts';
 import type { WindowMachine } from '../helpers/window-machine.ts';
@@ -45,6 +46,8 @@ interface Bench {
   /** Every request this client sent over the socket. */
   sent: Sent[];
   client: ControlClient;
+  /** The fake serve. */
+  fake: Awaited<ReturnType<typeof startFakeServe>>;
 }
 
 /** A machine, the fake serve with `env` (and FAKE_SERVE_REQUESTS), and a client with the clock. */
@@ -54,7 +57,7 @@ async function bench(
 ): Promise<Bench> {
   const m = windowMachine(t);
   const file = join(m.s.root, 'requests.jsonl');
-  await startFakeServe(t, m, { FAKE_SERVE_REQUESTS: file, ...env });
+  const fake = await startFakeServe(t, m, { FAKE_SERVE_REQUESTS: file, ...env });
   const sent: Sent[] = [];
   const net: Net = {
     ...m.platform.net,
@@ -65,6 +68,7 @@ async function bench(
   };
   return {
     m,
+    fake,
     sent,
     requests: () =>
       existsSync(file)
@@ -231,6 +235,78 @@ describe('controlClient: POST /resume and POST /new (plan C2, C4, C11)', () => {
     }
   });
 
+  test('the socket fails after the request reached the server (it went away): the line says that the session may have been started (ruled, task 76)', async (t) => {
+    for (const ask of [
+      (c: ControlClient) => c.resume(S1),
+      (c: ControlClient) => c.newSession(NEW),
+    ]) {
+      const b = await bench(t, { FAKE_SERVE_LAUNCH: 'silent' });
+      const asked = ask(b.client);
+      await until(() => b.requests().length === 1, 'the request reached launch', 10_000);
+      b.fake.child.kill('SIGKILL');
+
+      await assert.rejects(asked, (error: unknown) => {
+        assert.ok(error instanceof SkydeckError, String(error));
+        assert.equal(
+          error.message.replace(/\((E[A-Z]+)\)/, '(<code>)'),
+          `the window's server cannot be asked on ${b.m.runtime().serverSock} (<code>); it may have started the session: run skydeck to see whether it runs`,
+        );
+        return true;
+      });
+    }
+  });
+
+  test('nothing sent — no socket: today’s line, nothing started (ruled, task 76)', async (t) => {
+    const b = await bench(t, { FAKE_SERVE_LAUNCH: `answer:${JSON.stringify(ANSWER)}` });
+    const missing = join(b.m.runtime().dir, 'nothing-here.sock');
+    const client = controlClient(b.m.platform.net, missing, b.m.platform.clock);
+    const line = `the window's server does not run (nothing answers on ${missing})`;
+
+    await rejectsWith(client.resume(S1), line);
+    await rejectsWith(client.newSession(NEW), line);
+    await rejectsWith(
+      client.restore({ sessionIds: [S1], all: false }, () => {}),
+      line,
+    );
+    assert.deepEqual(b.requests(), []);
+  });
+
+  test('a body over the server’s 64 KiB: the 413 row’s line, and nothing is sent (ruled, task 76)', async (t) => {
+    const b = await bench(t, { FAKE_SERVE_LAUNCH: `answer:${JSON.stringify(ANSWER)}` });
+    const line = "the window's server refused the request (body: too large); use --here";
+
+    await rejectsWith(b.client.newSession({ ...NEW, flags: ['p'.repeat(64 * 1024)] }), line);
+    await rejectsWith(
+      b.client.restore(
+        { sessionIds: Array.from({ length: 2000 }, (_, i) => `${S1}-${i}`), all: false },
+        () => {},
+      ),
+      line,
+    );
+    assert.deepEqual(b.sent, []);
+    // At the limit it is sent, and the server takes it.
+    const flags = ['x'];
+    const within = { ...NEW, flags };
+    flags[0] = 'p'.repeat(64 * 1024 - Buffer.byteLength(JSON.stringify(within)) + 1);
+    assert.equal(Buffer.byteLength(JSON.stringify(within)), 64 * 1024);
+    assert.deepEqual(await b.client.newSession(within), ANSWER);
+    assert.equal(b.sent.length, 1);
+  });
+
+  test('a 404 of a kind that is not a route’s: a refusal, not unknown-route', async (t) => {
+    const m = windowMachine(t);
+    const net: Net = {
+      ...m.platform.net,
+      requestUnix: () => Promise.resolve({ status: 404, body: { error: 'token: unknown' } }),
+    };
+    const client = controlClient(net, '/nowhere.sock', m.platform.clock);
+
+    await rejectsWith(
+      client.resume(S1),
+      "the window's server refused POST /resume (404: token: unknown)",
+    );
+  });
+
   test('a field a newer server adds is left out; sessionId null is read', async (t) => {
     const b = await bench(t, {
       FAKE_SERVE_LAUNCH: `answer:${JSON.stringify({ code: 4, lines: [], sessionId: null, extra: 1 })}`,
@@ -309,6 +385,37 @@ describe('controlClient: POST /restore (plan C5, C14)', () => {
     const took = performance.now() - started;
     assert.ok(took >= 590 && took < 10_000, `after answerMs of silence (${took} ms)`);
     assert.deepEqual(seen, ['line 1']);
+  });
+
+  test('a server that dies after the first line (its connection reset): the stopped-answering line', async (t) => {
+    const b = await bench(t, { FAKE_SERVE_RESTORE: 'silent-after:1' });
+    const seen: string[] = [];
+
+    const asked = b.client.restore({ sessionIds: [S1], all: false }, (line) => seen.push(line));
+    await until(() => seen.length === 1, 'the first line', 10_000);
+    b.fake.child.kill('SIGKILL');
+
+    await rejectsWith(asked, STOPPED_ANSWERING);
+    assert.deepEqual(seen, ['line 1']);
+  });
+
+  test('a server that dies after the request reached it and before the first line: the line says that the restore may have started (ruled, task 76)', async (t) => {
+    const b = await bench(t, { FAKE_SERVE_RESTORE: 'silent-after:0' });
+    const seen: string[] = [];
+
+    const asked = b.client.restore({ sessionIds: [S1], all: false }, (line) => seen.push(line));
+    await until(() => b.requests().length === 1, 'the request reached launch', 10_000);
+    b.fake.child.kill('SIGKILL');
+
+    await assert.rejects(asked, (error: unknown) => {
+      assert.ok(error instanceof SkydeckError, String(error));
+      assert.equal(
+        error.message.replace(/\((E[A-Z]+)\)/, '(<code>)'),
+        `the window's server cannot be asked on ${b.m.runtime().serverSock} (<code>); it may have started the restore: run skydeck to see what started`,
+      );
+      return true;
+    });
+    assert.deepEqual(seen, []);
   });
 
   test('a stream that keeps coming is not cut off by answerMs', async (t) => {
