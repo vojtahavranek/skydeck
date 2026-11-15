@@ -683,6 +683,36 @@ describe('resume --window (S2 11.4; plan C11, C12)', () => {
     assert.equal(r.stderr, `${FLAGS_LINE}\n`);
   });
 
+  test('the status look after the answer fails: C12’s line with the failure as its reason; the exit code stays the answer’s (ruled, task 76)', async (t) => {
+    // An old server's /status the client cannot read whole: the look for a page fails.
+    const w = windowCase(t);
+    await serving(t, w, { ...STARTED, code: 4 }, { FAKE_SERVE_STATUS: 'pages-only' });
+
+    const r = await w.run(['resume', '0b5f', '--window']);
+
+    assert.equal(r.code, 4, r.stderr);
+    assert.equal(
+      r.stderr,
+      `${FLAGS_LINE}\nskydeck: the window could not be opened: the window's server gave an answer to GET /status that cannot be read; run skydeck window\n`,
+    );
+    assert.ok(!r.asked.includes('POST /token'), JSON.stringify(r.asked));
+    assert.deepEqual(w.edgeCalls(), []);
+  });
+
+  test('the status look fails under CLAUDECODE: the same line, its advice ending "in a terminal of your own" (ruled, task 76)', async (t) => {
+    const w = windowCase(t);
+    await serving(t, w, STARTED, { FAKE_SERVE_STATUS: 'pages-only' });
+
+    const r = await w.run(['resume', '0b5f', '--window'], { CLAUDECODE: '1' });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stderr,
+      `${FLAGS_LINE}\nskydeck: the window could not be opened: the window's server gave an answer to GET /status that cannot be read; run skydeck window in a terminal of your own\n`,
+    );
+    assert.deepEqual(w.edgeCalls(), []);
+  });
+
   test('the answer’s lines are printed sanitised: no escape sequence, no CR', async (t) => {
     const w = windowCase(t);
     await serving(
