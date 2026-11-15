@@ -912,8 +912,9 @@ tick.
   by the pid of that keeper's `.pid` record (`keeperOf`, `signalKeeper`; nothing else is
   signalled). Once the terminal is `lost`, a refresh while the holder demonstrably lives (no `hup`
   or `exit` record, the row still running) → the terminal is not closed and the session not
-  elsewhere; then the file, the stand-in's `exit` record, refreshes until the row is
-  `not-running` → the terminal is still there, `lost`, its exit `{ code: null, signal: 1 }`, the
+  elsewhere; then the file, the stand-in's `exit` record, the holder's process gone (the record
+  comes a moment before the exit, and `ended-unexpectedly` needs the last holder gone), refreshes
+  until the row is `not-running` → the terminal is still there, `lost`, its exit `{ code: null, signal: 1 }`, the
   row marked `ended-unexpectedly`. It fails on `main` 27d6e0e (the terminal is closed at the
   first refresh after the loss) and passes with the fix. It holds the shape "the holder below the
   program"; the real `claude` is the program itself, a shape the mapping's cases carry (the
