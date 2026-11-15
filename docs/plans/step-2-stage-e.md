@@ -134,7 +134,7 @@ marked **shared**.
 | 94 | `web/icons/skydeck.svg`, `web/icons/icon-16.png`, `web/icons/icon-32.png`, `web/icons/icon-48.png`, `web/icons/icon-192.png`, `web/icons/icon-512.png`, `web/icons/icon-192-maskable.png`, `web/icons/icon-512-maskable.png`, `web/icons/favicon.ico`, `web/manifest.webmanifest`, `scripts/icons.ts`, `test/window/icons.test.ts` | `src/window/assets.ts`, `test/window/assets.test.ts` |
 | 96 | `test/window/view/search-list.test.ts`, `test/window/protocol-search.test.ts` | `src/window/view/search/filter.ts`, `stacks.ts`, `switcher.ts` (their message types now come from `protocol.ts`); **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts` (the two cases that pin stage A's view without `chips`), `test/window/view/build.test.ts` (the pinned case extended to `search/`, the allowed imports; the cases that pin design 7.4's filter in the window), `test-page/list.test.ts` (its one case, at about line 487, that expects a done session to stay hidden while filtering), `docs/design-step-2.md` (4.3, 8.2.3, 12.2, 12.8) |
 | 95 | `test-page/hidden-selection.test.ts` | **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `web/pane.js`, `web/app.js` (the selected session's row, in three places), `web/edit.js` (stage D's: `update` reads that row), `test/window/view/build.test.ts` (new cases only), `test/web/pane.test.ts` (new cases only), `docs/design-step-2.md` (8.2.3's `selectedRow`, 12.6, 12.9) |
-| 97 | `web/chips.js`, `web/search.css`, `test-page/search.test.ts`, `test-page/icon.test.ts` | **shared:** `web/list.js`, `web/index.html` (the style sheet and the icon's links only), `docs/design-step-2.md` (8.2.1, 12.12; 12.2's look of a stack; 12.9's ← → on a stack) |
+| 97 | `web/chips.js`, `web/search.css`, `test-page/search.test.ts`, `test-page/icon.test.ts` | **shared:** `web/list.js`, `web/index.html` (the style sheet and the icon's links only), `web/app.js` (ruled: the initial `state.view`'s `chips` and `opened`, and `changeView`'s parameter type, only), `docs/design-step-2.md` (8.2.1, 12.12; 12.2's look of a stack; 12.9's ← → on a stack) |
 | 98 | `web/switcher.js`, `test-page/switcher.test.ts`, `test/window/switcher-offer.test.ts` | `web/search.css` (the switcher's styles); **shared:** `src/window/server.ts` (the offer, one statement in `listFor`), `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html` (`#switcher`, the `Switch…` button, the key bar's hint), `test/web/keys.test.ts`, `test-page/shell.test.ts` (the Ctrl+Shift+P steps of the later-keys case), `test-page/keys.test.ts` (its Ctrl+Shift+P step), `docs/design-step-2.md` (12.7, 12.8's switcher, 12.9) |
 | 99 | — | **shared:** `docs/install.md`, `docs/manual-checks.md`, `README.md`, `docs/design-step-2.md` (18, 19) |
 
@@ -1041,8 +1041,12 @@ gives on `main`.
 - Create: `web/chips.js`, `web/search.css`, `test-page/search.test.ts`, `test-page/icon.test.ts`
 - Modify: `web/list.js` (the chips under the filter field; `opened` in every view, and E6's
   memory; the stack's badge, its `+n more` line, its members; ← → on stacks; `list.filtering`;
-  `reveal`), `web/index.html` (`search.css`; the icon's links), `docs/design-step-2.md` (8.2.1:
-  the two paths' answers; 12.12: E14; 12.2: E7's look; 12.9: E7's ← → on a stack)
+  `reveal`), `web/index.html` (`search.css`; the icon's links), `web/app.js` (ruled: the initial
+  `state.view` gains `chips: []` and `opened: []`, and `changeView`'s parameter type `chips?`
+  and `opened?` — those two places only: app.js's own views, the welcome's and a select's, send
+  `...state.view`, so a page's first views would otherwise lack `opened`),
+  `docs/design-step-2.md` (8.2.1: the two paths' answers; 12.12: E14; 12.2: E7's look; 12.9:
+  E7's ← → on a stack)
 
 **Behaviour.** As E4, E5, E6, E7 and 2.5. The `+n more` line and every element list.js adds are
 made once and kept across renders, as stage A's rows (a render never loses a click). The filter
@@ -1057,13 +1061,18 @@ contexts through stage B's `newContext`)
   is gone; each chip pressed → `aria-pressed` and the rows the server sent, the keyboard where it
   was; `Show done`, `a` and the footer's `show` are one state (each turns the others on);
   `No session matches the filter.` for a chip that matches nothing; nothing folds while a chip is
-  set; every view the page sends holds `opened`.
+  set; every view the page sends holds `opened` — the page's first view (the welcome's), a
+  select's and the list's own (ruled).
 - `search.test.ts`, stacks: three sessions of `ORB-1` in This week → one row with `×3` and the
   line `+2 more in ORB-1`; a click on the line → three rows, the members indented and marked;
   ← on a member → the head selected and the stack closed; → on the head → open; ← on the head →
   closed; ← on a row that is in no stack folds Earlier as before; ↓ from a closed head skips the
-  hidden members and the line; Ctrl+Tab back to a member selected earlier → its stack is open,
-  and it stays open (the view's `opened` names it) when the selection goes to a row outside it;
+  hidden members and the line; E6's memory (ruled: reached the way the page can) — the selected
+  session becomes a member of a closed stack (a newer session of its group appears) → the stack
+  is open, the page adds its group to `opened`, and it stays open when the selection goes to a
+  row outside it; Ctrl+Tab back to a member of an open stack selects it, and (named) Ctrl+Tab
+  skips a member of a stack the user closed — app.js's `previous` takes only a row the list
+  draws, and the page never knows a closed stack's members;
   a filter → no stack; a group of 1,025 bytes → never in a view the page sends; a hostile group
   `<img src=x onerror=…>` in the line and a hostile title on a member are text
   (`querySelector('img')` null); exactly one `#list [data-id]` per drawn row.

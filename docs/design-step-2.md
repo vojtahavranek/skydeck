@@ -2481,7 +2481,9 @@ plan task 27). Folding Earlier (← or a click on its header) with the selection
 selects the row above it; while a filter is set nothing folds. On a stack (12.2; stage E, plan
 E7), → on a closed head opens it, ← on an open head closes it, and ← on a member selects the head
 and closes the stack, as folding Earlier first selects the row above it; on any other row ← and →
-fold and unfold Earlier. Ctrl+Shift+1–9 are unchanged: the rows with a slot never stack. While
+fold and unfold Earlier. Ctrl+Shift+1–9 are unchanged: the rows with a slot never stack. Ctrl+Tab
+skips a member of a closed stack (ruled: the page never knows a closed stack's members), as it
+skips a row a filter or a folded Earlier hides. While
 filtering (a word or a chip, 12.8) nothing folds and no stack is formed, so ← and → do nothing.
 The chips under the filter field (12.8) take no keyboard on a click: the keyboard stays where it
 was (in the field, on the list, in the terminal). The selection is never on a row the

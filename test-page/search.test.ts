@@ -338,6 +338,52 @@ test('search and stacks in the list', async (t) => {
   const chromium = await browser(t);
 
   await t.test(
+    "every view the page sends holds `opened` (`[]` at least) and `chips`: the page's first view (the welcome's), a select's, and the list's own",
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 2n * MIN, 'ORB-1 one');
+      session(d, S2, 3n * MIN, 'ORB-1 two');
+      session(d, S3, 4n * MIN, 'plain');
+      setNote(d.deck, S1, 'a note');
+      await untilRows(page, [S1, S3], 'a closed stack and a row');
+      const [first] = await sentViews(page);
+      assert.deepEqual(
+        { selected: first?.['selected'], chips: first?.['chips'], opened: first?.['opened'] },
+        { selected: null, chips: [], opened: [] },
+        "the first view (the welcome's): nothing selected yet",
+      );
+
+      // A select's view (app.js's), then the list's own (a chip, a stack opened).
+      await toZone(page, 'list');
+      await page.keyboard.press('ArrowDown');
+      await untilSelected(page, S3);
+      const selects = (await sentViews(page)).filter((view) => view['selected'] === S3);
+      assert.ok(selects.length > 0, 'a view with the selection');
+      for (const view of selects) {
+        assert.deepEqual([view['chips'], view['opened']], [[], []], "a select's view");
+      }
+      await page.locator(`#list .list-more[data-head="${S1}"]`).click();
+      await untilOpened(page, ['ORB-1']);
+      await clickChip(page, 'Has note');
+      await untilRows(page, [S1], 'Has note');
+      assert.deepEqual(
+        { chips: (await lastView(page))['chips'], opened: (await lastView(page))['opened'] },
+        { chips: ['note'], opened: ['ORB-1'] },
+        'the list keeps both, each sent whole',
+      );
+      await page.keyboard.press('ArrowUp');
+      await untilSelected(page, S1);
+      assert.deepEqual(
+        { chips: (await lastView(page))['chips'], opened: (await lastView(page))['opened'] },
+        { chips: ['note'], opened: ['ORB-1'] },
+        'a select after them holds them too',
+      );
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
     'the filter: two words typed → the rows that have both; the first characters of a short id → its row; a done session that matches is listed with `done`, and the footer is gone; the field names the short id',
     async (t) => {
       const l = await launchedWithViews(t, chromium);
@@ -614,7 +660,7 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
-    'a selected session that becomes a member of a closed stack → the stack is open, the page adds its group to `opened`, and it stays open when the selection goes to a row outside it; Ctrl+Tab back to a member of the open stack selects it; a filter → no stack',
+    'a selected session that becomes a member of a closed stack → the stack is open, the page adds its group to `opened`, and it stays open when the selection goes to a row outside it; a filter → no stack',
     async (t) => {
       const l = await launchedWithViews(t, chromium);
       const { page, d } = l;
@@ -643,12 +689,6 @@ test('search and stacks in the list', async (t) => {
       await sleep(500);
       assert.deepEqual(await rowIds(page), [S1, S2, S3, S4], 'the stack stays open');
       assert.deepEqual((await lastView(page))['opened'], ['ORB-1']);
-      // Ctrl+Tab back to the member: selected, the stack still open.
-      await page.keyboard.press('Control+Tab');
-      await untilSelected(page, S2);
-      assert.deepEqual(await rowIds(page), [S1, S2, S3, S4]);
-      await page.locator(`#list [data-id="${S4}"]`).click();
-      await untilSelected(page, S4);
 
       // A filter flattens every stack: no head, no member, no badge, no line.
       await page.keyboard.press('/');
@@ -670,6 +710,42 @@ test('search and stacks in the list', async (t) => {
       assert.deepEqual(await rowIds(page), [S1, S2, S3]);
       await page.keyboard.press('Escape');
       await untilRows(page, [S1, S2, S3, S4], 'the filter cleared: the stack open again');
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    "Ctrl+Tab back to a member of an open stack selects it; Ctrl+Tab skips a member of a stack the user closed (the page does not know a closed stack's members), as it skips a filtered or a folded row",
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'ORB-1 first');
+      session(d, S2, 2n * MIN, 'ORB-1 second');
+      session(d, S3, 3n * MIN, 'ORB-1 third');
+      session(d, S4, 4n * MIN, 'plain work');
+      await untilRows(page, [S1, S4], 'the closed stack');
+
+      await toZone(page, 'list');
+      await page.locator(`#list .list-more[data-head="${S1}"]`).click();
+      await untilRows(page, [S1, S2, S3, S4], 'open');
+      await page.locator(`#list [data-id="${S2}"]`).click();
+      await untilSelected(page, S2);
+      await page.locator(`#list [data-id="${S4}"]`).click();
+      await untilSelected(page, S4);
+      await page.keyboard.press('Control+Tab');
+      await untilSelected(page, S2);
+      assert.deepEqual(await rowIds(page), [S1, S2, S3, S4], 'the stack still open');
+
+      // The user closes the stack (← on the member: its head selected). Ctrl+Tab then skips S2.
+      await page.keyboard.press('ArrowLeft');
+      await untilRows(page, [S1, S4], 'closed');
+      await untilSelected(page, S1);
+      await untilOpened(page, []);
+      await page.keyboard.press('Control+Tab');
+      await untilSelected(page, S4);
+      await sleep(500);
+      assert.deepEqual(await rowIds(page), [S1, S4], 'the stack stays closed');
+      assert.deepEqual((await lastView(page))['opened'], []);
       await healthy(page, l.problems);
     },
   );

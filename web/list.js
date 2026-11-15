@@ -848,10 +848,5 @@ export function createList(root, hooks) {
     }
   };
 
-  // Every view the page sends holds `chips` and `opened` (E6: a view without `opened` gets no
-  // stacks): the list's state is handed to the page once it is made, before any connection opens
-  // (app.js opens it once the key is read). A microtask, so that app.js has made every module.
-  queueMicrotask(() => hooks.view({ chips: [...chips], opened: [...opened] }));
-
   return { render, key, editFilter, reveal };
 }
