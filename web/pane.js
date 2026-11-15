@@ -28,9 +28,9 @@ export function isEnded(term) {
  * The selected session's row (S2 12.9, plan E13): the sections' row of `id`, else the list's
  * `selectedRow` when its id is `id` (the server's answer can be for the selection before, until
  * the next list or while the connection is lost), else null — also for a null list or id. The one
- * helper for it: app.js's call of `paneFor`, the header's `edit` and `done` (stage D) and
- * `editor.update` use it; the list keys take the sections' row only, and act on no session the
- * list does not show.
+ * helper for it: app.js's call of `paneFor`, the header's `edit` and `done` (stage D), the New
+ * form's directory (a hidden row's only while it has a terminal) and `editor.update` use it; the
+ * list keys take the sections' row only, and act on no session the list does not show.
  * @param {ListMessage | null} list
  * @param {string | null} id
  * @returns {RowPayload | null}

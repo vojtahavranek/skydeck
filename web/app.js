@@ -1109,7 +1109,14 @@ function render() {
       cards.resumeCard(pane.row, selected, lines);
       break;
     case 'new': {
-      const row = state.selected === null ? undefined : rowOf(state.selected);
+      // The selected session's directory (S2 12.6): a hidden selection's too while a terminal of
+      // the window shows it (E13; review 2, ruled), since its header was what the user saw.
+      const selectedOne = sessionRow(state.list, state.selected);
+      const row =
+        selectedOne !== null &&
+        (selectedOne.terminal !== null || rowOf(selectedOne.id) !== undefined)
+          ? selectedOne
+          : undefined;
       const dirs = state.list?.dirs ?? [];
       cards.header(null, null, null, listNow);
       cards.newForm({ dir: row?.dir ?? dirs[0] ?? '', dirs });

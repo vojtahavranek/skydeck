@@ -133,7 +133,7 @@ marked **shared**.
 | 93 | `web/search-text.js`, `test/web/search-text.test.ts` | — |
 | 94 | `web/icons/skydeck.svg`, `web/icons/icon-16.png`, `web/icons/icon-32.png`, `web/icons/icon-48.png`, `web/icons/icon-192.png`, `web/icons/icon-512.png`, `web/icons/icon-192-maskable.png`, `web/icons/icon-512-maskable.png`, `web/icons/favicon.ico`, `web/manifest.webmanifest`, `scripts/icons.ts`, `test/window/icons.test.ts` | `src/window/assets.ts`, `test/window/assets.test.ts` |
 | 96 | `test/window/view/search-list.test.ts`, `test/window/protocol-search.test.ts` | `src/window/view/search/filter.ts`, `stacks.ts`, `switcher.ts` (their message types now come from `protocol.ts`, and they export none of them: ruled), `test/window/view/search/stacks.test.ts` and `switcher.test.ts` (their import lines only: those types from `protocol.ts`, ruled); **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts` (the two cases that pin stage A's view without `chips`), `test/window/view/build.test.ts` (the pinned case extended to `search/`, the allowed imports; the cases that pin design 7.4's filter in the window), `test-page/list.test.ts` (its one case, at about line 487, that expects a done session to stay hidden while filtering), `docs/design-step-2.md` (4.3, 8.2.3, 12.2, 12.8) |
-| 95 | `test-page/hidden-selection.test.ts` | **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `web/pane.js`, `web/app.js` (the selected session's row, in three places), `web/edit.js` (stage D's: `update` reads that row), `test/window/view/build.test.ts` (new cases only), `test/web/pane.test.ts` (new cases only), `docs/design-step-2.md` (8.2.3's `selectedRow`, 12.6, 12.9) |
+| 95 | `test-page/hidden-selection.test.ts` | **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `web/pane.js`, `web/app.js` (the selected session's row, in three places, and the New form's directory, ruled), `web/edit.js` (stage D's: `update` reads that row), `test/window/view/build.test.ts` (new cases only), `test/web/pane.test.ts` (new cases only), `docs/design-step-2.md` (8.2.3's `selectedRow`, 12.6, 12.9) |
 | 97 | `web/chips.js`, `web/search.css`, `test-page/search.test.ts`, `test-page/icon.test.ts` | **shared:** `web/list.js`, `web/index.html` (the style sheet and the icon's links only), `docs/design-step-2.md` (8.2.1, 12.12; 12.2's look of a stack; 12.9's ← → on a stack) |
 | 98 | `web/switcher.js`, `test-page/switcher.test.ts`, `test/window/switcher-offer.test.ts` | `web/search.css` (the switcher's styles); **shared:** `src/window/server.ts` (the offer, one statement in `listFor`), `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html` (`#switcher`, the `Switch…` button, the key bar's hint), `test/web/keys.test.ts`, `test-page/shell.test.ts` (the Ctrl+Shift+P steps of the later-keys case), `test-page/keys.test.ts` (its Ctrl+Shift+P step), `docs/design-step-2.md` (12.7, 12.8's switcher, 12.9) |
 | 99 | — | **shared:** `docs/install.md`, `docs/manual-checks.md`, `README.md`, `docs/design-step-2.md` (18, 19) |
@@ -478,8 +478,9 @@ export function switcherFooter(action, more) {} // → string
 // web/pane.js — task 95
 /** E13: the selected session's row — the sections' row of `id`, else `list.selectedRow` when
  *  its id is `id`, else null (also for a null list or id). The one helper for it: app.js's call
- *  of paneFor, stage D's `edit` and `done` handlers in app.js and `editor.update` in edit.js use
- *  it, and nothing else looks the row up. */
+ *  of paneFor, stage D's `edit` and `done` handlers in app.js, the New form's directory in
+ *  app.js (a hidden row's only while it has a terminal of the window) and `editor.update` in
+ *  edit.js use it, and nothing else looks the row up. */
 export function sessionRow(list, id) {}      // → RowPayload | null
 // paneFor(selected, rows, terminals, newOpen, selectedRow = null): `selectedRow` is what
 // sessionRow gave for a session the rows lack (null otherwise). With a row — listed, or that one —
@@ -552,7 +553,10 @@ export function switcherKey(e) {}
 
 `web/app.js` (task 95) uses `sessionRow` for the selected session's row in its three places:
 `render()`'s `paneFor` call, and stage D's `edit` and `done` handlers of the header (the row they
-hand to `editor.open`); `web/edit.js`'s `update(list)` takes the dialog's session's row through
+hand to `editor.open`); and, ruled on task 95's review 2 (S2), a fourth: the New form's default
+directory (S2 12.6, `render()`'s `new` case), which takes a hidden selection's directory only while
+that row has a terminal of the window (its header was what the user saw; without one the right side
+showed nothing, and the form starts from the first known directory); `web/edit.js`'s `update(list)` takes the dialog's session's row through
 it, so that a dialog whose session a filter hides meanwhile goes on finding its row. Stage D's list
 keys keep the sections' row (app.js's `selectedRow()`): they act on no session the list does not
 show (ruled).

@@ -2345,7 +2345,8 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   has the terminal's exit — the bar is drawn from the row, not from the terminal (stage A's plan,
   contract 2.9 `endedBar(row, exit)`; accepted by the plan owner, review 2 of plan task 29).
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
-  directories, most recent first, defaulting to the selected session's, or a typed absolute path),
+  directories, most recent first, defaulting to the selected session's — from stage E also one
+  the list does not show while a terminal of the window shows it (12.9) —, or a typed absolute path),
   the label, the group and extra flags. A label or group left empty, or holding only white space,
   is none (ruled by the plan owner, review of plan task 32: `skydeck new --label ' '` is refused,
   a blank form field is not). A label that starts with a ticket key gives the group
