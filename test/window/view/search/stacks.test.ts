@@ -13,7 +13,8 @@ function entry(id: string, group: string | null, held = false): Entry {
   return { id, group, held, own: `own-${id}` };
 }
 
-const NONE: ReadonlySet<string> = new Set();
+/** `view.opened` of a page that draws stacks and has opened none. */
+const NONE: readonly string[] = [];
 
 /** The drawn rows as `id` (in no stack), `id^` (a head) or `id<` (a member), in order. */
 function shape(drawn: readonly { entry: Entry; stack: StackPayload | null }[]): string[] {
@@ -64,7 +65,7 @@ test('stackRows: a group is text, whatever it spells; rows and opened name it ex
   for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
     const rows = [entry('a1', name), entry('x', null), entry('a2', name)];
     assert.deepEqual(shape(stackRows(rows, NONE, null)), ['a1^', 'x'], name);
-    assert.deepEqual(shape(stackRows(rows, new Set([name]), null)), ['a1^', 'a2<', 'x'], name);
+    assert.deepEqual(shape(stackRows(rows, [name], null)), ['a1^', 'a2<', 'x'], name);
     assert.deepEqual(
       shape(stackRows([entry('a1', name), entry('b1', 'B')], NONE, 'a1')),
       ['a1', 'b1'],
@@ -82,7 +83,7 @@ test('stackRows: a group is text, whatever it spells; rows and opened name it ex
     const apart = stackRows([entry('a1', one), entry('a2', other)], NONE, null);
     assert.deepEqual(shape(apart), ['a1', 'a2'], why);
     const same = [entry('a1', one), entry('a2', one)];
-    assert.deepEqual(shape(stackRows(same, new Set([other]), null)), ['a1^'], why);
+    assert.deepEqual(shape(stackRows(same, [other], null)), ['a1^'], why);
   }
 });
 
@@ -113,18 +114,18 @@ test('stackRows: nothing of the input is changed in place', () => {
       Object.freeze(row),
     ),
   );
-  const opened = new Set(['G']);
+  const opened = Object.freeze(['G']);
   assert.deepEqual(shape(stackRows(rows, opened, 'a2')), ['a1^', 'a2<', 'h', 'x']);
-  assert.deepEqual([...opened], ['G']);
+  assert.deepEqual(opened, ['G']);
 });
 
 test('stackRows: no rows, nothing to draw', () => {
-  assert.deepEqual(stackRows([], new Set(['G']), 'a1'), []);
+  assert.deepEqual(stackRows([], ['G'], 'a1'), []);
 });
 
 test("stackRows: the entries drawn are the caller's own objects", () => {
   const rows = [entry('a1', 'G'), entry('a2', 'G'), entry('x', null)];
-  const drawn = stackRows(rows, new Set(['G']), null);
+  const drawn = stackRows(rows, ['G'], null);
   assert.equal(drawn[0]?.entry, rows[0]);
   assert.equal(drawn[1]?.entry, rows[1]);
   assert.equal(drawn[2]?.entry, rows[2]);
@@ -132,7 +133,7 @@ test("stackRows: the entries drawn are the caller's own objects", () => {
 });
 
 test('stackRows: a section without a stack is its rows in order, each with stack null', () => {
-  // The shape task 96 gives every row of a view without `opened`, and while filtering (E5, E6).
+  // The shape a view without `opened` gets (below), and task 96 gives while filtering (E5).
   const rows = [
     entry('a1', 'A'),
     entry('x', null),
@@ -146,11 +147,43 @@ test('stackRows: a section without a stack is its rows in order, each with stack
   );
 });
 
+// --- a view without opened (ruled) ---------------------------------------------------------------
+
+test('stackRows: opened absent (a page that cannot draw stacks) → no stacks: every row a row', () => {
+  const rows = [
+    entry('a1', 'G'),
+    entry('x', null),
+    entry('a2', 'G'),
+    entry('h', 'G', true),
+    entry('b1', 'H'),
+    entry('b2', 'H'),
+  ];
+  const expected = rows.map((row) => ({ entry: row, stack: null }));
+  assert.deepEqual(stackRows(rows, undefined, null), expected);
+  // A selected member opens nothing either: there is no stack to open.
+  assert.deepEqual(stackRows(rows, undefined, 'a2'), expected);
+  assert.deepEqual(stackRows(rows, undefined, 'b1'), expected);
+});
+
+test('stackRows: opened empty (a page that draws stacks, none opened) → stacks, all closed', () => {
+  const rows = [entry('a1', 'G'), entry('x', null), entry('a2', 'G'), entry('b1', 'H')];
+  const drawn = stackRows(rows, [], null);
+  assert.deepEqual(shape(drawn), ['a1^', 'x', 'b1']);
+  assert.deepEqual(drawn[0]?.stack, { group: 'G', size: 2, open: false, role: 'head', head: 'a1' });
+  assert.deepEqual(shape(stackRows(rows, [], 'a2')), ['a1^', 'a2<', 'x', 'b1']);
+});
+
+test('stackRows: opened as an array: each group it names is open, a repeated name as once', () => {
+  const rows = [entry('a1', 'G'), entry('a2', 'G'), entry('b1', 'H'), entry('b2', 'H')];
+  assert.deepEqual(shape(stackRows(rows, ['G', 'G'], null)), ['a1^', 'a2<', 'b1^']);
+  assert.deepEqual(shape(stackRows(rows, ['H', 'G'], null)), ['a1^', 'a2<', 'b1^', 'b2<']);
+});
+
 // --- open and closed -----------------------------------------------------------------------------
 
 test('stackRows: opened names the group → its members right after the head, open on all', () => {
   const rows = [entry('a1', 'G'), entry('a2', 'G'), entry('a3', 'G'), entry('x', null)];
-  const drawn = stackRows(rows, new Set(['G']), null);
+  const drawn = stackRows(rows, ['G'], null);
   assert.deepEqual(shape(drawn), ['a1^', 'a2<', 'a3<', 'x']);
   const head: StackPayload = { group: 'G', size: 3, open: true, role: 'head', head: 'a1' };
   const member: StackPayload = { ...head, role: 'member' };
@@ -169,13 +202,13 @@ test("stackRows: an open stack's members follow the head, before the rows betwee
     entry('x2', null),
     entry('a3', 'G'),
   ];
-  const drawn = stackRows(rows, new Set(['G']), null);
+  const drawn = stackRows(rows, ['G'], null);
   assert.deepEqual(shape(drawn), ['a1^', 'a2<', 'a3<', 'x1', 'b1', 'x2']);
 });
 
 test('stackRows: opened naming another group leaves the stack closed', () => {
   const rows = [entry('a1', 'G'), entry('a2', 'G'), entry('b1', 'H'), entry('b2', 'H')];
-  const drawn = stackRows(rows, new Set(['H']), null);
+  const drawn = stackRows(rows, ['H'], null);
   assert.deepEqual(shape(drawn), ['a1^', 'b1^', 'b2<']);
   assert.equal(drawn[0]?.stack?.open, false);
   assert.equal(drawn[1]?.stack?.open, true);
@@ -183,7 +216,7 @@ test('stackRows: opened naming another group leaves the stack closed', () => {
 
 test('stackRows: opened naming a group of one row, or one no row has, changes nothing', () => {
   const rows = [entry('a1', 'G'), entry('x', null)];
-  const drawn = stackRows(rows, new Set(['G', 'NOPE']), null);
+  const drawn = stackRows(rows, ['G', 'NOPE'], null);
   assert.deepEqual(drawn, [
     { entry: rows[0], stack: null },
     { entry: rows[1], stack: null },
@@ -193,8 +226,8 @@ test('stackRows: opened naming a group of one row, or one no row has, changes no
 test('stackRows: a selected member opens its stack, whatever opened says', () => {
   const rows = [entry('a1', 'G'), entry('a2', 'G'), entry('a3', 'G'), entry('b1', 'H')];
   for (const selected of ['a2', 'a3']) {
-    for (const opened of [NONE, new Set(['H']), new Set(['G'])]) {
-      const why = `${selected}, opened ${[...opened].join()}`;
+    for (const opened of [NONE, ['H'], ['G']]) {
+      const why = `${selected}, opened ${opened.join()}`;
       const drawn = stackRows(rows, opened, selected);
       assert.deepEqual(shape(drawn), ['a1^', 'a2<', 'a3<', 'b1'], why);
       assert.ok(
@@ -210,7 +243,7 @@ test('stackRows: a selected head leaves its stack as opened says', () => {
   const closed = stackRows(rows, NONE, 'a1');
   assert.deepEqual(shape(closed), ['a1^']);
   assert.equal(closed[0]?.stack?.open, false);
-  const open = stackRows(rows, new Set(['G']), 'a1');
+  const open = stackRows(rows, ['G'], 'a1');
   assert.deepEqual(shape(open), ['a1^', 'a2<']);
   assert.equal(open[0]?.stack?.open, true);
 });
@@ -238,14 +271,14 @@ test('stackRows: a held row is drawn on its own at its place, never in the stack
   assert.deepEqual(shape(closed), ['a1^', 'h']);
   assert.equal(closed[0]?.stack?.size, 3);
   assert.equal(closed[1]?.stack, null);
-  const open = stackRows(rows, new Set(['G']), null);
+  const open = stackRows(rows, ['G'], null);
   assert.deepEqual(shape(open), ['a1^', 'a2<', 'a3<', 'h']);
   assert.equal(open[3]?.stack, null);
 });
 
 test('stackRows: with one row of the group left beside a held one, no stack', () => {
   const rows = [entry('h', 'G', true), entry('a1', 'G')];
-  const drawn = stackRows(rows, new Set(['G']), 'a1');
+  const drawn = stackRows(rows, ['G'], 'a1');
   assert.deepEqual(drawn, [
     { entry: rows[0], stack: null },
     { entry: rows[1], stack: null },
@@ -262,7 +295,7 @@ test('stackRows: a held newest row is no head: the first row that is not held is
 
 test('stackRows: several held rows of one group are all drawn on their own', () => {
   const rows = [entry('h1', 'G', true), entry('h2', 'G', true), entry('h3', 'G', true)];
-  const drawn = stackRows(rows, new Set(['G']), 'h2');
+  const drawn = stackRows(rows, ['G'], 'h2');
   assert.deepEqual(shape(drawn), ['h1', 'h2', 'h3']);
 });
 
@@ -296,13 +329,18 @@ test("stackRows: the section's order is kept, a member right after its head; not
     const rows = Array.from({ length: count }, (_, i) =>
       entry(`s${i}`, groups[Math.floor(next() * groups.length)] ?? null, next() < 0.2),
     );
-    const opened = new Set(
-      groups.filter((group): group is string => group !== null && next() < 0.4),
-    );
+    const opened = groups.filter((group): group is string => group !== null && next() < 0.4);
     const selected = count > 0 && next() < 0.5 ? `s${Math.floor(next() * count)}` : null;
     const drawn = stackRows(rows, opened, selected);
     const at = (id: string): number => rows.findIndex((row) => row.id === id);
     const why = `seed ${seed}`;
+
+    // A view without `opened`: no stacks at all.
+    assert.deepEqual(
+      stackRows(rows, undefined, selected),
+      rows.map((row) => ({ entry: row, stack: null })),
+      why,
+    );
 
     // Nothing is drawn twice.
     const ids = drawn.map(({ entry: row }) => row.id);
@@ -324,7 +362,7 @@ test("stackRows: the section's order is kept, a member right after its head; not
       const kin = rows.filter((other) => !other.held && group !== null && other.group === group);
       const isMember = kin.length >= 2 && kin[0] !== row;
       const open =
-        group !== null && (opened.has(group) || kin.slice(1).some((m) => m.id === selected));
+        group !== null && (opened.includes(group) || kin.slice(1).some((m) => m.id === selected));
       assert.equal(ids.includes(row.id), !isMember || open, `${why}, row ${index}`);
     }
 
@@ -354,7 +392,7 @@ test("stackRows: the section's order is kept, a member right after its head; not
     seen.held += drawn.filter(({ entry: row }) => row.held && row.group !== null).length;
     seen.bySelection += drawn.some(
       ({ entry: row, stack }) =>
-        stack?.role === 'member' && row.id === selected && !opened.has(stack.group),
+        stack?.role === 'member' && row.id === selected && !opened.includes(stack.group),
     )
       ? 1
       : 0;

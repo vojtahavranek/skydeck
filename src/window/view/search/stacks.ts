@@ -3,12 +3,10 @@
  * stack under the newest. Pure; imports nothing.
  *
  * Which rows reach this rule is the caller's (`build.ts`, task 96): only This week's and Earlier's
- * (running sessions never stack), and none at all for a view without `opened` (ruled: a page that
- * cannot draw stacks never has a session hidden in one) or while filtering (S2 12.8: a filter
- * flattens every stack). For those the caller gives every row `stack: null` without calling
- * `stackRows` — the same shape `stackRows` gives a section in which nothing stacks. Never call it
- * with `new Set(view.opened)` for a view without `opened`: that is an empty set, so every stack
- * would be closed on a page that cannot open one.
+ * (running sessions never stack), and none while filtering (S2 12.8: a filter flattens every
+ * stack; the caller then gives every row `stack: null`). A view without `opened` is this rule's own
+ * (ruled by the plan owner): `view.opened` is passed as it comes, and `undefined` gives no stacks
+ * at all, so that a page which cannot draw stacks never has a session hidden in one.
  */
 
 /** RowPayload.stack (E6; task 96 moves this type into protocol.ts, unchanged). */
@@ -39,15 +37,24 @@ export interface StackEntry {
  * stack's head, its other members in their order; a closed stack's other members left out. A
  * group with one row that is not held is no stack. `stack` is null for a row in no stack.
  *
+ * `opened` is `view.opened` as it comes (ruled by the plan owner): `undefined` (a page that cannot
+ * draw stacks) → no stacks, every row as it is with `stack: null`; an array, an empty one too →
+ * stacks, those of the groups it names open.
+ *
  * Groups are compared as the text the entries carry (the row's group is sanitised when step 1's
  * list model is built). The rule keeps no state: a stack stays open after the selection left it
  * only because the page has added its group to `opened` (ruled).
  */
 export function stackRows<T extends StackEntry>(
   rows: readonly T[],
-  opened: ReadonlySet<string>,
+  opened: readonly string[] | undefined,
   selected: string | null,
 ): { entry: T; stack: StackPayload | null }[] {
+  if (opened === undefined) {
+    return rows.map((entry) => ({ entry, stack: null }));
+  }
+  const open = new Set(opened);
+
   // Each group's rows that are not held, in the section's order, and the place of the first.
   const kin = new Map<string, { headAt: number; rows: T[] }>();
   for (const [index, row] of rows.entries()) {
@@ -75,16 +82,16 @@ export function stackRows<T extends StackEntry>(
       continue;
     }
     const members = stack.rows.slice(1);
-    const open = opened.has(group) || members.some((member) => member.id === selected);
+    const isOpen = open.has(group) || members.some((member) => member.id === selected);
     const payload = (role: StackPayload['role']): StackPayload => ({
       group,
       size: stack.rows.length,
-      open,
+      open: isOpen,
       role,
       head: row.id,
     });
     drawn.push({ entry: row, stack: payload('head') });
-    if (open) {
+    if (isOpen) {
       for (const member of members) {
         drawn.push({ entry: member, stack: payload('member') });
       }
