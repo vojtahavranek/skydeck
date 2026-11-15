@@ -1,8 +1,9 @@
 /**
  * The resume card's facts for the selected session (S2 12.6, plan A27): the exact command a resume
  * would run (design 7.6's, built by the same function the resume uses), the flags it would not
- * pass on, how the session ended, and whether its transcript is expiring or gone. It only reads:
- * no lock, no refresh, nothing stored — the page asks for it on every `list`.
+ * pass on, how the session ended, and whether its transcript is expiring or gone; and what the
+ * header and the dialogs of stage D need (plan D5, D6): the note as stored and the ticket address.
+ * It only reads: no lock, no refresh, nothing stored — the page asks for it on every `list`.
  */
 import { buildResumeCommand, unknownFlags } from '../claude/launch.ts';
 import { isSessionId } from '../claude/session-id.ts';
@@ -11,6 +12,9 @@ import type { ListRow } from '../sessions/list.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { printableCommand } from '../text/shell.ts';
 import type { SelectedPayload } from './protocol.ts';
+
+/** The longest note the window edits, in UTF-8 bytes (plan D5): `act note`'s limit. */
+const NOTE_MAX_BYTES = 64 * 1024;
 
 /**
  * How the session ended, for the card: mid-turn when it ended unexpectedly while a turn was in
@@ -25,11 +29,24 @@ function endedOf(row: ListRow): SelectedPayload['ended'] {
 }
 
 /**
+ * Plan D5: the note exactly as stored (not sanitised: the page puts it only into a text box's value
+ * and sends it back as `base`) while it holds at most NOTE_MAX_BYTES of UTF-8; a longer one is not
+ * sent and is marked too long, so that the window does not edit it.
+ */
+function noteOf(note: string | null): Pick<SelectedPayload, 'note' | 'noteTooLong'> {
+  if (note === null) return { note: null, noteTooLong: false };
+  return Buffer.byteLength(note, 'utf8') > NOTE_MAX_BYTES
+    ? { note: null, noteTooLong: true }
+    : { note, noteTooLong: false };
+}
+
+/**
  * A27: what the resume card shows for `row`. `command` is printableCommand of the directory and the
  * argument list buildResumeCommand gives for the session (claudeCommand, its recorded launch, its
  * label), as `prepareResume` builds them; null when the directory is not known or a word holds
  * anything the sanitiser would change. `unknownFlags` are sanitised: they come from a recorded
- * command line. Takes no lock and reads nothing but `deck.config`.
+ * command line. `note` and `noteTooLong` as `noteOf` says (plan D5); `ticketUrl` is null until
+ * task 36 fills it. Takes no lock and reads nothing but `deck.config`.
  */
 export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
   const launch = row.session.launch;
@@ -52,5 +69,7 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
     ended: endedOf(row),
     expiring: row.marks.includes('expiring'),
     expired: row.marks.includes('expired'),
+    ...noteOf(row.note),
+    ticketUrl: null,
   };
 }
