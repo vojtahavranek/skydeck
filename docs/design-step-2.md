@@ -2540,7 +2540,8 @@ skips a member of a closed stack (ruled: the page never knows a closed stack's m
 skips a row a filter or a folded Earlier hides. While filtering (a word or a chip, 12.8)
 nothing folds and no stack is formed, so ← and → do nothing. The chips under the filter field
 (12.8) take no keyboard on a click: the keyboard stays where it was (in the field, on the list, in
-the terminal). The selection is never on a row the
+the terminal). They are buttons: Tab from the filter field reaches them, Enter or Space presses
+one, and while one has the keyboard no list key acts, as on any button of the list zone. The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
