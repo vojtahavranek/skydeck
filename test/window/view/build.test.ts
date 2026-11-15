@@ -1125,7 +1125,7 @@ test('dirs: the known project directories, as projectDirs gives them', () => {
 
 // --- needs nothing but its input ---------------------------------------------------------------
 
-test("src/window/view/ imports values only from text, the two list functions of A8 and D4's CHIP_ORDER", () => {
+test("src/window/view/ imports values only from text, the two list functions of A8, D4's CHIP_ORDER and windowChip", () => {
   const dir = join(import.meta.dirname, '../../../src/window/view');
   const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
   assert.deepEqual(files.sort(), ['build.ts', 'chip.ts', 'sections.ts']);
@@ -1139,7 +1139,7 @@ test("src/window/view/ imports values only from text, the two list functions of 
       const names = (what ?? '').replace(/[{}\s]/g, '').split(',');
       const allowed =
         from === './sections.ts' ||
-        from === './chip.ts' ||
+        (from === './chip.ts' && names.every((n) => n === 'windowChip')) ||
         from === '../../text/sanitize.ts' ||
         (from === '../../sessions/list.ts' &&
           names.every((n) => n === 'isListed' || n === 'matchesFilter')) ||

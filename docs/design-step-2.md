@@ -1903,8 +1903,9 @@ interactive list: open and finished pull requests are counted apart.
   none is attached.
 - A chip whose state is `can't read` is drawn dotted.
 - **The tooltip** lists each open pull request with its own state (`repo #n · failing`, or `can't
-  read · last read 3h ago`), then the merged and closed counts. The header (12.5) shows each open
-  one on a line of its own.
+  read · last read 3h ago`), then the merged and closed counts. The header (12.5) shows the open
+  ones side by side on its one line for pull requests, as far as they fit, and the pull-request
+  dialog each attached one on a line of its own.
 
 | Attached | Chip |
 |---|---|
