@@ -1995,8 +1995,11 @@ gives them back when its program never started (7.8).
   answer within 30 seconds it says so and exits 1, printing no command (it prepared nothing; the
   server may have started the session: `skydeck` shows whether it runs); while the server is
   starting it asks again every 500 ms within those 30 seconds, and a server still starting after
-  them started nothing; one that is stopping, or refuses the request's body (a label over 1,024
-  bytes, a prompt after `--` over 64 KiB), is reported with `, or use --here` (plan C 2.5). With
+  them started nothing; one that is stopping is reported with `, or use --here`, and a body the
+  server refuses (a label over 1,024 bytes; a prompt after `--` over 64 KiB, which the command
+  refuses so before it sends anything) with `; use --here` (plan C 2.5). A connection that fails
+  after the request reached the server and before its answer says that the server may have
+  started the session (or the restore), as the 30 seconds do. With
   `"terminal": "window"`, `--tab` means the window too, and so does `R` in the interactive list,
   whose lines end before `, or use --here`; `R` opens no window.
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then

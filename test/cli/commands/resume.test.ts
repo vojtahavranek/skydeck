@@ -492,8 +492,11 @@ for (const code of ['EACCES', 'EMFILE']) {
 // serve listens on no port and the Edge stub opens no page, so a window the command opens is never
 // used: with pages 0 it ends after `pageMs` with C12's line.
 
-/** The waits of these cases (A31): a short ping wait, page wait and answer time. */
-const WINDOW_TIMES = 'pingMs=1000,pageMs=300,reuseMs=100,answerMs=2000';
+/** The waits of these cases (A31): a short page wait (no page ever uses the window), and ping and
+ *  answer waits no load runs out where a case expects none. */
+const WINDOW_TIMES = 'pingMs=5000,pageMs=300,reuseMs=100,answerMs=20000';
+/** For the cases that wait for a ping or an answer to run out: 1 s and 2 s. */
+const SHORT_TIMES = 'pingMs=1000,pageMs=300,reuseMs=100,answerMs=2000';
 const NO_PAGE_CONNECTED =
   'skydeck: the window could not be opened: Edge was started, but no window connected within 0.3 seconds; open the window in any browser with skydeck window --print-url; run skydeck window\n';
 const FLAGS_LINE = 'skydeck: original flags unknown; resuming with defaults';
@@ -674,6 +677,21 @@ describe('resume --window (S2 11.4; plan C11, C12)', () => {
     assert.deepEqual(w.edgeCalls(), []);
   });
 
+  test('CLAUDECODE set to the empty text is set: no window, C12’s line (as skydeck window refuses it)', async (t) => {
+    const w = windowCase(t);
+    await serving(t, w, STARTED);
+
+    const r = await w.run(['resume', '0b5f', '--window'], { CLAUDECODE: '' });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stderr,
+      `${FLAGS_LINE}\nskydeck: no window is open; run skydeck window in a terminal of your own\n`,
+    );
+    assert.ok(!r.asked.includes('POST /token'), JSON.stringify(r.asked));
+    assert.deepEqual(w.edgeCalls(), []);
+  });
+
   test('under CLAUDECODE with a page connected: nothing more is said', async (t) => {
     const w = windowCase(t);
     await serving(t, w, STARTED, { FAKE_SERVE_PAGES: '1' });
@@ -820,8 +838,12 @@ describe('resume --window (S2 11.4; plan C11, C12)', () => {
 
 describe('resume --window: the lines of plan 2.5 (exit 1, no window, no command printed)', () => {
   /** The case's run and its checks: `line` on stderr, exit 1, Edge never run, no command. */
-  async function refused(w: WindowCase, line: string): Promise<void> {
-    const r = await w.run(['resume', '0b5f', '--window']);
+  async function refused(
+    w: WindowCase,
+    line: string,
+    env: Record<string, string> = {},
+  ): Promise<void> {
+    const r = await w.run(['resume', '0b5f', '--window'], env);
     assert.equal(r.code, 1, r.stderr);
     assert.equal(r.stderr, `skydeck: ${line}\n`);
     assert.equal(r.stdout, '');
@@ -843,6 +865,7 @@ describe('resume --window: the lines of plan 2.5 (exit 1, no window, no command 
     await refused(
       w,
       `the window's server (pid ${fake.pid}) does not answer; skydeck window --restart stops it`,
+      { SKYDECK_TEST_WINDOW_TIMES: SHORT_TIMES },
     );
   });
 
@@ -882,6 +905,7 @@ describe('resume --window: the lines of plan 2.5 (exit 1, no window, no command 
     await refused(
       w,
       "the window's server did not answer within 2 s; it may have started the session: run skydeck to see whether it runs",
+      { SKYDECK_TEST_WINDOW_TIMES: SHORT_TIMES },
     );
   });
 });

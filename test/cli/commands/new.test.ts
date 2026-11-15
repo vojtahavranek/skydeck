@@ -258,7 +258,7 @@ async function windowNew(t: TestContext, env: Record<string, string> = {}): Prom
   const m = windowMachine(t, {
     env: (s) => ({
       SKYDECK_HANDOFF: join(s.root, 'handoff'),
-      SKYDECK_TEST_WINDOW_TIMES: 'pingMs=1000,pageMs=300,reuseMs=100,answerMs=2000',
+      SKYDECK_TEST_WINDOW_TIMES: 'pingMs=5000,pageMs=300,reuseMs=100,answerMs=20000',
     }),
   });
   const stub = writeWindowConfig(m.s, {});
@@ -357,7 +357,7 @@ describe('new --window (S2 11.4; plan C3)', () => {
     assert.deepEqual(w.edgeCalls(), []);
   });
 
-  test('a prompt after -- over 64 KiB (413): the refused-request line, exit 1', async (t) => {
+  test('a prompt after -- over the server’s 64 KiB: the 413 row’s line, exit 1, and nothing is sent (ruled, task 76)', async (t) => {
     const w = await windowNew(t);
 
     const r = await w.run(['new', '--window', '--', '-p', 'p'.repeat(70 * 1024)]);
@@ -367,6 +367,8 @@ describe('new --window (S2 11.4; plan C3)', () => {
       r.stderr,
       "skydeck: the window's server refused the request (body: too large); use --here\n",
     );
+    assert.ok(!r.asked.includes('POST /new'), `not sent: ${JSON.stringify(r.asked)}`);
+    assert.ok(!r.stderr.includes('may have started'), r.stderr);
     assert.deepEqual(w.requests(), []);
   });
 

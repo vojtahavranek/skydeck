@@ -585,11 +585,13 @@ Lines of the commands (each printed with `skydeck: `, exit 1 unless said):
 | 503 `starting` for the whole `answerMs` (task 76) | `the window's server did not finish its start within 30 s; it started nothing: run skydeck window again, or use --here` |
 | 500 for `/resume` or `/new` (task 76) | `the window's server failed while it answered the request (500: failed); it may have started the session: run skydeck to see whether it runs` |
 | 500 for `/restore` before its first line (task 76) | `the window's server failed while it answered the request (500: failed); run skydeck to see what started` |
+| The socket fails after the request reached the server and before its answer, for `/resume` or `/new` (a reset, a broken pipe; ruled, task 76) | `the window's server cannot be asked on <sock> (<code>); it may have started the session: run skydeck to see whether it runs`. Before the request was sent (no socket, refused, a full queue) it stays `the window's server does not run (nothing answers on <sock>)`: nothing started |
+| The same for `/restore` before its first line (ruled, task 76) | `the window's server cannot be asked on <sock> (<code>); it may have started the restore: run skydeck to see what started`; after its first line, and for a stream that ends without an outcome, the `stopped answering` row below |
 | `/restore` silent for `answerMs`, or ended without an outcome | `the window's server stopped answering; run skydeck to see what started` (S2 11.4) |
 | Edge after the answer (C12) | `the window could not be opened: <reason>; run skydeck window` — the exit code stays the answer's |
 | No page connected under `CLAUDECODE` (C12) | `no window is open; run skydeck window in a terminal of your own` — the exit code stays the answer's |
 | The status look after the answer fails (C12; ruled, task 76) | `the window could not be opened: <the failure>; run skydeck window` — under `CLAUDECODE` the advice ends `run skydeck window in a terminal of your own`; the exit code stays the answer's |
-| 400 or 413 for the body (a label over 1,024 bytes, a prompt after `--` over 64 KiB) | `the window's server refused the request (<kind>); use --here` |
+| 400 or 413 for the body (a label over 1,024 bytes, a prompt after `--` over 64 KiB) | `the window's server refused the request (<kind>); use --here` — a body over 64 KiB is refused so by the client before anything is sent, with the server's kind `body: too large` (ruled, task 76) |
 
 For `restore` and the interactive list the lines end before `, or use --here` (and the refused
 request's before `; use --here`). The times in the lines are `answerMs`'s seconds (30 s by default).

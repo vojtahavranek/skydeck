@@ -46,10 +46,11 @@ export interface ControlClient {
    * is asked again every 500 ms within it. 'unknown-route' for a 404 whose kind starts with
    * `route` (a server of a build before stage C). Rejects with a SkydeckError whose message is plan
    * 2.5's line: no answer in time (the server may have started the session), 503 `stopping`, a 400
-   * or 413 (the refused request), a 500 (it may have started the session too), the server still
-   * starting when the time is over (it started nothing), an answer that cannot be read. A client
-   * made without a clock rejects with a TypeError, and an `answerMs` no timer can wait with a
-   * RangeError, before anything is sent (ruled, task 76).
+   * or 413 (the refused request; a body over the server's 64 KiB is refused so before it is sent),
+   * a 500 or a socket that fails after the request was sent (it may have started the session too),
+   * the server still starting when the time is over (it started nothing), an answer that cannot be
+   * read. A client made without a clock rejects with a TypeError, and an `answerMs` no timer can
+   * wait with a RangeError, before anything is sent (ruled, task 76).
    */
   resume(sessionId: string, answerMs?: number): Promise<LaunchAnswer | 'unknown-route'>;
   /** `POST /new` with the request's four fields, as `resume`. */
@@ -58,10 +59,12 @@ export interface ControlClient {
    * `POST /restore` (plan C5): each `{ line }` of the stream to `onLine` as it arrives (as the
    * server wrote it: the caller sanitises it); resolves with the outcome. A 503 `starting` is asked
    * again every 500 ms within `answerMs`, as for `resume`. Rejects with S2 11.4's "stopped
-   * answering" line when `answerMs` pass without a line, or the answer ends without an outcome; a
-   * line that is neither `{ line }` nor `{ outcome }`, or one after the outcome, makes the answer
-   * one that cannot be read, and no such line reaches `onLine` (a refusal's `{ error }` neither).
-   * The other refusals as for `resume`.
+   * answering" line when `answerMs` pass without a line, the answer ends without an outcome, or
+   * the socket fails after the first line; one that fails after the request was sent and before
+   * the first line says that it may have started the restore (ruled, task 76). A line that is
+   * neither `{ line }` nor `{ outcome }`, or one after the outcome, makes the answer one that cannot
+   * be read, and no such line reaches `onLine` (a refusal's `{ error }` neither). The other refusals
+   * as for `resume`.
    */
   restore(
     request: RestoreRequest,
@@ -78,6 +81,10 @@ const ANSWER_MS = 30_000;
 const STARTING_RETRY_MS = 500;
 /** A refusal's body before the status is known: a few lines are kept, the rest is not read. */
 const REFUSAL_LINES = 4;
+/** The server's limit of a request body (control.ts, S2 8.3): a larger one is not sent. */
+const BODY_LIMIT = 64 * 1024;
+/** Failures of a request on which nothing reached the server: no socket, refused, its queue full. */
+const NOTHING_SENT: ReadonlySet<string> = new Set(['ECONNREFUSED', 'ENOENT', 'EAGAIN', 'EACCES']);
 const TOKEN_ID = /^[0-9a-f]{32}$/;
 const NS_TEXT = /^(0|[1-9][0-9]*)$/;
 const TOKEN_STATES: ReadonlySet<string> = new Set([
@@ -119,8 +126,13 @@ export function controlClient(net: Net, sockPath: string, clock?: Clock): Contro
     return readAnswer(answer, what, read);
   };
 
-  /** The clock and the answer time of a stage C request; thrown before anything is sent. */
-  const launchTimes = (answerMs: number): Clock => {
+  /**
+   * The clock and the answer time of a stage C request, and its body within the server's limit;
+   * thrown before anything is sent. A body over the limit is the 413 row's line (ruled, task 76):
+   * sent, it could fail while the server refuses it and closes, and then read as one that may have
+   * acted.
+   */
+  const launchTimes = (answerMs: number, body: unknown): Clock => {
     if (clock === undefined) {
       throw new TypeError(
         "the window's server is asked to start sessions only by a client made with a clock",
@@ -128,6 +140,9 @@ export function controlClient(net: Net, sockPath: string, clock?: Clock): Contro
     }
     if (!Number.isSafeInteger(answerMs) || answerMs < 0 || answerMs > MAX_TIMER_MS) {
       throw new RangeError(`not a whole number of milliseconds a timer can wait: ${answerMs}`);
+    }
+    if (Buffer.byteLength(JSON.stringify(body), 'utf8') > BODY_LIMIT) {
+      throw new SkydeckError(refusedRequest('body: too large'));
     }
     return clock;
   };
@@ -139,10 +154,11 @@ export function controlClient(net: Net, sockPath: string, clock?: Clock): Contro
     answerMs: number,
   ): Promise<LaunchAnswer | 'unknown-route'> => {
     const what = `POST ${path}`;
-    const answer = await askedWhileStarting(launchTimes(answerMs), answerMs, what, sockPath, {
+    const answer = await askedWhileStarting(launchTimes(answerMs, body), answerMs, what, sockPath, {
       send: (signal) =>
         net.requestUnix(sockPath, { method: 'POST', path, body, timeoutMs: answerMs, signal }),
       silence: () => new SkydeckError(noAnswer(answerMs)),
+      cut: (code) => new SkydeckError(`${cannotBeAsked(sockPath, code)}; ${MAY_HAVE_STARTED}`),
     });
     if (answer.status === 200) {
       const value = readLaunch(answer.body);
@@ -205,11 +221,23 @@ export function controlClient(net: Net, sockPath: string, clock?: Clock): Contro
     },
     async restore({ sessionIds, all }, onLine, answerMs = ANSWER_MS) {
       const what = 'POST /restore';
-      const answer = await askedWhileStarting(launchTimes(answerMs), answerMs, what, sockPath, {
-        send: (signal, begun) =>
-          restoreStream(net, sockPath, { sessionIds, all }, answerMs, signal, begun, onLine),
-        silence: () => new SkydeckError(STOPPED_ANSWERING),
-      });
+      const body = { sessionIds, all };
+      const answer = await askedWhileStarting(
+        launchTimes(answerMs, body),
+        answerMs,
+        what,
+        sockPath,
+        {
+          send: (signal, begun) =>
+            restoreStream(net, sockPath, body, answerMs, signal, begun, onLine),
+          silence: () => new SkydeckError(STOPPED_ANSWERING),
+          // Before its first line (after it, restoreStream says that the server stopped answering).
+          cut: (code) =>
+            new SkydeckError(
+              `${cannotBeAsked(sockPath, code)}; it may have started the restore: run skydeck to see what started`,
+            ),
+        },
+      );
       if (answer.status === 200) {
         if (answer.stream === 'unreadable') throw unreadable(what);
         if (answer.stream === null) throw new SkydeckError(STOPPED_ANSWERING);
@@ -235,6 +263,15 @@ function noAnswer(answerMs: number): string {
   return `the window's server did not answer within ${secondsOf(answerMs)} s; ${MAY_HAVE_STARTED}`;
 }
 
+function cannotBeAsked(sockPath: string, code: string): string {
+  return `the window's server cannot be asked on ${sockPath} (${code})`;
+}
+
+/** Plan 2.5's line for a body the server refuses (400, 413). */
+function refusedRequest(kind: string): string {
+  return `the window's server refused the request (${kind}); use --here`;
+}
+
 /** What a stage C request's answer is read from: its status, and its body (null when none). */
 interface Asked {
   status: number;
@@ -246,14 +283,21 @@ interface Asked {
  * `answerMs` in all — measured on `clock` from the first send, until `begun` says that an answer
  * is streaming (a restore runs as long as its lines keep coming). A request that gets no answer
  * by then is `silence()` (it may have acted); a server that still answers `starting` when the time
- * is over started nothing. A failure to ask is a SkydeckError as for stage A's requests.
+ * is over started nothing. A failure of the socket after the request may have reached the server
+ * and before its answer is complete (a reset, a broken pipe) is `cut(code)`: it may have acted
+ * (ruled, task 76). One on which nothing was sent (no socket, refused, a full queue) is a
+ * SkydeckError as for stage A's requests: nothing started.
  */
 async function askedWhileStarting<T extends Asked>(
   clock: Clock,
   answerMs: number,
   what: string,
   sockPath: string,
-  ask: { send(signal: AbortSignal, begun: () => void): Promise<T>; silence(): SkydeckError },
+  ask: {
+    send(signal: AbortSignal, begun: () => void): Promise<T>;
+    silence(): SkydeckError;
+    cut(code: string): SkydeckError;
+  },
 ): Promise<T> {
   const deadline = new AbortController();
   const over = new Promise<void>((resolve) => {
@@ -267,7 +311,9 @@ async function askedWhileStarting<T extends Asked>(
         answer = await ask.send(deadline.signal, cancel);
       } catch (error) {
         if (error instanceof SkydeckError) throw error;
-        if (isAbort(error) || systemCode(error) === 'ETIMEDOUT') throw ask.silence();
+        const code = systemCode(error);
+        if (isAbort(error) || code === 'ETIMEDOUT') throw ask.silence();
+        if (code !== null && !NOTHING_SENT.has(code)) throw ask.cut(code);
         throw askFailure(error, sockPath, what);
       }
       if (answer.status !== 503 || refusalKind(answer.body) !== 'starting') return answer;
@@ -292,9 +338,7 @@ function refusedLaunch(answer: Asked, what: string, afterFailure: string): 'unkn
   const detail = kind === null ? String(answer.status) : `${answer.status}: ${kind}`;
   if (answer.status === 404 && kind !== null && kind.startsWith('route')) return 'unknown-route';
   if (answer.status === 400 || answer.status === 413) {
-    throw new SkydeckError(
-      `the window's server refused the request (${kind ?? String(answer.status)}); use --here`,
-    );
+    throw new SkydeckError(refusedRequest(kind ?? String(answer.status)));
   }
   if (answer.status === 503 && kind === 'stopping') {
     throw new SkydeckError("the window's server is stopping; run skydeck window, or use --here");
