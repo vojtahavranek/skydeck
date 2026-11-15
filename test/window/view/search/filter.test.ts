@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { CHIP_ORDER } from '../../../../src/github.ts';
 import { matchesFilter } from '../../../../src/sessions/list.ts';
 import type { ListRow } from '../../../../src/sessions/list.ts';
 import type { PrRow } from '../../../../src/store/types.ts';
@@ -18,6 +19,7 @@ import {
   searchWords,
   searchable,
 } from '../../../../src/window/view/search/filter.ts';
+import { windowChip } from '../../../../src/window/view/chip.ts';
 import { attached, ds, meta, prRow, rowOf, rows } from '../../../helpers/derived.ts';
 import { S1, S2, S3 } from '../../../helpers/platform.ts';
 
@@ -101,6 +103,13 @@ test('searchWords: a word of 100 units counts in its first 64', () => {
   assert.deepEqual(searchWords(`ab ${'y'.repeat(64)}`), ['ab', 'y'.repeat(64)]);
 });
 
+test('searchWords: a word is cut after it is lower-cased', () => {
+  // `İ` is one unit and lower-cases to two (`i` and U+0307): the cut counts the lower case.
+  const [word = ''] = searchWords('İ'.repeat(64));
+  assert.equal(word.length, MAX_WORD_UNITS);
+  assert.equal(word, 'i̇'.repeat(32));
+});
+
 test('searchWords: two long words that are the same in their first 64 units count once', () => {
   assert.deepEqual(searchWords(`${'x'.repeat(70)}a ${'x'.repeat(80)}b`), ['x'.repeat(64)]);
 });
@@ -130,6 +139,22 @@ test('matchesWords: each field on its own is searched', () => {
   for (const [field, spec, word] of cases) {
     assert.equal(matches(row(spec), word), true, `${field}: ${word}`);
     assert.equal(matches(plain, word), false, `${field} absent: ${word}`);
+  }
+});
+
+test('matchesWords: a word is found inside one field, never across the end of one and the next', () => {
+  const target = row({
+    title: 'Fix login',
+    group: 'seeds',
+    note: 'tail',
+    dir: '/home/x',
+    prs: [prRow('acme/web', 42)],
+  });
+  for (const word of ['login', 'seeds', 'tail', '/home/x', 'acme/web', 'web#42', '42']) {
+    assert.equal(matches(target, word), true, word);
+  }
+  for (const word of ['logins', 'seedst', 'tail/home', 'xacme', 'web42', '42acme']) {
+    assert.equal(matches(target, word), false, word);
   }
 });
 
@@ -177,6 +202,7 @@ test('matchesWords: the id matches from its first 4 characters on, and only as i
   assert.equal(matches(target, S1.slice(0, 3)), false);
   assert.equal(matches(target, S1.slice(0, 4)), true);
   assert.equal(matches(target, S1.slice(0, 8)), true);
+  assert.equal(matches(target, S1.slice(0, 13)), true);
   assert.equal(matches(target, S1), true);
   assert.equal(matches(target, S1.slice(0, 4).toUpperCase()), true);
   assert.equal(matches(target, S1.slice(4, 8)), false);
@@ -355,26 +381,38 @@ test('matchesChips: running holds for a row in Open only', () => {
 });
 
 test('matchesChips: open-pr holds while a pull request is not known to be merged or closed', () => {
-  const open: [string, PrRow][] = [
-    ['unfetched', prRow('o/r', 1, { state: null, okAtNs: null })],
-    ['cant-read', prRow('o/r', 2, { error: 'HTTP 502' })],
-    ['draft', prRow('o/r', 3, { state: 'draft' })],
-    ['approved-green', prRow('o/r', 4)],
+  const byLevel: [string, PrRow][] = [
+    ['cant-read', prRow('o/r', 1, { error: 'HTTP 502' })],
+    ['unfetched', prRow('o/r', 2, { state: null, okAtNs: null })],
+    ['checks-failing', prRow('o/r', 3, { checks: 'failing' })],
+    ['changes-requested', prRow('o/r', 4, { review: 'changes-requested' })],
+    ['checks-pending', prRow('o/r', 5, { checks: 'pending' })],
+    ['review-required', prRow('o/r', 6, { review: 'review-required' })],
+    ['draft', prRow('o/r', 7, { state: 'draft' })],
+    ['approved-green', prRow('o/r', 8)],
+    ['merged', prRow('o/r', 9, { state: 'merged' })],
+    ['closed', prRow('o/r', 10, { state: 'closed' })],
   ];
-  const merged = prRow('o/r', 5, { state: 'merged' });
-  const closed = prRow('o/r', 6, { state: 'closed' });
-  for (const [level, pr] of open) {
+  assert.deepEqual(
+    byLevel.map(([level]) => level),
+    [...CHIP_ORDER],
+  );
+  const finished = (level: string): boolean => level === 'merged' || level === 'closed';
+  for (const [level, pr] of byLevel) {
     const target = row({ prs: [pr] });
     assert.equal(target.prs[0]?.level, level);
-    assert.equal(matchesChips(target, false, ['open-pr']), true, level);
+    assert.equal(matchesChips(target, false, ['open-pr']), !finished(level), level);
+    // The same rule as the chip of the window's row (S2 12.3): it counts this one open, or not.
+    const chip = windowChip(target.prs);
+    assert.equal(matchesChips(target, false, ['open-pr']), (chip?.open ?? 0) > 0, level);
+  }
+  const merged = byLevel[8]?.[1];
+  const closed = byLevel[9]?.[1];
+  assert.ok(merged !== undefined && closed !== undefined);
+  for (const [level, pr] of byLevel.filter(([name]) => !finished(name))) {
     assert.equal(matchesChips(row({ prs: [merged, pr, closed] }), false, ['open-pr']), true, level);
   }
-  const finished = row({ prs: [merged, closed] });
-  assert.deepEqual(
-    finished.prs.map((pr) => pr.level),
-    ['merged', 'closed'],
-  );
-  assert.equal(matchesChips(finished, true, ['open-pr']), false);
+  assert.equal(matchesChips(row({ prs: [merged, closed] }), true, ['open-pr']), false);
   assert.equal(matchesChips(row(), true, ['open-pr']), false);
 });
 
@@ -465,6 +503,12 @@ test('foundIn: nothing for no word, or a word that is not there', () => {
   assert.deepEqual(foundIn('Fix login', []), []);
   assert.deepEqual(foundIn('Fix login', ['zebra']), []);
   assert.deepEqual(foundIn('', ['fix']), []);
+});
+
+test('foundIn: an empty word is no word', () => {
+  // Longer than MAX_FOUND units, so that an empty word taken as found would end the walk at once.
+  assert.deepEqual(foundIn('x'.repeat(40), ['']), []);
+  assert.deepEqual(foundIn(`${'x'.repeat(40)}b`, ['', 'b']), [[40, 41]]);
 });
 
 // --- the bound of E3 ---------------------------------------------------------------------------
