@@ -106,14 +106,16 @@ function setTip(target, tip) {
 }
 
 /**
- * Whether Enter on the row switches to it (a terminal of the window, a card of a session elsewhere,
- * a running or starting session) rather than resuming it: stage A's `activate` rule.
+ * Whether a pick of the row resumes it (E10): it has no terminal of the window and does not run
+ * elsewhere — stage A's `activate` rule; otherwise the pick shows its terminal or its card. The one
+ * rule for the footer's `Enter resume here` and for app.js's pick, so that the footer says what
+ * Enter sends (ruled on review 2, C1): a session that runs with neither (a lost keeper's program)
+ * is resumed, and step 1 refuses it.
  * @param {RowPayload} row
+ * @returns {boolean}
  */
-function switches(row) {
-  return (
-    row.terminal !== null || row.elsewhere !== null || row.starting || row.state !== 'not-running'
-  );
+export function pickResumes(row) {
+  return row.terminal === null && row.elsewhere === null;
 }
 
 /**
@@ -254,7 +256,7 @@ export function createSwitcher(root, deps) {
     const action =
       entry?.offer != null
         ? 'restore'
-        : entry?.item != null && !switches(entry.item.row)
+        : entry?.item != null && pickResumes(entry.item.row)
           ? 'resume here'
           : 'switch';
     const more = connected && payload !== null && Number.isInteger(payload.more) ? payload.more : 0;
@@ -443,6 +445,9 @@ export function createSwitcher(root, deps) {
   // --- the field --------------------------------------------------------------------------------
 
   field.addEventListener('input', () => {
+    if (!shown) {
+      return; // a late `input` (an IME's, after the blur of a close) sends no text (review 2, C3)
+    }
     kept = false; // a kept Enter is dropped when the text changes (ruled)
     const typed = field.value.toWellFormed();
     sent = deps.text(field.value);

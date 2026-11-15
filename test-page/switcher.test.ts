@@ -1635,6 +1635,44 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
   );
 
   await t.test(
+    'the footer says what Enter sends: a running session with no terminal of the window and not elsewhere → `Enter resume here`, and Enter sends its resume (one rule for both, ruled on review 2, C1)',
+    async (t) => {
+      const lost = { state: 'running', terminal: null, elsewhere: null };
+      const d = await world(t, chromium, {
+        sections: { open: [row(S1, { title: 'lost keeper', ...lost })] },
+        entries: [{ id: S1, title: 'lost keeper', rank: 'open', row: lost }],
+      });
+      const { page, w } = d;
+      await untilSelected(page, S1);
+      await openSwitcher(page);
+      const view = await untilAnswer(page, '', (v) => idsOf(v).join() === S1, 'the session');
+      assert.equal(view.keys, '↑ ↓ move · Enter resume here · Esc close');
+      await page.keyboard.press('Enter');
+      const act = await w.act(1);
+      assert.deepEqual([act['kind'], act['sessionId']], ['resume', S1]);
+    },
+  );
+
+  await t.test(
+    'a refused resume of a picked session the list does not show is said in the key bar (ruled on review 2, C2)',
+    async (t) => {
+      const d = await world(t, chromium, {
+        ...ORB_WORLD,
+        entries: [{ id: S4, title: 'went away', rank: 'not-running' }],
+      });
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      await openSwitcher(page);
+      await untilAnswer(page, '', (v) => idsOf(v).join() === S4, 'the session');
+      await page.keyboard.press('Enter');
+      const act = await w.act(1);
+      assert.deepEqual([act['kind'], act['sessionId']], ['resume', S4]);
+      w.answer(act, { ok: false, error: 'no session went away here' });
+      await showsText(page, '#key-message', /^no session went away here$/);
+    },
+  );
+
+  await t.test(
     'the click guard lets go again: after a pick by a click, and after a click outside closed the switcher, a later double click on a row of the list resumes it (ruled on review 1)',
     async (t) => {
       const d = await world(t, chromium, ORB_WORLD);

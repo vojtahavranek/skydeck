@@ -2559,7 +2559,10 @@ One rule matches for the filter and for the switcher:
   and does what Enter on that row in the list does (12.6): a session with a terminal of the window
   shows it (an open one with the keyboard, an ended one under its bar), a session elsewhere shows
   its card, one that is not running is resumed into the window (11.3), and a refusal shows on its
-  card (an expired one too). A member of a closed stack needs nothing more: the server opens the
+  card (an expired one too), or in the key bar for a session the list does not show (one that went
+  away). Enter resumes exactly the sessions with no terminal of the window that do not run
+  elsewhere, and the footer's `Enter resume here` says so for the highlighted one: one rule for
+  both (ruled by the lead on 2026-11-15). A member of a closed stack needs nothing more: the server opens the
   stack of the selected session (12.2), so the switcher is the way to a member Ctrl+Tab skips. The
   second click of a double click on an item acts on nothing — neither the item nor what lay under
   it once the switcher closed —, and one on `Switch…` opens the switcher once.
@@ -2765,8 +2768,10 @@ field and do nothing; every other key is text. A mousedown in the panel anywhere
 is cancelled, so that the keyboard never leaves the field, and when nothing has the keyboard (a
 click on the toast) the next key gives it back to the field first. A click outside the panel
 closes it. When it closes without a pick the keyboard goes back where it was (the terminal, the
-list, the filter's field); after a pick, where the pick puts it; a terminal this page's resume
-brought meanwhile takes it then, as after a dialog. A held Esc or Enter that closes it over a
+list, the filter's field), and a terminal this page's resume brought meanwhile takes it then, as
+after a dialog; after a pick: the session's terminal (also one this page's resume of it brings),
+else the list — whatever the switcher was opened from, the filter's field too (ruled by the lead on
+2026-11-15). A held Esc or Enter that closes it over a
 terminal sends the program nothing (a key pressed off the program's holder); Esc while the New
 form is open closes the switcher only. Ctrl+Shift+P, and a click on the title bar's `Switch…`
 (which passes the same gate as a window chord), while a dialog is shown say `close the edit first

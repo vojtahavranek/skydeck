@@ -49,7 +49,7 @@ import { createList } from './list.js';
 import { createNotifications } from './notify.js';
 import { paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
-import { createSwitcher } from './switcher.js';
+import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
 import { createToast } from './toast.js';
 
@@ -936,10 +936,16 @@ function switcherPick(item) {
     holder.blur();
   }
   select(row.id, 'click');
-  if (row.terminal !== null || row.elsewhere !== null) {
-    return;
+  if (!pickResumes(row)) {
+    return; // its terminal or its card is shown
   }
-  void act({ kind: 'resume', sessionId: row.id });
+  void act({ kind: 'resume', sessionId: row.id }).then((result) => {
+    // A refusal shows on the resume card; a session the list does not show has none, so the key
+    // bar says it (ruled on review 2, C2).
+    if (!result.ok && rowOf(row.id) === undefined) {
+      say(result.error ?? 'skydeck could not resume that session');
+    }
+  });
 }
 
 /**
