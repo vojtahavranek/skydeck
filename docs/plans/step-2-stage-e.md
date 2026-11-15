@@ -193,9 +193,11 @@ those of stages B, C and D as merged, hold where these do not change them.
   argument that is not a regular-expression literal: those three build a pattern from a string, a
   door the `rg` line below does not see, so in this directory a pattern is written as a literal
   where it is used (ruled on task 90's review 1; it binds tasks 91, 92 and 96); and it judges a bare
-  `import '…'` and an `import('…')` by the same allowed sources as a static import. This prints
-  nothing after task 90 and every later one (the globs leave out the page's files that are not there
-  yet):
+  `import '…'` and an `import('…')` by the same allowed sources as a static import. The check reads
+  the files' text: it stops a slip, not code written to get past it (an alias of `RegExp`,
+  `Reflect.construct`, `String.prototype.match.call`, a computed member such as `t['match']`,
+  `import(name)`), which review keeps out (ruled on task 90's review 2). This prints nothing after
+  task 90 and every later one (the globs leave out the page's files that are not there yet):
   ```sh
   # no pattern is built from a search text
   rg -n "RegExp\s*\(" src/window/view/search web -g '*.ts' -g 'search-text.js' -g 'chips.js' -g 'switcher.js'

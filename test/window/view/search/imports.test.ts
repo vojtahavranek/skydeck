@@ -20,7 +20,7 @@ const SESSIONS = /^\.\.\/\.\.\/\.\.\/sessions\/[\w-]+\.ts$/;
 const TYPE_SOURCES = new Set(['../../protocol.ts', '../../hub.ts', '../sections.ts']);
 
 /** `import … from '…'` and `export … from '…'`, over several lines too. */
-const STATEMENT = /^(?:import|export)\s+(type\s+)?([^;]*?)\s*from\s+'([^']+)';/gms;
+const STATEMENT = /^(?:import|export)\s+(type\s+)?([^;]*?)\s*from\s+'([^']+)'/gms;
 /** `import '…';`: a value import, for its effects. */
 const BARE_IMPORT = /^import\s+'([^']+)'/gm;
 /** `import('…')`: in a type position or at run time; either way it names a module. */
@@ -28,7 +28,7 @@ const IMPORT_CALL = /\bimport\s*\(\s*'([^']+)'/g;
 /** A regular expression built at run time (a constructor or a call). */
 const REGEXP_CALL = /RegExp\s*\(/;
 /** String methods that build a regular expression from an argument that is not one. */
-const IMPLICIT_REGEXP = /\.(?:match|matchAll|search)\s*\(\s*(?!\/)/;
+const IMPLICIT_REGEXP = /\.(?:match|matchAll|search)\s*\((?!\s*\/(?![/*]))/;
 
 /** The names a clause imports as values: `{ a, type B, c as d }`, `* as x`, a default. */
 function valueNames(clause: string): string[] {
@@ -106,6 +106,8 @@ test('the check itself: what it lets through', () => {
     "type Row = import('../../protocol.ts').RowPayload;",
     'const parts = text.split(/\\s+/u);',
     'const m = text.match(/^>/);',
+    'const hit = query.match(\n  /^>\\s*(?:r|re|res)$/iu,\n);',
+    'const at = title.search( /x/);',
     'const all = [...text.matchAll(/x/g)];',
   ].join('\n');
   assert.deepEqual(violations(source), []);
@@ -129,6 +131,10 @@ test('the check itself: what it refuses', () => {
     ['const pattern = RegExp (text, "u");', 'RegExp('],
     ['const hit = title.match(word);', 'a pattern built from a string'],
     ['const hit = title.match(PATTERN);', 'a pattern built from a string'],
+    ['const hit = title.match(\n  word,\n);', 'a pattern built from a string'],
+    ['const hit = title.match(/* the word */ word);', 'a pattern built from a string'],
+    ['const hit = title.match(// the word\n  word);', 'a pattern built from a string'],
+    ["import { readFileSync } from 'node:fs' with {};", "import from 'node:fs'"],
     ["const hit = title.match(new String('x'));", 'a pattern built from a string'],
     ['const at = title.search(word);', 'a pattern built from a string'],
     ['const all = title.matchAll(word);', 'a pattern built from a string'],
