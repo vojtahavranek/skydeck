@@ -13,6 +13,7 @@
 /** @import { ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { ListAction, Zone } from './keys.js' */
 /** @import { RowText } from './list-text.js' */
+import { serverNow } from './format.js';
 import { countsText, footerText, rowText, sectionText } from './list-text.js';
 
 /**
@@ -79,7 +80,8 @@ function setTip(target, tip) {
 
 /**
  * One row's elements, made once (S2 12.2): the state icon, then the first line — the slot, the
- * ticket key or the group, the title, the marks, the chip, ✎, the age — and the state line.
+ * ticket key or the group, the title, the marks, the chip (S2 12.3: its open part, then its merged
+ * part apart), ✎, the age — and the state line.
  *
  * A double click activates only when both its clicks were on this row: Chromium counts a double
  * click by time and distance, not by element, so a list that moved the rows between the two
@@ -115,13 +117,30 @@ function makeRow(id, hooks, clicks) {
     mark.dataset.kind = kind;
   }
   const chip = element('row-chip');
+  const chipText = element('row-chip-text');
+  const chipMerged = element('row-chip-merged');
+  chip.append(chipText, chipMerged);
   const note = element('row-note');
   const age = element('row-age');
   const state = element('row-state', 'div');
   first.append(slot, key, group, title, ...marks.values(), chip, note, age);
   main.append(first, state);
   root.append(icon, main);
-  return { root, icon, slot, key, group, title, marks, chip, note, age, state };
+  return {
+    root,
+    icon,
+    slot,
+    key,
+    group,
+    title,
+    marks,
+    chip,
+    chipText,
+    chipMerged,
+    note,
+    age,
+    state,
+  };
 }
 
 /** @typedef {ReturnType<typeof makeRow>} RowElements */
@@ -152,9 +171,16 @@ function paintRow(row, text, done) {
     setText(mark, shown.map((candidate) => candidate.text).join(', '));
     setTip(mark, shown.map((candidate) => candidate.tip).join('\n'));
   }
-  setText(row.chip, text.chip?.text ?? '');
-  setTip(row.chip, text.chip?.tip ?? '');
-  setData(row.chip, 'dotted', String(text.chip?.dotted ?? false));
+  // S2 12.3: `PR · failing`, then ` +30` dim; a chip with none open (`3 merged`, `closed`) dim.
+  const chip = text.chip;
+  if (row.chip.hidden !== (chip === null)) {
+    row.chip.hidden = chip === null;
+  }
+  setText(row.chipText, chip?.text ?? '');
+  setText(row.chipMerged, chip === null || chip.merged === '' ? '' : ` ${chip.merged}`);
+  setTip(row.chip, chip?.tip ?? '');
+  setData(row.chip, 'dotted', String(chip?.dotted ?? false));
+  setData(row.chip, 'dim', String(chip?.dim ?? false));
   setText(row.note, text.note === null ? '' : '✎');
   setTip(row.note, text.note === null ? '' : text.note === '' ? 'has a note' : text.note);
   setText(row.age, text.age);
@@ -281,17 +307,9 @@ export function createList(root, hooks) {
   /** @returns {RowPayload[]} the rows drawn, in order */
   const rows = () => current?.sections.flatMap((section) => section.rows) ?? [];
 
-  /** The server's time now: the list's, counted on by the time since it came. */
-  const nowNs = () => {
-    if (current === null) {
-      return '';
-    }
-    if (!/^-?[0-9]+$/.test(current.nowNs)) {
-      return current.nowNs;
-    }
-    const elapsed = BigInt(Math.max(0, Math.floor((performance.now() - receivedAt) * 1e6)));
-    return String(BigInt(current.nowNs) + elapsed);
-  };
+  /** The server's time now: the list's, counted on by the time since it came (`serverNow`). */
+  const nowNs = () =>
+    current === null ? '' : serverNow(current.nowNs, performance.now() - receivedAt);
 
   /**
    * @param {RowPayload} row

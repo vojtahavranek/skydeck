@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { chipFor } from '../../../src/github.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
 import type { TerminalInfo } from '../../../src/window/hub.ts';
 import type { RowPayload } from '../../../src/window/protocol.ts';
+import { windowChip } from '../../../src/window/view/chip.ts';
 import { projectDirs, rowPayload, sectionOf } from '../../../src/window/view/sections.ts';
 import { attached, ds, meta, prRow, rowOf, rows } from '../../helpers/derived.ts';
 import { BOOT_A, S1, S2, S3, SEC, T0 } from '../../helpers/platform.ts';
@@ -184,10 +184,10 @@ test('rowPayload: a note of one line gives one line; no note gives none', () => 
   assert.deepEqual(rowPayload(none, NONE).noteHead, []);
 });
 
-test("rowPayload: pull requests with their level; the chip is design 7.3's", () => {
+test("rowPayload: pull requests with their level and last read; the chip is S2 12.3's (windowChip)", () => {
   const failing = prRow('acme/web', 7, { checks: 'failing', title: 'Fix it' });
-  const merged = prRow('acme/api', 30, { state: 'merged' });
-  const unreadable = prRow('acme/db', 3, { error: 'HTTP 502' });
+  const merged = prRow('acme/api', 30, { state: 'merged', okAtNs: T0 - 5n * SEC });
+  const unreadable = prRow('acme/db', 3, { error: 'HTTP 502', okAtNs: null });
   const prs = [failing, merged, unreadable];
   const row = rowOf(ds({ id: S1 }), {
     prs,
@@ -202,6 +202,7 @@ test("rowPayload: pull requests with their level; the chip is design 7.3's", () 
       title: 'A pull request',
       level: 'merged',
       error: null,
+      okAtNs: String(T0 - 5n * SEC),
     },
     {
       url: 'https://github.com/acme/db/pull/3',
@@ -210,6 +211,7 @@ test("rowPayload: pull requests with their level; the chip is design 7.3's", () 
       title: 'A pull request',
       level: 'cant-read',
       error: 'HTTP 502',
+      okAtNs: null,
     },
     {
       url: 'https://github.com/acme/web/pull/7',
@@ -218,10 +220,41 @@ test("rowPayload: pull requests with their level; the chip is design 7.3's", () 
       title: 'Fix it',
       level: 'checks-failing',
       error: null,
+      okAtNs: String(T0),
     },
   ]);
-  assert.deepEqual(payload.chip, chipFor(prs));
-  assert.deepEqual(payload.chip, { level: 'cant-read', count: 3 });
+  assert.deepEqual(payload.chip, windowChip(payload.prs));
+  assert.deepEqual(payload.chip, { level: 'cant-read', open: 2, merged: 1 });
+  // Not design 7.3's chip of `ls` (the worst of all, all counted), which the row also has.
+  assert.deepEqual(row.chip, { level: 'cant-read', count: 3 });
+});
+
+test("rowPayload: the chip of finished pull requests only is S2 12.3's, not design 7.3's", () => {
+  const prs = [
+    prRow('acme/api', 30, { state: 'merged' }),
+    prRow('acme/api', 31, { state: 'merged' }),
+    prRow('acme/api', 32, { state: 'closed' }),
+  ];
+  const row = rowOf(ds({ id: S1 }), { prs, sessionPrs: prs.map((pr) => attached(S1, pr)) });
+  assert.deepEqual(rowPayload(row, NONE).chip, { level: 'merged', open: 0, merged: 2 });
+  const closed = [prRow('acme/api', 33, { state: 'closed' })];
+  const only = rowOf(ds({ id: S1 }), { prs: closed, sessionPrs: [attached(S1, closed[0]!)] });
+  assert.deepEqual(rowPayload(only, NONE).chip, { level: 'closed', open: 0, merged: 0 });
+});
+
+test('rowPayload: a detached pull request is neither listed nor counted in the chip', () => {
+  const kept = prRow('acme/web', 7);
+  const gone = prRow('acme/web', 8, { checks: 'failing' });
+  const row = rowOf(ds({ id: S1 }), {
+    prs: [kept, gone],
+    sessionPrs: [attached(S1, kept), attached(S1, gone, { detachedAtNs: T0 })],
+  });
+  const payload = rowPayload(row, NONE);
+  assert.deepEqual(
+    payload.prs.map((pr) => pr.number),
+    [7],
+  );
+  assert.deepEqual(payload.chip, { level: 'approved-green', open: 1, merged: 0 });
 });
 
 test('rowPayload: no pull request, no chip', () => {

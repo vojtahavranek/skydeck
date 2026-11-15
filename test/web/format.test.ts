@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { formatAge as serverFormatAge } from '../../src/text/age.ts';
-import { ageBetween, formatAge } from '../../web/format.js';
+import { ageBetween, formatAge, serverNow } from '../../web/format.js';
 
 const SEC = 1_000_000_000n;
 const MIN = 60n * SEC;
@@ -98,4 +98,47 @@ describe('ageBetween', () => {
     assert.equal(ageBetween('59000000000', '-1000000000'), '1m');
     assert.equal(ageBetween('-5', '1'), '0s');
   });
+});
+
+describe("serverNow: the server's time now as the page estimates it (plan D 2.4)", () => {
+  const listNow = 1_794_474_000_000_000_000n;
+
+  test("a list's time counted on by the milliseconds since it came, exactly above 2^53", () => {
+    assert.equal(serverNow(String(listNow), 0), String(listNow));
+    assert.equal(serverNow(String(listNow), 1500), String(listNow + 1_500_000_000n));
+    assert.equal(serverNow(String(listNow), 3 * 86_400_000), String(listNow + 3n * DAY));
+    // performance.now() has fractions of a millisecond: counted in nanoseconds, rounded down.
+    assert.equal(serverNow(String(listNow), 0.25), String(listNow + 250_000n));
+    assert.equal(serverNow(String(listNow), 2.0000004), String(listNow + 2_000_000n));
+    assert.equal(serverNow(String(listNow), 2.0000006), String(listNow + 2_000_000n));
+  });
+
+  test("ages from it are the list's: 59 s after a list that said 1 s ago is 1m", () => {
+    const then = listNow - SEC;
+    assert.equal(ageBetween(serverNow(String(listNow), 59_000), String(then)), '1m');
+    assert.equal(ageBetween(serverNow(String(listNow), 58_999), String(then)), '59s');
+  });
+
+  test('time does not run backwards: a negative elapsed time counts as none', () => {
+    assert.equal(serverNow(String(listNow), -1000), String(listNow));
+  });
+
+  test('an elapsed time that is not a finite number counts as none, and nothing throws', () => {
+    for (const elapsed of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      assert.equal(serverNow(String(listNow), elapsed), String(listNow));
+    }
+  });
+
+  test('a negative integer time is still a whole number: counted on from it', () => {
+    assert.equal(serverNow('-5', 1), '999995');
+    assert.equal(serverNow('-1000000', 1), '0');
+  });
+
+  // As web/list.js did: the list's own text when it is not a whole number, so that its ages are
+  // empty (ageBetween) rather than wrong.
+  for (const odd of ['', 'soon', '1.5', ' 12 ', '0x10', '1e3', '12\n']) {
+    test(`${JSON.stringify(odd)} as the list's time is given back as it is`, () => {
+      assert.equal(serverNow(odd, 1500), odd);
+    });
+  }
 });
