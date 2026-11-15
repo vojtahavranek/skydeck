@@ -10,17 +10,35 @@ import type { Clock } from '../platform/types.ts';
 export const SEEN_AFTER_MS = 1500;
 
 /**
- * What a terminal sends that the user did not type: focus reports (`CSI I`, `CSI O`, mode 1004,
- * which Claude Code asks for: one at every click, chord and return to the window) and SGR mouse
- * reports (`CSI <` b;x;y `M` or `m`, modes 1006 and 1016). xterm.js's only other mouse encoding,
- * X10, comes as `binary`.
+ * What a terminal sends by itself, told by its shape (B9; C1 of review 2, ruled): focus reports
+ * (`CSI I`, `CSI O`, mode 1004, one at every click, chord and return to the window), SGR mouse
+ * reports (`CSI <` b;x;y `M` or `m`, modes 1006 and 1016), and the answers to queries. xterm.js's
+ * only other mouse encoding, X10, comes as `binary`. The page swallows the queries today (S2 9.3),
+ * so no answer arrives; were one to come, it must not count as typing: a false "typing" clears a
+ * mark unread, a false "not typing" costs the user 1.5 s. Keys never take these shapes but one:
+ * F3 with a modifier (`CSI 1 ; 2 R`) has the bytes of a cursor position report (ruled).
  */
-const REPORTS = /\x1b\[[IO]|\x1b\[<[0-9;]+[Mm]/g;
+const REPORTS = new RegExp(
+  [
+    // A private marker: SGR mouse reports, DA1 `?…c`, DA2 `>…c`, DEC mode reports `?…$y`,
+    // DEC status reports `?…n`, DECXCPR `?…R`.
+    /\x1b\[[<=>?][0-9;]*\$?[A-Za-z~]/.source,
+    // No marker: focus reports `I` and `O`, device attributes `c`, status reports `n`, window
+    // reports `t`, ANSI mode reports `$y`.
+    /\x1b\[[0-9;]*(?:[IOcnt]|\$y)/.source,
+    // A cursor position report.
+    /\x1b\[[0-9]+;[0-9]+R/.source,
+    // OSC answers (the colours of OSC 4, 10 and 11), ended by BEL or ST.
+    /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/.source,
+    // DCS answers (DECRQSS, DA3, XTVERSION), ended by ST.
+    /\x1bP[^\x1b]*\x1b\\/.source,
+  ].join('|'),
+  'g',
+);
 
 /**
- * B9: whether an `input` message is typing: not `binary`, and something is left once every focus
- * report (`ESC [ I`, `ESC [ O`) and every SGR mouse report (`ESC [ <` digits and `;` then `M` or
- * `m`) is taken out. Pure.
+ * B9: whether an `input` message is typing: not `binary`, and something is left once every report
+ * a terminal sends by itself, told by its shape (REPORTS), is taken out. Pure.
  */
 export function isTyping(data: string, binary: boolean): boolean {
   return !binary && data.replace(REPORTS, '') !== '';
@@ -40,9 +58,10 @@ export interface Seen {
   /** The sessions being seen now: held by a focused page for 1.5 s or since a typing, and those
    *  typed into since the last call (given once). */
   take(): Set<string>;
-  /** A session began to be seen (a hold completed, a typing). Listeners must not throw; a throw
-   *  out of a completed hold is dropped so that the timer cannot end the server; `typed` throws
-   *  only if a listener throws. */
+  /** A session began to be seen: a hold completed, or a typing when it was not yet seen (a key
+   *  into a session already being seen calls no listener). Listeners must not throw; a throw out
+   *  of a completed hold is dropped so that the timer cannot end the server; `typed` throws only
+   *  if a listener throws. */
   onChange(listener: () => void): () => void;
   /** Every timer stopped (the server's stop); nothing is seen or told after it. */
   stop(): void;
@@ -72,6 +91,15 @@ export function createSeen(clock: Clock): Seen {
     for (const listener of [...listeners]) {
       listener();
     }
+  };
+
+  /** Whether take() would give `sessionId` now. */
+  const beingSeen = (sessionId: string): boolean => {
+    if (typedOnce.has(sessionId)) return true;
+    for (const hold of holds.values()) {
+      if (hold.held && hold.selected === sessionId) return true;
+    }
+    return false;
   };
 
   const release = (hold: Hold): void => {
@@ -109,6 +137,9 @@ export function createSeen(clock: Clock): Seen {
     },
     typed(page, sessionId) {
       if (stopped || ended.has(page)) return;
+      // C4 of review 2 (ruled): a key into a session already being seen begins nothing, so that
+      // the listeners do not run at every key press.
+      const began = !beingSeen(sessionId);
       const hold = holds.get(page);
       if (hold !== undefined && hold.focused && hold.selected === sessionId) {
         hold.cancel?.();
@@ -117,7 +148,9 @@ export function createSeen(clock: Clock): Seen {
       } else {
         typedOnce.add(sessionId);
       }
-      tell();
+      if (began) {
+        tell();
+      }
     },
     gone(page) {
       ended.add(page);

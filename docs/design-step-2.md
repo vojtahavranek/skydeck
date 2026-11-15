@@ -1945,21 +1945,25 @@ the counter, never by clock times (10.2). A turn that ended while no server ran 
 plan owner). A page holds a session from the moment that page has focus with that session selected;
 any change of either starts the 1.5 s again, so a window that comes back to the front sees after
 1.5 s too, and focus lost ends the hold at once. Several windows each hold their own; a session held
-in any of them is seen. Typing is an `input` that is not `binary` and holds more than focus reports
-(`ESC [ I`, `ESC [ O`) and SGR mouse reports (`ESC [ <` digits and `;`, then `M` or `m`): a program
-that asks for focus reports (9.2; Claude Code is expected to, not yet checked with the real program)
-gets one at every click, chord and return to the window, and a mouse report is no key, so none of
-them is typing (else every selection would clear its mark at once). What the page sends for the
-user's own act on a terminal without a key — the wheel over a program in the alternate screen that
-asked for no mouse reports and an Alt+click, both arrow keys, or an empty paste — is typing: the
-server cannot tell it from keys. Typing into the selected session's terminal of a focused window
-completes the hold at once and it holds as long as the selection and the focus do; typing into
-another terminal, or into the selected one's while the window has no focus, makes the session it
-shows seen once. A `seen` is written only when it clears a mark — a hold completes, a typing comes,
-or a mark of a session already being seen becomes known — and always in the write of a turn end or
-window end of that session while the hold lasts; there is **no periodic `seen` write**: nothing
-writes to the store every few seconds because a window has focus. It is written only for a session
-among the list's rows, so that a selection naming no session leaves no row. The hold is
+in any of them is seen. Typing is an `input` that is not `binary` and is not a report a terminal
+sends by itself, told by its shape: focus reports (`ESC [ I`, `ESC [ O`), SGR mouse reports (`ESC [ <`
+digits and `;`, then `M` or `m`) and the answers to queries (device attributes, cursor position and
+status reports, mode reports, `CSI t`, the colours of OSC 4, 10 and 11, DECRQSS). A program that
+asks for focus reports (9.2; Claude Code is expected to, not yet checked with the real program) gets
+one at every click, chord and return to the window, and a mouse report is no key, so none of them is
+typing (else every selection would clear its mark at once). The page swallows the queries (9.3), so
+no answer arrives today; were one to come, it is still not typing (a false "typing" clears a mark
+unread, a false "not typing" costs the user 1.5 s), and F3 with a modifier, which has the bytes of a
+cursor position report, is not typing either. The user's own acts on a terminal without a key are
+typing: the wheel over a program in the alternate screen that asked for no mouse reports and an
+Alt+click, both arrow keys, and an empty paste. Typing into the selected session's terminal of a
+focused window completes the hold at once and it holds as long as the selection and the focus do;
+typing into another terminal, or into the selected one's while the window has no focus, makes the
+session it shows seen once. A `seen` is written only when it clears a mark — a hold completes, a
+typing comes, or a mark of a session already being seen becomes known — and always in the write of a
+turn end or window end of that session while the hold lasts; there is **no periodic `seen` write**:
+nothing writes to the store every few seconds because a window has focus. It is written only for a
+session among the list's rows, so that a selection naming no session leaves no row. The hold is
 `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall clock does not
 move).
 

@@ -229,7 +229,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | B6 | "Finished" needs a holder whose status is `idle`; a session `running` without a readable file is not finished. Ctrl+Shift+J's order: those that ask by their status time (unknown last), then those that ended by `window_end_seq`, then those that finished by `turn_ended_seq`; ties by session id. | S2 12.4: "the session is running and idle"; the longest-waiting and oldest first. | 51 (12.4) |
 | B7 | `list` gains `needYou: { count, order }`: `count` the listed rows that need you, whatever the filter (the title bar's count and `(n) skydeck`); `order` the ids of the rows this page shows that need you, in B6's order. A row that needs you is counted there and in none of `counts`. | The page decides no rule (S2 4.3); the title bar's parts add up, as S2 12.1's example does (3 + 3 + 2). | 51 (8.2.3, 12.1) |
 | B8 | `notify` carries `reason` as the kind (`asks`, `ended`, `finished`) and `detail` (the waiting detail, else null); the page writes the words. | As the list's words are the page's (stage A, A18); S2 8.2.3 names no detail. | 51 (8.2.3) |
-| B9 | Seen is held per page from the moment that page is focused with that session selected; any change of either starts the 1.5 s again (a window that comes back to the front sees after 1.5 s too). Typing into a terminal makes the session that terminal shows seen at once; typing is an `input` that is not `binary` and holds more than focus reports (`ESC [ I`, `ESC [ O`) and SGR mouse reports (`ESC [ < … M` or `m`): `isTyping` (2.5) — a program that asks for focus reports (Claude Code does, S2 9.2) gets one at every click, chord and return to the window, and none of them is typing. A `seen` is written only when a hold completes or a typing comes and it clears a mark, and always in the write of a turn end or window end of that session while the hold lasts; there is no periodic `seen` write (ruled). It is written only for a session among the rows (`rows()`), so that a selection naming no session leaves no row. | S2 12.4 fixes the 1.5 s but not when the hold starts; a `seen` matters only when it clears a mark or goes with an end. Question 4 in section 7. | 53 (12.4) |
+| B9 | Seen is held per page from the moment that page is focused with that session selected; any change of either starts the 1.5 s again (a window that comes back to the front sees after 1.5 s too). Typing into a terminal makes the session that terminal shows seen at once; typing is an `input` that is not `binary` and is not a report a terminal sends by itself, told by its shape — focus reports (`ESC [ I`, `ESC [ O`), SGR mouse reports (`ESC [ < … M` or `m`) and the answers to queries (device attributes, cursor position and status reports, mode reports, `CSI t`, the colours of OSC 4 / 10 / 11, DECRQSS; ruled on review 2 of task 53: the page swallows the queries, S2 9.3, but `isTyping` does not rely on it): `isTyping` (2.5) — a program that asks for focus reports (Claude Code is expected to, S2 9.2) gets one at every click, chord and return to the window, and none of them is typing. The user's own acts without a key are typing: the wheel in the alternate screen without a mouse mode and Alt+click (both arrive as arrow keys), an empty paste; F3 with a modifier has the bytes of a cursor position report and is not (ruled). A typing into a session already being seen calls no `onChange` listener (ruled on review 2 of task 53), so that nothing runs at every key press. A `seen` is written only when a hold completes or a typing comes and it clears a mark, and always in the write of a turn end or window end of that session while the hold lasts; there is no periodic `seen` write (ruled). It is written only for a session among the rows (`rows()`), so that a selection naming no session leaves no row. | S2 12.4 fixes the 1.5 s but not when the hold starts; a `seen` matters only when it clears a mark or goes with an end. Question 4 in section 7. | 53 (12.4) |
 | B10 | A window end is judged at each refresh after it was settled, for a terminal in state `ended` or `lost` (a keeper that died: its exit time is the server's clock) that started its program: recorded when its session's row is not running and marked `ended-unexpectedly`, not recorded when the row runs again or ended deliberately; judged once. It is the same end when the stored `window_end_ns` equals the exit's time, so a server restart, which finds a lingering keeper again, never marks it twice. At the first start of a stage B server the table is empty, so each lingering keeper of an ended-unexpectedly session gets `ended` once (no notification, B12; one sentence in `docs/install.md`, task 56). | S2 12.4 reason 2 says "at the next refresh"; S2 14: a keeper that dies makes its session need you; a restart for an update must not bring back what the user saw. | 52 (12.4) |
 | B11 | A write the store refuses (busy, S2 14) is kept; the next look tries the kept writes again first, in their order, each as an entry of its own (`recordAttention` takes the writes in order), then its own; nothing is folded but two turn ends of one session (the later is kept). The baselines move on, so a turn end is neither lost nor recorded twice. A store migrated under the server stops it (S2 10.1). | A turn end is seen once, at one look; folding a kept `seen` into a later turn end of the same session would make that turn seen (B3's order) although the user had left. | 52 (10.3) |
 | B12 | The server judges "starts to need you" over the rows a page without a filter lists (it builds that list with `buildListMessage`). The first judgement, which records without notifying, is the first check made once a refresh has worked and the marks have been read (`Attention.ready()`, `NotifierDeps.ready`), not simply the first call: a start whose first refresh fails must not notify everything that already needed you at the next one. A session whose reason changes does not start to need you. `Pages.notify` sends only while no page has focus, to the page that had it last. | S2 13; a restart must not notify everything that already needed you. | 52 (13) |
@@ -369,7 +369,8 @@ export interface LookedFile { pid: number; procStart: number; sessionId: string;
  *  `waiting` to `idle`. `busy` → `waiting` is not; another session (/clear) or another process
  *  start is not (it starts over). */
 export function isTurnEnd(before: LookedFile, after: LookedFile): boolean;
-/** One look (S2 10.3, B4). `files`: those read at this look; `gone`: the baselines' pids that /proc
+/** One look (S2 10.3, B4). `files`: those read at this look, at most one per pid (`readLiveFiles`
+ *  reads `<pid>.json`); `gone`: the baselines' pids that /proc
  *  says have no process, or a process with another start than the baseline's (the caller judges).
  *  A pid with no file keeps its baseline unless it is gone; a file is the new baseline of
  *  its pid; `first` (the server's first look) sets baselines only. `ends`: the turn ends of this
@@ -380,9 +381,11 @@ export function lookAt(baselines: ReadonlyMap<number, LookedFile>, files: readon
 ```ts
 // src/window/seen.ts — S2 12.4 "seen", the condition that holds; B9
 export const SEEN_AFTER_MS = 1500;
-/** B9: whether an `input` message is typing: not `binary`, and something is left once every focus
- *  report (`ESC [ I`, `ESC [ O`) and every SGR mouse report (`ESC [ <` digits and `;` then `M` or
- *  `m`) is taken out. Pure. */
+/** B9: whether an `input` message is typing: not `binary`, and something is left once every report
+ *  a terminal sends by itself, told by its shape, is taken out: focus reports (`ESC [ I`,
+ *  `ESC [ O`), SGR mouse reports (`ESC [ <` digits and `;` then `M` or `m`), and the answers to
+ *  queries (device attributes, cursor position and status reports, mode reports, `CSI t`, the
+ *  colours of OSC 4 / 10 / 11, DECRQSS; ruled on review 2). Pure. */
 export function isTyping(data: string, binary: boolean): boolean;
 export interface Seen {
   /** A page's focus and selection now (its `start`: selected null; its `focus`). A change of
@@ -396,9 +399,10 @@ export interface Seen {
   /** The sessions being seen now: held by a focused page for 1.5 s or since a typing, and those
    *  typed into since the last call (given once). */
   take(): Set<string>;
-  /** A session began to be seen (a hold completed, a typing). Listeners must not throw; a throw
-   *  out of a completed hold is dropped so that the timer cannot end the server; `typed` throws
-   *  only if a listener throws. */
+  /** A session began to be seen: a hold completed, or a typing when it was not yet seen (a key
+   *  into a session already being seen calls no listener). Listeners must not throw; a throw out
+   *  of a completed hold is dropped so that the timer cannot end the server; `typed` throws only
+   *  if a listener throws. */
   onChange(listener: () => void): () => void;
   /** Every timer stopped (the server's stop). */
   stop(): void;
@@ -658,12 +662,16 @@ file means, and when a session is being seen.
   end.
 - `isTyping` (F1 of review A): `a`, `\r`, a bracketed paste, text after a focus report → true; `ESC [ I`,
   `ESC [ O`, `ESC [ < 0 ; 10 ; 5 M`, `ESC [ < 0 ; 10 ; 5 m`, several of them in one message, the
-  empty string, and anything `binary` → false.
+  empty string, and anything `binary` → false. Review 2 (C1, ruled): keys and pastes as xterm.js
+  gives them, an empty paste among them → true; the answers to queries (DA1, DA2, DA3, cursor
+  position reports, DSR, DECRQM, `CSI t`, OSC 4 / 10 / 11, DECRQSS, XTVERSION), alone and several
+  in one message → false; F3 with a modifier → false (ruled).
 - `seen.ts`: focused with S selected → S in `take()` from 1,500 ms on, not at 1,499; unfocused
   first, or the selection changed at 1,000 ms → the 1.5 s starts again; focus lost → S out at once;
   `typed` for the selected session of a focused page → in `take()` at once and held; `typed` for
   another session → in the next `take()` only; two pages → the union; `gone` and `stop` → nothing
-  more, no timer left; `onChange` once per completed hold and per typing.
+  more, no timer left; `onChange` once per completed hold and per typing that begins a seen (C4 of
+  review 2, ruled: 200 keys into a session → one call); a page told `gone` stays gone.
 
 **Done when:** S2 10.3's rule and S2 12.4's condition are code with their edge cases tested;
 `npm run check` passes.

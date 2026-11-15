@@ -49,6 +49,77 @@ test('isTyping (F1 of review A): focus reports and SGR mouse reports are not typ
   }
 });
 
+/** What keys and pastes give through xterm.js 6.0.0 (C1 of review 2): every one is typing. */
+const KEY_INPUTS = [
+  '\x7f', // Backspace
+  '\t',
+  `${ESC}[Z`, // Shift+Tab
+  '\x03', // Ctrl+C
+  `${ESC}[B`,
+  `${ESC}OA`, // an arrow key with application cursor keys
+  `${ESC}[1;5C`, // Ctrl+Right
+  `${ESC}[H`,
+  `${ESC}[F`,
+  `${ESC}[2~`, // Insert
+  `${ESC}[3~`, // Delete
+  `${ESC}[5~`, // Page Up
+  `${ESC}OP`, // F1
+  `${ESC}OR`, // F3
+  `${ESC}[15~`, // F5
+  `${ESC}[24~`, // F12
+  `${ESC}[1;2P`, // Shift+F1
+  `${ESC}[1;2S`, // Shift+F4
+  `${ESC}b`, // Alt+b
+  `${ESC}P`, // Alt+Shift+P
+  `${ESC}[`, // Alt+[
+  `${ESC}]`, // Alt+]
+  `${ESC}c`, // Alt+c
+  `${ESC}[200~${ESC}[201~`, // an empty paste
+  `${ESC}[200~a paste that says ESC[0n and 12;40R${ESC}[201~`,
+  '😀',
+];
+
+/** What a terminal answers to a query, or sends by itself (C1 of review 2): none is typing. */
+const TERMINAL_REPORTS = [
+  `${ESC}[?1;2c`, // DA1
+  `${ESC}[>0;276;0c`, // DA2
+  `${ESC}P!|00000000${ESC}\\`, // DA3
+  `${ESC}[12;40R`, // a cursor position report
+  `${ESC}[?12;40R`, // DECXCPR
+  `${ESC}[0n`, // DSR: ready
+  `${ESC}[?997;1n`, // the colour scheme (mode 2031)
+  `${ESC}[?2026;2$y`, // DECRQM, a DEC mode
+  `${ESC}[4;2$y`, // DECRQM, an ANSI mode
+  `${ESC}[8;24;80t`, // the size in cells
+  `${ESC}[4;600;800t`, // the size in pixels
+  `${ESC}[48;24;80;600;800t`, // an in-band resize (mode 2048)
+  `${ESC}]10;rgb:ffff/ffff/ffff${ESC}\\`, // OSC 10, ended by ST
+  `${ESC}]11;rgb:0000/0000/0000\x07`, // OSC 11, ended by BEL
+  `${ESC}]4;1;rgb:cdcd/0000/0000\x07`, // OSC 4
+  `${ESC}P1$r0;1m${ESC}\\`, // DECRQSS
+  `${ESC}P>|xterm.js(6.0.0)${ESC}\\`, // XTVERSION
+  `${ESC}[?1;2c${ESC}[12;40R${ESC}]11;rgb:0000/0000/0000\x07${ESC}[I`, // several in one
+];
+
+test('isTyping (C1 of review 2, ruled): every key input and paste is typing', () => {
+  for (const data of KEY_INPUTS) {
+    assert.equal(isTyping(data, false), true, JSON.stringify(data));
+  }
+});
+
+test("isTyping (C1 of review 2, ruled): a terminal's answers to queries are not typing, by their shape", () => {
+  for (const data of TERMINAL_REPORTS) {
+    assert.equal(isTyping(data, false), false, JSON.stringify(data));
+  }
+  assert.equal(isTyping(`${ESC}[12;40Rx`, false), true, 'a key after a report');
+});
+
+test('isTyping: Shift+F3 and its kin share the bytes of a cursor report and are not typing (ruled)', () => {
+  for (const data of [`${ESC}[1;2R`, `${ESC}[1;5R`, `${ESC}[1;3R`]) {
+    assert.equal(isTyping(data, false), false, JSON.stringify(data));
+  }
+});
+
 test('isTyping: nothing binary is typing (the X10 mouse encoding)', () => {
   assert.equal(isTyping('a', true), false);
   assert.equal(isTyping(`${ESC}[M !!`, true), false);
@@ -281,7 +352,7 @@ test('stop: every timer stopped, and nothing more is seen or told', (t) => {
   seen.stop();
 });
 
-test('onChange: once per completed hold and once per typing; off() ends it', (t) => {
+test('onChange: once per completed hold and once per typing that begins a seen; off() ends it', (t) => {
   const { clock } = testPlatform(t);
   const seen = createSeen(clock);
   const calls: string[] = [];
@@ -300,14 +371,50 @@ test('onChange: once per completed hold and once per typing; off() ends it', (t)
   clock.advanceMs(10_000);
   assert.equal(calls.length, 2, 'a hold is told once');
   seen.typed(p, S1);
-  assert.equal(calls.length, 4, 'a typing');
+  assert.equal(calls.length, 2, 'a typing into a session already being seen begins nothing');
   seen.typed(p, S2);
-  assert.equal(calls.length, 6, 'another typing');
+  assert.equal(calls.length, 4, 'a typing that begins a seen');
   off();
   off();
   seen.focus(p, true, S2);
   clock.advanceMs(1500);
-  assert.deepEqual(calls.slice(6), ['b']);
+  assert.deepEqual(calls.slice(4), ['b']);
+});
+
+test('200 keys into a session: one call, for the key that began its seen (C4 of review 2)', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  let changes = 0;
+  seen.onChange(() => {
+    changes += 1;
+  });
+  const p = page();
+  seen.focus(p, true, S1);
+  clock.advanceMs(200);
+  for (let key = 0; key < 200; key += 1) seen.typed(p, S1);
+  assert.equal(changes, 1, 'the first key completed the hold');
+  assert.equal(clock.timers(), 0);
+
+  // A hold that completed by itself: no key calls a listener.
+  seen.focus(p, true, S2);
+  clock.advanceMs(1500);
+  assert.equal(changes, 2);
+  for (let key = 0; key < 200; key += 1) seen.typed(p, S2);
+  assert.equal(changes, 2);
+
+  // Typed into another terminal: the first key until the next take().
+  for (let key = 0; key < 200; key += 1) seen.typed(p, S3);
+  assert.equal(changes, 3);
+  assert.deepEqual(seen.take(), new Set([S2, S3]));
+  seen.typed(p, S3);
+  assert.equal(changes, 4, 'given by take(), it is not being seen: a key begins it again');
+
+  // Typed into a session another page holds: already being seen, and still in take().
+  const q = page();
+  seen.typed(q, S2);
+  assert.equal(changes, 4);
+  seen.focus(p, false, S2);
+  assert.deepEqual(seen.take(), new Set([S2, S3]));
 });
 
 test("a listener that throws out of a completed hold does not throw out of the clock's timer", (t) => {
