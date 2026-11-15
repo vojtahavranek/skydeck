@@ -138,9 +138,9 @@ lead's rulings of 2026-11-15).
 | D10 | A note saved in the window removes a note file that a failed editor kept (`<stateDir>/note-<id>.md`), as `note --set` does (design 7.1); `discardKeptNote` and the path rule move from `src/cli/notes.ts` to `src/sessions/meta.ts` so that the server can call them (`src/window/` never imports `src/cli/`). The dialog starts from the stored note, never from a kept file. | Otherwise the next `skydeck note` would open the old kept text over the window's note (ruled as planned). | 36 (12.5) |
 | D11 | Two parts of S2 12.5 that S2 19 names for no stage are built in task 38: `pr-refresh` (S2 8.2.3) as the ↻ of the pull-request dialog, and "opened <time> · last active <age>" with where the title comes from, on the header's second line. | They are the header's facts and its pull-request detail (ruled: in task 38). | 38 (19) |
 | D12 | The header keeps one height for every session and window width (S2 12.5, ruled): stage A's two lines and two more, the pull requests' line and the note's line, each one line cut with an ellipsis, there for every session. The pull requests' line: the window's chip, the open ones side by side (`owner/repo #7 · failing`) as far as they fit, and the button `Pull requests`, never cut; while none is attached, the hint `no pull request` in the dim style and the button `+ PR`. The note's line: its first line, `…` after it when there are more, or the hint `no note` in the dim style while there is none. `area()` and Z1's rule stay as on main: the header is still measured as it is, and it no longer changes with what skydeck knows about a session. | Review A on main's code: a height that follows the content resizes a running program whenever a pull request is attached by itself, merges, or a note is edited, moves the terminal's top edge between sessions, starts New at a wrong size, and has no bound. | — (S2 12.5) |
-| D13 | The pull-request dialog (task 37's, with its list from task 38) lists every attached pull request on a line of its own: a click on the line that selected no text opens it (`act open-link`, S2 9.6), × detaches it (`pr-rm`) and shows the toast `Detached owner/repo #7 · Undo`, whose Undo sends `pr-add` with that address; merged and closed ones fold into `30 merged, 2 closed ▸` (the mockup's words), unfolded with the same controls; ↻ sends `pr-refresh`; the field attaches one. Words per state: `can't read · last read 3h ago · <error>` (`never read` without one), `not fetched`, `checks failing`, `changes requested`, `checks pending`, `review required`, `draft`, `approved, green`, then `· checked 4m ago` once read. The pull request's title is the line's tooltip. The list follows every `list` while the dialog is shown (`editor.update`); the field's text never does. | S2 12.5 shows one example of each kind; the rest follows the chip's order. An address the user no longer sees cannot be attached again by hand. | — (S2 12.5) |
+| D13 | The pull-request dialog (task 37's, with its list from task 38) lists every attached pull request on a line of its own: a click on the line that selected no text opens it (`act open-link`, S2 9.6), × detaches it (`pr-rm`) and shows the toast `Detached owner/repo #7 · Undo`, whose Undo sends `pr-add` with that address; merged and closed ones fold into `30 merged, 2 closed ▸` (the mockup's words), unfolded with the same controls; ↻ sends `pr-refresh`; the field attaches one, and Attach's `ok` empties the field and keeps the dialog open, so that the new line shows in the list (`not fetched`, then its state), while every other dialog closes on `ok` (ruled on review B's re-check; task 37). Words per state: `can't read · last read 3h ago · <error>` (`never read` without one), `not fetched`, `checks failing`, `changes requested`, `checks pending`, `review required`, `draft`, `approved, green`, then `· checked 4m ago` once read. The pull request's title is the line's tooltip. The list follows every `list` while the dialog is shown (`editor.update`); the field's text never does. | S2 12.5 shows one example of each kind; the rest follows the chip's order. An address the user no longer sees cannot be attached again by hand. | — (S2 12.5) |
 | D14 | The group chip opens the ticket when there is a link and shows that it is one (an arrow `↗` after the key, underlined); otherwise it is plain text. It never edits: the ✎ beside it and `g` edit the group, with and without a link; while there is no group the dashed `+ group` button sets one. | One element, one meaning (ruled). | — (S2 12.5) |
-| D15 | The Undo toast: the mockup's words (`Marked done: hidden from the list. It comes back on new activity.`, and for a running session `Marked done. Stays under Open while it runs; hidden once it stops.`), one at a time, 5 seconds (the mockup's 4.2, rounded up for the reach to Undo); Undo sends `undone`; like the page's other chrome it takes no keyboard on a click, and it lies over the scrim of a dialog. `d` on a done row (shown with `a`) sends `undone` and shows no toast. `d` and the Done button act at the first keydown or click only (`d`'s auto-repeats are cancelled and do nothing), and not while their own act for that session waits. After this page's own `d` in the list, S2 12.9's exception: once the answer came and the next list no longer has the row, the row after it in the same section is selected, else the one before it, else none; never a row of Open. The Done button leaves the selection to S2 12.9's main rule. | S2 12.5 and 12.10 name the toast, not its words or time. Review A: a held `d` with done sessions shown sends `done`, then `undone`, at every list; a run of `d` needs the next row. | — (S2 12.9) |
+| D15 | The Undo toast: the mockup's words (`Marked done: hidden from the list. It comes back on new activity.`, and for a running session `Marked done. Stays under Open while it runs; hidden once it stops.`), one at a time, 5 seconds (the mockup's 4.2, rounded up for the reach to Undo); Undo sends `undone`; like the page's other chrome it takes no keyboard on a click, and it lies over the scrim of a dialog. `d` on a done row (shown with `a`) sends `undone` and shows no toast. `d` and the Done button act at the first keydown or click only (`d`'s auto-repeats are cancelled and do nothing), and not while their own act for that session waits. After this page's own `d` in the list, S2 12.9's exception: once the answer came and the next list no longer has the row, and only while that session is still the selected one (`d` on A, ↑ to Z before the list comes → the selection stays on Z), the row after it in the same section is selected, else the one before it, else none; never a row of Open. The Undo of that `d` selects the session again once it is back in the list, if the selection is still where that `d` left it (the row it selected, or none); moved meanwhile, it stays (both ruled on review A's re-check; task 37). The Done button leaves the selection to S2 12.9's main rule. | S2 12.5 and 12.10 name the toast, not its words or time. Review A: a held `d` with done sessions shown sends `done`, then `undone`, at every list; a run of `d` needs the next row. | — (S2 12.9) |
 | D16 | `skydeck show` prints the ticket address as a `ticket:` line after `group:`; `show --json` is unchanged. | Ruled; one line, no new interface. | — (S2 12.5, design 7.5) |
 | D17 | In the header and the dialogs only buttons (`+ group`, ✎, `Pull requests` / `+ PR`, Note, Done / Undone, ×, ↻, the fold) cancel their mousedown, so that they take no keyboard; every text that acts — the title, the group chip with a link, a pull request's item or line, the note's line — acts on a click that selected no text, and can still be selected and copied by a drag, as on main. | Review A: main lets the title, the group and the directory be selected and copied across lists (web/cards.js:11-14). | — |
 | D18 | `linkToOpen` (S2 9.6) moves unchanged from `src/window/windows.ts` to `src/text/link.ts`, which imports nothing; `windows.ts` re-exports it, so that its callers and tests stay as they are. `ticketAddress` (`src/sessions/`) returns what `linkToOpen` gives for the filled address; `src/platform/config.ts`, which imports nothing, checks `ticketUrl` itself with the URL parser as S2 16.4 says. | The import rules of design 11: `src/sessions/` may import `src/text/`, never `src/window/`; `src/platform/` imports nothing. | — |
@@ -318,15 +318,20 @@ export function createToast(root) {} // → { show(text: string, undo: (() => vo
 ```
 
 `web/app.js` (task 37) owns: the new list keys on the selected row (`no session selected` when
-there is none); `edit`, `done` and `say` given to the cards; `header(row, selected, term, now)`
+there is none); one function every window chord passes before it acts, `windowChordGate(kind)` —
+true when it may act; while a dialog is shown it passes `help`, passes `reload` unless the dialog
+holds changed text, and says `close the edit first (Esc)` for the rest — through which later
+stages send their own chord-like actions (stage B's notification click, stage E's switcher); `edit`, `done` and `say` given to the cards; `header(row, selected, term, now)`
 for every pane, with `selected` in the render key; `closed` and `now` given to the editor;
 `editor.update(list)` at every list while a dialog is shown; D2's rules (Esc to `editor.escape()`
 in the capture phase, the chords, the keyboard moved nowhere, `closed()` giving it back, the
 reload guard); D15's rules for `d` and Done (first keydown, one act per session at a time, the
 toast, the selection after `d`); `overLimit`'s entries for the new kinds (label and group text
 1,024 bytes, note text and base 65,536, URL 4,096), and its sentence, which today knows only
-1,024 and 4,096, names 65,536 too — so that the page never sends what the server's parser
-refuses. `index.html` gains `#editor` and `#toast` at the
+1,024 and 4,096, names 65,536 too; for these fields as for stage A's it also refuses text that is
+not well formed (a lone surrogate), for which the server would close the connection and a dialog
+would lose the user's text (task 34's review 2) — so that the page never sends what the server's
+parser refuses. `index.html` gains `#editor` and `#toast` at the
 body's level, beside `#help`, and the stylesheet `edit.css`.
 
 ### 2.5 What the server refuses, and how the page shows it
@@ -596,8 +601,10 @@ header's controls come with task 38 and call the same dialogs.
 
 **Files**
 - Create: `web/edit.js`, `web/edit.css`, `web/toast.js`, `test-page/edit.test.ts`,
-  `test-page/fixtures/recording-cards.js` (a cards module for `launched`'s `modules` option that
-  records every `header(…)` call's arguments on the page, so that a test sees what `app.js` passes)
+  `test-page/fixtures/recording-cards.js` (a whole cards module — `app.js` calls every member of
+  contract 2.9 on it —: a copy of `test-page/fixtures/minimal-cards.js` that also records every
+  `header(…)` call's arguments on the page, and the deps it is given, pinned with `pinModules`, so
+  that a test sees what `app.js` passes and does what task 38's header controls will do; ruled)
 - Modify: `web/app.js`, `web/keys.js`, `web/help.js` (the stage D lines: `l` and F2 label, `g`
   group, `n` note, `p` pull requests, `d` done or undone), `web/index.html` (`#editor`, `#toast`,
   `edit.css`), `web/cards.js` (only `header`'s new parameters and the three deps of 2.4, unused);
@@ -612,12 +619,13 @@ Claude Code as the session name on the next start or resume. Empty clears it.`, 
 ticket key at the start of the title is used.`, `Ctrl+Enter saves. Plain text, kept on this
 machine.`, `Pull requests a session touched are attached by themselves.`). The pull-request
 dialog of this task holds the field and Attach (task 38 adds the list above it). Save sends the
-`act` and is disabled while it waits; `ok` closes the dialog; a refusal stays in it (2.5). Every
+`act` and is disabled while it waits; `ok` closes the dialog, but Attach's `ok` empties the field
+and keeps the pull-request dialog open (ruled, D13); a refusal stays in it (2.5). Every
 close calls `deps.closed()`. D2's modal rules and reload guard; D15's toast, its first-keydown and
 one-at-a-time rules for `d`, and the selection after `d`; D17 for the dialogs' buttons. The cards'
 side of 2.4 as `app.js` sees it: `header(row, selected, term, now)` for every pane, `selected` in
 the render key, `now` from `serverNow` with the time the shown list came; `overLimit` names
-65,536 bytes in its sentence for the note.
+65,536 bytes in its sentence for the note and refuses text that is not well formed (2.4).
 
 **Tests** (platform: `realTestPlatform` for the page; the scripted stand-in through `editWorld`)
 - `keys.test.ts`: `l`, F2, `g`, `n`, `p`, `d` give 2.4's kinds; with Ctrl, Alt or Meta, nothing;
@@ -635,8 +643,9 @@ the render key, `now` from `serverNow` with the time the shown list came; `overL
   `n`: the note in the box, Enter a line break, Ctrl+Enter sends `act note` whose `base` is the
   listed string exactly (a CRLF note too); a `list` with another note arriving meanwhile changes
   neither the box nor `base`; 2.5's conflict message keeps the text; a note of 65,537 bytes typed →
-  refused in the dialog, nothing sent; `noteTooLong` → no Save and D5's sentence. `p` sends
-  `pr-add` with the URL. A held Enter saves once. A title `<img src=x onerror=…>` in the heading is
+  refused in the dialog, nothing sent; `noteTooLong` → no Save and D5's sentence; a lone surrogate in the note → refused in the
+  dialog, nothing sent, the text and the connection kept. `p` sends `pr-add` with the URL, and
+  (named) Attach's `ok` empties the field and keeps the dialog open. A held Enter saves once. A title `<img src=x onerror=…>` in the heading is
   text.
 - `edit.test.ts`, the modal rules (review A's case first, named "a resume's answer and its terminal
   never take the keyboard from a dialog"): Enter on a row that is not running, its resume answered
@@ -648,12 +657,15 @@ the render key, `now` from `serverNow` with the time the shown list came; `overL
   after the server's proof, as stage A's case. The connection lost while saving → stage A's line
   in the dialog, the text kept. While a dialog is shown, Ctrl+Shift+1 and Ctrl+Shift+L say `close
   the edit first (Esc)` and change nothing, `j` and `d` typed in its field are text, Ctrl+Shift+H
-  shows the help, a click on the scrim does nothing.
+  shows the help, a click on the scrim does nothing. (Named, ruled) a held Enter or Esc that
+  closes a dialog opened over a terminal types nothing into the terminal; the next press does.
 - `edit.test.ts`, `d` and the toast: `d` sends `done`; the toast shows D15's words; Undo sends
   `undone`; `d` on a done row sends `undone` and no toast. A held `d` (auto-repeats) sends one act;
   a second `d` while the first one's answer waits sends nothing. After `d` on a row of This week
   whose list then lacks it, the next row of This week is selected; on the last row, the one before
-  it; on the only row, none; a `d` whose answer is a refusal moves nothing.
+  it; on the only row, none; a `d` whose answer is a refusal moves nothing. (Ruled) `d` on A, ↑ to
+  Z before the list comes → the selection stays on Z; the Undo of this page's `d` selects the
+  session again when it is back, unless the selection was moved meanwhile.
 - `shell.test.ts`: the six keys are cancelled in the list zone; with no row selected the key bar
   says `no session selected`.
 
@@ -900,3 +912,10 @@ held by task 35's tests); task 36's message comparison drops the `skydeck: ` pre
 stand-in can hold an answer until the run's signal fires; W29 uses `skydeck show` and checks the
 reload keys with changed text; `overLimit` names 65,536; task 39 has its "Not in it"; task 37
 stays whole; the plan names no file outside the repository.
+
+Ruled after the plan was merged, and written into this text by task 37's pull request: Attach's
+`ok` keeps the pull-request dialog open (D13); the selection after `d` moves only while the done
+session is still selected, and the Undo of that `d` selects it again (D15, S2 12.9);
+`recording-cards.js` is a whole cards module; the held Enter or Esc over a terminal is a named
+case; `overLimit` refuses text that is not well formed (task 34's review 2); the gate every window
+chord passes is one function, `windowChordGate` (2.4), for stages B, C and E.
