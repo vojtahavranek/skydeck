@@ -68,17 +68,17 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
     ['a carriage return and a line break', '\r\n'],
     ['a vertical tab', '\v'],
     ['a form feed', '\f'],
-    ['a no-break space', ' '],
-    ['the ogham space mark', ' '],
-    ['an en quad', ' '],
-    ['a hair space', ' '],
-    ['the line separator', ' '],
-    ['the paragraph separator', ' '],
-    ['a narrow no-break space', ' '],
-    ['the medium mathematical space', ' '],
-    ['an ideographic space', '　'],
-    ['a byte order mark', '﻿'],
-    ['a run of mixed white space', ' \t \n　'],
+    ['a no-break space', '\u00a0'],
+    ['the ogham space mark', '\u1680'],
+    ['an en quad', '\u2000'],
+    ['a hair space', '\u200a'],
+    ['the line separator', '\u2028'],
+    ['the paragraph separator', '\u2029'],
+    ['a narrow no-break space', '\u202f'],
+    ['the medium mathematical space', '\u205f'],
+    ['an ideographic space', '\u3000'],
+    ['a byte order mark', '\ufeff'],
+    ['a run of mixed white space', ' \t\u00a0\n\u3000'],
   ];
   for (const [name, space] of separators) {
     test(`${name} separates words, for the page as for the server`, () => {
@@ -93,12 +93,12 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
   // E2, ruled (task 90, C4): a character that cannot be seen and is no white space is part of a
   // word, for the page as for the server.
   const joiners: ReadonlyArray<readonly [name: string, joiner: string]> = [
-    ['a zero-width space', '​'],
-    ['a zero-width joiner', '‍'],
+    ['a zero-width space', '\u200b'],
+    ['a zero-width joiner', '\u200d'],
     ['a control character', '\u0001'],
     ['DEL', '\u007f'],
     ['the next-line control (no white space in JavaScript)', '\u0085'],
-    ['the Mongolian vowel separator (no longer white space)', '᠎'],
+    ['the Mongolian vowel separator (no longer white space)', '\u180e'],
   ];
   for (const [name, joiner] of joiners) {
     test(`${name} is part of a word, for the page as for the server`, () => {
@@ -121,7 +121,7 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
 
   const texts: ReadonlyArray<readonly [name: string, text: string, expected?: string]> = [
     ['empty', '', ''],
-    ['only white space', ' \t\n 　 ', ' \t\n 　 '],
+    ['only white space', ' \t\n\u00a0\u3000 ', ' \t\n\u00a0\u3000 '],
     ['one word', 'login', 'login'],
     ['16 words', words(16).join(' '), words(16).join(' ')],
     [
@@ -200,10 +200,10 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
     };
     const pick = (from: readonly string[]): string =>
       from[Math.floor(random() * from.length)] ?? '';
-    const space = [' ', '\t', '\n', '\r', '\v', '\f', ' ', ' ', ' ', ' '];
-    space.push(' ', ' ', ' ', ' ', ' ', '　', '﻿');
+    const space = [' ', '\t', '\n', '\r', '\v', '\f', '\u00a0', '\u1680', '\u2000', '\u2009'];
+    space.push('\u200a', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000', '\ufeff');
     const letters = ['a', 'B', 'z', '1', '-', '#', '/', 'é', 'İ', 'ß', 'Σ', '😀', '\ud800'];
-    letters.push('\udc00', '​', '‍', '\u0001', '\u007f', '\u0085', '᠎', '­');
+    letters.push('\udc00', '\u200b', '\u200d', '\u0001', '\u007f', '\u0085', '\u180e', '\u00ad');
     for (let n = 0; n < 5000; n += 1) {
       const length = Math.floor(random() * 90);
       let text = '';
@@ -228,7 +228,7 @@ describe('stackBadge and moreText (E7)', () => {
 
   test('the group is sanitised: escape sequences, controls, line breaks', () => {
     assert.equal(moreText(3, '\u001b[31mORB\u001b[0m-21\u001b]0;title\u0007'), '+2 more in ORB-21');
-    assert.equal(moreText(3, 'ORB\n2107‮\u0000'), '+2 more in ORB 2107');
+    assert.equal(moreText(3, 'ORB\n2107\u202e\u0000'), '+2 more in ORB 2107');
   });
 
   test('the group stays text: nothing in it is made markup or escaped', () => {

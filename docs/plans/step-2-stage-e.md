@@ -440,16 +440,18 @@ id is `view.selected` (listed, or a done one), with `stack: null`; null when the
 ```js
 // web/search-text.js — task 93; pure, no DOM (node:test and the root tsc load it)
 export const MAX_WORDS = 16;
-/** E3: `text` up to the end of its MAX_WORDS-th word, split as the server splits (/\s+/u); `cut`
- *  when a word came after it. searchWords(cutWords(t).text) equals searchWords(t) (task 93's
- *  parity test). */
+/** E3: `text` up to the end of its MAX_WORDS-th word, split as the server splits (/\s+/u; a
+ *  zero-width or control character is part of a word); `cut` when a word came after it; a text
+ *  with no more words as typed; a word never cut. searchWords(cutWords(t).text) equals
+ *  searchWords(t) (task 93's parity test). */
 export function cutWords(text) {}            // → { text: string, cut: boolean }
 /** E7: `×4`. */
 export function stackBadge(size) {}          // → string
 /** E7: `+3 more in ORB-2107` for a stack of 4; the group passed through list-text.js's sanitize. */
 export function moreText(size, group) {}     // → string
 /** The parts of `text` with `found`'s ranges marked; ranges out of order, overlapping, empty or
- *  past the end are clamped or dropped, so that the parts always join to `text`. */
+ *  past the end are clamped or dropped (task 93 says how), so that the parts always join to
+ *  `text`; a part is text for `textContent`, never markup. */
 export function highlightParts(text, found) {} // → { text: string, found: boolean }[]
 /** E9: 'Needs you', 'Open', 'Not running', 'Done'. */
 export function rankHeading(rank) {}         // → string
@@ -761,19 +763,48 @@ them and the page's cut of a search text is the server's.
 **Files**
 - Create: `web/search-text.js`, `test/web/search-text.test.ts`
 
-**Behaviour.** As 2.5. It imports `sanitize` of `web/list-text.js` and nothing else.
+**Behaviour.** As 2.5. It imports `sanitize` of `web/list-text.js` and nothing else. It is pure
+page code as `web/list-text.js` is (no DOM, no clock; JSDoc types, checked by the root `tsc` and
+`tsc -p web`). Ruled for task 93: the page and the server never disagree about a search text —
+what a word is (E2: split at white space as `filter.ts` splits it, `/\s+/u`; a zero-width or
+control character is part of a word), how many count (16, repeated ones too), that a word counts
+in its first 64 units AFTER lower-casing (the server cuts it; the page sends it whole), within the
+text's limit of 1,024 bytes of UTF-8 (stage A's cut in `app.js`, before `cutWords`); where this
+module cuts, it gives what `filter.ts` reads from the same text. Every text a user or a program
+wrote (a search text, a title, a group) is handed on as text for `textContent`, never as markup: a
+highlight is given as parts, not as HTML. Nothing in the module builds a pattern from a text (no
+`RegExp`, no `.match(` / `.matchAll(` / `.search(` but with a literal), and nothing is logged.
+`highlightParts` takes the ranges in their order, each clamped to the text and to start no earlier
+than where the last one ended, its ends moved inwards off the middle of a surrogate pair; one that
+is then empty, or that is not two whole numbers, is dropped; neighbouring parts marked alike are
+one part and no part is empty (`[]` for an empty text). `rankHeading` of a rank it does not know
+gives that rank's text sanitised and trimmed (as `sectionText` does for a section), of anything
+that is not a string `''`.
 
-**Tests** (platform: none)
-- Parity: for a table of texts (white space of every kind of E2, 16 and 17 words, repeated words,
-  only white space, a word of 100 units, 1,024 bytes of one word) `searchWords(cutWords(t).text)`
-  equals `searchWords(t)` of task 90, and `cut` is true exactly when a 17th word was there (the
-  page does not cut a long word: the server counts its first 64 units, E3).
+**Tests** (platform: none; the test imports `filter.ts`, the page's module does not)
+- Parity: for a table of texts (white space of every kind of E2 — a space, a tab, a line break,
+  `\r\n`, the no-break space, U+3000, U+2028, U+FEFF … —, a zero-width space, a zero-width joiner,
+  a control character, U+0085 and U+180E inside a word, 16 and 17 words, white space before and
+  after them, repeated words, only white space, a word of 100 units, 1,024 bytes of one word (of
+  one-byte, two-byte and four-byte characters), `İ` (lower-casing makes it two units: 40 of them,
+  and 63 units then an `İ`), a surrogate pair at the server's 64th unit and at the page's cut, a
+  lone surrogate, 17 words in 1,024 bytes) and for 5,000 generated texts of those characters:
+  `searchWords(cutWords(t).text)` equals `searchWords(t)` of task 90, `cut` is true exactly when a
+  17th word was there, the result is a prefix of `t`, uncut it is `t` as typed, cut it ends where
+  the 16th word ends (the page does not cut a long word: the server counts its first 64 units,
+  E3); a cut text is not cut again.
 - `stackBadge(4)` → `×4`; `moreText(4, 'ORB-2107')` → `+3 more in ORB-2107`; a group holding an
-  escape sequence → sanitised.
+  escape sequence, a control or a line break → sanitised; a group holding markup → as it is.
 - `highlightParts`: two ranges → five parts that join to the text; ranges out of order,
-  overlapping, empty, past the end, negative → clamped or dropped, the parts still join to the
-  text; no range → one part.
-- `rankHeading` of each rank; `switcherFooter` for each action, with and without `more`.
+  overlapping, touching, empty, reversed, past the end, negative, not whole numbers, not pairs →
+  clamped or dropped, the parts still join to the text and none is empty; a range never splits a
+  surrogate pair; markup in a title stays text; no range → one part; the ranges of task 90's
+  `foundIn` mark the words of a search text.
+- `rankHeading` of each rank, of one it does not know and of no string; `switcherFooter` for each
+  action, with and without `more`.
+- The module's source (comments left out): no `RegExp`, no `.match(` / `.matchAll(` / `.search(`
+  with an argument that is not a literal, no `eval` or `Function(`, no `console`, no DOM, and its
+  only import is `sanitize` of `./list-text.js`.
 
 **Done when:** the texts are tested and the page's cut equals the server's; `npm run check`
 passes.
