@@ -40,7 +40,10 @@ export interface FakeClock extends Clock {
    * Moves the time on by `ms`, `monotonicNs` with it. Every timer of `every` and `after` that falls
    * due on the way is called at its time (nowNs() answers that time meanwhile), once per period, in time order; of
    * two due at once, the one started first. `sleep(ms)` calls this and resolves on the next
-   * microtask.
+   * microtask. A timer that steps the wall clock (setNs) during it takes nothing from
+   * `monotonicNs`'s `ms`; after a step forward, the timers due in the rest of the advance are not
+   * called (the advance ends where it would have on the wall clock), while `monotonicNs` counts
+   * that rest.
    */
   advanceMs(ms: number): void;
   /** How many timers run: those of `every` not stopped, those of `after` not fired or cancelled. */
