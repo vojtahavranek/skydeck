@@ -672,7 +672,7 @@ function received(message) {
         // A7: shown until the next list.
         dom.tick.textContent = message.text;
         dom.tick.hidden = false;
-      } else if (message.term !== null) {
+      } else if (message.kind !== 'restore-progress' && message.term !== null) {
         terminalView.notice(message.term, message.kind, message.text);
         keepKeyboard();
       }
