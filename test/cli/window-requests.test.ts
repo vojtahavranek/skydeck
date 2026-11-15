@@ -27,6 +27,7 @@ import type {
   RestoreStreamLine,
 } from '../../src/window/protocol.ts';
 import { capture } from '../helpers/capture.ts';
+import { deckWith } from '../helpers/deck.ts';
 import { until } from '../helpers/keeper.ts';
 import { S1, S2 } from '../helpers/platform.ts';
 import { writeWindowConfig } from '../helpers/window-config.ts';
@@ -239,7 +240,12 @@ interface RestoreBench {
 async function restoreBench(
   t: TestContext,
   env: Record<string, string>,
-  options: { platformEnv?: Record<string, string>; window?: Record<string, unknown> } = {},
+  options: {
+    platformEnv?: Record<string, string>;
+    window?: Record<string, unknown>;
+    /** Changes the deck the function is given. */
+    deck?: (deck: Deck) => Deck;
+  } = {},
 ): Promise<RestoreBench> {
   const m = windowMachine(t);
   const stub = writeWindowConfig(m.s, options.window ?? {});
@@ -255,10 +261,11 @@ async function restoreBench(
   };
   const platform = { ...m.platform, net, env: { ...m.platform.env, ...options.platformEnv } };
   // Opened after config.json names the Edge stub (the machine's own deck read it before).
-  const deck = openDeck(platform);
+  const opened = openDeck(platform);
   t.after(() => {
-    deck.store.close();
+    opened.store.close();
   });
+  const deck = options.deck?.(opened) ?? opened;
   return {
     m,
     deck,
@@ -319,6 +326,38 @@ describe('restoreInWindow (plan C12, C14)', () => {
     assert.ok(r.stderr.endsWith('; run skydeck window\n'), r.stderr);
     assert.ok(r.stdout.endsWith('restore finished: 2 started\n'), r.stdout);
     assert.equal(b.requests().length, 1);
+  });
+
+  test('the store fails while the window’s lock is taken: C12’s line with the failure, and the restore still sends its request (review 2)', async (t) => {
+    const locked = Object.assign(new Error('database is locked'), {
+      code: 'ERR_SQLITE_ERROR',
+      errcode: 5,
+    });
+    const b = await restoreBench(
+      t,
+      { FAKE_SERVE_RESTORE: JSON.stringify(STREAM) },
+      {
+        deck: (deck) =>
+          deckWith(deck, {
+            store: {
+              transaction: () => {
+                throw locked;
+              },
+            },
+          }),
+      },
+    );
+
+    const r = await b.restore();
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stderr,
+      `skydeck: the window could not be opened: the database ${b.deck.store.path} failed: database is locked; run skydeck window\n`,
+    );
+    assert.ok(r.stdout.endsWith('restore finished: 2 started\n'), r.stdout);
+    assert.equal(b.requests().length, 1);
+    assert.deepEqual(b.edgeCalls(), []);
   });
 
   test('under CLAUDECODE: no window, C12’s line, the request sent', async (t) => {
