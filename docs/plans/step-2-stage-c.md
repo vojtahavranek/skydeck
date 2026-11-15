@@ -166,7 +166,7 @@ scheduled around it:
 | Test file | Task | What it does |
 |---|---|---|
 | `test/window/protocol.test.ts` | 70 | new cases at the end; the three routes leave the "no route" list and `restore`, `dismiss-restore` the case of unknown kinds; no fixture changes (`banner: null` still type-checks) |
-| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end, and the hostile case's `restore` entry made malformed; 72: new cases at the end, every existing case unchanged |
+| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end, and the hostile case's `restore` entry made malformed; 72: new cases at the end, every existing case unchanged but 70's interim one, which becomes the case without the deps |
 | `test/window/view/build.test.ts` | 73 | `banner.ts` in the pinned file list; nothing else |
 | `test/window/server.test.ts` | 80 | one line (about 549): the refusal's new words `its resume lock was taken over` |
 | `test-page/helpers/shell.ts` | 75 | a new function `bannerWorld` after `actsWorld`; `scriptedList`, the worlds and `MINIMAL_MODULES` unchanged |
@@ -359,15 +359,18 @@ export interface Launches {
   resume(sessionId: string, size: Size): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
   /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
-   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. */
+   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. Never
+   *  throws: a hub that cannot be read gives `the window's terminals could not be read (<kind>)`. */
   refusal(sessionId: string): string | null;
   /** C8: null while a terminal of the session may still run; else why it cannot start any more —
-   *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost),
+   *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost, once
+   *  the program its keeper reported is gone by design 5.5: null while it may live),
    *  `claude ended before the session started (status <n>)` / `(signal <n>)`, `its terminal was
-   *  closed` (none listed). */
+   *  closed` (none listed). Never throws: null when the hub cannot be read. */
   gone(sessionId: string): string | null;
   /** The terminal restore opens with (size read once, when built): its open(spec) closes the
-   *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. */
+   *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. A
+   *  factory that throws: its open fails with `timedOut: false` (nothing was spawned). */
   restoreTerminal(size: Size): Terminal;
 }
 /** Throws only what is not a refusal: a busy store (isBusy) and unexpected errors; callers map them. */
@@ -561,7 +564,7 @@ The rules of the requests that start programs, and the test that holds each:
 | Only the user's own processes reach the routes | stage A's `test/window/control.test.ts` "server.sock has mode 0o600, in the runtime directory of mode 0o700" (unchanged) |
 | No request carries a program, an argument list or a path the server runs | 70: `protocol.test.ts` "the stage C routes refuse every field they do not define (argv, program, cwd, command, env)"; 74: `server-launch.test.ts` "a body with argv, program, cwd, command or env is 400 and no keeper is spawned" |
 | The program is `claudeCommand`, the arguments `buildResumeCommand`'s or `buildNewCommand`'s | 74: "POST /resume runs buildResumeCommand's argv with claudeCommand in the session's directory"; "POST /new runs buildNewCommand's" |
-| `new`'s directory and flags checked as `skydeck new` checks them | 74: "POST /new refuses what skydeck new refuses, with the same lines and code" |
+| `new`'s directory and flags checked as `skydeck new` checks them | 72: `launches.test.ts` "what skydeck new refuses is refused with code 2 and the command line's own message"; 74: "POST /new refuses what skydeck new refuses, with the same lines and code" |
 | The guard on freshly refreshed rows, the boot-id refusal, the lock | 72: `launches.test.ts` "resume goes through prepareResumeById"; 74: "two POST /resume of one session at once start one keeper" |
 | The window's own rule (already open) | 72: "resume and refusal(): already open while a terminal may still run"; 74 `server-restore.test.ts` "restore does not open a second terminal for a session the window is starting" |
 | Every restored session through the guard and its lock on fresh rows; batches; memory | 71: `restore.test.ts` (step 1's cases, unchanged, and the hooks); 74: "act restore starts the banner's sessions, restoreBatch at a time" |
@@ -848,10 +851,13 @@ exit codes), and give `act restore` and `act dismiss-restore` their final cases.
   its own deps and map `Launched` to a result exactly as `launched()` and `refusedBy()` do today;
   `guarded`, `terminalsOf`, `giveBackLock` and `closeEnded` move to `launches.ts` — whatever stage
   D's cases call of them (D 36's not-started refusal looks the hub up by session) stays callable
-  from `actions.ts`, kept there or re-exported from `launches.ts`; `restore` →
-  `deps.restore(sessionIds)`, `dismiss-restore` → `deps.dismissRestore(bootId)`, each answering
-  `ok` with no lines or `ok: false` with its error; absent → `skydeck cannot do that action`)
-- Test: `test/window/actions.test.ts`
+  from `actions.ts`, kept there or re-exported from `launches.ts` (as built: D's cases call none
+  of them, so all four moved); `restore` → `deps.restore(sessionIds)`, `dismiss-restore` →
+  `deps.dismissRestore(bootId)`, each answering `ok` with no lines or `ok: false` with its error;
+  absent → `skydeck cannot do that action`, nothing logged; `NOT_YET` and its line go, since no
+  kind is left for it ("Tasks 36 and 70: who holds `NOT_YET`"))
+- Test: `test/window/actions.test.ts` (task 70's interim case "restore and dismiss-restore are
+  known but not acted on yet" becomes the case without the deps; new cases at the end)
 
 **Behaviour.** `resume`: the window's refusal (`refused`, code 4), then `prepareResumeById` (a
 SkydeckError → `refused`, its `exitCode`, its message lines), `closeEnded`, `launchPrepared` with
@@ -862,9 +868,39 @@ blank field), then `launchPrepared`. A busy store and unexpected errors are thro
 which answers them (actions: stage A's texts; the server: C2's). `gone` reads the hub's terminals
 of the session as `refusal` does.
 
+As built, with the rulings of the lead's start message for this task:
+- **`/new` goes only through `prepareNew`.** Task 70's routes pass `label`, `group`, `dir` and
+  `flags` on raw (a label `--dangerously-skip-permissions`, an escape sequence, a line break, a
+  blank label, an empty or relative `dir`, `--resume <id>` among the flags all pass the parser):
+  `newSession` hands them to `prepareNew` exactly as `skydeck new`'s options reach it
+  (`cleanLabel`, `cleanGroup`, `refuseSessionFlags`, `refuseDirectory`), nothing is checked a
+  second time with another rule, and every refusal is the command line's own message (code 2).
+  The program is always the configured `claudeCommand` with `buildResumeCommand`'s or
+  `buildNewCommand`'s arguments.
+- **`gone` stays null while a program may live** (task 71's review: `gone` gives restore's lock
+  back on the server's word). A `lost` terminal (its keeper died; its program got SIGHUP, which a
+  program can survive) gives `its terminal's keeper ended` only once the program the keeper
+  reported (`TerminalInfo.program`) is gone by design 5.5 — `/proc/<pid>/stat` absent, or with
+  another start; a read that fails or a line without a start is "may live" (null). A keeper lost
+  before T reported no program: gone at once, as S2 7.8 settles it. When several terminals of the
+  session are over, the one opened last gives the reason. A reason the keeper sent is sanitised.
+- **The hooks never throw** (a hook that throws would reject the whole run, task 71): `refusal`
+  answers `the window's terminals could not be read (<kind>)` when the hub cannot be read
+  (nothing is started on what could not be checked), `gone` answers null (restore's own time limit
+  ends the wait), each with one log line by kind. `resume` keeps stage A's behaviour there: a
+  throw is the caller's, as any unexpected error.
+- **`restoreTerminal`** builds its terminal at once with the size given; a factory that throws
+  does not make it throw: its `open` answers `{ ok: false, error: 'the terminal failed
+  unexpectedly (<kind>)', timedOut: false }` (nothing was spawned, so restore gives the lock
+  back), closes nothing, and the failure is logged once by kind.
+- **Log lines** name the launch they were part of (`resume: …`, `new: …`, `restore: …`) and carry
+  kinds only; the caller's `log` adds its prefix (`createActions` passes `act `, so stage A's lines
+  `act resume: the terminal failed (<kind>)` are unchanged). A refusal is answered, never logged.
+
 **Tests** (platform: `testPlatform` through `testDeck`; a fake terminal and a fake hub as stage A's
 actions tests)
-- Every case of `test/window/actions.test.ts` passes unchanged (the refactor's check).
+- Every case of `test/window/actions.test.ts` passes unchanged (the refactor's check), but task
+  70's interim case (its rule held "until task 72").
 - `launches.test.ts`: "resume goes through prepareResumeById" — a running session → code 4 with the
   guard's line; a held lock → code 4 `is being resumed`; no boot id → code 4; an unknown id → code
   3; started → 0, `sessionId`, the spec's argv `buildResumeCommand`'s; the terminal failing → 1
@@ -875,8 +911,17 @@ actions tests)
   starting or running. `restoreTerminal`: an ended terminal of the spec's session closed before
   `open`, a running one of another session kept; `open` throwing → `{ ok: false, timedOut: true }`
   and one log line by kind.
+- As built (the rulings above): a lock another skydeck holds → code 4, its lock left as it is;
+  two resumes at once → the second meets the lock; the configured `claudeCommand` in both specs;
+  "what skydeck new refuses is refused with code 2 and the command line's own message" — each body
+  the ruling names (and a group's, `--continue`, `-cp`, `--name`), compared with what `skydeck new`
+  prints for the same options, nothing started, stored or logged; a lost terminal whose program
+  lives, is another process, is gone, has a stat line without a start, or whose `/proc` cannot be
+  read; "the hooks never throw" (a hub whose `list()` throws); `restoreTerminal` with a factory
+  that throws.
 - Actions: `restore` and `dismiss-restore` call their deps with the fields and answer what they
-  return; without the deps → `skydeck cannot do that action`.
+  return; without the deps → `skydeck cannot do that action`; a dep that throws is answered by
+  kind; a malformed one never reaches the dep.
 
 **Done when:** the window starts sessions through `launches.ts` only, stage A's behaviour is
 unchanged, and the two new kinds reach their deps; `npm run check` passes.
