@@ -259,6 +259,30 @@ const banner = createBanner(dom.banner, {
 // A control of the banner pressed from the keyboard can take itself away (the report's ×): the
 // zone's holder takes the keyboard back once the click is done, as for the notice's ×.
 dom.banner.addEventListener('click', () => setTimeout(keepKeyboard, 0));
+// A click sequence that began on the banner acts on nothing outside it (ruled on review 2 of task
+// 75, N1): its first click can take its control away (Not now, the report's ×), the list then
+// moves up under the pointer, and the later clicks of a double click would select — and its
+// dblclick resume — the row that came to lie there. They are swallowed before the list, the
+// header or the pane see them, and move no keyboard; a sequence that begins elsewhere is not.
+let clicksFromBanner = false;
+for (const type of ['mousedown', 'mouseup', 'click', 'dblclick']) {
+  addEventListener(
+    type,
+    (event) => {
+      if (!(event instanceof MouseEvent)) {
+        return;
+      }
+      const inBanner = event.target instanceof Node && dom.banner.contains(event.target);
+      if (type === 'mousedown' && event.detail <= 1) {
+        clicksFromBanner = inBanner;
+      } else if (event.detail > 1 && clicksFromBanner && !inBanner) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    true,
+  );
+}
 
 /** Whether a dialog is shown (D2: then the page is modal). */
 function modal() {
@@ -1642,7 +1666,7 @@ function dialogKey(event) {
  * press, and when the window loses focus. Stage B: the same for a key pressed on the title bar's
  * `Turn on notifications`, which hides itself once the permission is answered — at once where a
  * policy answers without asking —, so that a held Enter there is no list `enter` either. Stage C:
- * the same for Enter and Space pressed on a control of the restore banner, which can go away
+ * the same for Enter pressed on a control of the restore banner, which can go away
  * under it — Restore once a restore runs, Not now once the offer is dismissed, the report's × —;
  * a held Tab there walks on (review 2 of task 75, C4).
  * @type {Set<string>}
@@ -1663,7 +1687,7 @@ function heldFromDialog(event) {
   if (
     modal() ||
     document.activeElement === dom.notifyOn ||
-    (dom.banner.contains(document.activeElement) && (event.key === 'Enter' || event.key === ' '))
+    (dom.banner.contains(document.activeElement) && event.key === 'Enter')
   ) {
     if (!event.repeat) {
       pressedInDialog.add(event.code);

@@ -487,6 +487,68 @@ test('stage C: the restore banner on the page', async (t) => {
     },
   );
 
+  for (const which of ['the row last single-clicked', 'another row'] as const) {
+    await t.test(
+      `a double click on Not now whose second click lands, as the offer goes, on a row that moved under the pointer acts on nothing outside the banner — no resume, the selection and the keyboard as they were — when the row last single-clicked is ${which === 'another row' ? 'another' : 'that row'}; a click of its own then selects the row (ruled on review 2's re-check, N1)`,
+      async (t) => {
+        const [page, w] = await world(t, chromium, listOf(three(), TEN));
+        await until(page, (now) => now.notNow, 'Not now is shown');
+        const at = await page.locator('#banner .banner-not-now').boundingBox();
+        assert.ok(at !== null);
+        const x = at.x + at.width / 2;
+        const y = at.y + at.height / 2;
+        // The row that lies under Not now once the offer is gone.
+        w.list(listOf(null, TEN));
+        await until(page, (now) => !now.banner, 'no banner');
+        const under = await page.evaluate(
+          ([px, py]) =>
+            (
+              document.elementFromPoint(px as number, py as number)?.closest('#list [data-id]') as
+                HTMLElement | null | undefined
+            )?.dataset['id'] ?? null,
+          [x, y],
+        );
+        assert.ok(under !== null, 'a row lies under Not now without the banner');
+        const other = TEN.map((row) => row.id).find((id) => id !== under) as string;
+        w.list(listOf(three(), TEN));
+        await until(page, (now) => now.notNow, 'Not now again');
+        await clickRow(page, which === 'another row' ? other : under);
+        const selected = await selectedRow(page);
+        const keyboard = await active(page);
+
+        await page.mouse.click(x, y); // the double click's first click: Not now
+        w.answer(await w.act(1), { ok: true });
+        w.list(listOf(three({ shown: false }), TEN));
+        await until(page, (now) => !now.banner, 'the offer is gone');
+        await page.mouse.move(x, y);
+        await page.mouse.down({ clickCount: 2 }); // its second click, now on the row
+        await page.mouse.up({ clickCount: 2 });
+        await settle();
+        assert.deepEqual(
+          actsOf(w).map((act) => act['kind']),
+          ['dismiss-restore'],
+          'no resume, nothing but the dismissal',
+        );
+        assert.equal(await selectedRow(page), selected, 'the selection did not move');
+        assert.equal(await active(page), keyboard, 'the keyboard did not move');
+
+        await page.mouse.click(x, y); // a click of its own
+        await page.waitForFunction(
+          (id) =>
+            document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') === id,
+          under,
+          { timeout: PAGE_WAIT_MS },
+        );
+        await settle();
+        assert.deepEqual(
+          actsOf(w).map((act) => act['kind']),
+          ['dismiss-restore'],
+          'a single click selects and resumes nothing',
+        );
+      },
+    );
+  }
+
   for (const control of ['Restore', 'Not now'] as const) {
     await t.test(
       `the second click of a double click on ${control} presses nothing, also once the first click's answer has come (the rule of review 2 of task 38); a later click acts`,
@@ -829,6 +891,67 @@ test('stage C: the restore banner on the page', async (t) => {
   );
 
   await t.test(
+    "runs that bring no running list (one that cannot begin; one over within the page's second): their finished line ends the report, and a list that says none runs adds nothing (review 2, T5)",
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three()));
+      await until(page, (now) => now.offer, 'the offer is shown');
+      await viewsSent(w, 2); // the list answering it cannot fall between the lines
+      w.progress("skydeck's database is busy; try again");
+      w.progress('restore finished: nothing was started');
+      await until(page, (now) => now.close, 'the ×');
+      w.list(listOf(bannerOf([entryOf(S1, { title: 'drawn' }), entryOf(S2)])));
+      const after = await until(
+        page,
+        (now) => now.entries[0]?.text.includes('drawn') === true,
+        'the list is drawn',
+      );
+      assert.deepEqual(after.report, [
+        "skydeck's database is busy; try again",
+        'restore finished: nothing was started',
+      ]);
+
+      w.progress('started 0b5f3c1e one');
+      w.progress('started 1c6a4d2f two');
+      w.progress('restore finished: 2 started');
+      await until(page, (now) => now.report.length === 3 && now.close, 'the short run');
+      w.list(listOf(bannerOf([entryOf(S3, { preselected: false, title: 'left' })])));
+      const fewer = await until(
+        page,
+        (now) => now.entries.length === 1 && now.entries[0]?.text.includes('left') === true,
+        'the list with fewer entries is drawn',
+      );
+      assert.deepEqual(fewer.report, [
+        'started 0b5f3c1e one',
+        'started 1c6a4d2f two',
+        'restore finished: 2 started',
+      ]);
+    },
+  );
+
+  await t.test(
+    'under a banner that never said a restore runs, a report without its finished line ends at the next list that says none runs, and so does the report after it (review 2, T5)',
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three()));
+      await until(page, (now) => now.offer, 'the offer is shown');
+      await viewsSent(w, 2);
+      w.progress('started 0b5f3c1e one');
+      await until(page, (now) => now.report.length === 1, 'the line');
+      w.list(listOf(bannerOf([entryOf(S1, { title: 'drawn 1' }), entryOf(S2)])));
+      const first = await until(page, (now) => now.close, 'the first report ends');
+      assert.deepEqual(first.report, ['started 0b5f3c1e one', NOT_ARRIVED]);
+      w.progress('started 1c6a4d2f two');
+      await until(
+        page,
+        (now) => now.report.length === 1 && now.report[0] === 'started 1c6a4d2f two',
+        'a new report',
+      );
+      w.list(listOf(bannerOf([entryOf(S1, { title: 'drawn 2' }), entryOf(S2)])));
+      const second = await until(page, (now) => now.close, 'the second report ends');
+      assert.deepEqual(second.report, ['started 1c6a4d2f two', NOT_ARRIVED]);
+    },
+  );
+
+  await t.test(
     'a refusal is shown in the banner as its line (`a restore is already running; …`, Not now refused); one that comes once the offer is gone, in the key bar',
     async (t) => {
       const [page, w] = await world(t, chromium, listOf(three()));
@@ -1119,6 +1242,22 @@ test('stage C: the restore banner on the page', async (t) => {
     },
   );
 });
+
+/** Waits until the page has sent its `n`-th `view` (the world answers each with its list). */
+async function viewsSent(w: BannerWorld, n: number): Promise<void> {
+  const deadline = performance.now() + PAGE_WAIT_MS;
+  while (w.sent.filter((message) => message['t'] === 'view').length < n) {
+    assert.ok(performance.now() < deadline, `the page's view ${n}`);
+    await sleep(20);
+  }
+}
+
+/** Ten sessions not running (a list long enough to move under the banner's place). */
+const TEN = Array.from({ length: 10 }, (_, n) => ({
+  id: sessionN(n + 1),
+  terminal: null,
+  slot: null,
+}));
 
 /** Waits until the element `id` names (as `active` says it) has the keyboard. */
 async function keyboardOn(page: Page, id: string): Promise<void> {

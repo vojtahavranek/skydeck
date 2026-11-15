@@ -2429,6 +2429,9 @@ plan C task 75). The banner and the report together take at most 40 % of the lis
 height and scroll inside it, so that the filter and the list keep their room. Their controls take
 no keyboard on a mouse click, as the page's other controls; "Restore" and "Not now" act once — not
 while their own `act` waits, not on a key's auto-repeat, not on the second click of a double click.
+A click sequence that began on the banner acts on nothing outside it: when its first click takes
+the offer or the report away and the list moves up under the pointer, the later clicks of a double
+click select nothing there and resume nothing (ruled on review 2 of plan C task 75).
 
 The banner lies in the list zone above the list, in the list's width: it takes height from the list
 (the list scrolls under it), never width, so the right side, the header's one height and every

@@ -1147,11 +1147,15 @@ As built, and accepted on the reviews: a click on an entry's text ticks its box 
 box the keyboard (Chromium's label would); a refused result's line goes to the key bar when the
 offer is not drawn, and a new act, another boot, or a run that begins or ends clears it; `overLimit`
 refuses a restore of more than 1,000 sessions and a `dismiss-restore` whose boot id is not a
-lower-case UUID before they are sent (the server would close the connection); Enter or Space held
+lower-case UUID before they are sent (the server would close the connection); Enter held
 on a control of the banner acts on nothing once the control is gone (task 37's `heldFromDialog`,
 M1), while a held Tab there walks on; the second click of a double click on Restore or Not now
 presses nothing (review 2 of task 38: its offer is about to go); a label the list order moves keeps
-its checkbox's keyboard (`moveBefore`).
+its checkbox's keyboard (`moveBefore`). Ruled on review 2's re-check (N1, a MUST): a click
+sequence that began on the banner acts on nothing outside it — `web/app.js` swallows its later
+clicks and its `dblclick` outside the banner before the list, the header or the pane see them,
+since a double click on Not now would otherwise select, and resume, the row that moved under the
+pointer when the offer went.
 Ruled on review 2 (`s2-q75`): S1 — a report whose finished line never came (a dropped connection,
 a stopped server, WSL restarted mid-run) ends at the first `list` that says no restore runs, with
 one last line, exactly `the end of this report did not arrive; the list shows what started`, and
@@ -1181,7 +1185,12 @@ with no list coming; it writes only a changed text.
   empty report is left as it is. With the page's clock at 23:58, the heading's `today` becomes
   `yesterday` past midnight with no list, and a tick that changes nothing keeps a selection of it.
   The refusal's line stays through lists of the same boot and state and goes at the next act, a
-  run that begins or ends, another boot.
+  run that begins or ends, another boot. T5: runs that bring no running list (one that cannot
+  begin; one over within the page's second) end at their finished line and a list adds nothing;
+  under a banner that never said one runs, each unfinished report ends at the next list. N1: a
+  double click on Not now whose second click lands on a row that moved under the pointer —
+  the row last single-clicked, and another — sends nothing but the dismissal and moves neither
+  the selection nor the keyboard; a click of its own then selects the row.
 - C10, C21: 30 entries and 200 report lines → the filter's field and at least one row of the list
   stay visible, the banner scrolls inside; with a terminal shown, a banner that comes and goes
   (lists with and without it) sends no `resize` and leaves the terminal's box and the header's
