@@ -32,7 +32,7 @@ import { createHelp } from './help.js';
 import { cancels, listKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { createNotifications } from './notify.js';
-import { paneFor } from './pane.js';
+import { paneFor, sessionRow } from './pane.js';
 import { createTerminalView } from './terminal-view.js';
 import { createToast } from './toast.js';
 
@@ -664,7 +664,9 @@ function listNow() {
   return state.list === null ? '' : serverNow(state.list.nowNs, performance.now() - state.listAt);
 }
 
-/** The selected session's row, when the list shows it (S2 12.9: else none is selected). */
+/** The selected session's row, when the list shows it (S2 12.9: else none is selected). The list
+ *  keys take it from here: they act on no session the list does not show (E13, ruled); the right
+ *  side and the header's controls take `sessionRow`'s. */
 function selectedRow() {
   return state.selected === null ? undefined : rowOf(state.selected);
 }
@@ -1059,7 +1061,13 @@ function received(message) {
 /** Renders the list and the right side for the current state. */
 function render() {
   list.render(state.list, state.selected, state.zone);
-  const pane = paneFor(state.selected, rows(), state.list?.terminals ?? [], state.newOpen);
+  const pane = paneFor(
+    state.selected,
+    rows(),
+    state.list?.terminals ?? [],
+    state.newOpen,
+    sessionRow(state.list, state.selected), // E13: also a session the list does not show
+  );
   const exit = pane.kind === 'terminal' ? (state.exits.get(pane.term.id) ?? null) : null;
   // `list.selected` when it is the pane's session, for every pane (plan D 2.4, ruled on review B).
   const paneRow = pane.kind === 'new' || pane.kind === 'none' ? null : pane.row;
