@@ -272,6 +272,16 @@ test('attentionOf: a window end is ended whatever the times of an earlier turn e
 
 test('attentionOf: a waiting row whose turn ended asks instead of finishing', () => {
   assert.equal(attentionOf(runningRow(S1), turnEnded('waiting'))?.reason, 'asks');
+  // A session waits from after its last turn end, in the same run too: that is no stale ask.
+  const later = facts({
+    marks: [[S1, marks({ turnEndedSeq: 4, turnEndedNs: T0 - 3n * SEC })]],
+    live: [[S1, live('waiting', { sinceNs: T0 })]],
+  });
+  assert.deepEqual(attentionOf(runningRow(S1), later), {
+    reason: 'asks',
+    detail: null,
+    sinceNs: String(T0),
+  });
 });
 
 test('attentionOf: not finished once seen later, nor when the two seqs are equal', () => {

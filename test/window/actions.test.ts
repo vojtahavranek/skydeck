@@ -1434,19 +1434,22 @@ test('an action that meets a busy database answers that it is busy, logged by ki
   assert.ok(h.logs.every((line) => !line.includes('marker-busy')));
 });
 
-test("stage C's restore and dismiss-restore are known but not acted on yet: each answers so and nothing is done (task 72 acts on them)", async (t) => {
+// --- stage C: restore (plan C, task 72) --------------------------------------------------------
+
+const stageC: ActMessage[] = [
+  { t: 'act', id: 31, kind: 'restore', sessionIds: [S1, S2] },
+  { t: 'act', id: 32, kind: 'dismiss-restore', bootId: BOOT_A },
+];
+
+test("stage C's restore and dismiss-restore without their deps answer 'skydeck cannot do that action' and nothing is done", async (t) => {
   const d = testDeck(t);
   resumableSession(d);
   const h = harness(d);
   const kvBefore = d.deck.store.kvEntries('');
-  const stageC: ActMessage[] = [
-    { t: 'act', id: 31, kind: 'restore', sessionIds: [S1, S2] },
-    { t: 'act', id: 32, kind: 'dismiss-restore', bootId: BOOT_A },
-  ];
   for (const action of stageC) {
     assert.deepEqual(
       await h.act(action),
-      refused(action.id, 'skydeck cannot do that action yet'),
+      refused(action.id, 'skydeck cannot do that action'),
       action.kind,
     );
   }
@@ -1456,4 +1459,97 @@ test("stage C's restore and dismiss-restore are known but not acted on yet: each
   assert.deepEqual(h.told, [], 'changed() never, no fetch');
   assert.deepEqual(d.deck.store.kvEntries(''), kvBefore);
   assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+});
+
+describe('restore and dismiss-restore reach their deps (plan C 2.3)', () => {
+  /** The harness with `restore` and `dismissRestore` that record their calls and answer `answer`. */
+  function withRestore(
+    d: TestDeck,
+    answer: () => { ok: true } | { ok: false; error: string },
+  ): { act: Harness['act']; calls: string[]; logs: string[]; told: string[]; events: Events } {
+    const h = harness(d);
+    const calls: string[] = [];
+    const actions = createActions({
+      deck: d.deck,
+      hub: h.hub,
+      terminalFor: () => {
+        throw new Error('no terminal is built for a restore act');
+      },
+      openLink: async () => true,
+      log: (line) => h.logs.push(line),
+      changed: () => h.told.push('changed'),
+      prs: { fetch: () => undefined, refresh: () => undefined },
+      restore(sessionIds) {
+        calls.push(`restore ${sessionIds.join(' ')}`);
+        return answer();
+      },
+      dismissRestore(bootId) {
+        calls.push(`dismiss ${bootId}`);
+        return answer();
+      },
+    });
+    return {
+      act: (action) => actions.act(PAGE, action),
+      calls,
+      logs: h.logs,
+      told: h.told,
+      events: h.events,
+    };
+  }
+
+  test('each calls its dep once with its fields; ok answers ok with no lines and no session (C21)', async (t) => {
+    const d = testDeck(t);
+    const h = withRestore(d, () => ({ ok: true }));
+    assert.deepEqual(await h.act(stageC[0] as ActMessage), ok(31));
+    assert.deepEqual(await h.act(stageC[1] as ActMessage), ok(32));
+    assert.deepEqual(h.calls, [`restore ${S1} ${S2}`, `dismiss ${BOOT_A}`]);
+    assert.deepEqual(h.logs, []);
+    assert.deepEqual(h.told, [], 'the act itself writes nothing: its dep tells the lists');
+    assert.deepEqual(h.events, []);
+  });
+
+  test("a refusal answers its error, sanitised, as the result's one line", async (t) => {
+    const d = testDeck(t);
+    const h = withRestore(d, () => ({
+      ok: false,
+      error: 'a restore is already running; wait until it has finished\x1b[2J',
+    }));
+    const line = 'a restore is already running; wait until it has finished';
+    assert.deepEqual(await h.act(stageC[0] as ActMessage), refused(31, line));
+    assert.deepEqual(await h.act(stageC[1] as ActMessage), refused(32, line));
+    assert.deepEqual(h.logs, []);
+  });
+
+  test('a dep that throws is answered as any unexpected failure: by kind, logged by kind, never its message', async (t) => {
+    const d = testDeck(t);
+    const h = withRestore(d, () => {
+      throw new TypeError(SECRET);
+    });
+    assert.deepEqual(
+      await h.act(stageC[0] as ActMessage),
+      refused(31, 'the action failed unexpectedly (TypeError)'),
+    );
+    assert.deepEqual(
+      await h.act(stageC[1] as ActMessage),
+      refused(32, 'the action failed unexpectedly (TypeError)'),
+    );
+    assert.deepEqual(h.logs, [
+      'act restore: failed (TypeError)',
+      'act dismiss-restore: failed (TypeError)',
+    ]);
+    for (const line of h.logs) assert.ok(!line.includes(SECRET), line);
+  });
+
+  test('a malformed restore never reaches the dep', async (t) => {
+    const d = testDeck(t);
+    const h = withRestore(d, () => ({ ok: true }));
+    for (const action of [
+      { t: 'act', id: 9, kind: 'restore', sessionIds: [] },
+      { t: 'act', id: 9, kind: 'restore', sessionIds: ['S1'] },
+      { t: 'act', id: 9, kind: 'dismiss-restore', bootId: 'not-a-boot' },
+    ] as unknown as ActMessage[]) {
+      assert.deepEqual(await h.act(action), refused(9, 'skydeck cannot do that action'));
+    }
+    assert.deepEqual(h.calls, []);
+  });
 });

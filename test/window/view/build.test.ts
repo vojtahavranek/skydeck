@@ -1146,7 +1146,13 @@ function valueImports(path: string): [string[], string][] {
 test("src/window/view/ imports values only from text, A8's isListed, D4's CHIP_ORDER and windowChip, B's attention and E's search/; search/ only from its own files and sanitize", () => {
   const dir = join(import.meta.dirname, '../../../src/window/view');
   const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
-  assert.deepEqual(files.sort(), ['attention.ts', 'build.ts', 'chip.ts', 'sections.ts']);
+  assert.deepEqual(files.sort(), [
+    'attention.ts',
+    'banner.ts',
+    'build.ts',
+    'chip.ts',
+    'sections.ts',
+  ]);
   for (const name of files) {
     for (const [names, from] of valueImports(join(dir, name))) {
       const allowed =
