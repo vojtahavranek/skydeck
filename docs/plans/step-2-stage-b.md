@@ -123,8 +123,9 @@ happens at the update, from S2 10.1, 10.2, 16.5 and step 1's `migrate` (`src/sto
   back a moment later, is a second window (stage A's known limit). Even `skydeck window` run first
   is not certain: it migrates when it opens the store, and the old server's next write can fall
   into the moment before the command asks it for its windows. **The order that is certain**
-  (ruled): close the skydeck window, then `git pull`, then `skydeck window` — the sessions live in
-  their keepers and keep running. Migration 2 reaches the user at the first `git pull` after task
+  (ruled): close every skydeck window and tab (also those of `--new-window` and `--print-url`:
+  one page left open is the same race; ruled on review A's re-check), then `git pull`, then
+  `skydeck window` — the sessions live in their keepers and keep running. Migration 2 reaches the user at the first `git pull` after task
   50 is merged, long before stage B is done, so **task 50** writes that order into
   `docs/install.md`, "Updating", in its own pull request (ruled); section 6 and task 56 give the
   same order.
@@ -547,8 +548,8 @@ that the guard and `prepareRead` hold (stage A's contract 2.6, `openStore`); the
 same transaction (B2). Integer `*_seq` columns are numbers, `*_ns` bigints (design 9.2).
 
 **`docs/install.md` (ruled: migration 2 reaches the user at the first `git pull` after this task
-is merged).** "Updating": with the window in use, the order that is certain — close the skydeck
-window, then `git pull`, then `skydeck window` (the sessions live in their keepers and keep
+is merged).** "Updating": with the window in use, the order that is certain — close every skydeck
+window and tab (ruled on review A's re-check), then `git pull`, then `skydeck window` (the sessions live in their keepers and keep
 running; `skydeck doctor` after it if wanted) — and that from this update on a checkout from
 before it refuses the database (`the database … was written by a newer skydeck …`), so the way
 back is forward. "Updating while the window runs", its last paragraph (a command of the new code
@@ -557,7 +558,9 @@ of "Updating". The task runs no `skydeck` command: the refusal's line is held by
 `test/store/store.test.ts` ("a database written by a newer skydeck is refused"), `skydeck window`'s
 behaviour by stage A's `test/cli/commands/window.test.ts`.
 
-**Tests** (platform: none — the store on a sandbox path)
+**Tests** (platform: none — the store on a sandbox path; the server's-own-open cases use
+`testPlatform`, with `schema1Database` written at its `places.dbPath`, ruled on review B's
+re-check)
 - `MIGRATIONS` has two entries and `SCHEMA_VERSION` is 2; `MIGRATIONS[1]` equals the SQL block
   under "**Migration 2**" of S2 10.2 character for character (read from the design, as migration 1
   is from design.md 9.2).

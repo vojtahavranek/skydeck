@@ -15,7 +15,7 @@ import { openDeck } from '../../src/sessions/deck.ts';
 import { MIGRATIONS } from '../../src/store/migrations.ts';
 import { isDatabaseFailure, openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
-import { testContext } from '../helpers/context.ts';
+import { testPlatform } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import { SCHEMA1, dumpDatabase, schema1Database } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
@@ -177,7 +177,7 @@ test('opening a migrated database again changes nothing', (t) => {
 });
 
 test("the server's own open (openDeck, guardSchema, 250 ms) migrates a schema-1 database, and its guarded connection writes into it", (t) => {
-  const { platform, places } = testContext(t);
+  const { platform, places } = testPlatform(t);
   mkdirSync(places.dataDir, { recursive: true, mode: 0o700 });
   schema1Database(places.dbPath);
   const before = dumpDatabase(places.dbPath);
@@ -256,7 +256,7 @@ test('a migration waits for another connection that holds the write lock, and th
 });
 
 test("at the server's own open the migration waits the commands' 5 s, not the server's 250 ms", async (t) => {
-  const { platform, places } = testContext(t);
+  const { platform, places } = testPlatform(t);
   mkdirSync(places.dataDir, { recursive: true, mode: 0o700 });
   schema1Database(places.dbPath);
   const before = dumpDatabase(places.dbPath);

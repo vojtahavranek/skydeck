@@ -767,12 +767,12 @@ limits"), and the open windows reload themselves for the new page and connect ag
 waits up to 7 seconds for them, so it opens no second window. Keepers that run keep the code they
 started with; new terminals get the new keeper. No `npm ci`, no `skydeck install`.
 
-An update that upgrades the database is different: follow "Updating" below and close the window
-first. A command of the new code that upgrades the database while the old server still runs makes
-that server stop by itself (its windows say that it is not answering), and the `skydeck window`
-that follows can open a second window beside the old one. From outside you cannot tell whether an
-update upgrades the database (the one that brings stage B does); when in doubt, close the window
-first: it costs nothing, the sessions keep running in their keepers.
+An update that upgrades the database is different: follow "Updating" below and close every
+skydeck window and tab first. A command of the new code that upgrades the database while the old
+server still runs makes that server stop by itself (its windows say that it is not answering), and
+the `skydeck window` that follows can open a second window beside the old one. From outside you
+cannot tell whether an update upgrades the database (the one that brings stage B does); when in
+doubt, close them first: it costs nothing, the sessions keep running in their keepers.
 
 ## Checking: `skydeck doctor`
 
@@ -799,8 +799,9 @@ installation.
 
 When you use the window, update in this order. It is the one that is certain:
 
-1. Close the skydeck window (its ×, or Alt+F4 while it is in front). Your sessions keep running in
-   their keepers.
+1. Close every skydeck window (its ×, or Alt+F4 while it is in front), also those opened with
+   `--new-window`, and every browser tab of a `--print-url` address: one page left open is enough
+   for the second window below. Your sessions keep running in their keepers.
 2. In a WSL terminal of your own (not a `!` command inside Claude Code):
 
    ```sh
@@ -817,13 +818,13 @@ Without the window, `git pull` is all. The links point into the checkout, so the
 hook are the new code at once, and the database upgrades itself the next time a command runs.
 `npm ci` is needed only for development (`npm run check`); skip it otherwise. Then `skydeck doctor`.
 
-Why the window is closed first: an update can upgrade the database (the one that brings stage B
+Why the windows are closed first: an update can upgrade the database (the one that brings stage B
 does: it adds a table), and the first command of the new code that opens it upgrades it — `skydeck
 ls` or `doctor` as much as `skydeck window`. The window's server, still the old code, then stops by
 itself at its next write, and the next `skydeck window` finds no server: it starts one and a new
-window, and the old window, when it is still open, connects to the new server a moment later. Two
+window, and an old window or tab that is still open connects to the new server a moment later. Two
 windows (close one). Even `skydeck window` run first is not certain: the old server can stop before
-the command has asked it about its open windows. With the window closed there is none to come back.
+the command has asked it about its open windows. With every page closed there is none to come back.
 
 **There is no way back to an older checkout.** A database that a newer skydeck has upgraded is not
 opened by an older one: every command of an older checkout — a second clone, or this one moved back
