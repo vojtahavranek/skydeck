@@ -53,6 +53,8 @@ export interface GhRunner extends Runner {
   release(): void;
   /** Resolves once `count` gh runs have started. */
   started(count: number, timeoutMs?: number): Promise<void>;
+  /** What the runs from now on answer, and when (a run already started keeps its own). */
+  set(options: GhOptions): void;
 }
 
 /** What the runners reject with when the signal fires: an Error named AbortError. */
@@ -109,10 +111,14 @@ function resultOf(answer: GhPullRequest | RunResult, count: number): RunResult {
 export function ghRunner(inner: Runner, options: GhOptions = {}): GhRunner {
   const runs: GhRun[] = [];
   const held = new Set<() => void>();
-  const answer = options.answer ?? APPROVED_GREEN;
-  const hold = options.hold ?? 'now';
+  let answer = options.answer ?? APPROVED_GREEN;
+  let hold = options.hold ?? 'now';
   return {
     runs,
+    set(next) {
+      answer = next.answer ?? answer;
+      hold = next.hold ?? hold;
+    },
     release() {
       for (const go of [...held]) go();
     },

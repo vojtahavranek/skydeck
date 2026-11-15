@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import type { ListMessage, RowPayload } from '../../src/window/protocol.ts';
-import { ghRunner } from '../helpers/gh.ts';
+import { APPROVED_GREEN, ghRunner } from '../helpers/gh.ts';
 import type { GhOptions, GhRunner } from '../helpers/gh.ts';
 import { S1 } from '../helpers/platform.ts';
 import { connectTestPage, rowsOf, serverSandbox } from '../helpers/window.ts';
@@ -155,6 +155,27 @@ describe('pull requests in the window (S2 12.5, design 7.3; plan D8)', () => {
       gh.runs.every((run) => run.prs.join() === 'acme/web#7'),
       JSON.stringify(gh.runs),
     );
+  });
+
+  test('pr-refresh of a pull request read before: the list follows the fetch, although no refresh owes a reload', async (t) => {
+    const { d, test, gh } = await serverWithGh(t);
+    const { page } = await pageWithS1(t, d, test);
+    const levelOf = (list: ListMessage): string | undefined =>
+      rowOf(list, S1)?.prs.find((pr) => pr.url === PR7)?.level;
+    assert.equal((await page.act({ kind: 'pr-add', sessionId: S1, url: PR7 })).ok, true);
+    await page.list((list) => levelOf(list) === 'approved-green', 'read once');
+    gh.set({ hold: 'held', answer: { ...APPROVED_GREEN, reviewDecision: 'CHANGES_REQUESTED' } });
+    const runs = gh.runs.length;
+    assert.equal((await page.act({ kind: 'pr-refresh', sessionId: S1 })).ok, true);
+    await gh.started(runs + 1);
+    // A refresh of the tick passes meanwhile: the reload the act left owed is made, and the pull
+    // request was read a moment ago, so the tick's own refresh does not ask about it.
+    await new Promise((resolve) => setTimeout(resolve, 2300));
+    const released = performance.now();
+    gh.release();
+    await page.list((list) => levelOf(list) === 'changes-requested', 'the state refreshed', 1500);
+    assert.ok(performance.now() - released < 1500);
+    assert.equal(gh.runs.length, runs + 1, "the window's refresh, and no run of the tick's");
   });
 
   test('the server stopped while a fetch waits for gh: the stop does not wait for it', async (t) => {

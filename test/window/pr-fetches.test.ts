@@ -250,6 +250,17 @@ test('the signal aborted while one runs: idle() resolves, the one waiting and an
   assert.deepEqual(f.logs, [], 'an abort is no failure');
 });
 
+test('the signal aborted while a refresh runs: idle() resolves, nothing saved, nothing logged', async (t) => {
+  const f = fixture(t, { hold: 'signal' });
+  f.prs.refresh(S1);
+  await f.gh.started(1);
+  f.stop.abort();
+  await f.prs.idle();
+  assert.equal(levelOf(f.d, PR1), 'unfetched');
+  assert.equal(f.changes(), 0);
+  assert.deepEqual(f.logs, []);
+});
+
 test('idle() with nothing to do resolves at once', async (t) => {
   const f = fixture(t);
   await f.prs.idle();
