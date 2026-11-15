@@ -1654,7 +1654,10 @@ decided by the `*_seq` columns, never by times: `statusUpdatedAt` is Claude Code
 `seen` would be the server's, and the wall clock of a WSL machine steps back (about 1.8 s every
 32 s, design 7.6), so a short turn that ended right after a look could seem to have ended before
 it. Each write takes the next value of the `kv` counter `attention_seq` in the same transaction.
-The times are kept only to show ("finished 2m ago").
+The times are kept to show ("finished 2m ago") and for one test of identity: `turn_ended_ns` is
+also compared with the time the session's idle status began, and a turn end older than that status
+belongs to an earlier run (12.4). Within one run the two are the same value, so no order is ever
+read from two clocks.
 
 These are skydeck's own observations, not the user's data (design principle 6); a row is written
 the first time one of them is known and never removed.
@@ -1930,16 +1933,25 @@ How the view model judges them (stage B, plan B5, B6, B13). "Running" is the row
 but not running (an ask and a finished turn need it; an end of the window does not). A session with
 several holders (a duplicate) has one status: `waiting` when any holder waits, else `busy` when any
 is busy, else `idle` when any is idle, else the first holder's; of several holders with that status,
-the first one's detail and time. A session running without a readable live file is not finished. An
-end counts while its `*_seq` is greater than `seen_seq`, or no `seen_seq` is stored; an equal value
-is not later. The detail of an ask is the `waitingFor` sanitised (design 7.4), trimmed, and cut to
-120 UTF-16 units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit, and
-the list is sent whole); one that is blank once sanitised (empty, or only white space) is no detail.
-The time a row shows is the file's `statusUpdatedAt` (else `updatedAt`) for an ask, `window_end_ns`
-for an end of the window, `turn_ended_ns` for a finished turn. Ctrl+Shift+J's order, in full: those
-that ask by that time, the longest-waiting first and an unknown time last; then those that ended by
-`window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties by session
-id.
+the first one's detail and time. A session running without a readable live file is not finished; nor
+is a turn end of an earlier run: "finished" also needs that the idle status the row shows did not
+begin after the recorded turn end (`turn_ended_ns` and the status time both known, the status time
+later). Within one run the look records the file's status time as `turn_ended_ns` and keeps that
+file, so the two are the same value while the session stays idle; a session resumed elsewhere days
+after a turn end nobody saw is therefore not `finished · not seen · 3d`, and nothing notifies. Its
+limits: a live file with `updatedAt` but no `statusUpdatedAt`, rewritten while idle, loses its
+"finished"; a turn that starts and ends between two looks is not recorded, and its later status time
+drops the older mark (as the next turn's start does); and, not closed, `/resume X` inside a process
+that has been idle since before X's last turn end keeps its status time, so X is still "finished".
+An end counts while its `*_seq` is greater than `seen_seq`, or no `seen_seq` is stored; an equal
+value is not later. The detail of an ask is the `waitingFor` sanitised (design 7.4), trimmed, and
+cut to 120 UTF-16 units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit,
+and the list is sent whole); one that is blank once sanitised (empty, or only white space) is no
+detail. The time a row shows is the file's `statusUpdatedAt` (else `updatedAt`) for an ask,
+`window_end_ns` for an end of the window, `turn_ended_ns` for a finished turn. Ctrl+Shift+J's order,
+in full: those that ask by that time, the longest-waiting first and an unknown time last; then those
+that ended by `window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties
+by session id.
 
 Seen is a **condition that holds**, not a moment: a session **is being seen** while it is the
 selected one in a window that has focus, from 1.5 seconds after it was selected; typing into its

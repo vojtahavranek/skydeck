@@ -23,6 +23,7 @@ const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 const S5 = '4f9d7a5c-2b6e-4dae-9a7b-6c5d4e3f2a1b';
 const S6 = '5a0e8b6d-3c7f-4ebf-8b8c-7d6e5f4a3b2c';
 const S7 = '6b1f9c7e-4d8a-4fca-9c9d-8e7f6a5b4c3d';
+const DAY_NS: Ns = 86_400n * SEC;
 
 /** A row whose session runs (step 1's state `running`: a holder, no live file needed here). */
 function runningRow(id: string): ListRow {
@@ -227,6 +228,44 @@ test('attentionOf: a finished row has no detail although its idle file still hol
     detail: null,
     sinceNs: String(T0),
   });
+});
+
+/** Facts of a running session whose turn ended at `turnEndedNs` (seq 4, never seen) and whose
+ *  file has been idle since `sinceNs`. */
+function idleSince(turnEndedNs: Ns | null, sinceNs: Ns | null): AttentionFacts {
+  return facts({
+    marks: [[S1, marks({ turnEndedSeq: 4, turnEndedNs })]],
+    live: [[S1, live('idle', { sinceNs })]],
+  });
+}
+
+test('attentionOf: a turn end of an earlier run is not finished: the idle status began after it', () => {
+  // Resumed elsewhere days later: idle since a second ago, its last turn end 3 days old.
+  assert.equal(attentionOf(runningRow(S1), idleSince(T0 - 3n * DAY_NS, T0 - SEC)), null);
+  assert.equal(attentionOf(runningRow(S1), idleSince(T0, T0 + 1n)), null);
+});
+
+test('attentionOf: finished while the idle status began at the turn end, or before it', () => {
+  assert.deepEqual(attentionOf(runningRow(S1), idleSince(T0, T0)), {
+    reason: 'finished',
+    detail: null,
+    sinceNs: String(T0),
+  });
+  assert.equal(attentionOf(runningRow(S1), idleSince(T0, T0 - SEC))?.reason, 'finished');
+});
+
+test('attentionOf: finished when the turn end time or the status time is not known', () => {
+  assert.equal(attentionOf(runningRow(S1), idleSince(null, T0))?.reason, 'finished');
+  assert.equal(attentionOf(runningRow(S1), idleSince(T0, null))?.reason, 'finished');
+  assert.equal(attentionOf(runningRow(S1), idleSince(null, null))?.reason, 'finished');
+});
+
+test('attentionOf: a window end is ended whatever the times of an earlier turn end', () => {
+  const f = facts({
+    marks: [[S1, marks({ turnEndedSeq: 4, turnEndedNs: T0 - DAY_NS, windowEndSeq: 5 })]],
+    live: [[S1, live('idle', { sinceNs: T0 })]],
+  });
+  assert.equal(attentionOf(runningRow(S1), f)?.reason, 'ended');
 });
 
 test('attentionOf: a waiting row whose turn ended asks instead of finishing', () => {

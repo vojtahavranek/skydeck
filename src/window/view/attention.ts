@@ -116,13 +116,23 @@ function unseen(seq: number | null, seenSeq: number | null): boolean {
   return seq !== null && (seenSeq === null || seq > seenSeq);
 }
 
+/** A turn end of an earlier run (ruled on review 2): the idle status the row shows began after
+ *  the recorded turn end. Within one run the look records the file's `sinceNs` as `turn_ended_ns`
+ *  and keeps that file as the baseline, so while the session stays idle the two are the same
+ *  value: an identity test, not an order by two clocks. Unknown on either side: not stale. */
+function staleTurnEnd(marks: AttentionMarks, live: LiveStatus): boolean {
+  return marks.turnEndedNs !== null && live.sinceNs !== null && live.sinceNs > marks.turnEndedNs;
+}
+
 /**
  * S2 12.4's reasons in their order, null when the row needs nothing ("running": the row's state
  * is not `not-running`; the LiveStatus is the session's in `facts.live`):
  * asks — the row is running and its LiveStatus is `waiting` (detail: its waitingFor, cut, B13);
  * ended — windowEndSeq is not null and greater than seenSeq (or seenSeq is null), running or not;
  * finished — turnEndedSeq is greater than seenSeq (or seenSeq is null), the row is running and its
- * LiveStatus is `idle` (B6).
+ * LiveStatus is `idle` (B6), and that idle status did not begin after the recorded turn end (not
+ * turnEndedNs and the LiveStatus's sinceNs both known and sinceNs the later: a turn end of an
+ * earlier run, ruled on review 2).
  */
 export function attentionOf(row: ListRow, facts: AttentionFacts): AttentionPayload | null {
   const running = row.state !== 'not-running';
@@ -137,7 +147,12 @@ export function attentionOf(row: ListRow, facts: AttentionFacts): AttentionPaylo
   if (unseen(marks.windowEndSeq, marks.seenSeq)) {
     return { reason: 'ended', detail: null, sinceNs: nsText(marks.windowEndNs) };
   }
-  if (running && live?.status === 'idle' && unseen(marks.turnEndedSeq, marks.seenSeq)) {
+  if (
+    running &&
+    live?.status === 'idle' &&
+    unseen(marks.turnEndedSeq, marks.seenSeq) &&
+    !staleTurnEnd(marks, live)
+  ) {
     return { reason: 'finished', detail: null, sinceNs: nsText(marks.turnEndedNs) };
   }
   return null;
