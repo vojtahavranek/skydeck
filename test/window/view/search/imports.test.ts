@@ -21,11 +21,11 @@ const TYPE_SOURCES = new Set(['../../protocol.ts', '../../hub.ts', '../sections.
 
 /** `import … from '…'` and `export … from '…'`, over several lines too. An `export` counts only
  *  before `*` or `{` (a re-export), so that a `from '…'` in an exported declaration's template (or
- *  any text the clause does not take whole) is no import. The clause takes a block comment, a line comment with its line end or a
- *  string whole, and anything else but `;`, `/` and quotes: a `;` or a `from '…'` inside a
- *  comment or a string of the clause neither ends it nor names its source, so whatever the clause
- *  holds is judged, and each comment has one reading (a statement that reaches no source is read
- *  once, not once per way to split its comments). */
+ *  any text the clause does not take whole) is no import. The clause takes a block comment, a
+ *  line comment with its line end or a string whole, and anything else but `;`, `/` and quotes:
+ *  a `;` or a `from '…'` inside a comment or a string of the clause neither ends it nor names its
+ *  source, so whatever the clause holds is judged, and each comment has one reading (a statement
+ *  that reaches no source is read once, not once per way to split its comments). */
 const STATEMENT =
   /^(?:import|export(?=\s+(?:type\s+)?[*{]))\s+(type\s+)?((?:\/\*(?:(?!\*\/).)*\*\/|\/\/[^\n]*\n|'[^'\n]*'|"[^"\n]*"|[^;\/'"])*?)\s*from\s+'([^']+)'/gms;
 /** `import '…';`: a value import, for its effects. */
