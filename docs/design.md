@@ -463,8 +463,8 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
-| `skydeck new [--label <text>] [--group <text>] [--here \| --tab] [-- <claude flags>]` | Start a new session in the current directory (7.7). |
-| `skydeck resume <ref> [--here \| --tab]` | Resume one session (7.6). |
+| `skydeck new [--label <text>] [--group <text>] [--here \| --tab \| --window] [-- <claude flags>]` | Start a new session in the current directory (7.7); `--window` in the skydeck window (design-step-2.md 11.4). |
+| `skydeck resume <ref> [--here \| --tab \| --window]` | Resume one session (7.6); `--window` in the skydeck window (design-step-2.md 11.4). |
 | `skydeck restore [--all] [--dry-run] [--yes]` | Bring back what was open (7.8). |
 | `skydeck install` / `uninstall [--purge]` / `doctor` | Section 8. |
 

@@ -18,9 +18,9 @@ concurrency:
 jobs:
   check:
     runs-on: ${{ matrix.os }}
-    # The page suite's browser download and run (S2 17.5). The Node 24 leg with the page suite takes about
-    # 20 minutes; 30 leaves room without letting a hung run burn an hour.
-    timeout-minutes: 30
+    # The page suite's browser download and run (S2 17.5). The Node 24 leg with the page suite takes
+    # 22 to 25 minutes; 45 leaves room without letting a hung run burn an hour.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
