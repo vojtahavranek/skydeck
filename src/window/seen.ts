@@ -39,10 +39,7 @@ export interface Seen {
   /** The sessions being seen now: held by a focused page for 1.5 s or since a typing, and those
    *  typed into since the last call (given once). */
   take(): Set<string>;
-  /** A session began to be seen (a hold completed; every typing). Listeners must not throw: one
-   *  that throws anyway does not keep the others from being told; out of a typing its error is
-   *  thrown to typed's caller once all were told, out of a hold's timer it is dropped (a timer
-   *  has nobody to report to). */
+  /** A session began to be seen (a hold completed, a typing). Listeners must not throw. */
   onChange(listener: () => void): () => void;
   /** Every timer stopped (the server's stop); nothing is seen or told after it. */
   stop(): void;
@@ -65,17 +62,11 @@ export function createSeen(clock: Clock): Seen {
   const listeners = new Set<() => void>();
   let stopped = false;
 
-  /** Tells every listener; returns what they threw. */
-  const tell = (): unknown[] => {
-    const errors: unknown[] = [];
+  /** Tells every listener (a copy: one may end its own subscription). */
+  const tell = (): void => {
     for (const listener of [...listeners]) {
-      try {
-        listener();
-      } catch (error) {
-        errors.push(error);
-      }
+      listener();
     }
-    return errors;
   };
 
   const release = (hold: Hold): void => {
@@ -102,7 +93,7 @@ export function createSeen(clock: Clock): Seen {
         own.cancel = clock.after(SEEN_AFTER_MS, () => {
           own.cancel = null;
           own.held = true;
-          tell(); // dropped: a timer has nobody to report to (Clock.after)
+          tell();
         });
       }
     },
@@ -116,10 +107,7 @@ export function createSeen(clock: Clock): Seen {
       } else {
         typedOnce.add(sessionId);
       }
-      const errors = tell();
-      if (errors.length > 0) {
-        throw errors[0];
-      }
+      tell();
     },
     gone(page) {
       const hold = holds.get(page);
@@ -139,13 +127,9 @@ export function createSeen(clock: Clock): Seen {
       return seen;
     },
     onChange(listener) {
-      // Its own entry, so that one function added twice is told twice and each off() removes one.
-      const own = (): void => {
-        listener();
-      };
-      listeners.add(own);
+      listeners.add(listener);
       return () => {
-        listeners.delete(own);
+        listeners.delete(listener);
       };
     },
     stop() {
