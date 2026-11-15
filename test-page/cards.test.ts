@@ -164,7 +164,7 @@ test('the right side', async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    "the header shows the title, the group, the state, the directory, the short id and design 7.3's chip, all as text",
+    "the header shows the title, the group, the state, the directory, the short id and S2 12.3's chip, all as text",
     async (t) => {
       const s = await scripted(t, chromium);
       s.serve(
@@ -175,7 +175,7 @@ test('the right side', async (t) => {
               group: 'ORB-7',
               groupSource: 'title',
               dir: '/home/u/a <b>dir</b>',
-              chip: { level: 'checks-failing', count: 3 },
+              chip: { level: 'checks-failing', open: 3, merged: 0 },
             },
           },
         }),
@@ -202,7 +202,7 @@ test('the right side', async (t) => {
       // and no group when there are none.
       for (const [fields, state, chip] of [
         [
-          { state: 'working', stateDetail: null, chip: { level: 'draft', count: 1 } },
+          { state: 'working', stateDetail: null, chip: { level: 'draft', open: 1, merged: 0 } },
           'working',
           'PR · draft',
         ],
@@ -239,12 +239,17 @@ test('the right side', async (t) => {
     "the header's chip reads exactly as the selected row's chip in the list (one implementation of its words)",
     async (t) => {
       const s = await scripted(t, chromium);
-      for (const chip of [
-        { level: 'checks-failing', count: 3 },
-        { level: 'review-required', count: 1 },
-        { level: 'cant-read', count: 2 },
-        { level: 'merged', count: 30 },
-      ]) {
+      // S2 12.3's chips (plan D4); consecutive ones differ in level, which the wait below reads.
+      for (const [chip, words] of [
+        [{ level: 'checks-failing', open: 3, merged: 0 }, '3 PRs · failing'],
+        [{ level: 'review-required', open: 1, merged: 0 }, 'PR · review'],
+        [{ level: 'cant-read', open: 2, merged: 4 }, "2 PRs · can't read +4"],
+        // One open failing pull request and 30 merged: the list shows `PR · failing` and a dim
+        // `+30`; the header the same chip's whole text (task 38 rebuilds the header).
+        [{ level: 'checks-failing', open: 1, merged: 30 }, 'PR · failing +30'],
+        [{ level: 'merged', open: 0, merged: 30 }, '30 merged'],
+        [{ level: 'closed', open: 0, merged: 0 }, 'closed'],
+      ] as const) {
         s.serve(
           listWith([[{ id: S1, terminal: null, slot: null }], []], { rows: { [S1]: { chip } } }),
         );
@@ -258,7 +263,7 @@ test('the right side', async (t) => {
           chip.level,
         );
         const listed = (await inList.textContent()) ?? '';
-        assert.notEqual(listed, '');
+        assert.equal(listed, words);
         assert.deepEqual(await texts(s.page, '.card-header .header-chip'), [listed]);
       }
     },
@@ -1168,7 +1173,7 @@ test('the right side', async (t) => {
                 group: `<b>g</b>`,
                 stateDetail: `<b>d</b>`,
                 dir: `/d/${img}`,
-                chip: { level: `<b>x</b>`, count: 2 },
+                chip: { level: `<b>x</b>`, open: 2, merged: 0 },
               },
               [S2]: {
                 state: 'running',

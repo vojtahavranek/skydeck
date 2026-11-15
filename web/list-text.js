@@ -7,7 +7,7 @@
 // through the same rule again before showing it (`sanitize`, a copy of src/text/sanitize.ts that
 // the test holds to the server's): a page that shows foreign text decides that for itself.
 
-/** @import { ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
+/** @import { ChipPayload, ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
 import { ageBetween } from './format.js';
 
 // --- the sanitiser (a copy of src/text/sanitize.ts: web/ never imports code from src/) ----------
@@ -47,7 +47,13 @@ function clean(text) {
 /**
  * @typedef {'working' | 'waiting' | 'running' | 'starting' | 'not-running' | 'crashed'} RowIcon
  * @typedef {{ kind: string, text: string, tip: string }} MarkText
- * @typedef {{ text: string, tip: string, dotted: boolean }} ChipText
+ * @typedef {object} ChipText S2 12.3's chip of a row, as the list draws it
+ * @property {string} text the open ones (`PR · failing`, `3 PRs · failing`), or with none open
+ *   `3 merged` or `closed`
+ * @property {string} merged `+30` for the merged ones beside open ones, drawn dim; '' when none
+ * @property {string} tip each open one with its own state, then the merged and closed counts
+ * @property {boolean} dotted its state is `can't read`
+ * @property {boolean} dim none is open: the chip is `3 merged` or `closed`
  * @typedef {object} RowText
  * @property {RowIcon} icon the state icon
  * @property {string} slot the slot number, '' when the row's terminal has none
@@ -55,7 +61,7 @@ function clean(text) {
  * @property {string} group the group printed dim before a title that does not start with it, or ''
  * @property {string} title the title, after its key when it has one
  * @property {MarkText[]} marks design 6.3's marks in words, then `done`
- * @property {ChipText | null} chip design 7.3's chip
+ * @property {ChipText | null} chip S2 12.3's chip, null when no pull request is attached
  * @property {string | null} note null without a note; else the note's first line, the ✎'s tooltip
  * @property {string} age a one-line row's age (its last activity); '' on a row of two lines
  * @property {string | null} stateLine the second line of a running or starting row, else null
@@ -136,35 +142,88 @@ function levelWords(level) {
 }
 
 /**
- * The words of design 7.3's chip (the worst state among a row's attached pull requests and their
- * count) in S2 12.3's words: `PR · failing` for one, `3 PRs · failing` for several. Exported so
- * that the header (task 29) shows the same chip with the same words.
- * @param {{ level: string, count: number }} chip a row's `chip`
- * @returns {string}
+ * S2 12.3's chip in its words, its two parts apart: the open ones — `PR · failing` for one,
+ * `3 PRs · failing` for several, with the state of the one that most needs the user — and `+30`
+ * for the merged ones beside them; with none open, `3 merged` when any is merged, else `closed`.
+ * @param {ChipPayload} chip a row's `chip`
+ * @returns {{ text: string, merged: string }}
  */
-export function chipText(chip) {
+function chipParts(chip) {
+  const { open, merged } = chip;
+  if (open === 0) {
+    return { text: merged > 0 ? `${merged} merged` : 'closed', merged: '' };
+  }
   const words = levelWords(chip.level);
-  return chip.count === 1 ? `PR · ${words}` : `${chip.count} PRs · ${words}`;
+  return {
+    text: open === 1 ? `PR · ${words}` : `${open} PRs · ${words}`,
+    merged: merged > 0 ? `+${merged}` : '',
+  };
 }
 
 /**
- * A row's chip: `chipText`, drawn dotted when it is `can't read` (S2 12.3); the tooltip names each
- * attached pull request with its own state (S2 12.3).
+ * The whole text of S2 12.3's chip: `PR · failing`, `3 PRs · failing +30`, `3 merged`, `closed`.
+ * Exported so that the header shows the same chip with the same words.
+ * @param {ChipPayload} chip a row's `chip`
+ * @returns {string}
+ */
+export function chipText(chip) {
+  const { text, merged } = chipParts(chip);
+  return merged === '' ? text : `${text} ${merged}`;
+}
+
+/**
+ * One open pull request in the chip's tooltip (S2 12.3): `owner/repo #7 · failing`; one that
+ * cannot be read says when it was last read (`last read 3h ago`, `never read` without a read),
+ * then its error.
+ * @param {RowPayload['prs'][number]} pr
+ * @param {string} nowNs
+ * @returns {string}
+ */
+function openPrTip(pr, nowNs) {
+  const parts = [`${clean(pr.repo)} #${pr.number}`, levelWords(pr.level)];
+  if (pr.level === 'cant-read') {
+    const age = pr.okAtNs === null ? '' : ageBetween(nowNs, pr.okAtNs);
+    parts.push(pr.okAtNs === null ? 'never read' : age === '' ? '' : `last read ${age} ago`);
+    parts.push(clean(pr.error));
+  }
+  return parts.filter((part) => part !== '').join(' · ');
+}
+
+/**
+ * A row's chip (S2 12.3): its parts, dim when none is open, dotted when it is `can't read`; the
+ * tooltip lists each open pull request with its own state, then the merged and closed counts
+ * (`30 merged · 1 closed`).
  * @param {RowPayload} row
+ * @param {string} nowNs
  * @returns {ChipText | null}
  */
-function chipOf(row) {
+function chipOf(row, nowNs) {
   if (row.chip === null || typeof row.chip !== 'object') {
     return null;
   }
-  const tip = (Array.isArray(row.prs) ? row.prs : [])
-    .map((pr) =>
-      [`${clean(pr.repo)} #${pr.number}`, levelWords(pr.level), clean(pr.error)]
-        .filter((part) => part !== '')
-        .join(' · '),
-    )
+  const prs = Array.isArray(row.prs) ? row.prs : [];
+  const finished = (/** @type {string} */ level) => prs.filter((pr) => pr.level === level).length;
+  const counts = [
+    [finished('merged'), 'merged'],
+    [finished('closed'), 'closed'],
+  ]
+    .filter(([count]) => count !== 0)
+    .map(([count, words]) => `${count} ${words}`)
+    .join(' · ');
+  const tip = [
+    ...prs
+      .filter((pr) => pr.level !== 'merged' && pr.level !== 'closed')
+      .map((pr) => openPrTip(pr, nowNs)),
+    counts,
+  ]
+    .filter((line) => line !== '')
     .join('\n');
-  return { text: chipText(row.chip), tip, dotted: row.chip.level === 'cant-read' };
+  return {
+    ...chipParts(row.chip),
+    tip,
+    dotted: row.chip.level === 'cant-read',
+    dim: row.chip.open === 0,
+  };
 }
 
 /** What may stand between a title's ticket key and the rest of it. */
@@ -244,7 +303,7 @@ export function rowText(row, nowNs, terminal) {
     slot: typeof row.slot === 'number' ? String(row.slot) : '',
     ...titleOf(row),
     marks,
-    chip: chipOf(row),
+    chip: chipOf(row, nowNs),
     note: row.hasNote ? clean(noteHead[0] ?? '') : null,
     age: twoLines ? '' : ageBetween(nowNs, row.lastActivityNs),
     stateLine: twoLines ? stateLineOf(row, nowNs, terminal) : null,

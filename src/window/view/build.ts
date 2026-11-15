@@ -308,6 +308,7 @@ export function buildListMessage(
       notReported: terminal.notReported,
       cols: terminal.cols,
       rows: terminal.rows,
+      openedNs: String(terminal.openedNs),
     })),
     selected:
       input.selected !== null && input.selected.sessionId === view.selected ? input.selected : null,
