@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { stackRows } from '../../../../src/window/view/search/stacks.ts';
-import type { StackEntry, StackPayload } from '../../../../src/window/view/search/stacks.ts';
+import type { StackPayload } from '../../../../src/window/protocol.ts';
+import type { StackEntry } from '../../../../src/window/view/search/stacks.ts';
 
 /** A plain entry, with one field of its own to show that `stackRows` hands back the caller's objects. */
 interface Entry extends StackEntry {
