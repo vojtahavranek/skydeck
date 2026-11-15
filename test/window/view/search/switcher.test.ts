@@ -290,9 +290,28 @@ test('switcherPayload: a text whose first character is `>` lists no session, wha
   ]) {
     assert.deepEqual(
       switcherPayload(text, candidates, ['b']),
-      { query: text, items: [], more: 0, restore: null },
+      { query: text, command: true, items: [], more: 0, restore: null },
       JSON.stringify(text),
     );
+  }
+});
+
+test('switcherPayload: `command` is true exactly when the first character of the text is `>`', () => {
+  const candidates = commandLike();
+  const cases: [string, boolean][] = [
+    ['>', true],
+    ['> foo', true],
+    ['>restore', true],
+    ['>>', true],
+    [' >restore', false],
+    ['\t>r', false],
+    ['restore', false],
+    ['foo >', false],
+    ['', false],
+  ];
+  for (const [text, command] of cases) {
+    assert.equal(switcherPayload(text, candidates, []).command, command, JSON.stringify(text));
+    assert.equal(switcherPayload(text, [], []).command, command, JSON.stringify(text));
   }
 });
 
@@ -453,20 +472,34 @@ test('switcherPayload: `query` is the text as given, not cut and not lower-cased
   assert.equal(payload.restore, null);
 });
 
-test('switcherPayload: nothing gives { query, items: [], more: 0, restore: null }', () => {
-  assert.deepEqual(switcherPayload('', [], []), { query: '', items: [], more: 0, restore: null });
+test('switcherPayload: nothing gives { query, command: false, items: [], more: 0, restore: null }', () => {
+  assert.deepEqual(switcherPayload('', [], []), {
+    query: '',
+    command: false,
+    items: [],
+    more: 0,
+    restore: null,
+  });
   assert.deepEqual(switcherPayload('fix', [], ['n1']), {
     query: 'fix',
+    command: false,
     items: [],
     more: 0,
     restore: null,
   });
   assert.deepEqual(switcherPayload('absent', [candidate({ id: 'a' })], []), {
     query: 'absent',
+    command: false,
     items: [],
     more: 0,
     restore: null,
   });
+});
+
+test('switcherPayload: a payload with items has exactly the contract fields', () => {
+  const payload = switcherPayload('', [candidate({ id: 'a' })], []);
+  assert.deepEqual(Object.keys(payload).sort(), ['command', 'items', 'more', 'query', 'restore']);
+  assert.equal(payload.command, false);
 });
 
 test('switcherPayload: nothing in the input is written', () => {
@@ -620,6 +653,56 @@ test('restoreOffer: no offer while the banner is shown, while a restore runs, wi
   assert.equal(restoreOffer('>restore', banner({ preselected: [false, false, false] })), null);
   assert.equal(restoreOffer('>restore', banner({ preselected: [] })), null);
   assert.equal(restoreOffer('>restore', null), null);
+});
+
+/** A banner whose fields are set at run time to what its type does not allow: through a cast. */
+function untyped(over: Record<string, unknown>): Parameters<typeof restoreOffer>[1] {
+  return { ...banner(), ...over } as unknown as Parameters<typeof restoreOffer>[1];
+}
+
+test('restoreOffer: what is not positively known gives no offer: `shown` and `running` must be false', () => {
+  // The offer starts programs (ruled): a banner that does not say it is hidden and idle offers
+  // nothing.
+  for (const value of [undefined, null, 0, '', 'false', NaN]) {
+    assert.equal(
+      restoreOffer('>restore', untyped({ shown: value })),
+      null,
+      `shown ${String(value)}`,
+    );
+    assert.equal(
+      restoreOffer('>restore', untyped({ running: value })),
+      null,
+      `running ${String(value)}`,
+    );
+  }
+  // A banner without the field at all.
+  const { shown: _shown, ...noShown } = banner();
+  const { running: _running, ...noRunning } = banner();
+  assert.equal(
+    restoreOffer('>restore', noShown as unknown as Parameters<typeof restoreOffer>[1]),
+    null,
+  );
+  assert.equal(
+    restoreOffer('>restore', noRunning as unknown as Parameters<typeof restoreOffer>[1]),
+    null,
+  );
+});
+
+test('restoreOffer: an entry counts only when its `preselected` is true', () => {
+  const entries = [
+    { sessionId: S1, preselected: 1 },
+    { sessionId: S2, preselected: 'true' },
+    { sessionId: S3, preselected: true },
+    { sessionId: 'no-flag' },
+    { sessionId: 'null-flag', preselected: null },
+    { sessionId: 'object-flag', preselected: {} },
+  ];
+  assert.deepEqual(restoreOffer('>restore', untyped({ entries })), {
+    count: 1,
+    lastActivityNs: '1794474000000000000',
+    sessionIds: [S3],
+  });
+  assert.equal(restoreOffer('>restore', untyped({ entries: entries.slice(0, 2) })), null);
 });
 
 test("restoreOffer: the preselected entries' ids in the banner's order, their count, its lastActivityNs", () => {

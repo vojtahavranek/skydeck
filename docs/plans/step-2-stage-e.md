@@ -320,6 +320,9 @@ export interface RestoreOffer {
 export interface SwitcherPayload {
   /** The text it answers (view.switcher), as the page sent it; E10's picks compare it. */
   query: string;
+  /** E12 (ruled): the text is in command form — its first character is `>` — so `items` is []
+   *  and `more` 0; the page says so from this field and never tests the text itself. */
+  command: boolean;
   items: SwitchItem[];
   /** How many matching sessions were left out after MAX_ITEMS. */
   more: number;
@@ -333,7 +336,9 @@ export const MAX_ITEMS = 50;
  * before it) and what follows, trimmed and lower-cased with toLowerCase(), is a start of `restore`
  * of at least one letter (`>r`, `> rest`, `>Restore`, `> RESTORE`) — the banner is not null,
  * `shown` and `running` are false and at least one entry is preselected; else null. `>` alone and
- * `> foo` give none; a text whose first character is not `>` never does (ruled).
+ * `> foo` give none; a text whose first character is not `>` never does (ruled). The offer starts
+ * programs, so what is not positively known gives none (ruled): `shown` and `running` must be
+ * `false` itself, and an entry counts only when its `preselected` is `true`.
  */
 export function restoreOffer(
   query: string,
@@ -360,8 +365,8 @@ export interface SwitchCandidate {
  * (in needOrder's order, then any that needOrder lacks in the candidates' order), `open`,
  * `not-running` (not open, not done), `done` (not open, done); inside each rank in the
  * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null. A text in command
- * form — its first character `>`, whatever follows (E12, ruled) — lists no session: `items` []
- * and `more` 0.
+ * form — its first character `>`, whatever follows (E12, ruled) — lists no session: `command`
+ * true, `items` [] and `more` 0; any other text gives `command` false.
  */
 export function switcherPayload(
   query: string,
@@ -434,7 +439,8 @@ surrogate are each refused (`{ ok: false, kind }`, the kind holding none of the 
   as 2.2 says (Open's comparator for the open ones, the recent-first one for the others), each
   with its `hiddenBy` for this view (2.2's meanings) and `need` = its payload's `attention` is not
   null; `needOrder` is stage B's `attentionOrder` over those that need you (B's 2.4), [] without
-  stage B. Otherwise `switcher: null`. Its `restore` is null here; `listFor` sets it (2.6).
+  stage B. Otherwise `switcher: null`. Its `restore` is null here; `listFor` sets it (2.6). Its
+  `command` (2.2) is `switcherPayload`'s, passed on as it is.
 - Stage B's `needYou.order`, stage C's banner and the rest are untouched by any of it.
 
 `buildListMessage` (task 95): `selectedRow` is the payload the loop made for the candidate whose
@@ -734,8 +740,13 @@ knows stage B or C: `need` and `needOrder` are given, and `restoreOffer` reads o
 fields of a banner that 2.2 names. The command form (E12, ruled): a text whose first character is
 `>` lists no session in `switcherPayload`, whatever follows, and is the only text for which
 `restoreOffer` can give the offer; the command after the `>` is trimmed and lower-cased with
-`toLowerCase()`, so `> RESTORE` and `>Restore` name it as `>restore` does. The cost is linear in
-the candidates and in `needOrder` (no lookup in `needOrder` per candidate, no sort).
+`toLowerCase()`, so `> RESTORE` and `>Restore` name it as `>restore` does; `command` says that the
+text is a command, so that the page never tests the text itself. The offer starts programs, so
+what is not positively known gives none (ruled): `shown` and `running` must be `false` itself and
+an entry counts only when its `preselected` is `true`; a banner that is no object, or entries that
+are no array, are not guarded (the banner is the server's own typed value), and an id preselected
+twice is task 73's to hold. The cost is linear in the candidates and in `needOrder` (no lookup in
+`needOrder` per candidate, no sort).
 
 **Tests** (platform: none — candidates built from step 1's builders through task 90's `searchable`)
 - No text: every candidate, ranked need, open, not running, done; inside each the candidates'
@@ -746,12 +757,14 @@ the candidates and in `needOrder` (no lookup in `needOrder` per candidate, no so
 - 60 candidates → 50 items and `more` 10; with a text that 3 match → 3 and `more` 0.
 - `found` is `foundIn(row.title, words)`; `hiddenBy` and `row` are passed on as they are; `query`
   is the text as given (not cut, not lower-cased); `restore` null.
-- Nothing → `{ query, items: [], more: 0, restore: null }`.
-- The command form (ruled): `>restore`, `>r`, `> rest`, `>Restore`, `> RESTORE`, `>`, `> `, `> foo`,
-  `>foo` → `{ query, items: [], more: 0, restore: null }` over sessions whose titles hold those
-  words; ` >restore` and `\t>r` (white space first) → searched as the session words `>restore`
-  and `>r`; `restore` and `RESTORE old` → the sessions that hold the words. `switcherPayload` takes
-  no banner: a `>` text lists no session with a banner or without one (task 98's case).
+- Nothing → `{ query, command: false, items: [], more: 0, restore: null }`. `command`: true for
+  `>`, `> foo`, `>restore`, `>>`; false for ` >restore`, `\t>r`, `restore`, `foo >`, `''`.
+- The command form (ruled): `>restore`, `>r`, `> rest`, `>Restore`, `> RESTORE`, `>`, `> `,
+  `> foo`, `>foo` → `{ query, command: true, items: [], more: 0, restore: null }` over sessions
+  whose titles hold those words; ` >restore` and `\t>r` (white space first) → searched as the
+  session words `>restore` and `>r`; `restore` and `RESTORE old` → the sessions that hold the
+  words. `switcherPayload` takes no banner: a `>` text lists no session with a banner or without
+  one (task 98's case).
 - `restoreOffer`: a banner with three entries, two preselected, `shown` false, `running` false →
   for `>r`, `>re`, `> rest`, `>restor`, `>restore`, `>  restore  `, `>\trestore\n`, every
   white space `trim()` strips after the `>` (U+00A0, U+FEFF, U+3000, U+2028) and, for case,
@@ -762,7 +775,9 @@ the candidates and in `needOrder` (no lookup in `needOrder` per candidate, no so
   U+200B before the `>`, U+200B after it, a look-alike `>` or letter (U+FF1E, the Cyrillic
   U+0435, the long s U+017F, which `toUpperCase()` would take for `S`) and the command in quote
   marks, null; the same banner with `shown` true, with `running` true, with no entry
-  preselected, and a null banner → null for `>restore`.
+  preselected, and a null banner → null for `>restore`; through a cast, `shown` or `running`
+  `undefined`, `null`, `0`, `''`, `'false'`, `NaN` or absent → null, and an entry whose
+  `preselected` is `1`, `'true'`, `null`, `{}` or absent does not count.
 - `more` counts the ranks after the one the cut falls in (55 not running and 7 done → 50 items,
   `more` 12); an id `needOrder` names twice counts at its first place; `found` is of the row's
   title (U+0130 + `stanbul fix` and `fix` → `[]`, foundIn's named limit).
@@ -875,8 +890,8 @@ D nothing differs.
   - the switcher: `switcher` null without `view.switcher`; with `''` every listed session with
     done ones, ranked; a done session and one the filter hides are items, with `hiddenBy`
     `['done']`, `['filter']`, `['filter', 'done', 'folded']` as 2.2 says; with stage B's facts the
-    sessions that need you first in B's order; `restore` null; `counts` and `needYou` the same
-    with and without a switcher;
+    sessions that need you first in B's order; `restore` null; `command` false for `''`, true
+    with no item for `>restore`; `counts` and `needYou` the same with and without a switcher;
   - every stage A, B and D case of `build.test.ts` passes but the filter's cases named above.
 
 **Done when:** every rule of S2 12.2 and 12.8 that the server decides is in the list a page gets,
@@ -1094,7 +1109,10 @@ modal rule has its own gate; without C there is no offer, `server.ts` is not tou
 
 **Behaviour.** As E10, E11, E12 and 2.5. The panel lies over the page (the mockup's), with the
 field on top, the items grouped under `rankHeading`'s headings, and the footer (`switcherFooter`);
-`No session matches.` when nothing does. The highlight starts on the first item and follows
+`No session matches.` when nothing does and `switcher.command` is false; while it is true the
+switcher lists no session and shows the offer when there is one, or a line of its own for a
+command that names none (its words are task 98's): the page decides it from `switcher.command`,
+never from the text (S2 4.3). The highlight starts on the first item and follows
 ↑ ↓ PgUp PgDn, scrolled into view; a held key acts at each repeat for ↑ ↓ and once for Enter.
 
 **Tests** (platform: `realTestPlatform`; a test server with sessions made by step 1's helpers and

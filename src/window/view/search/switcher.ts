@@ -41,6 +41,9 @@ export interface RestoreOffer {
 export interface SwitcherPayload {
   /** The text it answers (view.switcher), as the page sent it; E10's picks compare it. */
   query: string;
+  /** E12 (ruled): the text is in command form — its first character is `>` — so `items` is []
+   *  and `more` 0; the page says so from this field and never tests the text itself. */
+  command: boolean;
   items: SwitchItem[];
   /** How many matching sessions were left out after MAX_ITEMS. */
   more: number;
@@ -69,6 +72,9 @@ function isCommand(query: string): boolean {
  * not null, `shown` and `running` are false and at least one entry is preselected; else null.
  * `>` alone and `> foo` give none. A text without `>` as its first character searches sessions
  * only, so that a session's name never brings the offer; never for an empty text.
+ *
+ * The offer starts programs, so what is not positively known gives none (ruled): `shown` and
+ * `running` must be `false` itself, and an entry counts only when its `preselected` is `true`.
  */
 export function restoreOffer(
   query: string,
@@ -89,11 +95,11 @@ export function restoreOffer(
   if (!RESTORE.startsWith(command.toLowerCase())) {
     return null;
   }
-  if (banner === null || banner.shown || banner.running) {
+  if (banner === null || banner.shown !== false || banner.running !== false) {
     return null;
   }
   const sessionIds = banner.entries
-    .filter((entry) => entry.preselected)
+    .filter((entry) => entry.preselected === true)
     .map((entry) => entry.sessionId);
   if (sessionIds.length === 0) {
     return null;
@@ -157,8 +163,8 @@ function inNeedOrder(
  * (in needOrder's order, then any that needOrder lacks in the candidates' order), `open`,
  * `not-running` (not open, not done), `done` (not open, done); inside each rank in the
  * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null. A text in command
- * form (its first character `>`, E12, ruled) lists no session: `items` [] and `more` 0, whatever
- * follows the `>`.
+ * form (its first character `>`, E12, ruled) lists no session: `command` true, `items` [] and
+ * `more` 0, whatever follows the `>`; any other text gives `command` false.
  */
 export function switcherPayload(
   query: string,
@@ -166,7 +172,7 @@ export function switcherPayload(
   needOrder: readonly string[],
 ): SwitcherPayload {
   if (isCommand(query)) {
-    return { query, items: [], more: 0, restore: null };
+    return { query, command: true, items: [], more: 0, restore: null };
   }
   const words = searchWords(query);
   const byRank: Record<SwitchRank, SwitchCandidate[]> = {
@@ -202,5 +208,5 @@ export function switcherPayload(
       });
     }
   }
-  return { query, items, more: matching - items.length, restore: null };
+  return { query, command: false, items, more: matching - items.length, restore: null };
 }
