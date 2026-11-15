@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { cancels, listKey, terminalKey, windowChord } from '../../web/keys.js';
+import { cancels, listKey, switcherKey, terminalKey, windowChord } from '../../web/keys.js';
 
 type Zone = 'list' | 'terminal';
 type Mod = 'ctrl' | 'shift' | 'alt' | 'meta';
@@ -49,7 +49,7 @@ type Chord = ReturnType<typeof windowChord>;
 /** Every chord of S2 12.9 (stage A, A11) as one layout types it. */
 function chordTable(shiftedDigits: readonly string[]): Array<[string, KeyLike, Chord]> {
   const rows: Array<[string, KeyLike, Chord]> = [
-    ['Ctrl+Shift+P', cs('P', 'KeyP'), { kind: 'later', stage: 'E' }],
+    ['Ctrl+Shift+P', cs('P', 'KeyP'), { kind: 'switcher' }],
     ['Ctrl+Shift+J', cs('J', 'KeyJ'), { kind: 'next-attention' }],
     ['Ctrl+Tab', ev('Tab', 'Tab', 'ctrl'), { kind: 'previous' }],
     ['Ctrl+Shift+O', cs('O', 'KeyO'), { kind: 'previous' }],
@@ -106,7 +106,7 @@ describe('windowChord: matching', () => {
 
     test(`${zone} zone: a lower-case letter (Caps Lock) still matches`, () => {
       assert.deepEqual(windowChord(cs('h', 'KeyH'), zone), { kind: 'help' });
-      assert.deepEqual(windowChord(cs('p', 'KeyP'), zone), { kind: 'later', stage: 'E' });
+      assert.deepEqual(windowChord(cs('p', 'KeyP'), zone), { kind: 'switcher' });
       assert.deepEqual(windowChord(cs('j', 'KeyJ'), zone), { kind: 'next-attention' });
     });
   }
@@ -458,7 +458,7 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
     }
   });
 
-  test('every later key: Ctrl+Shift+P in both zones', () => {
+  test('Ctrl+Shift+P is cancelled in both zones', () => {
     for (const zone of ZONES) {
       assert.equal(cancels(cs('P', 'KeyP'), zone, false), true);
     }
@@ -542,7 +542,7 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
   });
 });
 
-describe('`later` (A11) after stage D', () => {
+describe('`later` (A11) is gone after stage E', () => {
   /** Every character and named key a test here can name, with each of the 16 sets of modifiers. */
   const everyEvent = (): KeyLike[] => {
     const keys = [
@@ -573,20 +573,79 @@ describe('`later` (A11) after stage D', () => {
     return events;
   };
 
-  test('only Ctrl+Shift+P is still `later` (stage B took Ctrl+Shift+J); no list key is', () => {
+  test('no key gives `later` any more: Ctrl+Shift+P, the last one, is the switcher (stage E)', () => {
     const later: string[] = [];
     for (const e of everyEvent()) {
       const name = `${e.ctrlKey ? 'Ctrl+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.altKey ? 'Alt+' : ''}${e.metaKey ? 'Meta+' : ''}${e.key}`;
-      assert.notEqual(listKey(e)?.kind, 'later', name);
+      const kinds: (string | undefined)[] = [listKey(e)?.kind, switcherKey(e)?.kind];
+      for (const zone of ZONES) kinds.push(windowChord(e, zone)?.kind);
+      if (kinds.includes('later')) later.push(name);
+    }
+    assert.deepEqual(later, []);
+  });
+});
+
+describe('switcherKey (E11: the switcher’s field)', () => {
+  test('Ctrl+Shift+P on a US and a Czech layout, both zones: the switcher, cancelled', () => {
+    // A Czech layout types the same letters as a US one; Caps Lock gives the lower case.
+    for (const e of [cs('P', 'KeyP'), cs('p', 'KeyP')]) {
       for (const zone of ZONES) {
-        if (windowChord(e, zone)?.kind === 'later') later.push(`${zone}: ${name}`);
+        assert.deepEqual(windowChord(e, zone), { kind: 'switcher' });
+        for (const handled of [false, true]) {
+          assert.equal(cancels(e, zone, handled), true);
+        }
       }
     }
-    assert.deepEqual(later.sort(), [
-      'list: Ctrl+Shift+P',
-      'list: Ctrl+Shift+p',
-      'terminal: Ctrl+Shift+P',
-      'terminal: Ctrl+Shift+p',
-    ]);
+  });
+
+  test('↑ ↓ PgUp PgDn move, Enter picks, Esc closes, Tab and Shift+Tab stay', () => {
+    assert.deepEqual(switcherKey(ev('ArrowDown', 'ArrowDown')), { kind: 'move', by: 1 });
+    assert.deepEqual(switcherKey(ev('ArrowUp', 'ArrowUp')), { kind: 'move', by: -1 });
+    assert.deepEqual(switcherKey(ev('PageUp', 'PageUp')), { kind: 'move', by: 'page-up' });
+    assert.deepEqual(switcherKey(ev('PageDown', 'PageDown')), { kind: 'move', by: 'page-down' });
+    assert.deepEqual(switcherKey(ev('Enter', 'Enter')), { kind: 'pick' });
+    assert.deepEqual(switcherKey(ev('Enter', 'NumpadEnter')), { kind: 'pick' });
+    assert.deepEqual(switcherKey(ev('Escape', 'Escape')), { kind: 'close' });
+    assert.deepEqual(switcherKey(ev('Tab', 'Tab')), { kind: 'stay' });
+    assert.deepEqual(switcherKey(ev('Tab', 'Tab', 'shift')), { kind: 'stay' });
+  });
+
+  test('null with Ctrl, Alt or Meta; Shift only for Tab', () => {
+    const named = ['ArrowDown', 'ArrowUp', 'PageUp', 'PageDown', 'Enter', 'Escape', 'Tab'];
+    for (const key of named) {
+      for (const mod of ['ctrl', 'alt', 'meta'] as const) {
+        assert.equal(switcherKey(ev(key, key, mod)), null, `${mod}+${key}`);
+        assert.equal(switcherKey(ev(key, key, mod, 'shift')), null, `${mod}+Shift+${key}`);
+      }
+      if (key !== 'Tab') {
+        assert.equal(switcherKey(ev(key, key, 'shift')), null, `Shift+${key}`);
+      }
+    }
+  });
+
+  test('null for a letter, a digit, a character and the keys it does not use', () => {
+    for (const [key, code] of [
+      ['j', 'KeyJ'],
+      ['d', 'KeyD'],
+      ['/', 'Slash'],
+      ['>', 'Period'],
+      ['1', 'Digit1'],
+      [' ', 'Space'],
+      ['ArrowLeft', 'ArrowLeft'],
+      ['ArrowRight', 'ArrowRight'],
+      ['Home', 'Home'],
+      ['End', 'End'],
+      ['Backspace', 'Backspace'],
+      ['F2', 'F2'],
+      ['F5', 'F5'],
+    ] as const) {
+      assert.equal(switcherKey(ev(key, code)), null, key);
+    }
+    assert.equal(switcherKey(ev('P', 'KeyP', 'shift')), null, 'Shift+P');
+    assert.equal(switcherKey(cs('P', 'KeyP')), null, 'Ctrl+Shift+P is the chord, not a field key');
+  });
+
+  test('an event without a `key` (an autofill pick) is no key of the field', () => {
+    assert.equal(switcherKey({ ...ev('', ''), key: undefined as unknown as string }), null);
   });
 });

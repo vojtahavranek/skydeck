@@ -15,10 +15,19 @@
 // walks `needYou.order` as the server sends it (B14), a `notify` shows a desktop notification
 // (B15), and a click on one passes `windowChordGate` as a window chord does.
 //
+// Stage E (plan E task 98): the quick switcher of web/switcher.js, opened by Ctrl+Shift+P and by
+// the title bar's `Switch…` through `windowChordGate`. Its text is the view's `switcher` (cut as
+// the filter is: 1,024 bytes, then 16 words), and each `list` hands it its ranked items. While it
+// is shown it is modal as a dialog is (E11): `.app` is inert under its scrim, app.js moves the
+// keyboard nowhere and acts on no list key, and every window chord but Ctrl+Shift+P says `close
+// the switcher first (Esc)`; when it closes the keyboard goes back where it was, or where a pick
+// puts it. A pick reveals the row (`list.reveal`, E10), selects it and does what Enter in the
+// list does; the restore offer sends `act restore` (E12).
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
-/** @import { ExitMessage, ListMessage, ResultMessage, RowPayload, SectionPayload, ServerMessage, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
+/** @import { ExitMessage, ListMessage, ResultMessage, RowPayload, SearchChip, SectionPayload, ServerMessage, SwitchItem, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
 /** @import { EditWhat, ListAction, WindowChord, Zone } from './keys.js' */
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
@@ -29,10 +38,12 @@ import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
 import { serverNow } from './format.js';
 import { createHelp } from './help.js';
-import { cancels, listKey, windowChord } from './keys.js';
+import { cancels, listKey, switcherKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { createNotifications } from './notify.js';
 import { paneFor, sessionRow } from './pane.js';
+import { cutWords } from './search-text.js';
+import { createSwitcher } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
 import { createToast } from './toast.js';
 
@@ -82,6 +93,8 @@ const dom = {
   editor: byId('editor'),
   toast: byId('toast'),
   notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
+  switcher: byId('switcher'),
+  switchButton: byId('switch-button'),
   measure: byId('cell-measure'),
 };
 /** The page under a dialog: inert while one is shown (D2), so that nothing in it takes the keyboard. */
@@ -120,9 +133,15 @@ const state = {
     filter: '',
     unfolded: /** @type {string[]} */ ([]),
     showDone: false,
-    chips: /** @type {import('../src/window/protocol.ts').SearchChip[]} */ ([]),
+    chips: /** @type {SearchChip[]} */ ([]),
     opened: /** @type {string[]} */ ([]),
+    /** E8: the switcher's text while it is shown, null while it is not. @type {string | null} */
+    switcher: /** @type {string | null} */ (null),
   },
+  /** Whether the connection is open (the switcher says when it is not, E11). */
+  connected: false,
+  /** What had the keyboard when the switcher opened: it gets it back when it closes (E11). @type {Element | null} */
+  switcherFrom: /** @type {Element | null} */ (null),
   newOpen: false,
   /** @type {Map<string, ExitMessage>} */
   exits: new Map(),
@@ -163,8 +182,8 @@ const state = {
    * Undo's answer came. @type {{ sessionId: string, at: string, answered: boolean } | null}
    */
   undoTo: null,
-  /** The key (`code`) whose keydown opened the dialog shown, until it is released: its
-   *  auto-repeats type nothing into the field. */
+  /** The key (`code`) whose keydown opened the dialog or the switcher shown, until it is
+   *  released: its auto-repeats type nothing into the field. */
   openedBy: '',
 };
 
@@ -249,10 +268,27 @@ const notifications = createNotifications(dom.notifyOn, {
 // The item hides itself once the permission is answered: pressed from the keyboard, it takes the
 // keyboard with it, and the zone's holder takes it back (S2 12.9), as for the notice's ×.
 dom.notifyOn.addEventListener('blur', () => setTimeout(keepKeyboard, 0));
+// Stage E (plan E task 98): the quick switcher; its ages on the server's clock (`listNow`), the
+// offer's time in the page's own time zone (stage C's rule for the banner, C18).
+const switcher = createSwitcher(dom.switcher, {
+  text: (value) => switcherText(value),
+  pick: (item) => switcherPick(item),
+  restore: (sessionIds) => switcherRestore(sessionIds),
+  closed: () => switcherClosed(),
+  now: () => listNow(),
+  timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+});
+// The title bar's `Switch…` passes the gate of a window chord (B15), as Ctrl+Shift+P does; the
+// title bar takes no keyboard on a click, so the switcher knows where the keyboard was.
+dom.switchButton.addEventListener('click', () => {
+  if (windowChordGate('switcher')) {
+    openSwitcher();
+  }
+});
 
-/** Whether a dialog is shown (D2: then the page is modal). */
+/** Whether a dialog or the switcher is shown (D2, E11: then the page is modal). */
 function modal() {
-  return editor.shown();
+  return editor.shown() || switcher.shown();
 }
 
 // --- what the page says -------------------------------------------------------------------------
@@ -260,6 +296,7 @@ function modal() {
 /** @param {'connecting' | 'open' | 'lost' | 'fatal'} value */
 function setConnectionState(value) {
   document.documentElement.dataset.connection = value;
+  state.connected = value === 'open';
 }
 
 /**
@@ -484,22 +521,41 @@ function cutTo(text, bytes) {
 }
 
 /**
- * A change of the page's view (S2 8.2.3 `view`). The filter is held to S2 8.2.3's limit, so that
- * the server never refuses the page's view (it would close the connection for it): a longer one
- * is cut to its first 1,024 bytes, and the key bar says so.
- * @param {{ filter?: string, unfolded?: string[], showDone?: boolean, chips?: import('../src/window/protocol.ts').SearchChip[], opened?: string[] }} change
+ * A change of the page's view (S2 8.2.3 `view`). The filter's and the switcher's text are held to
+ * S2 8.2.3's limit, so that the server never refuses the page's view (it would close the
+ * connection for it), and to E3's 16 words: a longer one is cut to its first 1,024 bytes, then
+ * after its 16th word (`cutWords`, as the server reads it). The key bar says so for the filter
+ * (`the filter is cut to its first 1,024 bytes`, `… 16 words`); for the switcher its footer does.
+ * @param {{ filter?: string, unfolded?: string[], showDone?: boolean, chips?: SearchChip[], opened?: string[], switcher?: string | null }} change
  */
 function changeView(change) {
   let next = change;
   if (change.filter !== undefined) {
-    const filter = cutTo(change.filter.toWellFormed(), TEXT_BYTES);
-    if (filter.length < change.filter.length) {
-      say('the filter is cut to its first 1,024 bytes');
-    }
-    next = { ...change, filter };
+    next = { ...next, filter: searchText(change.filter, true) };
+  }
+  if (typeof change.switcher === 'string') {
+    next = { ...next, switcher: searchText(change.switcher, false) };
   }
   state.view = { ...state.view, ...next };
   sendView();
+}
+
+/**
+ * A search text as the page sends it (E3): its first 1,024 bytes of UTF-8, well formed, up to the
+ * end of its 16th word. For the filter the key bar says when it was cut.
+ * @param {string} text
+ * @param {boolean} filter
+ * @returns {string}
+ */
+function searchText(text, filter) {
+  const bytes = cutTo(text.toWellFormed(), TEXT_BYTES);
+  const words = cutWords(bytes);
+  if (filter && bytes.length < text.length) {
+    say('the filter is cut to its first 1,024 bytes');
+  } else if (filter && words.cut) {
+    say('the filter is cut to its first 16 words');
+  }
+  return words.text;
 }
 
 /** The acts whose result a dialog starts from: after this page's own `ok`, it waits for the list
@@ -717,18 +773,127 @@ function edit(what, sessionId, key, code) {
 function dialogClosed() {
   appRoot.inert = false;
   state.openedBy = '';
+  if (!broughtTakesKeyboard()) {
+    giveKeyboard();
+  }
+}
+
+/**
+ * After a dialog or the switcher closed: a terminal that this page's resume or new brought
+ * meanwhile takes the keyboard (S2 11.3: the user's own action; D2, E11). False when none did.
+ * @returns {boolean}
+ */
+function broughtTakesKeyboard() {
   const bringing = state.bringing;
   if (bringing === null) {
-    giveKeyboard();
-    return;
+    return false;
   }
-  setZone('terminal'); // S2 11.3: the user's own action (and gives the zone the keyboard)
+  setZone('terminal'); // the user's own action (and gives the zone the keyboard)
   const pane = state.pane;
   if (pane.kind === 'terminal' && (pane.row?.id === bringing || pane.term.sessionId === bringing)) {
     terminalView.focus();
     state.bringing = null;
   }
   // Not shown yet: render gives it the keyboard when its list comes.
+  return true;
+}
+
+// --- stage E: the quick switcher (plan E task 98) ---------------------------------------------
+
+/**
+ * Ctrl+Shift+P or `Switch…`, once past the gate (E11): the help hidden, the page inert under the
+ * switcher's scrim, the keyboard in its field; it remembers what had the keyboard. It gets the
+ * list shown, or none while the page is not connected (it says so).
+ */
+function openSwitcher() {
+  if (switcher.shown()) {
+    return;
+  }
+  help.hide();
+  state.switcherFrom = document.activeElement;
+  appRoot.inert = true;
+  switcher.open();
+  switcher.update(state.connected ? state.list : null);
+}
+
+/**
+ * The switcher's field changed (E8): the view's `switcher` is its text, cut as `changeView` cuts
+ * it; the switcher learns the text sent, which its picks compare with `list.switcher.query`.
+ * @param {string} value
+ * @returns {string}
+ */
+function switcherText(value) {
+  changeView({ switcher: value });
+  return state.view.switcher ?? '';
+}
+
+/**
+ * The switcher closed, whatever closed it: the page is no longer inert, the view's `switcher` is
+ * null again, and the keyboard goes back where it was — or to a terminal this page's resume
+ * brought meanwhile (E11); after a pick, `switcherPick` moves it on.
+ */
+function switcherClosed() {
+  appRoot.inert = false;
+  state.openedBy = '';
+  const from = state.switcherFrom;
+  state.switcherFrom = null;
+  state.view = { ...state.view, switcher: null };
+  sendView();
+  if (broughtTakesKeyboard()) {
+    return;
+  }
+  // What had it, when it is still there to take it — not the program's holder of a terminal,
+  // which the zone gives to the terminal shown now; else the zone's holder.
+  if (
+    from instanceof HTMLElement &&
+    from !== document.body &&
+    from.isConnected &&
+    from.checkVisibility() &&
+    from.closest('.xterm') === null
+  ) {
+    from.focus();
+    return;
+  }
+  giveKeyboard();
+}
+
+/**
+ * E10: a pick of the switcher (it has closed). When the list does not show the row, its view
+ * changes first so that it does, as `hiddenBy` says (`list.reveal`), the key bar saying so when
+ * the filter was cleared; then the row is selected and gets what Enter on it in the list does —
+ * stage A's `activate`, applied to the switcher's row, since the sections may not hold it yet: a
+ * terminal of the window or a session elsewhere is shown, one that is not running is resumed into
+ * the window (a refusal shows on its card). A closed stack needs nothing (E6: the server opens it
+ * for its selected member).
+ * @param {SwitchItem} item
+ */
+function switcherPick(item) {
+  const row = item.row;
+  const hiddenBy = Array.isArray(item.hiddenBy) ? item.hiddenBy : [];
+  if (hiddenBy.length > 0) {
+    list.reveal(hiddenBy);
+    if (hiddenBy.includes('filter')) {
+      say(`the filter was cleared to show ${row.shortId}`);
+    }
+  }
+  select(row.id, 'click');
+  if (row.terminal !== null || row.elsewhere !== null) {
+    return;
+  }
+  void act({ kind: 'resume', sessionId: row.id });
+}
+
+/**
+ * E12: Enter on the switcher's restore offer: `act restore` with its sessions, in the banner's
+ * order; a refusal in the key bar (the run's report is stage C's banner's).
+ * @param {string[]} sessionIds
+ */
+function switcherRestore(sessionIds) {
+  void act({ kind: 'restore', sessionIds }).then((result) => {
+    if (!result.ok) {
+      say(result.error ?? 'skydeck could not restore those sessions');
+    }
+  });
 }
 
 /**
@@ -1005,13 +1170,15 @@ function received(message) {
       followDone();
       followUndo();
       render();
-      if (modal()) {
+      if (editor.shown()) {
         editor.update(message); // the dialog's session's row (task 38's list)
       }
       // Stage B: the taskbar's count (S2 12.1), and the notifications of sessions that no
       // longer need you closed (B16). A list without `needYou` (stage A's) is none.
       document.title = windowTitle(message.needYou?.count ?? 0);
       notifications.update(message);
+      // Stage E: the switcher's items, while it is shown (E8).
+      switcher.update(message);
       if (state.welcomed) {
         state.welcomed = false;
         nextReattach();
@@ -1324,29 +1491,27 @@ function xtermHasKeyboard() {
 }
 
 /**
- * The name of a key for "<key>: comes in a later stage" (A11).
- * @param {KeyboardEvent} event
- * @returns {string}
- */
-function keyName(event) {
-  if (event.ctrlKey && event.shiftKey) {
-    return `Ctrl+Shift+${event.key.length === 1 ? event.key.toUpperCase() : event.key}`;
-  }
-  return event.key;
-}
-
-/**
  * THE GATE EVERY WINDOW CHORD PASSES before it acts (S2 12.9, plan D2), whether its keydown came
  * to the page's listener or through the terminal view's `chord`; the list zone's reload keys pass
  * it too, as `reload`. Later stages send their own chord-like actions through it (stage B's click
- * on a notification, stage E's switcher). With no dialog shown everything passes. While one is
- * shown: Ctrl+Shift+H (`help`) passes; a reload passes unless the dialog holds text the user typed
- * and did not save, when the key bar says `save or cancel the edit first`; everything else says
- * `close the edit first (Esc)` and does nothing else.
+ * on a notification, stage E's `Switch…`). With no dialog and no switcher shown everything passes.
+ * While the switcher is shown (E11): Ctrl+Shift+P (`switcher`, which closes it) and the reload keys
+ * pass (nothing typed there is worth keeping); everything else, Ctrl+Shift+H too, says `close the
+ * switcher first (Esc)` and does nothing else. While a dialog is shown: Ctrl+Shift+H (`help`)
+ * passes; a reload passes unless the dialog holds text the user typed and did not save, when the
+ * key bar says `save or cancel the edit first`; everything else says `close the edit first (Esc)`
+ * and does nothing else.
  * @param {WindowChord['kind'] | string} kind
  * @returns {boolean} whether it may act
  */
 function windowChordGate(kind) {
+  if (switcher.shown()) {
+    if (kind === 'switcher' || kind === 'reload') {
+      return true;
+    }
+    say('close the switcher first (Esc)');
+    return false;
+  }
   if (!modal() || kind === 'help') {
     return true;
   }
@@ -1436,8 +1601,14 @@ function doChord(chord, event) {
       }
       return;
     }
-    case 'later':
-      say(`${keyName(event)}: comes in a later stage`);
+    case 'switcher':
+      // E11: Ctrl+Shift+P opens the switcher, and closes it while it is shown.
+      if (switcher.shown()) {
+        switcher.close();
+      } else {
+        openSwitcher();
+        state.openedBy = event.code; // its auto-repeats type nothing into the field
+      }
       return;
   }
 }
@@ -1534,7 +1705,10 @@ function onKeyDown(event) {
   if (heldFromDialog(event)) {
     return; // swallowed: a held key that closed a dialog (review 2 of task 37)
   }
-  if (modal() && dialogKey(event)) {
+  if (switcher.shown() && switcherCapture(event)) {
+    return;
+  }
+  if (editor.shown() && dialogKey(event)) {
     return;
   }
   const zone = state.zone;
@@ -1609,6 +1783,35 @@ function dialogKey(event) {
     event.stopPropagation();
     if (!event.repeat) {
       editor.escape();
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * E11: the keys the shown switcher takes before anything else, in the capture phase — Esc, handed
+ * to the switcher (`escape()`, once per press: a held Esc is one), and the auto-repeats of the key
+ * that opened it, which type nothing into its field. True when it took the key; every other key
+ * goes on to onKeyDown's dispatch, where the chords meet `windowChordGate`, no list key acts and
+ * the field's own keys (↑ ↓ PgUp PgDn Enter Tab) reach the field. Esc while the New form is open
+ * closes the switcher only: the form's Esc branch comes after this.
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function switcherCapture(event) {
+  if (event.repeat && state.openedBy !== '' && event.code === state.openedBy) {
+    event.preventDefault();
+    return true;
+  }
+  if (event.isComposing || event.keyCode === 229) {
+    return false; // a key of an IME composition (its Esc cancels it) is the IME's
+  }
+  if (switcherKey(event)?.kind === 'close') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) {
+      switcher.escape();
     }
     return true;
   }
@@ -1813,11 +2016,13 @@ async function start() {
         dropPending();
         state.bringing = null; // the resume's terminal is no longer the page's own news (Z1)
         showGone(since);
+        switcher.update(null); // E11: it says so, and an Enter waits no more
       },
       fatal: (text) => {
         dropPending();
         dom.gone.hidden = true;
         showProblem(text);
+        switcher.update(null);
       },
       warn: (text) => showProblem(text),
     },

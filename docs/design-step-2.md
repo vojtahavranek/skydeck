@@ -2412,6 +2412,22 @@ terminal's area stay as they are — its coming and going sends no `resize`. A r
 nothing and moves no keyboard, in any page, also while a dialog is shown: its sessions are listed
 under Open, and a command's restore does not move the window's selection either.
 
+**The offer in the switcher** (stage E, plan E12; ruled by the lead on 2026-11-15). A restore
+starts a process per session, so it is never one Enter away: the switcher lists the offer only in
+command form — a text whose first character is `>` (nothing trimmed before it) lists commands, never
+a session, and the offer when what follows the `>`, trimmed and lower-cased, is a start of
+`restore` of at least one letter (`>r`, `> rest`, `>Restore`); `>` alone and `> foo` list neither,
+and any other text searches sessions only (`restore drill` never brings the offer, ` >restore` with
+a space first searches sessions for the word `>restore`). It is listed only while the banner is not
+shown (after "Not now"), holds preselected entries and no restore runs; whether it is, is the
+server's answer (`list.switcher.restore`, 8.2.3), so no tick of the banner can disagree with its
+sessions. Listed, it is the switcher's first entry, `Restore 3 sessions from yesterday at 18:02`
+(`1 session`; the time as the banner says it, on the page's own clock and in its time zone), and
+its Enter (or a click) sends `act restore` with the preselected sessions in the banner's order; a
+refusal shows in the key bar, and the run's report where the banner's report is (it is drawn while
+it holds lines). A command that names no offer says so in the switcher, with the one command
+written without quote marks (`> restore`).
+
 ### 12.8 Search
 
 - `/` filters the list: title, group, note, pull-request repository and number, directory, short
@@ -2462,6 +2478,36 @@ One rule matches for the filter and for the switcher:
   occurrence, overlapping ones merged, at most 32) and what this page's list would have to change
   to show it: the filter cleared, done sessions shown, Earlier unfolded. A text whose first
   character is `>` is a command and lists no session (12.7).
+- **The switcher on the page** (stage E, plan E10, E11). Ctrl+Shift+P, or the title bar's
+  `Switch…`, shows a panel over the page with an empty field, the items under the headings
+  `Needs you`, `Open`, `Not running` and `Done`, and a footer that names its keys
+  (`↑ ↓ move · Enter switch · Esc close`; `Enter resume here` on a session Enter would resume,
+  `Enter restore` on the offer, then `3 more: type to narrow` when items were left out). An item
+  shows the state icon, the group dim before the title when the title does not start with it, the
+  title with the words found in it marked, a second line (a running session's state line, else
+  `not running · 3d`) with the directory, and at the right the chip, the slot and the short id.
+  `No session matches.` when nothing does. The page cuts the field's text as it cuts the filter's
+  (1,024 bytes, then 16 words) and the footer says `only the first 16 words are searched`; the
+  filter's cut after 16 words is said in the key bar (`the filter is cut to its first 16 words`).
+  The highlight starts on the first entry, follows ↑ ↓ (at each repeat of a held key) and PgUp
+  PgDn, is scrolled into view, and stays on its session while a list keeps it.
+- **A pick** (Enter on the highlighted item, or a click on one; plan E10). It acts only while the
+  list drawn answers the text the page last sent: an Enter pressed before waits for that list and
+  then acts on its highlighted item, and a click on an item of an older list does nothing (ruled:
+  a fast `orb`, Enter never picks an item of the list for `or`). The waiting Enter is dropped when
+  the text changes, the switcher closes or the connection is lost, and while the page is not
+  connected — the panel then says `skydeck's server is not connected` in place of its items —
+  Enter does nothing (ruled by the lead on 2026-11-15). A held Enter picks once. The switcher
+  closes; when this page's list does not show the picked row, the page first changes its view so
+  that it does, as the item says — the filter and the chips cleared (the key bar says `the filter
+  was cleared to show 1a2b3c4d`), done sessions shown, Earlier unfolded; then it selects the row
+  and does what Enter on that row in the list does (12.6): a session with a terminal of the window
+  shows it (an open one with the keyboard, an ended one under its bar), a session elsewhere shows
+  its card, one that is not running is resumed into the window (11.3), and a refusal shows on its
+  card (an expired one too). A member of a closed stack needs nothing more: the server opens the
+  stack of the selected session (12.2), so the switcher is the way to a member Ctrl+Tab skips. The
+  second click of a double click on an item acts on nothing — neither the item nor what lay under
+  it once the switcher closed —, and one on `Switch…` opens the switcher once.
 - Each window has its own filter, chips, opened stacks, folded Earlier, done shown, selection and
   switcher; what it shows of each session is the same in every window (8.2.7).
 
@@ -2639,6 +2685,26 @@ it is reloaded: copy the text, then reload. Two named limits (ruled for plan D t
 unchanged dialog and the server's proof, and the page's own reload on another build, are not held
 back as the reload keys are: with changed text, only that prompt stands between the reload and the
 text.
+
+**The quick switcher** (12.8; stage E, plan E11) is modal by the dialogs' rule: a scrim covers the
+window, the page under it takes no keyboard, and while the switcher is shown the page moves the
+keyboard nowhere by itself (not for a resume's answer, a list or a render) and acts on no list key
+(`j`, `d` or `/` typed are text in its field). Ctrl+Shift+P closes it; every other window chord,
+Ctrl+Shift+H too, says `close the switcher first (Esc)` and does nothing else (its footer names its
+keys, and the help never covers its items); the reload keys reload as usual, since nothing typed
+there is worth keeping. Opening it hides the help. Stage D's toast lies under its panel and over
+its scrim, so that it never covers the items and its Undo can still be clicked. In its field ↑ ↓
+move the highlight, PgUp PgDn by a page, Enter picks, Esc closes, Tab and Shift+Tab stay in the
+field and do nothing; every other key is text. A mousedown in the panel anywhere but in the field
+is cancelled, so that the keyboard never leaves the field, and when nothing has the keyboard (a
+click on the toast) the next key gives it back to the field first. A click outside the panel
+closes it. When it closes without a pick the keyboard goes back where it was (the terminal, the
+list, the filter's field); after a pick, where the pick puts it; a terminal this page's resume
+brought meanwhile takes it then, as after a dialog. A held Esc or Enter that closes it over a
+terminal sends the program nothing (a key pressed off the program's holder); Esc while the New
+form is open closes the switcher only. Ctrl+Shift+P, and a click on the title bar's `Switch…`
+(which passes the same gate as a window chord), while a dialog is shown say `close the edit first
+(Esc)` and open nothing. The switcher opens while the page is not connected and says so.
 
 ### 12.10 Done
 

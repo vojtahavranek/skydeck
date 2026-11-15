@@ -1,12 +1,11 @@
 // The key help (S2 12.9, Ctrl+Shift+H; plan task 29): every key of S2 12.9 and of the list zone
 // (stage D's `l`, F2, `g`, `n`, `p`, `d` with plan D task 37; stage B's Ctrl+Shift+J with plan B
-// task 55), those whose action comes in a later stage marked so (A11), a note on stage D's
-// dialogs, the note for a browser tab and the note on the Claude Code bindings the window
-// shadows. Its interface is contract 2.9's. Every key it names is one web/keys.js handles in that
-// zone, and every key keys.js handles is named here (test-page/cards.test.ts reads the help and
-// checks both against keys.js).
-
-const LATER = 'comes in a later stage';
+// task 55; stage E's Ctrl+Shift+P with plan E task 98, whose field's keys are named as plain text
+// in its line, not as keys of a zone), a note on stage D's dialogs, the note for a browser tab and
+// the note on the Claude Code bindings the window shadows. No key comes in a later stage any more
+// (A11's marking is gone with stage E). Its interface is contract 2.9's. Every key it names is one
+// web/keys.js handles in that zone, and every key keys.js handles is named here
+// (test-page/cards.test.ts reads the help and checks both against keys.js).
 
 /**
  * The sections: who has the key, and its lines — the keys (one `kbd` each; "Ctrl+Shift+1…9" is
@@ -30,7 +29,10 @@ const SECTIONS = [
         ['Ctrl+Shift+R', 'Refresh', 'Shift+Refresh', 'Ctrl+Refresh'],
         'reload the page, once skydeck’s server has proven itself (Refresh: the keyboard’s refresh key)',
       ],
-      [['Ctrl+Shift+P'], `the quick switcher: ${LATER}`],
+      [
+        ['Ctrl+Shift+P'],
+        'the quick switcher: every session, done ones too — type to narrow; in it ↑ ↓ move, Enter switches to the session or resumes it, Esc closes',
+      ],
       [['Ctrl+Shift+J'], 'the next session that needs you; again goes on'],
     ],
   },
@@ -50,9 +52,9 @@ const SECTIONS = [
     lines: [
       [['↑', '↓', 'j', 'k'], 'move'],
       [['Home', 'End', 'PgUp', 'PgDn'], 'the first, the last, a page up, a page down'],
-      [['←', '→'], 'fold, unfold'],
+      [['←', '→'], 'fold or unfold Earlier; open or close a stack'],
       [['Enter'], 'show a running session’s terminal; resume one that is not running'],
-      [['/'], 'filter'],
+      [['/'], 'filter: several words, all must match, also the start of the short id'],
       [['a'], 'show or hide done sessions'],
       [['Esc'], 'clear the filter, then back to the terminal'],
       [
@@ -107,9 +109,6 @@ export function createHelp(root) {
         names.append(element('kbd', '', key));
       }
       line.append(names, element('span', 'help-what', what));
-      if (what.endsWith(LATER)) {
-        line.classList.add('later');
-      }
       part.append(line);
     }
     box.append(part);
