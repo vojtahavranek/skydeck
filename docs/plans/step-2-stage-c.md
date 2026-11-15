@@ -517,7 +517,10 @@ export function createPageMark(deps: { store: Store; log: (line: string) => void
 ### 2.4 The command line (tasks 76, 77)
 
 ```ts
-// src/window/client.ts — task 76: ControlClient gains
+// src/window/client.ts — task 76: controlClient(net, sockPath, clock?: Clock) (ruled, task 76: the
+// clock the three methods below pause with; optional, so stage A's callers and tests stay as they
+// are; the three methods of a client made without one reject with a TypeError before anything is
+// sent; window-requests.ts always passes platform.clock). ControlClient gains
   /** POST /resume, waiting `answerMs` (30 s); 503 'starting' asked again every 500 ms within it.
    *  'unknown-route' for a 404 whose kind starts with `route`. Rejects with a SkydeckError: no
    *  answer in time (C11's line), 503 'stopping', an answer that cannot be read. */
@@ -542,13 +545,18 @@ export function windowTimes(env: Env): WindowTimes;
  *  old key and so cannot come back — no C20 wait even when the server expects a window; true for
  *  C12's windows. Two booleans side by side: a case of task 81 fails when they are swapped. */
 export function launchWindow(deck: Deck, client: ControlClient, ping: PingAnswer, newWindow: boolean, oldMayReturn: boolean, times: WindowTimes, say: (line: string) => void): Promise<'opened' | 'came-back'>;
+// Also exported (ruled, task 76), for src/cli/commands/window.ts, their only other user (task 81's
+// wait after a restart): POLL_MS (100), START_MS (10,000), the Wait type and deadline(platform, ms).
 
 // src/cli/window-requests.ts — task 76
-export interface WindowServer { client: ControlClient; ping: PingAnswer }
+/** `here` (ruled, task 76): windowServer's argument, so that requestResume, requestNew and
+ *  restoreInWindow end their lines before ", or use --here" / "; use --here" when it is false. */
+export interface WindowServer { client: ControlClient; ping: PingAnswer; here: boolean }
 /** C11: findServer; this checkout's server (any build) or a SkydeckError with 2.5's line. `here`
  *  false (restore, the interactive list) leaves ", or use --here" out of the lines. */
 export function windowServer(deck: Deck, times: WindowTimes, here: boolean): Promise<WindowServer>;
-/** The answer, or a SkydeckError (C11's older-server line for 'unknown-route'). Prints nothing. */
+/** The answer, or a SkydeckError (C11's older-server line for 'unknown-route'; every line of 2.5
+ *  for `server.here`). Prints nothing. */
 export function requestResume(server: WindowServer, sessionId: string, times: WindowTimes): Promise<LaunchAnswer>;
 export function requestNew(server: WindowServer, request: NewRequest, times: WindowTimes): Promise<LaunchAnswer>;
 /** resume / new for a command: windowServer, the request, every line on stderr (sanitised), C12's
@@ -557,8 +565,13 @@ export function requestNew(server: WindowServer, request: NewRequest, times: Win
 export function resumeInWindow(ctx: Context, deck: Deck, sessionId: string): Promise<number>;
 export function newInWindow(ctx: Context, deck: Deck, request: NewRequest): Promise<number>;
 /** C14's request, after C12's window (before the request, when no page is connected; none under
- *  CLAUDECODE): every line on stdout as it arrives; the outcome's code. */
-export function restoreInWindow(ctx: Context, server: WindowServer, request: RestoreRequest, times: WindowTimes): Promise<number>;
+ *  CLAUDECODE): every line on stdout as it arrives; the outcome's code. It owns C14's two lines of
+ *  its own (ruled, task 76), since it alone sees the outcome: the 30 s silence line (the client's
+ *  rejection) and, with code 5, `skydeck: restore stopped before it finished; see above` on
+ *  stderr — task 77's restore.ts prints neither. `deck` (ruled, task 76):
+ *  the window's lock and configuration; task 77's `restore` passes the deck it planned with,
+ *  inside its own withDeck — no second store connection. */
+export function restoreInWindow(ctx: Context, deck: Deck, server: WindowServer, request: RestoreRequest, times: WindowTimes): Promise<number>;
 
 // src/cli/launching.ts — task 77
 /** C13. `flag` is the option given; the answer is where the command goes. */
@@ -581,13 +594,20 @@ Lines of the commands (each printed with `skydeck: `, exit 1 unless said):
 | 404 with a `route` kind | C11's older-server line |
 | 503 'stopping' | `the window's server is stopping; run skydeck window, or use --here` |
 | No answer to `/resume` or `/new` in `answerMs` | `the window's server did not answer within 30 s; it may have started the session: run skydeck to see whether it runs` |
+| 503 `starting` for the whole `answerMs` (task 76) | `the window's server did not finish its start within 30 s; it started nothing: run skydeck window again, or use --here` |
+| 500 for `/resume` or `/new` (task 76) | `the window's server failed while it answered the request (500: failed); it may have started the session: run skydeck to see whether it runs` |
+| 500 for `/restore` before its first line (task 76) | `the window's server failed while it answered the request (500: failed); run skydeck to see what started` |
+| The socket fails after the request reached the server and before its answer, for `/resume` or `/new` (a reset, a broken pipe; ruled, task 76) | `the window's server cannot be asked on <sock> (<code>); it may have started the session: run skydeck to see whether it runs`. Before the request was sent (no socket, refused, a full queue) it stays `the window's server does not run (nothing answers on <sock>)`: nothing started |
+| The same for `/restore` before its first line (ruled, task 76) | `the window's server cannot be asked on <sock> (<code>); it may have started the restore: run skydeck to see what started`; after its first line, and for a stream that ends without an outcome, the `stopped answering` row below |
 | `/restore` silent for `answerMs`, or ended without an outcome | `the window's server stopped answering; run skydeck to see what started` (S2 11.4) |
 | Edge after the answer (C12) | `the window could not be opened: <reason>; run skydeck window` — the exit code stays the answer's |
 | No page connected under `CLAUDECODE` (C12) | `no window is open; run skydeck window in a terminal of your own` — the exit code stays the answer's |
-| 400 or 413 for the body (a label over 1,024 bytes, a prompt after `--` over 64 KiB) | `the window's server refused the request (<kind>); use --here` |
+| The status look after the answer fails (C12; ruled, task 76) | `the window could not be opened: <the failure>; run skydeck window` — under `CLAUDECODE` the advice ends `run skydeck window in a terminal of your own`; the exit code stays the answer's |
+| 400 or 413 for the body (a label over 1,024 bytes, a prompt after `--` over 64 KiB) | `the window's server refused the request (<kind>); use --here` — a body over 64 KiB is refused so by the client before anything is sent, with the server's kind `body: too large` (ruled, task 76) |
 
-For `restore` and the interactive list the lines end before `, or use --here`. No line prints a
-command to run by hand: the command prepared nothing (S2 11.4).
+For `restore` and the interactive list the lines end before `, or use --here` (and the refused
+request's before `; use --here`). The times in the lines are `answerMs`'s seconds (30 s by default).
+No line prints a command to run by hand: the command prepared nothing (S2 11.4).
 
 The rules of the requests that start programs, and the test that holds each:
 
@@ -1528,31 +1548,38 @@ out of `window.ts` is a commit of its own in it ("moved unchanged"), so that a r
 - Create: `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`,
   `test/cli/window-requests.test.ts`
 - Modify: `src/window/client.ts` (the three methods and their readers: an answer of another shape
-  cannot be read; 400 and 413 give 2.5's refused-request line); `src/cli/commands/window.ts`
+  cannot be read; 400 and 413 give 2.5's refused-request line; the optional `clock` of
+  `controlClient`, ruled); `src/cli/commands/window.ts`
   (imports `windowTimes` and `launchWindow` instead of its private `timesOf` and `launch`, which
   move unchanged, task 81's wait with them; `launchWindow` gets the `say` of 2.4);
   `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` (`--window`; `whereFrom` refuses two of
   `--here`, `--tab`, `--window`; with `--window`, `resume` resolves `<ref>` as today and calls
   `resumeInWindow` with the id — no `prepareResumeById` here —, `new` calls `newInWindow` with
   `platform.cwd`, the label, the group and `parsed.rest`); `test/fixtures/fake-serve/fake-serve.ts`
-  (C3's routes: without `FAKE_SERVE_LAUNCH` no `launch`, as today; `FAKE_SERVE_LAUNCH=answer:
-  <LaunchAnswer JSON>` answers it to `/resume` and `/new`; `silent` never answers them; `status:
-  <code>` answers that HTTP status with `{ error: 'body: too long' }`; `FAKE_SERVE_RESTORE=<JSON
-  array of RestoreStreamLine>` writes them 100 ms apart, `silent-after:<n>` writes `n` lines and
-  then nothing; `FAKE_SERVE_REQUESTS=<path>` appends each launch request's JSON;
-  `FAKE_SERVE_STATE` `starting` or `stopping` for `launchState`; task 81's knobs stay)
+  (C3's routes: without `FAKE_SERVE_LAUNCH` and `FAKE_SERVE_RESTORE` no `launch`, as today;
+  `FAKE_SERVE_LAUNCH=answer:<LaunchAnswer JSON>` answers it to `/resume` and `/new`; `silent` never
+  answers them; `status:<code>` answers that HTTP status with `{ error: 'body: too long' }`;
+  `FAKE_SERVE_RESTORE=<JSON array of RestoreStreamLine>` writes them 100 ms apart,
+  `silent-after:<n>` writes `n` lines and then nothing; `FAKE_SERVE_RESTORE` alone installs
+  `launch` too, and then `/resume` and `/new` answer 500 (the real server never has one without the
+  others; ruled, task 76); `FAKE_SERVE_REQUESTS=<path>` appends each launch request's route and
+  JSON (`{ route, ...body }`); `FAKE_SERVE_STATE` `starting` or `stopping` for `launchState`, or
+  `starting:<n>` for the first n requests (ruled, task 76); a malformed value ends the fake with
+  exit 2; task 81's knobs stay)
 - Test: `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`,
   `test/cli/commands/window.test.ts` (unchanged: the move's check); `docs/design-step-2.md` (C11,
   C12: 11.4), `docs/design.md` (7.5: the options)
 
 **Behaviour.** As 2.4 and 2.5. `windowServer`: `findServer(deck, appRoot, computeBuild(...))` —
-`ours` and `other-build` are used, the rest refused. `resumeInWindow` / `newInWindow`: the
-request; every answer line on stderr through the sanitiser; then, unless the code is 2 or 3,
-`client.status()`, and with 0 pages `launchWindow(deck, client, ping, false, true, times, say)` — a
-SkydeckError there is C12's line —, or under `CLAUDECODE` no window and C12's `no window is open;
-run skydeck window in a terminal of your own`. `restoreInWindow`: with 0 pages the same window
-first (not under `CLAUDECODE`), then the request, every line on stdout. The usage texts name
-`--window` (`Without --here, --tab or --window, the configured "terminal" decides.`).
+`ours` and `other-build` are used, the rest refused; the client it returns has `platform.clock`,
+and `here` is its argument (ruled). `resumeInWindow` / `newInWindow`: the request; every answer
+line on stderr through the sanitiser; then, unless the code is 2 or 3, `client.status()`, and with
+0 pages `launchWindow(deck, client, ping, false, true, times, say)` — a SkydeckError there is C12's
+line —, or under `CLAUDECODE` no window and C12's `no window is open; run skydeck window in a
+terminal of your own`. `restoreInWindow(ctx, deck, …)` (the deck ruled): with 0 pages the same
+window first (not under `CLAUDECODE`, which says C12's line), then the request, every line on
+stdout. The usage texts name `--window` (`Without --here, --tab or --window, the configured
+"terminal" decides.`).
 
 **Tests** (platform: `realTestPlatform`; `windowMachine` and `startFakeServe` of
 `test/helpers/window-machine.ts`. The fake serve listens on no port and the fake Edge refuses
@@ -1610,7 +1637,8 @@ end to end through the real server, the window terminal and the stand-in.
   "here", "wezterm" or "window"`); `src/cli/launching.ts` (`whereFor`; `chooseTerminal` with
   `"window"` takes `here` only); `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` (`whereFor`
   decides; `window` → task 76's functions); `src/cli/commands/restore.ts` (C14; its usage text
-  says that with `"terminal": "window"` the sessions start in the window); `src/cli/tui/run.ts`
+  says that with `"terminal": "window"` the sessions start in the window; it prints neither of
+  C14's own lines — task 76's `restoreInWindow` prints both, ruled); `src/cli/tui/run.ts`
   (`R` with `"terminal": "window"`: `windowServer(…, false)` and `requestResume`, no local
   `prepareResumeById`; `opened <short> in the window` — with `; no window is open; run skydeck
   window` when no page is connected — or, for a failed launch, `starting <short> in the window
@@ -1647,8 +1675,8 @@ user who never sets the key sees only the new option in `--help`.
 - `restore-window.test.ts`, against the fake serve: no server → the not-running line and no
   prompt (stdin a terminal: the prompt never shown); `--dry-run` → no request (the fake's request
   file empty), the list printed; the chosen ids and `--all` in the request; `silent-after:1` →
-  11.4's line, exit 1; an outcome with code 5 → the line of C14, exit 5; an older server → C11's
-  line.
+  11.4's line ONCE, exit 1; an outcome with code 5 → the line of C14 ONCE, exit 5 (both lines are
+  `restoreInWindow`'s; ruled, task 76); an older server → C11's line.
 - `doctor` with `"terminal": "window"` → its `ok` line; the `wezterm` and `here` lines unchanged.
 - Every existing case of the commands, the list and `doctor` passes unchanged.
 

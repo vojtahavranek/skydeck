@@ -18,7 +18,6 @@ import { attachManualPr, requirePrKey } from '../src/sessions/meta.ts';
 import type { PrFetchResult } from '../src/store/types.ts';
 import { ghRunner } from '../test/helpers/gh.ts';
 import type { GhRunner } from '../test/helpers/gh.ts';
-import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import type { ServerSandbox } from '../test/helpers/window.ts';
 import { connectTestPage } from '../test/helpers/window.ts';
@@ -52,9 +51,16 @@ const MIN = 60_000_000_000n;
 const DONE_RUNNING = 'Marked done. Stays under Open while it runs; hidden once it stops.';
 const DONE_HIDDEN = 'Marked done: hidden from the list. It comes back on new activity.';
 
-/** A session last active `agoNs` before now, titled `title` (a `custom-title` record). */
-function session(d: ServerSandbox, sessionId: string, agoNs: bigint, title: string): void {
-  const dir = join(d.s.home, 'project');
+/** A session last active `agoNs` before now, titled `title` (a `custom-title` record), in the
+ *  directory `dirName` of the sandbox's home. Returns the directory. */
+function session(
+  d: ServerSandbox,
+  sessionId: string,
+  agoNs: bigint,
+  title: string,
+  dirName = 'project',
+): string {
+  const dir = join(d.s.home, dirName);
   mkdirSync(dir, { recursive: true });
   const folder = join(d.s.claudeHome, 'projects', 'project');
   mkdirSync(folder, { recursive: true });
@@ -67,6 +73,7 @@ function session(d: ServerSandbox, sessionId: string, agoNs: bigint, title: stri
     join(folder, `${sessionId}.jsonl`),
     lines.map((line) => `${JSON.stringify(line)}\n`).join(''),
   );
+  return dir;
 }
 
 /** The ids of the rows the list draws, in order. */
@@ -91,6 +98,25 @@ async function filterTo(page: Page, text: string, ids: string[]): Promise<void> 
   await until(
     async () => (await listed(page)).join() === ids.join(),
     `the list draws ${ids.join()}`,
+  );
+}
+
+/**
+ * Waits, in the page, until the terminal view has refitted to what is drawn now: two animation
+ * frames (the layout, then its ResizeObserver), then a timer queued after the view's refit timer
+ * (`REFIT_MS`, 100 ms, web/terminal-view.js) — an order, not a time, so a loaded machine only
+ * makes it later.
+ */
+async function refitted(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            setTimeout(resolve, 150);
+          }),
+        );
+      }),
   );
 }
 
@@ -207,7 +233,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       const first = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
       await showsText(page, '#cards .header-title', /^alpha work$/);
-      await sleep(500); // the terminal view has fitted its size
+      await refitted(page); // the terminal view has fitted its size
       const height = await headerHeight(page);
       assert.ok(height > 0, 'a header is shown');
       await mark(page, 'filter');
@@ -217,7 +243,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       await showsTerminal(page, first);
       assert.equal(await shownText(page, '#cards .header-title'), 'alpha work');
       assert.equal(await shownText(page, '#cards .header-id'), S1.slice(0, 8));
-      await sleep(1000); // a resize would follow the area's change
+      await refitted(page); // a resize would follow the area's change by then
       assert.equal(await headerHeight(page), height, 'the header keeps its height');
       assert.deepEqual(
         after(await logOf(page), 'filter').filter(
@@ -272,12 +298,12 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
   );
 
   await t.test(
-    'a selected session without a terminal that the filter hides: the right side shows nothing (S2 12.9); the list keys d, l, F2, g, n, p say `no session selected` and send nothing',
+    "a selected session without a terminal that the filter hides: the right side shows nothing (S2 12.9); the list keys d, l, F2, g, n, p say `no session selected` and send nothing; the New form's directory is the first known one, not the hidden session's",
     async (t) => {
       const l = await launched(t, chromium);
       const { page } = l;
-      session(l.d, S1, 2n * MIN, 'alpha work');
-      session(l.d, S2, 3n * MIN, 'omega work');
+      const alpha = session(l.d, S1, 3n * MIN, 'alpha work', 'alpha-dir');
+      const omega = session(l.d, S2, 2n * MIN, 'omega work', 'omega-dir');
       await clickRow(page, S1);
       await page.waitForSelector('#right-zone[data-pane="resume"]', {
         state: 'attached',
@@ -294,18 +320,77 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
 
       await mark(page, 'keys');
       for (const key of ['d', 'l', 'F2', 'g', 'n', 'p']) {
+        // The key bar's line stays 5 s: emptied first, so that each key must say it again (the
+        // page's own timer only empties it).
+        await page.evaluate(() => {
+          const line = document.getElementById('key-message');
+          if (line !== null) line.textContent = '';
+        });
+        assert.equal(await keyMessage(page), '', `emptied before ${key}`);
         await page.keyboard.press(key);
         await showsText(page, '#key-message', /^no session selected$/);
         assert.equal(await keyMessage(page), 'no session selected', key);
         assert.equal(await page.locator('#editor:not([hidden])').count(), 0, `no dialog: ${key}`);
       }
-      await sleep(500);
+      // A key's message and its act are both made in its keydown, which `press` has awaited.
       assert.equal(await page.locator('#editor:not([hidden])').count(), 0, 'no dialog');
       assert.deepEqual(
         after(await logOf(page), 'keys').filter((entry) => entry.e === 'out' && entry.t === 'act'),
         [],
         'nothing sent',
       );
+
+      // The New form: the user sees no session, so its directory is the most recent one (S2's),
+      // not the hidden S1's.
+      await page.keyboard.press('Control+Shift+N');
+      await page.waitForSelector('#right-zone[data-pane="new"]', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      assert.equal(await page.inputValue('#cards input[name="directory"]'), omega);
+      assert.notEqual(omega, alpha);
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('#right-zone[data-pane="none"]', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      noProblems(l);
+    },
+  );
+
+  await t.test(
+    "the New form's directory on a hidden selection that a terminal of the window shows: the selected session's, as while it was listed (S2 12.6; review 2's S2, ruled)",
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page } = l;
+      const alpha = session(l.d, S1, 2n * MIN, 'alpha work', 'alpha-dir');
+      await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      // S2 is active after S1's start: the first of the known directories.
+      const omega = session(l.d, S2, 0n, 'omega work', 'omega-dir');
+      await until(async () => (await listed(page)).includes(S2), 'S2 listed');
+      /** The New form's directory and its first suggestion, then the form closed (Esc). */
+      const newForm = async (): Promise<{ value: string; first: string }> => {
+        await page.keyboard.press('Control+Shift+N');
+        await page.waitForSelector('#right-zone[data-pane="new"]', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        const shown = {
+          value: await page.inputValue('#cards input[name="directory"]'),
+          first: (await page.getAttribute('#card-new-dirs option', 'value')) ?? '',
+        };
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('#right-zone[data-pane="terminal"]', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        return shown;
+      };
+      assert.deepEqual(await newForm(), { value: alpha, first: omega }, 'while S1 is listed');
+      await filterTo(page, 'omega', [S2]);
+      assert.equal(await selectedRow(page), null);
+      assert.deepEqual(await newForm(), { value: alpha, first: omega }, 'once S1 is hidden');
       noProblems(l);
     },
   );
