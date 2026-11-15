@@ -1937,12 +1937,20 @@ A row that needs you has a coloured left bar, a bold title and the reason on its
 ### 12.5 The header
 
 For the selected session: the title (a click edits the label, stage D), the group chip (dashed
-`+ group` when none; its tooltip says when the group comes from the title), the state pill, the
-project directory, "opened <time> · last active <age>", the short id (a click copies the whole
-id), where the title comes from. Each open pull request on a line of its own
-(`repo #n · approved, green · checked 4m ago`, or `can't read · last read 3h ago · gh: HTTP 502`);
-merged and closed ones fold into `30 merged ▸`; `+ PR`. The note's first three lines (a click
-edits it). Buttons Note and Done / Undone.
+`+ group` when none; its tooltip says when the group comes from the title; a ✎ beside it edits
+it), the state pill, the project directory, "opened <time> · last active <age>", the short id (a
+click copies the whole id), where the title comes from, and buttons Note and Done / Undone. Then
+two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
+height from stage D on (the next paragraph): **one line for the pull requests** — the window's
+chip (12.3), then the open ones side by side as far as they fit (`repo #n · failing`; a click
+opens one, 9.6), and a button that opens the pull-request dialog (`+ PR` while none is
+attached) — and **one line for the note**: its first line (a click edits it), or a quiet hint
+while there is none. Both lines are there for every session, with and without pull requests or a
+note. What does not fit lies one click away in a dialog over the page, which never changes the
+terminal's size: the pull-request dialog lists each attached pull request on a line of its own
+(`repo #n · approved, green · checked 4m ago`, or `can't read · last read 3h ago · gh: HTTP 502`),
+the merged and closed ones folded into `30 merged, 2 closed ▸`, with × to detach one, ↻ to read
+their status now, and the field that attaches one; the note's dialog holds the whole note.
 
 Stage A's header (19) has one height for every session and window width, so that the terminal
 area under it does not jump between sessions and the page knows its size before a terminal is
@@ -1955,6 +1963,24 @@ refused with the same message; a note is edited in a text box instead of `$VISUA
 (an empty note is no note), and a save is refused when the stored note changed since the edit
 began ("the note was changed elsewhere while you edited it; your text is still in the box"); `+ PR`
 attaches with origin `manual` and fetches at once (design 7.3). Done shows an Undo toast.
+
+**The ticket link** (asked for by the user on 2026-11-15; the details ruled by the lead that day).
+The group stays only a group (design 7.1), and nothing in the core depends on one ticket system
+(design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the
+group holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`,
+`_` and `.` and starting with a letter or a digit (the default pattern matches nothing else) —
+the address is `ticketUrl` with `{key}` replaced by exactly that text, as 9.6's rule
+re-serialises it, and only while its scheme, user name, password and host are those of
+`ticketUrl` itself. The chip then shows that it is a link (an arrow after the key, underlined),
+its tooltip is the address, and a click on it that selected no text opens it in the user's own
+Edge profile, as any link (9.6: `act open-link`, which the server checks again). Without a link
+the chip is plain text. The chip never edits: the ✎ beside it and `g` edit the group, with and
+without a link, and while there is no group the dashed `+ group` sets one. So nothing a program
+wrote into a title can add a host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`,
+`%` or white space, and the URL parser, not the text, decides that `{key}` stands after the host
+(16.4). The address reaches the page as a string of `list` and is shown only as text; it never
+becomes markup. skydeck reads nothing from the ticket system: no API, no login. `skydeck show`
+prints the address as `ticket:` after `group:` (its `--json` is unchanged).
 
 ### 12.6 The right side
 
@@ -2093,7 +2119,11 @@ selects the row above it; while a filter is set nothing folds. The selection is 
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
-(ruled by the plan owner, plan task 27). Enter changes meaning: it shows a running session's terminal, or resumes one
+(ruled by the plan owner, plan task 27). One exception, ruled by the lead on 2026-11-15 (the user
+may change it): when this page's own `d` in the list has marked the selected session done — its
+answer came, and the next list no longer has the row — the row after it in the same section is
+selected, else the one before it in that section, else none; never a row of Open. A held `d` acts
+once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a
@@ -2420,6 +2450,7 @@ New keys, all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
+| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` with the same scheme, user name, password and host, none of which holds the key: the parser decides where the key stands, not the text (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
@@ -2809,7 +2840,9 @@ configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` 
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
 and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3) and the
-pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2.
+pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
+the group chip and `ticketUrl` (12.5, 16.4; asked for by the user on 2026-11-15, the details
+ruled by the lead that day).
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
 the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The
