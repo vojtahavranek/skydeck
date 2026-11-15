@@ -13,7 +13,8 @@
 //   A banner without a boot (null, or one that only says a restore runs) leaves them as they are.
 // - "Restore <k>" sends `act restore` with the ticked ids in the banner's order (each once),
 //   disabled at 0 and while a restore runs; "Not now" sends `act dismiss-restore` with the boot.
-//   Each acts once: not while its own act waits, not on a held Enter's auto-repeat (C10). A
+//   Each acts once: not while its own act waits, not on a held Enter's auto-repeat (C10), not on
+//   the second click of a double click (review 2 of task 38). A
 //   refused result is the banner's line (the key bar's when the offer is not drawn); a new act,
 //   another boot, or a run that begins or ends clears it.
 // - The report (C10): the `restore-progress` lines as they come, the last 200, drawn while it
@@ -267,7 +268,13 @@ export function createBanner(root, deps) {
           row.box.disabled = runs;
         }
         if (entriesBox.children[index] !== row.label) {
-          entriesBox.insertBefore(row.label, entriesBox.children[index] ?? null);
+          // A label already placed is moved keeping its state (a checkbox keeps the keyboard).
+          const before = entriesBox.children[index] ?? null;
+          if (row.label.parentNode === entriesBox && typeof entriesBox.moveBefore === 'function') {
+            entriesBox.moveBefore(row.label, before);
+          } else {
+            entriesBox.insertBefore(row.label, before);
+          }
         }
       });
       setHidden(entriesBox, entries.length === 0);
@@ -301,9 +308,11 @@ export function createBanner(root, deps) {
     }
   }
 
-  restore.addEventListener('click', () => {
+  // The second click of a double click is no second press (review 2 of task 38): its first may
+  // have been answered already, and its offer is about to go.
+  restore.addEventListener('click', (event) => {
     const ids = ticked();
-    if (restoreWaits || banner === null || banner.running || ids.length === 0) {
+    if (event.detail > 1 || restoreWaits || banner === null || banner.running || ids.length === 0) {
       return;
     }
     restoreWaits = true;
@@ -317,9 +326,9 @@ export function createBanner(root, deps) {
     });
   });
 
-  notNow.addEventListener('click', () => {
+  notNow.addEventListener('click', (event) => {
     const bootId = banner?.bootId ?? null;
-    if (dismissWaits || bootId === null || banner?.running === true) {
+    if (event.detail > 1 || dismissWaits || bootId === null || banner?.running === true) {
       return;
     }
     dismissWaits = true;

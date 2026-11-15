@@ -146,6 +146,12 @@ describe('activityTime (C18)', () => {
     }
   });
 
+  test('a `now` no Date can hold gives an empty text, never a throw', () => {
+    for (const now of [8.64e15 + 1, -8.64e15 - 1, Number.MAX_VALUE, Number.NaN, Infinity]) {
+      assert.equal(activityTime(ns('2026-11-15T00:05:00Z'), now, 'UTC'), '', String(now));
+    }
+  });
+
   test('a time zone the browser does not know is taken as UTC', () => {
     assert.equal(activityTime(ns('2026-11-15T00:05:00Z'), NOW, 'Not/A_Zone'), 'today at 00:05');
   });

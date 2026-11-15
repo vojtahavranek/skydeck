@@ -1642,8 +1642,9 @@ function dialogKey(event) {
  * press, and when the window loses focus. Stage B: the same for a key pressed on the title bar's
  * `Turn on notifications`, which hides itself once the permission is answered — at once where a
  * policy answers without asking —, so that a held Enter there is no list `enter` either. Stage C:
- * the same for a key pressed on a control of the restore banner, which can go away under it —
- * Restore once a restore runs, Not now once the offer is dismissed, the report's × —.
+ * the same for Enter and Space pressed on a control of the restore banner, which can go away
+ * under it — Restore once a restore runs, Not now once the offer is dismissed, the report's × —;
+ * a held Tab there walks on (review 2 of task 75, C4).
  * @type {Set<string>}
  */
 const pressedInDialog = new Set();
@@ -1662,7 +1663,7 @@ function heldFromDialog(event) {
   if (
     modal() ||
     document.activeElement === dom.notifyOn ||
-    dom.banner.contains(document.activeElement)
+    (dom.banner.contains(document.activeElement) && (event.key === 'Enter' || event.key === ' '))
   ) {
     if (!event.repeat) {
       pressedInDialog.add(event.code);

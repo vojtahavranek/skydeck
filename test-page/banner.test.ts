@@ -347,6 +347,28 @@ test('stage C: the restore banner on the page', async (t) => {
       assert.equal(same.restore?.text, 'Restore 3');
       assert.equal(same.heading?.endsWith('3 sessions were open'), true);
 
+      // S1, unticked before it left, comes back: it is a new entry and takes its preselection.
+      w.list(
+        listOf(
+          bannerOf([
+            entryOf(S1),
+            entryOf(S2),
+            entryOf(S3, { preselected: false }),
+            entryOf(S4, { title: 'new here' }),
+          ]),
+        ),
+      );
+      const back = await until(page, (now) => now.entries.length === 4, 'S1 back');
+      assert.deepEqual(
+        back.entries.map((entry) => [entry.id, entry.checked]),
+        [
+          [S1, true],
+          [S2, true],
+          [S3, true],
+          [S4, true],
+        ],
+      );
+
       w.list(
         listOf(
           bannerOf([entryOf(S1), entryOf(S2, { preselected: false })], { bootId: OTHER_BOOT }),
@@ -424,22 +446,167 @@ test('stage C: the restore banner on the page', async (t) => {
   );
 
   await t.test(
-    "the page sends no Not now for a boot id that is not a lower-case UUID (S2 8.2.3's form, for which the server would close the connection): the banner says so",
+    "the page sends no Not now for a boot id that is not a lower-case UUID (S2 8.2.3's form, for which the server would close the connection), an upper-case one included: the banner says so",
     async (t) => {
-      const [page, w] = await world(t, chromium, listOf(three({ bootId: 'stand-in-boot' })));
-      await until(page, (now) => now.notNow, 'Not now is shown');
-      await page.click('#banner .banner-not-now');
-      const refused = await until(page, (now) => now.message !== null, 'the refusal');
-      assert.equal(
-        refused.message,
-        "this offer's boot id is not one skydeck takes; it cannot be dismissed",
+      for (const bootId of ['stand-in-boot', BOOT.toUpperCase()]) {
+        const [page, w] = await world(t, chromium, listOf(three({ bootId })));
+        await until(page, (now) => now.notNow, 'Not now is shown');
+        await page.click('#banner .banner-not-now');
+        const refused = await until(page, (now) => now.message !== null, 'the refusal');
+        assert.equal(
+          refused.message,
+          "this offer's boot id is not one skydeck takes; it cannot be dismissed",
+        );
+        await settle();
+        assert.deepEqual(w.acts(), [], `nothing was sent (${bootId})`);
+        assert.equal(
+          await page.evaluate(() => document.documentElement.dataset['connection']),
+          'open',
+        );
+      }
+    },
+  );
+
+  await t.test(
+    'a session the banner names twice is offered once, and Restore names it once',
+    async (t) => {
+      const [page, w] = await world(
+        t,
+        chromium,
+        listOf(bannerOf([entryOf(S1), entryOf(S1, { title: 'again' }), entryOf(S2)])),
       );
+      const offer = await until(page, (now) => now.offer, 'the offer is shown');
+      assert.deepEqual(
+        offer.entries.map((entry) => entry.id),
+        [S1, S2],
+      );
+      assert.equal(offer.restore?.text, 'Restore 2');
+      await page.click('#banner .banner-restore');
+      await w.act(1);
+      assert.deepEqual(actsOf(w), [{ kind: 'restore', sessionIds: [S1, S2] }]);
+    },
+  );
+
+  for (const control of ['Restore', 'Not now'] as const) {
+    await t.test(
+      `the second click of a double click on ${control} presses nothing, also once the first click's answer has come (the rule of review 2 of task 38); a later click acts`,
+      async (t) => {
+        const [page, w] = await world(t, chromium, listOf(three()));
+        await until(page, (now) => now.offer, 'the offer is shown');
+        const selector =
+          control === 'Restore' ? '#banner .banner-restore' : '#banner .banner-not-now';
+        const at = await page.locator(selector).boundingBox();
+        assert.ok(at !== null);
+        const x = at.x + at.width / 2;
+        const y = at.y + at.height / 2;
+        await page.mouse.click(x, y); // detail 1: acts
+        w.answer(await w.act(1), { ok: true });
+        await settle();
+        await page.mouse.move(x, y);
+        await page.mouse.down({ clickCount: 2 }); // the double click's second click: detail 2
+        await page.mouse.up({ clickCount: 2 });
+        await settle();
+        assert.equal(w.acts().length, 1, 'the second click of a double click sent nothing');
+        await page.mouse.click(x, y); // a click of its own
+        const second = await w.act(2);
+        assert.equal(second['kind'], control === 'Restore' ? 'restore' : 'dismiss-restore');
+      },
+    );
+  }
+
+  await t.test(
+    "Tab and Space work on the banner's controls as the browser's own: Shift+Tab from the list walks Not now, Restore and the checkboxes; Space ticks; Enter on a checkbox does nothing; Space held on Restore acts once, at its release; a held Tab walks on",
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three()));
+      await until(page, (now) => now.offer, 'the offer is shown');
+      await clickRow(page, S1);
+      const focused = (): Promise<string> =>
+        page.evaluate(() => {
+          const element = document.activeElement as HTMLElement | null;
+          const entry = element?.closest('.banner-entry') as HTMLElement | null;
+          return entry !== null && entry !== undefined
+            ? `entry ${entry.dataset['id'] ?? ''}`
+            : element?.id !== undefined && element.id !== ''
+              ? `#${element.id}`
+              : (element?.className ?? 'none');
+        });
+      const walked: string[] = [];
+      for (let n = 0; n < 5; n++) {
+        await page.keyboard.press('Shift+Tab');
+        walked.push(await focused());
+      }
+      assert.deepEqual(walked, [
+        'banner-button banner-not-now',
+        'banner-button primary banner-restore',
+        `entry ${S3}`,
+        `entry ${S2}`,
+        `entry ${S1}`,
+      ]);
+      await page.keyboard.press('Shift+Tab'); // none before the banner's first checkbox but the page's
+      await page.focus(box(S3));
+      await page.keyboard.press('Space');
+      await until(page, (now) => now.restore?.text === 'Restore 3', 'Space ticks');
+      await page.keyboard.press('Enter');
       await settle();
-      assert.deepEqual(w.acts(), [], 'nothing was sent');
-      assert.equal(
-        await page.evaluate(() => document.documentElement.dataset['connection']),
-        'open',
-      );
+      assert.equal((await shown(page)).restore?.text, 'Restore 3', 'Enter on a checkbox: nothing');
+      assert.deepEqual(w.acts(), []);
+
+      await page.keyboard.press('Tab'); // Restore
+      assert.equal(await focused(), 'banner-button primary banner-restore');
+      await page.keyboard.down(' ');
+      await page.keyboard.down(' '); // repeat: true
+      await settle();
+      assert.deepEqual(w.acts(), [], 'nothing before the release');
+      await page.keyboard.up(' ');
+      await w.act(1);
+      await settle();
+      assert.equal(w.acts().length, 1, 'Space held on Restore: one act, at its release');
+      w.answer(await w.act(1), { ok: false, error: 'refused' });
+      await until(page, (now) => now.message === 'refused', 'the refusal');
+
+      await page.focus('#banner .banner-restore');
+      const held: string[] = [];
+      await page.keyboard.down('Tab');
+      held.push(await focused());
+      for (let n = 0; n < 2; n++) {
+        await page.keyboard.down('Tab'); // repeat: true
+        held.push(await focused());
+      }
+      await page.keyboard.up('Tab');
+      assert.deepEqual(held, ['banner-button banner-not-now', '#list', 'list-filter']);
+    },
+  );
+
+  await t.test("a checkbox keeps the keyboard when the entries' order changes", async (t) => {
+    const [page, w] = await world(t, chromium, listOf(three()));
+    await until(page, (now) => now.offer, 'the offer is shown');
+    await page.focus(box(S3));
+    w.list(listOf(bannerOf([entryOf(S3, { preselected: false }), entryOf(S1), entryOf(S2)])));
+    await until(page, (now) => now.entries[0]?.id === S3, 'S3 first');
+    await settle();
+    assert.equal(
+      await page.evaluate(
+        (selector) => document.activeElement === document.querySelector(selector),
+        box(S3),
+      ),
+      true,
+      "S3's checkbox keeps the keyboard",
+    );
+  });
+
+  await t.test(
+    "a line that starts a new report takes the ended report's × away; when the × had the keyboard, the list takes it",
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three({ running: true })));
+      await until(page, (now) => now.offer, 'the offer is shown');
+      await clickRow(page, S1);
+      w.progress('started 0b5f3c1e one');
+      w.progress('restore finished: 1 started');
+      await until(page, (now) => now.close, 'the ×');
+      await page.focus('#banner .banner-report-close');
+      w.progress('started 1c6a4d2f two');
+      await until(page, (now) => now.report.length === 1 && !now.close, 'a new report');
+      await keyboardOn(page, '#list');
     },
   );
 
@@ -540,6 +707,11 @@ test('stage C: the restore banner on the page', async (t) => {
       const report = await until(page, (now) => now.report.length === 4, 'four lines');
       assert.deepEqual(report.report, lines);
       assert.equal(report.close, false, 'no × before the finished line');
+      // A line that holds the words further on (a session's title) is no boundary.
+      w.progress('started 0b5f3c1e restore finished: all');
+      const titled = await until(page, (now) => now.report.length === 5, 'five lines');
+      assert.equal(titled.close, false, 'no × for a title holding the words');
+      lines.push('started 0b5f3c1e restore finished: all');
 
       w.progress('restore finished: 1 started, 1 timed out, 1 not started');
       const finished = await until(page, (now) => now.close, 'the ×');

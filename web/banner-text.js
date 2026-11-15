@@ -112,7 +112,7 @@ function daysBetween(a, b) {
  */
 export function activityTime(ns, nowMs, timeZone) {
   const ms = msOf(ns);
-  if (ms === null || !Number.isFinite(nowMs)) {
+  if (ms === null || !Number.isFinite(new Date(nowMs).getTime())) {
     return '';
   }
   const at = partsOf(ms, timeZone);
