@@ -1256,10 +1256,12 @@ Setup:
 - **Where the keyboard is, before you type.** Text belongs in a field only while that field has
   the keyboard: the filter's field when its border has the selection's colour and its caret
   blinks in it (click into it first), the switcher's field while the switcher's panel is shown
-  over the window. Typed anywhere else, letters are list keys — `k` moves to a real session, `d`
-  marks it done, `l`, `g` and `n` open a dialog — or reach the terminal of the selected session.
-  When the field shows no caret, type nothing: click into it first. In the filter's field press
-  no Enter: Enter gives the keyboard to the list, where the next letter is a list key.
+  over the window. Type nothing otherwise: text typed while the list has the keyboard is list
+  keys — `k` moves to the row above, which may be a real session, `n` opens its note, `l` its
+  label, `d` marks it done —, and text typed while a terminal has it reaches that session's
+  program. When the field shows no caret, click into it first. In the filter's field press no
+  Enter: Enter gives the keyboard to the list, where the next letter is a list key. No step
+  presses Enter in the switcher on a session whose short id you have not looked at.
 - **One click on a row, on its title.** A double click on a session that is not running resumes
   it. These checks click only rows inside a stack, which never need you (a session that needs
   you and stays selected for 1.5 seconds is marked seen), and the throwaway session's row. A
