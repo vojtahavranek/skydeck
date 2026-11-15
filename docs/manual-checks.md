@@ -1283,7 +1283,11 @@ Windows programs should stay, the skydeck window among them (it is an Edge windo
 the design expects (design-step-2.md, section 6), not yet seen on this PC — W16 writes down what
 happens. A restart of the PC ends all of this and everything else.
 
-**Prepare**, before anything else:
+**Prepare**, before anything else. `wsl --shutdown` ends EVERY program in WSL, not only Claude
+Code sessions: builds, servers, agents that work for you, `tmux` and `screen` with all they run.
+The two looks of "Set up", step 4, are cross-checks, no guarantee that nothing of yours runs. So
+run the main part and the second part only at a moment when you would restart WSL anyway;
+otherwise leave them out and write down that you left them out (the third part needs no restart).
 
 1. Choose a moment when ten minutes without WSL cost you nothing.
 2. Save in every editor that runs in WSL. Stop the builds, the containers and the tunnels you would
@@ -1320,12 +1324,13 @@ happens. A restart of the PC ends all of this and everything else.
    and its short id (on its second line, the short id after the directory, the times and where the
    title comes from). In W, `skydeck show <short id>` for each says the same: its `dir:` line is
    the folder.
-4. In W: `skydeck ls`. Nothing may be `working`, `waiting` or `running` but the three throwaway
-   sessions. Then `pgrep -af claude` (it only lists processes): every line that runs `claude` must
-   be one of the three, `claude --session-id <id>` with an id that starts with one of their short
-   ids; another `claude` (one with another id, or with `-p`) is a run of yours that `skydeck ls`
-   does not list. If anything else runs, end it as in "Prepare", steps 3 and 4, or stop here and
-   do "Clean up" for what you made.
+4. In W: `skydeck ls --all` (`--all`: also the sessions marked done). Nothing may be `working`,
+   `waiting` or `running` but the three throwaway sessions. `skydeck ls` lists only the sessions
+   you work in: not `claude -p`, Agent SDK runs, Claude Code in VS Code's panel. So then `pgrep -af
+   claude` (it only lists processes): every line that runs `claude` must be one of the three,
+   `claude --session-id <id>` with an id that starts with one of their short ids; another `claude`
+   (one with another id, or with `-p`) is a run of yours. If anything else runs, end it as in
+   "Prepare", steps 3 and 4, or stop here and do "Clean up" for what you made.
 
 **Steps:**
 
@@ -1366,12 +1371,12 @@ prepare as above ("Prepare", and step 4 of "Set up"; the three throwaway session
 the first part).
 
 1. Minimise the skydeck window and leave it so for more than 5 minutes.
-2. Right before it, in W: step 4 of "Set up" again (`skydeck ls`, `pgrep -af claude`); a session
-   resumed meanwhile is ended first. Then in P: `wsl --shutdown`. Open a WSL terminal again (W) and,
-   with the window still minimised, run `skydeck window`. Expected: the waiting line; after it a new
-   window may open, because Edge wakes a window minimised that long only once a minute, and then the
-   old one comes back later, at its next wake (a known limit of stage C). Write down whether a
-   second window opened and how long the old one took to come back; close the new one.
+2. Right before it, in W: step 4 of "Set up" again (`skydeck ls --all`, `pgrep -af claude`); a
+   session resumed meanwhile is ended first. Then in P: `wsl --shutdown`. Open a WSL terminal again
+   (W) and, with the window still minimised, run `skydeck window`. Expected: the waiting line; after
+   it a new window may open, because Edge wakes a window minimised that long only once a minute, and
+   then the old one comes back later, at its next wake (a known limit of stage C). Write down
+   whether a second window opened and how long the old one took to come back; close the new one.
 3. In the window, read the banner's entries as in step 4 of the first part, then click `Not now`.
    Expected: the banner goes.
 4. In W: `skydeck window --restart`. Expected: the window connects again, and the banner does not
