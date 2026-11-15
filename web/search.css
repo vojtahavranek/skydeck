@@ -151,9 +151,11 @@
   cursor: pointer;
   user-select: none;
 }
+/* The offer acts on Enter only (E12): a restore starts programs, so a click does nothing. */
 .switcher-offer {
   grid-template-columns: minmax(0, 1fr);
   font-weight: 500;
+  cursor: default;
 }
 .switcher-item[data-active='true'],
 .switcher-offer[data-active='true'] {

@@ -893,8 +893,9 @@ async function openingCases(t: TestContext, chromium: Browser): Promise<void> {
       await page.keyboard.type('login');
       view = await untilSwitcher(
         page,
-        (v) => idsOf(v).join() === [S1, S2].join() && v.items.every((i) => i.marks.length > 0),
-        'the sessions whose title has login',
+        (v) =>
+          idsOf(v).join() === [S1, S2].join() && v.items.every((i) => i.marks.join() === 'login'),
+        'the sessions whose title has login (the answer to the whole word)',
       );
       assert.deepEqual(
         view.items.map((item) => [item.title, item.marks]),
@@ -988,6 +989,35 @@ async function openingCases(t: TestContext, chromium: Browser): Promise<void> {
       await page.keyboard.type(words.slice(0, 16).join(' '));
       await untilSwitcher(page, (v) => v.cut === '' && v.value.split(' ').length === 16, 'no note');
       await healthy(l);
+    },
+  );
+
+  await t.test(
+    'a text of more than 1,024 bytes in few words → the footer says only the first 1,024 bytes are searched and the server got 1,024 bytes (ruled on review 1)',
+    async (t) => {
+      const d = await world(t, chromium, ORB_WORLD);
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      await openSwitcher(page);
+      // 515 × `ä`: 1,030 bytes of UTF-8 in one word; the page sends the first 512 (1,024 bytes).
+      await page.keyboard.insertText('ä'.repeat(515));
+      await untilSwitcher(
+        page,
+        (v) => v.cut === 'only the first 1,024 bytes are searched',
+        'the note that the text is cut to its bytes',
+      );
+      await until(
+        () => switcherText(w.sent) === 'ä'.repeat(512),
+        'a view with the first 1,024 bytes',
+      );
+      for (const message of w.sent) {
+        const text = message['t'] === 'view' ? message['switcher'] : null;
+        if (typeof text === 'string') {
+          assert.ok(new TextEncoder().encode(text).length <= 1024, 'no view over 1,024 bytes');
+        }
+      }
+      await clearField(page);
+      await untilSwitcher(page, (v) => v.cut === '', 'no note for an empty text');
     },
   );
 
@@ -1402,6 +1432,73 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
         beneath > 0,
         'no second click landed on a list row or a card: the case proves nothing at this layout',
       );
+    },
+  );
+
+  await t.test(
+    'the click guard lets go again: after a pick by a click, and after a click outside closed the switcher, a later double click on a row of the list resumes it (ruled on review 1)',
+    async (t) => {
+      const d = await world(t, chromium, ORB_WORLD);
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      /** A double click on the list's row of `id`: its resume is the page's next act. */
+      const resumesByDoubleClick = async (id: string, what: string): Promise<void> => {
+        const before = w.acts().length;
+        await page.locator(`#list [data-id="${id}"]`).dblclick();
+        const act = await w.act(before + 1);
+        assert.deepEqual([act['kind'], act['sessionId']], ['resume', id], what);
+      };
+
+      // After a pick by a click on an item (the guard's sequence began in the switcher).
+      await openSwitcher(page);
+      await untilSwitcher(page, (v) => v.items.length === ORB.length, 'every session listed');
+      await page.locator(`#switcher [data-id="${S1}"]`).click();
+      await switcherShown(page, false);
+      const picked = await w.act(1);
+      assert.deepEqual([picked['kind'], picked['sessionId']], ['resume', S1]);
+      await resumesByDoubleClick(S2, 'a double click after a pick');
+
+      // After a click outside the panel closed the switcher.
+      await openSwitcher(page);
+      await page.mouse.click(8, 400); // on the scrim, outside the panel
+      await switcherShown(page, false);
+      await resumesByDoubleClick(S3, 'a double click after a close');
+    },
+  );
+
+  await t.test(
+    'a click on the restore offer sends nothing and the switcher stays; Enter on it restores (E12: Enter only, ruled on review 1)',
+    async (t) => {
+      const lastActivityNs = String(BigInt(Date.now() - 3_600_000) * 1_000_000n);
+      const restore: Row = { count: 2, lastActivityNs, sessionIds: [S1, S2] };
+      const d = await world(t, chromium, {
+        ...ORB_WORLD,
+        payload: (text) =>
+          text.startsWith('>')
+            ? commandPayload(text, restore)
+            : payloadFor(text, ORB_WORLD.entries ?? []),
+      });
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      await openSwitcher(page);
+      await page.keyboard.type('>restore');
+      await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
+      await page.locator('#switcher [data-offer]').click();
+      await sleep(400);
+      assert.deepEqual(w.acts(), [], 'a click on the offer sends nothing');
+      assert.equal((await switcherView(page)).shown, true, 'the switcher stays');
+      assert.equal(await keyboardOn(page), FIELD, 'the keyboard stays in the field');
+      assert.equal(
+        await page.evaluate(
+          () =>
+            getComputedStyle(document.querySelector('#switcher [data-offer]') as Element).cursor,
+        ),
+        'default',
+        'the offer shows no pointer',
+      );
+      await page.keyboard.press('Enter');
+      const act = await w.act(1);
+      assert.deepEqual([act['kind'], act['sessionIds']], ['restore', [S1, S2]]);
     },
   );
 

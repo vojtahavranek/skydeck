@@ -168,6 +168,8 @@ export function createSwitcher(root, deps) {
   const listBox = element('switcher-list', 'div');
   const empty = element('switcher-empty', 'div');
   empty.hidden = true;
+  // The offer acts on Enter only (E12, ruled on review 1): it starts programs, so it has no click
+  // listener, and its mousedown, as anywhere in the panel, keeps the keyboard in the field.
   const offerLine = element('switcher-offer', 'div');
   offerLine.dataset['offer'] = 'restore';
   const foot = element('switcher-foot', 'div');

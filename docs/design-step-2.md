@@ -2476,9 +2476,9 @@ shown (after "Not now"), holds preselected entries and no restore runs; whether 
 server's answer (`list.switcher.restore`, 8.2.3), so no tick of the banner can disagree with its
 sessions. Listed, it is the switcher's first entry, `Restore 3 sessions from yesterday at 18:02`
 (`1 session`; the time as the banner says it, on the page's own clock and in its time zone), and
-its Enter (or a click) sends `act restore` with the preselected sessions in the banner's order; a
-refusal shows in the key bar, and the run's report where the banner's report is (it is drawn while
-it holds lines). A command that names no offer says so in the switcher, with the one command
+Enter on it — Enter only: a click on it does nothing (ruled by the lead on 2026-11-15) — sends `act
+restore` with the preselected sessions in the banner's order; a refusal shows in the key bar, and
+the run's report where the banner's report is (it is drawn while it holds lines). A command that names no offer says so in the switcher, with the one command
 written without quote marks (`> restore`).
 
 ### 12.8 Search
@@ -2540,8 +2540,10 @@ One rule matches for the filter and for the switcher:
   title with the words found in it marked, a second line (a running session's state line, else
   `not running · 3d`) with the directory, and at the right the chip, the slot and the short id.
   `No session matches.` when nothing does. The page cuts the field's text as it cuts the filter's
-  (1,024 bytes, then 16 words) and the footer says `only the first 16 words are searched`; the
-  filter's cut after 16 words is said in the key bar (`the filter is cut to its first 16 words`).
+  (1,024 bytes, then 16 words) and the footer says `only the first 16 words are searched`, or `only
+  the first 1,024 bytes are searched` when the cut of the bytes came first (ruled by the lead on
+  2026-11-15); the filter's cut after 16 words is said in the key bar (`the filter is cut to its
+  first 16 words`).
   The highlight starts on the first entry, follows ↑ ↓ (at each repeat of a held key) and PgUp
   PgDn, is scrolled into view, and stays on its session while a list keeps it.
 - **A pick** (Enter on the highlighted item, or a click on one; plan E10). It acts only while the
