@@ -2092,7 +2092,7 @@ async function start() {
         dropPending();
         state.bringing = null; // the resume's terminal is no longer the page's own news (Z1)
         showGone(since);
-        switcher.update(null); // E11: it says so, and an Enter waits no more
+        switcher.update(null); // E11: it says so; Enter does nothing, a kept Enter is dropped
       },
       fatal: (text) => {
         dropPending();

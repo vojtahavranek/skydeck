@@ -121,11 +121,52 @@ const SENT = `(() => {
   };
 })();`;
 
+/**
+ * An init script that records, in order, the `switcher.query` of every `list` the page receives
+ * that carries the switcher's answer (`switcherAnswers`), before the page's own handler draws it:
+ * a wait on the answer to the whole text typed, which an answer to a text typed on the way (`alp`
+ * for `alpha`) cannot satisfy. It wraps WebSocket's `onmessage`, which web/connection.js sets.
+ */
+const ANSWERS = `(() => {
+  const answers = [];
+  Reflect.set(globalThis, 'switcherAnswers', answers);
+  // The accessor is the native WebSocket's: RECORDER may have put a subclass in its place.
+  let proto = WebSocket.prototype;
+  while (Object.getOwnPropertyDescriptor(proto, 'onmessage') === undefined) {
+    proto = Object.getPrototypeOf(proto);
+  }
+  const native = Object.getOwnPropertyDescriptor(proto, 'onmessage');
+  Object.defineProperty(proto, 'onmessage', {
+    configurable: true,
+    enumerable: native.enumerable,
+    get() {
+      return native.get.call(this);
+    },
+    set(handler) {
+      if (typeof handler !== 'function') {
+        native.set.call(this, handler);
+        return;
+      }
+      native.set.call(this, function (event) {
+        if (typeof event.data === 'string') {
+          try {
+            const message = JSON.parse(event.data);
+            const query = message?.t === 'list' ? message.switcher?.query : undefined;
+            if (typeof query === 'string') answers.push(query);
+          } catch {}
+        }
+        return handler.call(this, event);
+      });
+    },
+  });
+})();`;
+
 /** helpers/shell.ts's `launched`, with SENT among the page's init scripts from the start. */
 async function launchedSent(t: TestContext, chromium: Browser): Promise<Launched> {
   const page = await newPage(t, chromium);
   await page.addInitScript(RECORDER);
   await page.addInitScript(SENT);
+  await page.addInitScript(ANSWERS);
   const problems = problemsOf(page);
   const started = await startTestServer(t);
   const { token } = await controlClient(started.d.platform.net, started.d.files.serverSock).token(
@@ -265,6 +306,35 @@ async function switcherView(page: Page): Promise<SwitcherView> {
     },
     null,
   );
+}
+
+/**
+ * Waits until the page has drawn the switcher's answer to `text` — the last list it received with
+ * the switcher's answer is the one for `text`, its query as the page sent it — and `check` holds.
+ * The wait after typing: an answer to a text typed on the way cannot satisfy it.
+ */
+async function untilAnswer(
+  page: Page,
+  text: string,
+  check: (view: SwitcherView) => boolean,
+  what: string,
+): Promise<SwitcherView> {
+  const deadline = performance.now() + PAGE_WAIT_MS;
+  for (;;) {
+    const last = await readPage(
+      page,
+      () => (Reflect.get(globalThis, 'switcherAnswers') as string[] | undefined)?.at(-1) ?? null,
+      null,
+    );
+    const view = await switcherView(page);
+    if (last === text && check(view)) return view;
+    if (performance.now() > deadline) {
+      assert.fail(
+        `${what}: the last answer is to ${JSON.stringify(last)}, not ${JSON.stringify(text)}; the switcher shows ${JSON.stringify(view, null, 1)}`,
+      );
+    }
+    await sleep(50);
+  }
 }
 
 /** Waits until the switcher's view satisfies `check`; fails with what it showed. */
@@ -616,6 +686,7 @@ interface World {
  */
 async function world(t: TestContext, chromium: Browser, start: Config): Promise<World> {
   const page = await newPage(t, chromium);
+  await page.addInitScript(ANSWERS);
   let config = start;
   let w: EditWorld | undefined;
   const listFor = (id: string | null): Row => {
@@ -674,6 +745,7 @@ interface Driven {
 async function driven(t: TestContext, chromium: Browser, start: Config): Promise<Driven> {
   const secret = new Uint8Array(32).fill(drivenSeed++);
   const page = await newPage(t, chromium);
+  await page.addInitScript(ANSWERS);
   const sent: Row[] = [];
   let allowed = true;
   let held = false;
@@ -891,8 +963,9 @@ async function openingCases(t: TestContext, chromium: Browser): Promise<void> {
       }
 
       await page.keyboard.type('login');
-      view = await untilSwitcher(
+      view = await untilAnswer(
         page,
+        'login',
         (v) =>
           idsOf(v).join() === [S1, S2].join() && v.items.every((i) => i.marks.join() === 'login'),
         'the sessions whose title has login (the answer to the whole word)',
@@ -905,19 +978,21 @@ async function openingCases(t: TestContext, chromium: Browser): Promise<void> {
         ],
       );
       await page.keyboard.type(' alpha');
-      view = await untilSwitcher(page, (v) => idsOf(v).join() === S1, 'both words');
+      view = await untilAnswer(page, 'login alpha', (v) => idsOf(v).join() === S1, 'both words');
       assert.deepEqual([...(view.items[0]?.marks ?? [])].sort(), ['alpha', 'login']);
       assert.equal((await lastView(page))['switcher'], 'login alpha');
 
       await clearField(page);
-      await untilSwitcher(
+      await untilAnswer(
         page,
+        '',
         (v) => v.items.length === 3 && v.items.every((i) => i.marks.length === 0),
         'all again',
       );
       await page.keyboard.type(S3.slice(0, 4));
-      view = await untilSwitcher(
+      view = await untilAnswer(
         page,
+        S3.slice(0, 4),
         (v) => v.items.length > 0 && v.items.length < 3,
         'by short id',
       );
@@ -1054,7 +1129,12 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
 
       await openSwitcher(page);
       await page.keyboard.type('alpha');
-      const view = await untilSwitcher(page, (v) => idsOf(v).join() === S1, 'the open session');
+      const view = await untilAnswer(
+        page,
+        'alpha',
+        (v) => idsOf(v).join() === S1,
+        'the open session',
+      );
       assert.equal(view.items[0]?.rank, 'open');
       assert.equal(view.keys, '↑ ↓ move · Enter switch · Esc close');
       await page.keyboard.press('Enter');
@@ -1087,7 +1167,7 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
       await untilRows(page, [S1, S2], 'the sessions');
       await openSwitcher(page);
       await page.keyboard.type('beta');
-      const view = await untilSwitcher(page, (v) => idsOf(v).join() === S2, 'the session');
+      const view = await untilAnswer(page, 'beta', (v) => idsOf(v).join() === S2, 'the session');
       assert.equal(view.items[0]?.rank, 'not-running');
       assert.equal(view.keys, '↑ ↓ move · Enter resume here · Esc close');
       await page.keyboard.press('Enter');
@@ -1135,7 +1215,12 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
 
       await openSwitcher(page);
       await page.keyboard.type('beta far');
-      const view = await untilSwitcher(page, (v) => idsOf(v).join() === S2, 'the session');
+      const view = await untilAnswer(
+        page,
+        'beta far',
+        (v) => idsOf(v).join() === S2,
+        'the session',
+      );
       assert.equal(view.items[0]?.rank, 'open');
       assert.equal(view.keys, '↑ ↓ move · Enter switch · Esc close');
       await page.keyboard.press('Enter');
@@ -1179,7 +1264,7 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
 
       await openSwitcher(page);
       await page.keyboard.type('gone');
-      await untilSwitcher(page, (v) => idsOf(v).join() === S2, 'the expired session');
+      await untilAnswer(page, 'gone', (v) => idsOf(v).join() === S2, 'the expired session');
       await page.keyboard.press('Enter');
       await untilSelected(page, S2);
       await showsText(
@@ -1214,7 +1299,12 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
 
       await openSwitcher(page);
       await page.keyboard.type('finished');
-      const view = await untilSwitcher(page, (v) => idsOf(v).join() === S2, 'the done session');
+      const view = await untilAnswer(
+        page,
+        'finished',
+        (v) => idsOf(v).join() === S2,
+        'the done session',
+      );
       assert.equal(view.items[0]?.rank, 'done');
       assert.deepEqual(view.headings, [{ rank: 'done', text: 'Done' }]);
       await page.keyboard.press('Enter');
@@ -1247,7 +1337,7 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
 
       await openSwitcher(page);
       await page.keyboard.type('old five');
-      await untilSwitcher(page, (v) => idsOf(v).join() === S5, 'the old session');
+      await untilAnswer(page, 'old five', (v) => idsOf(v).join() === S5, 'the old session');
       await page.keyboard.press('Enter');
       await untilTerminalOf(page, S5);
       await untilRows(page, [S5, S1, S6], 'Earlier unfolded, S5 running under Open');
@@ -1281,7 +1371,7 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
 
       await openSwitcher(page);
       await page.keyboard.type('alpha');
-      await untilSwitcher(page, (v) => idsOf(v).join() === S1, 'the hidden session');
+      await untilAnswer(page, 'alpha', (v) => idsOf(v).join() === S1, 'the hidden session');
       await page.keyboard.press('Enter');
       await untilTerminalOf(page, S1);
       await showsText(
@@ -1482,7 +1572,7 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
       await untilSelected(page, S3);
       await openSwitcher(page);
       await page.keyboard.type('>restore');
-      await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
+      await untilAnswer(page, '>restore', (v) => v.offer !== null, 'the offer');
       await page.locator('#switcher [data-offer]').click();
       await sleep(400);
       assert.deepEqual(w.acts(), [], 'a click on the offer sends nothing');
@@ -1527,7 +1617,7 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
       const count = w.sent.filter((message) => message['t'] === 'view').length;
       await openSwitcher(page);
       await page.keyboard.type('old');
-      await untilSwitcher(page, (v) => idsOf(v).join() === S1, 'the old session');
+      await untilAnswer(page, 'old', (v) => idsOf(v).join() === S1, 'the old session');
       await page.keyboard.press('Enter');
       const act = await w.act(1);
       assert.deepEqual([act['kind'], act['sessionId']], ['resume', S1]);
@@ -1661,15 +1751,16 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
       const { page } = d;
       await openSwitcher(page);
       await page.keyboard.type('zzz');
-      let view = await untilSwitcher(page, (v) => v.empty !== '', 'nothing matches');
+      let view = await untilAnswer(page, 'zzz', (v) => v.empty !== '', 'nothing matches');
       assert.equal(view.empty, 'No session matches.');
       assert.deepEqual(view.items, []);
 
       for (const text of ['>x', 'plain']) {
         await clearField(page);
         await page.keyboard.type(text);
-        view = await untilSwitcher(
+        view = await untilAnswer(
           page,
+          text,
           (v) => v.empty !== '' && v.empty !== 'No session matches.',
           `${text}: a line of its own`,
         );
@@ -1679,7 +1770,12 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
 
       await clearField(page);
       await page.keyboard.type('>go');
-      view = await untilSwitcher(page, (v) => idsOf(v).join() === S1, '>go: the payload lists it');
+      view = await untilAnswer(
+        page,
+        '>go',
+        (v) => idsOf(v).join() === S1,
+        '>go: the payload lists it',
+      );
       assert.equal(view.empty, '');
     },
   );
@@ -1697,8 +1793,9 @@ async function queryCases(t: TestContext, chromium: Browser): Promise<void> {
       await untilSelected(page, S3);
       await openSwitcher(page);
       await page.keyboard.type('or');
-      await untilSwitcher(
+      await untilAnswer(
         page,
+        'or',
         (v) => idsOf(v).join() === [S1, S2].join() && v.items.every((i) => i.marks.join() === 'or'),
         'the list for or',
       );
@@ -1737,7 +1834,7 @@ async function queryCases(t: TestContext, chromium: Browser): Promise<void> {
       // The text changes after the Enter was kept.
       await openSwitcher(page);
       await page.keyboard.type('or');
-      await untilSwitcher(page, (v) => idsOf(v).join() === [S1, S2].join(), 'the list for or');
+      await untilAnswer(page, 'or', (v) => idsOf(v).join() === [S1, S2].join(), 'the list for or');
       d.hold(true);
       await page.keyboard.type('b');
       await until(() => switcherText(d.sent) === 'orb', 'the view for orb sent');
@@ -1929,7 +2026,7 @@ async function modalCases(t: TestContext, chromium: Browser): Promise<void> {
       await untilSelected(page, S1);
       await openSwitcher(page);
       await page.keyboard.type('second');
-      await untilSwitcher(page, (v) => idsOf(v).join() === S2, 'the idle session');
+      await untilAnswer(page, 'second', (v) => idsOf(v).join() === S2, 'the idle session');
       await page.keyboard.down('Enter'); // picks
       await page.keyboard.down('Enter'); // held: an auto-repeat
       await page.keyboard.down('Enter');
@@ -1944,7 +2041,7 @@ async function modalCases(t: TestContext, chromium: Browser): Promise<void> {
 
       await openSwitcher(page);
       await page.keyboard.type('running');
-      await untilSwitcher(page, (v) => idsOf(v).join() === S1, 'the open session');
+      await untilAnswer(page, 'running', (v) => idsOf(v).join() === S1, 'the open session');
       await page.keyboard.down('Enter');
       await page.keyboard.down('Enter');
       await page.keyboard.down('Enter');
@@ -2149,7 +2246,7 @@ async function offerCases(t: TestContext, chromium: Browser): Promise<void> {
         await page.keyboard.type('>rest');
         const nowMs = await page.evaluate(() => Date.now());
         const zone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
-        let view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
+        let view = await untilAnswer(page, '>rest', (v) => v.offer !== null, 'the offer');
         // Stage C's words for the time, on the page's clock and in its time zone (E12).
         assert.equal(
           view.offer?.text,
@@ -2169,7 +2266,12 @@ async function offerCases(t: TestContext, chromium: Browser): Promise<void> {
         await openSwitcher(page);
         await clearField(page);
         await page.keyboard.type('>restore');
-        view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer of one session');
+        view = await untilAnswer(
+          page,
+          '>restore',
+          (v) => v.offer !== null,
+          'the offer of one session',
+        );
         assert.match(view.offer?.text ?? '', /^Restore 1 session from /);
 
         restore = null;
@@ -2196,10 +2298,10 @@ async function offerCases(t: TestContext, chromium: Browser): Promise<void> {
         });
         await openSwitcher(page);
         await page.keyboard.type('>restore');
-        const view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
+        const view = await untilAnswer(page, '>restore', (v) => v.offer !== null, 'the offer');
         assert.match(view.offer?.text ?? '', /^Restore \d+ sessions? from /);
         await clearField(page);
-        await untilSwitcher(page, (v) => v.items.length > 0 && v.offer === null, 'the sessions');
+        await untilAnswer(page, '', (v) => v.items.length > 0 && v.offer === null, 'the sessions');
         await page.keyboard.press('Enter');
         await switcherShown(page, false);
         await sleep(800);
@@ -2258,10 +2360,20 @@ async function textCases(t: TestContext, chromium: Browser): Promise<void> {
         async () => `${(await lastView(page))['switcher']}`.includes(markers[1] as string),
         'a view with the switcher text',
       );
-      await untilSwitcher(page, (v) => v.empty === 'No session matches.', 'nothing matches it');
+      await untilAnswer(
+        page,
+        `${HOSTILE_TYPED} ${markers[1]}`,
+        (v) => v.empty === 'No session matches.',
+        'nothing matches it',
+      );
       await clearField(page);
       await page.keyboard.type('hostile');
-      const view = await untilSwitcher(page, (v) => idsOf(v).join() === S1, 'the hostile session');
+      const view = await untilAnswer(
+        page,
+        'hostile',
+        (v) => idsOf(v).join() === S1,
+        'the hostile session',
+      );
       const item = view.items[0];
       assert.equal(item?.title, HOSTILE_TITLE, 'its title, as text');
       // `hostile` twice in the title: in `data-hostile` and as its last word, every occurrence.
@@ -2311,7 +2423,7 @@ async function textCases(t: TestContext, chromium: Browser): Promise<void> {
       await untilRows(page, [S1], 'the first page filters');
       await openSwitcher(page);
       await page.keyboard.type('beta');
-      await untilSwitcher(page, (v) => idsOf(v).join() === S2, 'the first switcher lists S2');
+      await untilAnswer(page, 'beta', (v) => idsOf(v).join() === S2, 'the first switcher lists S2');
       assert.equal((await switcherView(other)).shown, false, 'the second has no switcher open');
       assert.equal(await other.inputValue('#list input.list-filter'), '');
       assert.deepEqual(
