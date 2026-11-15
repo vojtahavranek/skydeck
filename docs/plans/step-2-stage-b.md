@@ -493,7 +493,8 @@ export function createNotifier(deps: NotifierDeps): { check(): void };
   seen?: Pick<Seen, 'focus' | 'typed' | 'gone'>;
 // Pages gains
   /** S2 13: while no page has focus, `message` to the page that had focus last; false when it was
-   *  not sent (a page has focus, or none is open). */
+   *  not sent (a page has focus, or none is open — none is once `bye` has run: nothing follows a
+   *  `bye`; ruled on task 54's review 1). */
   notify(message: NotifyMessage): boolean;
 ```
 

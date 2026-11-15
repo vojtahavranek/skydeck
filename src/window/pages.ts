@@ -120,7 +120,8 @@ export interface Pages {
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
   /** S2 13: while no page has focus, `message` to the page that had focus last; false when it was
-   *  not sent (a page has focus, or none is open). */
+   *  not sent (a page has focus, or none is open — none is once `bye` has run: nothing follows a
+   *  `bye`). */
   notify(message: NotifyMessage): boolean;
   /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
    *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS).
