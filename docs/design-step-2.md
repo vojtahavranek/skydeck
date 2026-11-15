@@ -981,7 +981,14 @@ both in memory: the **expected session**. Which session it shows is decided agai
 
 - the terminal's program is the process the keeper reported in `T` or `hello` (8.1): pid and
   process start, on the current boot. A terminal whose keeper has not reported a start has no
-  program yet;
+  program yet. A terminal whose keeper sent `exit` has none any more (the keeper reaped it, 7.8).
+  A **lost** keeper's program (7.8) stays its terminal's as long as it lives by design 5.5's rule
+  on that pid and start — the server knows the loss at once, while the program, given SIGHUP, runs
+  its end for a moment — so its session is not "running in another terminal" (7.9) meanwhile and
+  the lost terminal is not dropped for it (7.8; stage B's plan, task 57). The pid alone never
+  counts: it may be another process's by then. Known limit: a wrapper `claudeCommand` that ends at
+  the SIGHUP before its `claude` child leaves that child outside every terminal, so the lost
+  terminal is dropped while the child runs its end;
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
   terminal's program or a descendant of it (parent pids read from `/proc/<pid>/stat`, at most 8
   steps up, each judged alive by design 5.5's rule). The descendant rule covers a `claudeCommand`
