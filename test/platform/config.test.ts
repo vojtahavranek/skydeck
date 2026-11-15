@@ -214,6 +214,9 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     // A host of the pattern's own that holds a sample key's text: it is the same for both sample
     // keys, so the key is not in it (ruled on #77).
     'https://key-1.example.net/{key}',
+    // A whole escape right before {key}: the key cannot finish it (ruled on #77).
+    'https://host/issues/?jql=key%3D{key}',
+    'https://host/b/%25{key}',
   ]) {
     test(`accepts ${JSON.stringify(value)}, kept as it was written`, (t) => {
       const config = withTicketUrl(t, value).run() as { ticketUrl: unknown };
@@ -247,6 +250,13 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     ['a user name and a password', 'https://user:secret@host/{key}'],
     ['a password', 'https://:secret@host/{key}'],
     ['a user name that holds a sample key', 'https://Other-2@host/{key}'],
+    // An escape left unfinished right before {key}, that a key would finish (ruled on #77).
+    ['a % right before {key}', 'https://host/b/%{key}'],
+    ['a % and a digit right before {key}', 'https://host/b/%2{key}'],
+    ['a % and a lower-case hex letter right before {key}', 'https://host/b/%a{key}'],
+    ['a % and an upper-case hex letter right before {key}', 'https://host/b/%A{key}'],
+    ['a % and a digit right before {key}, in the query', 'https://host/t?id=%2{key}'],
+    ['a % and a digit right before {key}, in the fragment', 'https://host/#%2{key}'],
     ['javascript:', 'javascript:{key}'],
     ['file:', 'file:///{key}'],
     ['ftp:', 'ftp://host/{key}'],

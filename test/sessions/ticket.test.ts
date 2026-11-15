@@ -211,10 +211,10 @@ describe('ticketAddress: a ticketUrl that puts the key before its path gives no 
   });
 });
 
-// S2 12.5: the address is the pattern's parsed address with the key in the place of `{key}`,
-// character for character; a key that the parser reads otherwise gives no link.
-describe('ticketAddress: a key the parser reads otherwise than the place it fills', () => {
-  test('a title "e. retry the upload" that finishes the escape %2 into a dot segment', () => {
+// S2 12.5 and 16.4: a key may not finish a percent-escape that the pattern began, so a pattern
+// whose text right before `{key}` ends in `%`, or in `%` and one hex digit, gives no link.
+describe('ticketAddress: an escape left unfinished right before {key} gives no link', () => {
+  test('a title "e. retry the upload" that would finish %2 into a dot segment', () => {
     const group = new RegExp(WORD).exec('e. retry the upload')?.[0] ?? null;
     assert.equal(group, 'e.');
     const url = 'https://tickets.example.net/team/browse/%2{key}';
@@ -224,18 +224,33 @@ describe('ticketAddress: a key the parser reads otherwise than the place it fill
   });
 
   for (const [url, keys] of [
-    ['https://host/b/%2{key}', ['e', 'E', 'e.']],
-    ['https://host/b/%{key}', ['2e', '2E', '2e.']],
+    ['https://host/b/%2{key}', ['e', 'E', 'e.', 'FOO-1']],
+    ['https://host/b/%{key}', ['2e', '2E', '2e.', '41']],
     ['https://host/b/.%2{key}', ['e']],
     ['https://host/b/.%{key}', ['2e']],
     ['https://host/b/%2e%{key}', ['2e']],
+    ['https://host/t?id=%2{key}', ['6x']],
+    ['https://host/#%2{key}', ['3x']],
+    ['https://host/b/%a{key}', ['b']],
+    ['https://host/b/%A{key}', ['B']],
   ] as const) {
-    test(`${url}: a key that ends the escape the pattern began`, () => {
-      for (const key of keys) {
+    test(url, () => {
+      for (const key of [...keys, 'ABC-12']) {
         assert.equal(ticketAddress(key, WORD, url), null, key);
       }
     });
   }
+
+  test('a whole escape right before {key} is a link', () => {
+    for (const [url, address] of [
+      ['https://host/issues/?jql=key%3D{key}', 'https://host/issues/?jql=key%3DABC-12'],
+      ['https://host/b/%25{key}', 'https://host/b/%25ABC-12'],
+      ['https://host/b/%7E{key}', 'https://host/b/%7EABC-12'],
+    ] as const) {
+      assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, url), address, url);
+    }
+    assert.equal(ticketAddress('2e', WORD, 'https://host/b/%25{key}'), 'https://host/b/%252e');
+  });
 
   test('a key "." or ".." in a path', () => {
     for (const key of ['.', '..']) {
@@ -243,21 +258,44 @@ describe('ticketAddress: a key the parser reads otherwise than the place it fill
     }
   });
 
-  test('an ordinary key after a whole escape, in a path, a query and a fragment, is a link', () => {
+  test('an ordinary key in a path, a query and a fragment is a link', () => {
     for (const [url, address] of [
-      ['https://host/issues/?jql=key%3D{key}', 'https://host/issues/?jql=key%3DABC-12'],
-      ['https://host/b/%7E{key}', 'https://host/b/%7EABC-12'],
       ['https://host/b/{key}/x', 'https://host/b/ABC-12/x'],
       ['https://host/b?k={key}&x=1', 'https://host/b?k=ABC-12&x=1'],
       ['https://host/#/b/{key}', 'https://host/#/b/ABC-12'],
+      [
+        'https://jira.example.net/browse/{key}?src=my_key_tool',
+        'https://jira.example.net/browse/ABC-12?src=my_key_tool',
+      ],
     ] as const) {
       assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, url), address, url);
     }
   });
+});
 
-  test('a ticketUrl that holds the stand-in\'s text "_key_" itself gives no link (a named limit)', () => {
-    assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, 'https://host/_key_/{key}'), null);
+// The parser removes tabs and line breaks before it reads, so the rule on the text before `{key}`
+// would not see what they hide; the configuration refuses such a pattern, and so does this.
+describe('ticketAddress: a ticketUrl that holds white space or a control character gives no link', () => {
+  test('a tab or a line break inside an unfinished escape', () => {
+    assert.equal(ticketAddress('e.', WORD, 'https://host/a/b/%2\t{key}'), null);
+    assert.equal(ticketAddress('2e.', WORD, 'https://host/a/b/%\n{key}'), null);
+    assert.equal(ticketAddress('6x', WORD, 'https://host/t?id=%2\t{key}'), null);
   });
+
+  for (const [name, url] of [
+    ['a space', 'https://host/a b/{key}'],
+    ['a leading space', ' https://host/{key}'],
+    ['a trailing line break', 'https://host/{key}\n'],
+    ['an escape character', 'https://host/\x1b/{key}'],
+    ['a DEL', 'https://host/\x7f/{key}'],
+    ['a C1 control', 'https://host/\u009b/{key}'],
+    ['a no-break space', 'https://host/a\u00a0b/{key}'],
+    ['a tab in the host', 'https://ho\tst/{key}'],
+  ] as const) {
+    test(name, () => {
+      assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, url), null);
+    });
+  }
 });
 
 describe('the modules of the ticket link (D18, design 11)', () => {

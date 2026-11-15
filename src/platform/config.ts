@@ -71,6 +71,8 @@ const OTHER_SAMPLE_KEY = 'OTHER-2';
 const MAX_TICKET_URL_LENGTH = 2048;
 /** White space, the control characters of S2 2, '"' and the backslash. */
 const NOT_IN_A_TICKET_URL = /[\s\u0000-\u001f\u007f-\u009f"\\]/;
+/** A percent-escape left unfinished: a key right after it would finish it (S2 16.4). */
+const UNFINISHED_ESCAPE = /%[0-9A-Fa-f]?$/;
 
 /**
  * The host that the URL parser reads in `pieces` joined by `key`; null when it reads no http or
@@ -84,10 +86,11 @@ function hostWith(pieces: string[], key: string): string | null {
 
 /**
  * S2 16.4: null, or a string of at most 2,048 characters holding `{key}` exactly once and no
- * white space, control character, '"' or backslash, that the URL parser reads with each of two
- * different sample keys in place of `{key}` as http or https without a user name or password and
- * with the same host — a host the key went into would differ. The parser decides where the key
- * stands, not the text: it skips extra slashes, and reads `https:{key}` with the key as the host.
+ * white space, control character, '"' or backslash, with no `%`, or `%` and one hex digit, right
+ * before `{key}`, that the URL parser reads with each of two different sample keys in place of
+ * `{key}` as http or https without a user name or password and with the same host — a host the
+ * key went into would differ. Where the key stands among the address's parts is the parser's to
+ * decide, not the text's: it skips extra slashes, and reads `https:{key}` with the key as the host.
  */
 function isTicketUrl(value: unknown): value is string | null {
   if (value === null) return true;
@@ -99,7 +102,8 @@ function isTicketUrl(value: unknown): value is string | null {
     return false;
   }
   const pieces = value.split(KEY_PLACE);
-  if (pieces.length !== 2) return false;
+  const [before = ''] = pieces;
+  if (pieces.length !== 2 || UNFINISHED_ESCAPE.test(before)) return false;
   const host = hostWith(pieces, SAMPLE_KEY);
   return host !== null && host === hostWith(pieces, OTHER_SAMPLE_KEY);
 }
