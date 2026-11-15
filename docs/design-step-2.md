@@ -2020,7 +2020,9 @@ by session id.
 **When a window end is recorded** (stage B's plan, B10). At each refresh that worked — after the
 exits it settled (7.8) — each terminal of the window in state `ended` or `lost` (a keeper that died:
 its exit time is the server's clock) that started its program is judged, once, at the first refresh
-where its session's row no longer runs (a lost keeper's program lives on its SIGHUP for a moment):
+where its session's row no longer runs and that row's last holder is gone (a lost keeper's program
+lives on its SIGHUP for a moment, and its end event can be ingested before it exits, while
+`ended-unexpectedly` needs the holder gone, design 6.3):
 its session, the one it shows or else the one it was opened for, gets `window_end_seq` and, as
 `window_end_ns`, the exit's time when that row is marked `ended-unexpectedly`; nothing when the
 session ended deliberately. A terminal that leaves the list is forgotten. It is the same end when the stored `window_end_ns` equals the exit's

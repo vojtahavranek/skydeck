@@ -29,8 +29,9 @@ import { attentionOf } from '../../src/window/view/attention.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { until } from '../helpers/keeper.ts';
-import { S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
+import { BOOT_A, S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
 import { info, registrySandbox } from '../helpers/registry.ts';
+import { ds } from '../helpers/derived.ts';
 import { listRow } from '../helpers/rows.ts';
 
 const PID = 4242;
@@ -1046,6 +1047,36 @@ describe('window ends (S2 12.4 reason 2; B10)', () => {
     w.attention.refreshed();
     w.rows.splice(0, 1, endedUnexpectedly(S1));
     w.attention.refreshed();
+    assert.deepEqual(stored(w.d), [
+      row({ sessionId: S1, windowEndSeq: 1, windowEndNs: T0 + 5n * SEC }),
+    ]);
+  });
+
+  test("a terminal is not judged while its row's last holder still lives: the refresh between the end event and the exit stores nothing, the next one stores the window end (ruled)", (t) => {
+    const holding = {
+      process: { bootId: BOOT_A, pid: 9000, procStart: 1 },
+      endedAtNs: T0 + 4n * SEC,
+      endDetail: 'other' as const,
+    };
+    // The end event is ingested (the row no longer runs) while the process still lives on its
+    // SIGHUP: no `ended-unexpectedly` mark yet (design 6.3 needs the holder gone).
+    const ending = listRow({
+      id: S1,
+      session: ds({ id: S1, lastHolding: { ...holding, alive: true } }),
+    });
+    const w = ended(t, [terminal({ id: 'aaaaaaaaaaaa', state: 'lost' })], [ending]);
+    assert.equal(w.attention.refreshed(), false);
+    assert.deepEqual(w.writes, []);
+    w.rows.splice(
+      0,
+      1,
+      listRow({
+        id: S1,
+        marks: ['ended-unexpectedly'],
+        session: ds({ id: S1, lastHolding: { ...holding, alive: false } }),
+      }),
+    );
+    assert.equal(w.attention.refreshed(), true);
     assert.deepEqual(stored(w.d), [
       row({ sessionId: S1, windowEndSeq: 1, windowEndNs: T0 + 5n * SEC }),
     ]);

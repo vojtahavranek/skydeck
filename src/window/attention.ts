@@ -414,8 +414,15 @@ export function createAttention(deps: AttentionDeps): Attention {
           rows ??= new Map(deps.rows().map((row) => [row.id, row]));
           const row = rows.get(sessionId);
           // Ruled (review 2): not judged while its row still runs — a lost keeper's program lives
-          // on its SIGHUP for a moment — but at the first refresh where the row no longer runs.
-          if (row !== undefined && row.state !== 'not-running') continue;
+          // on its SIGHUP for a moment — nor while the row's last holder lives (ruled 09:47Z: its
+          // end event can be ingested before its exit, and `ended-unexpectedly` needs the holder
+          // gone, design 6.3), but at the first refresh where neither holds.
+          if (
+            row !== undefined &&
+            (row.state !== 'not-running' || row.session.lastHolding?.alive === true)
+          ) {
+            continue;
+          }
           judgedTerminals.add(term.id);
           if (row === undefined || !row.marks.includes('ended-unexpectedly')) {
             continue; // it ended deliberately, or skydeck knows no such session
