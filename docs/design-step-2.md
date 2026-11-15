@@ -1140,14 +1140,14 @@ for its default port (and the upgrade's `Origin` is then `http://127.0.0.1`).
 |---|---|
 | `GET /` | `web/index.html`, with the asset version put into its asset URLs by the server when it reads the file at start (there is no build step). No secret needed: the page holds no secret of its own. |
 | `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list): every file of `web/` but `web/tsconfig.json` and `web/index.html` (served as `/` only), and the vendored `.mjs` and `.css` files of `vendor/MANIFEST.json`. `Cache-Control: max-age=31536000, immutable` under the versioned path. |
-| `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
+| `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12): `web/manifest.webmanifest` with the asset version put into its icons' URLs as into `index.html`'s, `application/manifest+json`; and `web/icons/favicon.ico`'s bytes, `image/x-icon` (the same file is also served under the versioned path, which is the one `index.html` names). |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
 | `OPTIONS` | 403. |
 | any other method but `GET` (`HEAD` included) | 405 with `Allow: GET`. |
 | any other `GET` | 404. |
 
-A query string is ignored and never used: `/?x` is `/`. Every path outside `/assets/` (`/`, and
-later the icon and the manifest) and every refusal (404, 405, 421, 403) carry
+A query string is ignored and never used: `/?x` is `/`. Every path outside `/assets/` (`/`, the
+manifest and the icon) and every refusal (404, 405, 421, 403) carry
 `Cache-Control: no-store`, so that a page reloading after a server restart always gets the new
 asset version.
 
@@ -2047,6 +2047,20 @@ span are all its rows', a closed stack's members included. A page that sends no 
 from before stage E's list) gets no stacks at all, so that no session is ever hidden in a stack
 it cannot draw (ruled).
 
+How a stack looks and is used (stage E, plan E7). The head shows `×4` after its ticket key (or
+its group); a closed stack is followed by the line `+3 more in ORB-2107`, which is no row: it is
+never selected, and ↑ ↓ pass over it and the members it hides; an open stack's members follow the
+head, indented. A click on `×4` or on the `+3 more` line opens or closes the stack; it selects
+nothing and leaves the keyboard where it was, but a click on `×4` that closes the stack while
+one of its members is selected selects the head first, as ← does (12.9; else the page would add
+the group again at the next list). The keys are 12.9's. The page sends `opened` in every view
+(`[]` at least), at most 64 groups, the oldest dropped; a group the server would refuse — not
+well formed, or over 1,024 bytes (8.2.3) — is never sent, so its stack opens only while one of
+its members is selected (a named limit). `d` on a closed stack's head marks that session only:
+the next member becomes the head (or the last one stands alone), and stage D's selection after
+`d` (12.9) takes the row after it of those the list drew when `d` was pressed — the row after the
+stack, whose members were not drawn. While filtering every row stands alone (12.8).
+
 ### 12.3 The pull-request chip in the window
 
 The window's chip differs from the list's (design 7.3), which stays as it is for `ls` and the
@@ -2464,7 +2478,13 @@ back to the terminal). `/` gives the keyboard to the filter's field, where every
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
 clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
 plan task 27). Folding Earlier (← or a click on its header) with the selection inside it first
-selects the row above it; while a filter is set nothing folds. The selection is never on a row the
+selects the row above it; while a filter is set nothing folds. On a stack (12.2; stage E, plan
+E7), → on a closed head opens it, ← on an open head closes it, and ← on a member selects the head
+and closes the stack, as folding Earlier first selects the row above it; on any other row ← and →
+fold and unfold Earlier. Ctrl+Shift+1–9 are unchanged: the rows with a slot never stack. While
+filtering (a word or a chip, 12.8) nothing folds and no stack is formed, so ← and → do nothing.
+The chips under the filter field (12.8) take no keyboard on a click: the keyboard stays where it
+was (in the field, on the list, in the terminal). The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
@@ -2582,6 +2602,22 @@ the PNGs are made once from the SVG and committed). `index.html` names the favic
 (`<link rel="icon">`) and the manifest (`<link rel="manifest">`), whose `name` and `short_name`
 are `skydeck`, `display` `standalone`, and `icons` the PNGs. Whether Edge's app window and its
 taskbar button show it is check W3. Low priority: stage E (19).
+
+As built (stage E, plan E14): `web/icons/skydeck.svg` is the source — a drawing of shapes, no
+script, nothing it loads —; `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and
+`icon-512.png` on a transparent background, `icon-192-maskable.png` and `icon-512-maskable.png`
+(the drawing inside the maskable safe zone, the middle 80 %, on a full background), and
+`favicon.ico` (the 16, 32 and 48 pixel PNGs in one ICO) were drawn once from it by
+`scripts/icons.ts` with the page suite's pinned Chromium, headless, and committed; no test and no
+CI step runs the script. `web/manifest.webmanifest` holds `name`, `short_name`, `display` and the
+seven PNGs, each `src` under the versioned path; it is served at `/manifest.webmanifest` with the
+build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html` names the favicon by its
+versioned path (`/assets/<build>/web/icons/favicon.ico`, `sizes="16x16 32x32 48x48"`) and the
+manifest by `/manifest.webmanifest`; the policy's `img-src 'self'` and `manifest-src 'self'` let
+the page load both, and nothing is fetched from outside, at build time or at run time. The
+manifest has no `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not meant to be
+installed as an app — Chromium counts it as not installable without `start_url`, and an
+installed app's shortcut would hold no launch token (5.1).
 
 ## 13. Notifications
 

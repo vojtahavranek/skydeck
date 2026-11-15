@@ -675,6 +675,35 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
+    "`d` on a closed stack's head marks that session only: the next member is the head (×2, `+1 more`); stage D's selection after `d` takes the row after it of those drawn when `d` was pressed — the row after the stack, whose members were not drawn",
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'ORB-1 first');
+      session(d, S2, 2n * MIN, 'ORB-1 second');
+      session(d, S3, 3n * MIN, 'ORB-1 third');
+      session(d, S4, 4n * MIN, 'plain work');
+      await untilRows(page, [S1, S4], 'the closed stack');
+      assert.equal(await selectedRow(page), S1);
+      await toZone(page, 'list');
+      await page.keyboard.press('d');
+      const after = await untilLines(
+        page,
+        (drawn) =>
+          drawn.map((line) => `${line.kind}${line.id}`).join() === `row${S2},more${S2},row${S4}`,
+        'S2 the head of the two left',
+      );
+      assert.equal(after[0]?.badge, '×2');
+      assert.equal(after[1]?.text, '+1 more in ORB-1');
+      await untilSelected(page, S4);
+      await sleep(500);
+      assert.equal(await selectedRow(page), S4, 'the selection stays there');
+      assert.deepEqual((await lastView(page))['opened'], [], 'the stack stays closed');
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
     'a group of 1,025 bytes is never in a view the page sends (its stack opens only while a member is selected); one of 1,024 bytes is',
     async (t) => {
       const l = await launchedWithViews(t, chromium);
