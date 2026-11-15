@@ -1953,19 +1953,21 @@ asks for focus reports (9.2; Claude Code is expected to, not yet checked with th
 one at every click, chord and return to the window, and a mouse report is no key, so none of them is
 typing (else every selection would clear its mark at once). The page swallows the queries (9.3), so
 no answer arrives today; were one to come, it is still not typing (a false "typing" clears a mark
-unread, a false "not typing" costs the user 1.5 s), and F3 with a modifier, which has the bytes of a
-cursor position report, is not typing either. The user's own acts on a terminal without a key are
-typing: the wheel over a program in the alternate screen that asked for no mouse reports and an
-Alt+click, both arrow keys, and an empty paste. Typing into the selected session's terminal of a
-focused window completes the hold at once and it holds as long as the selection and the focus do;
-typing into another terminal, or into the selected one's while the window has no focus, makes the
-session it shows seen once. A `seen` is written only when it clears a mark — a hold completes, a
-typing comes, or a mark of a session already being seen becomes known — and always in the write of a
-turn end or window end of that session while the hold lasts; there is **no periodic `seen` write**:
-nothing writes to the store every few seconds because a window has focus. It is written only for a
-session among the list's rows, so that a selection naming no session leaves no row. The hold is
-`src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall clock does not
-move).
+unread, a false "not typing" costs the user 1.5 s), and a key whose encoding has a report's shape,
+such as Shift+F3 (F3 with any modifier has the bytes of a cursor position report), does not count as
+typing either: the hold's 1.5 s apply. An OSC or DCS answer counts only when it is whole in one
+message, and a paste holds no ESC (9.1) but its two brackets. The user's own acts on a terminal
+without a key are typing: the wheel over a program in the alternate screen that asked for no mouse
+reports and an Alt+click, both arrow keys, and an empty paste. Typing into the selected session's
+terminal of a focused window completes the hold at once and it holds as long as the selection and
+the focus do; typing into another terminal, or into the selected one's while the window has no
+focus, makes the session it shows seen once. A `seen` is written only when it clears a mark — a hold
+completes, a typing comes, or a mark of a session already being seen becomes known — and always in
+the write of a turn end or window end of that session while the hold lasts; there is **no periodic
+`seen` write**: nothing writes to the store every few seconds because a window has focus. It is
+written only for a session among the list's rows, so that a selection naming no session leaves no
+row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
+clock does not move).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
 then those that ended; then those that finished, oldest first. Pressed again it goes on; after the

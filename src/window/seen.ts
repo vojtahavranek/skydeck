@@ -16,7 +16,9 @@ export const SEEN_AFTER_MS = 1500;
  * only other mouse encoding, X10, comes as `binary`. The page swallows the queries today (S2 9.3),
  * so no answer arrives; were one to come, it must not count as typing: a false "typing" clears a
  * mark unread, a false "not typing" costs the user 1.5 s. Keys never take these shapes but one:
- * F3 with a modifier (`CSI 1 ; 2 R`) has the bytes of a cursor position report (ruled).
+ * F3 with any modifier (`CSI 1 ; m R`) has the bytes of a cursor position report, and the hold's
+ * 1.5 s apply (ruled). An OSC or DCS counts only when it is whole in one message (BEL or ST at its
+ * end), so Alt+] and Alt+Shift+P stay typing; a paste holds no ESC (S2 9.1) but its two brackets.
  */
 const REPORTS = new RegExp(
   [

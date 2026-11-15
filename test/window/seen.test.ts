@@ -49,74 +49,117 @@ test('isTyping (F1 of review A): focus reports and SGR mouse reports are not typ
   }
 });
 
-/** What keys and pastes give through xterm.js 6.0.0 (C1 of review 2): every one is typing. */
-const KEY_INPUTS = [
+/** Review 2's 31 keys and pastes as xterm.js 6.0.0 gives them (C1, ruled): every one is typing. */
+const REVIEW_KEYS = [
+  'a', // a
+  '\r', // Enter
+  '\n', // Shift+Enter
+  '\x1b', // Esc
+  '\t', // Tab
+  '\x1b[Z', // Shift+Tab
   '\x7f', // Backspace
-  '\t',
-  `${ESC}[Z`, // Shift+Tab
+  '\x1b[A', // Up
+  '\x1bOA', // Up, application cursor keys
+  '\x1b[1;5A', // Ctrl+Up
+  '\x1b[H', // Home
+  '\x1b[F', // End
+  '\x1b[5~', // PgUp
+  '\x1b[3~', // Del
+  '\x1b[2~', // Ins
+  '\x1bOP', // F1
+  '\x1bOR', // F3
+  '\x1b[15~', // F5
+  '\x1b[15;2~', // Shift+F5
+  '\x1b[1;2P', // Shift+F1
+  '\x1b[24~', // F12
+  '\x1ba', // Alt+a
+  '\x1b[', // Alt+[
+  '\x1b]', // Alt+]
+  '\x1bP', // Alt+Shift+P
   '\x03', // Ctrl+C
-  `${ESC}[B`,
-  `${ESC}OA`, // an arrow key with application cursor keys
-  `${ESC}[1;5C`, // Ctrl+Right
-  `${ESC}[H`,
-  `${ESC}[F`,
-  `${ESC}[2~`, // Insert
-  `${ESC}[3~`, // Delete
-  `${ESC}[5~`, // Page Up
-  `${ESC}OP`, // F1
-  `${ESC}OR`, // F3
-  `${ESC}[15~`, // F5
-  `${ESC}[24~`, // F12
-  `${ESC}[1;2P`, // Shift+F1
-  `${ESC}[1;2S`, // Shift+F4
-  `${ESC}b`, // Alt+b
-  `${ESC}P`, // Alt+Shift+P
-  `${ESC}[`, // Alt+[
-  `${ESC}]`, // Alt+]
-  `${ESC}c`, // Alt+c
-  `${ESC}[200~${ESC}[201~`, // an empty paste
-  `${ESC}[200~a paste that says ESC[0n and 12;40R${ESC}[201~`,
-  '😀',
+  '\x16', // Ctrl+Shift+V
+  '\x1b[200~hi\x1b[201~', // a paste
+  '\x1b[200~\x1b[201~', // an empty paste
+  'žluťoučký kůň', // text
+  '\x1b[Ia', // a focus report and a key
 ];
 
-/** What a terminal answers to a query, or sends by itself (C1 of review 2): none is typing. */
-const TERMINAL_REPORTS = [
-  `${ESC}[?1;2c`, // DA1
-  `${ESC}[>0;276;0c`, // DA2
+/** Review 2's 22 reports (C1, ruled): what a terminal sends by itself; none is typing. */
+const REVIEW_REPORTS = [
+  '\x1b[I', // focus in
+  '\x1b[O', // focus out
+  '\x1b[<0;10;5M', // SGR mouse
+  '\x1b[<0;10;5m', // SGR mouse, release
+  '\x1b[?1;2c', // DA1
+  '\x1b[>0;276;0c', // DA2
+  '\x1b[12;40R', // CPR
+  '\x1b[?12;40R', // DECXCPR
+  '\x1b[0n', // DSR
+  '\x1b[?2026;2$y', // DECRQM, DEC mode
+  '\x1b[4;1$y', // DECRQM, ANSI mode
+  '\x1b[8;24;80t', // CSI 18 t
+  '\x1b[4;600;800t', // CSI 14 t
+  '\x1b]11;rgb:0000/0000/0000\x1b\\', // OSC 11, ended by ST
+  '\x1b]10;rgb:ffff/ffff/ffff\x07', // OSC 10, ended by BEL
+  '\x1b]4;1;rgb:cd00/0000/0000\x1b\\', // OSC 4
+  '\x1bP1$r0m\x1b\\', // DECRQSS
+  '\x1bP>|xterm.js(6.1.0)\x1b\\', // XTVERSION
+  '\x1b[?0u', // kitty keyboard
+  '\x1b[?997;1n', // mode 2031's colour-scheme report
+  '\x1b[48;24;80;600;800t', // mode 2048's size report
+  '\x1b[I\x1b[?1;2c\x1b]11;rgb:0/0/0\x07\x1b[<0;1;1M\x1b[O', // five in one message
+];
+
+/** More of each, beside review 2's. */
+const MORE_KEYS = [
+  `${ESC}[B`,
+  `${ESC}[1;5C`, // Ctrl+Right
+  `${ESC}[1;2S`, // Shift+F4
+  `${ESC}b`, // Alt+b
+  `${ESC}c`, // Alt+c
+  `${ESC}[200~a paste that says ESC[0n and 12;40R${ESC}[201~`, // a paste holds no ESC (S2 9.1)
+  '😀',
+];
+const MORE_REPORTS = [
   `${ESC}P!|00000000${ESC}\\`, // DA3
-  `${ESC}[12;40R`, // a cursor position report
-  `${ESC}[?12;40R`, // DECXCPR
-  `${ESC}[0n`, // DSR: ready
-  `${ESC}[?997;1n`, // the colour scheme (mode 2031)
-  `${ESC}[?2026;2$y`, // DECRQM, a DEC mode
-  `${ESC}[4;2$y`, // DECRQM, an ANSI mode
-  `${ESC}[8;24;80t`, // the size in cells
-  `${ESC}[4;600;800t`, // the size in pixels
-  `${ESC}[48;24;80;600;800t`, // an in-band resize (mode 2048)
-  `${ESC}]10;rgb:ffff/ffff/ffff${ESC}\\`, // OSC 10, ended by ST
+  `${ESC}[4;2$y`, // DECRQM, an ANSI mode reset
   `${ESC}]11;rgb:0000/0000/0000\x07`, // OSC 11, ended by BEL
-  `${ESC}]4;1;rgb:cdcd/0000/0000\x07`, // OSC 4
-  `${ESC}P1$r0;1m${ESC}\\`, // DECRQSS
-  `${ESC}P>|xterm.js(6.0.0)${ESC}\\`, // XTVERSION
-  `${ESC}[?1;2c${ESC}[12;40R${ESC}]11;rgb:0000/0000/0000\x07${ESC}[I`, // several in one
 ];
 
 test('isTyping (C1 of review 2, ruled): every key input and paste is typing', () => {
-  for (const data of KEY_INPUTS) {
+  for (const data of [...REVIEW_KEYS, ...MORE_KEYS]) {
     assert.equal(isTyping(data, false), true, JSON.stringify(data));
   }
 });
 
-test("isTyping (C1 of review 2, ruled): a terminal's answers to queries are not typing, by their shape", () => {
-  for (const data of TERMINAL_REPORTS) {
+test("isTyping (C1 of review 2, ruled): a terminal's own reports are not typing, by their shape", () => {
+  for (const data of [...REVIEW_REPORTS, ...MORE_REPORTS]) {
     assert.equal(isTyping(data, false), false, JSON.stringify(data));
   }
   assert.equal(isTyping(`${ESC}[12;40Rx`, false), true, 'a key after a report');
 });
 
-test('isTyping: Shift+F3 and its kin share the bytes of a cursor report and are not typing (ruled)', () => {
-  for (const data of [`${ESC}[1;2R`, `${ESC}[1;5R`, `${ESC}[1;3R`]) {
-    assert.equal(isTyping(data, false), false, JSON.stringify(data));
+test('isTyping: an OSC or DCS is a report only when it is whole in one message', () => {
+  assert.equal(isTyping(`${ESC}]11;rgb:0000/0000/0000`, false), true);
+  assert.equal(isTyping(`${ESC}P1$r0m`, false), true);
+});
+
+test('isTyping: F3 with any modifier has the bytes of a cursor report and is not typing (ruled)', () => {
+  for (let modifier = 2; modifier <= 8; modifier += 1) {
+    assert.equal(isTyping(`${ESC}[1;${modifier}R`, false), false, `modifier ${modifier}`);
+  }
+});
+
+test('isTyping: every other key xterm.js sends with a modifier is typing', () => {
+  for (let modifier = 2; modifier <= 8; modifier += 1) {
+    for (const final of ['A', 'B', 'C', 'D', 'H', 'F', 'P', 'Q', 'S']) {
+      const data = `${ESC}[1;${modifier}${final}`;
+      assert.equal(isTyping(data, false), true, JSON.stringify(data));
+    }
+    for (const code of [2, 3, 5, 6, 15, 17, 18, 19, 20, 21, 23, 24]) {
+      const data = `${ESC}[${code};${modifier}~`;
+      assert.equal(isTyping(data, false), true, JSON.stringify(data));
+    }
   }
 });
 
