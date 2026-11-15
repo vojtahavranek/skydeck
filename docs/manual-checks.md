@@ -788,12 +788,13 @@ Expected: no characters you did not type in the prompt (such as `[?62;c`, `0;276
 
 Write down: any stray characters; whether a key was swallowed.
 
-## W20. Privilege management lets Edge and wsl.exe start
+## W20. Privilege management lets Edge, wsl.exe and rundll32.exe start
 
 The PC's privilege management (BeyondTrust on the development PC) must neither block nor ask for
-`msedge.exe` started by `skydeck window` (W1) or for the keep-alive's `wsl.exe`, which the server
-starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`). Watch for a dialog
-during W1 and right after a `skydeck window --restart`.
+`msedge.exe` started by `skydeck window` (W1), for the keep-alive's `wsl.exe`, which the server
+starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`), or for `rundll32.exe`,
+which the server starts for every link the window opens with `window.links` `"default"` (W12).
+Watch for a dialog during W1, right after a `skydeck window --restart`, and at W12's first link.
 
 Write down: any dialog's exact text, and what you chose.
 

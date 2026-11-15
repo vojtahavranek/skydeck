@@ -3513,7 +3513,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W17 | **Real claude**, `/tui fullscreen`: the alternate screen and the mouse mode come back after `skydeck window --restart`. | A | 7.2 |
 | W18 | **Real claude**: a terminal query answered late (the server stopped for a few seconds while Claude Code starts) — does the answer leak into the prompt? | A | 7.1, 14 |
 | W19 | **Real claude**: does `waitingFor` tell a permission prompt from a question? | B | 12.4 |
-| W20 | Privilege management does not block or prompt for `msedge.exe` and `wsl.exe` started through interop. | A | 2, 5.3, 6.1 |
+| W20 | Privilege management does not block or prompt for `msedge.exe`, `wsl.exe` and `rundll32.exe` (with `window.links` `"default"` the server starts it for every link) started through interop. | A | 2, 5.3, 6.1, 9.6 |
 | W21 | **Real claude**: a turn that ends in a session that is not selected shows "finished · not seen"; selecting it for 1.5 s clears it; a permission dialog shows "asks". | B | 10.3, 12.4 |
 | W22 | **Real claude**: a session started in a WSL terminal shows "running in another terminal", Resume is refused with the guard's message, and after `/exit` it resumes into the window. | A | 7.9 |
 | W23 | **Real claude**: which `CLAUDE*` variables Claude Code sets for the programs it runs — print the variable names (never their values) in a session's `!env` against a plain shell's — to confirm 7.4's list. And `skydeck window` run from a session's `!` command refuses (5.1). | A | 5.1, 7.4 |

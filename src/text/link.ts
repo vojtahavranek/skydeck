@@ -6,10 +6,10 @@ const MAX_LINK_LENGTH = 2048;
 
 /**
  * S2 9.6: the URL to open (re-serialised), or null when it must not be opened: longer than 2,048
- * characters, not a URL, or not http/https. The re-serialised URL — the one passed to Edge — must
- * fit the same limit (percent-encoding can make it longer than what the page sent), and must hold
- * no '"' and no backslash: it becomes one argument of a Windows program, and either can change how
- * that program splits its command line. (The parser encodes a '"' everywhere but in the host, and
+ * characters, not a URL, or not http/https. The re-serialised URL — the one passed to a Windows
+ * program (Edge or `rundll32.exe`) — must fit the same limit (percent-encoding can make it longer
+ * than what the page sent), and must hold no '"' and no backslash: it becomes one argument of a
+ * Windows program, and either can change how that program splits its command line. (The parser encodes a '"' everywhere but in the host, and
  * a backslash keeps only in the query and the fragment.)
  */
 export function linkToOpen(url: string): string | null {
