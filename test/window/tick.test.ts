@@ -11,21 +11,25 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
+import { main } from '../../src/cli/main.ts';
 import { openDeck } from '../../src/sessions/deck.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import { launchPrepared } from '../../src/sessions/launch.ts';
 import type { ListRow } from '../../src/sessions/list.ts';
 import { attachManualPr, setLabel } from '../../src/sessions/meta.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
-import { lockKey } from '../../src/sessions/resume.ts';
+import { lockKey, prepareNew, readLock } from '../../src/sessions/resume.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import { openStore } from '../../src/store/store.ts';
+import { createActions } from '../../src/window/actions.ts';
 import type { KeeperHello } from '../../src/window/frames.ts';
-import type { TerminalInfo } from '../../src/window/hub.ts';
-import type { NoticeMessage } from '../../src/window/protocol.ts';
+import type { PageInfo, TerminalInfo } from '../../src/window/hub.ts';
+import { createLaunches } from '../../src/window/launches.ts';
+import type { ActMessage, NoticeMessage } from '../../src/window/protocol.ts';
 import { createTick } from '../../src/window/tick.ts';
 import type { Tick, TickDeps } from '../../src/window/tick.ts';
 import { windowTerminal } from '../../src/window/window-terminal.ts';
+import { testContextOn } from '../helpers/context.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { procStartOf, stillRuns, until } from '../helpers/keeper.ts';
@@ -597,6 +601,177 @@ describe('ended terminals (S2 7.8; plan task 21)', () => {
     assert.equal(d.deck.store.getKv(lockKey(S1)), null);
   });
 
+  test('a lost exit whose program may still run is not settled yet (task 82): its lock stays at every refresh until the program is gone, then it is released', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const lock = `${T0}:0`;
+    d.deck.store.setKv(lockKey(S1), lock);
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    const lost = terminal({
+      id: 'aaaaaaaaaaaa',
+      state: 'lost',
+      program: { pid: PID, procStart: START },
+      exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    f.tick.ended(helloOf({ lock, started: false }));
+    await ticks(f, 1);
+    d.clock.advanceMs(2000);
+    await ticks(f, 2);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), lock, 'kept while the program may run');
+    d.proc.setProcess(PID, null); // it ran its end and is gone
+    await ticks(f, 2);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+    assert.deepEqual(f.logs, []);
+  });
+
+  test('a lost `new` exit waits as a resume’s does (task 82, ruled): its label and group stay while its program may still run; removed at the next refresh once it is gone', async (t) => {
+    const d = testDeck(t);
+    const prepared = prepareNew(d.deck, {
+      dir: d.sandbox.home,
+      label: 'fix the build',
+      group: 'ops',
+      extra: [],
+    });
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    const lost = terminal({
+      id: 'aaaaaaaaaaaa',
+      state: 'lost',
+      kind: 'new',
+      expectedSessionId: prepared.sessionId,
+      program: { pid: PID, procStart: START },
+      exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    const hello = helloOf({ started: false });
+    f.tick.ended({ ...hello, meta: { ...hello.meta, kind: 'new', sessionId: prepared.sessionId } });
+    await ticks(f, 1);
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.label, 'fix the build');
+    d.proc.setProcess(PID, null);
+    await ticks(f, 2);
+    assert.equal(d.deck.store.meta(prepared.sessionId), null);
+  });
+
+  test('ended() keeps the terminal of that hello, not another one the hub lists before it (task 82)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const lock = `${T0}:0`;
+    d.deck.store.setKv(lockKey(S1), lock);
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    const terminals = [
+      terminal({ id: 'aaaaaaaaaaaa', expectedSessionId: S2, program: { pid: 9999, procStart: 1 } }),
+      terminal({
+        id: 'bbbbbbbbbbbb',
+        state: 'lost',
+        program: { pid: PID, procStart: START },
+        exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+      }),
+    ];
+    const f = fixture(t, { d, terminals });
+    f.tick.ended(helloOf({ id: 'bbbbbbbbbbbb', lock, started: false }));
+    await ticks(f, 1);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), lock, 'the lost one, listed second, is held');
+  });
+
+  test('a held exit holds back no other: an exit the keeper sent, listed and ended after it, is settled at the same refresh (task 82)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    writeTranscript(d, S2);
+    const lockS1 = `${T0}:0`;
+    const lockS2 = `${T0 + 1_000_000n}:0`;
+    d.deck.store.setKv(lockKey(S1), lockS1);
+    d.deck.store.setKv(lockKey(S2), lockS2);
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    // The ended terminal's program pid is alive too: only the exit its keeper sent tells it is over.
+    d.proc.setProcess(PID + 1, { stat: statLine(PID + 1, START), cmdline: ['claude'] });
+    const terminals = [
+      terminal({
+        id: 'aaaaaaaaaaaa',
+        state: 'lost',
+        program: { pid: PID, procStart: START },
+        exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+      }),
+      terminal({
+        id: 'bbbbbbbbbbbb',
+        state: 'ended',
+        expectedSessionId: S2,
+        sessionId: S2,
+        program: { pid: PID + 1, procStart: START },
+        exit: { code: 1, signal: null, atNs: String(T0), notStarted: null },
+      }),
+    ];
+    const f = fixture(t, { d, terminals });
+    const s2 = helloOf({ id: 'bbbbbbbbbbbb', lock: lockS2, started: false });
+    f.tick.ended(helloOf({ id: 'aaaaaaaaaaaa', lock: lockS1, started: false }));
+    f.tick.ended({ ...s2, meta: { ...s2.meta, sessionId: S2 } });
+    await ticks(f, 1);
+    assert.equal(d.deck.store.getKv(lockKey(S2)), null, 'the sent exit is settled at once');
+    assert.equal(d.deck.store.getKv(lockKey(S1)), lockS1, 'the lost one is held');
+  });
+
+  test('… the terminal as the registry listed it at ended(): closed since, its program still keeps the lock (task 82)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const lock = `${T0}:0`;
+    d.deck.store.setKv(lockKey(S1), lock);
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    const terminals = [
+      terminal({
+        id: 'aaaaaaaaaaaa',
+        state: 'lost',
+        program: { pid: PID, procStart: START },
+        exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+      }),
+    ];
+    const f = fixture(t, { d, terminals });
+    f.tick.ended(helloOf({ lock, started: false }));
+    terminals.splice(0); // the user closed it (close-terminal) before the next refresh
+    await ticks(f, 1);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), lock);
+    d.proc.setProcess(PID, null);
+    await ticks(f, 2);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+  });
+
+  test('settleAll (the server’s stop) leaves a lost exit whose program may still run: its lock stays and expires by itself (task 82)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const lock = `${T0}:0`;
+    d.deck.store.setKv(lockKey(S1), lock);
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    const f = fixture(t, {
+      d,
+      terminals: [
+        terminal({
+          id: 'aaaaaaaaaaaa',
+          state: 'lost',
+          program: { pid: PID, procStart: START },
+          exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+        }),
+      ],
+    });
+    f.tick.ended(helloOf({ lock, started: false }));
+    f.tick.settleAll();
+    assert.equal(d.deck.store.getKv(lockKey(S1)), lock);
+    assert.deepEqual(f.logs, []);
+  });
+
+  test('a hub whose list() throws at ended(): the exit is settled as before (no terminal known), nothing thrown (task 82)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const lock = `${T0}:0`;
+    d.deck.store.setKv(lockKey(S1), lock);
+    const f = fixture(t, { d });
+    const list = f.deps.hub.list;
+    f.deps.hub.list = () => {
+      throw new TypeError('not now');
+    };
+    f.tick.ended(helloOf({ lock, started: false }));
+    f.deps.hub.list = list;
+    await ticks(f, 1);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+  });
+
   test('an ended terminal whose session runs again elsewhere is closed; a running one never', async (t) => {
     const d = testDeck(t);
     writeTranscript(d, S1);
@@ -884,6 +1059,265 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
       'its exit stays the lost one',
     );
     assert.ok(rowOf()?.marks.includes('ended-unexpectedly'), 'the row ended unexpectedly');
+  });
+});
+
+describe('a start is refused while a lost terminal’s program may still live (task 82, end to end)', () => {
+  const SIZE = { cols: 100, rows: 30 };
+  const PAGE: PageInfo = {
+    windowId: '0123456789abcdef',
+    focused: true,
+    area: { cols: 120, rows: 40 },
+  };
+  /** `text` as one word of a `sh` script. */
+  const shellWord = (text: string): string => `'${text.replaceAll("'", `'\\''`)}'`;
+
+  interface Lost {
+    w: Awaited<ReturnType<typeof windowDeck>>;
+    r: ReturnType<Awaited<ReturnType<typeof windowDeck>>['registry']>;
+    tick: Tick;
+    launches: ReturnType<typeof createLaunches>;
+    terminalFor: (size: { cols: number; rows: number }) => ReturnType<typeof windowTerminal>;
+    id: string;
+    program: { pid: number; procStart: number };
+    /** The lock the first launch took. */
+    lock: string;
+    /** The next refresh (every second tick runs one). */
+    refreshNow(): Promise<void>;
+    /** Lets the program end; then waits until it is gone. */
+    release(): Promise<void>;
+    /** What each way to start S1 answers now: the window's two (launches, act) and the command line's. */
+    ways(): Promise<{ launches: string; act: string; command: string; handoff: boolean }>;
+  }
+
+  /**
+   * Program B of task 72's C5: a claude that ignores the hangup and has reported no session start.
+   * Started through the window, its keeper — this test's own, by the pid of its own record — killed;
+   * returned once the registry lists the terminal `lost` and the tick was told of the exit, as the
+   * server tells it inside the registry's exit event.
+   */
+  async function lostWithProgram(t: TestContext): Promise<Lost> {
+    let releaseFile = '';
+    let killOwnKeeper: (() => void) | null = null;
+    let program: { pid: number; procStart: number } | null = null;
+    // Registered before windowDeck's cleanup, so it runs first (t.after: first in, first out):
+    // also when the case failed half way, the keeper is gone and the program released before the
+    // keepers' box waits for the programs and the sandbox goes.
+    t.after(async () => {
+      if (releaseFile === '') return;
+      writeFileSync(releaseFile, '');
+      try {
+        killOwnKeeper?.();
+      } catch {
+        // It no longer runs.
+      }
+      const seen = program;
+      if (seen !== null) {
+        await until(() => !stillRuns(seen.pid, seen.procStart), 'program B ended', 15_000).catch(
+          () => {},
+        );
+      }
+    });
+    let ready = '';
+    const w = await windowDeck(t, {
+      claudeCommand: (s) => {
+        s.link('sleep');
+        releaseFile = join(s.root, 'release-82');
+        ready = join(s.root, 'ready-82');
+        const script = join(s.bin, 'claude-before-its-start');
+        writeFileSync(
+          script,
+          [
+            '#!/bin/sh',
+            `release=${shellWord(releaseFile)}`,
+            `root=${shellWord(s.root)}`,
+            `ready=${shellWord(ready)}`,
+            // It ignores the hangup and reports nothing; 900 rounds (90 s and more), not past the
+            // sandbox; the hook above releases it. `ready` once the hangup is ignored.
+            "trap '' HUP",
+            ': > "$ready"',
+            'n=0; while [ ! -e "$release" ] && [ -d "$root" ] && [ "$n" -lt 900 ]; do sleep 0.1; n=$((n + 1)); done',
+            '',
+          ].join('\n'),
+        );
+        chmodSync(script, 0o755);
+        return script;
+      },
+    });
+    w.resumable(S1);
+    const r = w.registry();
+    const made = w.deps(r);
+    const terminalFor = (size: { cols: number; rows: number }): ReturnType<typeof windowTerminal> =>
+      windowTerminal(made.deps, size);
+    const first = await launchPrepared(w.deck, prepareResumeById(w.deck, S1), terminalFor(SIZE));
+    assert.equal(first.code, 0, JSON.stringify(first));
+    const id = r.registry.list()[0]?.id ?? '';
+    const reported = info(r.registry, id).program;
+    assert.ok(reported !== null);
+    program = reported;
+    killOwnKeeper = () => {
+      w.signalKeeper(w.keeperOf(id), 'SIGKILL');
+    };
+    await until(() => existsSync(ready), 'program B ignores the hangup', 15_000);
+    const lock = readLock(w.deck, S1);
+    assert.ok(lock !== null, 'the launch took the lock');
+
+    const tick = createTick({
+      deck: w.deck,
+      hub: {
+        list: () => r.registry.list(),
+        setSession: (termId, sessionId, notReported) => {
+          r.registry.setSession(termId, sessionId, notReported);
+        },
+        close: (termId) => r.registry.close(termId),
+      },
+      pages: { pushList() {}, notice() {} },
+      keepAlive: { tick: () => Promise.resolve() },
+      interop: { refresh: () => Promise.resolve(null) },
+      keepersLog: join(w.deck.places.stateDir, 'keepers.log'),
+      log: () => {},
+      storeNewer: () => {},
+    });
+    t.after(() => tick.stop());
+    const refreshNow = async (): Promise<void> => {
+      await tick.run();
+      await tick.run();
+    };
+    await refreshNow();
+    assert.equal(tick.rows().find((row) => row.id === S1)?.state, 'not-running', 'no start');
+
+    // Only the keeper this test started, by the pid of its own record.
+    w.signalKeeper(w.keeperOf(id), 'SIGKILL');
+    killOwnKeeper = null;
+    await until(
+      () => r.events.exited.some((event) => event.term.id === id && event.lost),
+      'the terminal is lost',
+      15_000,
+    );
+    assert.equal(info(r.registry, id).state, 'lost');
+    const hello = r.events.hello.filter((event) => event.hello.id === id).at(-1)?.hello;
+    assert.ok(hello !== undefined);
+    tick.ended(hello);
+
+    const launches = createLaunches({ deck: w.deck, hub: r.registry, terminalFor, log: () => {} });
+    const actions = createActions({
+      deck: w.deck,
+      hub: r.registry,
+      terminalFor,
+      openLink: async () => true,
+      log: () => {},
+      changed() {},
+      prs: { fetch: () => undefined, refresh: () => undefined },
+    });
+    let acts = 0;
+    const ways: Lost['ways'] = async () => {
+      const launched = await launches.resume(S1, SIZE);
+      const action: ActMessage = { t: 'act', id: ++acts, kind: 'resume', sessionId: S1, ...SIZE };
+      const result = await actions.act(PAGE, action);
+      const handoff = join(w.s.root, `handoff-82-${acts}`);
+      const platform = {
+        ...w.tp.platform,
+        env: { ...w.tp.platform.env, SKYDECK_HANDOFF: handoff },
+      };
+      const c = testContextOn({ platform });
+      const code = await main(['resume', S1, '--here'], c.ctx);
+      return {
+        launches: `${launched.code}: ${launched.lines.join(' | ')}`,
+        act: `${result.ok}: ${result.lines.join(' | ')}`,
+        command: `${code}: ${c.stderr().trim()}`,
+        handoff: existsSync(handoff),
+      };
+    };
+    const release = async (): Promise<void> => {
+      writeFileSync(releaseFile, '');
+      await until(() => !stillRuns(reported.pid, reported.procStart), 'program B is gone', 15_000);
+    };
+    return {
+      w,
+      r,
+      tick,
+      launches,
+      terminalFor,
+      id,
+      program: reported,
+      lock,
+      refreshNow,
+      release,
+      ways,
+    };
+  }
+
+  test('refused by every way before the first refresh after the loss and after it; once the program is gone the lock is given back and the next start works', async (t) => {
+    const l = await lostWithProgram(t);
+    const running = `${S1.slice(0, 8)} is running (pid ${l.program.pid})`;
+    const spawned = l.r.spawned.length;
+    for (const moment of ['before the first refresh', 'after it']) {
+      assert.ok(stillRuns(l.program.pid, l.program.procStart), `${moment}: program B lives`);
+      const said = await l.ways();
+      assert.equal(said.launches, `4: ${running}`, moment);
+      assert.equal(said.act, `false: ${running}`, moment);
+      assert.match(
+        said.command,
+        /^4: skydeck: 0b5f3c1e is being resumed \(\d+ s ago\); try again in \d+ s$/,
+        moment,
+      );
+      assert.equal(said.handoff, false, `${moment}: the command line hands nothing off`);
+      assert.equal(l.launches.refusal(S1), running, `${moment}: restore's refuse`);
+      assert.equal(readLock(l.w.deck, S1), l.lock, `${moment}: the lock is kept`);
+      assert.equal(l.r.spawned.length, spawned, `${moment}: no second keeper`);
+      await l.refreshNow();
+    }
+    await l.release();
+    await l.refreshNow();
+    assert.equal(readLock(l.w.deck, S1), null, 'the settlement gave the lock back');
+    assert.equal(l.launches.refusal(S1), null);
+    const again = await l.launches.resume(S1, SIZE);
+    assert.equal(again.code, 0, JSON.stringify(again));
+    assert.equal(l.r.spawned.length, spawned + 1, 'one new keeper');
+    assert.ok(
+      !l.r.registry.list().some((term) => term.id === l.id),
+      'the lost terminal was closed',
+    );
+  });
+
+  test('after the lock’s expiry, while the loss is less than 60 s old: the window still refuses; the command line is open (the named limit)', async (t) => {
+    const l = await lostWithProgram(t);
+    const running = `${S1.slice(0, 8)} is running (pid ${l.program.pid})`;
+    await l.refreshNow();
+    // The lock as the store holds it once the launch is older than the lock's 60 s (as when the
+    // keeper is lost a minute after the launch): stale, its event id kept.
+    const nowMs = l.w.deck.platform.clock.nowNs() / 1_000_000n;
+    const stale = `${(nowMs - 61_000n) * 1_000_000n}${l.lock.slice(l.lock.indexOf(':'))}`;
+    l.w.deck.store.setKv(lockKey(S1), stale);
+    await l.refreshNow();
+    assert.ok(stillRuns(l.program.pid, l.program.procStart), 'program B lives');
+    const said = await l.ways();
+    assert.equal(said.launches, `4: ${running}`);
+    assert.equal(said.act, `false: ${running}`);
+    assert.equal(l.launches.refusal(S1), running, "restore's refuse");
+    // The guard sees no holder and the lock no longer holds: the command line would start a second
+    // program (S2 7.8's named limit; the handoff is only written, nothing runs it here).
+    assert.match(said.command, /^0: /);
+    assert.equal(said.handoff, true);
+  });
+
+  test('the named limit (ruled): closing the lost terminal ends the window’s refusal — with the lock stale, the next Resume starts a second program', async (t) => {
+    // S2 7.8: the window refuses only while it lists the lost terminal; after a Close (or a
+    // restart of the server) the lock alone refuses, until 60 s after the launch.
+    const l = await lostWithProgram(t);
+    const running = `${S1.slice(0, 8)} is running (pid ${l.program.pid})`;
+    await l.refreshNow();
+    const nowMs = l.w.deck.platform.clock.nowNs() / 1_000_000n;
+    const stale = `${(nowMs - 61_000n) * 1_000_000n}${l.lock.slice(l.lock.indexOf(':'))}`;
+    l.w.deck.store.setKv(lockKey(S1), stale);
+    const spawned = l.r.spawned.length;
+    assert.deepEqual((await l.launches.resume(S1, SIZE)).lines, [running]);
+    assert.equal(l.r.registry.close(l.id), 'ok', 'the bar’s Close (close-terminal)');
+    assert.ok(stillRuns(l.program.pid, l.program.procStart), 'program B lives');
+    assert.equal(l.launches.refusal(S1), null);
+    const again = await l.launches.resume(S1, SIZE);
+    assert.equal(again.code, 0, JSON.stringify(again));
+    assert.equal(l.r.spawned.length, spawned + 1, 'a second keeper beside program B');
   });
 });
 

@@ -252,8 +252,11 @@ describe('parsePageMessage: what is refused', () => {
     }
   });
 
-  test("stage A's view has no chips", () => {
-    refused(page({ ...VALID['view'], chips: [] }));
+  test("stage E's view takes chips (stage A's had none): a view with chips: [] is taken", () => {
+    assert.deepEqual(page({ ...VALID['view'], chips: [] }), {
+      ok: true,
+      value: { ...VALID['view'], chips: [] },
+    });
   });
 
   test('invalid JSON, a JSON array and other values that are not objects', () => {
@@ -705,8 +708,8 @@ describe('types (checked by npm run typecheck)', () => {
         unfolded: [],
         showDone: false,
         selected: null,
-        // @ts-expect-error stage A's view has no chips
-        chips: [],
+        // @ts-expect-error a view's chips are `chips` (stage E)
+        chip: [],
       } satisfies ViewMessage,
       {
         level: 'checks-failing',
