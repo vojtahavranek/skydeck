@@ -1,7 +1,7 @@
 /**
  * Plan 2.1 (stage E): every file of `src/window/view/search/` imports values only from its own
  * files and from `text`'s `sanitize`, types only from `sessions`, `protocol.ts`, `hub.ts` and
- * `sections.ts`, and holds no `RegExp(` (a constructor or a call).
+ * `sections.ts`, and builds no regular expression (from a search text or from anything else).
  */
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -18,12 +18,15 @@ const TYPE_SOURCES = new Set(['../../protocol.ts', '../../hub.ts', '../sections.
 
 /** `import … from '…'` and `export … from '…'`, over several lines too. */
 const STATEMENT = /^(?:import|export)\s+(type\s+)?([^;]*?)\s*from\s+'([^']+)';/gms;
-/** `import '…';`: a value import, for its effects. */
+/** `import '…';`: run for its effects, which a pure module has none of. */
 const BARE_IMPORT = /^import\s+'([^']+)'/gm;
-/** `import('…')`: in a type position or at run time; either way it names a module. */
-const IMPORT_CALL = /\bimport\s*\(\s*'([^']+)'/g;
+/** A module loaded at run time (or named in a type position: the directory needs neither). */
+const DYNAMIC = /\bimport\s*\(|\brequire\s*\(/;
 /** A regular expression built at run time (a constructor or a call). */
 const REGEXP_CALL = /RegExp\s*\(/;
+/** String methods that build a regular expression from an argument that is not one: in this
+ *  directory a pattern is written as a literal where it is used (ruled on task 90's review 1). */
+const IMPLICIT_REGEXP = /\.(?:match|matchAll|search)\s*\(\s*(?!\/)/;
 
 /** The names a clause imports as values: `{ a, type B, c as d }`, `* as x`, a default. */
 function valueNames(clause: string): string[] {
@@ -35,21 +38,12 @@ function valueNames(clause: string): string[] {
     .map((part) => part.split(/\s+as\s+/)[0] ?? part);
 }
 
-/** A module a value may come from. */
-function valueSource(from: string): boolean {
-  return OWN.test(from) || from === SANITIZE;
-}
-
-/** A module a type may come from. */
-function typeSource(from: string): boolean {
-  return valueSource(from) || SESSIONS.test(from) || TYPE_SOURCES.has(from);
-}
-
 /** What breaks plan 2.1 in one file's source; [] when nothing. */
 function violations(source: string): string[] {
   const found: string[] = [];
   for (const [, isType, clause = '', from = ''] of source.matchAll(STATEMENT)) {
-    if (!typeSource(from)) {
+    const allowedType = OWN.test(from) || from === SANITIZE || SESSIONS.test(from);
+    if (!allowedType && !TYPE_SOURCES.has(from)) {
       found.push(`import from '${from}'`);
       continue;
     }
@@ -62,17 +56,16 @@ function violations(source: string): string[] {
     }
   }
   for (const [, from = ''] of source.matchAll(BARE_IMPORT)) {
-    if (!valueSource(from)) {
-      found.push(`import '${from}'`);
-    }
+    found.push(`import '${from}'`);
   }
-  for (const [, from = ''] of source.matchAll(IMPORT_CALL)) {
-    if (!typeSource(from)) {
-      found.push(`import('${from}')`);
-    }
+  if (DYNAMIC.test(source)) {
+    found.push('a module loaded at run time');
   }
   if (REGEXP_CALL.test(source)) {
     found.push('RegExp(');
+  }
+  if (IMPLICIT_REGEXP.test(source)) {
+    found.push('a pattern built from a string by match, matchAll or search');
   }
   return found;
 }
@@ -94,9 +87,8 @@ test('the check itself: what it lets through', () => {
     "import type {\n  RowPayload,\n  NsText,\n} from '../../protocol.ts';",
     "import type { MAY_START } from '../sections.ts';",
     "export { searchWords } from './filter.ts';",
-    "import './stacks.ts';",
-    "type Row = import('../../protocol.ts').RowPayload;",
     'const parts = text.split(/\\s+/u);',
+    'const m = text.match(/^>/);',
   ].join('\n');
   assert.deepEqual(violations(source), []);
 });
@@ -113,10 +105,16 @@ test('the check itself: what it refuses', () => {
     ["import { readFileSync } from 'node:fs';", "import from 'node:fs'"],
     ["export * from '../build.ts';", "import from '../build.ts'"],
     ["import 'node:fs';", "import 'node:fs'"],
-    ["import '../../hub.ts';", "import '../../hub.ts'"],
-    ["const m = await import('node:fs');", "import('node:fs')"],
+    ["const m = await import('node:fs');", 'a module loaded at run time'],
     ['const pattern = new RegExp(text);', 'RegExp('],
     ['const pattern = RegExp (text, "u");', 'RegExp('],
+    ['const hit = title.match(word);', 'a pattern built from a string'],
+    ['const hit = title.match(PATTERN);', 'a pattern built from a string'],
+    ["const hit = title.match(new String('x'));", 'a pattern built from a string'],
+    ["const m = require('node:fs');", 'a module loaded at run time'],
+    ["import './stacks.ts';", "import './stacks.ts'"],
+    ['const at = title.search(word);', 'a pattern built from a string'],
+    ['const all = title.matchAll(word);', 'a pattern built from a string'],
   ];
   for (const [source, expected] of cases) {
     const found = violations(source);
