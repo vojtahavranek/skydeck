@@ -825,10 +825,7 @@ test('renewLock keeps the event id the lock records: only a later start releases
   const ahead = startAhead(d);
   acquireLock(d.deck, S1, { latestEventId: ahead });
   d.clock.setNs(T0 + 50n * SEC);
-  assert.equal(
-    renewLock(d.deck, S1, `${T0}:${ahead}`),
-    `${T0 + 50n * SEC + MARK_T0}:${ahead}`,
-  );
+  assert.equal(renewLock(d.deck, S1, `${T0}:${ahead}`), `${T0 + 50n * SEC + MARK_T0}:${ahead}`);
   assert.equal(lockOf(d, S1), `${T0 + 50n * SEC + MARK_T0}:${ahead}`);
   assert.equal(isLockHeld(d.deck, S1), true);
 });
@@ -911,11 +908,7 @@ function takeOver(d: TestDeck, atNs: Ns): string {
 
 test('lockMark: a lock acquireLock wrote has 1 + (its ms mod 999,999); every renewal keeps it', (t) => {
   const d = testDeck(t);
-  const [taken = '', renewed = '', again = ''] = takeAndRenew(
-    d,
-    T0 + 50n * SEC,
-    T0 + 100n * SEC,
-  );
+  const [taken = '', renewed = '', again = ''] = takeAndRenew(d, T0 + 50n * SEC, T0 + 100n * SEC);
   assert.equal(MARK_T0, 794_476n); // T0 is 1,794,474,000,000 ms
   assert.equal(taken, `${T0}:0`); // acquireLock writes what it wrote before
   assert.equal(lockMark(taken), Number(MARK_T0));
@@ -939,11 +932,7 @@ test('lockMark: last six digits that are not 0 are the mark; 1 to 999,999, never
 
 test('sameTake: a lock and its renewals are one take; a take-over with no new event is another', (t) => {
   const d = testDeck(t);
-  const [taken = '', renewed = '', again = ''] = takeAndRenew(
-    d,
-    T0 + 50n * SEC,
-    T0 + 100n * SEC,
-  );
+  const [taken = '', renewed = '', again = ''] = takeAndRenew(d, T0 + 50n * SEC, T0 + 100n * SEC);
   for (const [a, b] of [
     [taken, taken],
     [taken, renewed],

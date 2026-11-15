@@ -226,7 +226,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/platform/` | New interfaces: detached processes with a given environment, signals, TCP and unix sockets, a one-shot timer, random bytes, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value, the start deadline and the label; the `Terminal` names gain `window` (11.1, 11.2). | A |
-| `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). | A |
+| `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). In C, a renewal of a resume lock keeps the mark of its take in the last six digits of the lock's time, which are then not time (a lock's time is read to the millisecond); `sameTake` and `releaseLockOfTake` tell a renewal from a take-over (design 7.6; 7.3, 7.8). | A, C |
 | `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). | C |
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
@@ -886,14 +886,15 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   it has just run the guard and taken the lock (11.2). A server that **finds** such a keeper —
   after a restart, in `<runtimeDir>/terms/` — has not: before `G` it runs the guard again on
   freshly refreshed rows (`prepareResumeById`'s refresh and `checkResumable`, design 7.6) and
-  checks that the session's resume lock in the store is still exactly the spec's `lock` (no other
-  skydeck has taken it over); for a new session, that no live process holds the session id. When
-  all holds and the deadline has not passed, it sends `G`; otherwise `N` with the reason, which the
-  window shows on the terminal ("not started: <reason>"). The lock is compared exactly: a renewal and
-  a take-over of a stale lock with no new event look alike. Known limit, for the stage that brings
-  restore into the window: restore renews its locks, so a restored keeper whose hello comes late, or
-  after a reconnect, is refused ("its resume lock was renewed or taken over"; ruled by the plan
-  owner, stage A's plan task 21).
+  checks that the session's resume lock in the store is still of the take of the spec's `lock` —
+  that value, or a renewal of it (restore renews its locks while it waits) — and not one another
+  skydeck has taken over (design 7.6's mark of a take: same event id, same mark, and never two
+  different values a take wrote); for a new session, that no live process holds the session id.
+  When all holds and the deadline has not passed, it sends `G`; otherwise `N` with the reason, which
+  the window shows on the terminal ("not started: <reason>"; for the lock, "its resume lock was
+  taken over"). So a restored keeper whose hello comes late, or after a reconnect, is started. A
+  renewal an older skydeck wrote carries no mark and is refused as taken over, the cautious side
+  (stage C's plan, C19, task 80; it replaces stage A's exact comparison, ruled in its task 21).
 - **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
   passed with output since the last park, and for every terminal when it stops (5.5). A park names
   the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
@@ -1041,17 +1042,19 @@ The server, on `exit`:
   program may still run is never dropped this way;
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
-  and the session's lock is still the one this launch took, releases that lock, and for a new
+  and the session's lock is still of the take this launch made (the lock it took, or a renewal of
+  it by restore: design 7.6's mark), releases that lock, and for a new
   session removes the label and group it stored (design 7.6, 7.7): nothing runs, and the bar's
   Resume must not be refused for a minute. This differs **on purpose** from `settleFailedLaunch`,
   which releases only when no command could be printed (a printed command may yet be run by hand):
   the window prints nothing for the user to run (11.2), and the bar offers Resume itself. It is done
   for every exit, also of a terminal whose program was never started (an `X` with `notStarted`, a
   keeper lost before `T`); a new session's label and group are removed only while they are as
-  `prepareNew` stored them (principle 6). Known limit, for the stage that brings restore into the
-  window: restore renews its locks, so the store's lock is then no longer exactly the one the
-  terminal took, and such a lock is not given back (it expires; 7.3 has the other half). Lock values
-  then need a mark that a renewal keeps and a take-over changes.
+  `prepareNew` stored them (principle 6). A lock another skydeck took over is left alone (stage C's
+  plan, C19, task 80; 7.3 has the other half). Known limit (design 7.6): a take-over at a
+  millisecond congruent to the take's (mod 999,999, about one in a million) by a restore that then
+  renews it reads as a renewal of this launch's take; if this terminal ends while that restore
+  waits, the restore's lock is given back and its next renewal finds it gone.
 
 A keeper whose connection ends without `exit` is **lost** only when its process is dead by design
 5.5's rule (its `.pid` line) or its socket refuses connections: then its program got SIGHUP
