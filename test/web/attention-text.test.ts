@@ -104,7 +104,7 @@ describe("attentionLine: the second line of a row that needs you (B13, S2 12.2's
       'needs you · Bash <img src=x onerror=alert(1)> · 3m',
     );
     assert.equal(
-      attentionLine(attention({ detail: 'rm\n-rf\t/‮' }), now),
+      attentionLine(attention({ detail: 'rm\n-rf\t/\u202e' }), now),
       'needs you · rm -rf / · 3m',
     );
   });
@@ -179,7 +179,7 @@ describe("notificationText: a notification's title and body (S2 13, B13)", () =>
     assert.deepEqual(
       notificationText(
         notify({
-          title: '<b>\x1b]0;owned\x07Fix</b>\nit⁦',
+          title: '<b>\x1b]0;owned\x07Fix</b>\nit\u2066',
           detail: '\x1b[1m<script>alert(1)</script>\x1b[0m',
         }),
       ),
