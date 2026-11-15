@@ -36,12 +36,16 @@ them; this plan's section 2 gives only the changes.
 **Task numbers** are 90–99 (stage D has 34–39, B 50–56, C 70–79), so that branch names,
 pull-request titles and the lead's notes stay unique.
 
-**Stages B, C and D are built at the same time.** Their plans were not merged when this one was
-written. Each task here that edits a file of theirs names, in its **Waits for** line, the task of
-the other stage that must be merged first, and is written against the code as that plan leaves
-it; its **If absent** line says what the task does when that stage is not there. Where a name of
-theirs on `main` differs from what their plan said, the implementer follows `main` and tells the
-lead.
+**Stages B, C and D are built at the same time.** Stage D's plan is merged; B's and C's were
+under review when this one was written. For lines that tasks of several stages change, the lead
+ruled the order D, then B, then C, then E, per file group: a later task is built in parallel and
+merges `origin/main` after the earlier one has landed, resolving the places it names. So each
+task here that edits a file of theirs names, in its **Merges after** line, the tasks of the
+other stages that land first, and in its **To resolve** line the places where their lines and
+its own meet (line numbers are those of 9c5cbfb); it is written against the code as their plans
+leave it, and its **If absent** line says what it does when that stage is not there. Where a
+name of theirs on `main` differs from what their plan said, the implementer follows `main` and
+tells the lead.
 
 **CI stays as it is**: two Node legs, one job each. No task changes `.github/workflows/`,
 `package.json` or a dependency.
@@ -53,34 +57,39 @@ lead.
 - The icon's PNG files are drawn once, by the implementer of task 94, with `scripts/icons.ts`;
   no test and no CI step runs the script.
 - No task runs `bin/skydeck` outside the test suite (task 99 included).
+- No page case of stage E relies on the order of a context's and a page's init scripts:
+  Playwright does not define it (stage B's inert `Notification` is written for either order).
 
 **Known flakes** (not stage E's to fix; a run that fails only with one of them is run once more,
 and the pull request names both runs): `test/platform/real.test.ts` "a streamed answer that keeps
 coming…" and its case at line 1005 (the wall clock steps back); `test/standin/standin.test.ts`
 (records in the wrong order); `test/window/mapping.test.ts:623` (ENOTEMPTY at the sandbox's
-clean-up); `test-page/terminal.test.ts` "input-full (the program stalled, a large paste)".
+clean-up); `test-page/terminal.test.ts` "input-full (the program stalled, a large paste)". A
+candidate seen once under load: `test/cli/commands/window.test.ts:1772` ("--new-secret while a
+server starts…", `the window's server does not run`) — re-run once, and name both runs to the
+lead.
 
 ## 1. Tasks and waves
 
-Task 0 is `main` at 9c5cbfb (stage A complete) with this plan merged.
+Task 0 is `main` with this plan merged: stage A complete at 9c5cbfb, stage D's plan at cadb490.
 
-| # | Task | Depends on (stage E) | Waits for (other stages, merged) | Wave | Shared files | Size (code + tests) |
+| # | Task | Depends on (stage E) | Merges after (other stages) | Wave | Shared files | Size (code + tests) |
 |---|---|---|---|---|---|---|
 | 90 | The filter's rule: words, the short id, the chips | 0 | — | 1 | — | ~450 |
 | 91 | Stacks | 0 | — | 1 | — | ~350 |
 | 94 | The page's own icon | 0 | — | 1 | — | ~350 + the icon files |
 | 92 | The quick switcher's ranking | 90 | — | 2 | — | ~400 |
 | 93 | The page's texts of search | 90 | — | 2 | — | ~250 |
-| 95 | The selected session the list does not show | 0 | D 34, D 37, B 51, B 55, C 70, C 75 | 3 | yes | ~400 |
-| 96 | Search in the list message | 90, 91, 92, 95 | D 34, B 51, C 70 | 4 | yes | ~650 |
-| 97 | The list on the page: chips, stacks, the icon's links | 93, 94, 96 | D 34, D 37, B 55, C 75 | 5 | yes | ~700 |
+| 95 | The selected session the list does not show | 0 | D 34, B 51, C 70; D 37, B 55, C 75 | 3 | yes | ~400 |
+| 96 | Search in the list message | 90, 91, 92, 95 | D 34, B 51, C 70, C 73 | 4 | yes | ~650 |
+| 97 | The list on the page: chips, stacks, the icon's links | 93, 94, 96 | D 34, B 55; D 37, C 75 | 5 | yes | ~700 |
 | 98 | The quick switcher on the page | 97 | D 37, B 55, C 75 | 6 | yes | ~850 |
-| 99 | Documentation of stage E | all | D 39, B 56, C 79 | 7 | yes | docs only |
+| 99 | Documentation of stage E | all | B 50, D 39, B 56, C 79 | 7 | yes | docs only |
 
 ```
 wave 1:  90  91  94      start at once, beside stages B, C and D
 wave 2:  92  93          once 90 is merged; still no file another stage edits
-wave 3:  95              once the other stages' tasks of its row are merged (it may overlap wave 2)
+wave 3:  95              built at once; merges after the other stages' tasks of its row
 wave 4:  96
 wave 5:  97
 wave 6:  98
@@ -88,18 +97,24 @@ wave 7:  99
 ```
 
 **Can start at once:** 90, 91 and 94. They create only new files (94 also edits
-`src/window/assets.ts` and its test, which no other stage touches). 92 and 93 follow 90 and are
-just as free of shared files. Every later task edits files that stages B, C and D edit, and waits
-for the tasks named in its row. Between themselves 95–98 run one after the other: 95 and 96 edit
-the same files (`src/window/protocol.ts`, `build.ts` and their tests), 97 draws what 96 sends, and
-98 uses 97's list (`reveal`) and page elements (`#switcher`, `search.css`). The critical path is
+`src/window/assets.ts` and its test, which no other stage touches), so they also merge at once.
+92 and 93 follow 90 and are just as free of shared files. Every later task edits files that
+stages B, C and D edit: by the order D → B → C → E it may be built before those stages' tasks of
+its row are merged, and it merges `origin/main` after they have landed, resolving the places of
+its **To resolve** line. Between themselves 95–98 run one after the other: 95 and 96 edit the
+same files (`src/window/protocol.ts`, `build.ts` and their tests), 97 draws what 96 sends, and 98
+uses 97's list (`reveal`) and page elements (`#switcher`, `search.css`). The critical path is
 90 → 92 → 96 → 97 → 98 → 99. Task 99 may start its reading while 98 is built.
 
 **Why the new modules are in a directory of their own.** `test/window/view/build.test.ts` pins
-the exact list of files of `src/window/view/` (stage D's 34 and stage B's 51 each add one there):
-a new file beside them would change that pinned line in wave 1. The files of
-`src/window/view/search/` are not in it; task 90's `imports.test.ts` checks their import rule
-(2.1), and task 96, which makes `build.ts` call them, adds them to `build.ts`'s allowed imports.
+the exact list of files of `src/window/view/` and the values they may import (lines 1108–1126);
+D 34, B 51 and C 73 each extend those lines, in that order. A new file beside theirs would tie
+the first three tasks of stage E to C 73's merge. The pinned case reads only the files directly
+in `src/window/view/`, so the files of `src/window/view/search/` do not change it; until task 96
+the import rule of 2.1 holds for them through task 90's `imports.test.ts`. Task 96 — which makes
+`build.ts` call them and merges after C 73 — extends the pinned case to the subdirectory (its
+files pinned by name, the same rule for their imports), so that from then on the one case
+covers every file of the view model.
 
 **Every file each task creates or modifies.** Each task's own **Files** list below is exactly
 this row; a file not in a task's row is not that task's to touch. Files of other stages are
@@ -113,9 +128,9 @@ marked **shared**.
 | 93 | `web/search-text.js`, `test/web/search-text.test.ts` | — |
 | 94 | `web/icons/skydeck.svg`, `web/icons/icon-16.png`, `web/icons/icon-32.png`, `web/icons/icon-48.png`, `web/icons/icon-192.png`, `web/icons/icon-512.png`, `web/icons/icon-192-maskable.png`, `web/icons/icon-512-maskable.png`, `web/icons/favicon.ico`, `web/manifest.webmanifest`, `scripts/icons.ts`, `test/window/icons.test.ts` | `src/window/assets.ts`, `test/window/assets.test.ts` |
 | 95 | `test-page/hidden-selection.test.ts` | **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `web/pane.js`, `web/app.js` (one call), `test/window/view/build.test.ts` (new cases only), `test/web/pane.test.ts` (new cases only), `docs/design-step-2.md` (12.6, 12.9) |
-| 96 | `test/window/view/search-list.test.ts`, `test/window/protocol-search.test.ts` | `src/window/view/search/filter.ts`, `stacks.ts`, `switcher.ts` (their message types now come from `protocol.ts`); **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts` (the two cases that pin stage A's view without `chips`), `test/window/view/build.test.ts` (the allowed imports; the cases that pin design 7.4's filter in the window), `docs/design-step-2.md` (4.3, 8.2.3, 12.2, 12.8) |
+| 96 | `test/window/view/search-list.test.ts`, `test/window/protocol-search.test.ts` | `src/window/view/search/filter.ts`, `stacks.ts`, `switcher.ts` (their message types now come from `protocol.ts`); **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts` (the two cases that pin stage A's view without `chips`), `test/window/view/build.test.ts` (the pinned case extended to `search/`, the allowed imports; the cases that pin design 7.4's filter in the window), `docs/design-step-2.md` (4.3, 8.2.3, 12.2, 12.8) |
 | 97 | `web/chips.js`, `web/search.css`, `test-page/search.test.ts`, `test-page/icon.test.ts` | **shared:** `web/list.js`, `web/index.html`, `docs/design-step-2.md` (8.2.1, 12.12; 12.2's look of a stack; 12.9's ← → on a stack) |
-| 98 | `web/switcher.js`, `test-page/switcher.test.ts` | `web/search.css` (the switcher's styles); **shared:** `web/app.js`, `web/keys.js`, `web/help.js`, `web/banner.js` (stage C's: one rule), `test/web/keys.test.ts`, `test-page/shell.test.ts` (the Ctrl+Shift+P step of the later-keys case), `test-page/keys.test.ts` (its Ctrl+Shift+P step), `docs/design-step-2.md` (12.7, 12.8's switcher, 12.9) |
+| 98 | `web/switcher.js`, `test-page/switcher.test.ts` | `web/search.css` (the switcher's styles); **shared:** `web/app.js`, `web/keys.js`, `web/help.js`, `test/web/keys.test.ts`, `test-page/shell.test.ts` (the Ctrl+Shift+P step of the later-keys case), `test-page/keys.test.ts` (its Ctrl+Shift+P step), `docs/design-step-2.md` (12.7, 12.8's switcher, 12.9) |
 | 99 | — | **shared:** `docs/install.md`, `docs/manual-checks.md`, `README.md`, `docs/design-step-2.md` (18, 19) |
 
 Should an existing case of a file not in a task's row fail because of the task (a page case that
@@ -148,7 +163,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | E9 | **The switcher's ranking** (S2 12.8). Over every session the list lists with done ones shown, also those the page's filter, chips, folded Earlier or closed stacks leave out: the rows whose fields match every word of its text (E2, E3; all rows for none), ranked — needs you (stage B's attention, in B's order), open (Open's order: slots, then by opening time, then those elsewhere), not running (most recent first), done (not running and done, most recent first). At most 50 items; `more` says how many were left out. Each item carries where the words are in its title (every occurrence of each word, overlapping ones merged, at most 32; none when lower-casing changes the title's length — a named limit) and why this page's list does not show it (`hiddenBy`, E10). | One matching rule for the filter and the switcher (question 1: the mockup matched titles by subsequence); a bounded message. | 96 (12.8) |
 | E10 | **A pick** (Enter on an item, a click on one). The switcher closes; when the list does not show the picked row, the page first changes its view so that it does — the filter and the chips cleared (the key bar says `the filter was cleared to show <short id>`), done sessions shown, Earlier unfolded, as `hiddenBy` says; then it selects the row and does what Enter on that row in the list does (S2 12.6): a session with a terminal of the window shows it (an open one with the keyboard; an ended one under its bar); a session elsewhere shows its card; one that is not running is resumed into the window (11.3), and a refusal shows on its card (an expired one too, as the list's Enter). A closed stack needs nothing (E6). | S2 12.8: "Enter switches to a running one and resumes one that is not running"; S2 12.9: the selection is never on a row the list does not show, and the card must be shown for a refusal to be seen (question 2). | 98 (12.8) |
 | E11 | **The switcher is modal**, by stage D's rule for its dialogs (D2): a scrim covers the window; while the switcher is shown `app.js` moves the keyboard nowhere (no `setZone`, `giveKeyboard`, `keepKeyboard` or `terminalView.focus` for a result, a list or a render) and acts on no list key; Ctrl+Shift+P closes it; Ctrl+Shift+H shows the help; every other window chord says `close the switcher first (Esc)` and does nothing else; the reload keys reload as usual (nothing typed there is worth keeping). In its field: ↑ ↓ move the highlight, PgUp PgDn by a page, Enter picks, Esc closes, Tab and Shift+Tab stay in the field (they do nothing); every other key is text. A click on an item picks it; a click outside the panel closes it. It closes when the connection is lost (its items would be stale). When it closes without a pick the keyboard goes back where it was; after a pick, where the pick puts it (a terminal this page's resume brought meanwhile takes it then, as after D's dialogs). Ctrl+Shift+P while one of D's dialogs is shown says D's `close the edit first (Esc)` and opens nothing. | The brief and D2; S2 12.9 names only the chord. | 98 (12.9) |
-| E12 | **The restore offer in the switcher** (S2 12.7, stage C). While `list.banner` holds entries and no restore runs — whether the banner is shown or was dismissed with "Not now" — the switcher's first entry is `Restore <n> sessions from <time>` (`1 session`; `n` the preselected entries; the time as C's `activityTime`), shown while the switcher's text is empty or `restore` starts with each of its words; its Enter sends `act restore` with the preselected ids in the banner's order, as the banner's button does untouched. The run's report shows where stage C shows it, also when the banner was dismissed (one rule in C's `web/banner.js`: the report is drawn while it holds lines, whatever the payload says). With no offer there is no such entry. | S2 12.7: "the switcher still offers 'Restore 3 sessions from <time>' until the next WSL restart". The rule of the default set is C's view model; the page only shows what the banner payload holds. | 98 (12.7) |
+| E12 | **The restore offer in the switcher** (S2 12.7, stage C). While `list.banner` holds entries and no restore runs — whether the banner is shown or was dismissed with "Not now" — the switcher's first entry is `Restore <n> sessions from <time>` (`1 session`; `n` the preselected entries; the time as C's `activityTime` gives it, with the page's time zone as C's banner passes it), shown while the switcher's text is empty or `restore` starts with each of its words; its Enter sends `act restore` with the preselected ids in the banner's order, as the banner's button does untouched. The run's report shows where stage C shows it: C's banner draws its report while it holds lines, whatever the payload says, also after "Not now" (ruled for stage C's plan), so stage E changes nothing of C's page. With no offer there is no such entry. | S2 12.7: "the switcher still offers 'Restore 3 sessions from <time>' until the next WSL restart". The rule of the default set is C's view model; the page only shows what the banner payload holds. | 98 (12.7) |
 | E13 | **The selected session the list does not show** (stage A's known limit, S2 12.6). `list` gains `selectedRow`: the row of the session `view.selected` names, as the sections would carry it, also when they leave it out (a filter, the chips, done hidden, a folded Earlier). A terminal of the window that holds such a session is shown with that row: its header (stage D's, so it can be edited) and its ended bar with Resume and Close at once. Without a terminal the right side shows nothing, as S2 12.9 says (ruled for stage A's task 27). The list still shows no row selected and its keys act on none; when the filter shows the row again it is selected again. | Stage D's plan leaves exactly this to stage E (its section 5). | 95 (12.6, 12.9) |
 | E14 | **The icon** (S2 12.12). `web/icons/skydeck.svg` is the source; `icon-16/32/48/192/512.png`, and `icon-192-maskable.png`, `icon-512-maskable.png` (the drawing inside the maskable safe zone, the middle 80 %, on a full background), and `favicon.ico` (the 16, 32 and 48 PNGs in one ICO) are made once from it by `scripts/icons.ts` with Playwright's Chromium and committed. `web/manifest.webmanifest` holds `name` and `short_name` `skydeck`, `display` `standalone` and the seven PNGs, their `src` with `/assets/__VERSION__/`; it is served only as `GET /manifest.webmanifest` with the build put in (as `index.html`), `application/manifest+json`; `GET /favicon.ico` is `web/icons/favicon.ico`, `image/x-icon`; both `no-store` (stage A's rule for paths outside `/assets/`) and with the headers every answer carries. `index.html` names the versioned `favicon.ico` (`sizes="16x16 32x32 48x48"`) and the manifest. Nothing is fetched from outside, at build time or at run time. | S2 8.2.1 lists both paths; S2 12.12 the files; no build step. | 97 (8.2.1, 12.12) |
 
@@ -447,7 +462,7 @@ are searched`); the chord (open, or close when shown); E11's modal rule — stag
 condition becomes "a dialog or the switcher is shown" —; `switcher.update(list)` at every list
 while shown; the pick: `list.reveal(item.hiddenBy)` with E10's line when `filter` is in it, then
 `select` and the activation rule of stage A's `activate`, applied to `item.row`; the restore
-offer: `act restore` with its ids, a refusal in the key bar; `closed()`: the keyboard back where
+offer: `act restore` with its ids, a refusal in the key bar (the report is stage C's banner's); `closed()`: the keyboard back where
 it was, or to a terminal this page's resume brought meanwhile; a lost connection closes the
 switcher; a click on the title bar's `Switch…` button opens it, as the chord does (the mockup's
 button; like the rest of the page's chrome it takes no keyboard on its mousedown, and the switcher's
@@ -485,7 +500,7 @@ links in place of `<link rel="icon" href="data:," />`.
 
 ### Task 90: The filter's rule — words, the short id, the chips
 
-**Depends on:** 0 · **Waits for:** — · **Wave:** 1 · **Design:** S2 4.3, 12.8, design 7.4 · **Contracts:** 2.1, 2.2 (`filter.ts`) · **Decisions:** E1, E2, E3, E4, E5 (recorded by 96) · **Shared files:** none
+**Depends on:** 0 · **Merges after:** — · **Wave:** 1 · **Design:** S2 4.3, 12.8, design 7.4 · **Contracts:** 2.1, 2.2 (`filter.ts`) · **Decisions:** E1, E2, E3, E4, E5 (recorded by 96) · **Shared files:** none
 
 **Goal.** The one rule by which the filter and the switcher match a session, with its bounds, as
 pure functions, tested without a browser.
@@ -532,7 +547,7 @@ the cost of a long note is bounded too).
 
 ### Task 91: Stacks
 
-**Depends on:** 0 · **Waits for:** — · **Wave:** 1 · **Design:** S2 12.2, 12.9 · **Contracts:** 2.2 (`stacks.ts`) · **Decisions:** E6 (recorded by 96) · **Shared files:** none
+**Depends on:** 0 · **Merges after:** — · **Wave:** 1 · **Design:** S2 12.2, 12.9 · **Contracts:** 2.2 (`stacks.ts`) · **Decisions:** E6 (recorded by 96) · **Shared files:** none
 
 **Goal.** S2 12.2's rule of stacks as one pure function over a section's rows.
 
@@ -561,7 +576,7 @@ the cost of a long note is bounded too).
 
 ### Task 94: The page's own icon
 
-**Depends on:** 0 · **Waits for:** — · **Wave:** 1 · **Design:** S2 8.2.1, 12.12, 15.4 · **Contracts:** 2.6 · **Decisions:** E14 (recorded by 97) · **Shared files:** none
+**Depends on:** 0 · **Merges after:** — · **Wave:** 1 · **Design:** S2 8.2.1, 12.12, 15.4 · **Contracts:** 2.6 · **Decisions:** E14 (recorded by 97) · **Shared files:** none
 
 **Goal.** skydeck's icon as committed files, and the two routes of S2 8.2.1 that serve the
 favicon and the manifest. The page links them in task 97.
@@ -603,7 +618,7 @@ check` passes.
 
 ### Task 92: The quick switcher's ranking
 
-**Depends on:** 90 · **Waits for:** — · **Wave:** 2 · **Design:** S2 12.8, 12.4 (the order of those that need you), 12.1 (Open's order) · **Contracts:** 2.2 (`switcher.ts`) · **Decisions:** E9 (recorded by 96) · **Shared files:** none
+**Depends on:** 90 · **Merges after:** — · **Wave:** 2 · **Design:** S2 12.8, 12.4 (the order of those that need you), 12.1 (Open's order) · **Contracts:** 2.2 (`switcher.ts`) · **Decisions:** E9 (recorded by 96) · **Shared files:** none
 
 **Goal.** S2 12.8's ranking of every session for the switcher, as one pure function.
 
@@ -632,7 +647,7 @@ knows stage B or C: `need` and `needOrder` are given.
 
 ### Task 93: The page's texts of search
 
-**Depends on:** 90 · **Waits for:** — · **Wave:** 2 · **Design:** S2 12.2, 12.8 · **Contracts:** 2.5 (`search-text.js`) · **Decisions:** E3, E7, E9 · **Shared files:** none
+**Depends on:** 90 · **Merges after:** — · **Wave:** 2 · **Design:** S2 12.2, 12.8 · **Contracts:** 2.5 (`search-text.js`) · **Decisions:** E3, E7, E9 · **Shared files:** none
 
 **Goal.** Every text of stage E that the page writes, without the DOM, so that node:test holds
 them and the page's cut of a search text is the server's.
@@ -662,7 +677,16 @@ passes.
 
 ### Task 95: The selected session the list does not show
 
-**Depends on:** 0 · **Waits for:** D 34 (`protocol.ts`, `build.ts`, their tests, `test/web/pane.test.ts`), D 37 (`app.js`), B 51 (`protocol.ts`, `build.ts`), B 55 (`app.js`), C 70 (`protocol.ts`), C 75 (`app.js`) · **Wave:** 3 · **Design:** S2 12.6 (the ended bar's known limit), 12.9 (the selection) · **Contracts:** 2.3 (`selectedRow`), 2.4, 2.5 (`pane.js`) · **Decisions:** E13 (update S2 12.6, 12.9) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `web/pane.js`, `web/app.js`, `test/window/view/build.test.ts`, `test/web/pane.test.ts`, `docs/design-step-2.md`
+**Depends on:** 0 · **Merges after:** D 34 → B 51 → C 70 (`protocol.ts`, `build.ts`, `build.test.ts`; D 34 also `test/web/pane.test.ts`), D 37 → B 55 → C 75 (`app.js`) · **Wave:** 3 · **Design:** S2 12.6 (the ended bar's known limit), 12.9 (the selection) · **Contracts:** 2.3 (`selectedRow`), 2.4, 2.5 (`pane.js`) · **Decisions:** E13 (update S2 12.6, 12.9) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `web/pane.js`, `web/app.js`, `test/window/view/build.test.ts`, `test/web/pane.test.ts`, `docs/design-step-2.md`
+
+**To resolve when merging `origin/main`:** the end of `ListMessage` in `protocol.ts` (B 51's
+`needYou` right after `counts`, C 70's `banner` type): `selectedRow` goes last; the object
+`buildListMessage` returns (B 51's `needYou`, D 34's terminal fields): `selectedRow` goes last;
+`render()` in `app.js`, rebuilt by D 37 around `header(row, selected, term, now)` and its render
+key, and touched by B 55 and C 75 (the title, the banner): only its `paneFor(…)` call changes;
+the ends of `build.test.ts` and `pane.test.ts`, where D 34, B 51 and C 73 add cases: E's cases go
+after theirs; S2 12.6's paragraph on the ended terminal and S2 12.9's sentence on the selection
+(D's plan rewrote other sentences of 12.9: keep them).
 
 **Goal.** A terminal of the window whose session the filter (or the chips, or done hiding, or a
 folded Earlier) hides is shown with its header and an ended bar that has Resume and Close, so
@@ -708,10 +732,21 @@ known limit is gone from S2 12.6; `npm run check` passes.
 
 ### Task 96: Search in the list message
 
-**Depends on:** 90, 91, 92, 95 · **Waits for:** D 34, B 51, C 70 (`protocol.ts` and its test, `build.ts` and its test) · **Wave:** 4 · **Design:** S2 4.3, 8.2.3, 8.2.7, 12.1, 12.2, 12.8 · **Contracts:** 2.2, 2.3, 2.4 · **Decisions:** E1–E6, E8, E9 (update S2 4.3, 8.2.3, 12.2, 12.8) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `docs/design-step-2.md`
+**Depends on:** 90, 91, 92, 95 · **Merges after:** D 34 → B 51 → C 70 (`protocol.ts` and its test, `build.ts`), D 34 → B 51 → C 73 (`build.test.ts`'s pinned case) · **Wave:** 4 · **Design:** S2 4.3, 8.2.3, 8.2.7, 12.1, 12.2, 12.8 · **Contracts:** 2.2, 2.3, 2.4 · **Decisions:** E1–E6, E8, E9 (update S2 4.3, 8.2.3, 12.2, 12.8) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `docs/design-step-2.md`
 
 **Goal.** The server sends each page the list its view asks for: the filter of several words and
 the short id, done sessions while filtering, the chips, the stacks, and the switcher's items.
+
+**To resolve when merging `origin/main`:** `RowPayload` in `protocol.ts` — B 51's `attention`
+line sits right above `stack`, D 34 changed `chip` and the terminals' fields: only the `stack`
+line is E's; the end of `ViewMessage` (E only) and of `ListMessage` (after 95's `selectedRow`);
+`parsePageMessage`'s `view` entry (E only); in `build.ts`, the candidates' loop where B 51 sets
+each row's `attention` beside `rowPayload` and D 34 the terminals' fields, and the sections'
+sort; `build.test.ts` lines 1108–1126 — the pinned files and the allowed imports, which D 34
+(`chip.ts`, `windowChip`, `CHIP_ORDER`), B 51 (`attention.ts`) and C 73 (`banner.ts`) extend: E
+adds the subdirectory and keeps every name theirs added; `protocol.test.ts` — its two view cases
+(lines 165–166, 575–581) are E's alone, beside D 34's `ROW` and B 51's `LIST` fixtures; S2 8.2.3's
+`view` and `list` rows, which D 34, B 51 and C 70 each extend in that order: E's fields go last.
 
 **If absent:** without stage B no row has attention, `needOrder` is [] and the switcher has no
 Needs you rank (`build.ts` imports nothing of B's); without C or D nothing differs.
@@ -722,8 +757,10 @@ Needs you rank (`build.ts` imports nothing of B's); without C or D nothing diffe
   `src/window/view/search/filter.ts`, `stacks.ts`, `switcher.ts` (their message types imported
   from `protocol.ts`, nothing else), `test/window/protocol.test.ts` (the case "stage A's view has
   no chips" and the `@ts-expect-error` on a view with `chips`: a view with `chips: []` is now
-  taken), `test/window/view/build.test.ts` (the allowed imports gain `./search/filter.ts`,
-  `./search/stacks.ts`, `./search/switcher.ts` and lose `matchesFilter`; the cases that pinned
+  taken), `test/window/view/build.test.ts` (the pinned case also reads `src/window/view/search/`:
+  its three files pinned by name, their value imports held to 2.1's rule; `build.ts`'s allowed
+  imports gain `./search/filter.ts`, `./search/stacks.ts`, `./search/switcher.ts` and lose
+  `matchesFilter`; the cases that pinned
   design 7.4's filter in the window — one text, done sessions not shown while filtering — follow
   E2 and E5), `docs/design-step-2.md` (4.3: E1; 8.2.3: `view`'s `chips`, `opened`, `switcher`,
   `list`'s `switcher`, the stack on a row; 12.2: E6; 12.8: E2–E5, E9)
@@ -760,10 +797,21 @@ Needs you rank (`build.ts` imports nothing of B's); without C or D nothing diffe
 
 ### Task 97: The list on the page — chips, stacks, the icon's links
 
-**Depends on:** 93, 94, 96 · **Waits for:** D 34, B 55 (`web/list.js`), D 37, B 55, C 75 (`web/index.html`) · **Wave:** 5 · **Design:** S2 8.2.1, 12.1, 12.2, 12.8, 12.9 (the list zone), 12.12, 15.4 · **Contracts:** 2.1, 2.5 (`chips.js`, `list.js`, `index.html`) · **Decisions:** E4, E5, E7, E14 (update S2 8.2.1, 12.2, 12.12) · **Shared files:** `web/list.js`, `web/index.html`, `docs/design-step-2.md`
+**Depends on:** 93, 94, 96 · **Merges after:** D 34 → B 55 (`web/list.js`), D 37 → B 55 → C 75 (`web/index.html`) · **Wave:** 5 · **Design:** S2 8.2.1, 12.1, 12.2, 12.8, 12.9 (the list zone), 12.12, 15.4 · **Contracts:** 2.1, 2.5 (`chips.js`, `list.js`, `index.html`) · **Decisions:** E4, E5, E7, E14 (update S2 8.2.1, 12.2, 12.12) · **Shared files:** `web/list.js`, `web/index.html`, `docs/design-step-2.md`
 
 **Goal.** The list shows the chips, the stacks and done sessions while filtering exactly as the
 server sends them, and the page has its icon.
+
+**To resolve when merging `origin/main`:** in `list.js`, `makeRow` and `paintRow` (D 34's chip
+with its dim `+30`, B 55's `data-attention` and second line), where E adds the stack's badge and
+`data-stack`; `render()`'s loop over a section's rows, where E adds the `+n more` line; the
+filter bar of `createList`, where E adds the chips; `paintCounts` (B 55's `need you`) stays theirs;
+D 34 moved the list's `nowNs` into `web/format.js` (`serverNow`): E uses that. In `index.html`:
+the style-sheet links (D 37's `edit.css`, B 55's `attention.css`, C 75's `banner.css`; E's
+`search.css` after them), the body's elements (D 37's `#editor` and `#toast`; E's `#switcher`
+after them), the title bar (B 55's `#notify-on`; E's `Switch…` after it), the key bar's hints,
+and the icon's `<link>` line (E only); S2 12.2 and 12.9, where B 55 and D 37 wrote sentences of
+their own: keep them.
 
 **If absent:** without stage B, C or D nothing differs: the rows draw what `web/list-text.js`
 gives on `main`.
@@ -811,7 +859,21 @@ tests (98); the page's cut after 16 words (98: until then the server uses the fi
 
 ### Task 98: The quick switcher on the page
 
-**Depends on:** 97 · **Waits for:** D 37, B 55, C 75 (`web/app.js`, `keys.js`, `help.js`, `test/web/keys.test.ts`, `test-page/shell.test.ts`), C 75 (`web/banner.js`) · **Wave:** 6 · **Design:** S2 11.3, 12.6, 12.7, 12.8, 12.9, 15.4 · **Contracts:** 2.5 (`switcher.js`, `keys.js`, `app.js`) · **Decisions:** E3, E10, E11, E12 (update S2 12.7, 12.8, 12.9) · **Shared files:** `web/app.js`, `web/keys.js`, `web/help.js`, `web/banner.js`, `test/web/keys.test.ts`, `test-page/shell.test.ts`, `test-page/keys.test.ts`, `docs/design-step-2.md`
+**Depends on:** 97 · **Merges after:** D 37 → B 55 → C 75 (`web/app.js`, `keys.js`, `help.js`, `test/web/keys.test.ts`, `test-page/shell.test.ts`) · **Wave:** 6 · **Design:** S2 11.3, 12.6, 12.7, 12.8, 12.9, 15.4 · **Contracts:** 2.5 (`switcher.js`, `keys.js`, `app.js`) · **Decisions:** E3, E10, E11, E12 (update S2 12.7, 12.8, 12.9) · **Shared files:** `web/app.js`, `web/keys.js`, `web/help.js`, `test/web/keys.test.ts`, `test-page/shell.test.ts`, `test-page/keys.test.ts`, `docs/design-step-2.md`
+
+**To resolve when merging `origin/main`:** in `app.js`, the imports and the modules made at load
+(D 37's editor and toast, B 55's notifications, C 75's banner; E's switcher after them),
+`received()`'s `case 'list'` (D 37's `editor.update`, B 55's `document.title`, C 75's
+`banner.render`; E's `switcher.update` after them), `doChord` (B 55's `next-attention` beside
+E's `switcher`), D 37's modal condition and its capture-phase Esc (E extends both), `changeView`
+(E only); in `keys.js`, `windowChord`'s `'p'` case right beside B 55's `'j'` and the `later` kind
+(D 37 removed stage D's, B 55 stage B's: E removes the last, and the type with it); in `help.js`
+the window section's last two lines (Ctrl+Shift+P, and Ctrl+Shift+J which B 55 changed) and the
+list section's `←`/`→` and `/` lines (D 37 changed the lines after them); in
+`test/web/keys.test.ts` the `later` cases (lines 46, 103, 440–452), which D 37 and B 55 each
+narrowed; in `test-page/shell.test.ts` the later-keys case (lines 162–261: D 37's six keys, B 55's
+Ctrl+Shift+J), where only the Ctrl+Shift+P step is E's; S2 12.7's paragraph (C 73 wrote C10
+there) and 12.9 (D 37's D2 sentences): keep theirs.
 
 **Goal.** Ctrl+Shift+P opens the quick switcher over every session; typing narrows it, Enter
 switches to the session or resumes it, and the keyboard never leaves it while it is shown.
@@ -820,8 +882,7 @@ switches to the session or resumes it, and the keyboard never leaves it while it
 switcher alone (`modal()` is "the switcher is shown"), `now()` counts on from the list's `nowNs`
 in `app.js` as `web/list.js` does (there is no `serverNow` yet), and the case with a delayed resume
 builds its scripted world in its own file from stage A's `standinServer` and `honest`; without B the
-switcher shows no Needs you rank (the server sends none); without C there is no offer and
-`web/banner.js` is not touched.
+switcher shows no Needs you rank (the server sends none); without C there is no offer.
 
 **Files**
 - Create: `web/switcher.js`, `test-page/switcher.test.ts`
@@ -829,8 +890,7 @@ switcher shows no Needs you rank (the server sends none); without C there is no 
   (Ctrl+Shift+P, `switcherKey`), `web/help.js` (the Ctrl+Shift+P line no longer comes later: `the
   quick switcher: every session, done ones too — type to narrow, ↑ ↓ move, Enter switches to it or
   resumes it, Esc closes`; the `← →` line `fold or unfold Earlier; open or close a stack`; the `/`
-  line `filter: several words, all must match, also the short id`), `web/banner.js` (E12's one
-  rule), `test/web/keys.test.ts` (Ctrl+Shift+P gives `switcher`; `switcherKey`'s cases; `later`
+  line `filter: several words, all must match, also the short id`), `test/web/keys.test.ts` (Ctrl+Shift+P gives `switcher`; `switcherKey`'s cases; `later`
   only where it remains), `test-page/shell.test.ts` (the later-keys case's Ctrl+Shift+P step: it
   opens the switcher), `test-page/keys.test.ts` (its Ctrl+Shift+P step: the program gets
   nothing and the switcher opens), `docs/design-step-2.md` (12.7: E12; 12.8: E10; 12.9: E11)
@@ -884,10 +944,17 @@ passes.
 
 ### Task 99: Documentation of stage E
 
-**Depends on:** all · **Waits for:** D 39, B 56, C 79 (the documents) · **Wave:** 7 · **Design:** S2 12.2, 12.8, 12.12, 18, 19 · **Contracts:** — · **Decisions:** — · **Shared files:** `docs/install.md`, `docs/manual-checks.md`, `README.md`, `docs/design-step-2.md`
+**Depends on:** all · **Merges after:** B 50 (`docs/install.md`, "Updating"), then D 39 → B 56 → C 79 (the documents) · **Wave:** 7 · **Design:** S2 12.2, 12.8, 12.12, 18, 19 · **Contracts:** — · **Decisions:** — · **Shared files:** `docs/install.md`, `docs/manual-checks.md`, `README.md`, `docs/design-step-2.md`
 
 **Goal.** A user can search, use the chips, the stacks and the switcher from the documents
 alone, and knows which checks only they can make.
+
+**To resolve when merging `origin/main`:** `docs/install.md`'s "Using the window" and "Known
+limits" paragraphs, which D 39, B 56 and C 79 each extend (E's text after theirs; B 50 changed
+"Updating", which E leaves alone); the parts of `docs/manual-checks.md` each stage adds (E's part
+after C's); S2 18's table rows and S2 19's stage lines. In `README.md` E adds one sentence to the
+window's paragraph and no row to the command table (the formatter re-pads that table whole, so
+any other edit of it conflicts).
 
 **If absent:** the documents name only what is on `main` (an offer to restore only with stage C,
 Needs you only with stage B, the header's editing only with stage D).
@@ -960,7 +1027,8 @@ Stage E reads, and never changes, what B, C and D build: B's `attention` on a ro
 files only where its own lines are: in `protocol.ts` and `build.ts` the optional fields of 2.3 and
 the steps of 2.4; in `app.js` the one call of 95 and the switcher's wiring; in `keys.js` only
 Ctrl+Shift+P (the last `later`); in `help.js` three lines; in `list.js` the chips and the stacks;
-in `index.html` the elements of 2.5; in `banner.js` one rule (E12). No migration, no new store key,
+in `index.html` the elements of 2.5. Nothing of stage C's page changes: C's banner draws a
+restore's report whatever its payload says (ruled for C's plan). No migration, no new store key,
 no server module. Section 1's tables list every file of every task, for the lead's check against
 the other stages.
 
@@ -1017,8 +1085,15 @@ Planned around the reading given; each is the lead's or the user's to change.
    selection leaves (rows then move); the other way is for the page to remember it.
 5. **The bounds** (E3): 16 words; a note searched in its first 16,384 characters; 50 items in the
    switcher. Planned as given; each is one constant.
-6. **The report of a restore started from the switcher after "Not now"** (E12). Stage C shows the
-   report only with the banner; planned: one rule in C's `web/banner.js` (the report is drawn
-   while it has lines). The other way is for stage C's plan to say it.
+6. **The pinned case of the view's files** (section 1). The rule is that a new file under
+   `src/window/view/` extends `build.test.ts`'s pinned case. Planned: stage E's three modules sit
+   in `src/window/view/search/`, which that case does not read, so that tasks 90–92 merge at
+   once instead of after C 73. Meanwhile their import rule is held by task 90's own test. Task 96,
+   which merges after C 73, extends the pinned case to the subdirectory. The other way puts them
+   beside `build.ts` and makes 90–92 merge after C 73, each resolving lines 1108–1126.
 7. **The check numbers.** W30 and W31 follow stage D's W27–W29; if another stage takes them, task
    99 uses the next free ones.
+
+Answered by the lead before this plan was merged: the report of a restore started from the
+switcher after "Not now" is drawn by stage C's banner (ruled for C's plan, its review B,
+item 2), so task 98 changes nothing in `web/banner.js`.
