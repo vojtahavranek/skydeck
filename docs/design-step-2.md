@@ -1674,11 +1674,14 @@ the first time one of them is known and never removed.
 ### 10.3 When a turn ends
 
 A turn ends when a holder's live-session file changes its `status` from `busy` or `waiting` to
-`idle`, the file still naming the same session and the same process (pid and process start).
-The server sees that at its one-second look and records, for that session, the next
-`attention_seq` as `turn_ended_seq` and the file's `statusUpdatedAt` (else the time it saw the
-change) as `turn_ended_ns`. When the session is being seen at that moment (12.4), the same write
-sets `seen_seq` to a later value, so a turn that ends in front of the user is never "finished".
+`idle`, the file still naming the same session and the same process (pid and process start). The
+server sees that at its one-second look and records, for that session, the next `attention_seq` as
+`turn_ended_seq` and, as `turn_ended_ns`, the idle file's status time: its `statusUpdatedAt`, else
+its `updatedAt`, else the time the server saw the change. When the file has one of the two, that is
+exactly the time the look keeps for the file (stage B's plan, contract 2.5's `sinceNs`), so that it
+can be compared for equality with the status time the session shows (12.4), never across two clocks.
+When the session is being seen at that moment (12.4), the same write sets `seen_seq` to a later
+value, so a turn that ends in front of the user is never "finished".
 
 `busy` to `waiting` is not a turn end (a dialog opened inside the turn). A file that names another
 session than at the last look (`/clear`) starts over. A look that cannot read a file (it is being
