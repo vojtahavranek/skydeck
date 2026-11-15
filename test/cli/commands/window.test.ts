@@ -936,7 +936,7 @@ async function openTerminal(
 }
 
 describe('skydeck window --restart, --stop, --new-secret (S2 5.1, 5.5)', () => {
-  test('--restart: the restart line, a new server pid; the keeper alive and rediscovered', async (t) => {
+  test("--restart: the restart line, then C20's wait for the window the old server had (it does not come back), Edge; a new server pid; the keeper alive and rediscovered", async (t) => {
     const h = windowHarness(t);
     const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
     assert.equal(first.code, 0, first.stderr);
@@ -947,8 +947,11 @@ describe('skydeck window --restart, --stop, --new-secret (S2 5.1, 5.5)', () => {
     const r = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' } });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.stderr, restartLine(h));
+    // Plan C20 (task 74 wires the pages mark): the old server had a page, so the new one expects
+    // the window back; the fake page does not return, and after the wait Edge is started.
+    assert.equal(r.stderr, `${restartLine(h)}${WAITING}`);
     assert.match(r.stdout, SUCCESS);
+    await until(() => h.edgeRuns().length === 2, 'Edge started for the restart', WAIT_MS);
     const now = h.server();
     assert.ok(now !== null);
     assert.notEqual(now.pid, old.pid, 'a new server');

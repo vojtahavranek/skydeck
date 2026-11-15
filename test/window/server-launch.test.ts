@@ -4,7 +4,7 @@
 // builders with `claudeCommand`, and the first size of the page that had focus last. In the test
 // process (A19) on realTestPlatform, with real keepers running the stand-in.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -375,17 +375,55 @@ function heldStart(): {
 }
 
 describe('the pages mark (plan C20, S2 5.1)', () => {
-  test('window_pages_open is in the store once a page has started, removed once the last page closed, and still there after stop() with a page connected', async (t) => {
+  test("window_pages_open: written by the server's first refresh after a page has started, removed by its first refresh after the last page closed, and still there after stop() with a page connected", async (t) => {
     const d = serverSandbox(t);
     const test = await d.start();
     const mark = (): string | null => d.deck.store.getKv('window_pages_open');
-    assert.equal(mark(), null);
+    const { spoolDir } = d.deck.places;
+    mkdirSync(spoolDir, { recursive: true });
+    let markers = 0;
+    /**
+     * Until one refresh of the server has run whole since now (held by order, not by a time: a
+     * refresh every 2 s is the promptness C20 asks for). A file the hook could not have written is
+     * moved to spool/bad by a refresh's ingest; the server runs in this process and a refresh step
+     * — the ingest, then afterRefresh's update of the mark — runs without an await, so once the file
+     * is gone that step is over.
+     */
+    const refreshed = async (): Promise<void> => {
+      markers += 1;
+      const path = join(spoolDir, `0-0-${markers}-task74-marker.ev`);
+      writeFileSync(path, 'not a spool file\n');
+      await until(() => !existsSync(path), `refresh ${markers} of the server`, WAIT_MS);
+    };
+    const pagesOf = async (): Promise<unknown> =>
+      (
+        (
+          await d.platform.net.requestUnix(d.files.serverSock, {
+            method: 'GET',
+            path: '/status',
+            timeoutMs: 10_000,
+          })
+        ).body as { pages?: unknown }
+      ).pages;
+
+    await refreshed();
+    assert.equal(mark(), null, 'no page, no mark');
     const one = await connectTestPage(t, d, test.server);
-    await until(() => mark() === '1', 'the mark written at a refresh', WAIT_MS);
+    await one.next('list', 'the first list: the server has the page');
+    await refreshed();
+    assert.equal(mark(), '1', 'written by the first refresh after the page started');
     await one.close();
-    await until(() => mark() === null, 'the mark removed at a refresh', WAIT_MS);
-    await connectTestPage(t, d, test.server);
-    await until(() => mark() === '1', 'the mark written again', WAIT_MS);
+    const deadline = performance.now() + WAIT_MS;
+    while ((await pagesOf()) !== 0) {
+      assert.ok(performance.now() < deadline, 'the server saw the page go');
+      await sleep(50);
+    }
+    await refreshed();
+    assert.equal(mark(), null, 'removed by the first refresh after the last page closed');
+    const two = await connectTestPage(t, d, test.server);
+    await two.next('list', 'the first list of the second page');
+    await refreshed();
+    assert.equal(mark(), '1', 'written again');
     await test.server.stop('the test stops it');
     assert.equal(mark(), '1', 'the stop leaves it: a window may come back');
   });
