@@ -3201,6 +3201,9 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404? Answered for Chromium by the page suite (17.4, plan task 26): no, the worker keeps answering and stays registered; Edge itself is still to be checked here. | A | 15.3 |
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
+| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check keeps a copy of `config.json` first and puts it back at the end. | D | 12.5, 9.6 |
+| W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
+| W29 | On the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key. | D | 12.5, 12.9 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
@@ -3250,12 +3253,14 @@ configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` 
 `(in the skydeck window)`. Check W16.
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
-and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3) and the
-pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
+and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3), the header's
+one line for the pull requests and the pull-request dialog that lists each on a line of its own;
+the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
 the group chip and `ticketUrl` (12.5, 16.4; asked for by the user on 2026-11-15, the details
 ruled by the lead that day). Also two parts of 12.5 that no stage named before (plan D's D11): ↻
 in the pull-request dialog, which reads the session's pull requests now (`pr-refresh`, 8.2.3), and
-the header's "opened <time> · last active <age>" with where the title comes from.
+the header's "opened <time> · last active <age>" with where the title comes from. Checks
+W27–W29.
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
 the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The

@@ -4,7 +4,8 @@ The short checklist to run by hand after installing skydeck on a machine, and be
 Claude Code version. It covers what the tests cannot: they never start `claude`, never open a
 terminal tab, never restart WSL and never start a Windows program. Each item gives the command and
 the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 check the window of
-step 2 (stage A) and start at "The window (step 2, stage A)" below.
+step 2 (stage A) and start at "The window (step 2, stage A)" below; W27–W29 check editing in the
+window (stage D), at "The window (step 2, stage D)".
 
 Setup:
 
@@ -344,7 +345,7 @@ devtools pane, history, reload). What the ones with something to see do:
 | Ctrl+Shift+V | Claude Code's image paste (W6) |
 | Ctrl+Shift+H | the key help; again: it goes |
 | Ctrl+Shift+P, Ctrl+Shift+J | the key bar says `Ctrl+Shift+P: comes in a later stage` (`…J…`) |
-| in the list (Ctrl+Shift+L first): `l`, `g`, `n`, `p`, `d`, F2 | `l: comes in a later stage`, and so on |
+| in the list (Ctrl+Shift+L first), with the throwaway session selected (its short id in the header): `l`, F2, `g`, `n`, `p` | its dialog opens over the page (`Label — <title>`, …); Esc closes it and saves nothing. `d` marks the session done: it is W29's |
 | in the list: F5, Ctrl+R, Ctrl+F5, Shift+F5, Ctrl+Shift+R | the page reloads itself (the terminals come back) after it has checked the server |
 | in the terminal: F5, Ctrl+R | they reach Claude Code; Ctrl+Shift+R reloads the page |
 | Alt+F4 | the window closes (`skydeck window` opens it again) |
@@ -806,3 +807,137 @@ how it looked before. What a rebuilt screen does not restore (the scroll region,
 the character sets) would show as a cursor in the wrong place, or lines scrolled or drawn wrong.
 
 Write down: what differed, in the full-screen mode and after it.
+
+## The window (step 2, stage D)
+
+The checks of the design's section 18 (design-step-2.md) that stage D needs: W27–W29, editing in
+the window ([install.md](install.md), "Editing a session (stage D)" and "The ticket link"). Each
+check says what to set up, what to type, what to look at and what to write down.
+
+Setup:
+
+- The setup of "The window (step 2, stage A)" above, with its **throwaway session in the
+  window**. Every step here uses that session, never one of your real work: `l` and Enter on a
+  real row replace its label for good.
+- **Before every key and every click**, look at the header's short id (on its second line, at the
+  right): it must be the throwaway session's (`skydeck ls` in W prints the short ids as the last
+  column). In a dialog, the heading names the session (`Label — <title>`): it must be the
+  throwaway session's title.
+- No step marks a real session done, edits a real note or closes a window. After `d` the selection
+  moves to the next row, which may be a real session: click `Undo` in the toast before the next
+  key.
+
+## W27. The group chip opens your ticket
+
+Setup: one of your ticket keys (`ABC-123` below: with the default `groupPattern` capital letters
+and digits, a hyphen and a number) and your ticket system's address for a ticket, with `{key}`
+where the key goes. In W, when `~/.config/skydeck/config.json` exists (`ls ~/.config/skydeck/`),
+keep a copy of it first:
+
+```sh
+cp ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
+```
+
+Add the key `ticketUrl` to the file. When there is no file, create it with exactly this (for Jira;
+put your site's address):
+
+```json
+{
+  "ticketUrl": "https://<your site>.atlassian.net/browse/{key}"
+}
+```
+
+and when it has other keys, add the line `"ticketUrl": "…",` among them. A mistake in the file
+makes every skydeck command print one line that names the file and the key and exit 1, and do
+nothing else (`skydeck doctor` shows it as a problem line); put the copy back to undo it. Then, in
+W (the server reads the file when it starts; the window stays and connects again):
+
+```sh
+skydeck window --restart
+```
+
+1. In the window, select the throwaway session. In the list (Ctrl+Shift+L until the key bar says
+   `Focus: list`) press `l`: the dialog's heading is `Label — <the throwaway session's title>`.
+   Type `ABC-123 skydeck check` and press Enter. Expected: the dialog closes, the header's title is
+   `ABC-123 skydeck check`, and the group chip shows `ABC-123 ↗`, underlined, with your ticket's
+   address as its tooltip.
+2. In W: `skydeck show <short id>`. Expected: the line `group:     ABC-123`, and after it
+   `ticket:    ` with your ticket's address.
+3. Click the group chip once. Expected: the ticket opens in your own Edge window, not in skydeck's,
+   where you are logged in. A drag over the chip selects its text and opens nothing.
+4. Put the configuration back: `mv ~/.config/skydeck/config.json.before-w27
+   ~/.config/skydeck/config.json` when you made the copy; else remove the file
+   (`rm ~/.config/skydeck/config.json`). Then `skydeck window --restart`. Expected: the chip shows
+   `ABC-123` without `↗`, not underlined, with the tooltip `group (from the title)`; a click on it
+   opens nothing; `skydeck show <short id>` prints no `ticket:` line. (To keep the link for good,
+   add the key again afterwards.)
+
+Write down: where the ticket opened, and whether you were logged in there; whether the chip was a
+link only with `ticketUrl`; the `ticket:` line.
+
+## W28. A pull request of your own
+
+Setup: an open pull request of yours on GitHub that your `gh` can read (`gh auth status` says you
+are logged in), and its address, `https://github.com/<owner>/<repo>/pull/<n>`. In the window,
+select the throwaway session: the header's third line says `no pull request` and `+ PR`.
+
+1. Click `+ PR`. The dialog's heading is `Pull requests — <the throwaway session's title>`, and it
+   says `no pull request attached`. Paste the address into its field (Ctrl+V) and press Enter.
+   Expected: the field empties, the dialog stays open, and a line `<owner>/<repo> #<n> · not
+   fetched` appears; within seconds it shows the pull request's state, read through your `gh`
+   (`… · checks pending · checked 2s ago`, `… · approved, green · checked 2s ago`, …). Its
+   tooltip is the pull request's title.
+2. Esc. Expected: the header's third line shows the chip (`PR · pending`, …), the item
+   `<owner>/<repo> #<n> · pending` (the same state) and `Pull requests`; the session's row in the
+   list has the same chip.
+3. In W: `skydeck show <short id>`. Expected: a `pr:` line with the same state.
+4. Click the item on the header's third line. Expected: the pull request opens in your own Edge
+   window.
+5. `Pull requests`, then `↻`. Expected: within seconds the line's `checked … ago` starts again
+   from a few seconds.
+6. `×` on the line. Expected: the line goes, and the toast says `Detached <owner>/<repo> #<n>`
+   with `Undo` (leave it). Esc. The header's third line says `no pull request` and `+ PR` again,
+   and `skydeck show <short id>` has no `pr:` line.
+
+Write down: how long the state took to show; whether the dialog's line, the header, the list's
+chip and `skydeck show` agreed; any `can't read`, with its error.
+
+## W29. The edit keys on your layouts
+
+Run it once on the US layout and once on the Czech one (Win+Space switches, W8). Setup: the
+throwaway session running in the window (Enter on its row resumes it) and selected, and the list
+has the keyboard (Ctrl+Shift+L until the key bar says `Focus: list`). Look at the header's short
+id before every key.
+
+1. `l`: the label's dialog (`Label — <title>`). Type `W29 label` (on the Czech layout also
+   `ěščř`) and press Enter. Expected: the dialog closes; the header's title and the row show the
+   new label. F2: the same dialog; Esc closes it and changes nothing.
+2. `g`: the group's dialog. Type `w29-group` and press Enter. Expected: the group chip shows
+   `w29-group`, with ✎ beside it.
+3. `n`: the note's dialog, with a text box. Type two lines (Enter between them is a line break),
+   then press Ctrl+Enter. Expected: the dialog closes; the header's fourth line shows the first
+   line followed by ` …`.
+4. `n` again; change the text and press Esc. Expected: the dialog stays and says `Esc again
+   discards your text`. With the text still changed, press F5, Shift+F5, Ctrl+F5, Ctrl+R and
+   Ctrl+Shift+R, then the keyboard's refresh key if it has one (alone, with Shift, with Ctrl).
+   Expected for each: the key bar says `save or cancel the edit first` and the window does not
+   reload. **If one of them reloads the window, your text is lost: write down which key, and
+   report it** (the page's guard against a reload does not hold in Edge for that key). Then Esc
+   again: the dialog closes, and the note is the one saved in step 3.
+5. `p`: the pull-request dialog. Esc closes it.
+6. In W: `skydeck show <short id>`. Expected: its `label:`, `group:` and `note:` lines are what you
+   typed in steps 1 to 3.
+7. Back in the window (the key bar says `Focus: list`), `d`. Expected: the toast `Marked done.
+   Stays under Open while it runs; hidden once it stops.` with `Undo`; the row stays under Open
+   with a `done` mark, and stays selected. Click `Undo` within 5 seconds: the mark goes.
+8. End the throwaway session: Ctrl+Shift+L to its terminal, `/exit`, then `Close` on its ended
+   bar. Its row moves to This week. Click it (the list gets the keyboard; look at the short id)
+   and press `d`. Expected: the row disappears, the toast says `Marked done: hidden from the list.
+   It comes back on new activity.`, and the row after it in This week is selected (the one before
+   it when it was the last; none when it was alone) — another session: **click `Undo` now, before
+   any key**. Expected: the throwaway session is back in This week and selected again. (When the
+   toast went before you clicked: `a` shows the done sessions; click the throwaway session's row,
+   look at its short id, press `d`, then `a` again.)
+
+Write down, per layout: every key that did something else than described here, or nothing; in
+step 4, whether a reload key reloaded the window with changed text, and which.
