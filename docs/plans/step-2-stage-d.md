@@ -371,7 +371,8 @@ yet.
 - Modify (tests and fixtures): `test/window/protocol.test.ts`, `test/window/view/sections.test.ts`,
   `test/window/view/build.test.ts` (its fixtures, and its case that pins the view's files and
   value imports: `chip.ts` joins `build.ts` and `sections.ts`, and `CHIP_ORDER` of
-  `../../github.ts` joins the allowed imports, D4), `test/window/selected.test.ts`,
+  `../../github.ts` and `windowChip` of `./chip.ts`, which `sections.ts` imports, join the
+  allowed imports, D4; ruled by the lead on review B's re-check), `test/window/selected.test.ts`,
   `test/window/actions.test.ts`, `test/helpers/pages.ts` (`defaultList`'s terminals gain
   `openedNs`), `test/web/list.test.ts`, `test/web/pane.test.ts`, `test/web/format.test.ts`
   (`serverNow`), `test-page/list.test.ts`, `test-page/cards.test.ts` (its chip fixtures: `count`
@@ -394,7 +395,8 @@ closed`. Stage A's header keeps showing `chipText`'s whole text until task 38 re
 - `windowChip`: every row of S2 12.3's table; none attached → null; only never-fetched ones; a
   can't-read one with merged ones.
 - `rowPayload`: the chip and `okAtNs`; the list's terminals carry `openedNs`. The view's pinned
-  files and imports are `build.ts`, `chip.ts`, `sections.ts` and A8's and D4's names, no more.
+  files and imports are `build.ts`, `chip.ts`, `sections.ts` and A8's and D4's names
+  (`CHIP_ORDER`, and `windowChip` from `./chip.ts`), no more.
 - `serverNow`: a list's time plus the elapsed milliseconds, as `web/list.js` counted before; a
   time that is not a whole number given back as it is; the list's ages unchanged (its cases pass).
 - `selectedPayload`: the note exactly as stored (an escape character and CRLF kept); null without

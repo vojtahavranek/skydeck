@@ -52,6 +52,8 @@ const NO_TERMINAL = 'this terminal is no longer there';
 const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 characters';
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
+/** Stage D's actions are parsed (plan D 2.2) and acted on from task 36 on. */
+const NOT_YET = 'skydeck cannot do that action yet';
 const ALREADY_OPEN = 'this session is already open in the window';
 const BUSY = "skydeck's database is busy; try again";
 
@@ -116,7 +118,9 @@ function orNone(text: string): string | null {
  * `prepareNew` with the form's directory, label and group → `launchPrepared`. A launch answers its
  * outcome's lines (`ok` when it started, with the session's id); a SkydeckError (the guard, the
  * lock, RefError, prepareNew's refusals) answers its message. `close-terminal` → `hub.close`;
- * `open-link` → `linkToOpen`, then `openLink`. A resume is refused while the window has a terminal
+ * `open-link` → `linkToOpen`, then `openLink`. Stage D's kinds (label, group, note, done, undone,
+ * pr-refresh, pr-add, pr-rm) are refused with `skydeck cannot do that action yet`, nothing done,
+ * until task 36 acts on them. A resume is refused while the window has a terminal
  * of the session whose program may still run (ruled, review 2 of task 32), and before it opens its
  * terminal it closes the session's terminals that are over (ended, lost, not started): an ended
  * terminal is dropped when its session runs again (ruled, review of task 13).
@@ -244,6 +248,16 @@ export function createActions(deps: ActionDeps): ActionHandler {
         if (link === null) return refusal(NOT_A_LINK);
         return (await deps.openLink(link)) ? DONE : refusal(LINK_FAILED);
       }
+      case 'label':
+      case 'group':
+      case 'note':
+      case 'done':
+      case 'undone':
+      case 'pr-refresh':
+      case 'pr-add':
+      case 'pr-rm':
+        // Stage D's editing (plan D, task 36): nothing is done before then.
+        return refusal(NOT_YET);
     }
   }
 
