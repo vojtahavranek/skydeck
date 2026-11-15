@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -177,6 +178,7 @@ describe('parseConfig', () => {
       restoreStartTimeoutSeconds: 120,
       claudeHome: null,
       claudeCommand: 'claude',
+      ticketUrl: null,
       window: {
         port: 47613,
         edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -191,5 +193,97 @@ describe('parseConfig', () => {
       () => parseConfig('{"colour":1}', '/some/where.json'),
       /\/some\/where\.json.*colour/,
     );
+  });
+});
+
+describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () => {
+  const MESSAGE =
+    '"ticketUrl" must be null or an http or https address with {key} once, after its host';
+
+  /** The config with `ticketUrl` set to `value`, loaded from a file in a fresh sandbox. */
+  function withTicketUrl(t: TestContext, value: unknown): { path: string; run: () => unknown } {
+    return load(t, JSON.stringify({ ticketUrl: value }));
+  }
+
+  for (const value of [
+    null,
+    'https://example.atlassian.net/browse/{key}',
+    'http://host:8080/t?id={key}',
+    'https://host/#/{key}',
+    'https://Example.net:443/{key}',
+    'https://user:secret@host/{key}',
+  ]) {
+    test(`accepts ${JSON.stringify(value)}, kept as it was written`, (t) => {
+      const config = withTicketUrl(t, value).run() as { ticketUrl: unknown };
+      assert.equal(config.ticketUrl, value);
+    });
+  }
+
+  test('accepts one of exactly 2,048 characters', (t) => {
+    const base = 'https://example.net/{key}/';
+    const value = `${base}${'a'.repeat(2048 - base.length)}`;
+    assert.equal(value.length, 2048);
+
+    assert.equal((withTicketUrl(t, value).run() as { ticketUrl: unknown }).ticketUrl, value);
+  });
+
+  const refused: [name: string, value: unknown][] = [
+    // Review A's five: the parser skips the slashes, or takes the key as the user name.
+    ['the key read as the host behind three slashes', 'https:///{key}/x'],
+    ['the key read as the host behind four slashes', 'https:////{key}'],
+    ['the key read as the host behind one slash', 'https:/{key}/x'],
+    ['the key read as the host without slashes', 'https:{key}'],
+    ['the key read as the user name behind three slashes', 'https:///{key}@h/x'],
+    ['the key in the host', 'https://{key}.example.net/'],
+    ['the key as the host, after a user name', 'https://user@{key}/'],
+    ['the key at the end of the host', 'https://host{key}/'],
+    ['the key as the user name', 'https://{key}@host/x'],
+    ['the key as the password', 'https://u:{key}@host/x'],
+    ['the key as the port', 'https://host:{key}/'],
+    // A named limit: a host or a user name that holds a sample key itself cannot be told from one
+    // that the key went into.
+    ['a host that holds a sample key', 'https://key-1.example.net/{key}'],
+    ['a user name that holds the other sample key', 'https://Other-2@host/{key}'],
+    ['javascript:', 'javascript:{key}'],
+    ['file:', 'file:///{key}'],
+    ['ftp:', 'ftp://host/{key}'],
+    ['not a URL', 'example.net/{key}'],
+    ['no {key}', 'https://host/browse/'],
+    ['{key} twice', 'https://host/{key}/{key}'],
+    ['a "', 'https://host/{key}?q="a"'],
+    ['a backslash', 'https://host/a\\{key}'],
+    ['a space', 'https://host/a b/{key}'],
+    ['a tab', 'https://host/a\tb/{key}'],
+    ['an escape character', 'https://host/\x1b[31m/{key}'],
+    ['a DEL', 'https://host/a\x7f/{key}'],
+    ['a C1 control', 'https://host/a\u009b/{key}'],
+    ['a no-break space', 'https://host/a b/{key}'],
+    ['2,049 characters', `https://example.net/{key}/${'a'.repeat(2049 - 26)}`],
+    ['the empty string', ''],
+    ['a number', 3],
+    ['true', true],
+    ['an object', { url: 'https://host/{key}' }],
+  ];
+  for (const [name, value] of refused) {
+    test(`refuses ${name}: ${JSON.stringify(value)}`, (t) => {
+      const { path, run } = withTicketUrl(t, value);
+
+      assert.throws(run, (error: unknown) => {
+        assert.ok(error instanceof ConfigError, String(error));
+        assert.equal(error.message, `${path}: ${MESSAGE}`);
+        return true;
+      });
+    });
+  }
+
+  test('the 2,049 characters of that case are 2,049', () => {
+    const [, value] = refused.find(([name]) => name === '2,049 characters') ?? [];
+    assert.equal((value as string).length, 2049);
+  });
+
+  test('src/platform/config.ts imports nothing outside src/platform/ (D18)', () => {
+    const source = readFileSync(join(import.meta.dirname, '../../src/platform/config.ts'), 'utf8');
+    const from = [...source.matchAll(/^import\s[^;]*?from\s+'([^']+)';/gms)].map((m) => m[1]);
+    assert.deepEqual(from, ['node:path', './errors.ts', './types.ts']);
   });
 });

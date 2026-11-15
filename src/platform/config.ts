@@ -22,6 +22,8 @@ export interface Config {
   restoreStartTimeoutSeconds: number;
   claudeHome: string | null;
   claudeCommand: string;
+  /** S2 16.4: a ticket's address with `{key}` where its key goes, or null for no link. */
+  ticketUrl: string | null;
   window: WindowConfig;
 }
 
@@ -36,6 +38,7 @@ export const DEFAULT_CONFIG: Config = {
   restoreStartTimeoutSeconds: 120,
   claudeHome: null,
   claudeCommand: 'claude',
+  ticketUrl: null,
   window: {
     port: 47613,
     edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -60,16 +63,61 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Where the key goes in `ticketUrl` (S2 16.4). */
+const KEY_PLACE = '{key}';
+/** The two different keys that `ticketUrl` is read with, in place of `{key}` (S2 16.4). */
+const SAMPLE_KEY = 'KEY-1';
+const OTHER_SAMPLE_KEY = 'OTHER-2';
+const MAX_TICKET_URL_LENGTH = 2048;
+/** White space, the control characters of S2 2, '"' and the backslash. */
+const NOT_IN_A_TICKET_URL = /[\s\u0000-\u001f\u007f-\u009f"\\]/;
+
+/**
+ * The scheme, user name, password and host that the URL parser reads in `pieces` joined by `key`;
+ * null when it reads no http or https URL, or when the key stands in one of those parts (compared
+ * in lower case: the parser lowercases a host).
+ */
+function originWith(pieces: string[], key: string): string[] | null {
+  const url = URL.parse(pieces.join(key));
+  if (url === null || (url.protocol !== 'http:' && url.protocol !== 'https:')) return null;
+  const parts = [url.protocol, url.username, url.password, url.host];
+  return parts.some((part) => part.toLowerCase().includes(key.toLowerCase())) ? null : parts;
+}
+
+/**
+ * S2 16.4: null, or a string of at most 2,048 characters holding `{key}` exactly once and no
+ * white space, control character, '"' or backslash, that the URL parser reads with each of two
+ * sample keys in place of `{key}` as http or https with the same scheme, user name, password and
+ * host, none of which holds the key. The parser decides where the key stands, not the text: it
+ * skips extra slashes, and reads `https:{key}` with the key as the host.
+ */
+function isTicketUrl(value: unknown): value is string | null {
+  if (value === null) return true;
+  if (
+    typeof value !== 'string' ||
+    value.length > MAX_TICKET_URL_LENGTH ||
+    NOT_IN_A_TICKET_URL.test(value)
+  ) {
+    return false;
+  }
+  const pieces = value.split(KEY_PLACE);
+  if (pieces.length !== 2) return false;
+  const one = originWith(pieces, SAMPLE_KEY);
+  const other = originWith(pieces, OTHER_SAMPLE_KEY);
+  return one !== null && other !== null && one.every((part, i) => part === other[i]);
+}
+
 /**
  * Parses config.json text and merges it over DEFAULT_CONFIG. Throws ConfigError naming `source`
  * and the key on: invalid JSON; a top level that is not an object; an unknown key (also inside
  * `wezterm`); a wrong type; `terminal` not here|wezterm; a number that is not a positive integer;
- * `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute; `claudeCommand` empty; in
- * `window` (S2 16.4): an unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir`
- * neither null nor an absolute Windows path, `keepAlive` neither "wsl" nor "off".
+ * `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute; `claudeCommand` empty;
+ * `ticketUrl` that isTicketUrl refuses (S2 16.4); in `window` (S2 16.4): an unknown key, `port`
+ * outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
+ * `keepAlive` neither "wsl" nor "off".
  *
- * `claudeHome` and `wezterm.domain` may also be `null`, which is their default; an empty
- * `wezterm.domain` is an error like an empty `claudeCommand`.
+ * `claudeHome`, `ticketUrl` and `wezterm.domain` may also be `null`, which is their default; an
+ * empty `wezterm.domain` is an error like an empty `claudeCommand`.
  */
 export function parseConfig(text: string, source: string): Config {
   function fail(problem: string): never {
@@ -143,6 +191,14 @@ export function parseConfig(text: string, source: string): Config {
           fail('"claudeCommand" must be a non-empty string');
         }
         config.claudeCommand = value;
+        break;
+      case 'ticketUrl':
+        if (!isTicketUrl(value)) {
+          fail(
+            '"ticketUrl" must be null or an http or https address with {key} once, after its host',
+          );
+        }
+        config.ticketUrl = value;
         break;
       case 'window':
         if (!isObject(value)) {
