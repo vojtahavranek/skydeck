@@ -2421,14 +2421,14 @@ describe('the second window after a cold start: the server expects the old windo
     assert.equal(r.stderr.split(WAITING).length, 2, `the line once: ${r.stderr}`);
     assert.match(r.stderr, NOT_CONNECTED);
     assert.equal(edgeStarts(h), 1, 'a window is opened: the user is never left without one');
-    // From the wait's first look (the second GET /status: the first is stage A's) to the token:
-    // the bound, which begins right before that look, is startMs AND reconnectMs (two different
-    // values, so neither alone passes); a timer may fire a moment early.
+    // From stage A's look (the first GET /status, sent before the wait arms its timer: no stall
+    // in between can make the time shorter) to the token: the bound is startMs AND reconnectMs
+    // (two different values, so neither alone passes); 2 ms for the timers' rounding to a ms.
     const looks = r.requests.filter((q) => q.method === 'GET' && q.path === '/status');
     const token = r.requests.find((q) => q.method === 'POST' && q.path === '/token');
-    assert.ok(looks[1] !== undefined && token !== undefined);
-    const waited = token.atMs - looks[1].atMs;
-    assert.ok(waited >= 2000 - 20, `it waited its bound of 2,000 ms (${waited} ms)`);
+    assert.ok(looks.length >= 2 && looks[0] !== undefined && token !== undefined);
+    const waited = token.atMs - looks[0].atMs;
+    assert.ok(waited >= 2000 - 2, `it waited its bound of 2,000 ms (${waited} ms)`);
     assert.ok(r.ms < 60_000, `and no longer (${r.ms} ms)`);
     assert.ok(expects(statusesBeforeToken(r.requests).at(-1)), 'the server still expected one');
   });

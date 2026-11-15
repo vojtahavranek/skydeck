@@ -1215,8 +1215,8 @@ from, for the command, as stage A's restart-wait cases)
   after the server's deadline (it went on at an answer that said null); a server still starting
   (`windowExpectedMs` constant while it starts, also at 0) → the wait goes through the start, then
   the count-down, and it goes on at the first look that says null; a server whose expectation
-  never ends → Edge after `startMs` + `reconnectMs` (measured from the wait's first look, with two
-  different values), also when its start never ends;
+  never ends → Edge after `startMs` + `reconnectMs` (measured from stage A's look before the wait,
+  with two different values), also when its start never ends;
   with `--new-window` → no wait; with `--new-secret` → no wait although the new server's mark says
   a window is expected (ruled, F3); without the expectation (none, null or 0) → Edge at once, no
   line; a `windowExpectedMs` the client cannot read (a text, a fraction, below 0, `true`, an
