@@ -31,17 +31,26 @@ export const START_MS = 10_000;
  * nothing, and after a restart the pages the old server had get `reconnectMs` (7 s: the page's
  * longest retry interval is 5 s, S2 6.3; ruled, task 25) to come back. The wait for a window the
  * server expects back (plan C20) ends at the server's word, and at the latest after `startMs` and
- * `reconnectMs` of its own. The lifecycle's own times (ping, start, stop, kill) are passed on as
- * they are.
+ * `reconnectMs` of its own. A command that sends a request to start sessions (`resume` and `new`
+ * with the window, S2 11.4) waits `answerMs` (30 s, plan C17) for the answer, and a restore's
+ * answer ends after `answerMs` without a line. The lifecycle's own times (ping, start, stop, kill)
+ * are passed on as they are.
  */
 export interface WindowTimes extends LifecycleTimes {
   pageMs: number;
   reuseMs: number;
   launchingMs: number;
   reconnectMs: number;
+  answerMs: number;
 }
 
-const DEFAULT_WAITS = { pageMs: 30_000, reuseMs: 2000, launchingMs: 45_000, reconnectMs: 7000 };
+const DEFAULT_WAITS = {
+  pageMs: 30_000,
+  reuseMs: 2000,
+  launchingMs: 45_000,
+  reconnectMs: 7000,
+  answerMs: 30_000,
+};
 const TIME_NAMES: readonly string[] = [
   'pingMs',
   'startMs',
@@ -51,6 +60,7 @@ const TIME_NAMES: readonly string[] = [
   'reuseMs',
   'launchingMs',
   'reconnectMs',
+  'answerMs',
 ];
 
 /**
