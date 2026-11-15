@@ -4,7 +4,7 @@
 // interface is contract 2.9's. Every server string reaches the DOM through textContent.
 //
 // How app.js calls it: on a change of what the right side shows, `hide()` (every card and the
-// header), then `header(row)` and at most one card. `act` is app.js's: it adds `t` and `id`, and
+// header), then `header(row, selected, term, now)` (plan D 2.4) and at most one card. `act` is app.js's: it adds `t` and `id`, and
 // for `resume` and `new` the size of the terminal area; a successful resume or new selects its
 // session there and gives its terminal the keyboard (S2 11.3).
 //
@@ -16,13 +16,19 @@
 // Enter must not press a button for what the user has not seen (nothing resumes but on purpose);
 // app.js gives it to the zone after the call. The short id's copy takes no keyboard on a click.
 
-/** @import { ElsewherePayload, ExitMessage, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
+/** @import { ElsewherePayload, ExitMessage, ResultMessage, RowPayload, SelectedPayload, TerminalPayload } from '../src/window/protocol.ts' */
+/** @import { EditWhat } from './keys.js' */
 import { chipText } from './list-text.js';
 
 /**
  * @typedef {object} CardsDeps
  * @property {(action: Record<string, unknown> & { kind: string }) => Promise<ResultMessage>} act
  * @property {(id: string) => void} select
+ * @property {(what: EditWhat, sessionId: string) => void} edit stage D's dialogs (plan D 2.4;
+ *   task 38's header controls call it)
+ * @property {(sessionId: string) => void} done done, or undone for a done row (D15); the toast is
+ *   app.js's
+ * @property {(text: string) => void} say a line in the key bar
  */
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -500,8 +506,15 @@ export function createCards(root, deps) {
   }
 
   return {
-    /** @param {RowPayload | null} row */
-    header(row) {
+    /**
+     * Plan D 2.4: app.js passes `selected` (list.selected when it is the row's session), the
+     * pane's terminal and the server's now for every pane; task 38's header uses them.
+     * @param {RowPayload | null} row
+     * @param {SelectedPayload | null} selected
+     * @param {TerminalPayload | null} term
+     * @param {() => string} now
+     */
+    header(row, selected, term, now) {
       if (row === null) {
         setHidden(head, true);
         return;

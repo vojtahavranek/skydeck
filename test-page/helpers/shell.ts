@@ -1028,3 +1028,114 @@ export async function buildOf(page: Page): Promise<string> {
   assert.ok(match !== null);
   return match[1] as string;
 }
+
+/** What the page sent to an `editWorld`, and the means to answer it (plan D task 37). */
+export interface EditWorld {
+  /** Every message the page sent after its `start` but pings, over every connection, in order. */
+  sent: Record<string, unknown>[];
+  /** The page's acts so far, in order, over every connection. */
+  acts(): Record<string, unknown>[];
+  /** The page's `n`-th act (1, 2, …), once it has come (fails after PAGE_WAIT_MS). */
+  act(n: number): Promise<Record<string, unknown>>;
+  /** Answers `act` with a `result` on the connection the page uses now: `ok`, for a refusal its
+   *  `error` (which is also its one line), and the session a resume or new brings. */
+  answer(
+    act: Record<string, unknown>,
+    result: { ok: boolean; error?: string; sessionId?: string },
+  ): void;
+  /** Sends `list` now (unless `send` is false), and as the answer to every later `view`; a
+   *  function is given the selection of the page's last `view`. */
+  list(
+    list: Record<string, unknown> | ((selected: string | null) => Record<string, unknown>),
+    options?: { send?: boolean },
+  ): void;
+  /** While held, a `view` is recorded but not answered (as a server whose answer is late). */
+  holdViews(hold: boolean): void;
+  /** The selection of the page's last `view`. */
+  selected(): string | null;
+  /** Ends the connection the page uses now, as a server that stopped answering. */
+  drop(): void;
+}
+
+let editSeed = 60;
+
+/**
+ * A scripted stand-in for the page cases of stage D (plan D task 37), as `actsWorld` but scripted
+ * by the test: the page on `page` (pinned or not) is opened with a stored key and connected; every
+ * `view` is answered with the list the test gave last (`first` to begin with), every `attach` with
+ * an empty `snap` at the size it proposed, and every `act` is only recorded — the test answers it
+ * (`answer`) when it chooses, or never.
+ */
+export async function editWorld(
+  t: TestContext,
+  page: Page,
+  first: Record<string, unknown> | ((selected: string | null) => Record<string, unknown>),
+): Promise<EditWorld> {
+  const secret = new Uint8Array(32).fill(editSeed++);
+  const sent: Record<string, unknown>[] = [];
+  const acts: Record<string, unknown>[] = [];
+  let current = first;
+  let shown: string | null = null;
+  let viewsHeld = false;
+  const listNow = (): Record<string, unknown> =>
+    typeof current === 'function' ? current(shown) : current;
+  const standin = await standinServer(t, {
+    socket: honest(secret, {
+      open: (conn, message) => {
+        sent.push(message);
+        if (message['t'] === 'view') {
+          shown = (message['selected'] as string | null) ?? null;
+          if (!viewsHeld) conn.send(listNow());
+        } else if (message['t'] === 'attach') {
+          const { term, cols, rows } = message as { term: string; cols: number; rows: number };
+          conn.send({ t: 'snap', term, ch: 1, cols, rows, data: '' });
+        } else if (message['t'] === 'act') {
+          acts.push(message);
+        }
+      },
+    }),
+  });
+  const conn = (): StandinConnection => {
+    const last = standin.connections.at(-1);
+    assert.ok(last !== undefined, 'the page is connected');
+    return last;
+  };
+  await page.goto(standin.url);
+  await storeKey(page, secret);
+  await page.goto(standin.url);
+  await connection(page, 'open');
+  return {
+    sent,
+    acts: () => [...acts],
+    async act(n) {
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (acts.length < n) {
+        assert.ok(performance.now() < deadline, `act ${n} comes (${acts.length} came)`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return acts[n - 1] as Record<string, unknown>;
+    },
+    answer(act, result) {
+      const error = result.error ?? null;
+      conn().send({
+        t: 'result',
+        id: act['id'],
+        ok: result.ok,
+        lines: error === null ? [] : [error],
+        error,
+        sessionId: result.sessionId ?? null,
+      });
+    },
+    list(list, options = {}) {
+      current = list;
+      if (options.send !== false) conn().send(listNow());
+    },
+    holdViews(hold) {
+      viewsHeld = hold;
+    },
+    selected: () => shown,
+    drop() {
+      conn().ws.terminate();
+    },
+  };
+}

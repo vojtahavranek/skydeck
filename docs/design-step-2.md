@@ -227,7 +227,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value, the start deadline and the label; the `Terminal` names gain `window` (11.1, 11.2). | A |
 | `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). In C, a renewal of a resume lock keeps the mark of its take in the last six digits of the lock's time, which are then not time (a lock's time is read to the millisecond); `sameTake` and `releaseLockOfTake` tell a renewal from a take-over (design 7.6; 7.3, 7.8). | A, C |
-| `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). | C |
+| `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). `runRestore` takes optional hooks, which only the server passes: a refusal before the guard, a session that can no longer start, a stop signal, and a stop after a batch in which no session started (11.1, 11.3); each report line names the session it ends and how. The command passes none, and its restore is unchanged. | C |
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
@@ -1357,7 +1357,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 |---|---|---|
 | `resume` | `sessionId`, `cols`, `rows` | 11.3; the size is the new terminal's first size (8.2.6). |
 | `new` | `dir`, `label`, `group`, `flags` (the text as typed), `cols`, `rows` | 11.3; the server splits `flags` by 12.6's rule and checks them as `skydeck new` does (design 7.7). |
-| `restore` | `sessionIds` | 12.7. |
+| `restore` | `sessionIds` (1 to 1,000 distinct session ids) | 12.7. |
 | `label`, `group` | `sessionId`, `text` (empty clears) | 12.5. |
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
@@ -1365,12 +1365,15 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `close-terminal` | `term` | Forgets an ended or not-started terminal's last screen (7.8). Refused for a terminal whose program runs (principle 6). |
 | `open-link` | `url` | 9.6. |
-| `dismiss-restore` | `bootId` | 12.7. |
+| `dismiss-restore` | `bootId` (the earlier boot the banner offers, a lower-case UUID: the form of `/proc/sys/kernel/random/boot_id`) | 12.7. |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
 URLs 4,096, `input.data` 64 KiB, a note's `text` and `base` 64 KiB each, other text 1,024; the
-action of 9.6 then opens a URL only up to 2,048 characters) or a size that is not a whole number
-from 1 to 65,535. A note may be any length (design 7.1), so 1,024 bytes would refuse most notes;
+action of 9.6 then opens a URL only up to 2,048 characters), a size that is not a whole number
+from 1 to 65,535, a session id that does not pass the session-id rule (a lower-case UUID, 4.3) —
+in a `restore` each of its ids, which must also be distinct, at least one and at most 1,000 — or
+a `dismiss-restore` boot id that is not a lower-case UUID (stage C, plan C 2.2). A note may be any
+length (design 7.1), so 1,024 bytes would refuse most notes;
 at 65,536 bytes each the largest note `act`, every character escaped by JSON (six bytes for one),
 stays under the 1 MiB a page's message may hold (8.2.1). A stored note longer than that is not
 sent (`selected.note` null, `noteTooLong`) and the window does not edit it: it says `this note is
@@ -1389,13 +1392,13 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null). |
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
-| `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. |
+| `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. `restore-progress`: one report line of a restore, sanitised, to every page, whoever asked for the restore (11.3, 12.7; stage C). |
 | `bye` | `reason` (5.5). |
 
 Output is sent in binary frames: one byte 1, the channel number as a 4-byte big-endian integer,
@@ -1503,23 +1506,43 @@ absolute and existing, no flag that picks a session or names it). The program is
 |---|---|
 | `GET /ping` | `{ serverId, bootId, build, protocol, pid, port, checkout }` (`checkout`: the checkout the server runs from, which 5.1 compares). |
 | `GET /status` | `{ starting, pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin }` (`envOrigin`: where the server's environment came from and when, 5.2; `starting`: true while the server's start is not done and a page's upgrade is answered 503 (8.2.1) — a server answers before then, 5.2; a server of an older build sends none, which means false; ruled by the plan owner, follow-up "server-findable"), for `skydeck window` and `doctor`. |
-| `POST /resume` | `{ sessionId }` → `prepareResumeById` and the window terminal (11.2) → `{ code, lines }`: the exit code and the lines `skydeck resume` prints (design 7.6), refusals included. |
-| `POST /new` | `{ dir, label, group, flags }` (`flags` an array of strings) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
-| `POST /restore` | `{ sessionIds, all }` → 11.4. The answer is a stream of JSON lines: one per report line of the run, the last one the outcome. |
+| `POST /resume` | `{ sessionId }` (a session id) → `prepareResumeById` and the window terminal (11.2) → `{ code, lines, sessionId }`: the exit code `skydeck resume` would end with and the lines it prints on stderr (design 7.6), refusals included, each as printed (`skydeck: …`); `sessionId`, the session it started, else null. |
+| `POST /new` | `{ dir, label, group, flags }` (`label` and `group` null when the option was not given, and passed to `prepareNew` as the command passes them; `flags` the words after `--`, an array of strings, not split again) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
+| `POST /restore` | `{ sessionIds, all }` (the ids the user selected, 1 to 1,000; `all` as `--all`) → 11.4. The answer (200, chunked) is a stream of JSON lines: `{ "line": … }` per report line of the run, `{ "line": "waiting for <n> sessions" }` (`waiting for 1 session` for one) after 10 s without one, and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore runs already, the boot id cannot be read, the store is busy) is the same stream: its line, then an outcome with code 1. |
 | `POST /token` | `{ seconds }` (30 for a window, 600 for `--print-url`) → `{ id, token, expiresAtNs }`: a launch token, minted and held in memory (8.2.2). |
 | `GET /token/<id>` | `{ state }`: `waiting`, `used`, `reused` (a second proof came: the alarm, 8.2.2), `expired` or `dropped`. |
 | `POST /token/drop` | `{ id }` → `{ ok }`: the token is given up; a later proof with it fails with 4003 (or 4004 when it had been used). |
 | `POST /shutdown` | `{ ok: true }`, then 5.5. |
 
-A refused request answers `{ error: <kind> }`: 404 for an unknown route (stage C's `/resume`,
-`/new`, `/restore` until that stage), 400 for a bad body, 413 for a body over 64 KiB, which is not
-read on; `GET /token/<id>` is 404 for a token the server does not know. When answering a request
-fails inside the server (`ping`, `status` or the tokens throw), the answer is 500
-`{ error: 'failed' }`, the log names the error and its code, never its message (5.2), and the
-server goes on; a failure while stopping is the server's uncaught error. On the command line,
-`ping` reports a socket that refuses or is missing as refused, and no answer in time — or a full
-queue of connections, of a server that lives — as not answering (5.1); `POST /token/drop` for a
-token the server does not know is no error.
+**Stage C's three routes** (plan C2–C5). Their bodies have fixed fields: every session id passes the
+session-id rule (a lower-case UUID, 4.3), a restore's are distinct; strings are well formed; `dir`
+holds at most 4,096 bytes and no NUL, `label` and `group` at most 1,024, `flags` at most 1,000
+words, none with a NUL (the body's 64 KiB bounds the rest); an unknown or missing field is 400.
+While the server starts (a page's upgrade is answered 503, 8.2.1: before its keepers are found it
+does not know its terminals, so the "already open" rule of 11.1 could not see one) they answer 503
+`{ error: 'starting' }`, and the command asks again every 500 ms within its 30 s; once its stop has
+begun, 503 `{ error: 'stopping' }`, which the command reports. The `code` of `POST /resume` and
+`/new` is the exit code the command would end with: 0 when it started; 1 for a failed launch, a busy
+store (`skydeck: skydeck's database is busy; try again`) or a failure inside the server (`skydeck:
+the window's server could not start it (<kind>)`, logged by kind); 2 for `prepareNew`'s refusals; 3
+for a reference that names no session; 4 for the guard, the lock and the window's own "this session
+is already open in the window" (11.1) — a command must print something, so none of these is a 500.
+The `code` of a restore's outcome is design 7.8's: 5 when the run was stopped before it finished
+(the memory check, the server's stop, its asker's connection closing, a batch in which no session
+started while entries were left), else 1 when any selected session failed, was no longer offered or
+timed out, else 0. A restore asked for here stops when the asker's connection closes before the
+outcome: the sessions already opened go on, the rest are not started (11.4).
+
+A refused request answers `{ error: <kind> }`: 404 for an unknown route (a server of a build before
+stage C answers `/resume`, `/new` and `/restore` so, whatever text the body holds), 400 for a bad
+body, 413 for a body over 64 KiB, which is not read on; `GET /token/<id>` is 404 for a token the
+server does not know. When answering a request fails inside the server (`ping`, `status`, the tokens
+or a launch throw or reject), the answer is 500 `{ error: 'failed' }` — a restore whose answer has
+begun ends without an outcome instead — the log names the error and its code, never its message
+(5.2), and the server goes on; a failure while stopping is the server's uncaught error. On the
+command line, `ping` reports a socket that refuses or is missing as refused, and no answer in time —
+or a full queue of connections, of a server that lives — as not answering (5.1); `POST /token/drop`
+for a token the server does not know is no error.
 
 ## 9. Typing into and reading from a terminal
 
@@ -1760,7 +1783,7 @@ is the one it shows, or while it shows none the one it was opened for. The lock 
 cover it: claude can wait at a dialog before its `SessionStart` for longer than the lock holds, and
 the guard then sees no holder; step 1 accepts that hole only for terminals it cannot see.
 
-Four changes to step 1's code make that possible, with no change of behaviour for the commands
+Five changes to step 1's code make that possible, with no change of behaviour for the commands
 (4.4 lists every change step 2 makes to step 1's code, with its stage):
 
 - **Starting a prepared launch** (`launchPrepared`, in step 1 in `src/cli/launching.ts`) moves to
@@ -1787,6 +1810,22 @@ Four changes to step 1's code make that possible, with no change of behaviour fo
   function the command and the server share. It also returns the earlier boot and the time of its
   last event, which `planRestore` computes and today keeps to itself: the banner shows that time as
   the last activity before the restart (12.7) — the stop itself is not recorded.
+- **`runRestore`'s hooks** (`src/sessions/restore.ts`), optional, which only the server passes;
+  without them a restore runs as in step 1. `refuse` is asked before the guard: the window's
+  "already open" above, so that a restore opens no second terminal for a session the window is
+  starting. `gone` is asked at every look of the wait for each session whose start is not seen:
+  a session whose window terminals have all ended, were lost, were not started or were closed is
+  reported `failed <short>: <reason>` at once and restore's lock (its last renewed value) is
+  given back, instead of being waited for until `restoreStartTimeoutSeconds`, as a tab must be.
+  A `signal` lets the server end the run at its next step (its own stop, or the command that
+  asked for it going, 11.4): no further entry is prepared or opened, the wait ends at its next
+  look, the sessions still waited for are reported `timed out` (their locks stay: their terminals
+  may still start them), then one line `stopped: <reason>`, then the rest `not started`. The
+  signal stops the run only when it is seen while the stop changes something — a session the wait
+  would still wait for, or an entry not opened; otherwise (every session started, or the wait's
+  time ran out at that look, with no entry left) the run ends as it would have. The fourth hook, a stop after a batch in which no session started, is 11.3's. Each report line also
+  names the session it ends and how (started, timed out, failed, not started, handed off,
+  printed), and the outcome says whether a hook stopped the run.
 
 ### 11.2 The window terminal
 
@@ -1835,8 +1874,13 @@ gives them back when its program never started (7.8).
   plan task 32).
 - **Restore.** The banner (12.7) → the shared restore planning (11.1: design 7.8's set and preselection, on rows
   refreshed just before) → `runRestore` with the window terminal: batches of `restoreBatch`, the
-  memory check, the wait for start events with lock renewal, exactly as from the command line. Its
-  report lines go to the banner. One restore runs at a time.
+  memory check, the wait for start events with lock renewal, exactly as from the command line,
+  and the hooks of 11.1. One more rule is the window's: once a batch that opened at least one
+  terminal ends with none of its sessions started, while entries are left, the run stops —
+  `stopped: no session of this batch started`, the rest `not started` —, because a `claudeCommand`
+  that cannot start (the server's `PATH` after a boot) would otherwise open a keeper for every
+  session in turn. A last (or only) batch that starts nothing ends the run as any run with
+  failures. Its report lines go to the banner. One restore runs at a time.
 
 ### 11.4 `skydeck resume` (and `new`, `restore`) in a terminal while the window runs
 
@@ -2234,9 +2278,18 @@ hidden again, the row gone from the list), no row is selected — the right side
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
 (ruled by the plan owner, plan task 27). One exception, ruled by the lead on 2026-11-15 (the user
 may change it): when this page's own `d` in the list has marked the selected session done — its
-answer came, and the next list no longer has the row — the row after it in the same section is
-selected, else the one before it in that section, else none; never a row of Open. A held `d` acts
-once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
+answer came, and the list that holds its result (one that arrived since the act was sent — the
+server sends it before the answer, unless a list went to the page within the last second — and no
+longer shows the row as not done in its section, since one that still does is older than the write;
+else the next one, which the page asks for with a `view`) no longer has the row, while that session is
+still the selected one (moved away meanwhile, the selection stays where the user put it) — the row after it in the
+same section is selected, else the one before it in that section, else none; never a row of Open.
+The Undo of that `d` selects the session again once it is back in the list, if the selection is
+still where that `d` left it (the row it selected, or none); if the user moved it meanwhile, it
+stays (ruled for plan D task 37). That list decides once: a row it still has (running, under
+Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
+of plan D task 37). The header's Done leaves the selection to the main rule. A held
+`d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a
@@ -2260,6 +2313,49 @@ Esc on the list with a filter only clears the filter. A held chord acts once, at
 keydown. Ctrl+Shift+V sends its raw Ctrl+V only while the terminal has the keyboard — never from
 the list, the form or the help; in a text field the browser's own Ctrl+Shift+V stands (ruled, Z1
 of plan task 26).
+
+**The dialogs** (stage D, plan D2; ruled by the lead on 2026-11-15 on the plan's review A). The
+label, group, note and pull-request dialogs (12.5) lie over the page and are modal: a scrim covers
+the window and takes clicks without acting, and the page under it takes no keyboard; a click inside
+the dialog that selects no text gives the keyboard back to its field, and whenever nothing has the keyboard (a click on the key help or the toast, a disabled button) the next key gives it back to the field first, while a drag selects its text
+as anywhere. While a
+dialog is shown the page moves the keyboard nowhere by itself — not for a resume's or a new's
+answer, a list or a render: the rest of a note must never be typed into Claude Code, whose line
+breaks would submit it — and acts on no list key (`j` or `d` typed in the field are text). Every
+window chord but Ctrl+Shift+H says `close the edit first (Esc)` and does nothing else; in a field
+Ctrl+Shift+V stays the browser's paste. When the dialog closes, whatever closed it, a terminal that
+this page's resume or new brought meanwhile takes the keyboard, else the zone's holder gets it, at
+once (no list is waited for). Enter saves (Ctrl+Enter in the note, where Enter is a line break); a
+held Enter saves once, and the key that opened a dialog types nothing into it while it is held. An Enter or Esc of an IME composition is the IME's: it neither saves nor closes. Esc
+and Cancel (Close in the pull-request dialog) close; a note whose text was changed needs a second Esc (`Esc again discards your
+text`; a held Esc is one Esc). The reload keys (F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and
+BrowserRefresh) say `save or cancel the edit first` while the dialog holds changed text, and do not
+reload; otherwise they reload as anywhere. A held Enter or Esc that closes a dialog over a terminal
+is a key pressed off the program's holder: its repeats and its release are the page's, and the next
+press is the program's. Over the list, the auto-repeats of a key pressed in a dialog act on no list key once it is gone (an Enter must not resume a session); the next press does (review 2 of plan D task 37). A save keeps the dialog open with its text and its keyboard when it is
+refused, the connection is lost or the page refuses it before sending (over a limit of 8.2.3, or
+text that is not well formed); its `ok` closes the dialog, except Attach in the pull-request dialog,
+which empties the field and keeps the dialog open so that the new pull request shows in its list
+(ruled for plan D task 37).
+
+After this page's own save of a label, group or note, its key waits for the list that holds the
+result (one that arrived since the act was sent, else the next one: `the label is not here yet;
+press l again`; a named limit: a list that the server pushed just before it read the act also
+counts as holding it), so that the dialog never starts from the old text and an Enter never writes the
+old label back (the pull-request dialog does not wait). When no list came by the answer, the page asks
+for one (a `view`, which the server answers at once; it sends no list equal to the last one, so a
+save that changed nothing shown would otherwise wait for good). A named limit: when the store was
+busy at that save, the list asked for may come before the server could read the rows again, and the
+dialog then starts from the old text (a note's save is then refused as a conflict). A refusal whose dialog was closed meanwhile
+(Enter, then Esc at once) is shown as a toast, `not saved: <the error>`. While a dialog holds
+changed text, leaving the page in a way the keys do not cover — the tab's reload button, closing
+the window, the page's own reload when a reconnect meets a server of another build (15.3) — asks
+first, with the browser's own prompt; staying keeps the dialog and its text. In the last case the
+page then stays not connected (a save says `skydeck's server is not connected; try again`) until
+it is reloaded: copy the text, then reload. Two named limits (ruled for plan D task 37): text typed between an F5 on an
+unchanged dialog and the server's proof, and the page's own reload on another build, are not held
+back as the reload keys are: with changed text, only that prompt stands between the reload and the
+text.
 
 ### 12.10 Done
 
@@ -2849,7 +2945,10 @@ In the browser suite, besides those:
   an installed Chromium the page suite fails with the one command that installs it — exactly
   `Chromium for Playwright is not installed; run: npx playwright install chromium`, which a test
   pins — so that a local check does not pass where CI would fail.
-- CI, on every pull request: both legs of the Node matrix run format check, type checks, `npm
+- CI, on every pull request and every push to `main`, runs the newest leg of the Node matrix
+  (Node 24). The oldest leg (Node 24.12) runs only when the workflow is started by hand
+  (`workflow_dispatch`: the owner's decision, to save CI minutes), and a run started by hand runs
+  both legs. A leg runs format check, type checks, `npm
   test` (keeper and server tests included; Ubuntu runners have python3), `python3 -m py_compile
   bin/skydeck-keeper`, the vendored-files check (16.6: `test/vendor/vendor.test.ts`, a test in
   `npm test` that needs the packages `npm ci` installed, so it has no step of its own), and
