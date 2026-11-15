@@ -843,8 +843,9 @@ Setup: one of your ticket keys (`ABC-123` below: with the default `groupPattern`
 and digits, a hyphen and a number) and your ticket system's address for a ticket, with `{key}`
 where the key goes. The throwaway session has no group of its own: its header shows `+ group`.
 
-**Your configuration comes first.** The paths below are the default ones (with `XDG_CONFIG_HOME`
-or `SKYDECK_HOME` set, the file is elsewhere: install.md, "Places"). In W:
+**Your configuration comes first.** The paths below are the default ones: with `XDG_CONFIG_HOME`
+set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME` set, it is
+`$SKYDECK_HOME/config/config.json` (install.md, "Environment variables"). In W:
 
 ```sh
 ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
@@ -861,7 +862,8 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 
   Then add one line, on a line of its own right after the opening `{`, as its first key:
   `"ticketUrl": "https://<your site>.atlassian.net/browse/{key}",` (for Jira; else your ticket
-  system's address, with `{key}` where the key goes). When the file already holds a
+  system's address, with `{key}` where the key goes). In a file written on one line
+  (`{ "terminal": "wezterm" }`), put the key right after `{` on that line instead. When the file already holds a
   `"ticketUrl"` line (yours, or one left by an earlier W27 that did not finish), add nothing: the
   check uses it, and the file is the same at the end. If you do not want that link, remove the
   line by hand afterwards.
@@ -900,7 +902,8 @@ skydeck window --restart
      ```
 
      It must show only your own change: the `ticketUrl` line you added, after `> ` (with a line
-     such as `1a2` above it), or nothing when you added none. Only then put the copy back, and
+     such as `1a2` above it); for a file on one line, that line before (`< `) and after (`> `),
+     differing only by your key (with `1c1` above them); or nothing when you added none. Only then put the copy back, and
      remove it once the two are the same:
 
      ```sh
