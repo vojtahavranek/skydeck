@@ -616,14 +616,51 @@ describe('settleEndedTerminal: a lost keeper’s exit while its program may stil
     assert.equal(readLock(d.deck, S1), null);
   });
 
-  test('its program reported its start (in the spool: it ingests first): settled, the lock stays — the guard sees the holder', (t) => {
+  test('its program reported its start meanwhile: the settling still waits (ruled: the whole of it); once the program is gone it is settled and releases nothing', (t) => {
     const d = testDeck(t);
     const { lock, hello } = resumeLaunch(d);
     alive(d);
     spoolStart(d, S1, 4343, T0 + SEC, 1); // its child, below a wrapper, holds the session
-    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), true);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false);
     assert.equal(readLock(d.deck, S1), lock);
+    d.proc.setProcess(6161, null);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), true);
+    assert.equal(readLock(d.deck, S1), lock, 'started: the settlement keeps it (design 7.6)');
     assert.throws(() => prepareResumeById(d.deck, S1), /is running \(pid 4343\)/);
+  });
+
+  test('a new session (ruled: it waits as a resume does): its label and group stay while the program may still run; kept for good once it reported its start', (t) => {
+    const d = testDeck(t);
+    const { prepared, hello } = newLaunch(d);
+    alive(d);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false);
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.label, 'fix the build');
+    // Its SessionStart within the 60 s: the session is the program's now.
+    spoolStart(d, prepared.sessionId, 4343, T0 + SEC, 1);
+    d.clock.setNs(T0 + 30n * SEC);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), false);
+    d.proc.setProcess(6161, null);
+    assert.equal(settleEndedTerminal(d.deck, hello, lostAt(T0)), true);
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.label, 'fix the build');
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.group, 'ops');
+  });
+
+  test('a new session with no start: settled as before once its program is gone, or 60 s after the loss — its label and group removed', (t) => {
+    const gone = testDeck(t);
+    const first = newLaunch(gone);
+    alive(gone);
+    assert.equal(settleEndedTerminal(gone.deck, first.hello, lostAt(T0)), false);
+    gone.proc.setProcess(6161, null);
+    assert.equal(settleEndedTerminal(gone.deck, first.hello, lostAt(T0)), true);
+    assert.equal(gone.deck.store.meta(first.prepared.sessionId), null, 'program gone');
+    const late = testDeck(t);
+    const second = newLaunch(late);
+    alive(late);
+    late.clock.setNs(T0 + 59n * SEC);
+    assert.equal(settleEndedTerminal(late.deck, second.hello, lostAt(T0)), false, '59 s');
+    late.clock.setNs(T0 + 60n * SEC);
+    assert.equal(settleEndedTerminal(late.deck, second.hello, lostAt(T0)), true, '60 s');
+    assert.equal(late.deck.store.meta(second.prepared.sessionId), null, '60 s past');
   });
 
   test('an exit the keeper sent (it reaped the program), a keeper lost before T, or no terminal: released as before', (t) => {

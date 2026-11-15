@@ -18,7 +18,7 @@ import { launchPrepared } from '../../src/sessions/launch.ts';
 import type { ListRow } from '../../src/sessions/list.ts';
 import { attachManualPr, setLabel } from '../../src/sessions/meta.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
-import { lockKey, readLock } from '../../src/sessions/resume.ts';
+import { lockKey, prepareNew, readLock } from '../../src/sessions/resume.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import { openStore } from '../../src/store/store.ts';
 import { createActions } from '../../src/window/actions.ts';
@@ -623,6 +623,33 @@ describe('ended terminals (S2 7.8; plan task 21)', () => {
     await ticks(f, 2);
     assert.equal(d.deck.store.getKv(lockKey(S1)), null);
     assert.deepEqual(f.logs, []);
+  });
+
+  test('a lost `new` exit waits as a resume’s does (task 82, ruled): its label and group stay while its program may still run; removed at the next refresh once it is gone', async (t) => {
+    const d = testDeck(t);
+    const prepared = prepareNew(d.deck, {
+      dir: d.sandbox.home,
+      label: 'fix the build',
+      group: 'ops',
+      extra: [],
+    });
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    const lost = terminal({
+      id: 'aaaaaaaaaaaa',
+      state: 'lost',
+      kind: 'new',
+      expectedSessionId: prepared.sessionId,
+      program: { pid: PID, procStart: START },
+      exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    const hello = helloOf({ started: false });
+    f.tick.ended({ ...hello, meta: { ...hello.meta, kind: 'new', sessionId: prepared.sessionId } });
+    await ticks(f, 1);
+    assert.equal(d.deck.store.meta(prepared.sessionId)?.label, 'fix the build');
+    d.proc.setProcess(PID, null);
+    await ticks(f, 2);
+    assert.equal(d.deck.store.meta(prepared.sessionId), null);
   });
 
   test('… the terminal as the registry listed it at ended(): closed since, its program still keeps the lock (task 82)', async (t) => {

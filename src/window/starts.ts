@@ -139,18 +139,23 @@ export function decideFoundKeeper(
  * it. `terminal` is what the registry listed for the terminal when its exit came (null: not
  * known, settled as before). While its program may still run by task 57's rule
  * (`lostProgramMayRun`: alive by design 5.5 or not readable, the loss less than 60 s old by the
- * server's clock), a resume that reported no start keeps its lock and the exit is left for a later
- * call: false. Once the program is gone, or 60 s after the loss, it is settled as above. True when
- * it is settled (also when there was nothing to do).
+ * server's clock), nothing is settled — ruled: the whole of it, for a resume (its lock) as for a
+ * `new` (its label and group): the program may yet report its start — and the answer is false, the
+ * exit is left for a later call. Once the program is gone, or 60 s after the loss, it is settled as
+ * above. True when it is settled (also when there was nothing to do).
  */
 export function settleEndedTerminal(
   deck: Deck,
   hello: KeeperHello,
   terminal: Pick<TerminalInfo, 'state' | 'program' | 'exit'> | null = null,
 ): boolean {
+  const { platform } = deck;
+  if (terminal !== null && lostProgramMayRun(terminal, platform.proc, platform.clock.nowNs())) {
+    return false; // its program may yet report its start: the lock is all the command line has
+  }
   ingestSpool(deck);
   const { sessionId, kind } = hello.meta;
-  const { store, platform } = deck;
+  const { store } = deck;
   if (kind === 'new') {
     store.transaction(() => {
       // Only the row prepareNew wrote, untouched since (review 2, principle 6): one the user
@@ -171,12 +176,8 @@ export function settleEndedTerminal(
   if (lock === null || takenNs === null) {
     return true;
   }
-  if (resumeStarted(store, sessionId, takenNs, lockEventId(lock))) {
-    return true; // the lock stays (design 7.6): the guard sees its holder
+  if (!resumeStarted(store, sessionId, takenNs, lockEventId(lock))) {
+    releaseLockOfTake(deck, sessionId, lock);
   }
-  if (terminal !== null && lostProgramMayRun(terminal, platform.proc, platform.clock.nowNs())) {
-    return false; // its program may yet report its start: the lock is all the command line has
-  }
-  releaseLockOfTake(deck, sessionId, lock);
   return true;
 }
