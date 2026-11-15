@@ -2,7 +2,8 @@
 // every 30 seconds and once a minute, step 1's reload rule of the interactive list, the failed
 // tick shown once, the migrated store, the settling of ended terminals, the mapping of terminals to
 // sessions and the automatic pull-request refresh. On testPlatform's fake clock and /proc, with
-// fakes for the registry, the pages, the keep-alive and the interop link.
+// fakes for the registry, the pages, the keep-alive and the interop link; one case of task 57 runs
+// end to end, on a real registry with a real keeper the test starts and kills itself.
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +13,10 @@ import type { TestContext } from 'node:test';
 
 import { openDeck } from '../../src/sessions/deck.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
+import { launchPrepared } from '../../src/sessions/launch.ts';
+import type { ListRow } from '../../src/sessions/list.ts';
 import { attachManualPr, setLabel } from '../../src/sessions/meta.ts';
+import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import { lockKey } from '../../src/sessions/resume.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import { openStore } from '../../src/store/store.ts';
@@ -21,11 +25,16 @@ import type { TerminalInfo } from '../../src/window/hub.ts';
 import type { NoticeMessage } from '../../src/window/protocol.ts';
 import { createTick } from '../../src/window/tick.ts';
 import type { Tick, TickDeps } from '../../src/window/tick.ts';
+import { windowTerminal } from '../../src/window/window-terminal.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
+import { procStartOf, stillRuns, until } from '../helpers/keeper.ts';
 import { S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
+import { info } from '../helpers/registry.ts';
 import { startRunning, writeTranscript } from '../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
+import { readRecords, standinCommand, waitForRecord } from '../helpers/standin.ts';
+import { windowDeck } from '../helpers/window-deck.ts';
 
 const PID = 4242;
 const START = 51234567;
@@ -610,6 +619,271 @@ describe('ended terminals (S2 7.8; plan task 21)', () => {
     const f = fixture(t, { d, terminals: [ended, live] });
     await ticks(f, 1);
     assert.deepEqual(f.closed, ['eeeeeeeeeeee']);
+  });
+});
+
+describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
+  /** A keeper that died: its exit is made up at once (SIGHUP), its program may still run. */
+  const lostExit = { code: null, signal: 1, atNs: String(T0), notStarted: null };
+  /** `text` as one word of a `sh` script. */
+  const shellWord = (text: string): string => `'${text.replaceAll("'", `'\\''`)}'`;
+
+  test('the lost terminal is not closed and its session is not elsewhere while its own program lives', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    startRunning(d, S1, PID);
+    const lost = terminal({
+      id: 'eeeeeeeeeeee',
+      state: 'lost',
+      sessionId: S1,
+      program: { pid: PID, procStart: START },
+      exit: lostExit,
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    await ticks(f, 1);
+    assert.deepEqual(f.closed, []);
+    assert.deepEqual([...f.tick.elsewhere().keys()], []);
+    assert.deepEqual(f.sessions.at(-1), { id: 'eeeeeeeeeeee', sessionId: S1, notReported: false });
+  });
+
+  test('once the program is gone it is an ended terminal as any other: kept with its exit, closed when the session runs elsewhere', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    startRunning(d, S1, PID);
+    const lost = terminal({
+      id: 'eeeeeeeeeeee',
+      state: 'lost',
+      sessionId: S1,
+      program: { pid: PID, procStart: START },
+      exit: lostExit,
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    await ticks(f, 1);
+    d.proc.setProcess(PID, null); // the program has run its end and is gone
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, []);
+    assert.deepEqual(f.terminals[0]?.exit, lostExit, 'its exit stays the lost one');
+    assert.equal(
+      f.tick.rows().find((row) => row.id === S1)?.state,
+      'not-running',
+      'the row no longer runs',
+    );
+    // Now the session runs again in a program outside the window.
+    startRunning(d, S1, PID + 7);
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, ['eeeeeeeeeeee']);
+  });
+
+  test('for 60 s after the loss only (ruled): kept at 59 s, closed as on main at 61 s, with the holder’s pid elsewhere', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    startRunning(d, S1, PID);
+    const lost = terminal({
+      id: 'eeeeeeeeeeee',
+      state: 'lost',
+      sessionId: S1,
+      program: { pid: PID, procStart: START },
+      exit: { ...lostExit, atNs: String(d.clock.nowNs()) },
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    await ticks(f, 1);
+    d.clock.setNs(T0 + 59n * SEC);
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, [], 'kept at 59 s');
+    d.clock.setNs(T0 + 61n * SEC);
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, ['eeeeeeeeeeee'], 'closed at 61 s');
+    assert.equal(f.tick.elsewhere().get(S1)?.pid, PID);
+  });
+
+  test('a clock that steps back after the loss keeps the lost terminal (it never closes early)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    startRunning(d, S1, PID);
+    const lost = terminal({
+      id: 'eeeeeeeeeeee',
+      state: 'lost',
+      sessionId: S1,
+      program: { pid: PID, procStart: START },
+      exit: { ...lostExit, atNs: String(d.clock.nowNs()) },
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    await ticks(f, 1);
+    d.clock.setNs(T0 - 3600n * SEC);
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, []);
+    assert.equal(f.tick.elsewhere().has(S1), false);
+  });
+
+  test('a lost terminal whose program lives is still closed when its session runs in another program or another terminal (as today)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    writeTranscript(d, S2);
+    startRunning(d, S1, PID); // outside every terminal
+    startRunning(d, S2, PID + 1); // the program of the running terminal below
+    // The lost terminals' programs live on and hold nothing.
+    d.proc.setProcess(9000, { stat: statLine(9000, 1), cmdline: ['claude'] });
+    d.proc.setProcess(9001, { stat: statLine(9001, 2), cmdline: ['claude'] });
+    const lostS1 = terminal({
+      id: 'eeeeeeeeeeee',
+      state: 'lost',
+      sessionId: S1,
+      program: { pid: 9000, procStart: 1 },
+      exit: lostExit,
+    });
+    const lostS2 = terminal({
+      id: 'dddddddddddd',
+      state: 'lost',
+      expectedSessionId: S2,
+      sessionId: S2,
+      program: { pid: 9001, procStart: 2 },
+      exit: lostExit,
+    });
+    const live = terminal({
+      id: 'ffffffffffff',
+      expectedSessionId: S2,
+      program: { pid: PID + 1, procStart: START },
+    });
+    const f = fixture(t, { d, terminals: [lostS1, lostS2, live] });
+    await ticks(f, 1);
+    assert.deepEqual([...f.closed].sort(), ['dddddddddddd', 'eeeeeeeeeeee']);
+  });
+
+  test('end to end: the test’s own keeper killed while the program and its holder live on — the terminal stays lost, then its row ended unexpectedly', async (t) => {
+    // The program is a `sh` that outlives the hangup of its pty until the test releases it, and so
+    // does its child, the stand-in that holds the session: at a hangup only the session leader
+    // gets SIGHUP; the kernel sends it to the child's process group when the leader ends.
+    let release = '';
+    let record = '';
+    /** Kills this test's keeper while it runs; null once the case has killed it. */
+    let killOwnKeeper: (() => void) | null = null;
+    // Registered before windowDeck's cleanup, so it runs first (t.after: first in, first out):
+    // also when the case failed half way, the keeper is gone, the `sh` released and the holder's
+    // last hook written before the keepers' box waits for the program and the sandbox goes.
+    t.after(async () => {
+      if (release === '') return;
+      writeFileSync(release, '');
+      try {
+        killOwnKeeper?.();
+      } catch {
+        // It no longer runs.
+      }
+      if (record !== '') {
+        await waitForRecord(record, (entry) => entry.ev === 'exit', 10_000).catch(() => {});
+      }
+    });
+    const w = await windowDeck(t, {
+      claudeCommand: (s) => {
+        const standin = standinCommand(s);
+        s.link('sleep');
+        release = join(s.root, 'release-57');
+        const script = join(s.bin, 'claude-outlives-hangup');
+        writeFileSync(
+          script,
+          [
+            '#!/bin/sh',
+            `release=${shellWord(release)}`,
+            `root=${shellWord(s.root)}`,
+            // 200 rounds (20 s and more), and not past the sandbox; the hook above releases it.
+            'trap \'n=0; while [ ! -e "$release" ] && [ -d "$root" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n + 1)); done; exit 129\' HUP',
+            'exec 3<&0',
+            `${shellWord(standin)} "$@" <&3 3<&- &`,
+            'wait "$!"',
+            '',
+          ].join('\n'),
+        );
+        chmodSync(script, 0o755);
+        return script;
+      },
+    });
+    w.resumable(S1);
+    const r = w.registry();
+    const made = w.deps(r);
+    record = made.record;
+    const outcome = await launchPrepared(
+      w.deck,
+      prepareResumeById(w.deck, S1),
+      windowTerminal(made.deps, { cols: 80, rows: 24 }),
+    );
+    assert.equal(outcome.code, 0);
+    const id = r.registry.list()[0]?.id ?? '';
+    killOwnKeeper = () => {
+      w.signalKeeper(w.keeperOf(id), 'SIGKILL');
+    };
+    await w.prompt(r, id, S1);
+    const holder = readRecords(record).find((entry) => entry.ev === 'start')?.pid;
+    const program = info(r.registry, id).program?.pid;
+    assert.ok(holder !== undefined && program !== undefined && holder !== program);
+    const holderStart = procStartOf(holder);
+    assert.ok(holderStart !== null);
+
+    const closed: string[] = [];
+    const tick = createTick({
+      deck: w.deck,
+      hub: {
+        list: () => r.registry.list(),
+        setSession: (termId, sessionId, notReported) => {
+          r.registry.setSession(termId, sessionId, notReported);
+        },
+        close: (termId) => {
+          closed.push(termId);
+          return r.registry.close(termId);
+        },
+      },
+      pages: { pushList() {}, notice() {} },
+      keepAlive: { tick: () => Promise.resolve() },
+      interop: { refresh: () => Promise.resolve(null) },
+      keepersLog: join(w.deck.places.stateDir, 'keepers.log'),
+      log: () => {},
+      storeNewer: () => {},
+    });
+    t.after(() => tick.stop());
+    /** The next refresh (every second tick runs one). */
+    const refreshNow = async (): Promise<void> => {
+      await tick.run();
+      await tick.run();
+    };
+    const rowOf = (): ListRow | undefined => tick.rows().find((row) => row.id === S1);
+    // 'working', 'waiting' or 'running': a live holder holds the session.
+    await tick.run();
+    assert.equal(info(r.registry, id).sessionId, S1);
+    assert.notEqual(rowOf()?.state ?? 'not-running', 'not-running');
+
+    // Only the keeper this test started, by the pid of its own record.
+    w.signalKeeper(w.keeperOf(id), 'SIGKILL');
+    killOwnKeeper = null;
+    await until(() => info(r.registry, id).state === 'lost', 'the terminal is lost', 15_000);
+    await refreshNow();
+    assert.deepEqual(
+      readRecords(record).filter((entry) => entry.ev === 'hup' || entry.ev === 'exit'),
+      [],
+      'the holder still lives at this refresh',
+    );
+    assert.notEqual(rowOf()?.state ?? 'not-running', 'not-running', 'the holder still holds it');
+    assert.deepEqual(closed, [], 'its own program is not "elsewhere"');
+    assert.equal(tick.elsewhere().has(S1), false);
+    assert.equal(info(r.registry, id).sessionId, S1);
+
+    writeFileSync(release, '');
+    await waitForRecord(record, (entry) => entry.ev === 'exit', 15_000);
+    // The exit record comes a moment before the exit, and `ended-unexpectedly` needs the last
+    // holder's process gone (derive: `!lastHolding.alive`), not only its end ingested.
+    await until(() => !stillRuns(holder, holderStart), 'the holder is gone', 15_000);
+    const deadline = performance.now() + 15_000;
+    while ((rowOf()?.state ?? 'not-running') !== 'not-running') {
+      assert.ok(performance.now() < deadline, 'the row no longer runs within 15 s');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await refreshNow();
+    }
+    assert.deepEqual(closed, []);
+    const term = info(r.registry, id);
+    assert.equal(term.state, 'lost');
+    assert.deepEqual(
+      [term.exit?.code, term.exit?.signal],
+      [null, 1],
+      'its exit stays the lost one',
+    );
+    assert.ok(rowOf()?.marks.includes('ended-unexpectedly'), 'the row ended unexpectedly');
   });
 });
 

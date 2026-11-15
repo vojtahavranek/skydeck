@@ -570,6 +570,229 @@ describe('mapTerminals: elsewhere', () => {
   });
 });
 
+describe('mapTerminals: a lost keeper’s program while it lives (task 57; S2 7.5, 7.8)', () => {
+  // A keeper that died sent no X: its exit is made up at once (SIGHUP), while the program it
+  // started may still run its end for a moment, given to init.
+  const lostExit = { code: null, signal: 1, atNs: String(T0), notStarted: null };
+  const lost = (over: Partial<TerminalInfo> = {}): TerminalInfo =>
+    terminal({
+      id: 'aaaaaaaaaaaa',
+      state: 'lost',
+      program: PROGRAM,
+      sessionId: S1,
+      exit: lostExit,
+      ...over,
+    });
+
+  test('its program still lives (its stat line names the start the keeper reported): the holder is the terminal’s, not elsewhere', () => {
+    const got = map(
+      [lost({ openedNs: T0 - 10n * TIMEOUT })],
+      [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
+      procOf([[5000, 900, 1]]),
+    );
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S1);
+    assert.deepEqual([...got.elsewhere], []);
+    assert.deepEqual([...got.unknown], []);
+    assert.equal(
+      got.notReported.size,
+      0,
+      'a terminal with an exit is never "started, not reported"',
+    );
+  });
+
+  test('also while lose()’s exit is on its way through the screen side (the state not yet lost), and for a holder below the program (a wrapper)', () => {
+    const proc = procOf([
+      [5000, 900, 1],
+      [5001, 901, 5000],
+    ]);
+    for (const state of ['reconnecting', 'running', 'lost'] as const) {
+      // The holder is the program itself, or its child below a wrapper.
+      for (const held of [holder(5000, 900), holder(5001, 901)]) {
+        const what = `${state}, holder ${held.process.pid}`;
+        const got = map(
+          [lost({ state })],
+          [ds({ id: S1, state: 'running', holders: [held] })],
+          proc,
+        );
+        assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, what);
+        assert.equal(got.elsewhere.has(S1), false, what);
+      }
+    }
+  });
+
+  test('a session held by the lost program and by a process outside is not elsewhere while the program lives', () => {
+    const got = map(
+      [lost()],
+      [ds({ id: S1, state: 'running', holders: [holder(8000, 800), holder(5000, 900)] })],
+      procOf([
+        [5000, 900, 1],
+        [8000, 800, 1],
+      ]),
+    );
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S1);
+    assert.equal(got.elsewhere.has(S1), false);
+  });
+
+  test('once the program is gone it counts no more: its holder is gone, and a holder outside makes the session elsewhere', () => {
+    const got = map(
+      [lost()],
+      [ds({ id: S1, state: 'running', holders: [holder(5000, 900), holder(8000, 800)] })],
+      procOf([[8000, 800, 1]]),
+    );
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, 'it keeps the session it showed');
+    assert.deepEqual(got.elsewhere.get(S1), { pid: 8000, tty: null });
+  });
+
+  test('its pid is another process now (another start): never the terminal’s program — a pid alone is no one', () => {
+    const got = map(
+      [lost()],
+      [ds({ id: S2, state: 'running', holders: [holder(5000, 901)] })],
+      procOf([[5000, 901, 1]]),
+    );
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, 'not moved to S2');
+    assert.deepEqual(got.elsewhere.get(S2), { pid: 5000, tty: null });
+  });
+
+  test('its pid is another process now, and the dead program’s own holder record is still in the rows: that holder is gone, not the terminal’s', () => {
+    // The one input on which the start check of `lives` decides: the holder record has the
+    // program's own pid and start, so holderPlace would match it with the program at once.
+    for (const start of [899, 901]) {
+      const got = map(
+        [lost()],
+        [ds({ id: S1, state: 'running', holders: [holder(5000, 900), holder(8000, 800)] })],
+        procOf([
+          [5000, start, 1],
+          [8000, 800, 1],
+        ]),
+      );
+      assert.deepEqual(got.elsewhere.get(S1), { pid: 8000, tty: null }, `start ${start}`);
+      assert.deepEqual([...got.unknown], [], `start ${start}`);
+    }
+  });
+
+  test('its stat line cannot be read, or names no process start: it may still run, so it counts — never “elsewhere”', () => {
+    // Ruled (review 2's SHOULD 1): what cannot be told is not taken for gone (Proc's contract).
+    const procs = (): Proc[] => {
+      const noStart = procOf([[5001, 901, 5000]]);
+      noStart.setProcess(5000, { stat: '5000 (claude) S 1', cmdline: [] });
+      return [
+        unreadable(
+          procOf([
+            [5000, 900, 1],
+            [5001, 901, 5000],
+          ]),
+          5000,
+        ),
+        noStart,
+      ];
+    };
+    for (const proc of procs()) {
+      // The holder is the program: matched by its pid and start, nothing more to read.
+      const own = map(
+        [lost()],
+        [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
+        proc,
+      );
+      assert.equal(own.shown.get('aaaaaaaaaaaa'), S1);
+      assert.equal(own.elsewhere.has(S1), false);
+      assert.deepEqual([...own.unknown], []);
+      // A holder below it: its walk meets the same read, so its session is unknown.
+      const below = map(
+        [lost()],
+        [ds({ id: S1, state: 'running', holders: [holder(5001, 901)] })],
+        proc,
+      );
+      assert.equal(below.shown.get('aaaaaaaaaaaa'), S1);
+      assert.equal(below.elsewhere.has(S1), false);
+      assert.deepEqual([...below.unknown], [S1]);
+    }
+  });
+
+  test('a read of its stat line that fails once (EMFILE) and works a moment later: still the terminal’s, not elsewhere', () => {
+    for (const held of [holder(5000, 900), holder(5001, 901)]) {
+      const base = procOf([
+        [5000, 900, 1],
+        [5001, 901, 5000],
+      ]);
+      let failed = false;
+      const proc: Proc = {
+        ...base,
+        stat: (pid) => {
+          if (pid === 5000 && !failed) {
+            failed = true;
+            throw Object.assign(new Error('too many open files'), { code: 'EMFILE' });
+          }
+          return base.stat(pid);
+        },
+      };
+      const got = map([lost()], [ds({ id: S1, state: 'running', holders: [held] })], proc);
+      assert.ok(failed, 'the read failed once');
+      const what = `holder ${held.process.pid}`;
+      assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, what);
+      assert.equal(got.elsewhere.has(S1), false, what);
+      assert.deepEqual([...got.unknown], [], what);
+    }
+  });
+
+  test('only for less than 60 s after the loss: then everything is as for any ended terminal (ruled)', () => {
+    const proc = procOf([[5000, 900, 1]]);
+    const at = (ageNs: Ns): ReturnType<typeof mapTerminals> =>
+      map(
+        [lost({ exit: { ...lostExit, atNs: String(T0) } })],
+        [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
+        proc,
+        { nowNs: T0 + ageNs },
+      );
+    for (const ageNs of [0n, 59n * SEC, 60n * SEC - 1n]) {
+      assert.equal(at(ageNs).elsewhere.has(S1), false, `kept at ${ageNs} ns`);
+      assert.equal(at(ageNs).shown.get('aaaaaaaaaaaa'), S1, `kept at ${ageNs} ns`);
+    }
+    for (const ageNs of [60n * SEC, 61n * SEC, 3600n * SEC]) {
+      assert.deepEqual(
+        at(ageNs).elsewhere.get(S1),
+        { pid: 5000, tty: null },
+        `as on main at ${ageNs} ns`,
+      );
+    }
+  });
+
+  test('a clock that stepped back since the loss keeps the program (it never counts out early)', () => {
+    const got = map(
+      [lost({ exit: { ...lostExit, atNs: String(T0 + 3600n * SEC) } })],
+      [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
+      procOf([[5000, 900, 1]]),
+      { nowNs: T0 },
+    );
+    assert.equal(got.shown.get('aaaaaaaaaaaa'), S1);
+    assert.equal(got.elsewhere.has(S1), false);
+  });
+
+  test('an exit time that is no decimal number counts the program out, as before, and does not throw', () => {
+    const got = map(
+      [lost({ exit: { ...lostExit, atNs: 'not a time' } })],
+      [ds({ id: S1, state: 'running', holders: [holder(5000, 900)] })],
+      procOf([[5000, 900, 1]]),
+    );
+    assert.deepEqual(got.elsewhere.get(S1), { pid: 5000, tty: null });
+  });
+
+  test('an exit the keeper sent (ended, not started) counts the program never, even with its pid and start alive', () => {
+    const exit = { code: 0, signal: null, atNs: String(T0), notStarted: null };
+    for (const over of [
+      { state: 'ended' as const, exit },
+      { state: 'not-started' as const, exit: { ...exit, code: null, notStarted: 'x' } },
+    ]) {
+      const got = map(
+        [lost(over)],
+        [ds({ id: S2, state: 'running', holders: [holder(5000, 900)] })],
+        procOf([[5000, 900, 1]]),
+      );
+      assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, over.state);
+      assert.ok(got.elsewhere.has(S2), over.state);
+    }
+  });
+});
+
 describe('mapTerminals with real programs', { concurrency: true }, () => {
   const SIZE = { cols: 80, rows: 24 };
 

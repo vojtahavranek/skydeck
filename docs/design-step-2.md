@@ -1008,7 +1008,20 @@ both in memory: the **expected session**. Which session it shows is decided agai
 
 - the terminal's program is the process the keeper reported in `T` or `hello` (8.1): pid and
   process start, on the current boot. A terminal whose keeper has not reported a start has no
-  program yet;
+  program yet. A terminal whose keeper sent `exit` has none any more (the keeper reaped it, 7.8).
+  A **lost** keeper's program (7.8) stays its terminal's while it may still run — its stat line
+  names that pid and start, or cannot be read (design 5.5: what cannot be read is not taken for
+  gone) — and for less than 60 seconds after the loss (the exit's time, on the server's wall
+  clock: a clock that stepped back keeps it longer, one that stepped forward, as after a sleep of
+  the host, ends it early):
+  the server knows the loss at once, while the program, given SIGHUP, runs its end for a moment,
+  so its session is not "running in another terminal" (7.9) meanwhile and the lost terminal is not
+  dropped for it (7.8; stage B's plan, task 57). The pid alone never counts: it may be another
+  process's by then. Known limits: a program that has not ended 60 seconds after the loss counts
+  as running in another terminal, as 7.9 shows it, and the lost terminal is dropped, so its later
+  end is not marked in the window; a wrapper `claudeCommand` that ends at the SIGHUP before its
+  `claude` child leaves that child outside every terminal, so the lost terminal is dropped while
+  the child runs its end;
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
   terminal's program or a descendant of it (parent pids read from `/proc/<pid>/stat`, at most 8
   steps up, each judged alive by design 5.5's rule). The descendant rule covers a `claudeCommand`
@@ -1066,7 +1079,8 @@ The server, on `exit`:
   session's terminals whose program is over (ended, lost, not started) once the guard and the
   lock have let it through and before it opens the new one (a refused resume leaves them), and
   the tick closes an ended terminal whose session is seen running anywhere else. A terminal whose
-  program may still run is never dropped this way;
+  program may still run is never dropped this way — for a lost terminal, for 60 seconds after the
+  loss (7.5);
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
   and the session's lock is still of the take this launch made (the lock it took, or a renewal of
@@ -1757,6 +1771,9 @@ server sees that at its one-second look and records, for that session, the next 
 its `updatedAt`, else the time the server saw the change. When the file has one of the two, that is
 exactly the time the look keeps for the file (stage B's plan, contract 2.5's `sinceNs`), so that it
 can be compared for equality with the status time the session shows (12.4), never across two clocks.
+A session with several holders (a duplicate) records the latest status time among its idle holders
+(stage B's plan, task 52): never earlier than the time the session shows, also when a look missed
+one holder's idle file and sees it end later.
 When the session is being seen at that moment (12.4), the same write sets `seen_seq` to a later
 value, so a turn that ends in front of the user is never "finished".
 
@@ -1775,6 +1792,26 @@ another program, whose baseline would otherwise keep a dead holder's `waiting`, 
 would ask until that program ends). The statuses attention reads (12.4) are the baselines', so a
 file being rewritten does not make a mark blink. The rule is pure, `isTurnEnd` and `lookAt` of
 `src/claude/terminal.ts` (4.3); the server reads the files and asks `/proc`.
+
+**A busy store** (stage B's plan, B11; 14). The look writes this look's turn ends (12.4: with the
+`seen` of a session being seen) in one transaction. A store another process keeps locked refuses it
+after the server's 250 ms: the write is kept, and the next look tries the kept writes again first,
+in their order, each as an entry of its own, then its own. Nothing is folded but two turn ends of
+one session, the later kept: a kept `seen` folded into a later turn end would make that turn seen although the user
+had left. The baselines move on, so a turn end is neither lost nor recorded twice. While writes are
+kept, a refresh's window ends (12.4) and the `seen` that a hold or a typing brings are put behind
+them, and the store is not tried again before the next look: a busy store costs its 250 ms once a
+second at most, never at every key press. Any other refusal of a write — the counter at 2^53 − 1
+(10.2), a damaged table — is logged by its kind and dropped, not kept; a `seen` that would still
+clear a mark is made anew at the next look, or the next key that begins a seen, while the hold
+lasts, and each such try is refused at once. A live file's time that no INTEGER column holds (past
+2^63 − 1 ns, from the year 2262 on) is taken as unknown, so that one foreign file cannot make the
+write of every session fail. The marks are read from the
+store once, at the first look that can, and then follow from what each write returns; a read that
+fails for another reason than a busy store (one damaged row makes every read of the table fail, and
+so does a schema version 2 without the table) leaves no marks from the store, logged once by kind:
+the list goes on, and a session that asks still shows it, from its live file. A store migrated under
+the server stops it (10.1).
 
 **Decided against: a `Stop` hook** (design 16 had planned turn hooks for step 2). The live-session
 file already says when a turn ends, for every session, including those running outside the window,
@@ -2066,6 +2103,20 @@ in full: those that ask by that time, the longest-waiting first and an unknown t
 that ended by `window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties
 by session id.
 
+**When a window end is recorded** (stage B's plan, B10). At each refresh that worked — after the
+exits it settled (7.8) — each terminal of the window in state `ended` or `lost` (a keeper that died:
+its exit time is the server's clock) that started its program is judged, once, at the first refresh
+where its session's row no longer runs and that row's last holder is gone (a lost keeper's program
+lives on its SIGHUP for a moment, and its end event can be ingested before it exits, while
+`ended-unexpectedly` needs the holder gone, design 6.3):
+its session, the one it shows or else the one it was opened for, gets `window_end_seq` and, as
+`window_end_ns`, the exit's time when that row is marked `ended-unexpectedly`; nothing when the
+session ended deliberately. A terminal that leaves the list is forgotten. It is the same end when the stored `window_end_ns` equals the exit's
+time, so a server restart, which finds a lingering keeper again, never marks it twice; nothing is
+judged before the server has read the marks. A session being seen at that moment gets its `seen` in
+the same write. At the first start of a stage B server the table is empty, so each lingering keeper
+of a session that ended unexpectedly gives `ended` once, with no notification (13).
+
 Seen is a **condition that holds**, not a moment: a session **is being seen** while it is the
 selected one in a window that has focus, from 1.5 seconds after it was selected; typing into its
 terminal makes it seen at once. While it holds, the server sets `seen_seq` to the next counter
@@ -2098,8 +2149,9 @@ focus, makes the session it shows seen once. A `seen` is written only when it cl
 completes, a typing comes, or a mark of a session already being seen becomes known — and always in
 the write of a turn end or window end of that session while the hold lasts; there is **no periodic
 `seen` write**: nothing writes to the store every few seconds because a window has focus. It is
-written only for a session among the list's rows, so that a selection naming no session leaves no
-row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
+written on its own only for a session among the list's rows, so that a selection naming no session
+leaves no row; one in the write of that session's own end goes with it all the same, since the end
+makes the row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
 clock does not move).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
@@ -2424,6 +2476,13 @@ taskbar button show it is check W3. Low priority: stage E (19).
 - When a session starts to need you (12.4: a change from not needing you to needing you, for any
   of the three reasons) and no window has focus, the server sends `notify` to **one** page: the
   one that had focus last (several windows would otherwise each raise one).
+- How the server judges it (stage B's plan, B12): over the rows a page without a filter lists,
+  against its last judgement. A session whose reason changes does not start to need you; one that
+  stops needing you and needs you again later does. The first judgement records and notifies
+  nothing, so that a restart does not notify everything that already needed you, and it is made
+  only once the server has read the marks and a refresh has worked, with that refresh's window
+  ends stored (a busy store that keeps them makes it wait): a start whose first refresh fails must not notify all of it at the next one. A `notify`
+  that no page takes (a window has focus, or none is open) is not sent again later.
 - That page shows a desktop notification with the Notification API (allowed: `127.0.0.1` is a
   secure context, section 21): title = the session's title, body = the reason (`asks: permission ·
   Bash`, `finished`, `ended unexpectedly`), both plain text; `tag` = the session id, so a newer
@@ -2973,12 +3032,14 @@ In the browser suite, besides those:
   an installed Chromium the page suite fails with the one command that installs it — exactly
   `Chromium for Playwright is not installed; run: npx playwright install chromium`, which a test
   pins — so that a local check does not pass where CI would fail.
-- CI, on every pull request: both legs of the Node matrix run format check, type checks, `npm
-  test` (keeper and server tests included; Ubuntu runners have python3), `python3 -m py_compile
-  bin/skydeck-keeper`, the vendored-files check (16.6: `test/vendor/vendor.test.ts`, a test in
-  `npm test` that needs the packages `npm ci` installed, so it has no step of its own), and
-  `shellcheck` on the shell scripts by
-  name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
+- CI, on every pull request and every push to `main`, runs the newest leg of the Node matrix
+  (Node 24). The oldest leg (Node 24.12) runs only when the workflow is started by hand
+  (`workflow_dispatch`: the owner's decision, to save CI minutes), and a run started by hand runs
+  both legs. A leg runs format check, type checks, `npm test` (keeper and server tests included;
+  Ubuntu runners have python3), `python3 -m py_compile bin/skydeck-keeper`, the vendored-files
+  check (16.6: `test/vendor/vendor.test.ts`, a test in `npm test` that needs the packages `npm ci`
+  installed, so it has no step of its own), and `shellcheck` on the shell scripts by name —
+  `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
   bin/skydeck*` would also match the python keeper. Each is a step of its own: CI does not run
   `npm run check`, which ends with the page suite. Only the newest leg (Node 24) runs the page
   suite, and it runs on Ubuntu 24.04 (the development machine's system) while the other leg runs
