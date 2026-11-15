@@ -1702,6 +1702,9 @@ server sees that at its one-second look and records, for that session, the next 
 its `updatedAt`, else the time the server saw the change. When the file has one of the two, that is
 exactly the time the look keeps for the file (stage B's plan, contract 2.5's `sinceNs`), so that it
 can be compared for equality with the status time the session shows (12.4), never across two clocks.
+A session with several holders (a duplicate) records the latest status time among its idle holders
+(stage B's plan, task 52): never earlier than the time the session shows, also when a look missed
+one holder's idle file and sees it end later.
 When the session is being seen at that moment (12.4), the same write sets `seen_seq` to a later
 value, so a turn that ends in front of the user is never "finished".
 
@@ -1725,8 +1728,7 @@ file being rewritten does not make a mark blink. The rule is pure, `isTurnEnd` a
 `seen` of a session being seen) in one transaction. A store another process keeps locked refuses it
 after the server's 250 ms: the write is kept, and the next look tries the kept writes again first,
 in their order, each as an entry of its own, then its own. Nothing is folded but two turn ends of
-one session, the later kept (two holders of one session that end their turns at one look give the
-later time): a kept `seen` folded into a later turn end would make that turn seen although the user
+one session, the later kept: a kept `seen` folded into a later turn end would make that turn seen although the user
 had left. The baselines move on, so a turn end is neither lost nor recorded twice. While writes are
 kept, a refresh's window ends (12.4) and the `seen` that a hold or a typing brings are put behind
 them, and the store is not tried again before the next look: a busy store costs its 250 ms once a
@@ -2013,10 +2015,11 @@ by session id.
 
 **When a window end is recorded** (stage B's plan, B10). At each refresh that worked — after the
 exits it settled (7.8) — each terminal of the window in state `ended` or `lost` (a keeper that died:
-its exit time is the server's clock) that started its program is judged, once: its session, the one
-it shows or else the one it was opened for, gets `window_end_seq` and, as `window_end_ns`, the exit's
-time when its row is not running and marked `ended-unexpectedly`; nothing when the row runs again or
-the session ended deliberately. It is the same end when the stored `window_end_ns` equals the exit's
+its exit time is the server's clock) that started its program is judged, once, at the first refresh
+where its session's row no longer runs (a lost keeper's program lives on its SIGHUP for a moment):
+its session, the one it shows or else the one it was opened for, gets `window_end_seq` and, as
+`window_end_ns`, the exit's time when that row is marked `ended-unexpectedly`; nothing when the
+session ended deliberately. A terminal that leaves the list is forgotten. It is the same end when the stored `window_end_ns` equals the exit's
 time, so a server restart, which finds a lingering keeper again, never marks it twice; nothing is
 judged before the server has read the marks. A session being seen at that moment gets its `seen` in
 the same write. At the first start of a stage B server the table is empty, so each lingering keeper
@@ -2054,8 +2057,9 @@ focus, makes the session it shows seen once. A `seen` is written only when it cl
 completes, a typing comes, or a mark of a session already being seen becomes known — and always in
 the write of a turn end or window end of that session while the hold lasts; there is **no periodic
 `seen` write**: nothing writes to the store every few seconds because a window has focus. It is
-written only for a session among the list's rows, so that a selection naming no session leaves no
-row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
+written on its own only for a session among the list's rows, so that a selection naming no session
+leaves no row; one in the write of that session's own end goes with it all the same, since the end
+makes the row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
 clock does not move).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
@@ -2323,8 +2327,8 @@ taskbar button show it is check W3. Low priority: stage E (19).
   against its last judgement. A session whose reason changes does not start to need you; one that
   stops needing you and needs you again later does. The first judgement records and notifies
   nothing, so that a restart does not notify everything that already needed you, and it is made
-  only once the server has read the marks and a refresh has worked (with that refresh's window
-  ends): a start whose first refresh fails must not notify all of it at the next one. A `notify`
+  only once the server has read the marks and a refresh has worked, with that refresh's window
+  ends stored (a busy store that keeps them makes it wait): a start whose first refresh fails must not notify all of it at the next one. A `notify`
   that no page takes (a window has focus, or none is open) is not sent again later.
 - That page shows a desktop notification with the Notification API (allowed: `127.0.0.1` is a
   secure context, section 21): title = the session's title, body = the reason (`asks: permission ·

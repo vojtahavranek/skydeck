@@ -56,9 +56,10 @@ export interface AttentionDeps {
 export interface Attention {
   /** The one-second look (S2 10.3): readLiveFiles, trust, lookAt, then one recordAttention with the
    *  writes kept from a refused one first, in their order (B11), and this look's turn ends (the
-   *  file's time, else the clock) and B9's seen writes: for each id of seen.take() among rows(),
-   *  in the write of its end, else on its own when the marks after this write would still hold an
-   *  unseen end (a mark that became known while the hold lasts; ruled) — none periodic. The marks
+   *  latest status time among the session's idle baselines, else the clock; ruled) and B9's seen
+   *  writes for each id of seen.take(): in the write of its end, else on its own, for an id among
+   *  rows(), when the marks after this write would still hold an unseen end (a mark that became
+   *  known while the hold lasts; ruled) — none periodic. The marks
    *  are read from the store at the first look that can (only the server writes them). True when
    *  the facts changed. Never throws: a busy store keeps the writes (B11) and logs its kind once
    *  until a write works again. */
@@ -71,8 +72,9 @@ export interface Attention {
    *  join them for the next look and the store is not touched. Cheap when there is nothing to clear
    *  (no read, no write). As look. */
   seenNow(): boolean;
-  /** B12: true once the marks have been read and a refresh has worked since (refreshed() was
-   *  called), so that the window ends of that refresh are among the first judgement. */
+  /** B12: true once the marks have been read, a refresh has worked since (refreshed() was called)
+   *  and nothing is kept, so that the window ends of that refresh are in the first judgement also
+   *  when a busy store kept them (ruled); once true, it stays true. */
   ready(): boolean;
   /** The module's own maps, read-only to the caller: current until its next call that changes them
    *  (a caller builds its lists at once, as the server's do). */
@@ -196,6 +198,8 @@ export function createAttention(deps: AttentionDeps): Attention {
   let marksRead = false;
   /** A refresh was judged with the marks read (B12). */
   let judged = false;
+  /** ready() said true: it stays so. */
+  let wasReady = false;
   /** The terminals whose end was judged (B10: once), forgotten when they leave the list. */
   const judgedTerminals = new Set<string>();
   let stopped = false;
@@ -273,37 +277,52 @@ export function createAttention(deps: AttentionDeps): Attention {
     return gone;
   };
 
-  /** This look's turn ends, one write per session: its time is the after-file's (else the clock);
-   *  of two holders of one session that end at one look, the later time (B11's fold). */
-  const turnEnds = (ends: readonly { sessionId: string; atNs: Ns | null }[]): AttentionWrite[] => {
-    const latest = new Map<string, Ns>();
-    for (const end of ends) {
-      const atNs = end.atNs ?? clock.nowNs();
-      const before = latest.get(end.sessionId);
-      if (before === undefined || atNs > before) latest.set(end.sessionId, atNs);
-    }
-    return [...latest].map(([sessionId, turnEndedNs]) => ({ sessionId, turnEndedNs }));
-  };
+  /**
+   * This look's turn ends, one write per session. Its time is the latest status time among that
+   * session's idle baselines after the look (ruled on review 2), so always an after-file's
+   * `sinceNs`, and never earlier than the one the row shows (B5 shows the first idle holder's): the
+   * stale-turn rule of the view model compares the two for equality. That holds for two holders that
+   * end at one look (the later time) and for one whose idle file a look missed and that is seen
+   * ending later with an earlier time. None known: the clock, the time the server saw the change.
+   */
+  const turnEnds = (
+    ends: readonly { sessionId: string }[],
+    after: ReadonlyMap<number, LookedFile>,
+  ): AttentionWrite[] =>
+    [...new Set(ends.map((end) => end.sessionId))].map((sessionId) => {
+      let latest: Ns | null = null;
+      for (const baseline of after.values()) {
+        const { sinceNs } = baseline;
+        if (
+          baseline.sessionId === sessionId &&
+          baseline.status === 'idle' &&
+          sinceNs !== null &&
+          (latest === null || sinceNs > latest)
+        ) {
+          latest = sinceNs;
+        }
+      }
+      return { sessionId, turnEndedNs: latest ?? clock.nowNs() };
+    });
 
   /**
-   * B9: a seen for each session being seen that is among the rows (F6): in the last write of its end
-   * among `writes` (after the end: B3), else one of its own when the marks after the kept writes and
-   * `writes` would still hold an unseen end — a write only when there is something to clear.
+   * B9: a seen for each session being seen: in the last write of its end among `writes` (after the
+   * end: B3), whatever the rows say (ruled on review 2: the end makes the row, so F6's reason does
+   * not hold, and a turn that ends in front of the user is never finished); else one of its own,
+   * for a session among the rows (F6), when the marks after the kept writes and `writes` would still
+   * hold an unseen end — a write only when there is something to clear.
    */
   const addSeen = (writes: AttentionWrite[], taken: ReadonlySet<string>): void => {
     let rowIds: Set<string> | null = null;
     for (const sessionId of taken) {
       const own = writes.findLast((write) => write.sessionId === sessionId && hasEnd(write));
-      if (
-        own === undefined &&
-        !unseenAfter(marks.get(sessionId), [...kept, ...writes], sessionId)
-      ) {
+      if (own !== undefined) {
+        own.seen = true;
         continue;
       }
+      if (!unseenAfter(marks.get(sessionId), [...kept, ...writes], sessionId)) continue;
       rowIds ??= new Set(deps.rows().map((row) => row.id));
-      if (!rowIds.has(sessionId)) continue;
-      if (own !== undefined) own.seen = true;
-      else writes.push({ sessionId, seen: true });
+      if (rowIds.has(sessionId)) writes.push({ sessionId, seen: true });
     }
   };
 
@@ -358,7 +377,7 @@ export function createAttention(deps: AttentionDeps): Attention {
           live = statuses;
           changed = true;
         }
-        const writes = turnEnds(ends);
+        const writes = turnEnds(ends, baselines);
         addSeen(writes, deps.seen.take());
         let queue = kept;
         for (const one of writes) queue = enqueue(queue, one);
@@ -391,16 +410,15 @@ export function createAttention(deps: AttentionDeps): Attention {
           ) {
             continue;
           }
-          judgedTerminals.add(term.id);
           const sessionId = term.sessionId ?? term.expectedSessionId;
           rows ??= new Map(deps.rows().map((row) => [row.id, row]));
           const row = rows.get(sessionId);
-          if (
-            row === undefined ||
-            row.state !== 'not-running' ||
-            !row.marks.includes('ended-unexpectedly')
-          ) {
-            continue; // it runs again, it ended deliberately, or skydeck knows no such session
+          // Ruled (review 2): not judged while its row still runs — a lost keeper's program lives
+          // on its SIGHUP for a moment — but at the first refresh where the row no longer runs.
+          if (row !== undefined && row.state !== 'not-running') continue;
+          judgedTerminals.add(term.id);
+          if (row === undefined || !row.marks.includes('ended-unexpectedly')) {
+            continue; // it ended deliberately, or skydeck knows no such session
           }
           const atNs = BigInt(exit.atNs);
           // The same end (a server restart finds the keeper again) is never marked twice.
@@ -432,7 +450,12 @@ export function createAttention(deps: AttentionDeps): Attention {
       }
     },
 
-    ready: () => marksRead && judged,
+    ready() {
+      // Latched (ruled on review 2): also nothing kept, so that the first judgement holds the
+      // window ends of that refresh even when a busy store kept them.
+      wasReady ||= marksRead && judged && kept.length === 0;
+      return wasReady;
+    },
 
     facts: () => ({ marks, live }),
   };

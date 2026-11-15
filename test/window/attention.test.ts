@@ -19,8 +19,10 @@ import type { ListRow } from '../../src/sessions/list.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import type { AttentionRow, AttentionWrite } from '../../src/store/types.ts';
 import { createAttention } from '../../src/window/attention.ts';
+import { createNotifier } from '../../src/window/notify.ts';
 import type { Attention } from '../../src/window/attention.ts';
 import type { TerminalInfo } from '../../src/window/hub.ts';
+import type { NotifyMessage } from '../../src/window/protocol.ts';
 import { createSeen } from '../../src/window/seen.ts';
 import type { Seen } from '../../src/window/seen.ts';
 import { attentionOf } from '../../src/window/view/attention.ts';
@@ -420,6 +422,33 @@ describe('the look (S2 10.3; B4)', () => {
     assert.deepEqual(stored(w.d), [row({ sessionId: S1, turnEndedSeq: 1, turnEndedNs: T0 + SEC })]);
   });
 
+  test("a turn end's time is the latest status time among its session's idle holders: a holder whose idle file was missed, seen ending later with an earlier time, hides no finished (ruled)", (t) => {
+    const w = world(t);
+    liveFile(w.d, PID, S1, 'busy', T0);
+    liveFile(w.d, PID2, S1, 'busy', T0);
+    w.attention.look();
+    liveFile(w.d, PID, S1, 'idle', T0 + 4n * SEC);
+    writeFileSync(join(w.d.deck.places.claudeHome, 'sessions', `${PID2}.json`), '{"pid": 43'); // idle at T0 + 2 s, being written
+    w.attention.look();
+    assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 4n * SEC }]);
+    liveFile(w.d, PID2, S1, 'idle', T0 + 2n * SEC);
+    w.attention.look();
+    assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 4n * SEC }]);
+    assert.equal(w.attention.facts().live.get(S1)?.sinceNs, T0 + 4n * SEC);
+    assert.equal(reasonOf(w, S1), 'finished');
+  });
+
+  test("a holder that is still busy lends a turn end no time: the end's time is its idle holders' only", (t) => {
+    const w = world(t);
+    liveFile(w.d, PID, S1, 'busy', T0);
+    liveFile(w.d, PID2, S1, 'busy', T0);
+    w.attention.look();
+    liveFile(w.d, PID, S1, 'idle', T0 + 2n * SEC);
+    liveFile(w.d, PID2, S1, 'busy', T0 + 6n * SEC);
+    w.attention.look();
+    assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 2n * SEC }]);
+  });
+
   test("two holders of one session that end their turns at one look: one turn end, the later time, and it is finished whichever holder's time the row shows", (t) => {
     const w = world(t);
     liveFile(w.d, PID, S1, 'busy', T0);
@@ -507,6 +536,17 @@ describe('seen (S2 12.4; B9)', () => {
     }
     assert.deepEqual(w.writes, []);
     assert.deepEqual(stored(w.d), []);
+  });
+
+  test("a held session that is no row yet ends a turn: its seen rides in the end's write all the same, never finished (ruled)", (t) => {
+    const w = world(t, { rows: [running(S1)] });
+    liveFile(w.d, PID2, S2, 'busy', T0);
+    w.attention.look();
+    hold(w, S2);
+    liveFile(w.d, PID2, S2, 'idle', T0 + SEC);
+    w.attention.look();
+    assert.deepEqual(w.writes, [[{ sessionId: S2, turnEndedNs: T0 + SEC, seen: true }]]);
+    assert.equal(reasonOf(w, S2), null);
   });
 
   test('a seen is written only for an id among the rows: a selection naming no row writes nothing and creates no row (F6)', (t) => {
@@ -972,18 +1012,23 @@ describe('window ends (S2 12.4 reason 2; B10)', () => {
     assert.deepEqual(w.writes, []);
   });
 
-  test('judged once: a second refresh writes nothing more, also when the row changes after the judgement', (t) => {
+  test('a terminal whose row still runs is not judged yet: it is judged at the first refresh where its row no longer runs, and then once (ruled)', (t) => {
     const w = ended(
       t,
       [
-        terminal({ id: 'aaaaaaaaaaa1', sessionId: S1 }),
+        terminal({ id: 'aaaaaaaaaaa1', sessionId: S1, state: 'lost' }),
         terminal({ id: 'aaaaaaaaaaa2', sessionId: S2 }),
       ],
-      [endedUnexpectedly(S1), running(S2)],
+      [running(S1), listRow({ id: S2 })],
     );
-    w.attention.refreshed();
-    w.rows.splice(1, 1, endedUnexpectedly(S2));
+    // S1's program still lives on its SIGHUP; S2 ended deliberately.
     assert.equal(w.attention.refreshed(), false);
+    w.rows.splice(0, 2, endedUnexpectedly(S1), endedUnexpectedly(S2));
+    assert.equal(w.attention.refreshed(), true);
+    assert.equal(w.attention.refreshed(), false);
+    w.rows.splice(0, 1, running(S1));
+    w.attention.refreshed();
+    w.rows.splice(0, 1, endedUnexpectedly(S1));
     w.attention.refreshed();
     assert.deepEqual(stored(w.d), [
       row({ sessionId: S1, windowEndSeq: 1, windowEndNs: T0 + 5n * SEC }),
@@ -1106,8 +1151,16 @@ describe('window ends (S2 12.4 reason 2; B10)', () => {
     assert.equal(stored(w.d)[0]?.windowEndNs, T0 + 5n * SEC);
   });
 
+  test('a terminal whose session is no row skydeck knows is judged at once, to nothing: a row that appears later records nothing for it', (t) => {
+    const w = ended(t, [terminal({ id: 'aaaaaaaaaaaa', sessionId: S3 })], [endedUnexpectedly(S1)]);
+    assert.equal(w.attention.refreshed(), false);
+    w.rows.push(endedUnexpectedly(S3));
+    assert.equal(w.attention.refreshed(), false);
+    assert.deepEqual(w.writes, []);
+  });
+
   test('a terminal gone from the list is forgotten: listed again later, it is judged again', (t) => {
-    const w = ended(t, [terminal({ id: 'aaaaaaaaaaaa' })], [running(S1)]);
+    const w = ended(t, [terminal({ id: 'aaaaaaaaaaaa' })], [listRow({ id: S1 })]);
     w.attention.refreshed();
     w.terminals.pop();
     w.attention.refreshed();
@@ -1143,6 +1196,57 @@ describe('ready() (B12)', () => {
     assert.equal(w.attention.ready(), true);
     w.attention.look();
     assert.equal(w.attention.ready(), true);
+  });
+
+  test("a busy store at the start: ready() waits until the first refresh's window ends are stored, so the first judgement holds them and nothing notifies (ruled); then it stays true", (t) => {
+    const d = testDeck(t);
+    const w = world(t, {
+      d,
+      deck: guardedDeck(t, d),
+      terminals: [
+        terminal({ id: 'aaaaaaaaaaa1', sessionId: S1 }),
+        terminal({ id: 'aaaaaaaaaaa2', sessionId: S2 }),
+      ],
+      rows: [endedUnexpectedly(S1), endedUnexpectedly(S2), running(S3)],
+    });
+    const sent: NotifyMessage[] = [];
+    const notifier = createNotifier({
+      needs: () =>
+        new Map(
+          w.rows.flatMap((r) => {
+            const attention = attentionOf(r, w.attention.facts());
+            return attention === null ? [] : [[r.id, { title: r.title, attention }] as const];
+          }),
+        ),
+      ready: () => w.attention.ready(),
+      send: (message) => {
+        sent.push(message);
+        return true;
+      },
+    });
+    liveFile(d, PID, S3, 'busy', T0);
+    w.attention.look();
+    const lock = lockStore(t, d);
+    w.attention.refreshed(); // the two window ends are kept
+    assert.equal(w.attention.ready(), false);
+    notifier.check();
+    lock.release();
+    w.attention.look(); // stored now
+    assert.equal(w.attention.ready(), true);
+    notifier.check(); // the first judgement: both ends in it, nothing sent
+    assert.equal(sent.length, 0);
+
+    const again = lockStore(t, d);
+    liveFile(d, PID, S3, 'idle', T0 + SEC);
+    w.attention.look(); // S3's turn end is kept
+    assert.equal(w.attention.ready(), true, 'once true, it stays');
+    again.release();
+    w.attention.look();
+    notifier.check();
+    assert.deepEqual(
+      sent.map((message) => [message.sessionId, message.reason]),
+      [[S3, 'finished']],
+    );
   });
 });
 
