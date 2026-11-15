@@ -33,9 +33,10 @@ export interface GhOptions {
    */
   answer?: GhPullRequest | RunResult;
   /**
-   * When a run answers: `now` (the default); `held` until release() (an abort of the run's signal
-   * still rejects it, as it would kill a real gh); `signal` only when the run's own signal fires —
-   * it then rejects as an aborted run does, and a run without a signal is a mistake of the test.
+   * When a run answers: `now` (the default: at the next turn of the event loop); `held` until
+   * release() (an abort of the run's signal still rejects it, as it would kill a real gh); `signal`
+   * only when the run's own signal fires — it then rejects as an aborted run does, and a run without
+   * a signal is a mistake of the test.
    */
   hold?: 'now' | 'held' | 'signal';
 }
@@ -53,6 +54,8 @@ export interface GhRunner extends Runner {
   release(): void;
   /** Resolves once `count` gh runs have started. */
   started(count: number, timeoutMs?: number): Promise<void>;
+  /** What the runs from now on answer, and when (a run already started keeps its own). */
+  set(options: GhOptions): void;
 }
 
 /** What the runners reject with when the signal fires: an Error named AbortError. */
@@ -109,10 +112,14 @@ function resultOf(answer: GhPullRequest | RunResult, count: number): RunResult {
 export function ghRunner(inner: Runner, options: GhOptions = {}): GhRunner {
   const runs: GhRun[] = [];
   const held = new Set<() => void>();
-  const answer = options.answer ?? APPROVED_GREEN;
-  const hold = options.hold ?? 'now';
+  let answer = options.answer ?? APPROVED_GREEN;
+  let hold = options.hold ?? 'now';
   return {
     runs,
+    set(next) {
+      answer = next.answer ?? answer;
+      hold = next.hold ?? hold;
+    },
     release() {
       for (const go of [...held]) go();
     },
@@ -132,7 +139,9 @@ export function ghRunner(inner: Runner, options: GhOptions = {}): GhRunner {
       const prs = asked(args);
       runs.push({ prs: prs.map((pr) => `${pr.owner}/${pr.repo}#${pr.number}`), args });
       const result = resultOf(answer, prs.length);
-      if (hold === 'now') return Promise.resolve(result);
+      // At the next turn of the event loop, as a real program's answer comes: a run started again
+      // and again cannot starve the timers (a case's own timeout still fires).
+      if (hold === 'now') return new Promise((resolve) => setImmediate(() => resolve(result)));
       if (hold === 'signal' && signal === undefined) {
         return Promise.reject(new Error("ghRunner: hold 'signal' needs a run with a signal"));
       }

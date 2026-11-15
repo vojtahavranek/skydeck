@@ -134,6 +134,10 @@ function harness(
     openLink?: (url: string) => Promise<boolean>;
     terminalFor?: ActionDeps['terminalFor'];
     deck?: Deck;
+    /** Called at each changed(), after it is recorded in `told`. */
+    changed?: () => void;
+    /** Called at each prs.fetch(), after it is recorded in `told`. */
+    fetch?: () => void;
   } = {},
 ): Harness {
   const events: Events = [];
@@ -160,9 +164,15 @@ function harness(
         return true;
       }),
     log: (line) => logs.push(line),
-    changed: () => told.push('changed'),
+    changed: () => {
+      told.push('changed');
+      options.changed?.();
+    },
     prs: {
-      fetch: (urls) => told.push(`fetch ${urls.join(' ')}`),
+      fetch: (urls) => {
+        told.push(`fetch ${urls.join(' ')}`);
+        options.fetch?.();
+      },
       refresh: (sessionId) => told.push(`refresh ${sessionId}`),
     },
   });
@@ -997,6 +1007,80 @@ describe('label and group (S2 12.5, design 7.1)', () => {
   });
 });
 
+test('changed() comes after the write: at that moment the store already holds it, for every kind that writes', async (t) => {
+  const d = testDeck(t);
+  knownSession(d);
+  const seen: unknown[] = [];
+  const h = harness(d, {
+    changed() {
+      const meta = d.deck.store.meta(S1);
+      const attached = d.deck.store.sessionPrs().filter((link) => link.detachedAtNs === null);
+      seen.push([meta?.label, meta?.group, meta?.note, meta?.doneAtNs !== null, attached.length]);
+    },
+  });
+  const edits: ActMessage[] = [
+    label('L'),
+    group('G-1'),
+    note('N', ''),
+    { t: 'act', id: 44, kind: 'done', sessionId: S1 },
+    { t: 'act', id: 45, kind: 'undone', sessionId: S1 },
+    { t: 'act', id: 47, kind: 'pr-add', sessionId: S1, url: PR7 },
+    { t: 'act', id: 48, kind: 'pr-rm', sessionId: S1, url: PR7 },
+  ];
+  for (const action of edits) assert.equal((await h.act(action)).ok, true, action.kind);
+  assert.deepEqual(seen, [
+    ['L', null, null, false, 0],
+    ['L', 'G-1', null, false, 0],
+    ['L', 'G-1', 'N', false, 0],
+    ['L', 'G-1', 'N', true, 0],
+    ['L', 'G-1', 'N', false, 0],
+    ['L', 'G-1', 'N', false, 1],
+    ['L', 'G-1', 'N', false, 0],
+  ]);
+});
+
+test('a committed write answers ok even when changed() or prs.fetch throws; one log line by kind, nothing of the text (ruled on #90, review 2)', async (t) => {
+  const d = testDeck(t);
+  knownSession(d);
+  const h = harness(d, {
+    changed() {
+      throw new RangeError(`cannot tell ${SECRET}`);
+    },
+  });
+  const url = `https://github.com/acme/${SECRET}/pull/7`;
+  const edits: ActMessage[] = [
+    label(SECRET),
+    group(SECRET),
+    note(SECRET, ''),
+    { t: 'act', id: 44, kind: 'done', sessionId: S1 },
+    { t: 'act', id: 45, kind: 'undone', sessionId: S1 },
+    { t: 'act', id: 47, kind: 'pr-add', sessionId: S1, url },
+    { t: 'act', id: 48, kind: 'pr-rm', sessionId: S1, url },
+  ];
+  for (const action of edits) {
+    const result = await h.act(action);
+    assert.equal(result.ok, true, `${action.kind}: ${JSON.stringify(result)}`);
+  }
+  assert.equal(d.deck.store.meta(S1)?.label, SECRET);
+  assert.equal(d.deck.store.meta(S1)?.note, SECRET);
+  assert.ok(h.told.includes(`fetch ${url}`), 'pr-add still asks for its fetch');
+  assert.deepEqual(
+    h.logs,
+    ['label', 'group', 'note', 'done', 'undone', 'pr-add', 'pr-rm'].map(
+      (kind) => `act ${kind}: the lists were not told (RangeError)`,
+    ),
+  );
+
+  const fetching = harness(d, {
+    fetch() {
+      throw new TypeError(`cannot fetch ${SECRET}`);
+    },
+  });
+  const added = await fetching.act({ t: 'act', id: 47, kind: 'pr-add', sessionId: S1, url });
+  assert.deepEqual(added, ok(47, [`attached ${url}`]));
+  assert.deepEqual(fetching.logs, ['act pr-add: the fetch was not asked for (TypeError)']);
+});
+
 describe('note (S2 12.5; plan D9, D10)', () => {
   test('with base the stored note, the text is stored exactly as typed: CRLF, trailing spaces, 65,536 bytes', async (t) => {
     const d = testDeck(t);
@@ -1010,6 +1094,7 @@ describe('note (S2 12.5; plan D9, D10)', () => {
     assert.deepEqual(await h.act(note(longest, typed)), ok(33));
     assert.equal(d.deck.store.meta(S1)?.note, longest);
     assert.deepEqual(h.told, ['changed', 'changed']);
+    assert.deepEqual(h.logs, [], 'a note sent is never logged');
   });
 
   test('an empty text, or one of only white space, clears the note', async (t) => {
@@ -1043,6 +1128,18 @@ describe('note (S2 12.5; plan D9, D10)', () => {
     setNote(d.deck, S1, 'set meanwhile');
     assert.equal((await h.act(note('mine', ''))).ok, false);
     assert.equal(d.deck.store.meta(S1)?.note, 'set meanwhile');
+    // The base is the stored string exactly (plan D3): a space or a line break of another kind is
+    // another note.
+    const differing: [stored: string, base: string][] = [
+      ['text ', 'text'],
+      ['one\r\ntwo', 'one\ntwo'],
+      ['one\ntwo', 'one\r\ntwo'],
+    ];
+    for (const [stored, base] of differing) {
+      setNote(d.deck, S1, stored);
+      assert.equal((await h.act(note('mine', base))).ok, false, JSON.stringify(base));
+      assert.equal(d.deck.store.meta(S1)?.note, stored);
+    }
   });
 
   test('the same save sent twice (its answer lost): both ok, one write', async (t) => {
@@ -1126,6 +1223,36 @@ describe('note (S2 12.5; plan D9, D10)', () => {
     assert.equal(existsSync(kept), false, 'removed after the save');
     assert.equal(existsSync(other), true, "another session's stays");
   });
+  test('a save whose commit fails leaves the kept note file and the stored note: the file goes only after the commit', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    setNote(d.deck, S1, 'stored');
+    mkdirSync(d.deck.places.stateDir, { recursive: true });
+    const kept = keptNotePath(d.deck, S1);
+    writeFileSync(kept, 'typed in an editor that failed');
+    const deck = deckWith(d.deck, {
+      store: {
+        transaction<T>(fn: () => T): T {
+          return d.deck.store.transaction(() => {
+            fn();
+            // As a commit that fails: everything fn wrote is rolled back.
+            throw Object.assign(new Error('database is locked'), {
+              code: 'ERR_SQLITE_ERROR',
+              errcode: 5,
+            });
+          });
+        },
+      },
+    });
+    const h = harness(d, { deck });
+    assert.deepEqual(
+      await h.act(note('mine', 'stored')),
+      refused(33, "skydeck's database is busy; try again"),
+    );
+    assert.equal(existsSync(kept), true, 'the text typed in the editor is kept');
+    assert.equal(d.deck.store.meta(S1)?.note, 'stored');
+    assert.deepEqual(h.told, []);
+  });
 });
 
 describe('done and undone (S2 12.10)', () => {
@@ -1139,6 +1266,7 @@ describe('done and undone (S2 12.10)', () => {
     assert.deepEqual(await h.act({ t: 'act', id: 45, kind: 'undone', sessionId: S1 }), ok(45));
     assert.equal(d.deck.store.meta(S1)?.doneAtNs, null);
     assert.deepEqual(h.told, ['changed', 'changed']);
+    assert.deepEqual(h.logs, []);
   });
 });
 
@@ -1162,6 +1290,7 @@ describe('pull requests (S2 12.5, design 7.3; plan D8)', () => {
     assert.equal(link?.origin, 'manual');
     assert.equal(link?.detachedAtNs, null, 'the earlier detach is gone');
     assert.deepEqual(h.told, ['changed', `fetch ${PR7}`], 'its key URL, once, after the write');
+    assert.deepEqual(h.logs, [], 'an address sent is never logged');
   });
 
   test("pr-add of a URL that is not a pull request: requirePrKey's message, nothing attached", async (t) => {
@@ -1191,6 +1320,7 @@ describe('pull requests (S2 12.5, design 7.3; plan D8)', () => {
     assert.deepEqual(await h.act(rm), ok(48));
     assert.notEqual(d.deck.store.sessionPrs()[0]?.detachedAtNs, null);
     assert.deepEqual(h.told, ['changed']);
+    assert.deepEqual(h.logs, []);
   });
 
   test("pr-refresh asks for the explicit refresh of the session's pull requests and answers ok at once", async (t) => {
@@ -1199,6 +1329,7 @@ describe('pull requests (S2 12.5, design 7.3; plan D8)', () => {
     const h = harness(d);
     assert.deepEqual(await h.act({ t: 'act', id: 46, kind: 'pr-refresh', sessionId: S1 }), ok(46));
     assert.deepEqual(h.told, [`refresh ${S1}`], 'nothing written: no changed()');
+    assert.deepEqual(h.logs, []);
   });
 });
 
@@ -1240,6 +1371,23 @@ describe('the session an edit acts on (plan D9, 2.5)', () => {
     }
     assert.deepEqual(d.deck.store.allMeta(), []);
     assert.deepEqual(d.deck.store.sessionPrs(), []);
+  });
+
+  test('a session started in a `new` terminal that is still there is edited once the store knows it', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const opened = info('t-new', 'running', { kind: 'new', expectedSessionId: S1, sessionId: S1 });
+    const terminals = [
+      opened,
+      { ...opened, sessionId: null },
+      { ...opened, state: 'ended' as const },
+    ];
+    for (const terminal of terminals) {
+      const h = harness(d, { terminals: [terminal] });
+      const text = `in ${terminal.state} ${terminal.sessionId ?? 'unmapped'}`;
+      assert.deepEqual(await h.act(label(text)), ok(31), text);
+      assert.equal(d.deck.store.meta(S1)?.label, text);
+    }
   });
 
   test('a resume terminal opened for an unknown id does not make it a session that has not started', async (t) => {

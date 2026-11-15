@@ -12,7 +12,7 @@ import type { Browser, Page } from 'playwright';
 
 import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2, S3 } from '../test/helpers/platform.ts';
-import { browser, newPage } from './helpers/browser.ts';
+import { browser, newContext, newPage } from './helpers/browser.ts';
 import {
   active,
   bannerWorld,
@@ -367,9 +367,9 @@ test('stage C: the restore banner on the page', async (t) => {
   await t.test(
     "the times are the page's own time zone's (C18): in a page in Europe/Prague the heading's last activity and an entry's end read in Prague's time",
     async (t) => {
-      // A context of the zone (helpers/browser.ts makes UTC ones); 2024-03-12 18:02 UTC is
+      // A context of the zone (newContext makes UTC ones unless told); 2024-03-12 18:02 UTC is
       // 19:02 in Prague.
-      const context = await chromium.newContext({ timezoneId: 'Europe/Prague', locale: 'en-US' });
+      const context = await newContext(chromium, { timezoneId: 'Europe/Prague' });
       t.after(() => context.close());
       const page = await context.newPage();
       await bannerWorld(t, page, listOf(three()));

@@ -10,6 +10,11 @@
 // on no list key, and every window chord passes `windowChordGate` first; when it closes,
 // `dialogClosed` gives the keyboard back.
 //
+// Stage B (plan B task 55): the window title carries the count of sessions that need you, each
+// `list` closes the notifications of sessions that no longer do (web/notify.js), Ctrl+Shift+J
+// walks `needYou.order` as the server sends it (B14), a `notify` shows a desktop notification
+// (B15), and a click on one passes `windowChordGate` as a window chord does.
+//
 // Stage C (plan C task 75): the restore banner of web/banner.js at the top of the list zone, drawn
 // from each `list`'s `banner`, with the report of every restore run (`notice restore-progress`). A
 // restore selects nothing and moves no keyboard (C21); a key held on one of its controls acts on
@@ -22,6 +27,7 @@
 /** @import { EditWhat, ListAction, WindowChord, Zone } from './keys.js' */
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
+import { nextNeeding, windowTitle } from './attention-text.js';
 import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createBanner } from './banner.js';
 import { createCards } from './cards.js';
@@ -31,6 +37,7 @@ import { serverNow } from './format.js';
 import { createHelp } from './help.js';
 import { cancels, listKey, windowChord } from './keys.js';
 import { createList } from './list.js';
+import { createNotifications } from './notify.js';
 import { paneFor } from './pane.js';
 import { createTerminalView } from './terminal-view.js';
 import { createToast } from './toast.js';
@@ -81,6 +88,7 @@ const dom = {
   help: byId('help'),
   editor: byId('editor'),
   toast: byId('toast'),
+  notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
   measure: byId('cell-measure'),
 };
 /** The page under a dialog: inert while one is shown (D2), so that nothing in it takes the keyboard. */
@@ -223,6 +231,25 @@ const editor = createEditor(dom.editor, {
   closed: () => dialogClosed(),
   now: () => listNow(),
 });
+// Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
+// session this page's list does not show (its filter, the folded Earlier) and that has no terminal
+// of the window is not selected (ruled on review 2): the pane would be empty, and a focused page's
+// selection is seen after 1.5 s (S2 12.4), which would clear a mark of a session never shown.
+const notifications = createNotifications(dom.notifyOn, {
+  select: (id) => {
+    if (!windowChordGate('notification')) {
+      return;
+    }
+    if (rowOf(id) === undefined && !hasTerminal(id)) {
+      say('that session is hidden by the filter or the fold');
+      return;
+    }
+    select(id, 'chord');
+  },
+});
+// The item hides itself once the permission is answered: pressed from the keyboard, it takes the
+// keyboard with it, and the zone's holder takes it back (S2 12.9), as for the notice's ×.
+dom.notifyOn.addEventListener('blur', () => setTimeout(keepKeyboard, 0));
 // Stage C (plan C task 75): the restore banner; its times in the page's own time zone (C18).
 const banner = createBanner(dom.banner, {
   act: (action) => act(action),
@@ -999,6 +1026,10 @@ function received(message) {
       if (modal()) {
         editor.update(message); // the dialog's session's row (task 38's list)
       }
+      // Stage B: the taskbar's count (S2 12.1), and the notifications of sessions that no
+      // longer need you closed (B16). A list without `needYou` (stage A's) is none.
+      document.title = windowTitle(message.needYou?.count ?? 0);
+      notifications.update(message);
       if (state.welcomed) {
         state.welcomed = false;
         nextReattach();
@@ -1050,6 +1081,10 @@ function received(message) {
         terminalView.notice(message.term, message.kind, message.text);
         keepKeyboard();
       }
+      return;
+    case 'notify':
+      // S2 13, B15: none for the session that is selected while this page has focus.
+      notifications.show(message, { focused: document.hasFocus(), selected: state.selected });
       return;
     default:
       return;
@@ -1406,6 +1441,18 @@ function doChord(chord, event) {
     case 'reload':
       void connection?.reload();
       return;
+    case 'next-attention': {
+      // B14: the next of `needYou.order` as the server sent it; the key bar says when none is.
+      const needYou = state.list?.needYou;
+      const next = nextNeeding(needYou?.order ?? [], state.selected, needYou?.count ?? 0);
+      if (next.id !== null) {
+        select(next.id, 'chord');
+      }
+      if (next.say !== null) {
+        say(next.say);
+      }
+      return;
+    }
     case 'later':
       say(`${keyName(event)}: comes in a later stage`);
       return;
@@ -1592,17 +1639,19 @@ function dialogKey(event) {
  * is pressed again): over a terminal `heldIntoTerminal` swallows its events, and over the list its
  * auto-repeats would be list keys (an Enter that resumes). Once the dialog is gone they act on
  * nothing; the next press acts (review 2 of task 37). Forgotten at the key's release, at a fresh
- * press, and when the window loses focus. Stage C: the same for a key pressed on a control of the
- * restore banner, which can go away under it — Restore once a restore runs, Not now once the offer
- * is dismissed, the report's × —, so that a held Enter there is no list `enter` either.
+ * press, and when the window loses focus. Stage B: the same for a key pressed on the title bar's
+ * `Turn on notifications`, which hides itself once the permission is answered — at once where a
+ * policy answers without asking —, so that a held Enter there is no list `enter` either. Stage C:
+ * the same for a key pressed on a control of the restore banner, which can go away under it —
+ * Restore once a restore runs, Not now once the offer is dismissed, the report's × —.
  * @type {Set<string>}
  */
 const pressedInDialog = new Set();
 
 /**
  * Keeps `pressedInDialog` and swallows an auto-repeat of a key held since a dialog was shown (or
- * on a control of the banner), once the dialog (or the control) no longer has it. True when it
- * swallowed the event.
+ * on `Turn on notifications`, or on a control of the banner), once the dialog (or the item, or
+ * the control) no longer has it. True when it swallowed the event.
  * @param {KeyboardEvent} event
  * @returns {boolean}
  */
@@ -1610,7 +1659,11 @@ function heldFromDialog(event) {
   if (MODIFIER_KEYS.has(event.key)) {
     return false;
   }
-  if (modal() || dom.banner.contains(document.activeElement)) {
+  if (
+    modal() ||
+    document.activeElement === dom.notifyOn ||
+    dom.banner.contains(document.activeElement)
+  ) {
     if (!event.repeat) {
       pressedInDialog.add(event.code);
     }
