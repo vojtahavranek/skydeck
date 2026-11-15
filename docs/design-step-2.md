@@ -2750,7 +2750,7 @@ In the browser suite, besides those:
   Playwright's version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
   `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
-  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 20
+  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 30
   minutes.
 
 ## 18. Manual checks for step 2
