@@ -1948,11 +1948,12 @@ that asks for focus reports (Claude Code does, 9.2) gets one at every click, cho
 window, and a mouse report is no key, so none of them is typing (else every selection would clear
 its mark at once). Typing into the selected session's terminal of a focused window completes the
 hold at once and it holds as long as the selection and the focus do; typing into another terminal
-makes the session it shows seen once. A `seen` is written only when a hold completes or a typing
-comes and it clears a mark, and always in the write of a turn end or window end of that session
-while the hold lasts; there is **no periodic `seen` write**: nothing writes to the store every few
-seconds because a window has focus. It is written only for a session among the list's rows, so that
-a selection naming no session leaves no row. The hold is `src/window/seen.ts` on the server's clock
+makes the session it shows seen once. A `seen` is written only when it clears a mark — a hold
+completes, a typing comes, or a mark of a session already being seen becomes known — and always in
+the write of a turn end or window end of that session while the hold lasts; there is **no periodic
+`seen` write**: nothing writes to the store every few seconds because a window has focus. It is
+written only for a session among the list's rows, so that a selection naming no session leaves no
+row. The hold is `src/window/seen.ts` on the server's clock
 (`Clock.after`, which a step of the wall clock does not move).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
