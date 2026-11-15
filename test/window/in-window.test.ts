@@ -27,6 +27,22 @@ function holderOf(pid: number, procStart: number | null, bootId: string): Holder
   return { process: { bootId, pid, procStart }, sinceNs: T0, live: null, scripted: false };
 }
 
+/** `stat` that calls `fails` the first time it is asked for `pid`, and `real` otherwise. */
+function failsOnce(
+  pid: number,
+  real: (pid: number) => string | null,
+  fails: () => never,
+): (pid: number) => string | null {
+  let first = true;
+  return (asked) => {
+    if (asked === pid && first) {
+      first = false;
+      return fails();
+    }
+    return real(asked);
+  };
+}
+
 // --- with real programs -------------------------------------------------------------------------
 
 interface KeeperDeck {
@@ -139,7 +155,7 @@ describe('holdersInWindow with real keepers', { concurrency: true }, () => {
     assert.deepEqual([...holdersInWindow(deck, holders)], [started.pid]);
   });
 
-  test('every doubt → not in the window: no boot id, a read that throws, another boot, no process start, a keeper line that is unknown', async (t) => {
+  test('every doubt → not in the window: no boot id, a read that throws, another boot, no process start, a keeper line that is unknown, a holder that is gone', async (t) => {
     const { box, deck, bootId } = keeperDeck(t);
     const keeper = await box.start();
     const { started } = await startProgram(keeper);
@@ -162,6 +178,12 @@ describe('holdersInWindow with real keepers', { concurrency: true }, () => {
         holders,
       ],
       [
+        // Only the line's judgement fails: the walk reads the keeper again and would reach it.
+        'the keeper line is unknown (its /proc entry fails once, when the line is judged)',
+        deckWith(deck, { proc: { stat: failsOnce(keeper.pid, realStat, fails) } }),
+        holders,
+      ],
+      [
         "the holder's /proc entry cannot be read",
         deckWith(deck, {
           proc: { stat: (pid: number) => (pid === started.pid ? fails() : realStat(pid)) },
@@ -170,6 +192,11 @@ describe('holdersInWindow with real keepers', { concurrency: true }, () => {
       ],
       ['a holder of another boot', deck, [holderOf(started.pid, started.procStart, BOOT_B)]],
       ['a holder without a process start', deck, [holderOf(started.pid, null, bootId)]],
+      [
+        'a holder that is gone (its pid is another process now)',
+        deck,
+        [holderOf(started.pid, started.procStart + 1, bootId)],
+      ],
     ];
     for (const [what, given, of] of cases) {
       assert.deepEqual([...holdersInWindow(given, of)], [], what);
