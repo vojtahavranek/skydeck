@@ -2217,3 +2217,394 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// The second window after a cold start (plan C20, task 81): the server that found the pages mark
+// at its start expects the old window back and says so in GET /status (`windowExpectedMs`); every
+// command that would open a window waits for that deadline. The server is the fake serve of the
+// fixture checkout, which the command runs from (so it is "ours"); its fake Edge opens no page
+// (the fake serve listens on no port), so a command that opens a window ends after `pageMs`.
+
+const WAITING =
+  'skydeck: waiting up to 7 s for the open window to come back; --new-window opens one now\n';
+const ALREADY_OPEN = 'skydeck window: a window is already open\n';
+const NOT_CONNECTED = /^skydeck: Edge was started, but no window connected within /m;
+/** The command runs from the fake serve's checkout: the server it finds is of its checkout and build. */
+const OURS: RunOptions = { appRoot: FAKE_ROOT, times: { pageMs: 300 } };
+
+type StatusBody = { pages?: unknown; starting?: unknown; windowExpectedMs?: unknown };
+
+/**
+ * How many times the commands started Edge, counted where they start it (the platform's
+ * processes): the fake Edge's own record may come after a command that does not wait for its page
+ * has ended.
+ */
+function edgeStarts(h: Harness): number {
+  return h.started.filter((program) => !isServe(program)).length;
+}
+
+/** A fake serve of the fixture checkout with `env`, once it is ready. */
+function expecting(h: Harness, env: Record<string, string>): Promise<ChildProcess> {
+  return h.fakeServe({ FAKE_SERVE_CHECKOUT: FAKE_ROOT, ...env });
+}
+
+/** The answers to the GET /status of `requests` before the first POST /token (all without one). */
+function statusesBeforeToken(requests: readonly Request[]): StatusBody[] {
+  const token = requests.findIndex((q) => q.method === 'POST' && q.path === '/token');
+  return requests
+    .slice(0, token < 0 ? requests.length : token)
+    .filter((q) => q.method === 'GET' && q.path === '/status')
+    .map((q) => (q.answer?.body ?? {}) as StatusBody);
+}
+
+function expects(status: StatusBody | undefined): boolean {
+  return typeof status?.windowExpectedMs === 'number' && status.windowExpectedMs > 0;
+}
+
+/**
+ * The command waited while the server expected a window and went on at the server's word: looks
+ * that said so (the one look of stage A and at least one of the wait), then one that said null,
+ * and no token before it. `alone`: no other command holds `window_launching`, so nothing asks
+ * between that look and the token — the command went on AT it (with another command it may wait
+ * for that one's page meanwhile).
+ */
+function assertWaitedForTheServer(
+  requests: readonly Request[],
+  { what = '', alone = true }: { what?: string; alone?: boolean } = {},
+): void {
+  const looks = statusesBeforeToken(requests);
+  const end = looks.findIndex((status) => !expects(status));
+  assert.ok(
+    end >= 2,
+    `${what} looked again while the server expected a window: ${JSON.stringify(looks)}`,
+  );
+  assert.equal(looks[end]?.windowExpectedMs, null, `${what} went on at the server's word`);
+  if (alone) {
+    assert.equal(end, looks.length - 1, `${what} went on at once: ${JSON.stringify(looks)}`);
+  }
+}
+
+/** A request of ownRequests, with when its answer came (performance.now()). */
+interface TimedRequest extends Request {
+  answeredMs: number | null;
+}
+
+/** A net that records the control requests of one run only: `r.requests` of two runs at once mix. */
+function ownRequests(): { net: (net: Net) => Net; requests: TimedRequest[] } {
+  const requests: TimedRequest[] = [];
+  return {
+    requests,
+    net: (base) => ({
+      ...base,
+      async requestUnix(path, request) {
+        const entry: TimedRequest = {
+          method: request.method,
+          path: request.path,
+          body: request.body,
+          answer: null,
+          atMs: performance.now(),
+          answeredMs: null,
+        };
+        requests.push(entry);
+        const answer = await base.requestUnix(path, request);
+        entry.answer = answer;
+        entry.answeredMs = performance.now();
+        return answer;
+      },
+    }),
+  };
+}
+
+describe('the second window after a cold start: the server expects the old window back (plan C20)', () => {
+  // With its two parameters swapped (newWindow, oldMayReturn) the plain command would not wait:
+  // this case fails then.
+  test('the old window comes back while the server expects it: C20’s line once, "a window is already open" — no token, Edge not run', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, {
+      FAKE_SERVE_WINDOW_EXPECTED_MS: '20000',
+      FAKE_SERVE_PAGES_AFTER: '1000:1',
+    });
+
+    const r = await h.run([], OURS);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, ALREADY_OPEN);
+    assert.equal(r.stderr, WAITING);
+    assert.deepEqual(tokensAsked(r), [], 'no token minted');
+    assert.equal(edgeStarts(h), 0, 'Edge not run');
+    const looks = statusesBeforeToken(r.requests);
+    assert.ok(looks.filter(expects).length >= 2, `it looked again: ${JSON.stringify(looks)}`);
+    assert.equal(looks.at(-1)?.pages, 1, 'done at the page');
+  });
+
+  test('the old window does not come back: Edge once, only after the server’s deadline', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, { FAKE_SERVE_WINDOW_EXPECTED_MS: '3000' });
+
+    const r = await h.run([], OURS);
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.ok(r.stderr.startsWith(WAITING), r.stderr);
+    assert.equal(r.stderr.split(WAITING).length, 2, 'the line once');
+    assert.match(r.stderr, NOT_CONNECTED);
+    assert.equal(edgeStarts(h), 1, 'Edge once');
+    assert.equal(tokensAsked(r).length, 1);
+    assertWaitedForTheServer(r.requests);
+  });
+
+  test('a server still starting: the wait goes through its start (7,000 ms left while it lasts) and then its count-down', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, {
+      FAKE_SERVE_STARTING_MS: '3000',
+      FAKE_SERVE_WINDOW_EXPECTED_MS: '1000',
+    });
+
+    const r = await h.run([], OURS);
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.equal(r.stderr.split(WAITING).length, 2, `the line once: ${r.stderr}`);
+    assert.equal(edgeStarts(h), 1);
+    const looks = statusesBeforeToken(r.requests);
+    const starting = looks.findIndex((s) => s.starting === true && s.windowExpectedMs === 1000);
+    const counting = looks.findIndex(
+      (s) => s.starting === false && expects(s) && Number(s.windowExpectedMs) < 1000,
+    );
+    assert.ok(
+      starting >= 0 && counting > starting,
+      `the start, then the count-down: ${JSON.stringify(looks)}`,
+    );
+    assertWaitedForTheServer(r.requests);
+  });
+
+  test('a server still starting with windowExpectedMs set, though at 0: it waits until the start is done, then goes on', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, { FAKE_SERVE_STARTING_MS: '2500', FAKE_SERVE_WINDOW_EXPECTED_MS: 'json:0' });
+
+    const r = await h.run([], OURS);
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.equal(r.stderr.split(WAITING).length, 2, `the line once: ${r.stderr}`);
+    const looks = statusesBeforeToken(r.requests);
+    assert.ok(looks.filter((s) => s.starting === true).length >= 2, JSON.stringify(looks));
+    assert.equal(looks.at(-1)?.starting, false, 'it went on once the start was done');
+    assert.equal(
+      looks.filter((s) => s.starting === false).length,
+      1,
+      `at the first look that said so: ${JSON.stringify(looks)}`,
+    );
+  });
+
+  test('a server whose start never ends, with the mark: the command’s own bound still ends the wait', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, { FAKE_SERVE_STARTING_MS: '600000', FAKE_SERVE_WINDOW_EXPECTED_MS: '7000' });
+
+    const r = await h.run([], { ...OURS, times: { pageMs: 300, startMs: 800, reconnectMs: 700 } });
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.equal(r.stderr.split(WAITING).length, 2, `the line once: ${r.stderr}`);
+    assert.match(r.stderr, NOT_CONNECTED);
+    assert.equal(edgeStarts(h), 1, 'a window is opened: the user is never left without one');
+    assert.ok(r.ms < 60_000, `no longer than its bound (${r.ms} ms)`);
+    assert.equal(statusesBeforeToken(r.requests).at(-1)?.starting, true, 'still starting');
+  });
+
+  test('a server that never stops expecting a window: the command waits at most the start wait and the 7 s, then opens one', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, { FAKE_SERVE_WINDOW_EXPECTED_MS: '120000' });
+
+    const r = await h.run([], {
+      ...OURS,
+      times: { pageMs: 300, startMs: 1200, reconnectMs: 800 },
+    });
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.equal(r.stderr.split(WAITING).length, 2, `the line once: ${r.stderr}`);
+    assert.match(r.stderr, NOT_CONNECTED);
+    assert.equal(edgeStarts(h), 1, 'a window is opened: the user is never left without one');
+    // From stage A's look (the first GET /status, sent before the wait arms its timer: no stall
+    // in between can make the time shorter) to the token: the bound is startMs AND reconnectMs
+    // (two different values, so neither alone passes); 2 ms for the timers' rounding to a ms.
+    const looks = r.requests.filter((q) => q.method === 'GET' && q.path === '/status');
+    const token = r.requests.find((q) => q.method === 'POST' && q.path === '/token');
+    assert.ok(looks.length >= 2 && looks[0] !== undefined && token !== undefined);
+    const waited = token.atMs - looks[0].atMs;
+    assert.ok(waited >= 2000 - 2, `it waited its bound of 2,000 ms (${waited} ms)`);
+    assert.ok(r.ms < 60_000, `and no longer (${r.ms} ms)`);
+    assert.ok(expects(statusesBeforeToken(r.requests).at(-1)), 'the server still expected one');
+  });
+
+  test('--new-window: no wait for the expected window — no line, Edge at once', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, { FAKE_SERVE_WINDOW_EXPECTED_MS: '120000' });
+
+    const r = await h.run(['--new-window'], OURS);
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.ok(!r.stderr.includes(WAITING), r.stderr);
+    assert.match(r.stderr, NOT_CONNECTED);
+    assert.equal(edgeStarts(h), 1);
+    assert.ok(r.ms < 60_000, `no wait (${r.ms} ms)`);
+    const status = await h.client().status();
+    assert.ok(
+      typeof status.windowExpectedMs === 'number' && status.windowExpectedMs > 60_000,
+      `the server still expects the window: ${String(status.windowExpectedMs)}`,
+    );
+  });
+
+  test('--new-secret: no wait, even though the new server’s mark says a window is expected (the old pages cannot come back with the old key)', async (t) => {
+    const h = windowHarness(t);
+
+    // No server runs: the command starts the fake serve of its checkout, with its environment.
+    const r = await h.run(['--new-secret'], {
+      ...OURS,
+      env: { FAKE_SERVE_WINDOW_EXPECTED_MS: '120000' },
+    });
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.ok(!r.stderr.includes(WAITING), r.stderr);
+    assert.match(r.stderr, NOT_CONNECTED);
+    assert.equal(edgeStarts(h), 1);
+    assert.equal(tokensAsked(r).length, 1);
+    assert.ok(r.ms < 60_000, `no wait (${r.ms} ms)`);
+    assert.ok(
+      statusesBeforeToken(r.requests).some(expects),
+      'the server expected a window when the command looked',
+    );
+  });
+
+  test('the wait is the server’s fact: a second skydeck window started while the first waits takes the time the server has left, and neither opens a window before its deadline', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, { FAKE_SERVE_WINDOW_EXPECTED_MS: '4000' });
+    const a = ownRequests();
+    const b = ownRequests();
+
+    const first = h.run([], { ...OURS, net: a.net });
+    // Once the server has answered the first command's first look, so that the second's comes
+    // at least 1.2 s after the server counted the first one's.
+    await until(
+      () => a.requests.some((q) => q.path === '/status' && q.answer !== null),
+      'the first command looked',
+      WAIT_MS,
+    );
+    await sleep(1200);
+    const second = h.run([], { ...OURS, net: b.net });
+    const [ra, rb] = await Promise.all([first, second]);
+
+    for (const [r, requests, name] of [
+      [ra, a.requests, 'the first'],
+      [rb, b.requests, 'the second'],
+    ] as const) {
+      assert.equal(r.code, 1, `${name}: ${r.stderr}`);
+      assert.ok(r.stderr.startsWith(WAITING), `${name}: ${r.stderr}`);
+      assert.equal(r.stderr.split(WAITING).length, 2, `${name}: the line once`);
+      assertWaitedForTheServer(requests, { what: name, alone: false });
+    }
+    // The server counted each first look between its request and its answer: the time between the
+    // two counts lies between the gap of those windows and their span, whatever the load (and the
+    // rounding up to a whole ms moves each answer by less than 1).
+    const firstLook = (requests: readonly TimedRequest[]) => {
+      const look = requests.find((q) => q.method === 'GET' && q.path === '/status');
+      assert.ok(look?.answer != null && look.answeredMs !== null, 'a first look, answered');
+      const left = (look.answer.body as StatusBody).windowExpectedMs;
+      assert.ok(typeof left === 'number', JSON.stringify(look.answer.body));
+      return { left, sentMs: look.atMs, answeredMs: look.answeredMs };
+    };
+    const fa = firstLook(a.requests);
+    const fb = firstLook(b.requests);
+    const least = fb.sentMs - fa.answeredMs;
+    const most = fb.answeredMs - fa.sentMs;
+    assert.ok(least >= 1200, `the second looked 1.2 s after the first was answered (${least} ms)`);
+    assert.ok(
+      fb.left <= fa.left - least + 1 && fb.left >= fa.left - most - 1,
+      `the second took what the server had left: ${fa.left} ms, then ${fb.left} ms, ${least} to ${most} ms later`,
+    );
+  });
+
+  test('no window expected — none reported (a server before stage C), null or 0: no line, no wait, Edge at once', async (t) => {
+    const h = windowHarness(t);
+    for (const expected of [undefined, 'json:null', 'json:0']) {
+      await expecting(h, expected === undefined ? {} : { FAKE_SERVE_WINDOW_EXPECTED_MS: expected });
+
+      const r = await h.run([], OURS);
+
+      const what = String(expected);
+      assert.equal(r.code, 1, `${what}: ${r.stderr}`);
+      assert.ok(!r.stderr.includes(WAITING), `${what}: ${r.stderr}`);
+      assert.match(r.stderr, NOT_CONNECTED, what);
+      const looks = statusesBeforeToken(r.requests).length;
+      assert.ok(looks <= 2, `${what}: stage A's look and at most one more (${looks})`);
+      const stop = await h.run(['--stop']);
+      assert.equal(stop.code, 0, stop.stderr);
+    }
+    assert.equal(edgeStarts(h), 3);
+  });
+
+  test('a windowExpectedMs the client cannot read (a text, a fraction, below 0, true): an answer that cannot be read — exit 1, no token, Edge not run', async (t) => {
+    const h = windowHarness(t);
+    for (const expected of ['json:"3000"', 'json:2.5', 'json:-1', 'json:true', 'json:{}']) {
+      await expecting(h, { FAKE_SERVE_WINDOW_EXPECTED_MS: expected });
+
+      const r = await h.run([], OURS);
+
+      assert.equal(r.code, 1, expected);
+      assert.equal(
+        r.stderr,
+        "skydeck: the window's server gave an answer to GET /status that cannot be read\n",
+        expected,
+      );
+      const stop = await h.run(['--stop']);
+      assert.equal(stop.code, 0, stop.stderr);
+    }
+    assert.equal(edgeStarts(h), 0);
+    assert.deepEqual(h.asked('POST', '/token'), []);
+  });
+
+  test('the fake serve refuses a timing option of another form, so that a typo cannot pass as "no wait"', async (t) => {
+    const h = windowHarness(t);
+    for (const [name, value] of [
+      ['FAKE_SERVE_WINDOW_EXPECTED_MS', '3s'],
+      ['FAKE_SERVE_WINDOW_EXPECTED_MS', 'json:{'],
+      ['FAKE_SERVE_STARTING_MS', '-1'],
+      ['FAKE_SERVE_PAGES_AFTER', '1000'],
+    ] as const) {
+      const child = spawn(FAKE_SERVE, ['serve'], {
+        env: h.d.s.env({
+          SKYDECK_NODE: process.execPath,
+          FAKE_SERVE_CHECKOUT: FAKE_ROOT,
+          [name]: value,
+        }),
+        cwd: '/',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      h.own(child);
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+      child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+      const [code] = (await once(child, 'close')) as [number | null];
+
+      assert.equal(code, 2, `${name}=${value}: ${err}`);
+      assert.match(err, new RegExp(`fake-serve: ${name} is not `), `${name}=${value}`);
+      assert.ok(!out.split('\n').includes('ready'), `${name}=${value}: never ready`);
+    }
+  });
+
+  test('the client reads windowExpectedMs as the server sends it, and leaves out what an older server does not send', async (t) => {
+    const h = windowHarness(t);
+    await expecting(h, { FAKE_SERVE_WINDOW_EXPECTED_MS: '120000' });
+    const expected = (await h.client().status()).windowExpectedMs;
+    assert.ok(
+      typeof expected === 'number' && expected > 60_000 && expected <= 120_000,
+      String(expected),
+    );
+    const stop = await h.run(['--stop']);
+    assert.equal(stop.code, 0, stop.stderr);
+
+    await expecting(h, { FAKE_SERVE_WINDOW_EXPECTED_MS: 'json:null' });
+    assert.equal((await h.client().status()).windowExpectedMs, null);
+    assert.equal((await h.run(['--stop'])).code, 0);
+
+    await expecting(h, {});
+    assert.ok(!Object.hasOwn(await h.client().status(), 'windowExpectedMs'), 'absent stays absent');
+  });
+});

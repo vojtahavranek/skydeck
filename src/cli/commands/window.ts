@@ -85,8 +85,10 @@ interface Options {
  * the launch token, a used token is watched `reuseMs` (2 s) more for a second use, a
  * `window_launching` older than `launchingMs` (45 s, longer than the wait it guards) holds
  * nothing, and after a restart the pages the old server had get `reconnectMs` (7 s: the page's
- * longest retry interval is 5 s, S2 6.3; ruled, task 25) to come back. The lifecycle's own times
- * (ping, start, stop, kill) are passed on as they are.
+ * longest retry interval is 5 s, S2 6.3; ruled, task 25) to come back. The wait for a window the
+ * server expects back (plan C20) ends at the server's word, and at the latest after `startMs` and
+ * `reconnectMs` of its own. The lifecycle's own times (ping, start, stop, kill) are passed on as
+ * they are.
  */
 interface Times extends LifecycleTimes {
   pageMs: number;
@@ -256,7 +258,21 @@ async function useServer(
     say('skydeck window: a window is already open');
     return EXIT.ok;
   }
-  await launch(deck, client, ping, options, times);
+  const launched = await launch(
+    deck,
+    client,
+    ping,
+    options.newWindow,
+    !options.newSecret, // after --new-secret the old pages are refused: none comes back
+    times,
+    (line) => {
+      ctx.io.stderr(`skydeck: ${line}\n`);
+    },
+  );
+  if (launched === 'came-back') {
+    say('skydeck window: a window is already open');
+    return EXIT.ok;
+  }
   say(`skydeck window: http://127.0.0.1:${ping.port}/ (server pid ${ping.pid})`);
   return EXIT.ok;
 }
@@ -434,25 +450,77 @@ async function pageWithin(platform: Platform, client: ControlClient, ms: number)
   }
 }
 
+/** Plan C20's line, said once when a command waits for the window the server expects back; the
+ *  `say` it is given adds the `skydeck: ` of the command's other diagnostic lines. */
+const WAITING_LINE =
+  'waiting up to 7 s for the open window to come back; --new-window opens one now';
+
 /**
- * S2 5.1 step 2: holding `window_launching`, a launch token for 30 s, Edge started with it, and
- * the wait for a page to use it; the token is given up when the wait ends, whatever its end. While
- * another command holds the lock, this one waits for that one's page (and is done when it comes,
- * unless `--new-window`), or for the lock to be given up or to go stale, and then launches itself.
- * Throws a SkydeckError with S2 5.1's line when no page used the token, when it was used twice (the
- * alarm), and when Edge could not be started (S2 5.3; the server keeps running).
+ * Plan C20: whether the window the server expects back came back — a page connected. The wait is
+ * the server's fact: while its GET /status says that it expects a window (`windowExpectedMs` set
+ * while its start is not done, above 0 after it) and no page is connected, `say`s WAITING_LINE
+ * once and looks again every POLL_MS; it goes on (false) once the server expects none any more,
+ * and at the latest after `startMs` and `reconnectMs` of its own, whatever the server says (a mark
+ * that is stale never leaves the user without a window). A server that sends no
+ * `windowExpectedMs` (one of an older build) expects none.
+ */
+async function windowComesBack(
+  platform: Platform,
+  client: ControlClient,
+  times: Times,
+  say: (line: string) => void,
+): Promise<boolean> {
+  const bound = deadline(
+    platform,
+    Math.min((times.startMs ?? START_MS) + times.reconnectMs, MAX_TIMER_MS),
+  );
+  let said = false;
+  try {
+    for (;;) {
+      const status = await client.status();
+      if (status.pages > 0) return true;
+      const expected = status.windowExpectedMs ?? null;
+      if (expected === null || (status.starting !== true && expected <= 0) || bound.over()) {
+        return false;
+      }
+      if (!said) {
+        say(WAITING_LINE);
+        said = true;
+      }
+      await platform.clock.sleep(POLL_MS);
+    }
+  } finally {
+    bound.cancel();
+  }
+}
+
+/**
+ * S2 5.1 step 2: unless `newWindow`, or when no old window can come back (`oldMayReturn` false:
+ * `--new-secret`), first plan C20's wait for the window the server expects back ('came-back' when
+ * it came: no window opened); then, holding `window_launching`, a launch token for 30 s, Edge
+ * started with it, and the wait for a page to use it; the token is given up when the wait ends,
+ * whatever its end. While another command holds the lock, this one waits for that one's page (and
+ * is done when it comes, unless `newWindow`), or for the lock to be given up or to go stale, and
+ * then launches itself. Throws a SkydeckError with S2 5.1's line when no page used the token, when
+ * it was used twice (the alarm), and when Edge could not be started (S2 5.3; the server keeps
+ * running).
  */
 async function launch(
   deck: Deck,
   client: ControlClient,
   ping: PingAnswer,
-  options: Options,
+  newWindow: boolean,
+  oldMayReturn: boolean,
   times: Times,
-): Promise<void> {
+  say: (line: string) => void,
+): Promise<'opened' | 'came-back'> {
   const { platform } = deck;
+  if (!newWindow && oldMayReturn && (await windowComesBack(platform, client, times, say))) {
+    return 'came-back';
+  }
   const lock = launchingLock(deck, times.launchingMs);
   while (!lock.take()) {
-    if (!options.newWindow && (await client.status()).pages > 0) return;
+    if (!newWindow && (await client.status()).pages > 0) return 'opened';
     await platform.clock.sleep(POLL_MS);
   }
   try {
@@ -493,6 +561,7 @@ async function launch(
   } finally {
     lock.release();
   }
+  return 'opened';
 }
 
 function seconds(ms: number): string {
