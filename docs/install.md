@@ -870,12 +870,23 @@ session seen in one window is seen in all of them.
 **Desktop notifications.** At the right of the title bar, `Turn on notifications` shows until Edge
 has your answer. Click it once: Edge asks whether the page may show notifications (its own
 prompt). Allow, or Block: either way the button goes, and it comes back only when that answer is
-reset in Edge's settings for the site. The window's own Edge profile (its profile folder, above)
-keeps the answer, not your own Edge's, and keeps it per address: after a change of `window.port`
-the button shows again. Closed without an answer, the
-prompt leaves the button there. When Edge or the company's policy refuses (the button is not there
-at all, or it goes at once without a prompt), or you chose Block, nothing else changes: the count
-in the title bar and `(3) skydeck` on the taskbar still show what needs you.
+reset in Edge's settings for the site. Closed without an answer, the prompt leaves the button
+there. When Edge or the company's policy refuses (the button is not there at all, or it goes at
+once without a prompt), or you chose Block, nothing else changes: the count in the title bar and
+`(3) skydeck` on the taskbar still show what needs you.
+
+The window's own Edge profile (its profile folder, above) keeps the answer, not your own Edge's,
+and keeps it per address: after a change of `window.port` the button shows again. To see or
+change it, open a normal Edge window on that profile folder, as manual check W13 does, in
+PowerShell (with the folder `skydeck doctor` names):
+
+```powershell
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --user-data-dir="C:\Users\<you>\AppData\Local\skydeck\edge-profile"
+```
+
+and in its address bar `edge://settings/content/notifications`; close that window afterwards, the
+skydeck window stays. Windows' own Settings › System › Notifications › Microsoft Edge turns
+notifications off for every Edge window, yours too.
 
 With notifications allowed, a session that **starts** to need you while no skydeck window has the
 focus shows one desktop notification: its title is the session's title, its text `asks: <detail>`
@@ -996,10 +1007,11 @@ said before.
   `--print-url` address counts as a window: when it had the focus last, the notification goes to
   it, and it shows nothing unless that browser allows the page's notifications.
 - **A notification keeps its first words** when its session's reason changes (it asked, then
-  finished): only a start notifies. One that was shown before the page reloaded (after an update,
-  or F5) is not closed by the new page; a session the filter or the folded Earlier hides keeps its
-  notification until the list shows its row. What Windows does with a notification the page closes
-  is manual check W11's.
+  finished): only a start notifies. One that was shown before the page reloaded (after an update, or
+  F5) is not closed by the new page; a session the filter or the folded Earlier hides keeps its
+  notification until the list shows its row without a mark, or nothing needs you any more. A done
+  session that has stopped never notifies, also when a window that shows done sessions marks it.
+  What Windows does with a notification the page closes is manual check W11's.
 - **What a notification shows**: the session's title and, for an ask, its detail, which may name a
   command or a path (W19). On a shared screen others can read it; judge for yourself whether to
   allow notifications there.

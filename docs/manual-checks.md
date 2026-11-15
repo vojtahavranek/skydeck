@@ -3,10 +3,11 @@
 The short checklist to run by hand after installing skydeck on a machine, and before trusting a new
 Claude Code version. It covers what the tests cannot: they never start `claude`, never open a
 terminal tab, never restart WSL and never start a Windows program. Each item gives the command and
-the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 check the window of
-step 2 (stage A) and start at "The window (step 2, stage A)" below; W27–W29 check editing in the
-window (stage D), at "The window (step 2, stage D)"; W11, W19 and W21 check which sessions need
-you and the desktop notifications (stage B), at "The window (step 2, stage B)".
+the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 but W11, W16,
+W19 and W21 check the window of step 2 (stage A) and start at "The window (step 2, stage A)"
+below; W27–W29 check editing in the window (stage D), at "The window (step 2, stage D)"; W11, W19
+and W21 check which sessions need you and the desktop notifications (stage B), at "The window
+(step 2, stage B)".
 
 Setup:
 
@@ -1054,13 +1055,14 @@ Setup:
   Resume and Close), click `Resume` on the bar first and wait until it runs. Type nothing
   otherwise: text typed while the list has the keyboard is list keys — `k` moves to the row
   above, which may be a real session, `n` opens its note, `l` its label, `d` marks it done.
-- **The other throwaway session**, in a terminal of your own: open one more WSL terminal, **T**,
-  and in it `cd ~/skydeck-try && claude`; send it one prompt (`say hello in one word`). In the
-  window its row is under Open and says `running in another terminal`; once its answer is written,
-  its second line is `finished · not seen · <age>` instead: click the row, and the mark goes after
-  1.5 seconds or a little more (its card shows). When a step says "click the other session's row",
-  click that row: the window shows its card, and nothing you type in the window reaches it. **When
-  you are done with the checks of this part**, end it: `/exit` in T.
+- **The other throwaway session**, in a terminal of your own: open one more WSL terminal, **T**, and
+  in it `cd ~/skydeck-try && claude`; send it one prompt (`say hello in one word`). In the window
+  its row is under Open and says `running in another terminal`; once its answer is written, its
+  second line is `finished · not seen · <age>` instead: click the row, and the mark goes after 1.5
+  seconds or a little more (its card shows). A turn this short can also be over between two of the
+  server's looks and leave no mark: then there is nothing to clear. When a step says "click the
+  other session's row", click that row: the window shows its card, and nothing you type in the
+  window reaches it. **When you are done with the checks of this part**, end it: `/exit` in T.
 - **The story prompt** is `write a story of about 300 words about a lighthouse; reply in this
   chat, with no tool and no file`: Claude Code writes for a while. When it asks for anything all
   the same (to run a command, to write a file), answer **No** and send the prompt again.
@@ -1095,9 +1097,11 @@ Setup: look at the right of the title bar.
    page at `127.0.0.1:47613` (or your `window.port`) may show notifications. Choose `Allow` or
    `Block`; both are valid answers. Expected either way: the button goes. When no prompt comes and
    the button goes at once, Edge or the company's policy refused: write that down. When you close
-   the prompt without choosing, the button stays: click it again. After `Block` or a refusal, do
-   only step 5 of W11: steps 2 to 4 and 6 need notifications, and the title bar's count and the
-   window's title (W21, W3) are what shows you that a session needs you.
+   the prompt without choosing, the button stays: click it again. When no prompt comes and the
+   button stays (Edge may ask quietly, with a small icon where an address bar would be, and the
+   window has none): write that down, change nothing, and leave W11 there. After `Block` or a
+   refusal, do only step 5 of W11: steps 2 to 4 and 6 need notifications, and the title bar's count
+   and the window's title (W21, W3) are what shows you that a session needs you.
 2. **A notification, and a click on it.** Select the throwaway session; its terminal has the
    keyboard (the key bar says `Focus: terminal`). Type the story prompt and press Enter. At once
    click the other session's row (its card shows), then click into W, so that no skydeck window has
@@ -1122,7 +1126,7 @@ Setup: look at the right of the title bar.
    (Win+N). Expected, one of two:
    - Edge still said that the window had the focus while the PC was locked: the session was seen
      at its turn end, so no `finished · not seen`, no count and no notification. Then a turn that
-     ends while you are away from the session you work in tells you nothing until you look at it.
+     ends in the session you work in while you are away gives no mark and no notification.
    - Locking took the focus from the window: a notification `finished` came (on the lock screen,
      or in the notification centre), and the row says `finished · not seen` — but only for a
      moment: once the window has the focus again, its selected session is seen after 1.5 seconds
