@@ -220,8 +220,9 @@ test('the page shell', async (t) => {
       // Every key through pressed(), so that each reads its own entry.
       assert.equal(await pressed('Control+Shift+P'), true);
       await showsText(page, '#key-message', /^Ctrl\+Shift\+P: comes in a later stage$/);
+      // Stage B's Ctrl+Shift+J acts (plan B task 55): this page has no list, so none needs you.
       assert.equal(await pressed('Control+Shift+J'), true);
-      await showsText(page, '#key-message', /^Ctrl\+Shift\+J: comes in a later stage$/);
+      await showsText(page, '#key-message', /^no session needs you$/);
 
       assert.equal(await pressed('Control+Shift+H'), true);
       await page.waitForSelector('#help:not([hidden])');

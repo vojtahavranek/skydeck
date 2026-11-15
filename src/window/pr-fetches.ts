@@ -30,15 +30,16 @@ interface Batch {
 /**
  * The fetches of one server. A run calls refreshPrs for the sessions it holds, then fetchPrs for
  * the pull requests (with the platform's runner, clock and environment and the deck's store, and
- * `signal`); `changed()` once after a run that saved something (fetched or failed), a failure that
- * was saved logged by its count, a thrown one by its kind (failureKind) — never a message, which can
- * name an address. A run the signal ended saves nothing (fetchPrs), so it logs and tells nothing.
+ * `signal`); `changed()` once after a run that saved something (fetched or failed) or that threw (a
+ * batch may have been saved before; ruled on #90, review 2), a failure that was saved logged by its
+ * count, a thrown one by its kind (failureKind) — never a message, which can name an address. A
+ * run the signal ended saves nothing (fetchPrs), so it logs and tells nothing.
  */
 export function createPrFetches(deps: {
   deck: Deck;
   /** The server's stop: aborts a running fetch, starts no other. */
   signal: AbortSignal;
-  /** Called when a fetch saved something (fetched + failed > 0). */
+  /** Called when a fetch saved something (fetched + failed > 0), or threw after it may have. */
   changed(): void;
   log: (line: string) => void;
 }): PrFetches {
@@ -57,6 +58,7 @@ export function createPrFetches(deps: {
   const run = async (batch: Batch): Promise<void> => {
     let fetched = 0;
     let failed = 0;
+    let threw = false;
     try {
       if (batch.sessions.size > 0) {
         const counts = await refreshPrs(gh, {
@@ -74,10 +76,11 @@ export function createPrFetches(deps: {
         failed += counts.failed;
       }
     } catch (error) {
+      threw = true; // after a batch it may have saved: the counts of a throw are not known
       log(`prs: the fetch failed (${failureKind(error)})`);
     }
     if (failed > 0) log(`prs: ${failed} of ${fetched + failed} pull requests could not be read`);
-    if (fetched + failed === 0) return;
+    if (fetched + failed === 0 && !threw) return;
     try {
       deps.changed();
     } catch (error) {

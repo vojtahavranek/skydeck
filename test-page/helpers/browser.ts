@@ -1,11 +1,13 @@
 // Headless Chromium for the page suite (S2 17.4, 17.5; plan A15): the `playwright` library driven
-// from node:test, not @playwright/test.
+// from node:test, not @playwright/test. Every browser context of the suite is made by `newContext`
+// here (plan B17), which gives its pages an inert `Notification`: no test can show a desktop
+// notification or ask for a permission, whatever a server sends.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 
 import { chromium } from 'playwright';
-import type { Browser, Page } from 'playwright';
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright';
 
 import { sandbox } from '../../test/helpers/sandbox.ts';
 
@@ -83,12 +85,64 @@ export async function browser(t: TestContext): Promise<Browser> {
 }
 
 /**
- * A page in a fresh browser context (no storage shared with another case), closed in `t.after`.
- * Its time zone is UTC and its language en-US, whatever the machine's, so that times and ages a
- * page shows are the same on every machine.
+ * The marker a recording double of `Notification` sets (test-page/helpers/notification.ts), so
+ * that the inert one of `newContext` yields to it in whichever order their init scripts run.
  */
+export const NOTIFICATION_DOUBLE = 'skydeckNotificationDouble';
+
+/**
+ * B17's init script, run in the page: `showNotification` of a service worker's registration
+ * refuses, and unless a double's marker is there, `Notification` is an inert one — its permission
+ * `denied`, `requestPermission` answers `denied` and asks nothing, and a notification made anyway
+ * shows nothing. Self-contained (Playwright sends its source), and configurable, so that a double
+ * installed after it replaces it.
+ */
+export function inertNotification(marker: string): void {
+  // A worker's showNotification refuses whatever else is there: the double has none of its own.
+  const registration = Reflect.get(globalThis, 'ServiceWorkerRegistration') as
+    { prototype: object } | undefined;
+  if (registration !== undefined) {
+    Object.defineProperty(registration.prototype, 'showNotification', {
+      value: () => Promise.reject(new TypeError('no notification is shown in a test')),
+      configurable: true,
+      writable: true,
+    });
+  }
+  if (Reflect.get(globalThis, marker) === true) return;
+  class InertNotification extends EventTarget {
+    static readonly permission = 'denied';
+    static requestPermission(callback?: (permission: string) => void): Promise<string> {
+      callback?.('denied');
+      return Promise.resolve('denied');
+    }
+    close(): void {}
+  }
+  Object.defineProperty(globalThis, 'Notification', {
+    value: InertNotification,
+    configurable: true,
+    writable: true,
+  });
+}
+
+/**
+ * A fresh browser context (no storage shared with another case) with B17's inert `Notification`
+ * in every page it makes. Its time zone is UTC and its language en-US, whatever the machine's
+ * (`options` may add to them, or change them), so that times and ages a page shows are the same
+ * on every machine. The caller closes it. No other way of making a context stands in the suite
+ * (test-page/attention.test.ts holds that).
+ */
+export async function newContext(
+  chromium: Browser,
+  options: BrowserContextOptions = {},
+): Promise<BrowserContext> {
+  const context = await chromium.newContext({ timezoneId: 'UTC', locale: 'en-US', ...options });
+  await context.addInitScript(inertNotification, NOTIFICATION_DOUBLE);
+  return context;
+}
+
+/** A page in a context of its own from `newContext`, closed in `t.after`. */
 export async function newPage(t: TestContext, chromium: Browser): Promise<Page> {
-  const context = await chromium.newContext({ timezoneId: 'UTC', locale: 'en-US' });
+  const context = await newContext(chromium);
   t.after(() => context.close());
   return context.newPage();
 }

@@ -2,7 +2,8 @@
 // key handler does with the keys it maps, the list keys, and which keys the page cancels.
 // Pure: functions of a KeyboardEvent-like object, no DOM, no state. Tested by
 // test/web/keys.test.ts on a US and a Czech layout. Stage D's list keys (`l`, F2, `g`, `n`, `p`,
-// `d`) are no longer `later` (plan D 2.4); only windowChord's Ctrl+Shift+J and Ctrl+Shift+P are.
+// `d`) are no longer `later` (plan D 2.4), nor is stage B's Ctrl+Shift+J (`next-attention`, plan
+// B 2.8); only windowChord's Ctrl+Shift+P is.
 //
 // Matching (S2 12.9): a letter is matched by the character the key types (`key`), never by the
 // physical key, as Claude Code does. A digit is matched by the character typed when that is a
@@ -19,7 +20,8 @@
 /**
  * @typedef {{ kind: 'slot', slot: number } | { kind: 'previous' } | { kind: 'toggle-zone' }
  *   | { kind: 'new' } | { kind: 'find' } | { kind: 'copy' } | { kind: 'paste-raw' }
- *   | { kind: 'help' } | { kind: 'reload' } | { kind: 'later', stage: 'B' | 'E' }} WindowChord
+ *   | { kind: 'help' } | { kind: 'reload' } | { kind: 'next-attention' }
+ *   | { kind: 'later', stage: 'E' }} WindowChord
  */
 /** @typedef {{ send: string } | 'browser' | null} TerminalMapping */
 /** @typedef {'label' | 'group' | 'note' | 'pr'} EditWhat */
@@ -32,10 +34,11 @@
 
 /**
  * The window's own chord (S2 12.9, stage A): Ctrl+Shift with a letter or a digit of the table,
- * and Ctrl+Tab. The keys of later stages are the window's from stage A on (A11): Ctrl+Shift+J
- * (B) and Ctrl+Shift+P (E) give `later`. Every chord is the window's in both zones, so the
- * result does not depend on `zone`. Ctrl+Shift+R and the BrowserRefresh key (alone, with Shift,
- * with Ctrl; xterm.js sends nothing for it) are the page's reload in both (S2 12.9, 15.3).
+ * and Ctrl+Tab. The keys of later stages are the window's from stage A on (A11): Ctrl+Shift+P
+ * (E) gives `later`; Ctrl+Shift+J gives stage B's `next-attention` (S2 12.4, plan B14). Every
+ * chord is the window's in both zones, so the result does not depend on `zone`. Ctrl+Shift+R and
+ * the BrowserRefresh key (alone, with Shift, with Ctrl; xterm.js sends nothing for it) are the
+ * page's reload in both (S2 12.9, 15.3).
  * @param {KeyLike} e
  * @param {Zone} zone
  * @returns {WindowChord | null}
@@ -58,7 +61,7 @@ export function windowChord(e, zone) {
     case 'p':
       return { kind: 'later', stage: 'E' };
     case 'j':
-      return { kind: 'later', stage: 'B' };
+      return { kind: 'next-attention' };
     case 'o':
       return { kind: 'previous' };
     case 'l':
