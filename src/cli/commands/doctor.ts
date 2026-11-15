@@ -432,9 +432,9 @@ async function checkGh({ platform }: Facts, report: Report): Promise<void> {
 
 /**
  * The configured terminal (S2 16.4): `here` and `window` start no program and are named; for
- * `wezterm`, the tab adapter answers. `--no-auto-start`: without it `wezterm cli` starts a hidden server when
- * no WezTerm window is open, and the check would pass where opening a tab fails. From WSL,
- * `wezterm.exe` is tried when `wezterm` is not found, as the adapter does (D15).
+ * `wezterm`, the tab adapter answers. `--no-auto-start`: without it `wezterm cli` starts a hidden
+ * server when no WezTerm window is open, and the check would pass where opening a tab fails. From
+ * WSL, `wezterm.exe` is tried when `wezterm` is not found, as the adapter does (D15).
  */
 async function checkTerminal(
   { platform, config }: Facts & { config: Config },
