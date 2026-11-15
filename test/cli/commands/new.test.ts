@@ -1,16 +1,20 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
+import type { TestContext } from 'node:test';
 
 import { main } from '../../../src/cli/main.ts';
 import { fakeRunner, runResult } from '../../helpers/platform.ts';
 import { shellQuote } from '../../../src/text/shell.ts';
 import { testDeck } from '../../helpers/deck.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
+import { runOn, startFakeServe, windowMachine } from '../../helpers/window-machine.ts';
+import type { Lines, WindowMachine } from '../../helpers/window-machine.ts';
+import { writeWindowConfig } from '../../helpers/window-config.ts';
 
 const USAGE_FIRST_LINE =
-  'skydeck new [--label <text>] [--group <text>] [--here | --tab] [-- <claude flags>]\n';
+  'skydeck new [--label <text>] [--group <text>] [--here | --tab | --window] [-- <claude flags>]\n';
 const UUID1 = '00000000-0000-4000-8000-000000000001';
 
 type Options = Parameters<typeof testDeck>[1];
@@ -230,4 +234,156 @@ test('new --tab that timed out names the new session and prints no command', asy
       `skydeck: the new session's id is ${UUID1}; running skydeck shows whether it started\n`,
   );
   assert.equal(d.deck.store.meta(UUID1)?.label, 'fix it');
+});
+
+// ---------------------------------------------------------------------------------------------
+// new --window (S2 11.4; plan C3, C11; task 76): the command sends its current directory,
+// --label, --group and the words after -- to the window's server (the fake serve of
+// test/fixtures/fake-serve, whose parser is the server's) and prepares nothing itself.
+
+const ANSWER = { code: 0, lines: ['skydeck: started a new session'], sessionId: UUID1 };
+
+interface WindowNew {
+  m: WindowMachine;
+  project: string;
+  /** What reached the fake serve's launch (FAKE_SERVE_REQUESTS). */
+  requests(): unknown[];
+  edgeCalls(): string[][];
+  /** `skydeck <argv>` in `project`; the control requests' paths. */
+  run(argv: string[]): Promise<Lines & { asked: string[] }>;
+}
+
+/** A window machine, the Edge stub, and the fake serve with `env` answering ANSWER. */
+async function windowNew(t: TestContext, env: Record<string, string> = {}): Promise<WindowNew> {
+  const m = windowMachine(t, {
+    env: (s) => ({
+      SKYDECK_HANDOFF: join(s.root, 'handoff'),
+      SKYDECK_TEST_WINDOW_TIMES: 'pingMs=5000,pageMs=300,reuseMs=100,answerMs=20000',
+    }),
+  });
+  const stub = writeWindowConfig(m.s, {});
+  const project = join(m.s.root, 'project');
+  mkdirSync(project);
+  const requests = join(m.s.root, 'requests.jsonl');
+  await startFakeServe(t, m, {
+    FAKE_SERVE_REQUESTS: requests,
+    FAKE_SERVE_LAUNCH: `answer:${JSON.stringify(ANSWER)}`,
+    FAKE_SERVE_PAGES: '1',
+    ...env,
+  });
+  return {
+    m,
+    project,
+    edgeCalls: () => stub.edgeCalls(),
+    requests: () =>
+      existsSync(requests)
+        ? readFileSync(requests, 'utf8')
+            .split('\n')
+            .filter((line) => line !== '')
+            .map((line) => JSON.parse(line) as unknown)
+        : [],
+    async run(argv) {
+      const asked: string[] = [];
+      const r = await runOn(m, argv, {
+        cwd: project,
+        net: {
+          ...m.platform.net,
+          requestUnix(path, request) {
+            asked.push(`${request.method} ${request.path}`);
+            return m.platform.net.requestUnix(path, request);
+          },
+        },
+      });
+      return { ...r, asked };
+    },
+  };
+}
+
+describe('new --window (S2 11.4; plan C3)', () => {
+  test('--label, --group and the flags after -- as the request; the answer’s lines and code; nothing prepared here', async (t) => {
+    const w = await windowNew(t);
+
+    const r = await w.run([
+      'new',
+      '--window',
+      '--label',
+      'x',
+      '--group',
+      'y',
+      '--',
+      '--model',
+      'opus',
+    ]);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stderr, 'skydeck: started a new session\n');
+    assert.deepEqual(w.requests(), [
+      { route: 'new', dir: w.project, label: 'x', group: 'y', flags: ['--model', 'opus'] },
+    ]);
+    assert.equal(existsSync(join(w.m.s.root, 'handoff')), false, 'no handoff file');
+    assert.deepEqual(w.m.deck.store.allMeta(), [], 'no label or group stored here');
+    assert.deepEqual(w.edgeCalls(), [], 'a page is connected');
+  });
+
+  test('without --label and --group: null; the flags as given, a prompt with spaces one word', async (t) => {
+    const w = await windowNew(t);
+
+    const r = await w.run(['new', '--window', '--', '-p', 'two words', '--model=x']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(w.requests(), [
+      {
+        route: 'new',
+        dir: w.project,
+        label: null,
+        group: null,
+        flags: ['-p', 'two words', '--model=x'],
+      },
+    ]);
+  });
+
+  test('a label of 1,025 bytes is refused by the server’s parser (400): the refused-request line, exit 1, no window', async (t) => {
+    const w = await windowNew(t, { FAKE_SERVE_PAGES: '0' });
+
+    const r = await w.run(['new', '--window', '--label', 'x'.repeat(1025)]);
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.equal(
+      r.stderr,
+      "skydeck: the window's server refused the request (body.label: too long); use --here\n",
+    );
+    assert.deepEqual(w.requests(), []);
+    assert.ok(!r.asked.includes('POST /token'), JSON.stringify(r.asked));
+    assert.deepEqual(w.edgeCalls(), []);
+  });
+
+  test('a prompt after -- over the server’s 64 KiB: the 413 row’s line, exit 1, and nothing is sent (ruled, task 76)', async (t) => {
+    const w = await windowNew(t);
+
+    const r = await w.run(['new', '--window', '--', '-p', 'p'.repeat(70 * 1024)]);
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.equal(
+      r.stderr,
+      "skydeck: the window's server refused the request (body: too large); use --here\n",
+    );
+    assert.ok(!r.asked.includes('POST /new'), `not sent: ${JSON.stringify(r.asked)}`);
+    assert.ok(!r.stderr.includes('may have started'), r.stderr);
+    assert.deepEqual(w.requests(), []);
+  });
+
+  test('--here --window and --tab --window are usage errors: exit 2, nothing sent', async (t) => {
+    const w = await windowNew(t);
+    for (const other of ['--here', '--tab']) {
+      const r = await w.run(['new', other, '--window']);
+      assert.equal(r.code, 2, other);
+      assert.ok(
+        r.stderr.startsWith(`skydeck: ${other} and --window cannot be used together\n`),
+        r.stderr,
+      );
+      assert.ok(r.stderr.includes(USAGE_FIRST_LINE), r.stderr);
+      assert.deepEqual(r.asked, [], other);
+    }
+    assert.deepEqual(w.requests(), []);
+  });
 });

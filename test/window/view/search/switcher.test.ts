@@ -1,18 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import type { RowPayload } from '../../../../src/window/protocol.ts';
+import type { HiddenBy, RowPayload, SwitcherPayload } from '../../../../src/window/protocol.ts';
 import { foundIn, searchWords, searchable } from '../../../../src/window/view/search/filter.ts';
 import {
   MAX_ITEMS,
   restoreOffer,
   switcherPayload,
 } from '../../../../src/window/view/search/switcher.ts';
-import type {
-  HiddenBy,
-  SwitchCandidate,
-  SwitcherPayload,
-} from '../../../../src/window/view/search/switcher.ts';
+import type { SwitchCandidate } from '../../../../src/window/view/search/switcher.ts';
 import { rowPayload } from '../../../../src/window/view/sections.ts';
 import { ds, meta, rowOf } from '../../../helpers/derived.ts';
 import { S1, S2, S3 } from '../../../helpers/platform.ts';

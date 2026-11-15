@@ -10,7 +10,9 @@
  *
  * What the window adds (stage A's actions, moved here unchanged): the refusal "this session is
  * already open in the window" before the guard while a terminal of the session may still run (S2
- * 11.1), the session's terminals that are over closed before its new one opens (S2 7.8), a
+ * 11.1) — and, plan task 82, `<short> is running (pid <p>)` while a lost terminal's program may
+ * still run, which the guard cannot see before that program reports its session start (S2 7.8) —,
+ * the session's terminals that are over closed before its new one opens (S2 7.8), a
  * terminal whose `open()` rejects or throws answered as an open that timed out (S2 11.3), and the
  * lock given back after a throw before `open()`. For restore (task 73): `refusal`, `gone` and
  * `restoreTerminal`, which never throw (a hook that throws would end the whole run, task 71).
@@ -19,10 +21,10 @@
  * message. Each line names what it was part of (`resume: …`, `new: …`, `restore: …`); the caller's
  * `log` puts its own prefix before it.
  */
-import { procStartFromStat } from '../claude/procstat.ts';
 import { SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { launchPrepared } from '../sessions/launch.ts';
+import { SHORT_ID_LENGTH } from '../sessions/list.ts';
 import type { LaunchOutcome } from '../sessions/launch.ts';
 import { prepareNew, readLock, releaseLock } from '../sessions/resume.ts';
 import type { PreparedLaunch } from '../sessions/resume.ts';
@@ -31,6 +33,7 @@ import type { OpenResult, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import type { TerminalHub, TerminalInfo } from './hub.ts';
+import { lives, lostProgramMayRun } from './mapping.ts';
 import type { NewRequest } from './protocol.ts';
 import { MAY_START } from './view/sections.ts';
 
@@ -61,7 +64,10 @@ export interface Launches {
   resume(sessionId: string, size: Size): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
   /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
-   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. Never
+   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else, while a lost
+   *  terminal of the session has a program that may still run (plan task 82: task 57's rule, for
+   *  60 s after the loss), the guard's words `<short> is running (pid <p>[, pid <p>…])`, the
+   *  terminal opened last first; else null. `resume` refuses with the same text, code 4. Never
    *  throws: a hub that cannot be read gives `the window's terminals could not be read (<kind>)`. */
   refusal(sessionId: string): string | null;
   /** C8: null while a terminal of the session may still run; else why it cannot start any more —
@@ -143,8 +149,27 @@ export function createLaunches(deps: LaunchesDeps): Launches {
       .filter((terminal) => (terminal.sessionId ?? terminal.expectedSessionId) === sessionId);
   }
 
-  function mayStart(sessionId: string): boolean {
-    return terminalsOf(sessionId).some((terminal) => MAY_START.has(terminal.state));
+  /**
+   * Why the window refuses a start of the session, before the guard; null when it does not. A
+   * terminal of the session whose state is in MAY_START: "already open" (S2 11.1). Else, a lost
+   * terminal of the session whose program may still run — task 57's rule (`lostProgramMayRun`: the
+   * program its keeper reported, alive by design 5.5 or not readable, the loss less than 60 s old by
+   * the server's clock) — in the guard's own words, which the guard cannot say itself: a program
+   * that has not reported its session start is no holder (plan task 82). Every such program's pid,
+   * the terminal opened last first (checkResumable lists its holders latest first).
+   */
+  function windowRefusal(sessionId: string): string | null {
+    const terminals = terminalsOf(sessionId);
+    if (terminals.some((terminal) => MAY_START.has(terminal.state))) return ALREADY_OPEN;
+    const { proc, clock } = deck.platform;
+    const nowNs = clock.nowNs();
+    const pids = terminals
+      .filter((terminal) => lostProgramMayRun(terminal, proc, nowNs))
+      .sort((a, b) => (a.openedNs === b.openedNs ? 0 : a.openedNs > b.openedNs ? -1 : 1))
+      .map((terminal) => `pid ${terminal.program?.pid}`);
+    return pids.length === 0
+      ? null
+      : `${sessionId.slice(0, SHORT_ID_LENGTH)} is running (${pids.join(', ')})`;
   }
 
   /**
@@ -205,28 +230,22 @@ export function createLaunches(deps: LaunchesDeps): Launches {
    * keeper died; its program got SIGHUP, which a program can survive) is gone only once its program
    * is: by design 5.5, `/proc/<pid>/stat` with the start the keeper reported. Unknown is not dead
    * (a read that fails, a line without a start). A keeper lost before T reported no program: none
-   * was started as far as anyone can tell (S2 7.8 settles it so).
+   * was started as far as anyone can tell (S2 7.8 settles it so). Task 57's `lives`, without its
+   * 60 s bound: restore's own time limit ends the wait (plan task 82 shares the rule, no copy).
    */
   function programMayLive(terminal: TerminalInfo): boolean {
-    const { program } = terminal;
-    if (program === null) return false;
-    try {
-      const line = deck.platform.proc.stat(program.pid);
-      if (line === null) return false;
-      const start = procStartFromStat(line);
-      return start === null || start === program.procStart;
-    } catch {
-      return true;
-    }
+    return terminal.program !== null && lives(terminal.program, deck.platform.proc);
   }
 
   return {
     async resume(sessionId, size) {
       // Ruled (review 2 of stage A's task 32): a terminal of the window opened for the session
       // whose program may still run refuses a second resume, whatever the lock says — claude can
-      // wait at a dialog before its SessionStart for longer than the lock holds.
-      if (mayStart(sessionId)) {
-        return { code: REFUSED_CODE, lines: [ALREADY_OPEN], refused: true, sessionId: null };
+      // wait at a dialog before its SessionStart for longer than the lock holds. Task 82: so does
+      // a lost terminal's program while it may still run.
+      const refused = windowRefusal(sessionId);
+      if (refused !== null) {
+        return { code: REFUSED_CODE, lines: [refused], refused: true, sessionId: null };
       }
       // The terminal is made before anything is taken, so that a factory that throws leaves no
       // lock behind.
@@ -272,7 +291,7 @@ export function createLaunches(deps: LaunchesDeps): Launches {
 
     refusal(sessionId) {
       try {
-        return mayStart(sessionId) ? ALREADY_OPEN : null;
+        return windowRefusal(sessionId);
       } catch (error) {
         // Nothing is started on what could not be checked.
         const failure = failureKind(error);
