@@ -1,0 +1,31 @@
+/* Attention (S2 12.4, 13; plan B task 55): the colours of the three reasons, which web/list.css
+   draws on a row's left bar, its reason's line and the title bar's count — asks in style.css's
+   waiting colour, a finished turn in green, an end of the window in style.css's crash colour (the
+   mockup's) — and the title bar's `Turn on notifications` (#notify-on, web/notify.js). */
+:root {
+  --need: var(--wait);
+  --need-finished: #1f8a4c;
+  --need-ended: var(--crash);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --need-finished: #4cc27a;
+  }
+}
+
+.notify-on {
+  padding: 2px 9px;
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.notify-on:hover {
+  color: var(--text);
+}
+.notify-on:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}
