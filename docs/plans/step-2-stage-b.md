@@ -538,7 +538,10 @@ export function createNotifications(item, deps) {}
 window chord (D2's: while a dialog is shown, `close the edit first (Esc)` and nothing else; B15);
 `#notify-on`'s blur gives the keyboard back to the zone's holder when the item hid itself, and a
 key pressed on it joins task 37's `pressedInDialog` (B15). `web/list.js` sets `data-attention="<reason>"` on a row
-element that needs you (the coloured left bar and the bold title are `web/list.css`'s) and writes
+element that needs you (the coloured left bar and the bold title are `web/list.css`'s; a reason
+the page does not know is shown as `other` with its words — sanitised, in the row's line and a
+notification's body —, so that an older page never puts an unknown word into an attribute the
+style sheet keys on; ruled on review 1) and writes
 `needYouText` first into `#counts`, on an element with `data-state="need-you"` whose dot
 `web/list.css` draws.
 `web/list-text.js`'s `rowText` gives `attentionLine` as `stateLine` when the row needs you (and
@@ -836,11 +839,14 @@ only on a click.
 **Files**
 - Create: `web/attention-text.js`, `web/notify.js`, `web/attention.css`,
   `test/web/attention-text.test.ts`, `test-page/attention.test.ts`,
-  `test-page/helpers/notification.ts` (`notificationDouble(page, permission)` — an init script
-  that sets B17's marker and records each `new Notification` with its strings, each `close()`,
-  `requestPermission` calls with `navigator.userActivation.isActive`, and clicks on a recorded
-  one; `pageFocus(page, focused)` — `document.hasFocus` answering `focused` and a `focus` or
-  `blur` event dispatched)
+  `test-page/helpers/notification.ts` (`notificationDouble(page, permission, answer =
+  'granted')` — an init script that sets B17's marker and records each `new Notification` with
+  its strings, each `close()`, `requestPermission` calls with `navigator.userActivation.isActive`
+  (each answered `answer`, which then is the permission), and clicks on a recorded one;
+  `pageFocus(page, focused)` — `document.hasFocus` answering `focused` and a `focus` or `blur`
+  event dispatched; the file, and `helpers/browser.ts` for B17's script and marker, may export
+  what their cases need besides: here `installDouble`, `notificationsOf`, `clickNotification`,
+  `setPermission`, `NOTIFICATION_DOUBLE`, `inertNotification`; ruled on review 1)
 - Modify: `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`,
   `web/help.js` (`Ctrl+Shift+J`: `the next session that needs you; again goes on`),
   `web/index.html` (`#notify-on` in the title bar, `attention.css` after `edit.css`),
