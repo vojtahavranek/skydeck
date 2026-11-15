@@ -4,7 +4,7 @@
 // interface is contract 2.9's. Every server string reaches the DOM through textContent.
 //
 // How app.js calls it: on a change of what the right side shows, `hide()` (every card and the
-// header), then `header(row)` and at most one card. `act` is app.js's: it adds `t` and `id`, and
+// header), then `header(row, selected, term, now)` (plan D 2.4) and at most one card. `act` is app.js's: it adds `t` and `id`, and
 // for `resume` and `new` the size of the terminal area; a successful resume or new selects its
 // session there and gives its terminal the keyboard (S2 11.3).
 //
@@ -510,11 +510,11 @@ export function createCards(root, deps) {
      * Plan D 2.4: app.js passes `selected` (list.selected when it is the row's session), the
      * pane's terminal and the server's now for every pane; task 38's header uses them.
      * @param {RowPayload | null} row
-     * @param {SelectedPayload | null} [_selected]
-     * @param {TerminalPayload | null} [_term]
-     * @param {() => string} [_now]
+     * @param {SelectedPayload | null} selected
+     * @param {TerminalPayload | null} term
+     * @param {() => string} now
      */
-    header(row, _selected, _term, _now) {
+    header(row, selected, term, now) {
       if (row === null) {
         setHidden(head, true);
         return;

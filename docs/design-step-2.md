@@ -2206,7 +2206,9 @@ of plan task 26).
 
 **The dialogs** (stage D, plan D2; ruled by the lead on 2026-11-15 on the plan's review A). The
 label, group, note and pull-request dialogs (12.5) lie over the page and are modal: a scrim covers
-the window and takes clicks without acting, and the page under it takes no keyboard. While a
+the window and takes clicks without acting, and the page under it takes no keyboard; a click inside
+the dialog that selects no text gives the keyboard back to its field, while a drag selects its text
+as anywhere. While a
 dialog is shown the page moves the keyboard nowhere by itself — not for a resume's or a new's
 answer, a list or a render: the rest of a note must never be typed into Claude Code, whose line
 breaks would submit it — and acts on no list key (`j` or `d` typed in the field are text). Every

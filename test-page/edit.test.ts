@@ -353,7 +353,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         sections: {
           week: [
             row(S2, { title: 'my label', titleSource: 'label' }),
-            row(S3, { title: 'Fix the build', titleSource: 'summary' }),
+            row(S3, { title: 'Fix the build', titleSource: 'generated' }),
           ],
         },
       });
@@ -585,17 +585,18 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
   );
 
   await t.test(
-    "the pull-request dialog: `p` sends `pr-add` with the URL; Attach's `ok` empties the field and keeps the dialog open (ruled); a refusal keeps the text",
+    'the pull-request dialog: `p` opens it, Enter sends `pr-add` with the URL, a refusal keeps the text',
     async (t) => {
       const d = await deck(t, chromium, { sections: { week: [row(S2, { title: 'Ship it' })] } });
       const { page, w } = d;
       await clickRow(page, S2);
       await page.keyboard.press('p');
       await dialogShown(page, true);
-      let shown = await dialog(page);
+      const shown = await dialog(page);
       assert.equal(shown.what, 'pr');
       assert.equal(shown.heading, 'Pull requests — Ship it');
       assert.equal(shown.value, '');
+      assert.equal(shown.inField, true);
       assert.equal(shown.save, 'Attach');
       assert.equal(shown.help, 'Pull requests a session touched are attached by themselves.');
       const url = 'https://github.com/owner/repo/pull/7';
@@ -606,18 +607,37 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         { kind: act['kind'], sessionId: act['sessionId'], url: act['url'] },
         { kind: 'pr-add', sessionId: S2, url },
       );
-      w.answer(act, { ok: true });
-      await eventually(async () => (await dialog(page)).value === '', 'the field emptied');
-      shown = await dialog(page);
-      assert.equal(shown.shown, true, 'the dialog stays open');
-      assert.equal(shown.inField, true, 'the keyboard stays in the field');
+      w.answer(act, { ok: false, error: `not a GitHub pull-request URL: ${url}` });
+      await showsText(page, '#editor .edit-message', /^not a GitHub pull-request URL: /);
+      assert.equal((await dialog(page)).value, url, 'the text stays');
+    },
+  );
 
-      await page.keyboard.type('nope');
-      await page.keyboard.press('Enter');
-      const refused = await w.act(2);
-      w.answer(refused, { ok: false, error: 'not a GitHub pull-request URL: nope' });
-      await showsText(page, '#editor .edit-message', /^not a GitHub pull-request URL: nope$/);
-      assert.equal((await dialog(page)).value, 'nope');
+  await t.test(
+    "Attach's `ok` empties the field and keeps the pull-request dialog open, the keyboard in its field (ruled; every other dialog closes on `ok`)",
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('p');
+      await dialogShown(page, true);
+      for (const [n, number] of [
+        [1, 7],
+        [2, 8],
+      ] as const) {
+        await page.keyboard.type(`https://github.com/owner/repo/pull/${number}`);
+        await page.keyboard.press('Enter');
+        w.answer(await w.act(n), { ok: true });
+        await eventually(async () => (await dialog(page)).value === '', 'the field emptied');
+        const shown = await dialog(page);
+        assert.equal(shown.shown, true, 'the dialog stays open');
+        assert.equal(shown.inField, true, 'the keyboard stays in the field');
+        assert.equal(shown.message, '');
+        assert.equal(shown.saveDisabled, false);
+      }
+      assert.equal(await dialog(page).then((shown) => shown.value), '');
+      await page.keyboard.press('Escape'); // emptied: nothing changed, one Esc closes it
+      await dialogShown(page, false);
     },
   );
 
@@ -875,6 +895,36 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       assert.equal(shown.shown, true, 'the dialog stays');
       assert.equal(shown.inField, true, 'the keyboard stays in the field');
       assert.equal(await selectedRow(page), S2, 'the click selected nothing');
+    },
+  );
+
+  await t.test(
+    "a click inside a dialog that selects nothing gives the keyboard back to its field; a drag that selects the heading's text keeps the selection (ruled: D2 for the mouse, D17)",
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2, { title: 'Copy me' })] } });
+      const { page } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      for (const part of ['.edit-heading', '.edit-help']) {
+        await page.locator(`#editor ${part}`).click();
+        await eventually(async () => (await dialog(page)).inField, `${part}: the field again`);
+      }
+      const heading = await page.locator('#editor .edit-heading').boundingBox();
+      assert.ok(heading !== null);
+      await page.mouse.move(heading.x + 2, heading.y + heading.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(heading.x + heading.width - 2, heading.y + heading.height / 2, {
+        steps: 5,
+      });
+      await page.mouse.up();
+      await sleep(300);
+      assert.match(
+        await page.evaluate(() => getSelection()?.toString() ?? ''),
+        /Copy me/,
+        'the heading is selected',
+      );
+      assert.equal((await dialog(page)).inField, false, 'the selection is not taken away');
     },
   );
 
