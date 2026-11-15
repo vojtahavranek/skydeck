@@ -224,6 +224,11 @@ interface Measured {
   height: number;
   lines: { name: string; height: number; overflows: boolean }[];
   whole: Record<string, boolean | null>;
+  /** Each open pull request of line 3: shown whole inside the items' box, inside it with an
+   *  ellipsis (one wider than the box alone), left out of it, or cut by its edge. */
+  items: ('whole' | 'ellipsis' | 'out' | 'cut')[];
+  /** The widths of the title, the group chip and the state on line 1. */
+  widths: { title: number; group: number; state: number };
 }
 async function measure(page: Page): Promise<Measured> {
   return page.evaluate(() => {
@@ -241,7 +246,34 @@ async function measure(page: Page): Promise<Measured> {
         element.scrollWidth <= element.clientWidth
       );
     };
+    const itemsBox = (
+      head.querySelector('.header-pr-items') as HTMLElement
+    ).getBoundingClientRect();
+    const items = [...head.querySelectorAll<HTMLElement>('.header-pr')].map((item) => {
+      const r = item.getBoundingClientRect();
+      const inside =
+        r.left >= itemsBox.left - 0.5 &&
+        r.right <= itemsBox.right + 0.5 &&
+        r.top >= itemsBox.top - 0.5 &&
+        r.bottom <= itemsBox.bottom + 0.5;
+      const out = r.top >= itemsBox.bottom - 0.5 || r.left >= itemsBox.right - 0.5;
+      return inside
+        ? item.scrollWidth <= item.clientWidth
+          ? ('whole' as const)
+          : ('ellipsis' as const)
+        : out
+          ? ('out' as const)
+          : ('cut' as const);
+    });
+    const width = (selector: string): number =>
+      (head.querySelector(selector) as HTMLElement).getBoundingClientRect().width;
     return {
+      items,
+      widths: {
+        title: width('.header-title'),
+        group: width('.header-group'),
+        state: width('.header-state'),
+      },
       height: box.height,
       lines: [...head.children].map((line) => ({
         name: line.className,
@@ -489,7 +521,22 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
           }
           assert.equal(m.whole['.header-id'], true, `${where}: the short id`);
           assert.equal(m.whole['.header-prs-button'], true, `${where}: the pull-request button`);
+          // The open pull requests as far as they fit: each shown whole, or left out whole.
+          assert.ok(!m.items.includes('cut'), `${where}: no item is cut (${m.items.join(' ')})`);
+          assert.ok(
+            !m.items.slice(1).includes('ellipsis'),
+            `${where}: only a first item wider than the line alone ends in an ellipsis`,
+          );
+          if (m.items.length > 0) assert.notEqual(m.items[0], 'out', `${where}: the first item`);
+          // Line 1 short of room: the title, the chip and the state each keep a share.
+          for (const [part, px] of Object.entries(m.widths)) {
+            if (part !== 'group' || shown['group'] !== null) {
+              assert.ok(px >= 40, `${where}: the ${part} keeps ${px} px`);
+            }
+          }
         }
+        // Eight long ones do not fit on the line: some are left out (whole).
+        assert.ok((await measure(s.page)).items.includes('out'), `at ${width} px: some left out`);
         await sleep(800);
         const resized = s.w.sent.slice(from).filter((message) => message['t'] === 'resize');
         assert.deepEqual(resized, [], `at ${width} px: no resize while only the content changed`);
@@ -546,11 +593,14 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
               ...prsOf(prs),
             }),
           ],
-          week: [row(S2, { title: 'plain', titleSource: 'generated' })],
+          week: [
+            row(S2, { title: 'plain', titleSource: 'generated' }),
+            row(S3, { title: 'only merged', ...prsOf([pr(5, 'merged'), pr(6, 'merged')]) }),
+          ],
         },
         terminals: [terminal(TERM_A, S1, 1, { openedNs: '1741064760000000000' })],
       });
-      const { page } = s;
+      const { page, w } = s;
       await showsText(page, '#cards .header-title', /^ORB-7 fix the retry$/);
       assert.deepEqual(await texts(page, '#cards .header-group'), ['ORB-7']);
       assert.match(await tipOf(page, '#cards .header-group'), /from the title/);
@@ -597,6 +647,32 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
         ),
         /underline/,
       );
+      // D17: a drag over the link selects it and opens nothing; a click opens it.
+      const chip = await page.locator('#cards .header-group').boundingBox();
+      assert.ok(chip !== null);
+      await page.mouse.move(chip.x + 1, chip.y + chip.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(chip.x + chip.width - 1, chip.y + chip.height / 2, { steps: 6 });
+      await page.mouse.up();
+      await sleep(300);
+      assert.notEqual(await page.evaluate(() => getSelection()?.toString() ?? ''), '');
+      assert.deepEqual(w.acts(), [], 'a drag over the link opens nothing');
+      await page.evaluate(() => getSelection()?.removeAllRanges());
+      await page.locator('#cards .header-group').click();
+      const opened = await eventually(async () => w.acts()[0] ?? null, 'the link opened');
+      assert.deepEqual(
+        [opened['kind'], opened['url']],
+        ['open-link', 'https://tickets.example/browse/ORB-7'],
+      );
+
+      // Only merged ones attached: none is open, but some are attached — the chip `2 merged`,
+      // the button `Pull requests`, no hint.
+      await clickRow(page, S3);
+      await showsText(page, '#cards .header-title', /^only merged$/);
+      assert.deepEqual(await texts(page, '#cards .header-chip'), ['2 merged']);
+      assert.deepEqual(await texts(page, '#cards .header-pr'), []);
+      assert.deepEqual(await texts(page, '#cards .header-prs-none'), []);
+      assert.deepEqual(await texts(page, '#cards .header-prs-button'), ['Pull requests']);
 
       // A session not running, without a group, pull requests or a note: no `opened`, `+ group`,
       // `no pull request` with `+ PR`, and `no note`.
@@ -717,6 +793,12 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       await sleep(300);
       assert.match(await page.evaluate(() => getSelection()?.toString() ?? ''), /select this/);
       assert.equal((await dialog(page)).shown, false, 'a drag opens nothing');
+      // A list that changes another of the header's texts keeps the selection (set when changed).
+      s.set({
+        sections: { week: [row(S1, { title: 'select this title', dir: '/u/b' }), row(S2)] },
+      });
+      await showsText(page, '#cards .header-dir', /^\/u\/b$/);
+      assert.match(await page.evaluate(() => getSelection()?.toString() ?? ''), /select this/);
       await page.evaluate(() => getSelection()?.removeAllRanges());
 
       await page.locator('#cards .header-title').click();
@@ -817,6 +899,14 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       assert.ok((await dialog(page)).inField, 'the keyboard is in the field');
       w.answer(actsOf('pr-rm')[1] as Row, { ok: true });
       await eventually(async () => (await toast(page)).text === 'Detached acme/web #7', 'toast');
+      // This stand-in sends no list without the line, so its × stays disabled (C2) — until the
+      // toast's Undo attaches it again.
+      assert.equal(await remove.isDisabled(), true, '× disabled until the list without the line');
+      await page.locator('#toast .toast-undo').click();
+      const add = await eventually(async () => actsOf('pr-add')[0] ?? null, "Undo's pr-add");
+      assert.equal(add['url'], PR7);
+      w.answer(add, { ok: true });
+      await eventually(async () => !(await remove.isDisabled()), '× enabled again');
 
       // A refusal after the dialog closed: the toast — of a line's link (review 1) and of ×.
       await page.locator('#editor .edit-pr-text').first().click();
@@ -845,6 +935,132 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       await dialogShown(page, true);
       await showsAll(page, '#editor .edit-pr-fold', ['1 merged ▸']);
       assert.deepEqual(await prLines(page), ['acme/web #7 · checks failing · checked 4m ago']);
+    },
+  );
+
+  await t.test(
+    "review 2's M1, C2, S1, C1: a double click on × detaches one pull request, whether the list or the answer comes first, and × stays disabled until the list without its line; a drag held over a line whose age counts seconds keeps its selection and opens nothing; ↻ from the keyboard leaves the keyboard in the field",
+    async (t) => {
+      const three = [pr(7, 'draft'), pr(8, 'draft'), pr(9, 'draft')];
+      const s = await scripted(t, chromium, { sections: { week: [row(S1, prsOf(three))] } });
+      const { page, w } = s;
+      const rms = (): Row[] => w.acts().filter((act) => act['kind'] === 'pr-rm');
+      const withPrs = (prs: Row[]): void => s.set({ sections: { week: [row(S1, prsOf(prs))] } });
+      await page.locator('#cards .header-prs-button').click();
+      await dialogShown(page, true);
+      await eventually(async () => (await prLines(page)).length === 3, 'three lines');
+      const first = await page.locator('#editor .edit-pr-remove').first().boundingBox();
+      assert.ok(first !== null);
+      await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+
+      // The list that removes the line comes before the answer: the next line's × is under the
+      // pointer when the second click of the double click comes.
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await eventually(async () => rms().length === 1, 'the first pr-rm');
+      withPrs([three[1] as Row, three[2] as Row]);
+      await eventually(async () => (await prLines(page)).length === 2, 'its line gone');
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.up({ clickCount: 2 });
+      await sleep(300);
+      assert.deepEqual(
+        rms().map((act) => act['url']),
+        [PR7],
+        'the second click detaches nothing',
+      );
+      w.answer(rms()[0] as Row, { ok: true });
+      await eventually(async () => (await toast(page)).text === 'Detached acme/web #7', 'toast');
+
+      // The answer comes before the list: the second click, and a slow third one, send nothing
+      // while the line is still shown; it goes with the list.
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await eventually(async () => rms().length === 2, 'the second pr-rm');
+      w.answer(rms()[1] as Row, { ok: true });
+      await eventually(async () => (await toast(page)).text === 'Detached acme/web #8', 'toast');
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.up({ clickCount: 2 });
+      await sleep(600);
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await sleep(300);
+      assert.equal(rms().length, 2, 'nothing more is detached');
+      assert.equal((await dialog(page)).message, '', 'and nothing is refused');
+      withPrs([three[2] as Row]);
+      await eventually(async () => (await prLines(page)).length === 1, 'the line goes');
+
+      // A line whose age counts seconds: a drag held over a tick keeps its selection, opens nothing.
+      withPrs([pr(9, 'draft', { okAtNs: String(NOW_NS - 5n * SEC_NS) })]);
+      await showsAll(page, '#editor .edit-pr-text', ['acme/web #9 · draft · checked 5s ago']);
+      const line = await page.locator('#editor .edit-pr-text').boundingBox();
+      assert.ok(line !== null);
+      await page.mouse.move(line.x + 1, line.y + line.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(line.x + line.width - 1, line.y + line.height / 2, { steps: 6 });
+      await sleep(1200);
+      await page.mouse.up();
+      await sleep(1200);
+      assert.match(
+        await page.evaluate(() => getSelection()?.toString() ?? ''),
+        /acme\/web #9 · draft · checked/,
+        'the selection is kept',
+      );
+      assert.deepEqual(
+        w.acts().filter((act) => act['kind'] === 'open-link'),
+        [],
+        'the drag opens nothing',
+      );
+      // Without the selection the age counts on again.
+      await page.evaluate(() => getSelection()?.removeAllRanges());
+      const frozen = (await prLines(page))[0] ?? '';
+      await eventually(async () => {
+        const now = (await prLines(page))[0] ?? '';
+        return now !== frozen && /^acme\/web #9 · draft · checked \d+s ago$/.test(now);
+      }, 'the age repainted');
+
+      // ↻ pressed from the keyboard: the keyboard goes back to the field.
+      await page.focus('#editor .edit-pr-refresh');
+      await page.keyboard.press('Enter');
+      const refresh = await eventually(
+        async () => w.acts().find((act) => act['kind'] === 'pr-refresh') ?? null,
+        'pr-refresh',
+      );
+      assert.ok((await dialog(page)).inField, 'the keyboard is in the field');
+      w.answer(refresh, { ok: true });
+    },
+  );
+
+  await t.test(
+    "review 2's S2: Enter held on the header's Note button opens the note dialog and its repeats type nothing into the note; a fresh Enter does (the key that opened a dialog, S2 12.9)",
+    async (t) => {
+      const s = await scripted(t, chromium, {
+        sections: { week: [row(S1, { hasNote: true, noteHead: ['kept'] })] },
+        selected: { [S1]: { note: 'kept' } },
+      });
+      const { page } = s;
+      await showsText(page, '#cards .card-command', /--resume/); // its `selected` has come
+      const cdp = await page.context().newCDPSession(page);
+      const enter = async (type: 'keyDown' | 'keyUp', autoRepeat = false): Promise<void> => {
+        await cdp.send('Input.dispatchKeyEvent', {
+          type,
+          key: 'Enter',
+          code: 'Enter',
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+          ...(type === 'keyDown' ? { text: '\r', autoRepeat } : {}),
+        });
+      };
+      await page.focus('#cards .header-note-button');
+      await enter('keyDown');
+      await dialogShown(page, true);
+      assert.equal((await dialog(page)).value, 'kept');
+      for (let i = 0; i < 3; i++) await enter('keyDown', true);
+      await enter('keyUp');
+      await sleep(200);
+      assert.equal((await dialog(page)).value, 'kept', 'the repeats typed nothing');
+      await enter('keyDown');
+      await enter('keyUp');
+      await eventually(async () => (await dialog(page)).value === 'kept\n', 'a fresh Enter');
     },
   );
 
@@ -1090,8 +1306,21 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       const order = await sectionRows(l.page, 'week');
       await clickRow(l.page, order[1] as string);
       await showsText(l.page, '#cards .card-command', /--resume/); // its `selected` has come
+      // A quiet page: no list for more than the once-a-second rule's second, so that the server's
+      // list of the write comes before the answer (review 2's S3).
+      await sleep(1500);
+      await mark(l.page, 'd');
       await l.page.keyboard.press('d');
       await eventually(async () => (await selectedRow(l.page)) === order[2], 'the next row');
+      const since = after(await logOf(l.page), 'd').filter(
+        (entry) =>
+          (entry.e === 'in' && (entry.t === 'list' || entry.t === 'result')) || entry.t === 'act',
+      );
+      assert.deepEqual(
+        since.slice(0, 3).map((entry) => `${entry.e} ${entry.t ?? ''}`),
+        ['out act', 'in list', 'in result'],
+        'the list of the write came before the answer',
+      );
       assert.deepEqual(await sectionRows(l.page, 'week'), [order[0], order[2], order[3]]);
       assert.equal(await keyMessage(l.page), '');
       assert.deepEqual(l.problems, []);

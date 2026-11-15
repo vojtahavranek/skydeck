@@ -214,6 +214,21 @@ describe('prLineText: a pull request on its line of the dialog (D13)', () => {
     );
   });
 
+  test('an unknown level is shown as sent, sanitised', () => {
+    assert.equal(
+      prLineText(pr('later\x1b[31m-level'), now),
+      'acme/web #7 · later-level · checked 4m ago',
+    );
+  });
+
+  test('a surrogate pair that ends right before the cut is kept whole', () => {
+    const before = `${'a'.repeat(ERROR_MAX - 3)}😀tail`;
+    const cut = prLineText(pr('cant-read', { okAtNs: null, error: before }), now)
+      .split(' · ')
+      .at(-1);
+    assert.equal(cut, `${'a'.repeat(ERROR_MAX - 3)}😀…`);
+  });
+
   test('a repository or an error with an escape sequence is sanitised', () => {
     assert.equal(
       prLineText(
@@ -348,6 +363,8 @@ describe("noteLine: the note's line of the header (S2 12.5, D12)", () => {
       text: 'first',
       empty: false,
     });
+    // A lone carriage return breaks a line too, as the server splits a note.
+    assert.deepEqual(noteLine(r, selected('first\rsecond')), { text: 'first …', empty: false });
     // A note too long for `selected` (D5): the head decides.
     assert.deepEqual(noteLine(r, selected(null, true)), { text: 'first', empty: false });
   });

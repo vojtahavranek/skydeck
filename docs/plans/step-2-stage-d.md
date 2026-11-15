@@ -718,20 +718,27 @@ Code's name`, `title: Claude Code's summary`, `title: start time and folder`; th
 the short id (never cut, a click copies, as stage A's). Line 3: the window's chip (the list's own
 words and tooltip, `rowText`), the open pull requests' items (`owner/repo #7 · failing`, the chip's
 words; a click that selected no text opens it; the tooltip D13's words with the error whole, then
-the title) as far as they fit — one that does not fit is left out whole —, `Pull requests` / `+ PR`
+the title) as far as they fit — one that does not fit is left out whole, and only a first one wider
+than the line alone ends in an ellipsis —, `Pull requests` / `+ PR`
 (the pull-request dialog), never cut; while none is attached the hint `no pull request`. Line 4: the
 note's first line and ` …` when the note has another line with something on it (the whole note of
 `selected` decides; without it the list's head of the note), or `no note`, a click opening the note
 dialog. A refused link through `deps.say`. The pull-request dialog's list as D13, above the field:
 `no pull request attached` while there is none; the fold is closed at every open; × and ↻ send one
-act while it waits; a refused link, × or ↻ shows under the field, and one whose dialog was closed
+act while it waits, a double click on × is one press, and a × whose `pr-rm` was taken stays disabled
+until a list no longer holds its line (or its Undo attaches it again); a line's text is not drawn
+again while a mouse button is down on the list or a selection touches the line, so that an age
+counting seconds neither ends a selection nor turns a drag into an open; a refused link, × or ↻
+shows under the field, and one whose dialog was closed
 meanwhile is the toast `not saved: <the error>` (as C4); an error is cut on its line to 120 UTF-16
 units with `…`, never inside a surrogate pair, and its line's tooltip is the pull request's title,
 then the whole error when the line cut it. The list follows every `list` (`editor.update`): a line
 comes or goes with the list that holds the write, which the server pushes after it (D7) — usually
 before the act's answer, else within a second (the once-a-second rule), or at its next refresh when
 the store was busy; an address attached already changes nothing, so no list comes for it, and its
-line is there. Buttons and texts as D17. Every age — `last active`, `checked`, `last read` — is
+line is there. A dialog's field takes the auto-repeats only of a key whose first press it got, so
+that Enter held on the header's Note opens the dialog and types nothing into it (S2 12.9's held
+key, review 2). Buttons and texts as D17. Every age — `last active`, `checked`, `last read` — is
 counted from `now()` and repainted on the module's own 1 s tick, in the header and in the
 pull-request dialog's list (`deps.now` of the editor), as the list repaints its ages (A18); a text is
 set only when it changed, so a selection in it stays.
@@ -750,7 +757,9 @@ attached with `attachManualPr` and their status saved with `savePrResult`, notes
   one with stage D's longest texts — a label of 1,024 bytes, a group of 200 characters, a note whose
   first line has 1,000 characters, eight open pull requests with long titles, a ticket address of
   1,900 characters — each at 1280 and at 900 px → the same header height in four lines of one line
-  each, the buttons and the short id whole, and no `resize` while only the content changes (ruled
+  each, the buttons and the short id whole, no pull request cut by the line's edge (some left out
+  with eight), the title, the chip and the state each at least 40 px wide, and no `resize` while
+  only the content changes (ruled
   01:53Z); on the real server, a pull request attached and a note set, changed and cleared while the
   terminal runs → the same height and no `resize`.
 - `header.test.ts`, ages: `last active 1m` becomes `last active 2m` (the page's clock moved on, no new
@@ -767,12 +776,17 @@ attached with `attachManualPr` and their status saved with `savePrResult`, notes
   text; without `ticketUrl` the chip is plain text and only ✎ edits; no group → `+ group` opens the
   dialog. The note's line shows its first line sanitised, a click → the dialog with the whole note.
   Done → the row done, the toast, Undo → undone; a running session's Done → it stays under Open,
-  marked `done`; Done clicked twice while its answer waits → one act. Dragging over the title, a pull
-  request or the note's line selects it and opens nothing; a button's click leaves the keyboard where
-  it was. The dialog's refusals and waits as in Behaviour. A hostile title, group, note line, pull
+  marked `done`; Done clicked twice while its answer waits → one act. Dragging over the title, the
+  ticket link, a pull request or the note's line selects it and opens nothing; a selected title
+  stays selected through a list that changes another text; a button's click leaves the keyboard
+  where it was; only merged ones attached → `Pull requests`, no hint. The dialog's refusals and
+  waits as in Behaviour: a double click on × with the list before the answer and after it, a slow
+  click while the line is still there, a drag held 1.2 s over `checked 5s ago`, ↻ and × from the
+  keyboard; Enter held on Note types nothing into the note, a fresh Enter does (review 2). A hostile title, group, note line, pull
   request's repository, title and error and ticket address appear as text and create no element.
 - `header.test.ts`, the order of `list` and `result` (ruled 06:38Z): on the real server, a quiet
-  page, `d` on a row of This week → the next row of This week is selected.
+  page (no list for 1.5 s), `d` on a row of This week → the list of the write comes before the
+  answer, and the next row of This week is selected.
 - `cards.test.ts`: the cases that pinned stage A's header follow it — the chip on the pull requests'
   line; the three cases that took `#cards button` for the card's own button (the header has buttons
   now) name the card's; stage A's one-height case holds as it is.

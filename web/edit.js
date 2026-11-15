@@ -150,11 +150,14 @@ export function createEditor(root, deps) {
   /** The merged and closed pull requests are shown (the fold is open); folded at every open. */
   let unfolded = false;
   /**
-   * The pull requests whose × waits for its answer (`<session id> <address>`): no second `pr-rm`
-   * meanwhile.
+   * The pull requests whose × was pressed (`<session id> <address>`): its × stays disabled while
+   * the answer waits and, after an `ok`, until a list no longer holds the line (review 2 of task
+   * 38: a slow second click must not send `pr-rm` again for it).
    * @type {Set<string>}
    */
   const removing = new Set();
+  /** A mouse button is down on the list: no line's text is replaced meanwhile (D17, below). */
+  let pressed = false;
   /**
    * The sessions whose ↻ waits for its answer.
    * @type {Set<string>}
@@ -217,12 +220,21 @@ export function createEditor(root, deps) {
       );
     }
     const now = deps.now();
+    const selection = getSelection();
     prs.forEach((pr, at) => {
       const line = container.children[at];
       const text = line?.querySelector('.edit-pr-text');
       const remove = line?.querySelector('.edit-pr-remove');
       if (text instanceof HTMLElement && remove instanceof HTMLButtonElement) {
-        setText(text, prLineText(pr, now));
+        // D17: a line is drawn again only while no button is down on the list and no selection
+        // touches it, so that an age counting seconds neither ends a drag's selection nor turns
+        // the drag's click into an open (review 2 of task 38); it is drawn on the next tick.
+        const held =
+          pressed ||
+          (selection !== null && !selection.isCollapsed && selection.containsNode(text, true));
+        if (!held) {
+          setText(text, prLineText(pr, now));
+        }
         if (text.title !== prLineTip(pr)) {
           text.title = prLineTip(pr);
         }
@@ -239,6 +251,13 @@ export function createEditor(root, deps) {
       return;
     }
     const prs = prsShown();
+    const sessionId = current?.row.id;
+    for (const key of removing) {
+      // A × whose line a list no longer holds is done with (its answer may still come).
+      if (key.startsWith(`${sessionId} `) && !prs.some((pr) => key === `${sessionId} ${pr.url}`)) {
+        removing.delete(key);
+      }
+    }
     const { open, finished } = splitPrs(prs);
     const merged = finished.filter((pr) => pr.level === 'merged').length;
     prNone.hidden = prs.length !== 0;
@@ -300,13 +319,14 @@ export function createEditor(root, deps) {
     removing.add(key);
     drawPrs();
     const result = await deps.act({ kind: 'pr-rm', sessionId, url });
-    removing.delete(key);
-    drawPrs();
     if (!result.ok) {
+      removing.delete(key);
+      drawPrs();
       refused(sessionId, result);
       return;
     }
     deps.toast(`Detached ${name}`, () => {
+      removing.delete(key); // attached again, its line comes back with its × to press
       void deps.act({ kind: 'pr-add', sessionId, url }).then((again) => {
         if (!again.ok) {
           refused(sessionId, again);
@@ -340,7 +360,11 @@ export function createEditor(root, deps) {
       return;
     }
     if (target.closest('.edit-pr-remove') !== null) {
-      void detach(url);
+      // A double click is one press (review 2 of task 38: its second click would detach the line
+      // that moved under the pointer, or this one again); a press from the keyboard has no detail.
+      if (event.detail <= 1) {
+        void detach(url);
+      }
     } else if (target.closest('.edit-pr-text') !== null && !textSelected()) {
       // S2 9.6's `open-link` (the server checks the address again); a refusal as `refused` says.
       const sessionId = current?.row.id;
@@ -354,6 +378,18 @@ export function createEditor(root, deps) {
       });
     }
   });
+  prList.addEventListener('mousedown', () => {
+    pressed = true;
+  });
+  for (const ended of ['mouseup', 'blur']) {
+    addEventListener(
+      ended,
+      () => {
+        pressed = false;
+      },
+      true,
+    );
+  }
   fold.addEventListener('click', () => {
     unfolded = !unfolded;
     drawPrs();
@@ -535,6 +571,22 @@ export function createEditor(root, deps) {
       }
       if (field !== null) {
         field.spellcheck = false;
+        // S2 12.9: the key that opened a dialog types nothing into it while it is held. The list's
+        // keys are app.js's to swallow; a key held on a button of the header (Enter on Note) is
+        // this: the field takes the auto-repeats only of a key whose first press it got.
+        /** @type {Set<string>} */
+        const pressedHere = new Set();
+        field.addEventListener('keydown', (event) => {
+          const key = /** @type {KeyboardEvent} */ (event);
+          if (!key.repeat) {
+            pressedHere.add(key.code);
+          } else if (!pressedHere.has(key.code)) {
+            key.preventDefault();
+          }
+        });
+        field.addEventListener('keyup', (event) => {
+          pressedHere.delete(/** @type {KeyboardEvent} */ (event).code);
+        });
         field.addEventListener('keydown', (event) =>
           onFieldKey(/** @type {KeyboardEvent} */ (event)),
         );
