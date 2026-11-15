@@ -1530,6 +1530,13 @@ Any number of pages may attach to one terminal; they share its ordered stream. I
 them goes to the program in the order the server receives it. `list` goes to every page; each
 page's `view` state is its own. Notifications go to one page only (13).
 
+Attention (12.4, 13; stage B's plan, B20) is the server's, so it is the same in every window: the
+marks, the title bar's count and the window title — but for what a window lists at all: a done
+session that has stopped counts only in a window that shows done sessions (`showDone`, 12.8); and
+`needYou.order` follows each window's own filter and fold. A session seen in any window that has focus is seen for all of them, and a typing
+from any window counts. A notification goes to the one window that had focus last, and only while
+no window has it.
+
 #### 8.2.8 Backpressure
 
 The server never pauses a program; it may stop reading a keeper's connection (7.3, Reading), which
@@ -1722,7 +1729,12 @@ and turn ends (10.3); check the keep-alive. Every second tick: the refresh every
 (design 5.3: ingest, reconcile, transcript scan, lock sweep), the automatic pull-request refresh
 (design 7.3) for the sessions the pages list, and a reload of the rows when that refresh saved
 something, a live file or its trust changed, another process committed to the store
-(`Store.dataVersion()`), or a minute passed — the interactive list's rule. The server then sends
+(`Store.dataVersion()`), or a minute passed — the interactive list's rule — or when a row's last
+holding that was alive at the last load is gone now (stage B, ruled 2026-11-15): a session's end
+event can be ingested before its process exits, `ended-unexpectedly` (design 6.3) and a window end
+judged on it (12.4) need that process gone, and an exit after the live file went moves no change
+mark, so without it the mark would wait for the minute. A /proc read that fails, or a boot id that
+cannot be read, is not taken for gone (design 5.5). The server then sends
 `list` to every page whose view model changed. An edit a page made (12.5) does not wait for that:
 the server's own writes move no change mark, so after one the server loads the rows again and
 sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
@@ -2197,7 +2209,8 @@ exits it settled (7.8) — each terminal of the window in state `ended` or `lost
 its exit time is the server's clock) that started its program is judged, once, at the first refresh
 where its session's row no longer runs and that row's last holder is gone (a lost keeper's program
 lives on its SIGHUP for a moment, and its end event can be ingested before it exits, while
-`ended-unexpectedly` needs the holder gone, design 6.3):
+`ended-unexpectedly` needs the holder gone, design 6.3; the rows are loaded again once that holder
+is gone, 10.1):
 its session, the one it shows or else the one it was opened for, gets `window_end_seq` and, as
 `window_end_ns`, the exit's time when that row is marked `ended-unexpectedly`; nothing when the
 session ended deliberately. A terminal that leaves the list is forgotten. It is the same end when the stored `window_end_ns` equals the exit's
