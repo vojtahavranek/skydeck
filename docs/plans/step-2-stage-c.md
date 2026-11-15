@@ -15,7 +15,11 @@ ended terminals closed first, a failing terminal taken as a timeout) on top of s
 lock and command builders. A restore is step 1's `runRestore` with the window terminal and three
 optional hooks, run by one coordinator in the server (`src/window/restorer.ts`), one at a time;
 the banner is a pure function of the view model. The commands never start a server and prepare
-nothing themselves when they send to it.
+nothing themselves when they send to it. Two of stage A's named limits on this path are settled
+here: a renewal of a resume lock keeps a mark of its take, so restore can renew the lock of a
+window terminal (task 80), and the server keeps a mark in the store while windows are connected,
+so that `skydeck window` after a WSL restart waits for the old window instead of opening a second
+one (task 81).
 
 **Tech Stack:** as stage A — TypeScript on Node.js ≥ 24.12 through type stripping, `node:test`;
 the page in plain JavaScript modules with JSDoc types and no build step; Playwright 1.60.0's
@@ -35,8 +39,9 @@ the two test platforms, the `SKYDECK_TEST_*` seams only in a marked sandbox). It
 (section 2) stay in force where this plan does not change them; this plan's section 2 gives only
 the changes.
 
-**Task numbers** are 70–79 (stage D has 34–39, stage B numbers from 50), so that branch names,
-pull-request titles and the lead's notes stay unique.
+**Task numbers** are 70–81 (stage D has 34–39, stage B 50–56), so that branch names, pull-request
+titles and the lead's notes stay unique. Tasks 80 and 81 were added after the first version of
+this plan (the lead's guidance); their numbers do not follow their waves.
 
 **CI stays as it is**: two Node legs, one job each. No task changes `.github/workflows/`,
 `package.json` or a dependency.
@@ -56,39 +61,48 @@ pull-request titles and the lead's notes stay unique.
   the fake serve of `test/fixtures/fake-serve` (task 76 teaches it the stage C routes) or a real
   test server (`startTestServer`). Edge is always the recording stub (A32).
 
-**Known flakes** (not stage C's to fix): `LEFT-TO-YOU.md` section 4, "Tests" (the input-full page
-case under load, `test/platform/real.test.ts:1005` and its streamed-answer case, the stand-in's
-record order, `test/window/mapping.test.ts:623`). A run that fails only with one of them is run
-once more, and the pull request names both runs.
+**Known flakes** (not stage C's to fix): `test-page/terminal.test.ts`, "input-full (the program
+stalled, a large paste)" (under load a key pressed during the stall can be taken);
+`test/platform/real.test.ts:1005` (it uses the wall clock, which WSL steps back) and its case "a
+streamed answer that keeps coming…"; `test/standin/standin.test.ts` (records in the wrong order
+now and then); `test/window/mapping.test.ts:623` (ENOTEMPTY at the sandbox's clean-up); and, seen
+once while five other suites ran, `test/cli/commands/window.test.ts:1772` ("--new-secret while a
+server starts…"). A run that fails only with one of them is run once more, and the pull request
+names both runs.
 
 ## 1. Tasks and waves
 
-Task 0 is `main` at 9c5cbfb (stage A complete) with this plan merged.
+Task 0 is `main` with this plan merged (stage A complete at 9c5cbfb; stage D's plan merged at
+cadb490).
 
-| # | Task | Depends on | Wave | Size (code + tests) | Shared files |
+| # | Task | Depends on | Wave | Size (code + tests) | Shared with another stage |
 |---|---|---|---|---|---|
-| 70 | Contracts; the control socket's stage C routes | 0 | 1 | ~600 | `src/window/protocol.ts`, `src/window/actions.ts` (two lines), `src/store/types.ts` (one line), their tests |
+| 70 | Contracts; the control socket's stage C routes | 0 | 1 | ~600 | `protocol.ts`, `actions.ts` (the interim case), `store/types.ts` (two lines), their tests |
 | 71 | Step 1 change: restore planning shared, `runRestore`'s hooks | 0 | 1 | ~450 | — |
-| 78 | `show`: `(in the skydeck window)` | 0 | 1 | ~300 | `src/cli/commands/show.ts`, `src/cli/output.ts`, their tests |
-| 72 | Launches: one way to start a session in the window | 70 | 2 | ~450 | `src/window/actions.ts`, its test |
-| 73 | The restorer and the banner's view model | 70, 71 | 2 | ~600 | — (a new file in `src/window/view/`) |
-| 75 | The banner on the page | 70 | 2 | ~600 | `web/app.js`, `web/index.html`, `test-page/helpers/shell.ts` (a new function) |
-| 76 | The command line's side: the client, `--window` for `resume` and `new` | 70 | 2 | ~700 | — |
-| 74 | The server: launches, restore and the routes wired | 72, 73 | 3 | ~650 | `src/window/server.ts` |
-| 77 | `"terminal": "window"`: the configuration, `restore`, `R`, `doctor` | 74, 76 | 4 | ~600 | `src/platform/config.ts`, its test |
+| 78 | `show`: `(in the skydeck window)` | 0 | 1 | ~300 | `show.ts`, `output.ts`, their tests |
+| 80 | Step 1 change: the resume lock's take mark | 0 | 1 | ~300 | — |
+| 72 | Launches: one way to start a session in the window | 70 | 2 | ~450 | `actions.ts`, its test |
+| 73 | The restorer and the banner's view model | 70, 71 | 2 | ~600 | `test/window/view/build.test.ts` (the pinned file list) |
+| 75 | The banner on the page | 70 | 2 | ~600 | `web/app.js`, `web/index.html`, `test-page/helpers/shell.ts` (a function at the end) |
+| 81 | The second window after a cold start: the pages mark | 70 | 2 | ~300 | — |
+| 74 | The server: launches, restore, the routes and the pages mark wired | 72, 73, 81 | 3 | ~650 | `server.ts` |
+| 76 | The command line's side: the client, `--window` for `resume` and `new` | 70, 81 | 3 | ~700 | — |
+| 77 | `"terminal": "window"`: the configuration, `restore`, `R`, `doctor` | 74, 76 | 4 | ~600 | `config.ts`, its test |
 | 79 | Documentation of stage C | all | 5 | docs only | `docs/*`, `README.md` |
 
 ```
-wave 1:  70  71  78
-wave 2:  72  73  75  76
-wave 3:  74
+wave 1:  70  71  78  80
+wave 2:  72  73  75  81
+wave 3:  74  76
 wave 4:  77
 wave 5:  79
 ```
 
-**Can start at once:** 71 (no dependency, no shared file). 70 and 78 depend on nothing but edit
-files that stages B and D edit too: they start as soon as the lead has no other task on those
-files in flight (70: stage D's 34 and B's contract task; 78: stage D's 35).
+**Can start at once** (no dependency, no file another stage changes): **71 and 80**. 70 and 78
+depend on nothing and may start too; they share lines with other stages' tasks and merge after
+them (the order below). Every later task may be built while its stage B or D neighbour is open
+and merges `origin/main` once that one landed, resolving the places its **At the merge** line
+names.
 
 The critical path is 70 → 72 → 74 → 77 → 79. Task 76 builds against the fake serve, so it does not
 wait for the server's routes (74); task 77 is the first to drive the commands end to end through
@@ -96,27 +110,69 @@ the real server, the real window terminal and the stand-in. Task 75 builds again
 stand-in server, as stage A's page tasks did, so it does not wait for 73 and 74. Task 79 may start
 its reading while 77 is built and merges last.
 
-**Disjoint files in a wave.** Every new module is its own file with its own test file. The files
-more than one task of this stage edits, and who edits them:
+### 1b. Every file of every task
 
-| File | Tasks (wave) |
-|---|---|
-| `src/window/protocol.ts`, `test/window/protocol.test.ts` | 70 (1) only |
-| `src/window/actions.ts`, `test/window/actions.test.ts` | 70 (1: the interim case), 72 (2) |
-| `src/window/control.ts`, `test/window/control.test.ts` | 70 (1) only |
-| `src/window/client.ts` | 76 (2) only |
-| `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` and their tests | 76 (2: `--window`), 77 (4: the configuration) |
-| `src/cli/window-requests.ts` | 76 (2) creates it; 77 (4) only calls it |
-| `test/fixtures/fake-serve/fake-serve.ts` | 76 (2) only |
-| `docs/design-step-2.md`, `docs/design.md` | each task records its decisions of 1a in the sections named there, disjoint within a wave; a conflict is rebased keeping both edits |
-| `docs/install.md`, `docs/manual-checks.md`, `README.md` | 79 (5) only |
+Every new module is its own file with its own test file. Each task's own **Files** list says the
+same as its row here.
 
-**Against stages B and D.** Each task that edits a shared file says, in its **If D was merged
-first** line, what a rebase brings. Stage B's plan was not written when this one was; its tasks
-are expected in `protocol.ts` (attention, `notify`), `src/store/` (migration 2, `attention_seq`),
-`tick.ts`, `src/window/view/`, `web/app.js` and `web/list.js`. Stage C changes nothing in
-`tick.ts`, `src/window/view/build.ts`, `sections.ts`, `web/list.js`, `web/keys.js`, `web/help.js`
-or `web/cards.js`.
+| # | Creates | Changes |
+|---|---|---|
+| 70 | — | `src/window/protocol.ts`, `src/window/control.ts`, `src/window/actions.ts`, `src/store/types.ts`; `test/window/protocol.test.ts`, `test/window/control.test.ts`, `test/window/actions.test.ts`; `docs/design-step-2.md` (8.2.3, 8.3) |
+| 71 | — | `src/sessions/restore.ts`, `src/cli/commands/restore.ts`; `test/sessions/restore.test.ts`, `test/cli/commands/restore.test.ts`; `docs/design-step-2.md` (4.4, 11.1, 11.3) |
+| 78 | `src/window/in-window.ts`, `test/window/in-window.test.ts` | `src/window/mapping.ts`, `src/cli/output.ts`, `src/cli/commands/show.ts`; `test/cli/output.test.ts`, `test/cli/commands/show.test.ts`; `docs/design-step-2.md` (11.4) |
+| 80 | — | `src/sessions/resume.ts`, `src/window/starts.ts`; `test/sessions/resume.test.ts`, `test/window/starts.test.ts`; `docs/design.md` (7.6), `docs/design-step-2.md` (4.4, 7.3, 7.8) |
+| 72 | `src/window/launches.ts`, `test/window/launches.test.ts` | `src/window/actions.ts`; `test/window/actions.test.ts` |
+| 73 | `src/window/restorer.ts`, `src/window/view/banner.ts`, `test/window/restorer.test.ts`, `test/window/view/banner.test.ts` | `test/window/view/build.test.ts`; `docs/design-step-2.md` (10.2, 11.3, 12.7) |
+| 75 | `web/banner.js`, `web/banner-text.js`, `web/banner.css`, `test/web/banner.test.ts`, `test-page/banner.test.ts` | `web/app.js`, `web/index.html`; `test-page/helpers/shell.ts`; `docs/design-step-2.md` (12.7) |
+| 81 | `src/window/page-mark.ts`, `test/window/page-mark.test.ts` | `src/cli/commands/window.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/window.test.ts`; `docs/design-step-2.md` (5.1, 10.2) |
+| 74 | `test/helpers/window-restore.ts`, `test/window/server-launch.test.ts`, `test/window/server-restore.test.ts` | `src/window/server.ts` |
+| 76 | `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`, `test/cli/window-requests.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`; `docs/design-step-2.md` (11.4), `docs/design.md` (7.5) |
+| 77 | `test/cli/window-e2e.test.ts`, `test/cli/commands/restore-window.test.ts` | `src/platform/config.ts`, `src/cli/launching.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `src/cli/commands/restore.ts`, `src/cli/commands/doctor.ts`, `src/cli/tui/run.ts`; `test/platform/config.test.ts`, `test/cli/commands/doctor.test.ts`, `test/cli/tui/run.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`; `docs/design-step-2.md` (11.4, 16.4) |
+| 79 | — | `docs/install.md`, `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (18, 19, and any decision of 1a still missing) |
+
+Files more than one stage C task changes, never two of one wave: `src/window/actions.ts` and its
+test (70, 72), `src/cli/commands/window.ts` and `test/fixtures/fake-serve/fake-serve.ts` (81, 76),
+`src/cli/commands/resume.ts`, `new.ts` and their tests (76, 77). `docs/design-step-2.md`: each task
+writes only the sections its row names; 70 and 71 write different sections in wave 1, 73, 75 and
+81 in wave 2 (73 and 75 both write 12.7: 73 the rule's paragraph, 75 the page's; the second to
+merge keeps both).
+
+**The order across stages** (ruled where it says so; "proposed" where no ruling names the file) for the files that tasks of several stages change at the same
+lines. A later task is built in parallel and merges `origin/main` once the earlier one landed,
+resolving the places named:
+
+| Files | Order | What the stage C task resolves |
+|---|---|---|
+| `src/store/types.ts`, `KvKey` after `'window_launching'` | B 50 → C 70 | 70 inserts its two keys after `attention_seq` (S2 10.2's order) |
+| `src/window/protocol.ts`, `test/window/protocol.test.ts` | D 34 → B 51 → C 70 (proposed) | 70: its kinds beside D's in `ActMessage` and `ACTS`; `restore-progress` in `NoticeMessage.kind`; `ListMessage.banner` keeps its line (B puts `needYou` after `counts`); its cases at the end |
+| `src/window/actions.ts`, `test/window/actions.test.ts` | D 34 → C 70; D 36 → C 72 (proposed) | 70: its interim case beside D 34's; 72: only the `resume` and `new` cases, the helpers above `run()` and its two cases, beside D 36's cases and deps |
+| `test/window/view/build.test.ts` (the case that pins the view's files and imports, lines 1111, 1119–1126) | D 34 → B 51 → C 73 | 73 adds `banner.ts` to the file list (`chip.ts` and `attention.ts` kept); `banner.ts` imports types only, so the allowed imports are unchanged |
+| `web/app.js` (the import block; `received()`, `case 'list'` and `case 'notice'`; `render()`), `web/index.html` (the style-sheet links after `cards.css`; the list zone) | D 37 → B 55 → C 75 | 75: its import after B's; `banner.render` in `render()`; the `restore-progress` branch in `case 'notice'`; `banner.css` after `attention.css`; `#banner` before `#list` |
+| `src/window/server.ts` (`createActions`' deps, `listFor`, `afterRefresh`, the orderly stop), `tick.ts` | D 36 → B 54 → C 74 | 74: its two deps beside D's; the banner set on `buildListMessage`'s result after B's attention; `pageMark.update` beside `decidePostponed`; `restorer.stop()` as the stop's FIRST step, before D's fetch wait and B's `seen.stop()`. C changes nothing in `tick.ts` |
+| `src/platform/config.ts`, `test/platform/config.test.ts` | D 35 → C 77 (proposed) | 77: only the `terminal` type, its check and message; cases at the end |
+| `src/cli/commands/show.ts`, `src/cli/output.ts` and their tests | D 35 → C 78 (proposed) | 78: `inWindow` after D's `ticket` parameter; the mark on the holder line; cases at the end |
+| `docs/install.md`, `docs/manual-checks.md`, `README.md` | B 50 ("Updating" only); then D 39 → B 56 → C 79 | 79: its parts after D's and B's; W16 in the stage A checks' numbering |
+
+**What each stage C task does to a test file another stage changes too**, so that B and D can be
+scheduled around it:
+
+| Test file | Task | What it does |
+|---|---|---|
+| `test/window/protocol.test.ts` | 70 | new cases at the end; no fixture changes (`banner: null` still type-checks) |
+| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end; 72: new cases at the end, every existing case unchanged |
+| `test/window/view/build.test.ts` | 73 | `banner.ts` in the pinned file list; nothing else |
+| `test-page/helpers/shell.ts` | 75 | a new function `bannerWorld` at the end; `scriptedList`, the worlds and `MINIMAL_MODULES` unchanged |
+| `test/platform/config.test.ts` | 77 | new cases at the end |
+| `test/cli/output.test.ts`, `test/cli/commands/show.test.ts` | 78 | new cases at the end |
+
+**Not changed by stage C** although its type changes reach them: `test/helpers/pages.ts`
+(`defaultList`'s `banner: null` is still a `BannerPayload | null`), `test-page/cards.test.ts`,
+`test-page/real-modules.test.ts` (it loads the real `banner.js` through `app.js`; with a null
+banner it draws nothing, and its cases' "no problem" still holds), `test/web/pane.test.ts`,
+`test/window/pages-stream.test.ts`, `test-page/list.test.ts` and the shell's pinned modules (the
+shell tests load the real `banner.js`, which draws nothing for the null banner of their lists).
+Stage C changes nothing in `src/window/tick.ts`, `src/window/view/build.ts`, `sections.ts`,
+`src/window/selected.ts`, `web/list.js`, `web/keys.js`, `web/help.js` or `web/cards.js`.
 
 ## 1a. Decisions this plan makes where the design is silent
 
@@ -132,7 +188,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C5 | `POST /restore` answers 200 with JSON lines (2.2 `RestoreStreamLine`): `{ "line": … }` per report line, `{ "line": "waiting for <n> sessions" }` after 10 s without one (`1 session`), and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore is already running, the boot id unreadable, the store busy) is the same stream: its line, then an outcome with code 1. `code`: 5 when the memory check or the server's stop ended the run, else 1 when any selected session failed, was not offered any more or timed out, else 0 (design 7.8's codes). | S2 8.3 and 11.4: a stream of lines, the outcome last, a line at least every 10 s. One reading path for the client. | 70 (8.3) |
 | C6 | One restore runs at a time in the server, whoever asked (a page or a command). Another request meanwhile is refused with `a restore is already running; wait until it has finished`: `act restore` answers it as its result, `POST /restore` as its one line. `act restore` answers at once (`ok`, no lines) once the run has begun; every report line of every run, whoever asked, goes to every page as `notice restore-progress` (its text sanitised), and the run's last line is `restore finished: <n> started, <n> timed out, <n> failed, <n> not started` with the parts that are 0 left out. Heartbeats go to the command line only. | S2 11.3 ("one restore runs at a time"), 12.7 ("the banner reports each line of the run"), 8.2.3's `restore-progress`. A result that waited for the whole run (minutes) would be lost by a page that reconnects meanwhile. | 73 (11.3, 12.7) |
 | C7 | The restore's set is taken on freshly refreshed rows at the moment it starts (`refresh`, then `restorePlan`, 2.3), design 7.8's default set for the banner and `all` as asked over `server.sock`; the selected ids are kept in the set's order, and an id not in the set is reported `failed <short>: no longer offered for restore` before the run. Each terminal's first size is the area the page that had focus last reported, else 120 × 40, read when that terminal is opened (S2 8.2.6). The server's configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`) is the one it read at its start. | S2 11.4 and 8.2.6 say it; the configuration is the server's like every launch it makes (S2 5.2). | 73 (11.4) |
-| C8 | `runRestore` gains three optional hooks and the outcome of each report line (2.3, `RestoreHooks`): `refuse` before the guard (the window's "already open"), `gone` at every look of the wait — a session whose window terminals have all ended, were lost, were not started or were closed before restore saw its start is reported `failed <short>: <reason>` at once and restore's own lock (its last renewed value) is given back —, and `signal`, with which the server's stop ends the run at its next step (`stopped: the window's server is stopping`, the rest `not started`). The command passes none and nothing changes for it. | S2 11.1's rule must hold for restore; a window terminal that ended is known to the server, where a tab is not, so waiting the full `restoreStartTimeoutSeconds` and keeping a renewed lock nobody gives back (S2 7.8's known limit) would only make the user wait; the server's stop must not leave a restore writing into a closed store. Question 1. | 71 (4.4, 7.8, 11.1, 11.3) |
+| C8 | `runRestore` gains three optional hooks and the outcome of each report line (2.3, `RestoreHooks`): `refuse` before the guard (the window's "already open"), `gone` at every look of the wait — a session whose window terminals have all ended, were lost, were not started or were closed before restore saw its start is reported `failed <short>: <reason>` at once and restore's own lock (its last renewed value) is given back —, and `signal`, with which the server's stop ends the run at its next step (`stopped: the window's server is stopping`, the rest `not started`). The command passes none and nothing changes for it. | S2 11.1's rule must hold for restore; a window terminal that ended is known to the server, where a tab is not, so waiting the full `restoreStartTimeoutSeconds` would only make the user wait; the server's stop must not leave a restore writing into a closed store. Question 1. | 71 (4.4, 11.1, 11.3) |
 | C9 | The banner is the view model's (`bannerPayload`, 2.3): null when design 7.8's default set is empty and no restore runs; otherwise its payload with `shown` false once the user said "Not now" for its earlier boot (the page then shows nothing; stage E's switcher still finds the offer) and `running` while any restore runs. `dismiss-restore` names the earlier boot whose sessions the banner offers (`banner.bootId`) and stores it in `kv` `window_restore_dismissed` only when it is the banner's current one (else `this offer to restore is no longer shown`, nothing stored). The server computes it from the tick's rows, again only when the rows array, the dismissal or `running` changed (one read of the events each time). | S2 12.7 and 10.2: "the user has not dismissed it for that boot", and the switcher's offer after "Not now". The page decides no rule (S2 4.3). | 70 (8.2.3), 73 (12.7, 10.2) |
 | C10 | The page keeps the report lines it receives (`restore-progress`) under the banner, as text, at most the last 200; a line that comes after a run's last line (`restore finished: …` or `stopped: …`) starts a new report. After the last line the report has a × that removes it; the banner itself goes when the view model says so. A page that connects during a run sees `running` and the lines from then on (a named limit). The banner's controls take no keyboard on a mouse click (stage A's rule for the page's chrome); nothing in stage C adds a key. | S2 12.7 shows the lines; nothing in 12.9 is a key for restore (the switcher is stage E). | 75 (12.7) |
 | C11 | `--window` and `"terminal": "window"` find the server as `skydeck window` does (`findServer`) and never start, restart or signal one. A server of this checkout is used whatever its build (the window's own Resume runs on that build too); none, one that does not answer, one that is starting past the ping wait, and one of another checkout are refused with the lines of 2.5, exit 1; one that answers the route with 404 (`route` kind: a build before stage C) with `the window's server is older than this command and cannot start sessions for it; run skydeck window to restart it, or use --here`. No answer within 30 s (`answerMs`): 11.4's line, exit 1, no command printed. None of these is refused under `CLAUDECODE` (no server is started). | S2 11.4 leaves the other states open; the server's environment becomes every session's, so only `skydeck window` may start or restart one (S2 5.2). Question 3. | 76 (11.4) |
@@ -143,6 +199,9 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C16 | `src/cli/` may import `src/window/` also for `resume`, `new`, `restore`, `show` and the interactive list (stage A's 2.1 named `window`, `serve`, `doctor`, `uninstall`). | They talk to the server or read its files. | — |
 | C17 | `SKYDECK_TEST_WINDOW_TIMES` (A31) gains `answerMs` (30 s: the wait for an answer to `POST /resume` and `/new`, and the silence that ends a `POST /restore`), honoured only with `SKYDECK_TEST_NO_WINDOWS=1`. The restorer's heartbeat interval is an option of `createRestorer` (10 s by default), set only by tests. | A31's rule: no test waits 30 s. | — |
 | C18 | The times the banner shows are the page's (`web/banner-text.js`): `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02`, `on 12 Nov 2025 at 18:02` (a year other than this one), in the page's time zone, 24-hour. | S2 12.7's "yesterday at 18:02"; the server sends nanoseconds (S2 8.2.3). | — |
+| C19 | **The resume lock's take mark** (S2 7.3's and 7.8's named limit, settled). A renewal writes the lock's time with a mark in its last six digits, the sub-millisecond part that skydeck's clock (milliseconds) leaves 0: the mark of a value whose last six digits are 0 — every lock `acquireLock` writes, as today — is `1 + (its milliseconds mod 999,999)`; any other value's mark is those six digits; `renewLock` writes the time of now, to the millisecond, plus the mark of the value it renews. Two values are **of one take** when both record an event id, the same one, and the same mark (`sameTake`); a value without an event id (an older skydeck's) is of one take only with itself. The window's found-keeper decision accepts a lock of the hello's take (a renewal), and the settlement of an ended terminal gives back a lock of its take (`releaseLockOfTake`); a take-over (a new `acquireLock`, a new millisecond) is another take. `acquireLock`, `releaseLock` and every value stage A writes or compares are unchanged. | A renewal and a take-over of a stale lock with no new event looked alike; the mark tells them apart. Old code reads a renewed value as a time less than 1 ms later, so a server of an older build that still runs during an update neither sweeps it nor takes it over (a third field would make it "not a lock skydeck writes": swept as stale within 2 s). What is left: a take-over in a millisecond congruent to the first take's modulo 999,999 looks like a renewal (about one in a million); the found keeper is then past its own deadline (55 s after its take, 60 s or more before any take-over) and refused by it, and only a settlement could give back the other take's lock. | 80 (design 7.6; S2 4.4, 7.3, 7.8) |
+| C20 | **The second window after a cold start** (stage A's follow-up "a second window opens when `skydeck window` starts a server while an old window is still open", settled). The server keeps `kv` `window_pages_open` while pages are connected: it writes it at the first refresh that works with a page connected and removes it at the first with none (`createPageMark`, once per change), and leaves it as it is when it stops or dies. `skydeck window` that finds no server and starts one reads it first; when it is there, the command waits as after a restart (S2 5.1: while the new server says `starting`, then up to 7 s for a page) before it asks for a token — unless `--new-secret`, `--new-window` or `--print-url`. A page that comes back is "a window is already open". | It is on W16's path: after `wsl --shutdown` the old window reconnects a few seconds after `skydeck window` started a server, so a second window opened every time. The page tries every 5 s at most (S2 6.3), within the 7 s. The cost of a mark left by a window closed while no server ran is one wait of 7 s. The first update from a stage A server, which writes no mark, may still open a second window once. | 81 (5.1, 10.2) |
+| C21 | The banner lies in the list zone, above `#list`, in the list's width; it takes height from the list (the list scrolls under it), never width, so the right side, the header's one height (stage D) and every terminal's area stay as they are: its coming and going sends no `resize`. A restore selects nothing and moves no keyboard, in any page, also while a dialog of stage D is shown: its result carries no `sessionId` (stage A's `act` selects only a resume's or a new session's). | S2 12.7: "at the top of the list"; the size a restored terminal starts with is the last focused page's area (S2 8.2.6), which the banner must not change. | 75 (12.7) |
 
 ## 2. Contracts
 
@@ -199,6 +258,7 @@ export interface BannerPayload {
 }
 // ListMessage.banner: BannerPayload | null            (stage A: null)
 // NoticeMessage.kind gains 'restore-progress'          (term null; text one report line, sanitised)
+// src/store/types.ts: KvKey gains 'window_restore_dismissed' (C9) and 'window_pages_open' (C20)
 
 // server.sock (S2 8.3), stage C
 export interface NewRequest { dir: string; label: string | null; group: string | null; flags: string[] }
@@ -367,6 +427,33 @@ export function holderPlace(holder: Holder, programs: ReadonlyMap<number, { proc
 export function holdersInWindow(deck: Deck, holders: readonly Holder[]): ReadonlySet<number>;
 ```
 
+```ts
+// src/sessions/resume.ts — task 80 (C19)
+/** The take a lock value belongs to: its last six digits when they are not 0, else 1 + (its
+ *  milliseconds mod 999,999); null for a value that is not a lock skydeck writes. */
+export function lockMark(value: string): number | null;
+/** Both values record the same event id and the same mark; a value without an event id is of
+ *  one take only with itself (exact equality). */
+export function sameTake(a: string, b: string): boolean;
+/** In one store transaction: removes the session's lock when it is of the take of `taken`
+ *  (sameTake); whether it did. For a holder of an older value of that take (a keeper's spec). */
+export function releaseLockOfTake(deck: Deck, sessionId: string, taken: string): boolean;
+// renewLock(deck, sessionId, ours): unchanged signature; the value it writes keeps ours' mark.
+// src/window/starts.ts — task 80: decideFoundKeeper compares the stored lock with the hello's by
+// sameTake ("its resume lock was taken over" otherwise); settleEndedTerminal releases with
+// releaseLockOfTake.
+
+// src/window/page-mark.ts — task 81 (C20)
+export interface PageMark {
+  /** Writes kv window_pages_open ('1') when `pages` > 0, removes it at 0 — only when that differs
+   *  from what it last wrote; a write that fails is logged by kind and tried at the next call. */
+  update(pages: number): void;
+}
+export function createPageMark(deps: { store: Store; log: (line: string) => void }): PageMark;
+/** Whether the last server had pages connected when it last looked (the key is there). */
+export function pagesWereOpen(store: Store): boolean;
+```
+
 ### 2.4 The command line (tasks 76, 77)
 
 ```ts
@@ -462,7 +549,7 @@ talks to the real `controlHandler` from the start (the fake serve uses it).
   `Transfer-Encoding: chunked` and one JSON line per `write`, ended when the promise settles);
   `src/window/actions.ts` (the interim case: `restore` and `dismiss-restore` answer `skydeck cannot
   do that action`, nothing done, until task 72); `src/store/types.ts` (`KvKey` gains
-  `'window_restore_dismissed'`)
+  `'window_restore_dismissed'` and `'window_pages_open'`)
 - Test: `test/window/protocol.test.ts`, `test/window/control.test.ts`,
   `test/window/actions.test.ts` (one case)
 
@@ -494,9 +581,10 @@ stage A's routes.
 **Done when:** every stage C message parses as 2.2 says; `controlHandler` serves the three routes
 for any `launch` it is given; `npm run check` passes.
 
-**If D was merged first:** `ActMessage` and `ACTS` hold D's kinds (task 34) and `actions.ts` its
-interim case for them; C's kinds and case go beside them. `RowPayload.chip`, `PrPayload` and
-`SelectedPayload` are D's shapes; C touches none of them.
+**At the merge** (after D 34, B 50 and B 51): `ActMessage` and `ACTS` hold D's kinds and
+`actions.ts` D's interim case for them — C's kinds and case go beside them; `RowPayload.chip`,
+`PrPayload` and `SelectedPayload` are D's shapes and `needYou`, `AttentionPayload` and `NotifyMessage`
+B's — C touches none of them; `KvKey` has B's `attention_seq` — C's two keys go after it.
 
 **Not in it:** acting on any of it (72–74), the client (76).
 
@@ -514,8 +602,7 @@ change for the command.
 - Modify: `src/sessions/restore.ts`; `src/cli/commands/restore.ts` (its private `plan()` replaced
   by `restorePlan(deck, all).entries`; nothing else changes)
 - Test: `test/sessions/restore.test.ts`, `test/cli/commands/restore.test.ts`; `docs/design-step-2.md`
-  (C8: 4.4's row for `src/sessions/restore.ts`, 7.8's known limit narrowed to an exit after the
-  restore stopped waiting, 11.1, 11.3)
+  (C8: 4.4's row for `src/sessions/restore.ts`, 11.1, 11.3)
 
 **Behaviour.** `latestEarlierBoot` is the part of `planRestore` that chooses the boot, taken out;
 `planRestore` calls it and gives the same entries as before. `restorePlan` is the command's
@@ -547,6 +634,8 @@ wait. `report`'s second argument for every line that ends a session's part: `sta
 
 **Done when:** the command and the server can plan a restore with one function, `runRestore` takes
 the three hooks, and the command behaves as before; `npm run check` passes.
+
+**At the merge:** nothing to resolve: no file another stage changes.
 
 **Not in it:** the server's use of them (73, 74).
 
@@ -587,10 +676,64 @@ the skydeck window)]`.
 **Done when:** `show` marks a holder in the window and nothing else of `show` changes; `npm run
 check` passes.
 
-**If D was merged first:** `formatShow` has D's parameter `ticket` (task 35) and prints `ticket:`
-after `group:`; `inWindow` goes after `ticket`. `show.ts` passes D's ticket address first.
+**At the merge** (after D 35): `formatShow` has D's parameter `ticket` and prints `ticket:` after
+`group:`; `inWindow` goes after `ticket`, and `show.ts` passes D's ticket address first.
 
 **Not in it:** the mark in `ls` or the interactive list (S2 11.4 names `show` only).
+
+---
+
+### Task 80: Step 1 change — the resume lock's take mark
+
+**Depends on:** 0 · **Wave:** 1 · **Design:** design 7.6 (the lock), S2 7.3 (a found keeper), 7.8 (an exit before the start), 11.3 · **Contracts:** 2.3 (`lockMark`, `sameTake`, `releaseLockOfTake`) · **Decisions:** C19 · **Shared files:** —
+
+**Goal.** Settle S2 7.3's and 7.8's named limit for restore in the window before anything renews a
+window terminal's lock: a renewed lock is still the take a keeper's spec holds, a taken-over one is
+not. With it, a keeper of a restore whose hello comes late (or after a reconnect) is started, and
+an exit before the start gives its lock back, whatever restore renewed meanwhile.
+
+**Files**
+- Modify: `src/sessions/resume.ts` (`lockMark`, `sameTake`, `releaseLockOfTake`; `renewLock` writes
+  the mark; `parseLock`'s pattern, `acquireLock`, `releaseLock`, `sweepLocks` and `freshAge`
+  unchanged); `src/window/starts.ts` (`resumeRefusal` by `sameTake`, its words `its resume lock
+  was taken over`; `settleEndedTerminal` by `releaseLockOfTake`; the comment "Restore, the one
+  renewer, does not reach a window terminal in stage A" goes)
+- Test: `test/sessions/resume.test.ts`, `test/window/starts.test.ts`; `docs/design.md` (7.6: the
+  mark and what an older skydeck does with it), `docs/design-step-2.md` (4.4's row for
+  `src/sessions/`; 7.3's and 7.8's known limits replaced by the rule)
+
+**Behaviour.** As C19. The value's form stays `<time>:<event id>`, the one stage A's pattern
+reads; only a renewal's time gets non-zero last six digits. `lockTakenNs` of a renewed value is
+its time with the mark (less than 1 ms late), which `startDeadline`, `freshAge` and the age in a
+refusal take as they are.
+
+**Tests** (platform: `testPlatform` through `testDeck`)
+- `lockMark`: a value `acquireLock` wrote at T0 → `1 + (T0 in ms mod 999,999)`; its renewal at T0 +
+  50 s → the same mark, the time T0 + 50 s plus the mark; a renewal of that renewal → the same;
+  a value that is not a lock → null.
+- `sameTake`: a value and its renewals → true; a take-over at T0 + 61 s with no new event (the
+  case of stage A's "acquireLock replaces a lock older than 60 s") → false; two values of
+  different event ids → false; an older skydeck's value without an event id → true with itself
+  only; over every take-over millisecond from T0 + 60 s to T0 + 61 s → false.
+- An older skydeck reads it: stage A's pattern (copied into the test) parses a renewed value, and
+  its time is within 1 ms of the renewal's clock; `isLockHeld` and `sweepLocks` treat it as fresh
+  until 60 s after the renewal.
+- `releaseLockOfTake`: removes the lock of its take after two renewals, leaves one taken over and
+  one of another event id, in one transaction.
+- `renewLock`'s two cases that pin the renewed value (lines 805–823) now expect the mark; every
+  other case of the file passes unchanged.
+- `decideFoundKeeper`: a resume whose stored lock is a renewal of the hello's → started; taken
+  over → refused with `its resume lock was taken over`. `settleEndedTerminal`: an exit before the
+  start releases a renewed lock of its take, not a taken-over one. Every other case of
+  `starts.test.ts` passes unchanged.
+
+**Done when:** a renewal keeps the take and a take-over changes it, for the window's found keepers
+and settlements, and every value stage A writes reads as before; `npm run check` passes.
+
+**At the merge:** nothing to resolve: no file another stage changes.
+
+**Not in it:** restore through the window (71, 73, 74), which is the first renewer of a window
+terminal's lock.
 
 ---
 
@@ -639,9 +782,9 @@ actions tests)
 **Done when:** the window starts sessions through `launches.ts` only, stage A's behaviour is
 unchanged, and the two new kinds reach their deps; `npm run check` passes.
 
-**If D was merged first:** `actions.ts` has D's cases (task 36) and `ActionDeps.changed`,
-`.fetchPrs`, `.refreshPrs`; this task changes only the `resume` and `new` cases, the helpers above
-`run()` and its own two cases, and adds two optional deps beside D's.
+**At the merge** (after D 36): `actions.ts` has D's cases and `ActionDeps.changed`, `.fetchPrs`,
+`.refreshPrs`; this task changes only the `resume` and `new` cases, the helpers above `run()` and
+its own two cases, and adds its two optional deps beside D's.
 
 **Not in it:** the restorer (73), wiring anything into the server (74).
 
@@ -649,7 +792,7 @@ unchanged, and the two new kinds reach their deps; `npm run check` passes.
 
 ### Task 73: The restorer and the banner's view model
 
-**Depends on:** 70, 71 · **Wave:** 2 · **Design:** S2 11.3 (restore), 11.4 (`POST /restore`), 12.7, 10.1 ("a running restore"), 10.2 (`window_restore_dismissed`), design 7.8 · **Contracts:** 2.3 (`bannerPayload`, `createRestorer`) · **Decisions:** C5, C6, C7, C9, C17 · **Shared files:** — (`src/window/view/banner.ts` is a new file)
+**Depends on:** 70, 71 · **Wave:** 2 · **Design:** S2 11.3 (restore), 11.4 (`POST /restore`), 12.7, 10.1 ("a running restore"), 10.2 (`window_restore_dismissed`), design 7.8 · **Contracts:** 2.3 (`bannerPayload`, `createRestorer`) · **Decisions:** C5, C6, C7, C9, C17 · **Shared files:** `test/window/view/build.test.ts` (one line)
 
 **Goal.** The one coordinator of restores in the server, and the rule that decides the banner,
 both tested without a server: the window terminal, the refusal and `gone` are injected.
@@ -657,7 +800,9 @@ both tested without a server: the window terminal, the refusal and `gone` are in
 **Files**
 - Create: `src/window/restorer.ts`, `src/window/view/banner.ts`, `test/window/restorer.test.ts`,
   `test/window/view/banner.test.ts`
-- Modify: `docs/design-step-2.md` (C6: 11.3 and 12.7; C9: 12.7 and 10.2)
+- Modify: `test/window/view/build.test.ts` (the case that pins the view's files: `banner.ts` in its
+  list; `banner.ts` imports types only, so the allowed imports stay); `docs/design-step-2.md` (C6:
+  11.3 and 12.7; C9: 12.7 and 10.2's `kv` table)
 
 **Behaviour.** `start`: refused while a run is going or after `stop()`; otherwise, synchronously,
 `refresh(deck)` and `restorePlan(deck, request.all)` (a SkydeckError or a busy store → `ok: false`
@@ -702,13 +847,16 @@ terminal that opens what the test says, a `gone` the test scripts)
 **Done when:** a restore can be run, refused, watched, stopped and its banner decided by the
 restorer alone; `npm run check` passes.
 
+**At the merge** (after D 34 and B 51): the pinned file list has D's `chip.ts` and B's
+`attention.ts`; `banner.ts` goes beside them.
+
 **Not in it:** the server (74), the page (75).
 
 ---
 
 ### Task 75: The banner on the page
 
-**Depends on:** 70 · **Wave:** 2 · **Design:** S2 12.7, 12.9 (focus), 15.4 (text, not markup), 6.3 (the WSL-restarted notice it appears under) · **Contracts:** 2.2 (`BannerPayload`, `restore-progress`) · **Decisions:** C10, C18 · **Shared files:** `web/app.js`, `web/index.html`, `test-page/helpers/shell.ts`
+**Depends on:** 70 · **Wave:** 2 · **Design:** S2 12.7, 12.9 (focus), 15.4 (text, not markup), 6.3 (the WSL-restarted notice it appears under) · **Contracts:** 2.2 (`BannerPayload`, `restore-progress`) · **Decisions:** C10, C18, C21 · **Shared files:** `web/app.js`, `web/index.html`, `test-page/helpers/shell.ts`
 
 **Goal.** At the top of the list, the banner the view model sends: the sessions with their
 checkboxes, "Restore <n>", "Not now", the report of the run.
@@ -750,87 +898,71 @@ terminal; Tab and Space work on them as the browser's own.
   started` gives the ×, the × removes the report; a refusal `a restore is already running; …`
   shown; "a hostile title and report line are text": a title `<img src=x onerror=…>` and a line
   holding markup create no element (`querySelector('img')` null).
+- C21: with a terminal shown, a banner that comes and goes (lists with and without it) sends no
+  `resize` and leaves the terminal's box and the header's height as they were; the banner never
+  widens the list zone (a title of 1,024 bytes wraps inside it); a `restore-progress` notice and
+  the `act restore` result move neither the selection nor the keyboard. Once stage D's task 37 is
+  in (this task merges after it): with D's dialog shown, the banner takes no click and a restore's
+  lines move no keyboard.
 - Every existing page case passes (the banner hidden in their lists).
 
 **Done when:** the page shows and acts on the banner the server sends, and shows the run's lines;
 `npm run check` and `npm run test:page` pass.
 
-**If D was merged first:** `index.html` has D's `#editor`, `#toast` and `edit.css` (task 37) and
-`app.js` D's dialog with its modal rule; the banner's clicks are covered by D's scrim while a
-dialog is shown, which needs nothing here. `scriptedList`'s rows have D's chip shape (task 34):
-`bannerWorld` builds its lists with that helper.
+**At the merge** (after D 37 and B 55): `index.html` has D's `#editor`, `#toast` and `edit.css`
+and B's `attention.css` — `banner.css` goes after them, `#banner` before `#list`; `app.js` has D's
+dialog with its modal rule and B's window title in `case 'list'` — C's import after B's,
+`banner.render` in `render()`, the `restore-progress` branch in `case 'notice'`; while a dialog is
+shown D's scrim takes the banner's clicks too, which needs nothing here. `scriptedList`'s rows have
+D's chip shape (task 34): `bannerWorld` builds its lists with that helper.
 
 **Not in it:** the server's side (73, 74); a key for restore (stage E's switcher).
 
 ---
 
-### Task 76: The command line's side — the client, `--window` for `resume` and `new`
+### Task 81: The second window after a cold start — the pages mark
 
-**Depends on:** 70 · **Wave:** 2 · **Design:** S2 11.4, 8.3, 5.1 (finding the server; step 2's window), design 7.5 (the commands' options) · **Contracts:** 2.4 (client, `window-open.ts`, `window-requests.ts`), 2.5 · **Decisions:** C11, C12, C16, C17 · **Shared files:** —
+**Depends on:** 70 · **Wave:** 2 · **Design:** S2 5.1 (step 2 of `skydeck window`, the wait after a restart), 6.3 (the page's retries), 10.2 · **Contracts:** 2.3 (`createPageMark`, `pagesWereOpen`) · **Decisions:** C20 · **Shared files:** —
 
-**Goal.** Everything the commands need to send to the server, built and tested against the fake
-serve, and `--window` on `resume` and `new`.
+**Goal.** `skydeck window` after a WSL restart, a server's crash or `--stop`, while an old window is
+still open, waits for that window to come back instead of opening a second one — W16's case.
 
 **Files**
-- Create: `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`,
-  `test/cli/window-requests.test.ts`
-- Modify: `src/window/client.ts` (the three methods and their readers: an answer of another shape
-  cannot be read); `src/cli/commands/window.ts` (imports `windowTimes` and `launchWindow` instead
-  of its private `timesOf` and `launch`; nothing else changes); `src/cli/commands/resume.ts`,
-  `src/cli/commands/new.ts` (`--window`; `whereFrom` refuses two of `--here`, `--tab`,
-  `--window`; with `--window`, `resume` resolves `<ref>` as today and calls `resumeInWindow` with
-  the id — no `prepareResumeById` here —, `new` calls `newInWindow` with `platform.cwd`, the label,
-  the group and `parsed.rest`); `test/fixtures/fake-serve/fake-serve.ts` (C3's routes: without
-  `FAKE_SERVE_LAUNCH` no `launch`, as today; `FAKE_SERVE_LAUNCH=answer:<LaunchAnswer JSON>`
-  answers it to `/resume` and `/new`; `silent` never answers them; `FAKE_SERVE_RESTORE=<JSON
-  array of RestoreStreamLine>` writes them 100 ms apart, `silent-after:<n>` writes `n` lines and
-  then nothing; `FAKE_SERVE_REQUESTS=<path>` appends each launch request's JSON; `FAKE_SERVE_STATE`
-  `starting` or `stopping` for `launchState`)
-- Test: `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`,
-  `test/cli/commands/window.test.ts` (unchanged: the move's check); `docs/design-step-2.md` (C11,
-  C12: 11.4), `docs/design.md` (7.5: the options)
+- Create: `src/window/page-mark.ts`, `test/window/page-mark.test.ts`
+- Modify: `src/cli/commands/window.ts` (`serverToUse`: when it found no server and starts one, it
+  reads `pagesWereOpen` before the start; `useServer`'s `comeBack` is then true, with stage A's
+  conditions: not `--new-secret`, and the wait is skipped for `--new-window` and `--print-url`);
+  `test/fixtures/fake-serve/fake-serve.ts` (`FAKE_SERVE_PAGES_AFTER=<ms>:<n>`: `/status` reports
+  `n` pages once `ms` have passed since it was ready); `test/cli/commands/window.test.ts` (cases
+  at the end); `docs/design-step-2.md` (5.1's paragraph on the wait after a restart; 10.2's `kv`
+  table)
 
-**Behaviour.** As 2.4 and 2.5. `windowServer`: `findServer(deck, appRoot, computeBuild(...))` —
-`ours` and `other-build` are used, the rest refused. `resumeInWindow` / `newInWindow`: the
-request; every answer line on stderr through the sanitiser; then `client.status()`, and with 0
-pages `launchWindow(deck, client, ping, false, times)` — a SkydeckError there is C12's line. The
-usage texts name `--window` (`Without --here, --tab or --window, the configured "terminal"
-decides.`).
+**Behaviour.** As C20. The server's side (calling `update` after each refresh that worked) is
+wired by task 74; this task builds the module and the command's side.
 
-**Tests** (platform: `realTestPlatform`; `windowMachine` and `startFakeServe` of
-`test/helpers/window-machine.ts`)
-- Client: each method's request as 2.2 says (the fake's request file); `503 starting` twice, then
-  an answer → the answer; `stopping` → its line; `silent` with `answerMs` 300 → the no-answer
-  line; a 404 route → `unknown-route`; an answer of another shape → cannot be read; `restore`'s
-  lines to `onLine` in order and the outcome; `silent-after:1` → the stopped-answering line after
-  `answerMs`; a stream ended without an outcome → the same line.
-- `resume --window` against the fake answering `{ code: 0, lines: ['skydeck: original flags
-  unknown; resuming with defaults'], sessionId }` → that line on stderr, exit 0, the request's
-  `sessionId` the resolved id, no handoff file, no lock in the store (the command took none); with
-  pages 0 → the Edge stub ran once with a token, the token given up; with pages 1 → not run;
-  Edge missing → C12's line, exit 0; an answer `{ code: 4, lines: [...] }` → exit 4.
-- Each row of 2.5's table: no server, one that does not answer (`FAKE_SERVE_MODE=silent`), another
-  checkout, an older server (no `FAKE_SERVE_LAUNCH`), `stopping` → its line, exit 1, no request
-  sent, no Edge.
-- "the answer's lines are printed sanitised": a line with an escape sequence and a CR → printed
-  without them.
-- `new --window --label x --group y -- --model opus` → the request `{ dir: <cwd>, label: 'x',
-  group: 'y', flags: ['--model', 'opus'] }`; without `--label` → `label: null`.
-- `--here --window`, `--tab --window` → usage error, exit 2, nothing sent. Under `CLAUDECODE=1` →
-  sent as usual.
-- `skydeck window`'s every existing case passes unchanged.
+**Tests** (platform: `testPlatform` for `page-mark.test.ts`; `realTestPlatform` with
+`windowMachine` and the fake serve for the command, as stage A's restart-wait cases)
+- `update`: 0 → nothing written; 1 → the key; 2 → no second write; 0 → removed; a store that is
+  busy at the write → one log line by kind, written at the next call; `pagesWereOpen` follows.
+- `skydeck window` with the key in the store and no server: it starts one, waits while it says
+  `starting`, then a page in 3 s (`FAKE_SERVE_PAGES_AFTER=3000:1`) → `skydeck window: a window is
+  already open`, the Edge stub never run, no token minted; no page in `reconnectMs` → Edge started
+  once, as without the key; without the key → no wait (Edge at once); with the key and
+  `--new-window`, `--print-url` or `--new-secret` → no wait. Every existing case passes unchanged.
 
-**Done when:** `resume --window` and `new --window` send to the server and say what C11 and C12
-say in every case of 2.5, and `skydeck window` behaves as before; `npm run check` passes.
+**Done when:** a cold start after a window was connected waits for it as a restart does; `npm run
+check` passes.
 
-**Not in it:** `"terminal": "window"`, `restore` and `R` (77); the end-to-end cases through the
-real server (77).
+**At the merge:** nothing to resolve: no file another stage changes.
+
+**Not in it:** writing the mark in the server (74); a mark left by a window closed while no server
+ran costs one wait of 7 s (C20), which is accepted.
 
 ---
 
 ### Task 74: The server — launches, restore and the routes wired
 
-**Depends on:** 72, 73 · **Wave:** 3 · **Design:** S2 8.3, 11.3, 11.4, 12.7, 8.2.6 (first size), 5.5 (the stop), 14 · **Contracts:** 2.3, 2.5 · **Decisions:** C2, C4, C6, C7, C9 · **Shared files:** `src/window/server.ts`
+**Depends on:** 72, 73, 81 · **Wave:** 3 · **Design:** S2 8.3, 11.3, 11.4, 12.7, 8.2.6 (first size), 5.5 (the stop), 7.3, 7.8, 14 · **Contracts:** 2.3, 2.5 · **Decisions:** C2, C4, C6, C7, C9, C19, C20 · **Shared files:** `src/window/server.ts`
 
 **Goal.** The running server does stage C: the banner in every list, restore from a page or a
 command, `POST /resume` and `/new`; and its stop ends a restore before it closes anything.
@@ -845,8 +977,9 @@ command, `POST /resume` and `/new`; and its stop ends a restore before it closes
   `newSession` through `launches` with the same size, mapped to C2's `LaunchAnswer`, a busy store
   and an unexpected error as C2 says; `restore` → `restorer.start(request, write)` and its `done`,
   a refusal as one line and an outcome with code 1) and `launchState` (`starting` until `ready`,
-  `stopping` from the first line of the orderly stop); the orderly stop's first step is
-  `await restorer.stop()`, before the tick's stop and `control.close()`
+  `stopping` from the first line of the orderly stop); `createPageMark` over the server's store,
+  its `update(pages.count())` called in `afterRefresh` beside `decidePostponed` (C20); the orderly
+  stop's first step is `await restorer.stop()`, before the tick's stop and `control.close()`
 - Create: `test/helpers/window-restore.ts` (sessions of an earlier boot in a server sandbox: for
   each, a resumable transcript (`resumable`), and through `test/helpers/spool.ts` a `start` event
   in an invented boot id with a pid and process start that are not alive and no end, so that the
@@ -891,16 +1024,94 @@ two launch routes get `skydeck: ` in front, the launch lines are passed as they 
   nothing, `stop()` resolves within 10 s, the `POST /restore` stream got `stopped: the window's
   server is stopping` and code 5 before it closed, the started stand-ins still run. (The 503
   `starting` of C4 is held by task 70's control test; the server's `ready` flag is stage A's.)
+- The take mark end to end (C19, task 80): a restored session whose program ends AFTER the
+  restore stopped waiting for it (`restoreStartTimeoutSeconds` 2, a `claudeCommand` that sleeps
+  3 s and then exits 3) → at the next refresh its lock, which the restore renewed, is gone, and
+  its ended bar's Resume is not refused. (A found or late keeper whose lock was renewed is held by
+  task 80's `decideFoundKeeper` cases.)
+- The pages mark (C20): `window_pages_open` is in the store within 2 s of a page's `start`,
+  removed within 2 s of the last page closing, and still there after `stop()` with a page
+  connected.
 
 **Done when:** a page and a command can restore through the server, the banner follows the store
 and the run, and `POST /resume` and `/new` start sessions with the rules of 2.5; `npm run check`
 passes.
 
-**If D was merged first:** `server.ts` passes D's `changed`, `fetchPrs` and `refreshPrs` to
-`createActions` (task 36) and the tick has `reloadNow`; the restorer's `changed` then calls
-`tick.reloadNow()` instead of `tick?.reload(); pages.pushList()`, and C's two deps go beside D's.
+**At the merge** (after D 36 and B 54): `server.ts` passes D's `changed`, `fetchPrs` and
+`refreshPrs` to `createActions` and the tick has `reloadNow` — the restorer's `changed` then calls
+`tick.reloadNow()` instead of `tick?.reload(); pages.pushList()`, and C's two deps go beside D's;
+`listFor` passes B's attention to `buildListMessage` — C sets `banner` on its result; the orderly
+stop waits for D's fetches and calls B's `seen.stop()` — `restorer.stop()` stays its first step.
 
 **Not in it:** the commands (76, 77), the page (75).
+
+---
+
+### Task 76: The command line's side — the client, `--window` for `resume` and `new`
+
+**Depends on:** 70, 81 · **Wave:** 3 · **Design:** S2 11.4, 8.3, 5.1 (finding the server; step 2's window), design 7.5 (the commands' options) · **Contracts:** 2.4 (client, `window-open.ts`, `window-requests.ts`), 2.5 · **Decisions:** C11, C12, C16, C17 · **Shared files:** —
+
+**Goal.** Everything the commands need to send to the server, built and tested against the fake
+serve, and `--window` on `resume` and `new`.
+
+**Files**
+- Create: `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`,
+  `test/cli/window-requests.test.ts`
+- Modify: `src/window/client.ts` (the three methods and their readers: an answer of another shape
+  cannot be read); `src/cli/commands/window.ts` (imports `windowTimes` and `launchWindow` instead
+  of its private `timesOf` and `launch`, which move unchanged, with task 81's cold-start wait left
+  where 81 put it); `src/cli/commands/resume.ts`,
+  `src/cli/commands/new.ts` (`--window`; `whereFrom` refuses two of `--here`, `--tab`,
+  `--window`; with `--window`, `resume` resolves `<ref>` as today and calls `resumeInWindow` with
+  the id — no `prepareResumeById` here —, `new` calls `newInWindow` with `platform.cwd`, the label,
+  the group and `parsed.rest`); `test/fixtures/fake-serve/fake-serve.ts` (C3's routes: without
+  `FAKE_SERVE_LAUNCH` no `launch`, as today; `FAKE_SERVE_LAUNCH=answer:<LaunchAnswer JSON>`
+  answers it to `/resume` and `/new`; `silent` never answers them; `FAKE_SERVE_RESTORE=<JSON
+  array of RestoreStreamLine>` writes them 100 ms apart, `silent-after:<n>` writes `n` lines and
+  then nothing; `FAKE_SERVE_REQUESTS=<path>` appends each launch request's JSON; `FAKE_SERVE_STATE`
+  `starting` or `stopping` for `launchState`)
+- Test: `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`,
+  `test/cli/commands/window.test.ts` (unchanged: the move's check); `docs/design-step-2.md` (C11,
+  C12: 11.4), `docs/design.md` (7.5: the options)
+
+**Behaviour.** As 2.4 and 2.5. `windowServer`: `findServer(deck, appRoot, computeBuild(...))` —
+`ours` and `other-build` are used, the rest refused. `resumeInWindow` / `newInWindow`: the
+request; every answer line on stderr through the sanitiser; then `client.status()`, and with 0
+pages `launchWindow(deck, client, ping, false, times)` — a SkydeckError there is C12's line. The
+usage texts name `--window` (`Without --here, --tab or --window, the configured "terminal"
+decides.`).
+
+**Tests** (platform: `realTestPlatform`; `windowMachine` and `startFakeServe` of
+`test/helpers/window-machine.ts`)
+- Client: each method's request as 2.2 says (the fake's request file); `503 starting` twice, then
+  an answer → the answer; `stopping` → its line; `silent` with `answerMs` 300 → the no-answer
+  line; a 404 route → `unknown-route`; an answer of another shape → cannot be read; `restore`'s
+  lines to `onLine` in order and the outcome; `silent-after:1` → the stopped-answering line after
+  `answerMs`; a stream ended without an outcome → the same line.
+- `resume --window` against the fake answering `{ code: 0, lines: ['skydeck: original flags
+  unknown; resuming with defaults'], sessionId }` → that line on stderr, exit 0, the request's
+  `sessionId` the resolved id, no handoff file, no lock in the store (the command took none); with
+  pages 0 → the Edge stub ran once with a token, the token given up; with pages 1 → not run;
+  Edge missing → C12's line, exit 0; an answer `{ code: 4, lines: [...] }` → exit 4.
+- Each row of 2.5's table: no server, one that does not answer (`FAKE_SERVE_MODE=silent`), another
+  checkout, an older server (no `FAKE_SERVE_LAUNCH`), `stopping` → its line, exit 1, no request
+  sent, no Edge.
+- "the answer's lines are printed sanitised": a line with an escape sequence and a CR → printed
+  without them.
+- `new --window --label x --group y -- --model opus` → the request `{ dir: <cwd>, label: 'x',
+  group: 'y', flags: ['--model', 'opus'] }`; without `--label` → `label: null`.
+- `--here --window`, `--tab --window` → usage error, exit 2, nothing sent. Under `CLAUDECODE=1` →
+  sent as usual.
+- `skydeck window`'s every existing case passes unchanged, task 81's included.
+
+**Done when:** `resume --window` and `new --window` send to the server and say what C11 and C12
+say in every case of 2.5, and `skydeck window` behaves as before; `npm run check` passes.
+
+**At the merge:** nothing to resolve with another stage; `window.ts` and the fake serve come after
+task 81's changes (its knob `FAKE_SERVE_PAGES_AFTER` stays beside the new ones).
+
+**Not in it:** `"terminal": "window"`, `restore` and `R` (77); the end-to-end cases through the
+real server (77).
 
 ---
 
@@ -954,8 +1165,8 @@ user who never sets the key sees only the new option in `--help`.
 **Done when:** `"terminal": "window"` sends `resume`, `new`, `restore` and `R` to the window as
 S2 11.4 says, end to end; `npm run check` passes.
 
-**If D was merged first:** `config.ts` has D's `ticketUrl` key and its check (task 35); C changes
-only the `terminal` type, its value check and its message.
+**At the merge** (after D 35): `config.ts` has D's `ticketUrl` key and its check; C changes only
+the `terminal` type, its value check and its message.
 
 **Not in it:** the documentation (79).
 
@@ -981,11 +1192,10 @@ documents alone, and can run W16 without risk to their work.
   `restore` and `R` too); 2.5's lines in a short table "When the window cannot take it"; `show`'s
   `(in the skydeck window)`; the restore settings and `claudeCommand` are the server's, read when it
   starts (`skydeck window --restart` after a change). "Known limits of stage C": a window that
-  connects during a restore sees its lines from then on; a session whose program ends after the
-  restore stopped waiting for it keeps the renewed lock for up to a minute (its Resume says how long
-  to wait); a restored terminal found by a restarted server before its program started is refused
-  (S2 7.3); after a WSL restart `skydeck window` may open a second window beside the old one, which
-  reconnects (close one); `restore` and `R` open no window.
+  connects during a restore sees its lines from then on; `restore` and `R` open no window; after a
+  WSL restart or `--stop`, `skydeck window` waits up to 7 seconds for an open window to come back
+  before it opens one (C20), and the first update from stage A may still open a second window once
+  (the old server wrote no mark).
 - `README.md`: `--window` in the command table for `resume` and `new`; one sentence on restore in
   the window.
 - `docs/manual-checks.md`: in the window's part, W16 as below; the part's opening list moves W16
@@ -1015,8 +1225,10 @@ documents alone, and can run W16 without risk to their work.
     working`, `Restore 3` and `Not now`. If a session you did not make is offered, untick it.
     Restore 3: the three under Open as `starting…`, then running, in slots 1–3; the report says
     `started <short> <title>` for each and `restore finished: 3 started`; each terminal shows its
-    conversation. Write down: whether a second window opened beside the old one (a known limit),
-    the banner's words, the time from Restore to the last `started`.
+    conversation. `skydeck window` printed `skydeck window: a window is already open` and no
+    second window opened (C20; if one did, write it down and close it — the old one is the window
+    that showed the bar). Write down the banner's words and the time from Restore to the last
+    `started`.
   - An optional second part (one more `wsl --shutdown`, prepared the same way): Not now → the
     banner goes; `skydeck window --restart` → it does not come back; `skydeck restore --dry-run`
     in W still lists the three.
@@ -1029,20 +1241,25 @@ documents alone, and can run W16 without risk to their work.
 
 | # | Check | Stage | Decides |
 |---|---|---|---|
-| W16 | WSL stop drill: `wsl --shutdown` with the window open and three throwaway sessions in it (and no real session running). The bar of 6.3 appears; after `skydeck window` the window says WSL restarted and the banner offers the three; "Restore 3" brings them back into the window. Optional: Not now survives a server restart; `resume --window` opens the window by itself. | C | 6.3, 12.7, 11.4 |
+| W16 | WSL stop drill: `wsl --shutdown` with the window open and three throwaway sessions in it (and no real session running). The bar of 6.3 appears; after `skydeck window` the old window comes back (no second one) and says WSL restarted, and the banner offers the three; "Restore 3" brings them back into the window. Optional: Not now survives a server restart; `resume --window` opens the window by itself. | C | 5.1, 6.3, 12.7, 11.4 |
 
 **Steps**
-- [ ] Run every command of the new install text on a clean `SKYDECK_HOME` with the fake Edge stub
-      of the test helpers — never `skydeck window` or `--window` against the installed skydeck —
-      to check its words.
+- [ ] Check every line the new text quotes against the test that holds it — none of them is
+      checked by running `skydeck`: a "clean `SKYDECK_HOME`" is no sandbox (`show` would read the
+      real `~/.claude`, `window` reach port 47613 and the real Edge). The lines of 2.5 are held by
+      76's and 77's tests; the banner's words by 75's; the report lines by 73's and 74's; `show`'s
+      mark by 78's; the configuration's message and `doctor`'s line by 77's; the wait of C20 by
+      81's. A line no test holds is not written.
 - [ ] `npm run check` → pass. Open the pull request.
 
 **Done when:** the user can use stage C from `docs/install.md` alone, and W16 is in
 `docs/manual-checks.md` with its preparation first.
 
-**If D was merged first:** `install.md`, `manual-checks.md` and `README.md` have D's parts (task
-39: editing, W27–W29); C's parts go beside them, and W16 keeps its place among the stage A checks'
-numbers.
+**Not in it:** code, tests, running any `skydeck` command.
+
+**At the merge** (after B 50, D 39 and B 56): `install.md`, `manual-checks.md` and `README.md` have
+B's "Updating" order, D's parts (editing, W27–W29) and B's (attention, W11, W19, W21); C's parts go
+after them, and W16 keeps its place among the stage A checks' numbers.
 
 ## 4. Design coverage
 
@@ -1052,7 +1269,9 @@ numbers.
 | S2 8.2.3, `restore`, `dismiss-restore`, `banner`, `restore-progress` | 70 (types), 72 (acting), 73 (banner, progress), 74 (wiring), 75 (page) |
 | S2 8.2.6, the first size of a terminal a command or a restore opens | 73 (read per opening), 74 (the last focused page's area) |
 | S2 8.3, `POST /resume`, `/new`, `/restore` | 70 (parsing, the socket's side), 74 (acting), 76 (client) |
-| S2 10.1, a running restore; 10.2, `window_restore_dismissed` | 73 |
+| S2 5.1, the wait for a window that comes back, also after a cold start | 81 (the command), 74 (the mark written) |
+| S2 7.3, 7.8, design 7.6: the lock a restore renews | 80 (the take mark), 74 (end to end) |
+| S2 10.1, a running restore; 10.2, `window_restore_dismissed`, `window_pages_open` | 73, 81 |
 | S2 11.1, one implementation; restore planning moved | 72 (launches), 71 (`restorePlan`, `latestEarlierBoot`) |
 | S2 11.3, restore in the window | 71 (hooks), 73, 74 |
 | S2 11.4, the commands while the window runs | 76 (`--window`, the client, the window opened after), 77 (`"terminal": "window"`, `restore`, `R`), 78 (`show`) |
@@ -1071,26 +1290,27 @@ Stage C works without B, D and E and touches their files only where its own line
 notice and the three routes, and leaves `attention`, `notify`, `stack`, `view.chips` and D's kinds
 as they are; in `src/window/actions.ts` it moves stage A's resume and new into `launches.ts` and
 adds its two cases beside D's; in `src/window/server.ts` it adds the launches, the restorer, the
-banner in `listFor` and the restorer's stop as the stop's first step; in `web/app.js` it adds the
-banner and one notice kind, and no key; in `web/index.html` one element and one stylesheet. It
-changes nothing in `tick.ts`, `src/window/view/build.ts`, `sections.ts`, `web/list.js`,
-`web/keys.js`, `web/help.js` or `web/cards.js`. One store key, no migration.
+banner in `listFor`, the pages mark after each refresh and the restorer's stop as the stop's first
+step; in `web/app.js` it adds the banner and one notice kind, and no key; in `web/index.html` one
+element and one stylesheet. It changes nothing in `tick.ts`, `src/window/view/build.ts`,
+`sections.ts`, `web/list.js`, `web/keys.js`, `web/help.js` or `web/cards.js`. Two store keys, no
+migration. The banner changes neither the header's one height (stage D) nor a terminal's area
+(C21).
 
 For stage E: the switcher's "Restore 3 sessions from <time>" (S2 12.7) can be drawn from
 `list.banner` — its entries and `lastActivityNs` stay in the payload after "Not now" (`shown`
 false) until the next WSL restart — and sent as `act restore` with the preselected ids.
 
-**Follow-ups on stage C's path** (`LEFT-TO-YOU.md` section 4 and the design's known limits):
-- *A second window after `skydeck window` started a server while an old window is open* — **left**.
-  It is on W16's path (after `wsl --shutdown` the old window reconnects a few seconds after the new
-  one opened); task 79 names it in W16 and in the known limits. Its fix (a mark in the store while
-  pages are connected) is not stage C's.
-- *A restore's renewed lock and the found keeper* (S2 7.3, 7.8) — **narrowed, not closed**: C8
-  gives the lock back for every session whose window terminal ends while the restore waits; a
-  program that ends after the restore stopped waiting keeps the renewed lock until it expires, and
-  a restored keeper found by a restarted server before its program started is refused. Closing both
-  needs lock values with a mark that a renewal keeps and a take-over changes (S2 7.8): a change of
-  step 1's lock format, not made here (question 4).
+**Follow-ups of stage A on stage C's path:**
+- *A second window after `skydeck window` started a server while an old window is open* —
+  **settled** by task 81 (C20): after a WSL restart, a crash or `--stop`, the command waits for the
+  old window as it does after a restart. It is W16's case. Left: the first update from a stage A
+  server, which wrote no mark, may still open a second window once (stage B's "Updating" order —
+  close the window first — avoids it).
+- *A restore's renewed lock* (S2 7.3's and 7.8's named limit) — **settled** by task 80 (C19): a
+  renewal keeps the take; a found or late keeper of a restore is started and an exit before the
+  start gives its lock back. Left: about one take-over in a million looks like a renewal, which
+  only a settlement could act on (C19).
 - *The ended bar of a session the filter hides* — untouched; restore adds no new case of it.
 
 ## 6. Stage C is ready to try
@@ -1120,7 +1340,7 @@ banner shows only after WSL or the PC restarted.
 
 **What only you can check:**
 - W16 — the drill, prepared as `docs/manual-checks.md` says first (it ends every WSL process):
-  the banner after `wsl --shutdown`, Restore 3, and whether a second window opened.
+  the banner after `wsl --shutdown`, Restore 3, and that no second window opens.
 - That `skydeck resume --window` opens the window by itself when none is open (W16's third part).
 - Your judgement on questions 1–3 of section 7: the restore that stops waiting for a terminal that
   ended, the window opened after a command's answer, and a server of another build.
@@ -1143,10 +1363,11 @@ Planned around the reading given; each is the lead's or the user's to change.
    another checkout, a server that does not answer and one older than stage C (404) are refused.
    The other way refuses another build and asks for `skydeck window`, which restarts it with the
    environment of the shell it runs in (S2 5.2).
-4. **The lock's mark** (section 5). S2 7.8 names "a mark that a renewal keeps and a take-over
-   changes" as what closes the two remaining cases of the restore's renewed lock. Not planned: it
-   changes step 1's lock value, which every command reads. A follow-up if the remaining cases
-   matter.
+4. **Where the lock's mark lives** (C19, task 80). Planned in the last six digits of a renewed
+   lock's time, so that every older skydeck still reads the value as a lock (a third field would
+   make an older server of the same installation sweep it as stale during an update) and nothing
+   stage A writes changes. The other way, a third field, is clearer to read and costs that
+   update hole.
 5. **`show --json`** (C15): planned unchanged, as stage D's D16 did for the ticket; the holder
    object could carry `inWindow`.
 6. **What "Not now" stores** (C9): planned as the earlier boot whose sessions the banner offers
