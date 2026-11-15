@@ -1153,7 +1153,8 @@ says how many more match: `… · 3 more: type to narrow`.
 
 In its field ↑ ↓ move the highlight, PgUp and PgDn by a page; Enter acts on the highlighted
 session; Esc, or Ctrl+Shift+P again, closes the switcher, and the keyboard goes back where it
-was; Tab and Shift+Tab do nothing; every other key is text. The footer names the keys and what
+was; Tab and Shift+Tab do nothing; every other key is text (Ctrl+Shift+V too, which pastes as
+the browser does). The footer names the keys and what
 Enter does to the highlighted session: `↑ ↓ move · Enter switch · Esc close` for a session that
 has a terminal of the window or runs in another terminal, `↑ ↓ move · Enter resume here · Esc
 close` for one that has neither — a session that is not running, or one whose program runs
@@ -1175,23 +1176,23 @@ it: the filter's field and the chips are cleared (the key bar says `the filter w
 show <short id>`), done sessions are shown, Earlier is unfolded; a closed stack opens by itself
 for its selected member.
 
-Enter acts only on the answer to what you typed: pressed right after a keystroke, it waits for
-that answer (a fraction of a second) and then acts on the highlighted session of it, the first
-one — the highlight goes to the first session of each new answer, and stays on its session while
-a list only moves the sessions. Typing on, closing the switcher or a lost connection drops a
-waiting Enter. While the page is not connected the switcher says `skydeck's server is not
-connected` in place of its sessions, and Enter does nothing. When no session matches it says `No
-session matches.`
+Enter acts only on the answer to what you typed: pressed right after a keystroke, it waits for that
+answer (usually a fraction of a second) and then acts on the highlighted session of it, the first
+one — the highlight goes to the first session of each new answer, and stays on its session while a
+list only moves the sessions. Typing on, closing the switcher or a lost connection drops a waiting
+Enter. While the page is not connected the switcher says `skydeck's server is not connected` in
+place of its sessions, and Enter does nothing. When no session matches it says `No session matches.`
 
-While the switcher is shown the window under it takes no click and no key. Every window chord
-but Ctrl+Shift+P says `close the switcher first (Esc)` in the key bar and does nothing else,
-Ctrl+Shift+H too (opening the switcher hides the key help); the reload keys reload. While one of
-stage D's dialogs is open, Ctrl+Shift+P and `Switch…` say `close the edit first (Esc)`. Each
-window has its own switcher.
+While the switcher is shown the window under it takes no click and no key. Every window chord but
+Ctrl+Shift+P (and Ctrl+Shift+V, the field's paste) says `close the switcher first (Esc)` in the key
+bar and does nothing else, Ctrl+Shift+H too (opening the switcher hides the key help); the reload
+keys reload. While one of stage D's dialogs is open, Ctrl+Shift+P and `Switch…` say `close the edit
+first (Esc)`. Each window has its own switcher.
 
 **The restore offer** (stage C). After `Not now` on the restore banner, the switcher still offers
 that restore until WSL restarts, in command form only: type `>restore` (or `>r`, `> rest`, `>
-RESTORE`: a text whose first character is `>`, and after it the start of `restore`), and the
+RESTORE`: a text whose first character is `>`, and after it at least the first letter of
+`restore`; `>` alone lists nothing), and the
 entry `Restore 3 sessions from yesterday at 18:02` is listed (the time as the banner says it),
 while no restore runs. Enter on it, not a click (a click on it does nothing), restores the
 sessions the banner had preselected, and the run's report shows where the banner's report shows;

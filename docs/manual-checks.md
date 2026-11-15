@@ -1517,23 +1517,27 @@ chip on. Write down how many sessions the title bar counts.
    heading shows only when it has a session), each with its short id at the right; at the bottom
    a footer that starts `↑ ↓ move · Enter`. When no such panel shows, type nothing and write that
    down. Type the ticket key of step 1 (`orb-2107`).
-   Expected: the list narrows at each keystroke, and the key's letters are marked in the titles.
+   Expected: the list narrows at each keystroke, and in the titles that hold the key its letters
+   are marked (a session that has it only as its group shows no mark).
    Press ↓ a few times, then ↑: the highlight moves, and the footer's `Enter switch` or `Enter
    resume here` follows the highlighted session. **Press no Enter**: it would switch to that
    session, or resume it. Press Esc. Expected: the panel goes, and the key bar shows the `Focus: …`
    it showed before.
 6. **The throwaway session, with Enter.** Press Ctrl+Shift+P again (the panel shows, its caret
-   blinks) and type the first 6 characters of the throwaway session's short id. Wait until the
-   sessions stop changing (a second). Look at the highlighted session: its short id, at the right,
-   must be the one you wrote down, whole. When it is another one, press ↓ until the highlighted
-   session's short id is the throwaway session's; when no session shows it, press Esc and leave
-   this step out. Read the footer: `Enter resume here` (the throwaway session has no terminal in
-   the window) or `Enter switch` (its terminal is in the window). Then press Enter once. Expected:
-   the panel goes and the throwaway session is selected; with `Enter resume here`, it is resumed
-   into the window (its row under Open, `starting…`, then its terminal, which takes the keyboard:
-   `Focus: terminal`); with `Enter switch`, its terminal shows and has the keyboard — or, when it
-   runs in another terminal, its card shows and the list has the keyboard. Type nothing into it: it stays as it
-   is, for the other checks. When step 4 left Earlier unfolded: with the throwaway session's row
+   blinks; else type nothing) and type the first 6 characters of the throwaway session's short id.
+   Wait until the sessions stop changing (a second). Look at the highlighted session: its short id,
+   at the right, must be the one you wrote down, whole. When it is another one, press ↓ until the
+   highlighted session's short id is the throwaway session's; when no session shows it, press Esc
+   and leave this step out. Read the footer: `Enter resume here` (the throwaway session has no
+   terminal in the window) or `Enter switch` (its terminal is in the window). Right before Enter,
+   after your last ↓, look at the highlighted session's short id once more: a late answer to your
+   last keystroke moves the highlight back to the first session. When it is still the throwaway
+   session's, press Enter once; when it is not, press Esc and leave this step out. Expected: the
+   panel goes and the throwaway session is selected; with `Enter resume here`, it is resumed into
+   the window (its row under Open, `starting…`, then its terminal, which takes the keyboard: `Focus:
+   terminal`); with `Enter switch`, its terminal shows and has the keyboard — or, when it runs in
+   another terminal, its card shows and the list has the keyboard. Type nothing into it: it stays as
+   it is, for the other checks. When step 4 left Earlier unfolded: with the throwaway session's row
    now under Open, fold Earlier with a click on its header; with its row still in Earlier, leave
    Earlier unfolded and write that down.
 
