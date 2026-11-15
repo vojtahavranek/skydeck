@@ -188,13 +188,14 @@ those of stages B, C and D as merged, hold where these do not change them.
 - **`src/window/view/search/`** imports values only from `./*.ts` (its own files) and
   `../../../text/sanitize.ts`; types from `sessions`, `../../protocol.ts`, `../../hub.ts` and
   `../sections.ts`. Task 90's `test/window/view/search/imports.test.ts` checks every `.ts` file of
-  the directory, whatever its name, and that none of them holds `RegExp(` (a constructor or a
-  call). It also refuses, in every file of the directory (ruled on task 90's review 1; it binds
-  tasks 91, 92 and 96): `import()` and `require()`, a bare `import '…'`, and `.match(`,
-  `.matchAll(` or `.search(` with an argument that is not a regular-expression literal — those
-  three build a pattern from a string argument, a door the `rg` line below does not see. In this
-  directory a pattern is written as a literal where it is used. This prints nothing after task 90 and every later one (the globs leave out the page's
-  files that are not there yet):
+  the directory, whatever its name, and that none of them holds `RegExp(` (a constructor or a call).
+  In every file of the directory it also refuses `.match(`, `.matchAll(` and `.search(` with an
+  argument that is not a regular-expression literal: those three build a pattern from a string, a
+  door the `rg` line below does not see, so in this directory a pattern is written as a literal
+  where it is used (ruled on task 90's review 1; it binds tasks 91, 92 and 96); and it judges a bare
+  `import '…'` and an `import('…')` by the same allowed sources as a static import. This prints
+  nothing after task 90 and every later one (the globs leave out the page's files that are not there
+  yet):
   ```sh
   # no pattern is built from a search text
   rg -n "RegExp\s*\(" src/window/view/search web -g '*.ts' -g 'search-text.js' -g 'chips.js' -g 'switcher.js'
@@ -622,9 +623,9 @@ the cost of a long note is bounded too).
   fail it), and every row matched (the case asserts both, so that a word that ended a row's
   search early would show).
 - `imports.test.ts`: every `.ts` file of `src/window/view/search/` imports values only as 2.1 says,
-  and none holds `RegExp(`, `import()`, `require()`, a bare import, or `.match(` / `.matchAll(` /
-  `.search(` with an argument that is not a literal (2.1, ruled); cases of the check itself, for
-  what it lets through and what it refuses.
+  and none holds `RegExp(`, or `.match(` / `.matchAll(` / `.search(` with an argument that is not
+  a literal (2.1, ruled); a bare import and an `import('…')` are judged by the same sources as a
+  static import; cases of the check itself, for what it lets through and what it refuses.
 
 **Done when:** S2 12.8's matching, E2–E5, is a tested pure function and its bounds are pinned;
 `npm run check` passes.
