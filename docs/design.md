@@ -813,7 +813,7 @@ relative (8).
 Configuration keys, all optional: `terminal` (`here` or `wezterm`; default `here`), `wezterm.domain`,
 `groupPattern`, `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
 `restoreStartTimeoutSeconds`, `claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4;
-decided by the user on 2026-11-15). Unknown keys are an error.
+asked for by the user on 2026-11-15). Unknown keys are an error.
 
 ### 9.2 Database
 
