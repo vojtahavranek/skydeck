@@ -3007,7 +3007,9 @@ configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` 
 and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3) and the
 pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
 the group chip and `ticketUrl` (12.5, 16.4; asked for by the user on 2026-11-15, the details
-ruled by the lead that day).
+ruled by the lead that day). Also two parts of 12.5 that no stage named before (plan D's D11): ↻
+in the pull-request dialog, which reads the session's pull requests now (`pr-refresh`, 8.2.3), and
+the header's "opened <time> · last active <age>" with where the title comes from.
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
 the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The
