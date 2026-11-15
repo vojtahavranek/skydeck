@@ -1357,7 +1357,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 |---|---|---|
 | `resume` | `sessionId`, `cols`, `rows` | 11.3; the size is the new terminal's first size (8.2.6). |
 | `new` | `dir`, `label`, `group`, `flags` (the text as typed), `cols`, `rows` | 11.3; the server splits `flags` by 12.6's rule and checks them as `skydeck new` does (design 7.7). |
-| `restore` | `sessionIds` | 12.7. |
+| `restore` | `sessionIds` (1 to 1,000 distinct session ids) | 12.7. |
 | `label`, `group` | `sessionId`, `text` (empty clears) | 12.5. |
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
@@ -1365,12 +1365,15 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `close-terminal` | `term` | Forgets an ended or not-started terminal's last screen (7.8). Refused for a terminal whose program runs (principle 6). |
 | `open-link` | `url` | 9.6. |
-| `dismiss-restore` | `bootId` | 12.7. |
+| `dismiss-restore` | `bootId` (the earlier boot the banner offers, a lower-case UUID: the form of `/proc/sys/kernel/random/boot_id`) | 12.7. |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
 URLs 4,096, `input.data` 64 KiB, a note's `text` and `base` 64 KiB each, other text 1,024; the
-action of 9.6 then opens a URL only up to 2,048 characters) or a size that is not a whole number
-from 1 to 65,535. A note may be any length (design 7.1), so 1,024 bytes would refuse most notes;
+action of 9.6 then opens a URL only up to 2,048 characters), a size that is not a whole number
+from 1 to 65,535, a session id that does not pass the session-id rule (a lower-case UUID, 4.3) —
+in a `restore` each of its ids, which must also be distinct, at least one and at most 1,000 — or
+a `dismiss-restore` boot id that is not a lower-case UUID (stage C, plan C 2.2). A note may be any
+length (design 7.1), so 1,024 bytes would refuse most notes;
 at 65,536 bytes each the largest note `act`, every character escaped by JSON (six bytes for one),
 stays under the 1 MiB a page's message may hold (8.2.1). A stored note longer than that is not
 sent (`selected.note` null, `noteTooLong`) and the window does not edit it: it says `this note is
@@ -1389,13 +1392,13 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null). |
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
-| `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. |
+| `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. `restore-progress`: one report line of a restore, sanitised, to every page, whoever asked for the restore (11.3, 12.7; stage C). |
 | `bye` | `reason` (5.5). |
 
 Output is sent in binary frames: one byte 1, the channel number as a 4-byte big-endian integer,
@@ -1503,23 +1506,43 @@ absolute and existing, no flag that picks a session or names it). The program is
 |---|---|
 | `GET /ping` | `{ serverId, bootId, build, protocol, pid, port, checkout }` (`checkout`: the checkout the server runs from, which 5.1 compares). |
 | `GET /status` | `{ starting, pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin }` (`envOrigin`: where the server's environment came from and when, 5.2; `starting`: true while the server's start is not done and a page's upgrade is answered 503 (8.2.1) — a server answers before then, 5.2; a server of an older build sends none, which means false; ruled by the plan owner, follow-up "server-findable"), for `skydeck window` and `doctor`. |
-| `POST /resume` | `{ sessionId }` → `prepareResumeById` and the window terminal (11.2) → `{ code, lines }`: the exit code and the lines `skydeck resume` prints (design 7.6), refusals included. |
-| `POST /new` | `{ dir, label, group, flags }` (`flags` an array of strings) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
-| `POST /restore` | `{ sessionIds, all }` → 11.4. The answer is a stream of JSON lines: one per report line of the run, the last one the outcome. |
+| `POST /resume` | `{ sessionId }` (a session id) → `prepareResumeById` and the window terminal (11.2) → `{ code, lines, sessionId }`: the exit code `skydeck resume` would end with and the lines it prints on stderr (design 7.6), refusals included, each as printed (`skydeck: …`); `sessionId`, the session it started, else null. |
+| `POST /new` | `{ dir, label, group, flags }` (`label` and `group` null when the option was not given, and passed to `prepareNew` as the command passes them; `flags` the words after `--`, an array of strings, not split again) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
+| `POST /restore` | `{ sessionIds, all }` (the ids the user selected, 1 to 1,000; `all` as `--all`) → 11.4. The answer (200, chunked) is a stream of JSON lines: `{ "line": … }` per report line of the run, `{ "line": "waiting for <n> sessions" }` after 10 s without one, and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore runs already, the boot id cannot be read, the store is busy) is the same stream: its line, then an outcome with code 1. |
 | `POST /token` | `{ seconds }` (30 for a window, 600 for `--print-url`) → `{ id, token, expiresAtNs }`: a launch token, minted and held in memory (8.2.2). |
 | `GET /token/<id>` | `{ state }`: `waiting`, `used`, `reused` (a second proof came: the alarm, 8.2.2), `expired` or `dropped`. |
 | `POST /token/drop` | `{ id }` → `{ ok }`: the token is given up; a later proof with it fails with 4003 (or 4004 when it had been used). |
 | `POST /shutdown` | `{ ok: true }`, then 5.5. |
 
-A refused request answers `{ error: <kind> }`: 404 for an unknown route (stage C's `/resume`,
-`/new`, `/restore` until that stage), 400 for a bad body, 413 for a body over 64 KiB, which is not
-read on; `GET /token/<id>` is 404 for a token the server does not know. When answering a request
-fails inside the server (`ping`, `status` or the tokens throw), the answer is 500
-`{ error: 'failed' }`, the log names the error and its code, never its message (5.2), and the
-server goes on; a failure while stopping is the server's uncaught error. On the command line,
-`ping` reports a socket that refuses or is missing as refused, and no answer in time — or a full
-queue of connections, of a server that lives — as not answering (5.1); `POST /token/drop` for a
-token the server does not know is no error.
+**Stage C's three routes** (plan C2–C5). Their bodies have fixed fields: every session id passes the
+session-id rule (a lower-case UUID, 4.3), a restore's are distinct; strings are well formed; `dir`
+holds at most 4,096 bytes and no NUL, `label` and `group` at most 1,024, `flags` at most 1,000
+words, none with a NUL (the body's 64 KiB bounds the rest); an unknown or missing field is 400.
+While the server starts (a page's upgrade is answered 503, 8.2.1: before its keepers are found it
+does not know its terminals, so the "already open" rule of 11.1 could not see one) they answer 503
+`{ error: 'starting' }`, and the command asks again every 500 ms within its 30 s; once its stop has
+begun, 503 `{ error: 'stopping' }`, which the command reports. The `code` of `POST /resume` and
+`/new` is the exit code the command would end with: 0 when it started; 1 for a failed launch, a busy
+store (`skydeck: skydeck's database is busy; try again`) or a failure inside the server (`skydeck:
+the window's server could not start it (<kind>)`, logged by kind); 2 for `prepareNew`'s refusals; 3
+for a reference that names no session; 4 for the guard, the lock and the window's own "this session
+is already open in the window" (11.1) — a command must print something, so none of these is a 500.
+The `code` of a restore's outcome is design 7.8's: 5 when the run was stopped before it finished
+(the memory check, the server's stop, its asker's connection closing, a batch in which no session
+started while entries were left), else 1 when any selected session failed, was no longer offered or
+timed out, else 0. A restore asked for here stops when the asker's connection closes before the
+outcome: the sessions already opened go on, the rest are not started (11.4).
+
+A refused request answers `{ error: <kind> }`: 404 for an unknown route (a server of a build before
+stage C answers `/resume`, `/new` and `/restore` so, whatever the body), 400 for a bad body, 413 for
+a body over 64 KiB, which is not read on; `GET /token/<id>` is 404 for a token the server does not
+know. When answering a request fails inside the server (`ping`, `status`, the tokens or a launch
+throw or reject), the answer is 500 `{ error: 'failed' }` — a restore whose answer has begun ends
+without an outcome instead — the log names the error and its code, never its message (5.2), and the
+server goes on; a failure while stopping is the server's uncaught error. On the command line, `ping`
+reports a socket that refuses or is missing as refused, and no answer in time — or a full queue of
+connections, of a server that lives — as not answering (5.1); `POST /token/drop` for a token the
+server does not know is no error.
 
 ## 9. Typing into and reading from a terminal
 

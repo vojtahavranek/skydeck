@@ -165,8 +165,8 @@ scheduled around it:
 
 | Test file | Task | What it does |
 |---|---|---|
-| `test/window/protocol.test.ts` | 70 | new cases at the end; no fixture changes (`banner: null` still type-checks) |
-| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end; 72: new cases at the end, every existing case unchanged |
+| `test/window/protocol.test.ts` | 70 | new cases at the end; the three routes leave the "no route" list and `restore`, `dismiss-restore` the case of unknown kinds; no fixture changes (`banner: null` still type-checks) |
+| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end, and the hostile case's `restore` entry made malformed; 72: new cases at the end, every existing case unchanged |
 | `test/window/view/build.test.ts` | 73 | `banner.ts` in the pinned file list; nothing else |
 | `test/window/server.test.ts` | 80 | one line (about 549): the refusal's new words `its resume lock was taken over` |
 | `test-page/helpers/shell.ts` | 75 | a new function `bannerWorld` after `actsWorld`; `scriptedList`, the worlds and `MINIMAL_MODULES` unchanged |
@@ -575,7 +575,7 @@ The rules of the requests that start programs, and the test that holds each:
 
 ### Task 70: Contracts; the control socket's stage C routes
 
-**Depends on:** 0 · **Merges after:** D 34, B 50, B 51 · **Wave:** 1 · **Design:** S2 8.2.3 (`restore`, `dismiss-restore`, `banner`, `restore-progress`, the `list` row), 8.3 (`POST /resume`, `/new`, `/restore`, `GET /status`'s `windowExpectedMs`) · **Contracts:** 2.2, 2.3 (`ControlLaunch`) · **Decisions:** C2, C3, C4, C5, C9 (the payload), C22 (the asker's signal) · **Shared files:** `src/window/protocol.ts`, `src/window/actions.ts`, `src/store/types.ts`, `web/app.js` (one line), their tests
+**Depends on:** 0 · **Merges after:** D 34, B 50, B 51 · **Wave:** 1 · **Design:** S2 8.2.3 (`restore`, `dismiss-restore`, `banner`, `restore-progress`, the `list` row), 8.3 (`POST /resume`, `/new`, `/restore`; `GET /status`'s `windowExpectedMs` is in `StatusAnswer` here, but its row of 8.3 is task 81's — ruled on review B's re-check) · **Contracts:** 2.2, 2.3 (`ControlLaunch`) · **Decisions:** C2, C3, C4, C5, C9 (the payload), C22 (the asker's signal) · **Shared files:** `src/window/protocol.ts`, `src/window/actions.ts`, `src/store/types.ts`, `web/app.js` (one line), their tests
 
 **Goal.** Fix as code every message the other stage C tasks meet at, and the socket's side of the
 three routes, so that the server (74) only supplies `ControlLaunch` and the command line (76)
@@ -594,12 +594,18 @@ talks to the real `controlHandler` from the start (the fake serve uses it).
   `restore-progress` out, so that `tsc -p web` passes — `terminalView.notice` takes only the three
   terminal kinds; task 75 fills the branch); `docs/design-step-2.md` (8.2.3's `act` rows and `list`
   row, 8.3's table: C2–C5)
-- Test: `test/window/protocol.test.ts`, `test/window/control.test.ts`,
-  `test/window/actions.test.ts` (one case at the end)
+- Test: `test/window/protocol.test.ts` (new cases at the end; the three routes leave the "no
+  route" list and `restore`, `dismiss-restore` the case of kinds it does not know),
+  `test/window/control.test.ts` (stage A's 404 case renamed; new cases at the end),
+  `test/window/actions.test.ts` (one case at the end; the hostile case's well-formed `restore`
+  becomes a malformed one, since a well-formed one is now a known kind)
 
 **Behaviour.** The parser takes the two kinds and the three bodies with 2.2's and C3's limits.
 `controlHandler`: without `launch` the three routes are 404 `{ error: 'route: unknown' }` as
-today; with it, while `launchState()` is not null they are 503 `{ error }`; otherwise `resume` and
+today, whatever the body (the fake serve stands for a server before stage C, which answers a
+body the parser would refuse 404 too); with it, a body the parser refuses is 400 first; then,
+while `launchState()` is not null they are 503 `{ error }` (not logged: the command asks again
+every 500 ms while the server starts); otherwise `resume` and
 `new` answer what `launch` resolves with (200), and a rejection is 500 `{ error: 'failed' }` with
 one log line by kind (`failureKind`); `restore` streams every `write` as a line, and a rejection
 after the first line ends the answer without an outcome (the client says the server stopped
@@ -635,9 +641,15 @@ for any `launch` it is given; `npm run check` passes.
   `ServerMessage`) are B's — C's `banner` keeps its line, its types go beside `ListMessage`; the
   `LIST` fixture of `protocol.test.ts` has B's `needYou` — C changes no fixture.
 - `web/app.js`: C 70's one line lands in wave 1, before D 37 and B 55 change `received()`; they keep
-  it.
+  it. Whichever of 70 and D 37 merges second merges `origin/main` and keeps both (ruled).
+- `NOT_YET` in `src/window/actions.ts` (ruled, "Tasks 36 and 70: who holds `NOT_YET`"): D 36
+  removes the constant and its case once stage D's kinds have their own. If 70 merges first, its
+  two kinds are in that case and 36 keeps it with them; if 36 merges first, 70 adds back the one
+  line `const NOT_YET = 'skydeck cannot do that action yet';` beside `NOT_AN_ACTION` and `case
+  'restore': case 'dismiss-restore': return refusal(NOT_YET);`. No `default:` that returns it (no
+  test could reach it, and the switch would lose its exhaustiveness check).
 
-**Not in it:** acting on any of it (72–74), the client (76).
+**Not in it:** acting on any of it (72–74), the client (76), S2 8.3's `GET /status` row (81).
 
 ---
 
