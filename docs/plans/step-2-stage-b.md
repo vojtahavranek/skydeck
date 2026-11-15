@@ -409,7 +409,9 @@ export interface Seen {
    *  typed into since the last call (given once). */
   take(): Set<string>;
   /** A session began to be seen: a hold completed, or a typing when it was not yet seen (a key
-   *  into a session already being seen calls no listener). Listeners must not throw; a throw out
+   *  into a session already being seen calls no listener: keys into one session call the
+   *  listeners at most once between two `take()`s, unless a `focus` or `gone` in between ended
+   *  the hold that made it seen). Listeners must not throw; a throw out
    *  of a completed hold is dropped so that the timer cannot end the server; `typed` throws only
    *  if a listener throws. */
   onChange(listener: () => void): () => void;

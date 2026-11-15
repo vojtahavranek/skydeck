@@ -3,8 +3,8 @@
 // server's own open, and a connection opened before the migration keeps working after it.
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdirSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -48,27 +48,32 @@ function schema1(t: TestContext): string {
   return path;
 }
 
+/** What `pathsIn` writes for `root/`: none of the characters a text is split at. */
+const ROOT = '<root>/';
+
 /**
- * Every path a value of the dump names: each part of a text, split at white space, `:`, quotes,
- * `,` and `=`, that starts with one `/` (an address's `//host/…` is none).
+ * Every path a value of the dump names, with `root/` written as ROOT: each part of a text, split
+ * at white space, `:`, quotes, `,` and `=`, that starts with ROOT or with one `/` (an address's
+ * `//host/…` is none). `root/` is replaced before the split, so that a space or a `:` in it
+ * splits nothing.
  */
-function pathsIn(dump: DatabaseDump): string[] {
+function pathsIn(dump: DatabaseDump, root: string): string[] {
   return Object.values(dump.tables)
     .flat()
     .flatMap((row) => Object.values(row))
     .filter((value): value is string => typeof value === 'string')
-    .flatMap((value) => value.split(/[\s:"',=]+/))
-    .filter((part) => part.startsWith('/') && !part.startsWith('//'));
+    .flatMap((value) => value.replaceAll(`${root}/`, ROOT).split(/[\s:"',=]+/))
+    .filter((part) => part.startsWith(ROOT) || (part.startsWith('/') && !part.startsWith('//')));
 }
 
 /** No value of the fixture names a path outside `root` (ruled on review 2: a MUST). */
 function assertInside(dump: DatabaseDump, root: string): void {
-  const paths = pathsIn(dump);
+  const paths = pathsIn(dump, root);
   // the events' and the transcript's working directories, the transcript, the settings backup,
   // the server's checkout, the runtime directory
   assert.ok(paths.length >= 9, String(paths.length));
   for (const path of paths) {
-    assert.ok(path.startsWith(`${root}/`), path);
+    assert.ok(path.startsWith(ROOT), path);
   }
 }
 
@@ -172,8 +177,25 @@ test('schema1Database leaves a database as step 1 and stage A do: WAL, mode 600,
   assert.equal(kv('window_runtime_dir'), join(dirname(path), 'runtime'));
 });
 
-test('schema1Database refuses a path that is not absolute: its paths would not be in a sandbox', () => {
-  assert.throws(() => schema1Database('skydeck.db'), RangeError);
+test('schema1Database refuses a path that is not absolute: its paths would not be in a sandbox', (t) => {
+  // A relative path to a place in the sandbox, so that the database lands there, not in the
+  // working directory, were the check ever removed.
+  const inBox = join(sandbox(t).root, 'skydeck.db');
+  const path = relative(process.cwd(), inBox);
+  assert.equal(isAbsolute(path), false, path);
+  assert.throws(() => schema1Database(path), {
+    name: 'RangeError',
+    message: /not an absolute path/,
+  });
+  assert.equal(existsSync(inBox), false);
+});
+
+test('schema1Database under a directory whose path holds a space and a `:`: every path is inside it', (t) => {
+  const dir = join(sandbox(t).root, 'a b:c');
+  mkdirSync(dir);
+  const path = join(dir, 'skydeck.db');
+  schema1Database(path);
+  assertInside(dumpDatabase(path), dir);
 });
 
 test('openStore migrates a schema-1 database to 2: nothing of migration 1 changes, attention is empty', (t) => {

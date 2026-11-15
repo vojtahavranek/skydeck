@@ -76,7 +76,7 @@ test('stackRows: a group is text, whatever it spells; rows and opened name it ex
   const twins: [string, string][] = [
     ['ORB-1', 'orb-1'],
     ['ORB-1', 'ORB-1 '],
-    ['café', 'café'],
+    ['caf\u00e9', 'cafe\u0301'], // NFC and NFD
   ];
   for (const [one, other] of twins) {
     const why = `${one} / ${other}`;
@@ -114,9 +114,10 @@ test('stackRows: nothing of the input is changed in place', () => {
       Object.freeze(row),
     ),
   );
-  const opened = Object.freeze(['G']);
+  // Two names out of order: a sort in place would throw, or show.
+  const opened = Object.freeze(['H', 'G']);
   assert.deepEqual(shape(stackRows(rows, opened, 'a2')), ['a1^', 'a2<', 'h', 'x']);
-  assert.deepEqual(opened, ['G']);
+  assert.deepEqual(opened, ['H', 'G']);
 });
 
 test('stackRows: no rows, nothing to draw', () => {
@@ -130,6 +131,10 @@ test("stackRows: the entries drawn are the caller's own objects", () => {
   assert.equal(drawn[1]?.entry, rows[1]);
   assert.equal(drawn[2]?.entry, rows[2]);
   assert.equal(drawn[1]?.entry.own, 'own-a2');
+  // Without `opened` too: every row comes back as the caller's object.
+  const flat = stackRows(rows, undefined, null);
+  assert.equal(flat.length, rows.length);
+  rows.forEach((row, index) => assert.equal(flat[index]?.entry, row, row.id));
 });
 
 test('stackRows: a section without a stack is its rows in order, each with stack null', () => {
