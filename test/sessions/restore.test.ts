@@ -7,9 +7,19 @@ import { test } from 'node:test';
 import type { Ns } from '../../src/platform/types.ts';
 import { loadRows } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
-import { planRestore, runRestore } from '../../src/sessions/restore.ts';
-import type { RestoreEntry, RestoreOutcome } from '../../src/sessions/restore.ts';
-import { ResumeRefusedError } from '../../src/platform/errors.ts';
+import {
+  latestEarlierBoot,
+  planRestore,
+  restorePlan,
+  runRestore,
+} from '../../src/sessions/restore.ts';
+import type {
+  ReportOutcome,
+  RestoreEntry,
+  RestoreHooks,
+  RestoreOutcome,
+} from '../../src/sessions/restore.ts';
+import { ResumeRefusedError, SkydeckError } from '../../src/platform/errors.ts';
 import { acquireLock, lockKey, prepareResume, readLock } from '../../src/sessions/resume.ts';
 import { handoffScript, hereTerminal } from '../../src/terminals/here.ts';
 import { shellQuote } from '../../src/text/shell.ts';
@@ -341,6 +351,97 @@ test('a scripted run late in an older boot does not make it the latest earlier b
     entries.map((entry) => entry.row.id),
     [sid(1), sid(2), sid(3), sid(9)],
   );
+});
+
+// --- latestEarlierBoot and restorePlan (S2 11.1) -------------------------------------------------
+
+test('latestEarlierBoot: the boot other than this one whose last event is the latest, and that event', (t) => {
+  const d = restartedMachine(t);
+  // A scripted run later in the older BOOT_C, and one late in BOOT_A: neither counts (design 5.3).
+  scriptedEvent(d, BOOT_C, sid(5), T0 + HOUR, 205);
+  scriptedEvent(d, BOOT_A, sid(4), T0 + 10n * MINUTE, 204, 'scripted-end');
+  assert.deepEqual(latestEarlierBoot(d.deck.store.events(), BOOT_B), {
+    bootId: BOOT_A,
+    lastEventNs: T0,
+  });
+});
+
+test('latestEarlierBoot: none when only the current boot held a session, or there are no events', (t) => {
+  const d = restoreDeck(t);
+  addSession(d, sid(1), { boot: BOOT_B, pid: 101, startNs: NOW - HOUR });
+  assert.equal(latestEarlierBoot(d.deck.store.events(), BOOT_B), null);
+  assert.equal(latestEarlierBoot([], BOOT_B), null);
+});
+
+test('restorePlan: planRestore’s entries over the rows in list order, and the earlier boot', (t) => {
+  const d = restartedMachine(t);
+  for (const all of [false, true]) {
+    const plan = restorePlan(d.deck, all);
+    const expected = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, all);
+    assert.deepEqual(plan.entries.map(shape), expected.map(shape), `all: ${all}`);
+    assert.deepEqual(plan.earlier, { bootId: BOOT_A, lastEventNs: T0 }, `all: ${all}`);
+  }
+  assert.deepEqual(
+    restorePlan(d.deck, false)
+      .entries.map(shape)
+      .toSorted((a, b) => String(a['id']).localeCompare(String(b['id']))),
+    [S1_ENTRY, S2_ENTRY, S3_ENTRY, S9_ENTRY],
+  );
+});
+
+test('restorePlan takes the rows it is given and puts them in list order itself', (t) => {
+  const d = restartedMachine(t);
+  const inOrder = listOrder(d).filter((row) => row.id !== sid(2));
+  const rows = loadRows(d.deck)
+    .filter((row) => row.id !== sid(2))
+    .reverse();
+  const plan = restorePlan(d.deck, false, rows);
+  assert.deepEqual(
+    plan.entries.map(shape),
+    planRestore(inOrder, d.deck.store.events(), BOOT_B, false).map(shape),
+  );
+  const ids = plan.entries.map((entry) => entry.row.id);
+  assert.deepEqual(ids.toSorted(), [sid(1), sid(3), sid(9)]);
+  assert.notDeepEqual(
+    rows.map((row) => row.id).filter((id) => ids.includes(id)),
+    ids,
+    'the rows were given out of list order',
+  );
+  for (const entry of plan.entries) {
+    assert.ok(rows.includes(entry.row), 'the entries hold the rows given');
+  }
+});
+
+test('restorePlan refreshes nothing: a start in the spool since the last refresh is not seen yet', (t) => {
+  const d = restartedMachine(t);
+  startClaude(d, sid(1), 4242);
+  const spooled = readdirSync(d.deck.places.spoolDir);
+  assert.ok(restorePlan(d.deck, false).entries.some((entry) => entry.row.id === sid(1)));
+  assert.deepEqual(readdirSync(d.deck.places.spoolDir), spooled);
+});
+
+test('restorePlan refuses rows without a boot id with the command’s message', (t) => {
+  const d = restartedMachine(t);
+  d.proc.setBootId(null);
+  assert.throws(
+    () => restorePlan(d.deck, false),
+    (error: unknown) =>
+      error instanceof SkydeckError &&
+      error.exitCode === 1 &&
+      error.message ===
+        'cannot read the boot id (/proc/sys/kernel/random/boot_id): restore cannot tell which sessions are still running',
+  );
+});
+
+test('restorePlan with no rows: no entries and no earlier boot, also without a boot id', (t) => {
+  const d = restoreDeck(t);
+  assert.deepEqual(restorePlan(d.deck, true), { entries: [], earlier: null });
+  d.proc.setBootId(null);
+  assert.deepEqual(restorePlan(d.deck, false), { entries: [], earlier: null });
+  assert.deepEqual(restorePlan(restartedMachine(t).deck, false, []), {
+    entries: [],
+    earlier: null,
+  });
 });
 
 // --- runRestore with tabs ----------------------------------------------------------------------

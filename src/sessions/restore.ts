@@ -3,7 +3,7 @@
 // 7), and only while there is memory to spare.
 import { unknownFlags } from '../claude/launch.ts';
 import { isSessionId } from '../claude/live.ts';
-import { RefError, ResumeRefusedError } from '../platform/errors.ts';
+import { RefError, ResumeRefusedError, SkydeckError } from '../platform/errors.ts';
 import { NS_PER_MINUTE, NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
 import type { EventRow } from '../store/types.ts';
@@ -13,6 +13,7 @@ import { shellQuote } from '../text/shell.ts';
 import type { Deck } from './deck.ts';
 import { ingestSpool } from './ingest.ts';
 import { launchSpec } from './launch.ts';
+import { buildList, flatRows } from './list.ts';
 import type { ListRow } from './list.ts';
 import { loadRows } from './load.ts';
 import { refresh } from './refresh.ts';
@@ -46,28 +47,27 @@ const PRESELECT_WINDOW_NS = 2n * NS_PER_MINUTE;
 /** How long restore waits between two looks for the start events of a batch. */
 const START_CHECK_MS = 1000;
 
+/** The latest earlier boot (design 7.8) and the time of its last event. */
+export interface EarlierBoot {
+  bootId: string;
+  lastEventNs: Ns;
+}
+
 /**
- * 7.8 set and preselection, in the order of `rows` (pass list order).
- *
- * The latest earlier boot is the boot other than `currentBootId` whose last event is the latest,
- * among the boots that have a `start` or `observed` event (a session was held in it). The default
- * set is the rows marked `ended-unexpectedly`, not done and not expired, whose last holding was in
- * that boot; `all` takes such rows from every boot, the current one included. An entry is
- * preselected when no exit was recorded, or when it ended at most two minutes before the last
- * event of its own boot (D17). `scripted` and `scripted-end` events (design 5.3) are left out of both: a scripted run
- * neither makes a boot the latest earlier one nor moves the last event of its boot.
+ * Of each boot: its last event, and whether a session was held in it (a `start` or `observed`
+ * event). `scripted` and `scripted-end` events (design 5.3) are left out of both: a scripted run is
+ * not what the user had open, so it neither makes a boot the latest earlier one nor moves the last
+ * event of its boot.
  */
-export function planRestore(
-  rows: readonly ListRow[],
-  events: readonly EventRow[],
-  currentBootId: string | null,
-  all: boolean,
-): RestoreEntry[] {
+function bootsOf(events: readonly EventRow[]): {
+  lastEventOf: Map<string, Ns>;
+  heldIn: Set<string>;
+} {
   const lastEventOf = new Map<string, Ns>();
   const heldIn = new Set<string>();
   for (const event of events) {
     if (event.kind === 'scripted' || event.kind === 'scripted-end') {
-      continue; // a scripted run (design 5.3) is not what the user had open: it moves no boot's end
+      continue;
     }
     const last = lastEventOf.get(event.bootId);
     if (last === undefined || event.timeNs > last) {
@@ -77,16 +77,47 @@ export function planRestore(
       heldIn.add(event.bootId);
     }
   }
-  let earlierBoot: string | null = null;
-  let earlierLastNs = 0n;
+  return { lastEventOf, heldIn };
+}
+
+/**
+ * Design 7.8's latest earlier boot: of the boots other than `currentBootId` in which a session was
+ * held (a `start` or `observed` event), the one whose last event is the latest; `scripted` and
+ * `scripted-end` events count for neither. null when there is none.
+ */
+export function latestEarlierBoot(
+  events: readonly EventRow[],
+  currentBootId: string | null,
+): EarlierBoot | null {
+  const { lastEventOf, heldIn } = bootsOf(events);
+  let earlier: EarlierBoot | null = null;
   for (const bootId of [...heldIn].sort()) {
-    const lastNs = lastEventOf.get(bootId) ?? 0n;
-    if (bootId !== currentBootId && (earlierBoot === null || lastNs > earlierLastNs)) {
-      earlierBoot = bootId;
-      earlierLastNs = lastNs;
+    const lastEventNs = lastEventOf.get(bootId) ?? 0n;
+    if (bootId !== currentBootId && (earlier === null || lastEventNs > earlier.lastEventNs)) {
+      earlier = { bootId, lastEventNs };
     }
   }
+  return earlier;
+}
 
+/**
+ * 7.8 set and preselection, in the order of `rows` (pass list order).
+ *
+ * The default set is the rows marked `ended-unexpectedly`, not done and not expired, whose last
+ * holding was in the latest earlier boot (latestEarlierBoot); `all` takes such rows from every boot,
+ * the current one included. An entry is preselected when no exit was recorded, or when it ended at
+ * most two minutes before the last event of its own boot (D17). `scripted` and `scripted-end` events
+ * (design 5.3) are left out of both: a scripted run neither makes a boot the latest earlier one nor
+ * moves the last event of its boot.
+ */
+export function planRestore(
+  rows: readonly ListRow[],
+  events: readonly EventRow[],
+  currentBootId: string | null,
+  all: boolean,
+): RestoreEntry[] {
+  const earlierBoot = latestEarlierBoot(events, currentBootId)?.bootId ?? null;
+  const { lastEventOf } = bootsOf(events);
   const entries: RestoreEntry[] = [];
   for (const row of rows) {
     const holding = row.session.lastHolding;
@@ -116,6 +147,57 @@ export function planRestore(
   }
   return entries;
 }
+
+export interface RestorePlan {
+  entries: RestoreEntry[];
+  earlier: EarlierBoot | null;
+}
+
+/**
+ * The plan of a restore, shared by the command and the window's server (S2 11.1): planRestore over
+ * `rows` (default loadRows(deck)) in list order (`ls --all`), with the boot id the rows were derived
+ * with as the current one — never a second read, so a read that failed for the rows and one that
+ * worked are not mixed (design 7.6) —, and the latest earlier boot. Without that boot id it refuses
+ * (SkydeckError): every process would look dead, so this boot's running sessions would be offered,
+ * and the guard could not see that they run (principle 7). No rows: no entries and no earlier boot.
+ * Refreshes nothing: callers refresh first. The events are read once.
+ */
+export function restorePlan(
+  deck: Deck,
+  all: boolean,
+  rows: readonly ListRow[] = loadRows(deck),
+): RestorePlan {
+  const [first] = rows;
+  if (first === undefined) {
+    return { entries: [], earlier: null };
+  }
+  const { bootId } = first.session;
+  if (bootId === null) {
+    throw new SkydeckError(
+      'cannot read the boot id (/proc/sys/kernel/random/boot_id): restore cannot tell which sessions are still running',
+    );
+  }
+  const inOrder = flatRows(
+    buildList(rows, { showAll: true, filter: '', nowNs: deck.platform.clock.nowNs() }),
+  );
+  const events = deck.store.events();
+  return {
+    entries: planRestore(inOrder, events, bootId, all),
+    earlier: latestEarlierBoot(events, bootId),
+  };
+}
+
+export interface RestoreHooks {
+  refuse?(sessionId: string): string | null;
+  gone?(sessionId: string): string | null;
+  signal?: AbortSignal;
+  stopAfterEmptyBatch?: boolean;
+}
+
+export type ReportOutcome = {
+  sessionId: string;
+  kind: 'started' | 'timed-out' | 'failed' | 'not-started' | 'handed-off' | 'printed';
+};
 
 export interface RestoreOutcome {
   /** Session ids with a start event in time. */
