@@ -611,7 +611,9 @@ every 500 ms while the server starts); otherwise `resume` and
 one log line by kind (`failureKind`); `restore` streams every `write` as a line, and a rejection
 after the first line ends the answer without an outcome (the client says the server stopped
 answering), one log line by kind. A refused body is logged by its kind, never by its text, as
-stage A's routes.
+stage A's routes. The order of the answers, as measured (ruled on review 2): 413 (a body over
+64 KiB), 400 `body: not UTF-8`, 404 (no `launch`), 400 (the parser's kind), 503 (`launchState`),
+then the route's own answer.
 
 **Tests** (platform: `testPlatform` for the parser; the real sockets of stage A's control tests)
 - Protocol: each new kind and route accepted at its limits and refused one over (1,001 ids, a
