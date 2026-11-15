@@ -34,8 +34,9 @@
 //   FAKE_SERVE_WINDOW_EXPECTED_MS  plan C20: /status reports `windowExpectedMs`: this many ms while
 //                           it starts (FAKE_SERVE_STARTING_MS), then counting down from the end of
 //                           its start (`ready`, without a start), null once it is down to 0 or
-//                           reports a page — as the server's page mark does; `json:<JSON value>`
-//                           reports that value as it is (`json:"3000"`, `json:-1`, `json:null`).
+//                           reports a page — as the server's page mark does (so 0 is null from the
+//                           start, also while it starts); `json:<JSON value>` reports that value
+//                           as it is, all the time (`json:0`, `json:"3000"`, `json:-1`, `json:null`).
 //                           Default: none (a server before stage C)
 //   FAKE_SERVE_STATUS       pages-only: /status answers `{ pages }` and nothing else (an old
 //                           server's answer the command line's client cannot read whole)

@@ -2276,24 +2276,31 @@ function assertWaitedForTheServer(requests: readonly Request[], what = ''): void
   assert.equal(looks[end]?.windowExpectedMs, null, `${what} went on at the server's word`);
 }
 
+/** A request of ownRequests, with when its answer came (performance.now()). */
+interface TimedRequest extends Request {
+  answeredMs: number | null;
+}
+
 /** A net that records the control requests of one run only: `r.requests` of two runs at once mix. */
-function ownRequests(): { net: (net: Net) => Net; requests: Request[] } {
-  const requests: Request[] = [];
+function ownRequests(): { net: (net: Net) => Net; requests: TimedRequest[] } {
+  const requests: TimedRequest[] = [];
   return {
     requests,
     net: (base) => ({
       ...base,
       async requestUnix(path, request) {
-        const entry: Request = {
+        const entry: TimedRequest = {
           method: request.method,
           path: request.path,
           body: request.body,
           answer: null,
           atMs: performance.now(),
+          answeredMs: null,
         };
         requests.push(entry);
         const answer = await base.requestUnix(path, request);
         entry.answer = answer;
+        entry.answeredMs = performance.now();
         return answer;
       },
     }),
@@ -2458,11 +2465,24 @@ describe('the second window after a cold start: the server expects the old windo
       assert.equal(r.stderr.split(WAITING).length, 2, `${name}: the line once`);
       assertWaitedForTheServer(requests, name);
     }
-    const left = (requests: Request[]): number =>
-      Number(statusesBeforeToken(requests)[0]?.windowExpectedMs);
+    // The server counted each first look between its request and its answer: the time between the
+    // two counts lies between the gap of those windows and their span, whatever the load (and the
+    // rounding up to a whole ms moves each answer by less than 1).
+    const firstLook = (requests: readonly TimedRequest[]) => {
+      const look = requests.find((q) => q.method === 'GET' && q.path === '/status');
+      assert.ok(look?.answer != null && look.answeredMs !== null, 'a first look, answered');
+      const left = (look.answer.body as StatusBody).windowExpectedMs;
+      assert.ok(typeof left === 'number', JSON.stringify(look.answer.body));
+      return { left, sentMs: look.atMs, answeredMs: look.answeredMs };
+    };
+    const fa = firstLook(a.requests);
+    const fb = firstLook(b.requests);
+    const least = fb.sentMs - fa.answeredMs;
+    const most = fb.answeredMs - fa.sentMs;
+    assert.ok(least >= 1200, `the second looked 1.2 s after the first was answered (${least} ms)`);
     assert.ok(
-      left(b.requests) <= left(a.requests) - 1199,
-      `the second took what the server had left: ${left(a.requests)} ms, then ${left(b.requests)} ms`,
+      fb.left <= fa.left - least + 1 && fb.left >= fa.left - most - 1,
+      `the second took what the server had left: ${fa.left} ms, then ${fb.left} ms, ${least} to ${most} ms later`,
     );
   });
 

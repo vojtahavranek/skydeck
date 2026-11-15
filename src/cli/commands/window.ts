@@ -450,7 +450,8 @@ async function pageWithin(platform: Platform, client: ControlClient, ms: number)
   }
 }
 
-/** Plan C20's line, said once when a command waits for the window the server expects back. */
+/** Plan C20's line, said once when a command waits for the window the server expects back; the
+ *  `say` it is given adds the `skydeck: ` of the command's other diagnostic lines. */
 const WAITING_LINE =
   'waiting up to 7 s for the open window to come back; --new-window opens one now';
 

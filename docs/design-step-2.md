@@ -331,8 +331,8 @@ of its start until a page connects or 7 seconds have passed, and says so in `GET
 (`windowExpectedMs`, 8.3). The wait is the server's fact, not each command's guess: unless
 `--new-window`, `--print-url` or `--new-secret` (its old windows are refused, so none comes back),
 step 2 first reads `GET /status`, and while the server is starting with `windowExpectedMs` set, or
-`windowExpectedMs` is above 0, and no page is connected, it prints `waiting up to 7 s for the open
-window to come back; --new-window opens one now` on standard error once and looks again every 100
+`windowExpectedMs` is above 0, and no page is connected, it prints `skydeck: waiting up to 7 s
+for the open window to come back; --new-window opens one now` on standard error once and looks again every 100
 ms — every command that would open a window, a second `skydeck window` meanwhile too, so they wait
 for one deadline. It waits at most the start wait (10 seconds) and 7 seconds more of its own, from
 its first look, whatever the server says: a mark that is stale never leaves the user without a
