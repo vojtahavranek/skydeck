@@ -1530,6 +1530,13 @@ Any number of pages may attach to one terminal; they share its ordered stream. I
 them goes to the program in the order the server receives it. `list` goes to every page; each
 page's `view` state is its own. Notifications go to one page only (13).
 
+Attention (12.4, 13; stage B's plan, B20) is the server's, so it is the same in every window: the
+marks, the title bar's count and the window title — but for what a window lists at all: a done
+session that has stopped counts only in a window that shows done sessions (`showDone`, 12.8); and
+`needYou.order` follows each window's own filter and fold. A session seen in any window that has focus is seen for all of them, and a typing
+from any window counts. A notification goes to the one window that had focus last, and only while
+no window has it.
+
 #### 8.2.8 Backpressure
 
 The server never pauses a program; it may stop reading a keeper's connection (7.3, Reading), which
@@ -1722,7 +1729,12 @@ and turn ends (10.3); check the keep-alive. Every second tick: the refresh every
 (design 5.3: ingest, reconcile, transcript scan, lock sweep), the automatic pull-request refresh
 (design 7.3) for the sessions the pages list, and a reload of the rows when that refresh saved
 something, a live file or its trust changed, another process committed to the store
-(`Store.dataVersion()`), or a minute passed — the interactive list's rule. The server then sends
+(`Store.dataVersion()`), or a minute passed — the interactive list's rule — or when a row's last
+holding that was alive at the last load is gone now (stage B, ruled 2026-11-15): a session's end
+event can be ingested before its process exits, `ended-unexpectedly` (design 6.3) and a window end
+judged on it (12.4) need that process gone, and an exit after the live file went moves no change
+mark, so without it the mark would wait for the minute. A /proc read that fails, or a boot id that
+cannot be read, is not taken for gone (design 5.5). The server then sends
 `list` to every page whose view model changed. An edit a page made (12.5) does not wait for that:
 the server's own writes move no change mark, so after one the server loads the rows again and
 sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
@@ -1999,18 +2011,42 @@ gives them back when its program never started (7.8).
 - `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other), or
   configuration `"terminal": "window"`, sends the request to the server (8.3) instead of starting
   anything itself: `resume` sends the session id its `<ref>` resolved to, `new` sends its current
-  directory, `--label`, `--group` and the flags after `--`. It never starts a server: the server's
-  environment becomes every session's (5.2), so only `skydeck window` starts one. With no server
-  running it says `the window is not running; run skydeck window first, or use --here` and exits 1.
-  It prints the answer's lines on stderr and exits with the answer's code; then, when no page is
-  connected, it starts a window as `skydeck window` does (5.3). When the server does not answer
-  within 30 seconds it says so and exits 1, printing no command (it prepared nothing; the server may
-  have started the session: `skydeck` shows whether it runs). With `"terminal": "window"`, `--tab` means the window too, and so does
-  `R` in the interactive list.
+  directory, `--label`, `--group` and the flags after `--`. It never starts, restarts or signals a
+  server: the server's environment becomes every session's (5.2), so only `skydeck window` starts
+  one. It finds the server as `skydeck window` does (5.1) and uses one of this checkout whatever its
+  build (the window's own Resume runs on that build too). With no server running it says `the
+  window is not running; run skydeck window first, or use --here` and exits 1; a server that does
+  not answer, or is still starting after the 5 seconds, gets 5.1's line; one of another checkout
+  `the window's server runs from <checkout>, not from this checkout; skydeck window --restart here
+  replaces it, or use --here`; one of a build before stage C (it answers the request 404) `the
+  window's server is older than this command and cannot start sessions for it; run skydeck window
+  to restart it, or use --here` — each exit 1, and none of them is refused under `CLAUDECODE`, since
+  no server is started (plan C11). It prints the answer's lines on stderr, sanitised (the server may
+  be of another build), and exits with the answer's code; then, when no page is connected, it
+  starts a window as `skydeck window` does (5.1 step 2, the wait of a window the server expects
+  back included; 5.3) — not after a code of 2 or 3, a refusal of usage or reference that started
+  nothing. A window that cannot be opened is one line, `the window could not be opened: <reason>;
+  run skydeck window`, and the exit code stays the answer's. **Under `CLAUDECODE` a command never
+  opens a window** (5.1 refuses `skydeck window` there, and this must not be a second door): it may
+  still ask a running server to start the session, and with no page connected it says `no window
+  is open; run skydeck window in a terminal of your own` (plan C12). When the server does not
+  answer within 30 seconds it says so and exits 1, printing no command (it prepared nothing; the
+  server may have started the session: `skydeck` shows whether it runs); while the server is
+  starting it asks again every 500 ms within those 30 seconds, and a server still starting after
+  them started nothing; one that is stopping is reported with `, or use --here`, and a body the
+  server refuses (a label over 1,024 bytes; a prompt after `--` over 64 KiB, which the command
+  refuses so before it sends anything) with `; use --here` (plan C 2.5). A connection that fails
+  after the request reached the server and before its answer says that the server may have
+  started the session (or the restore), as the 30 seconds do. With
+  `"terminal": "window"`, `--tab` means the window too, and so does `R` in the interactive list,
+  whose lines end before `, or use --here`; `R` opens no window.
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
-  sends the selected session ids (and `--all`) to `POST /restore`. The server takes design 7.8's
-  set from freshly refreshed rows, keeps the entries the user selected (an id no longer in the set
-  is reported `failed <short>: no longer offered for restore`), and runs `runRestore` with the
+  sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
+  after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
+  terminals start at the window's size and a start dialog can be answered. The server takes
+  design 7.8's set from freshly refreshed rows, keeps the entries the user selected (an id no
+  longer in the set is reported `failed <short>: no longer offered for restore`), and runs
+  `runRestore` with the
   window terminal (11.3), the selected entries in the set's order. Each terminal starts at the area
   the page that had focus last reported (8.2.6), read when that terminal is opened; the
   configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`)
@@ -2188,7 +2224,8 @@ exits it settled (7.8) — each terminal of the window in state `ended` or `lost
 its exit time is the server's clock) that started its program is judged, once, at the first refresh
 where its session's row no longer runs and that row's last holder is gone (a lost keeper's program
 lives on its SIGHUP for a moment, and its end event can be ingested before it exits, while
-`ended-unexpectedly` needs the holder gone, design 6.3):
+`ended-unexpectedly` needs the holder gone, design 6.3; the rows are loaded again once that holder
+is gone, 10.1):
 its session, the one it shows or else the one it was opened for, gets `window_end_seq` and, as
 `window_end_ns`, the exit's time when that row is marked `ended-unexpectedly`; nothing when the
 session ended deliberately. A terminal that leaves the list is forgotten. It is the same end when the stored `window_end_ns` equals the exit's
@@ -3294,7 +3331,7 @@ grants a permission through Playwright.
   Playwright's version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
   `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
-  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 30
+  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 45
   minutes.
 
 ## 18. Manual checks for step 2

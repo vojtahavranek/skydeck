@@ -294,6 +294,8 @@ export async function startPages(
     platform?: (platform: Platform) => Platform;
     /** PagesDeps.starting (task 23). */
     starting?: () => boolean;
+    /** PagesDeps.seen (plan B task 54). */
+    seen?: PagesDeps['seen'];
   } = {},
 ): Promise<PagesFixture> {
   const d = testDeck(t);
@@ -339,6 +341,7 @@ export async function startPages(
       logs.push(line);
     },
     ...(options.starting === undefined ? {} : { starting: options.starting }),
+    ...(options.seen === undefined ? {} : { seen: options.seen }),
   });
   const listener = await platform.net.listenHttp(
     { host: '127.0.0.1', port: 0 },
