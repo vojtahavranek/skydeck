@@ -77,7 +77,12 @@ const DONE: Answer = { ok: true, lines: [], error: null, sessionId: null };
 const STILL_RUNS = 'the program still runs; end it inside claude';
 const NO_TERMINAL = 'this terminal is no longer there';
 const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 characters';
-const LINK_FAILED = 'the link could not be opened: Edge could not be started';
+/** S2 9.6: openLink could not start the program `window.links` names. */
+const LINK_FAILED = {
+  default:
+    'the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)',
+  edge: 'the link could not be opened: Edge could not be started',
+} as const;
 const NOT_AN_ACTION = 'skydeck cannot do that action';
 /** Plan D 2.5: the row of a `new` terminal whose session the store does not know yet (A28). */
 const NOT_STARTED = 'this session has not started yet; edit it once it runs';
@@ -320,7 +325,9 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'open-link': {
         const link = linkToOpen(action.url);
         if (link === null) return refusal(NOT_A_LINK);
-        return (await deps.openLink(link)) ? DONE : refusal(LINK_FAILED);
+        return (await deps.openLink(link))
+          ? DONE
+          : refusal(LINK_FAILED[deps.deck.config.window.links]);
       }
       case 'label':
       case 'group':

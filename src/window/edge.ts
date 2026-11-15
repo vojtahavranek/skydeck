@@ -1,9 +1,10 @@
 /**
- * Starting Windows programs (S2 2): Edge for the window (S2 5.3) and for the links a page opens
- * (S2 9.6). skydeck starts exactly two Windows programs, `window.edge` and the keep-alive's
- * `wsl.exe` (keepalive.ts), and both go through `startWindowsProgram`: an argument list, never a
- * shell, detached, stdio ignored, in a Windows directory, with `WSL_INTEROP` pointing at the
- * runtime directory's interop link (S2 6.4) when there is one.
+ * Starting Windows programs (S2 2): Edge for the window (S2 5.3), and for the links a page opens
+ * (S2 9.6) `rundll32.exe` — the Windows default browser — or, with `window.links` "edge", Edge.
+ * skydeck starts exactly three Windows programs, `window.edge`, `rundll32.exe` and the
+ * keep-alive's `wsl.exe` (keepalive.ts), and all go through `startWindowsProgram`: an argument
+ * list, never a shell, detached, stdio ignored, in a Windows directory, with `WSL_INTEROP`
+ * pointing at the runtime directory's interop link (S2 6.4) when there is one.
  */
 
 import { join } from 'node:path';
@@ -13,6 +14,11 @@ import type { Detached, Env, Platform } from '../platform/types.ts';
 import { describeError } from '../sessions/problems.ts';
 import { driveC } from './drive.ts';
 import { deriveProfileDirUnder, edgeArgs, linkToOpen } from './windows.ts';
+
+/** S2 9.6: what opens a link in the Windows default browser (`window.links` "default"). */
+const RUNDLL32_EXE = '/mnt/c/Windows/System32/rundll32.exe';
+/** Its first argument: hands the rest of the command line, the address, to the shell. */
+const FILE_PROTOCOL_HANDLER = 'url.dll,FileProtocolHandler';
 
 /** A launch token as the address carries it: base64url (S2 8.2.2). */
 const TOKEN = /^[A-Za-z0-9_-]+$/;
@@ -151,9 +157,14 @@ export async function startEdge(
 }
 
 /**
- * S2 9.6: opens `url` in the user's own Edge profile — `window.edge` with the re-serialised URL as
- * its only argument, no profile folder. False, starting nothing, for a URL linkToOpen refuses; false
- * too when Edge cannot be started. True once it was started (it is not waited for).
+ * S2 9.6: opens `url` where `window.links` says. "default": the Windows default browser —
+ * `rundll32.exe` with exactly two arguments, `url.dll,FileProtocolHandler` and the re-serialised
+ * URL, which holds no white space and no control character (the parser removes tab and line
+ * breaks, percent-encodes the rest, and fails a host or a port that keeps one), so that it is one
+ * word of the Windows command line. "edge": the user's own Edge profile — `window.edge` with the
+ * re-serialised URL as its only argument, no profile folder. False, starting nothing, for a URL
+ * linkToOpen refuses; false too when the program cannot be started. True once it was started (it
+ * is not waited for).
  */
 export async function openLink(
   platform: Platform,
@@ -165,8 +176,10 @@ export async function openLink(
   if (link === null) {
     return false;
   }
+  const [command, args] =
+    window.links === 'edge' ? [window.edge, [link]] : [RUNDLL32_EXE, [FILE_PROTOCOL_HANDLER, link]];
   try {
-    await startWindowsProgram(platform, window.edge, [link], interop);
+    await startWindowsProgram(platform, command, args, interop);
     return true;
   } catch {
     return false;

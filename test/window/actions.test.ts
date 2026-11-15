@@ -729,11 +729,41 @@ test('open-link passes on the re-serialised URL', async (t) => {
   assert.deepEqual(h.links, ['https://github.com/a%20b']);
 });
 
-test('open-link that Edge cannot open answers so', async (t) => {
+/** `d`'s deck with `window.links` set to `links`. */
+function deckWithLinks(d: TestDeck, links: 'default' | 'edge'): Deck {
+  return { ...d.deck, config: { ...d.deck.config, window: { ...d.deck.config.window, links } } };
+}
+
+test('open-link that the default browser cannot open answers so, naming window.links "edge"', async (t) => {
   const d = testDeck(t);
-  const h = harness(d, { openLink: async () => false });
+  assert.equal(d.deck.config.window.links, 'default');
+  const words =
+    'the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)';
+  for (const deck of [d.deck, deckWithLinks(d, 'default')]) {
+    const h = harness(d, { deck, openLink: async () => false });
+    const result = await h.act({ t: 'act', id: 4, kind: 'open-link', url: 'https://example.com/' });
+    assert.deepEqual(result, refused(4, words));
+  }
+});
+
+test('open-link that Edge cannot open (window.links "edge") answers so', async (t) => {
+  const d = testDeck(t);
+  const h = harness(d, { deck: deckWithLinks(d, 'edge'), openLink: async () => false });
   const result = await h.act({ t: 'act', id: 4, kind: 'open-link', url: 'https://example.com/' });
   assert.deepEqual(result, refused(4, 'the link could not be opened: Edge could not be started'));
+});
+
+test('open-link of an address linkToOpen refuses gives the same refusal whatever window.links says, and opens nothing', async (t) => {
+  const d = testDeck(t);
+  for (const links of ['default', 'edge'] as const) {
+    const h = harness(d, { deck: deckWithLinks(d, links) });
+    const result = await h.act({ t: 'act', id: 4, kind: 'open-link', url: 'file:///etc/passwd' });
+    assert.deepEqual(
+      result,
+      refused(4, 'skydeck opens only http and https links of at most 2,048 characters'),
+    );
+    assert.deepEqual(h.links, []);
+  }
 });
 
 // --- the unexpected ---------------------------------------------------------------------------

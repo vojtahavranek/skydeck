@@ -9,6 +9,8 @@ export interface WindowConfig {
   edge: string; // absolute path
   profileDir: string | null; // an absolute Windows path, `<letter>:\…`
   keepAlive: 'wsl' | 'off';
+  /** S2 9.6: where a link the window opens goes — the Windows default browser, or `edge`. */
+  links: 'default' | 'edge';
 }
 
 export interface Config {
@@ -46,6 +48,7 @@ export const DEFAULT_CONFIG: Config = {
     edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
     profileDir: null,
     keepAlive: 'wsl',
+    links: 'default',
   },
 };
 
@@ -117,7 +120,7 @@ function isTicketUrl(value: unknown): value is string | null {
  * positive integer; `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute;
  * `claudeCommand` empty; `ticketUrl` that isTicketUrl refuses (S2 16.4); in `window` (S2 16.4): an
  * unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
- * `keepAlive` neither "wsl" nor "off".
+ * `keepAlive` neither "wsl" nor "off", `links` neither "default" nor "edge".
  *
  * `claudeHome`, `ticketUrl` and `wezterm.domain` may also be `null`, which is their default; an
  * empty `wezterm.domain` is an error like an empty `claudeCommand`.
@@ -238,6 +241,12 @@ export function parseConfig(text: string, source: string): Config {
                 fail('"window.keepAlive" must be "wsl" or "off"');
               }
               config.window.keepAlive = item;
+              break;
+            case 'links':
+              if (item !== 'default' && item !== 'edge') {
+                fail('"window.links" must be "default" or "edge"');
+              }
+              config.window.links = item;
               break;
             default:
               fail(`unknown key "window.${name}"`);
