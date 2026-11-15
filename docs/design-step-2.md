@@ -1826,7 +1826,11 @@ gives them back when its program never started (7.8).
   A session resumed in a WSL terminal runs there; within two seconds the window lists it as
   "running in another terminal" (7.9). The guard sees every holder wherever it runs, so a session
   open in the window is refused as `running (pid <n>)` like any other running session; `show` adds
-  `(in the skydeck window)` to a holder that descends from a keeper (7.5's rule).
+  `(in the skydeck window)` to a holder's line when the holder is a keeper's program or descends
+  from it (7.5's walk: up to 8 parents below the program, so 9 below the keeper) and that keeper is
+  alive by its `.pid` line in the runtime directory the store records (4.2, design 5.5's rule). It
+  needs no running server: it creates nothing and connects to nothing, and with no runtime
+  directory, no keeper line or no boot id there is no mark. `show --json` is unchanged.
 - `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other), or
   configuration `"terminal": "window"`, sends the request to the server (8.3) instead of starting
   anything itself: `resume` sends the session id its `<ref>` resolved to, `new` sends its current
