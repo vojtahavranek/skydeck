@@ -255,12 +255,55 @@ test(
     f.prs.fetch([PR1]);
     await f.prs.idle();
     assert.deepEqual(f.logs, ['prs: the fetch failed (Error (ERR_SQLITE_ERROR))']);
-    assert.equal(f.changes(), 0, 'nothing saved');
+    assert.equal(levelOf(f.d, PR1), 'unfetched', 'nothing saved');
+    assert.equal(
+      f.changes(),
+      1,
+      'told all the same: a run that throws may have saved a batch first',
+    );
     failing = false;
     f.prs.fetch([PR1]);
     await f.prs.idle();
     assert.equal(levelOf(f.d, PR1), 'approved-green');
+    assert.equal(f.changes(), 2);
+  },
+);
+
+test(
+  'a refresh that throws after it saved a batch still tells the lists (ruled on #90, review 2)',
+  LIMIT,
+  async (t) => {
+    let saves = 0;
+    const f = fixture(t, {
+      deck: (deck) =>
+        deckWith(deck, {
+          store: {
+            savePrResult(url, result) {
+              if (++saves > 50) {
+                throw Object.assign(new Error(`database is locked at ${url}`), {
+                  code: 'ERR_SQLITE_ERROR',
+                  errcode: 5,
+                });
+              }
+              deck.store.savePrResult(url, result);
+            },
+          },
+        }),
+    });
+    for (let n = 10; n < 70; n++)
+      attachManualPr(f.d.deck, S1, `https://github.com/acme/web/pull/${n}`);
+    f.prs.refresh(S1);
+    await f.prs.idle();
+    const levels = loadRows(f.d.deck)
+      .flatMap((row) => row.prs)
+      .map((pr) => pr.level);
+    assert.equal(
+      levels.filter((level) => level === 'approved-green').length,
+      50,
+      'the first batch saved',
+    );
     assert.equal(f.changes(), 1);
+    assert.deepEqual(f.logs, ['prs: the fetch failed (Error (ERR_SQLITE_ERROR))']);
   },
 );
 

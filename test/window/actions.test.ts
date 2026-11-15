@@ -136,6 +136,8 @@ function harness(
     deck?: Deck;
     /** Called at each changed(), after it is recorded in `told`. */
     changed?: () => void;
+    /** Called at each prs.fetch(), after it is recorded in `told`. */
+    fetch?: () => void;
   } = {},
 ): Harness {
   const events: Events = [];
@@ -167,7 +169,10 @@ function harness(
       options.changed?.();
     },
     prs: {
-      fetch: (urls) => told.push(`fetch ${urls.join(' ')}`),
+      fetch: (urls) => {
+        told.push(`fetch ${urls.join(' ')}`);
+        options.fetch?.();
+      },
       refresh: (sessionId) => told.push(`refresh ${sessionId}`),
     },
   });
@@ -1030,6 +1035,48 @@ test('changed() comes after the write: at that moment the store already holds it
     ['L', 'G-1', 'N', false, 1],
     ['L', 'G-1', 'N', false, 0],
   ]);
+});
+
+test('a committed write answers ok even when changed() or prs.fetch throws; one log line by kind, nothing of the text (ruled on #90, review 2)', async (t) => {
+  const d = testDeck(t);
+  knownSession(d);
+  const h = harness(d, {
+    changed() {
+      throw new RangeError(`cannot tell ${SECRET}`);
+    },
+  });
+  const url = `https://github.com/acme/${SECRET}/pull/7`;
+  const edits: ActMessage[] = [
+    label(SECRET),
+    group(SECRET),
+    note(SECRET, ''),
+    { t: 'act', id: 44, kind: 'done', sessionId: S1 },
+    { t: 'act', id: 45, kind: 'undone', sessionId: S1 },
+    { t: 'act', id: 47, kind: 'pr-add', sessionId: S1, url },
+    { t: 'act', id: 48, kind: 'pr-rm', sessionId: S1, url },
+  ];
+  for (const action of edits) {
+    const result = await h.act(action);
+    assert.equal(result.ok, true, `${action.kind}: ${JSON.stringify(result)}`);
+  }
+  assert.equal(d.deck.store.meta(S1)?.label, SECRET);
+  assert.equal(d.deck.store.meta(S1)?.note, SECRET);
+  assert.ok(h.told.includes(`fetch ${url}`), 'pr-add still asks for its fetch');
+  assert.deepEqual(
+    h.logs,
+    ['label', 'group', 'note', 'done', 'undone', 'pr-add', 'pr-rm'].map(
+      (kind) => `act ${kind}: the lists were not told (RangeError)`,
+    ),
+  );
+
+  const fetching = harness(d, {
+    fetch() {
+      throw new TypeError(`cannot fetch ${SECRET}`);
+    },
+  });
+  const added = await fetching.act({ t: 'act', id: 47, kind: 'pr-add', sessionId: S1, url });
+  assert.deepEqual(added, ok(47, [`attached ${url}`]));
+  assert.deepEqual(fetching.logs, ['act pr-add: the fetch was not asked for (TypeError)']);
 });
 
 describe('note (S2 12.5; plan D9, D10)', () => {
