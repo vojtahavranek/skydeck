@@ -5,7 +5,7 @@
 // fakes for the registry, the pages, the keep-alive and the interop link; one case of task 57 runs
 // end to end, on a real registry with a real keeper the test starts and kills itself.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
@@ -1419,5 +1419,211 @@ describe('pull requests (design 7.3)', () => {
       ['n0=1'],
       'only the pull request of the listed session',
     );
+  });
+});
+
+describe('attention (plan B 2.7; S2 10.1, 10.3)', () => {
+  /** A tick on the fixture's fakes with `attention`, every call of which goes into `order`. */
+  function withAttention(
+    t: TestContext,
+    f: Fixture,
+    order: string[],
+    answers: { look?: () => boolean; refreshed?: () => boolean } = {},
+  ): Tick {
+    const tick = createTick({
+      ...f.deps,
+      hub: {
+        ...f.deps.hub,
+        list: () => {
+          order.push('map');
+          return f.deps.hub.list();
+        },
+      },
+      keepAlive: {
+        tick() {
+          order.push('keep-alive');
+          return Promise.resolve();
+        },
+      },
+      attention: {
+        look() {
+          order.push('look');
+          return answers.look?.() ?? false;
+        },
+        refreshed() {
+          order.push('refreshed');
+          return answers.refreshed?.() ?? false;
+        },
+      },
+    });
+    t.after(() => tick.stop());
+    return tick;
+  }
+
+  test('look() every second before the keep-alive; refreshed() after each refresh that worked, after the mapping', async (t) => {
+    const f = fixture(t);
+    const order: string[] = [];
+    const tick = withAttention(t, f, order);
+    for (let i = 0; i < 4; i++) await tick.run();
+    assert.deepEqual(order, [
+      'look',
+      'keep-alive',
+      'map',
+      'refreshed',
+      'look',
+      'keep-alive',
+      'look',
+      'keep-alive',
+      'map',
+      'refreshed',
+      'look',
+      'keep-alive',
+    ]);
+  });
+
+  test('the lists are pushed when look() says true; a refresh pushes them as before, whatever refreshed() says', async (t) => {
+    const f = fixture(t);
+    let looked = false;
+    const tick = withAttention(t, f, [], { look: () => looked, refreshed: () => true });
+    await tick.run(); // a refresh: one push
+    assert.equal(f.pushes(), 1);
+    await tick.run(); // no refresh, the look says false: none
+    assert.equal(f.pushes(), 1);
+    await tick.run(); // a refresh: one push, also when the look says true
+    looked = true;
+    await tick.run(); // no refresh, the look says true: one
+    assert.equal(f.pushes(), 3);
+    await tick.run(); // a refresh and a look that says true: still one
+    assert.equal(f.pushes(), 4);
+  });
+
+  test('a refresh that fails calls no refreshed(); the look goes on at every tick', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    let failing = true;
+    const f = fixture(t, {
+      d,
+      deck: (deck) =>
+        deckWith(deck, {
+          store: {
+            transaction: <T>(fn: () => T): T => {
+              if (failing) throw busyError('database is locked');
+              return deck.store.transaction(fn);
+            },
+          },
+        }),
+    });
+    spoolStart(d, S2, PID, 1); // the refresh has to write
+    const order: string[] = [];
+    const tick = withAttention(t, f, order);
+    await tick.run();
+    await tick.run();
+    assert.deepEqual(
+      order.filter((call) => call !== 'keep-alive'),
+      ['look', 'look'],
+    );
+    failing = false;
+    await tick.run();
+    assert.equal(order.at(-1), 'refreshed', 'the refresh that worked');
+  });
+
+  test('a look() or refreshed() that throws anyway is logged by kind, and the tick goes on', async (t) => {
+    const f = fixture(t);
+    const order: string[] = [];
+    const tick = withAttention(t, f, order, {
+      look: () => {
+        throw new TypeError('marker-secret');
+      },
+      refreshed: () => {
+        throw new RangeError('marker-secret');
+      },
+    });
+    await tick.run();
+    await tick.run();
+    assert.deepEqual(order, ['look', 'keep-alive', 'map', 'refreshed', 'look', 'keep-alive']);
+    assert.deepEqual(f.logs, [
+      'tick: the attention look failed (TypeError)',
+      'tick: the window ends were not judged (RangeError)',
+      'tick: the attention look failed (TypeError)',
+    ]);
+    assert.equal(f.pushes(), 1, 'the refresh still pushed the lists');
+    assert.deepEqual(f.notices, [], 'not a refresh that failed');
+  });
+
+  describe('a last holder that lived at the last load and is gone now (ruled 2026-11-15 09:47Z, part b)', () => {
+    /** S1's holder PID ended its session (SessionEnd) and removed its live file, as Claude Code
+     *  does at its end, while its process still runs: the next refresh ingests the end. */
+    async function endedWhileItRuns(t: TestContext) {
+      const d = testDeck(t);
+      writeTranscript(d, S1);
+      startRunning(d, S1, PID);
+      let statFails = false;
+      const f = fixture(t, {
+        d,
+        deck: (deck) =>
+          deckWith(deck, {
+            proc: {
+              stat: (pid) => {
+                if (statFails && pid === PID) throw new Error('EIO');
+                return deck.platform.proc.stat(pid);
+              },
+            },
+          }),
+      });
+      await ticks(f, 1);
+      assert.notEqual(f.tick.rows().find((row) => row.id === S1)?.state, 'not-running');
+      const end = {
+        event: 'SessionEnd' as const,
+        timeNs: T0 - 10n * SEC,
+        pid: PID,
+        input: hookInput('SessionEnd', S1, { reason: 'other' }),
+      };
+      writeFileSync(join(d.deck.places.spoolDir, spoolName(end, 2)), spoolText(end));
+      unlinkSync(join(d.deck.places.claudeHome, 'sessions', `${PID}.json`));
+      await ticks(f, 2);
+      const row = f.tick.rows().find((candidate) => candidate.id === S1);
+      assert.equal(row?.state, 'not-running', 'the end is ingested');
+      assert.equal(row.session.lastHolding?.alive, true, 'its process still runs');
+      assert.equal(row.marks.includes('ended-unexpectedly'), false, 'not yet: the process runs');
+      return {
+        d,
+        f,
+        failStat: (fails: boolean) => {
+          statFails = fails;
+        },
+      };
+    }
+
+    test('the rows are not loaded again while it runs, nor while /proc cannot be read (unknown is not gone)', async (t) => {
+      const { f, failStat } = await endedWhileItRuns(t);
+      const loaded = f.tick.rows();
+      await ticks(f, 2);
+      assert.equal(f.tick.rows(), loaded, 'it still runs: nothing moved');
+      failStat(true);
+      await ticks(f, 2);
+      assert.equal(f.tick.rows(), loaded, 'a read that throws is not gone');
+      assert.deepEqual(f.logs, []);
+    });
+
+    test('once its process is gone the next refresh loads the rows again — the row ended unexpectedly — and the one after does not', async (t) => {
+      const { d, f } = await endedWhileItRuns(t);
+      d.proc.setProcess(PID, null);
+      await ticks(f, 2);
+      const row = f.tick.rows().find((candidate) => candidate.id === S1);
+      assert.ok(row?.marks.includes('ended-unexpectedly'), 'loaded again: no change mark moved');
+      assert.equal(row?.session.lastHolding?.alive, false);
+      const loaded = f.tick.rows();
+      await ticks(f, 2);
+      assert.equal(f.tick.rows(), loaded, 'a holding known gone moves nothing more');
+    });
+
+    test('a boot id that cannot be read loads nothing again for it', async (t) => {
+      const { d, f } = await endedWhileItRuns(t);
+      const loaded = f.tick.rows();
+      d.proc.setProcess(PID, null);
+      d.proc.setBootId(null);
+      await ticks(f, 2);
+      assert.equal(f.tick.rows(), loaded);
+    });
   });
 });
