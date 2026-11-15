@@ -109,9 +109,29 @@ export interface SessionPrRow {
   detachedAtNs: Ns | null;
 }
 
+/** S2 10.2: one row of `attention`. */
+export interface AttentionRow {
+  sessionId: string;
+  turnEndedSeq: number | null;
+  turnEndedNs: Ns | null;
+  seenSeq: number | null;
+  windowEndSeq: number | null;
+  windowEndNs: Ns | null;
+}
+/** One session's part of a write (B3): at least one of the three. */
+export interface AttentionWrite {
+  sessionId: string;
+  /** A turn end: turn_ended_seq = the next value, turn_ended_ns = this. */
+  turnEndedNs?: Ns;
+  /** A window end judged ended-unexpectedly (B10): window_end_seq = the next value, window_end_ns = this. */
+  windowEndNs?: Ns;
+  /** seen_seq = the next value, after this write's other values for the session. */
+  seen?: true;
+}
+
 /** Every key the kv table holds. */
 export type KvKey =
-  | 'schema_version' // "1"
+  | 'schema_version' // decimal: how many migrations ran ("2")
   | 'dropped_scripted' // decimal count of scripted-run events dropped at ingest
   | 'settings_hash' // sha256 hex of settings.json as install left it
   | 'settings_backup' // absolute path of the backup, or "none" when there was no settings file
@@ -129,6 +149,7 @@ export type KvKey =
   | 'window_runtime_dir' // the runtime directory the server uses (S2 4.2)
   | 'window_alarm' // when a used launch token was presented a second time (S2 8.2.2)
   | 'window_launching' // the lock of the one command that starts Edge (S2 5.1)
+  | 'attention_seq' // S2 10.2's counter, decimal
   // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
   // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
   // version wrote); one per session id.

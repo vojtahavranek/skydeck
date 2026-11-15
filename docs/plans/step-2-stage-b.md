@@ -62,7 +62,7 @@ Task 0 is `main` at 9c5cbfb (stage A complete) with this plan merged.
 
 | # | Task | Depends on | Wave | Shared files (section 1c) | Size (code + tests) |
 |---|---|---|---|---|---|
-| 50 | Migration 2 and the store's attention | 0 | 1 | `src/store/types.ts` (one line); `docs/install.md` ("Updating") | ~450 |
+| 50 | Migration 2 and the store's attention | 0 | 1 | `src/store/types.ts` (one `KvKey` line, two types, and the comment of `schema_version`); `docs/install.md` ("Updating") | ~450 |
 | 51 | Contracts and the view model of attention | 0 (D 34 merged in before its last push) | 1 | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`, `test/window/pages-stream.test.ts` (one line, ruled) | ~500 |
 | 53 | The turn-end rule and seen | 0 | 1 | — | ~350 |
 | 52 | Attention on the server: the look, the writes, the notifier | 50, 51, 53 | 2 | — | ~650 |
@@ -123,8 +123,9 @@ happens at the update, from S2 10.1, 10.2, 16.5 and step 1's `migrate` (`src/sto
   back a moment later, is a second window (stage A's known limit). Even `skydeck window` run first
   is not certain: it migrates when it opens the store, and the old server's next write can fall
   into the moment before the command asks it for its windows. **The order that is certain**
-  (ruled): close the skydeck window, then `git pull`, then `skydeck window` — the sessions live in
-  their keepers and keep running. Migration 2 reaches the user at the first `git pull` after task
+  (ruled): close every skydeck window and tab (also those of `--new-window` and `--print-url`:
+  one page left open is the same race; ruled on review A's re-check), then `git pull`, then
+  `skydeck window` — the sessions live in their keepers and keep running. Migration 2 reaches the user at the first `git pull` after task
   50 is merged, long before stage B is done, so **task 50** writes that order into
   `docs/install.md`, "Updating", in its own pull request (ruled); section 6 and task 56 give the
   same order.
@@ -149,7 +150,7 @@ same as its row here.
 
 | # | Creates | Changes |
 |---|---|---|
-| 50 | `test/helpers/schema1.ts`, `test/store/migration-2.test.ts` | `src/store/migrations.ts`, `src/store/store.ts`, `src/store/types.ts`; `test/store/store.test.ts`; `docs/design-step-2.md` (10.2), `docs/install.md` ("Updating", and the last paragraph of "Updating while the window runs") |
+| 50 | `test/helpers/schema1.ts`, `test/store/migration-2.test.ts` | `src/store/migrations.ts`, `src/store/store.ts`, `src/store/types.ts` (also the comment of `schema_version`, which says `"1"`: a comment must not state a value this task makes false; ruled on task 50's review 1); `test/store/store.test.ts`; `docs/design-step-2.md` (10.2), `docs/install.md` ("Updating", the last paragraph of "Updating while the window runs", and the second-window sentence of "Known limits of stage A", ruled on task 50's review 2) |
 | 51 | `src/window/view/attention.ts`, `test/window/view/attention.test.ts` | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`, `test/window/pages-stream.test.ts` (one line, ruled); `docs/design-step-2.md` (8.2.3, 12.1, 12.4) |
 | 53 | `src/window/seen.ts`, `test/window/seen.test.ts` | `src/claude/terminal.ts`; `test/claude/terminal.test.ts`; `docs/design-step-2.md` (10.3, 12.4) |
 | 52 | `src/window/attention.ts`, `src/window/notify.ts`, `test/window/attention.test.ts`, `test/window/notify.test.ts` | `docs/design-step-2.md` (10.3, 12.4, 13) |
@@ -222,8 +223,8 @@ decision in the design in its own pull request; `—` means it is an implementat
 | # | Decision | Why | Design update |
 |---|---|---|---|
 | B1 | Migration 2 is S2 10.2's SQL character for character, pinned by a test as migration 1 is pinned to design 9.2. It only adds a table. | Readers of schema 1 (stage A's server until its next write, an old interactive list) keep reading correctly (1b). | — |
-| B2 | The counter: each value is one more than the larger of `kv` `attention_seq` (a value that is not a canonical decimal whole number counts as 0) and every `*_seq` of `attention`; `attention_seq` is left at the last value given. | A damaged or deleted counter must never make a later observation look earlier than a `seen`. | 50 (10.2) |
-| B3 | One write (`recordAttention`) is one transaction; inside it each session's observations take their values in the order turn end, window end, seen. | S2 10.3: a turn that ends in front of the user is never "finished" — its seen must be later. | — |
+| B2 | The counter: each value is one more than the larger of `kv` `attention_seq` (a value that is not a canonical decimal whole number counts as 0, and so does one above 2^53 − 1: a damaged counter that numbers could not count on from) and every `*_seq` of `attention`; `attention_seq` is left at the last value given. `recordAttention` throws a RangeError, writing nothing, when the next value would pass 2^53 − 1 (reachable only through a damaged `attention` row or a counter set to exactly 2^53 − 1, ruled on task 50's review 2: a refusal that shows is better than an order silently lost); task 52 treats that throw as any failure of the write that is not "busy" — logged by kind, not kept and retried at every look (ruled on task 50's review 1). | A damaged or deleted counter must never make a later observation look earlier than a `seen`. | 50 (10.2) |
+| B3 | One write (`recordAttention`) is one transaction; inside it each session's observations take their values in the order turn end, window end, seen. | S2 10.3: a turn that ends in front of the user is never "finished" — its seen must be later. | 50 (10.2; ruled on task 50's review 1) |
 | B4 | The look keeps a baseline per pid: the last file read whole, parsed and trusted (`isLiveFileTrusted`). A file not read at a look (rewritten, unreadable, untrusted, or `/proc` cannot be read) keeps its baseline; a baseline is dropped when its pid is gone: `/proc` says it has no process, or a process with another start (a pid taken by another program, whose baseline would otherwise keep a dead holder's `waiting`). The statuses the view reads are the baselines', so a file being rewritten does not make a mark blink. | S2 10.3: "a look that cannot read a file keeps the last status seen"; the baselines must not grow for ever. | 53 (10.3) |
 | B5 | A session with several holders (a duplicate) has one status: `waiting` when any holder waits, else `busy` when any is busy, else `idle` when any is idle, else the first one's. | S2 12.4 speaks of "a holder's live-session file". | 51 (12.4) |
 | B6 | "Finished" needs a holder whose status is `idle`; a session `running` without a readable file is not finished, and neither is one whose idle status began after the recorded turn end (`turn_ended_ns` and the status time both known, the status time later: a turn end of an earlier run; ruled on task 51's review 2). Ctrl+Shift+J's order: those that ask by their status time (unknown last), then those that ended by `window_end_seq`, then those that finished by `turn_ended_seq`; ties by session id. | S2 12.4: "the session is running and idle"; the longest-waiting and oldest first. | 51 (12.4) |
@@ -291,7 +292,8 @@ attention(): AttentionRow[];
 /** S2 10.2 in ONE transaction (the guarded connection refuses it whole: StoreNewerError): for each
  *  write in order, each observation takes the next value (B2) in B3's order; a row is created when
  *  absent and never removed. Returns the rows it wrote, as stored. An empty list writes nothing; a
- *  write with no observation is a RangeError and nothing is written. */
+ *  write with no observation is a RangeError and nothing is written; so is a write whose next
+ *  value would pass 2^53 − 1 (B2; ruled on task 50's review 1). */
 recordAttention(writes: readonly AttentionWrite[]): AttentionRow[];
 ```
 
@@ -533,7 +535,7 @@ scripted list of stage A's helpers): no count, no mark.
 
 ### Task 50: Migration 2 and the store's attention
 
-**Depends on:** 0 · **Wave:** 1 · **Design:** S2 10.2, 4.4 (`src/store/`, B), 16.5; design 9.2 · **Contracts:** 2.2 · **Decisions:** B1, B2, B3 · **Shared files:** `src/store/types.ts` (a `KvKey` line and two types), `docs/install.md` ("Updating"). Order (1c): B 50 before C 70 (its `KvKey` goes after `attention_seq`) and before D 39 and B 56 (`docs/install.md`): this task resolves nothing; stage D adds no migration and no key.
+**Depends on:** 0 · **Wave:** 1 · **Design:** S2 10.2, 4.4 (`src/store/`, B), 16.5; design 9.2 · **Contracts:** 2.2 · **Decisions:** B1, B2, B3 · **Shared files:** `src/store/types.ts` (a `KvKey` line, two types and the comment of `schema_version`), `docs/install.md` ("Updating"). Order (1c): B 50 before C 70 (its `KvKey` goes after `attention_seq`) and before D 39 and B 56 (`docs/install.md`): this task resolves nothing; stage D adds no migration and no key.
 
 **Goal.** The store at schema 2, its attention rows read and written by the server's rules, and
 the proof that a database in use since step 1 migrates without loss (section 1b).
@@ -542,7 +544,9 @@ the proof that a database in use since step 1 migrates without loss (section 1b)
 - Modify: `src/store/migrations.ts` (migration 2), `src/store/store.ts` (`attention`,
   `recordAttention`), `src/store/types.ts`, `docs/design-step-2.md` 10.2 (B2, after the paragraph
   "**Order is a counter, not a clock.**"; the SQL block stays as it is), `docs/install.md`
-  ("Updating", and the last paragraph of "Updating while the window runs"; F5 of review A)
+  ("Updating", and the last paragraph of "Updating while the window runs"; F5 of review A; and
+  the second-window sentence of "Known limits of stage A", false for this update from its merge
+  on, ruled on task 50's review 2)
 - Create: `test/helpers/schema1.ts`, `test/store/migration-2.test.ts`
 - Test: `test/store/store.test.ts` (the migration count, the table list of a new database, the
   schema version's literals at lines 152, 163 and 232, the attention methods; every place that
@@ -554,8 +558,8 @@ that the guard and `prepareRead` hold (stage A's contract 2.6, `openStore`); the
 same transaction (B2). Integer `*_seq` columns are numbers, `*_ns` bigints (design 9.2).
 
 **`docs/install.md` (ruled: migration 2 reaches the user at the first `git pull` after this task
-is merged).** "Updating": with the window in use, the order that is certain — close the skydeck
-window, then `git pull`, then `skydeck window` (the sessions live in their keepers and keep
+is merged).** "Updating": with the window in use, the order that is certain — close every skydeck
+window and tab (ruled on review A's re-check), then `git pull`, then `skydeck window` (the sessions live in their keepers and keep
 running; `skydeck doctor` after it if wanted) — and that from this update on a checkout from
 before it refuses the database (`the database … was written by a newer skydeck …`), so the way
 back is forward. "Updating while the window runs", its last paragraph (a command of the new code
@@ -564,7 +568,9 @@ of "Updating". The task runs no `skydeck` command: the refusal's line is held by
 `test/store/store.test.ts` ("a database written by a newer skydeck is refused"), `skydeck window`'s
 behaviour by stage A's `test/cli/commands/window.test.ts`.
 
-**Tests** (platform: none — the store on a sandbox path)
+**Tests** (platform: none — the store on a sandbox path; the server's-own-open cases use
+`testPlatform`, with `schema1Database` written at its `places.dbPath`, ruled on review B's
+re-check)
 - `MIGRATIONS` has two entries and `SCHEMA_VERSION` is 2; `MIGRATIONS[1]` equals the SQL block
   under "**Migration 2**" of S2 10.2 character for character (read from the design, as migration 1
   is from design.md 9.2).
@@ -703,7 +709,9 @@ becomes a `LookedFile` (one that throws is not read at this look); `gone`, for t
 without a file: `Proc.stat` null, or a process start other than the baseline's (a throw: not
 gone); `lookAt`; one `recordAttention` with the kept writes first, in their order, each as its own
 entry, then this look's turn ends (their time, else the clock) and B9's seen writes for the ids of
-`seen.take()` that are among `rows()` (B11, B9); the stored rows replace the facts' marks. `refreshed()`: B10 over `hub.list()` and `rows()`; the session a terminal held is
+`seen.take()` that are among `rows()` (B11, B9); the stored rows replace the facts' marks. A
+RangeError of `recordAttention` (B2's limit at 2^53 − 1) is a failure of the write that is not
+"busy": logged by kind, not kept and retried at every look (ruled on task 50's review 1). `refreshed()`: B10 over `hub.list()` and `rows()`; the session a terminal held is
 the one it shows, else the one it was opened for (`sessionId ?? expectedSessionId`). Every log line names a kind or a
 count, never a session's text. `createNotifier`: `check()` diffs `needs()` with the last
 judgement through `startsToNeed` and sends one `NotifyMessage` per new one.
@@ -897,8 +905,8 @@ order that is certain, and knows which checks only they can make.
   title still show it). "Known limits of stage B": a turn that ends while no server runs is not
   recorded; a notification goes to one window; seen needs the window in front; at the first start
   of a stage B server each terminal that still shows an unexpected end gets `ended` once (B10).
-  "Updating while the window runs": task 50's order stays (close the window, `git pull`,
-  `skydeck window`); nothing to install again (B19).
+  "Updating while the window runs": task 50's order stays (close every skydeck window and tab,
+  `git pull`, `skydeck window`); nothing to install again (B19).
 - `README.md`: one sentence in the window's paragraph — what needs you, and notifications.
 - `docs/manual-checks.md`: a part "The window (step 2, stage B)" with W11, W19 and W21, and W3
   gains the title `(n) skydeck` on its taskbar button. Each says what to set up, what to type, what
@@ -988,8 +996,8 @@ a server while an old window is still open. Migration 2 is the first update afte
 server stops by itself when a command other than `skydeck window` runs first, and even
 `skydeck window` first is not certain (1b). **Not carried** (ruled): the fix (a mark in the store
 while pages are connected) changes stage A's start of the window; the order that is certain —
-close the window, `git pull`, `skydeck window` — is in `docs/install.md` from task 50 on, and in
-task 56 and section 6. Question 5 in section 7.
+close every skydeck window and tab, `git pull`, `skydeck window` — is in `docs/install.md` from
+task 50 on, and in task 56 and section 6. Question 5 in section 7.
 
 ## 6. Stage B is ready to try
 
@@ -997,8 +1005,8 @@ When task 56 is merged. (The database is upgraded already at the first `git pull
 `docs/install.md`, "Updating", says the same order from then on, and the lead tells the user when
 50 is merged.)
 
-First close the skydeck window (its ×, or Alt+F4 while it is in front): your sessions keep
-running in their keepers. Then, in a WSL terminal of your own (not a `!` command inside Claude
+First close every skydeck window and tab (its ×, or Alt+F4 while it is in front; also a window
+of `--new-window` and a tab of `--print-url`): your sessions keep running in their keepers. Then, in a WSL terminal of your own (not a `!` command inside Claude
 Code):
 
 ```sh
@@ -1045,8 +1053,8 @@ the plan above follows the rulings.
 4. **When the 1.5 s starts** (B9). Ruled: as planned — from the moment the window has focus with
    that session selected; it holds because typing no longer includes focus and mouse reports (F1).
 5. **The second window at the update.** Ruled: not carried by stage B; the order that is certain
-   (close the window, `git pull`, `skydeck window`) goes into task 50's `install.md` text, task 56
-   and section 6.
+   (close every skydeck window and tab, `git pull`, `skydeck window`) goes into task 50's
+   `install.md` text, task 56 and section 6.
 6. **Idle in the middle of a turn.** Ruled: no debounce; W21 checks it.
 7. **The header's state pill** (B18). Ruled: unchanged.
 

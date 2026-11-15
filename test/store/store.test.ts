@@ -19,6 +19,8 @@ import {
 } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import type {
+  AttentionRow,
+  AttentionWrite,
   EventRow,
   KvKey,
   NewEvent,
@@ -27,6 +29,7 @@ import type {
   TranscriptRow,
 } from '../../src/store/types.ts';
 import { sandbox } from '../helpers/sandbox.ts';
+import { uncommittedWrite } from '../helpers/schema1.ts';
 
 const T0 = 1_762_988_000_000_000_000n;
 const BOOT_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -114,9 +117,9 @@ function sessionPr(store: Store, sessionId = S1, url = URL1): SessionPrRow | und
 }
 
 describe('migrations', () => {
-  test('there is one migration and the schema version is its count', () => {
-    assert.equal(MIGRATIONS.length, 1);
-    assert.equal(SCHEMA_VERSION, 1);
+  test('there are two migrations and the schema version is their count', () => {
+    assert.equal(MIGRATIONS.length, 2);
+    assert.equal(SCHEMA_VERSION, 2);
   });
 
   test('migration 1 is the SQL of design 9.2 character for character', () => {
@@ -124,6 +127,16 @@ describe('migrations', () => {
     const match = /^Migration 1:\n\n```sql\n([\s\S]*?)\n```$/m.exec(design);
     assert.ok(match, 'design.md 9.2 has no "Migration 1" SQL block');
     assert.equal(MIGRATIONS[0], match[1]);
+  });
+
+  test('migration 2 is the SQL of design-step-2.md 10.2 character for character', () => {
+    const design = readFileSync(
+      join(import.meta.dirname, '..', '..', 'docs', 'design-step-2.md'),
+      'utf8',
+    );
+    const match = /^\*\*Migration 2\*\* [^\n]*:\n\n```sql\n([\s\S]*?)\n```$/m.exec(design);
+    assert.ok(match, 'design-step-2.md 10.2 has no "Migration 2" SQL block');
+    assert.equal(MIGRATIONS[1], match[1]);
   });
 });
 
@@ -149,7 +162,7 @@ describe('openStore', () => {
     }
   });
 
-  test('a new database has the connection settings, mode 600, version 1 and every table', (t) => {
+  test('a new database has the connection settings, mode 600, version 2 and every table', (t) => {
     const { store, path } = fresh(t);
 
     assert.equal(store.path, path);
@@ -160,12 +173,13 @@ describe('openStore', () => {
       foreignKeys: 1,
     });
     assert.equal(mode(path), 0o600);
-    assert.equal(store.getKv('schema_version'), '1');
+    assert.equal(store.getKv('schema_version'), '2');
     const tables = rawRows(
       path,
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
     ).map((row) => row.name);
     assert.deepEqual(tables, [
+      'attention',
       'events',
       'kv',
       'links',
@@ -229,7 +243,7 @@ describe('openStore', () => {
 
     const second = reopen();
 
-    assert.equal(second.getKv('schema_version'), '1');
+    assert.equal(second.getKv('schema_version'), '2');
     assert.equal(second.events().length, 1);
   });
 
@@ -253,14 +267,18 @@ describe('openStore', () => {
   });
 
   test('a database written by a newer skydeck is refused with exit code 1', (t) => {
-    const { store, reopen } = fresh(t);
-    store.setKv('schema_version', '2');
+    const { store, path, reopen } = fresh(t);
+    store.setKv('schema_version', String(SCHEMA_VERSION + 1));
     store.close();
 
     assert.throws(reopen, (error) => {
       assert.ok(error instanceof SkydeckError);
       assert.equal(error.exitCode, 1);
-      assert.match(error.message, /newer/);
+      // The line docs/install.md quotes ("Updating").
+      assert.equal(
+        error.message,
+        `the database ${path} was written by a newer skydeck (schema version ${SCHEMA_VERSION + 1}, this one knows ${SCHEMA_VERSION}); update skydeck`,
+      );
       return true;
     });
   });
@@ -1213,7 +1231,16 @@ describe('the schema guard of the server (S2 10.1)', () => {
   function dump(path: string): Record<string, unknown[]> {
     const db = new DatabaseSync(path, { readOnly: true, readBigInts: true });
     try {
-      const tables = ['events', 'links', 'session_meta', 'transcripts', 'prs', 'session_prs', 'kv'];
+      const tables = [
+        'events',
+        'links',
+        'session_meta',
+        'transcripts',
+        'prs',
+        'session_prs',
+        'kv',
+        'attention',
+      ];
       return Object.fromEntries(
         tables.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]),
       );
@@ -1485,5 +1512,340 @@ describe('the schema guard of the server (S2 10.1)', () => {
       store.kvEntries('window_'),
       [...keys].sort().map((key) => ({ key, value: `value of ${key}` })),
     );
+  });
+});
+
+describe('attention (S2 10.2; stage B, B2 and B3)', () => {
+  const S3 = '33333333-3333-4333-8333-333333333333';
+  /** Times with nanosecond digits, above 2^53. */
+  const TURN = T0 + 1_234_567_891n;
+  const LATER_TURN = T0 + 9n * SEC + 7n;
+  const WINDOW_END = T0 + 5n * SEC + 3n;
+
+  function row(over: Partial<AttentionRow> & { sessionId: string }): AttentionRow {
+    return {
+      turnEndedSeq: null,
+      turnEndedNs: null,
+      seenSeq: null,
+      windowEndSeq: null,
+      windowEndNs: null,
+      ...over,
+    };
+  }
+
+  /** attention and the counter, read through a connection that is not the store's. */
+  function stored(path: string): { rows: Record<string, unknown>[]; counter: unknown } {
+    const db = new DatabaseSync(path, { readOnly: true, readBigInts: true });
+    try {
+      return {
+        rows: db
+          .prepare('SELECT * FROM attention ORDER BY session_id')
+          .all()
+          .map((r) => ({ ...r })),
+        counter: db.prepare("SELECT value FROM kv WHERE key = 'attention_seq'").get()?.['value'],
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  function makeNewer(path: string): void {
+    const db = new DatabaseSync(path);
+    try {
+      db.prepare("UPDATE kv SET value = ? WHERE key = 'schema_version'").run(
+        String(SCHEMA_VERSION + 1),
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  test('a new store has no attention row and no counter', (t) => {
+    const { store } = fresh(t);
+    assert.deepEqual(store.attention(), []);
+    assert.equal(store.getKv('attention_seq'), null);
+  });
+
+  test('a turn end, then a seen in a later write: the seen is later than the turn end', (t) => {
+    const { store } = fresh(t);
+    const turn = row({ sessionId: S1, turnEndedSeq: 1, turnEndedNs: TURN });
+
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, turnEndedNs: TURN }]), [turn]);
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, seen: true }]), [
+      { ...turn, seenSeq: 2 },
+    ]);
+    assert.deepEqual(store.attention(), [{ ...turn, seenSeq: 2 }]);
+  });
+
+  test('a turn end and a seen of one session in one write: the seen is the turn end + 1 (B3)', (t) => {
+    const { store } = fresh(t);
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, seen: true, turnEndedNs: TURN }]), [
+      row({ sessionId: S1, turnEndedSeq: 1, turnEndedNs: TURN, seenSeq: 2 }),
+    ]);
+  });
+
+  test('a window end and a seen of one session in one write: the seen is later (B3)', (t) => {
+    const { store } = fresh(t);
+    assert.deepEqual(
+      store.recordAttention([{ sessionId: S1, seen: true, windowEndNs: WINDOW_END }]),
+      [row({ sessionId: S1, windowEndSeq: 1, windowEndNs: WINDOW_END, seenSeq: 2 })],
+    );
+  });
+
+  test("all three of one session in one write take the values in B3's order: turn end, window end, seen", (t) => {
+    const { store } = fresh(t);
+    assert.deepEqual(
+      store.recordAttention([
+        { sessionId: S1, seen: true, windowEndNs: WINDOW_END, turnEndedNs: TURN },
+      ]),
+      [
+        row({
+          sessionId: S1,
+          turnEndedSeq: 1,
+          turnEndedNs: TURN,
+          windowEndSeq: 2,
+          windowEndNs: WINDOW_END,
+          seenSeq: 3,
+        }),
+      ],
+    );
+    assert.equal(store.getKv('attention_seq'), '3');
+  });
+
+  test('values grow across writes and sessions, in the order the writes are given; the counter keeps the last', (t) => {
+    const { store } = fresh(t);
+    store.recordAttention([
+      { sessionId: S2, turnEndedNs: TURN },
+      { sessionId: S1, turnEndedNs: LATER_TURN },
+    ]);
+    store.recordAttention([
+      { sessionId: S1, seen: true },
+      { sessionId: S2, seen: true },
+    ]);
+    assert.deepEqual(store.attention(), [
+      row({ sessionId: S1, turnEndedSeq: 2, turnEndedNs: LATER_TURN, seenSeq: 3 }),
+      row({ sessionId: S2, turnEndedSeq: 1, turnEndedNs: TURN, seenSeq: 4 }),
+    ]);
+    assert.equal(store.getKv('attention_seq'), '4');
+  });
+
+  test('a row is made at its first observation and kept; a later write changes only its own columns; times are stored exactly', (t) => {
+    const { store, path } = fresh(t);
+    store.recordAttention([{ sessionId: S1, seen: true }]);
+    assert.deepEqual(store.attention(), [row({ sessionId: S1, seenSeq: 1 })]);
+
+    store.recordAttention([{ sessionId: S1, windowEndNs: WINDOW_END }]);
+    store.recordAttention([{ sessionId: S1, turnEndedNs: TURN }]);
+    store.recordAttention([{ sessionId: S1, turnEndedNs: LATER_TURN }]);
+    store.recordAttention([{ sessionId: S2, seen: true }]);
+
+    const s1 = row({
+      sessionId: S1,
+      seenSeq: 1,
+      windowEndSeq: 2,
+      windowEndNs: WINDOW_END,
+      turnEndedSeq: 4,
+      turnEndedNs: LATER_TURN,
+    });
+    assert.deepEqual(store.attention(), [s1, row({ sessionId: S2, seenSeq: 5 })]);
+    assert.deepEqual(stored(path).rows[0], {
+      session_id: S1,
+      turn_ended_seq: 4n,
+      turn_ended_ns: LATER_TURN,
+      seen_seq: 1n,
+      window_end_seq: 2n,
+      window_end_ns: WINDOW_END,
+    });
+  });
+
+  test('attention() is ordered by session id', (t) => {
+    const { store } = fresh(t);
+    store.recordAttention([
+      { sessionId: S3, seen: true },
+      { sessionId: S1, seen: true },
+      { sessionId: S2, seen: true },
+    ]);
+    assert.deepEqual(
+      store.attention().map((r) => r.sessionId),
+      [S1, S2, S3],
+    );
+  });
+
+  test('the rows returned are the rows written as stored: one per session, by session id, the last state of each', (t) => {
+    const { store } = fresh(t);
+    store.recordAttention([{ sessionId: S3, turnEndedNs: TURN }]);
+
+    const written = store.recordAttention([
+      { sessionId: S2, turnEndedNs: TURN },
+      { sessionId: S1, seen: true },
+      { sessionId: S2, seen: true },
+    ]);
+
+    assert.deepEqual(written, [
+      row({ sessionId: S1, seenSeq: 3 }),
+      row({ sessionId: S2, turnEndedSeq: 2, turnEndedNs: TURN, seenSeq: 4 }),
+    ]);
+    assert.deepEqual(
+      written,
+      store.attention().filter((r) => r.sessionId !== S3),
+    );
+  });
+
+  /** Rows whose largest *_seq is 3, the counter at 3. */
+  function threeStored(store: Store): void {
+    store.recordAttention([
+      { sessionId: S1, turnEndedNs: TURN },
+      { sessionId: S1, windowEndNs: WINDOW_END },
+      { sessionId: S2, seen: true },
+    ]);
+    assert.equal(store.getKv('attention_seq'), '3');
+  }
+
+  const damaged: [what: string, damage: (store: Store) => void][] = [
+    ['deleted', (store) => store.deleteKv('attention_seq')],
+    ['set to abc', (store) => store.setKv('attention_seq', 'abc')],
+    ['set lower than a stored seq', (store) => store.setKv('attention_seq', '1')],
+    ['set to 0', (store) => store.setKv('attention_seq', '0')],
+    ['empty', (store) => store.setKv('attention_seq', '')],
+    ['with a leading zero', (store) => store.setKv('attention_seq', '09')],
+    ['with a sign', (store) => store.setKv('attention_seq', '+9')],
+    ['negative', (store) => store.setKv('attention_seq', '-9')],
+    ['with a fraction', (store) => store.setKv('attention_seq', '9.0')],
+    ['with spaces', (store) => store.setKv('attention_seq', ' 9 ')],
+    ['in exponent form', (store) => store.setKv('attention_seq', '1e3')],
+    ['hexadecimal', (store) => store.setKv('attention_seq', '0x9')],
+    ['too large for a number', (store) => store.setKv('attention_seq', '99999999999999999999')],
+  ];
+  for (const [what, damage] of damaged) {
+    test(`B2: with the counter ${what}, the next value is still one more than every stored one`, (t) => {
+      const { store } = fresh(t);
+      threeStored(store);
+      damage(store);
+
+      assert.deepEqual(store.recordAttention([{ sessionId: S3, seen: true }]), [
+        row({ sessionId: S3, seenSeq: 4 }),
+      ]);
+      assert.equal(store.getKv('attention_seq'), '4');
+    });
+  }
+
+  test('B2: a counter above every stored value gives the value after it', (t) => {
+    const { store } = fresh(t);
+    threeStored(store);
+    store.setKv('attention_seq', '100');
+    store.recordAttention([{ sessionId: S3, seen: true }]);
+    assert.equal(store.attention()[2]?.seenSeq, 101);
+    assert.equal(store.getKv('attention_seq'), '101');
+  });
+
+  for (const column of ['turn_ended_seq', 'seen_seq', 'window_end_seq']) {
+    test(`B2: the largest stored value counts in whichever column it is (${column})`, (t) => {
+      const { store, path } = fresh(t);
+      threeStored(store);
+      const db = new DatabaseSync(path);
+      db.prepare(`UPDATE attention SET ${column} = 50 WHERE session_id = ?`).run(S1);
+      db.close();
+      store.deleteKv('attention_seq');
+
+      store.recordAttention([{ sessionId: S3, turnEndedNs: TURN }]);
+      assert.equal(store.attention()[2]?.turnEndedSeq, 51);
+    });
+  }
+
+  test('B2: the last value is 2^53 - 1; past it the write is a RangeError and nothing is written', (t) => {
+    const { store, path } = fresh(t);
+    store.setKv('attention_seq', String(Number.MAX_SAFE_INTEGER - 1));
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, seen: true }]), [
+      row({ sessionId: S1, seenSeq: Number.MAX_SAFE_INTEGER }),
+    ]);
+    const before = stored(path);
+    assert.equal(before.counter, String(Number.MAX_SAFE_INTEGER));
+
+    assert.throws(() => store.recordAttention([{ sessionId: S2, turnEndedNs: TURN }]), {
+      name: 'RangeError',
+      message: 'the attention counter is at 2^53 - 1 and cannot go on',
+    });
+    assert.deepEqual(stored(path), before);
+  });
+
+  test('B2: the next value is read inside the write lock: what another connection commits while this write waits counts', async (t) => {
+    const { store, path } = fresh(t);
+    store.recordAttention([{ sessionId: S1, seen: true }]); // seen_seq 1, the counter '1'
+    // Another writer gives the values up to 50 and commits while this one waits for the lock.
+    const other = uncommittedWrite(
+      path,
+      `UPDATE attention SET seen_seq = 50; UPDATE kv SET value = '50' WHERE key = 'attention_seq';`,
+      500,
+    );
+    await once(other, 'message');
+
+    const written = store.recordAttention([{ sessionId: S2, turnEndedNs: TURN }]);
+
+    await once(other, 'exit');
+    assert.deepEqual(written, [row({ sessionId: S2, turnEndedSeq: 51, turnEndedNs: TURN })]);
+    assert.equal(store.getKv('attention_seq'), '51');
+  });
+
+  test('an empty list writes nothing: no row, no counter', (t) => {
+    const { store, path } = fresh(t);
+    assert.deepEqual(store.recordAttention([]), []);
+    assert.deepEqual(stored(path), { rows: [], counter: undefined });
+  });
+
+  test('a write with no observation is a RangeError, and nothing is written, also of the writes before it', (t) => {
+    const { store, path } = fresh(t);
+    const empty: AttentionWrite = { sessionId: S2 };
+    assert.throws(
+      () => store.recordAttention([{ sessionId: S1, turnEndedNs: TURN }, empty]),
+      RangeError,
+    );
+    assert.deepEqual(stored(path), { rows: [], counter: undefined });
+  });
+
+  test('on a guarded connection with the store one version newer: StoreNewerError, nothing written', (t) => {
+    const { store, path } = fresh(t);
+    store.recordAttention([{ sessionId: S1, turnEndedNs: TURN }]);
+    const guarded = openStore(path, { guardSchema: true });
+    t.after(() => {
+      guarded.close();
+    });
+    makeNewer(path);
+    const before = stored(path);
+
+    assert.throws(
+      () =>
+        guarded.recordAttention([
+          { sessionId: S1, seen: true },
+          { sessionId: S2, turnEndedNs: TURN },
+        ]),
+      (error: unknown) =>
+        error instanceof StoreNewerError &&
+        error.message === 'skydeck was updated; run skydeck window',
+    );
+    assert.deepEqual(stored(path), before);
+  });
+
+  test("with another connection holding the write lock (the server's 250 ms): a failure of the database as a whole, nothing written", (t) => {
+    const { path } = fresh(t);
+    const server = openStore(path, { guardSchema: true, busyTimeoutMs: 250 });
+    t.after(() => {
+      server.close();
+    });
+    const other = new DatabaseSync(path);
+    t.after(() => {
+      other.close();
+    });
+    other.exec('BEGIN IMMEDIATE');
+
+    assert.throws(
+      () => server.recordAttention([{ sessionId: S1, turnEndedNs: TURN }]),
+      (error: unknown) => isDatabaseFailure(error),
+    );
+    other.exec('ROLLBACK');
+    assert.deepEqual(stored(path), { rows: [], counter: undefined });
+
+    assert.deepEqual(server.recordAttention([{ sessionId: S1, turnEndedNs: TURN }]), [
+      row({ sessionId: S1, turnEndedSeq: 1, turnEndedNs: TURN }),
+    ]);
   });
 });
