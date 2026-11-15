@@ -827,38 +827,52 @@ Setup:
 - The setup of "The window (step 2, stage A)" above, with its **throwaway session in the
   window**. Every step here uses that session, never one of your real work: `l` and Enter on a
   real row replace its label for good.
-- **Before every key and every click**, look at the header's short id (on its second line, at the
-  right): it must be the throwaway session's (`skydeck ls` in W prints the short ids as the last
-  column). In a dialog, the heading names the session (`Label — <title>`): it must be the
-  throwaway session's title.
+- **Before every key and every click**, look at the header's short id (on its second line, after
+  the directory, the times and where the title comes from): it must be the throwaway session's
+  (`skydeck ls` in W prints the short ids as the last column). In a dialog, the heading names the
+  session (`Label — <title>`): it must be the throwaway session's title.
 - No step marks a real session done, edits a real note or closes a window. After `d` the selection
   moves to the next row, which may be a real session: click `Undo` in the toast before the next
   key.
+- Each check starts from a throwaway session with no label, group, note or pull request of yours
+  (the header shows `+ group`, `no pull request` and `no note`), sets what it needs, and clears it
+  again at its end, so that the checks can run in any order.
 
 ## W27. The group chip opens your ticket
 
 Setup: one of your ticket keys (`ABC-123` below: with the default `groupPattern` capital letters
 and digits, a hyphen and a number) and your ticket system's address for a ticket, with `{key}`
-where the key goes. In W, when `~/.config/skydeck/config.json` exists (`ls ~/.config/skydeck/`),
-keep a copy of it first:
+where the key goes. The throwaway session has no group of its own: its header shows `+ group`.
+
+**Your configuration comes first.** The paths below are the default ones (with `XDG_CONFIG_HOME`
+set, the file is under that folder: install.md, "Places"). In W:
 
 ```sh
-cp ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
+ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 ```
 
-Add the key `ticketUrl` to the file. When there is no file, create it with exactly this (for Jira;
-put your site's address):
+- **`config.json.before-w27` is listed**: an earlier W27 did not finish. Do its step 4 first,
+  then start again.
+- **Only `config.json` is listed**: you have a configuration. Copy it aside, as it is:
 
-```json
-{
-  "ticketUrl": "https://<your site>.atlassian.net/browse/{key}"
-}
-```
+  ```sh
+  cp -p ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
+  ```
 
-and when it has other keys, add the line `"ticketUrl": "…",` among them. A mistake in the file
-makes every skydeck command print one line that names the file and the key and exit 1, and do
-nothing else (`skydeck doctor` shows it as a problem line); put the copy back to undo it. Then, in
-W (the server reads the file when it starts; the window stays and connects again):
+  Then add the line `"ticketUrl": "https://<your site>.atlassian.net/browse/{key}",` among its
+  keys (for Jira; else your ticket system's address, with `{key}` where the key goes).
+- **Both are missing** (`No such file or directory` twice): you have none. Create the file with
+  only this key (put your site's address; the command writes nothing when the file exists):
+
+  ```sh
+  mkdir -p ~/.config/skydeck
+  test -e ~/.config/skydeck/config.json || printf '%s\n' '{ "ticketUrl": "https://<your site>.atlassian.net/browse/{key}" }' > ~/.config/skydeck/config.json
+  ```
+
+A mistake in the file makes every skydeck command print one line that names the file and the key
+and exit 1, and do nothing else (`skydeck doctor` shows it as a problem line); correct the line, or
+go on with step 4. Then, in W (the server reads the file when it starts; the window stays and
+connects again):
 
 ```sh
 skydeck window --restart
@@ -873,12 +887,23 @@ skydeck window --restart
    `ticket:    ` with your ticket's address.
 3. Click the group chip once. Expected: the ticket opens in your own Edge window, not in skydeck's,
    where you are logged in. A drag over the chip selects its text and opens nothing.
-4. Put the configuration back: `mv ~/.config/skydeck/config.json.before-w27
-   ~/.config/skydeck/config.json` when you made the copy; else remove the file
-   (`rm ~/.config/skydeck/config.json`). Then `skydeck window --restart`. Expected: the chip shows
-   `ABC-123` without `↗`, not underlined, with the tooltip `group (from the title)`; a click on it
-   opens nothing; `skydeck show <short id>` prints no `ticket:` line. (To keep the link for good,
-   add the key again afterwards.)
+4. **Give your configuration back**, by the branch you took above:
+   - you made the copy: put it back, then remove the copy only once the two are the same:
+
+     ```sh
+     cp -p ~/.config/skydeck/config.json.before-w27 ~/.config/skydeck/config.json
+     cmp ~/.config/skydeck/config.json.before-w27 ~/.config/skydeck/config.json && rm ~/.config/skydeck/config.json.before-w27
+     ```
+
+   - you had no file before: remove the one you created, `rm ~/.config/skydeck/config.json`.
+
+   Then `skydeck window --restart`. Expected: the chip shows `ABC-123` without `↗`, not
+   underlined, with the tooltip `group (from the title)`; a click on it opens nothing; `skydeck
+   show <short id>` prints no `ticket:` line. (To keep the link for good, add the key again
+   afterwards.)
+5. Clear the label: select the throwaway session (look at the short id), `l`, Backspace (the field
+   holds the label, selected), Enter. Expected: the title is the one it had before step 1, the
+   header shows `+ group`, and `skydeck show <short id>` prints `label:     -`.
 
 Write down: where the ticket opened, and whether you were logged in there; whether the chip was a
 link only with `ticketUrl`; the `ticket:` line.
@@ -915,7 +940,8 @@ chip and `skydeck show` agreed; any `can't read`, with its error.
 Run it once on the US layout and once on the Czech one (Win+Space switches, W8). Setup: the
 throwaway session running in the window (Enter on its row resumes it) and selected, and the list
 has the keyboard (Ctrl+Shift+L until the key bar says `Focus: list`). Look at the header's short
-id before every key.
+id before every key. Right after a save, the next of these keys can say `the … is not here yet;
+press … again` for up to a second: press it again then.
 
 1. `l`: the label's dialog (`Label — <title>`). Type `W29 label` (on the Czech layout also
    `ěščř`) and press Enter. Expected: the dialog closes; the header's title and the row show the
@@ -938,14 +964,20 @@ id before every key.
 7. Back in the window (the key bar says `Focus: list`), `d`. Expected: the toast `Marked done.
    Stays under Open while it runs; hidden once it stops.` with `Undo`; the row stays under Open
    with a `done` mark, and stays selected. Click `Undo` within 5 seconds: the mark goes.
-8. End the throwaway session: Ctrl+Shift+L to its terminal, `/exit`, then `Close` on its ended
-   bar. Its row moves to This week. Click it (the list gets the keyboard; look at the short id)
+8. End the throwaway session: Ctrl+Shift+L to its terminal, look at the short id (`/exit` ends
+   the session it is typed into), `/exit`, then `Close` on its ended bar. Its row moves to This
+   week. Click it (the list gets the keyboard; look at the short id)
    and press `d`. Expected: the row disappears, the toast says `Marked done: hidden from the list.
    It comes back on new activity.`, and the row after it in This week is selected (the one before
    it when it was the last; none when it was alone) — another session: **click `Undo` now, before
    any key**. Expected: the throwaway session is back in This week and selected again. (When the
    toast went before you clicked: `a` shows the done sessions; click the throwaway session's row,
    look at its short id, press `d`, then `a` again.)
+9. Clear what this check set, with the throwaway session selected (look at the short id): `l`,
+   Backspace (the field holds the label, selected), Enter; `g`, Backspace, Enter; `n`, Ctrl+A,
+   Backspace, Ctrl+Enter. Expected: the header shows the title it had before step 1, `+ group`
+   and `no note`; `skydeck show <short id>` in W prints `label:     -` and `group:     -`, and no
+   `note:`.
 
 Write down, per layout: every key that did something else than described here, or nothing; in
 step 4, whether a reload key reloaded the window with changed text, and which.

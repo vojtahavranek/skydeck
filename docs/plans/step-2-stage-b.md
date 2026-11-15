@@ -159,7 +159,7 @@ same as its row here.
 | 52 | `src/window/attention.ts`, `src/window/notify.ts`, `test/window/attention.test.ts`, `test/window/notify.test.ts` | `docs/design-step-2.md` (10.3, 12.4, 13) |
 | 55 | `web/attention-text.js`, `web/notify.js`, `web/attention.css`, `test/web/attention-text.test.ts`, `test-page/attention.test.ts`, `test-page/helpers/notification.ts` | `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts`; `docs/design-step-2.md` (12.2, 12.4, 13, 17.4) |
 | 57 | — | `src/window/mapping.ts`, `src/window/tick.ts` (the comment of `map()` only); `test/window/mapping.test.ts`, `test/window/tick.test.ts`; `docs/design-step-2.md` (7.5) |
-| 54 | `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`, `test-page/attention-server.test.ts` | `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.7) |
+| 54 | `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`, `test-page/attention-server.test.ts` | `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.7; 10.1 and 12.4 for part (b) of the ruling of 2026-11-15 09:47Z) |
 | 56 | — | `docs/install.md` (all but task 50's paragraphs), `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (19, and any decision of 1d still missing) |
 
 **Shared source files** (changed by another stage too; never two stage B tasks of one wave):
@@ -237,7 +237,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | B7 | `list` gains `needYou: { count, order }`: `count` the listed rows that need you, whatever the filter (the title bar's count and `(n) skydeck`); `order` the ids of the rows this page shows that need you, in B6's order. A row that needs you is counted there and in none of `counts`. | The page decides no rule (S2 4.3); the title bar's parts add up, as S2 12.1's example does (3 + 3 + 2). | 51 (8.2.3, 12.1) |
 | B8 | `notify` carries `reason` as the kind (`asks`, `ended`, `finished`) and `detail` (the waiting detail, else null); the page writes the words. | As the list's words are the page's (stage A, A18); S2 8.2.3 names no detail. | 51 (8.2.3) |
 | B9 | Seen is held per page from the moment that page is focused with that session selected; any change of either starts the 1.5 s again (a window that comes back to the front sees after 1.5 s too). Typing into a terminal makes the session that terminal shows seen at once; typing is an `input` that is not `binary` and is not a report a terminal sends by itself, told by its shape — focus reports (`ESC [ I`, `ESC [ O`), SGR mouse reports (`ESC [ < … M` or `m`) and the answers to queries (device attributes, cursor position and status reports, mode reports, `CSI t`, the colours of OSC 4 / 10 / 11, DECRQSS; ruled on review 2 of task 53: the page swallows the queries, S2 9.3, but `isTyping` does not rely on it): `isTyping` (2.5) — a program that asks for focus reports (Claude Code is expected to, S2 9.2) gets one at every click, chord and return to the window, and none of them is typing. The user's own acts without a key are typing: the wheel in the alternate screen without a mouse mode and Alt+click (both arrive as arrow keys), an empty paste; a key whose encoding has a report's shape does not count — F3 with any modifier has the bytes of a cursor position report — and the hold's 1.5 s apply (ruled). A typing into a session already being seen calls no `onChange` listener (ruled on review 2 of task 53), so that nothing runs at every key press. A `seen` is written only when a hold completes or a typing comes and it clears a mark, or when a mark of a session already being seen becomes known (cleared at the look: a session in `take()` whose marks after that look's write would still hold an unseen end gets a `seen`; ruled for task 52), and always in the write of a turn end or window end of that session while the hold lasts; there is no periodic `seen` write (ruled). It is written on its own only for a session among the rows (`rows()`), so that a selection naming no session leaves no row; a `seen` in the write of that session's own end is kept whatever `rows()` says (the end makes the row; ruled on task 52's review 2). | S2 12.4 fixes the 1.5 s but not when the hold starts; a `seen` matters only when it clears a mark or goes with an end. Question 4 in section 7. | 53 (12.4) |
-| B10 | A window end is judged at each refresh after it was settled, for a terminal in state `ended` or `lost` (a keeper that died: its exit time is the server's clock) that started its program: recorded when its session's row is not running and marked `ended-unexpectedly`, not recorded when the session ended deliberately; judged once, at the first refresh where its row no longer runs and the row's last holder is gone: while the row still runs (a lost keeper's program lives on its SIGHUP for a moment), or while that holder still lives (its end event can be ingested before its exit, and `ended-unexpectedly` needs the holder gone; ruled 2026-11-15 09:47Z; reloading the rows while it waits is task 54's), it is left for the next refresh, and a terminal that leaves the list is forgotten (ruled on task 52's review 2; that the tick's `map()` closes such a lost terminal at once is task 57's). It is the same end when the stored `window_end_ns` equals the exit's time, so a server restart, which finds a lingering keeper again, never marks it twice. At the first start of a stage B server the table is empty, so each lingering keeper of an ended-unexpectedly session gets `ended` once (no notification, B12; one sentence in `docs/install.md`, task 56). | S2 12.4 reason 2 says "at the next refresh"; S2 14: a keeper that dies makes its session need you; a restart for an update must not bring back what the user saw. | 52 (12.4) |
+| B10 | A window end is judged at each refresh after it was settled, for a terminal in state `ended` or `lost` (a keeper that died: its exit time is the server's clock) that started its program: recorded when its session's row is not running and marked `ended-unexpectedly`, not recorded when the session ended deliberately; judged once, at the first refresh where its row no longer runs and the row's last holder is gone: while the row still runs (a lost keeper's program lives on its SIGHUP for a moment), or while that holder still lives (its end event can be ingested before its exit, and `ended-unexpectedly` needs the holder gone; ruled 2026-11-15 09:47Z; the rows are then loaded again once that holder is gone: the tick takes a last holding that was alive at the last load and is gone now as a change, task 54), it is left for the next refresh, and a terminal that leaves the list is forgotten (ruled on task 52's review 2; that the tick's `map()` closes such a lost terminal at once is task 57's). It is the same end when the stored `window_end_ns` equals the exit's time, so a server restart, which finds a lingering keeper again, never marks it twice. At the first start of a stage B server the table is empty, so each lingering keeper of an ended-unexpectedly session gets `ended` once (no notification, B12; one sentence in `docs/install.md`, task 56). | S2 12.4 reason 2 says "at the next refresh"; S2 14: a keeper that dies makes its session need you; a restart for an update must not bring back what the user saw. | 52 (12.4) |
 | B11 | A write the store refuses (busy, S2 14) is kept; the next look tries the kept writes again first, in their order, each as an entry of its own (`recordAttention` takes the writes in order), then its own; nothing is folded but two turn ends of one session (the later is kept). The baselines move on, so a turn end is neither lost nor recorded twice. Kept writes are tried again only at the look: while there are any, `refreshed()` and `seenNow()` put theirs behind them and touch no store (ruled: `seenNow` runs at every key press on some paths, and a busy store's 250 ms must not come per key). A refusal that is not busy (B2's limit; a damaged table) is logged by kind and dropped. The marks are read once, at the first look that can (a busy read: the next look); a read that fails otherwise (one damaged row makes `attention()` throw for every session; so does schema 2 without the table) leaves no marks, logged once by kind, and the look goes on (ruled). A store migrated under the server stops it (S2 10.1). | A turn end is seen once, at one look; folding a kept `seen` into a later turn end of the same session would make that turn seen (B3's order) although the user had left. | 52 (10.3) |
 | B12 | The server judges "starts to need you" over the rows a page without a filter lists (it builds that list with `buildListMessage`). The first judgement, which records without notifying, is the first check made once a refresh has worked, the marks have been read and nothing is kept (`Attention.ready()`, latched, `NotifierDeps.ready`; nothing kept: ruled on task 52's review 2, so that a busy store at the start cannot keep that refresh's window ends out of the first judgement), not simply the first call: a start whose first refresh fails must not notify everything that already needed you at the next one. A session whose reason changes does not start to need you. `Pages.notify` sends only while no page has focus, to the page that had it last. | S2 13; a restart must not notify everything that already needed you. | 52 (13) |
 | B13 | The page's words: a row that needs you has the reason on its second line — `needs you · <detail> · 3m` (`needs you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — also a row that is not running (an ended one), which then has two lines; the title bar starts with the count, whose text is `3 need you` (`1 needs you`; the dot before it is drawn by the style sheet on the count's element, in the rows' attention colour — that of an ask —, not a character; ruled); the bar and the reason's line are in the reason's colour (an ask in the waiting colour, a finished turn in green, an end of the window in the crash colour: the mockup's; the colours are `web/attention.css`'s); the window title is `(3) skydeck`, and `skydeck` when none; a notification's body is `asks: <detail>` (`asks`), `finished`, `ended unexpectedly`. The detail is the live file's `waitingFor`, sanitised, trimmed and cut to 120 UTF-16 units with `…` (never inside a surrogate pair) by the view model (ruled; the blank test and the cut apply to the trimmed text, ruled on task 51's review 2); a `waitingFor` that is blank once sanitised (empty, or only white space) gives `detail: null` (ruled on task 51). | S2 12.2's and 13's examples; S2 12.4: "the reason on its second line"; a `waitingFor` has no length limit. Question 2 in section 7. | 51 (the cut, 12.4), 55 (the words, 12.2, 12.4) |
@@ -247,7 +247,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | B17 | Every context of the page suite is made by `newContext` of `test-page/helpers/browser.ts` (and `newPage` with it), which installs an inert `Notification` (permission `denied`, `requestPermission` answers `denied` and asks nothing, a notification made anyway shows nothing) unless a double is there already, and in any case a service worker's `showNotification` that refuses (the double has none of its own; ruled on review 2): a recording double sets a marker and is installed by the case's own init script, and Playwright does not order a context's and a page's init scripts, so either order ends with the double (ruled on review B). One case pins that no `.newContext(` (nor a persistent context, a context over CDP, or a page made by a browser rather than a context) stands under `test-page/` outside `helpers/browser.ts`, so that a later stage's own context cannot lose the inert `Notification` silently (ruled on review A's re-check). | No test may show a notification or ask for a permission, whatever a server sends. | 55 (17.4) |
 | B18 | Stage B leaves the header as it is: attention shows on the row, in the title bar, the window title and the notification. Nothing of stage B changes the header's height or resizes a terminal (the list's rows are not under a terminal). | S2 12.5 names no attention; the header keeps one fixed height for every session (S2 12.5, kept by the lead's ruling on stage D's plan). | — |
 | B19 | No hook entry and no settings change: `install`, `uninstall` and `doctor`'s hook check stay as they are, and nobody needs to run `install` again. | S2 10.3 decided against turn hooks. | — |
-| B20 | Several windows (S2 8.2.7): the marks, the counts and the window title are the same in every window (the facts are the server's); `needYou.order` follows each window's own filter; a session seen in any focused window is seen for all; a notification goes to one window (B12). | S2 12.4 and 13 say it for one window and for the notification only. | 54 (8.2.7) |
+| B20 | Several windows (S2 8.2.7): the marks, the counts and the window title are the same in every window (the facts are the server's) but for what a window lists at all — a done session that has stopped counts only in a window that shows done sessions (`showDone`; review 2 of task 54); `needYou.order` follows each window's own filter; a session seen in any focused window is seen for all; a notification goes to one window (B12). | S2 12.4 and 13 say it for one window and for the notification only. | 54 (8.2.7) |
 
 ## 2. Contracts
 
@@ -493,7 +493,8 @@ export function createNotifier(deps: NotifierDeps): { check(): void };
   seen?: Pick<Seen, 'focus' | 'typed' | 'gone'>;
 // Pages gains
   /** S2 13: while no page has focus, `message` to the page that had focus last; false when it was
-   *  not sent (a page has focus, or none is open). */
+   *  not sent (a page has focus, or none is open — none is once `bye` has run: nothing follows a
+   *  `bye`; ruled on task 54's review 1). */
   notify(message: NotifyMessage): boolean;
 ```
 
@@ -1034,11 +1035,18 @@ end-to-end case needs no option of it).
 and a real typing in a real page do what S2 12.4 and 13 say, in every window.
 
 **Files**
-- Modify: `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts` (the `seen` calls:
+- Modify: `src/window/tick.ts` (also part (b) of the ruling of 2026-11-15 09:47Z: the rows are
+  loaded again when a row's last holding that was alive at the last load is gone now — a /proc
+  read that throws or a boot id that cannot be read is not gone), `src/window/server.ts` (Seen,
+  attention and the notifier made in one function of their own, `attentionParts`, so that the
+  assembly's own lines change little; the notifier's `check()` wrapped: a failure is logged by
+  kind, once until a check works; the tick's and attention's `storeNewer` one function),
+  `src/window/pages.ts` (the `seen` calls:
   `start` → `focus(conn, focused, null)`, `focus`, an `input` for which `isTyping` is true →
   `typed` with the session `hub.list()` says the terminal shows, the end of the connection →
   `gone`;
-  `notify`), `test/helpers/pages.ts`, `docs/design-step-2.md` 8.2.7
+  `notify`), `test/helpers/pages.ts`, `docs/design-step-2.md` 8.2.7 (B20) and 10.1 and 12.4 (part
+  (b))
 - Create: `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`,
   `test-page/attention-server.test.ts`
 - Test: `test/window/tick.test.ts` (new cases at the end). No existing case on `main` makes a
@@ -1048,38 +1056,58 @@ and a real typing in a real page do what S2 12.4 and 13 say, in every window.
 
 **Tests** (platform: `realTestPlatform`, through `startTestServer` and `TestPage`, unless marked)
 - `tick.test.ts`: `look` every second before the keep-alive, `refreshed` after each refresh that
-  worked, the lists pushed when either says true; without `attention` stage A's cases unchanged.
+  worked (after the mapping; none after one that failed), the lists pushed when either says true
+  (a refresh pushes them in any case), a `look` or `refreshed` that throws anyway logged by kind;
+  without `attention` stage A's cases unchanged. Part (b): an end ingested while its process runs
+  → the rows not loaded again (nor while /proc cannot be read, nor without a boot id); the process
+  gone → loaded again at the next refresh, the row ended unexpectedly, and not again after.
 - `pages-attention.test.ts` (`startPages`): the `seen` calls for `start`, `focus`, text input
   — none for binary input, a focus report (`ESC [ I`, `ESC [ O`) or an SGR mouse report (F1) —
   and a closed page; `notify` with no page focused → only the page that
   had focus last; with one focused → none, false; with none open → false.
 - `attention-server.test.ts`: a stand-in in a window terminal while a focused page selects another
-  session: `/busy`, then `/idle` → within 4 s its row is `finished`, `needYou.count` 1, the store
-  holds `turn_ended_seq`; the page selects it, focused → cleared after 1.5 s and within 3 s,
-  `seen_seq` greater; unfocused → it stays. Typing into its terminal → cleared at once (no 1.5 s).
-  A turn that ends while the page holds it → never `finished` in any list (each list read) and one
-  write with seen = turn + 1. `/waiting permission prompt` → `asks` with that detail within 2 s,
-  `/busy` → gone. `/fail 3` → `ended` after the next refresh; `/exit` → none; with one terminal
-  open, its keeper killed by `killKeepersIn` (A34) → the terminal `lost` and `ended` (F7); a server
-  restart while the ended keeper lingers → still one `window_end_seq`, the mark as before. A session the
+  session: `/waiting permission prompt` → `asks` with that detail, `/busy` → gone, `/idle` → its
+  row is `finished`, `needYou.count` 1, the store holds `turn_ended_seq`; the page selects it,
+  unfocused → it stays; focused → cleared, not before 1.5 s, `seen_seq` greater. Typing into its
+  terminal with no page focused → cleared (no hold could). A turn that ends while the page holds it
+  → never `finished` in any list (each list read) and one write with seen = turn + 1. `/fail 3` →
+  `ended` after the next refresh, at the exit's time, one `notify`; `/exit` → none. With one
+  terminal open, its keeper killed by the pid of its own record (F7, `serverKeepers`) while its
+  program (a `sh` around the stand-in, task 57's way) lives on → the terminal `lost`, no window end
+  while the program lives; the program ended → one `window_end_seq` at the lost exit's time,
+  `ended`, one `notify` (the required lost-keeper case). A program that fails while no server
+  runs → the next server finds its keeper lingering and marks it once, without `notify`; the
+  server after it → still one `window_end_seq`, the mark as before, no `notify` (a keeper whose exit
+  a running server took is acknowledged and ends, S2 7.8, so none lingers across a restart once its
+  end is recorded; B10's same-end rule is held by task 52's cases). A session the
   test runs outside the window → its turn ends recorded too. Two pages: the second sees the same
   marks; a seen in the first clears them in both; both unfocused, the second focused last → only
   it gets `notify`; one focused → none; what needed you before a server restart → no `notify`
   after it; attention rows the test wrote before the start (a session finished, not seen) and the
-  store held by `test/fixtures/hold-write-lock.ts` from the start's delay (`startDelayMs`, A31)
-  until after the first tick → once it is released the list shows `finished` and no page gets
-  `notify` (review B, B1); a turn that ended while no server ran → no `finished`. The store locked
+  first refreshes failing through `start({ platform })`'s seam (ruled on review B's re-check: no
+  lock, no timing — the server's `/proc` read of a process only the store's events name throws
+  while the test holds it, so the rows cannot be loaded and every refresh fails until it lets go)
+  → once released the list shows `finished` and no page gets `notify` (review B, B1); a turn
+  that ended while no server ran → no `finished`. The store locked
   at a turn end → recorded once when the lock is gone; a store migrated by another connection →
   `bye`, nothing written. No log line holds a title or a detail (a marker in both).
+  Every case waits for a fact, never for a time (the lead's rule for task 54: they hold at a load
+  of 80): the one-second look and the two-second refresh are `tick.test.ts`'s, and a look must
+  have read `/busy` or `/waiting` before `/idle`, so each turn waits for what a look shows first
+  (`asks`, or `asks` gone at `/busy`).
 - `test-page/attention-server.test.ts` (Chromium, `notificationDouble`, `pageFocus`; the page
-  built as `launched` builds it, from the parts `test-page/helpers/shell.ts` exports —
-  `RECORDER`, `problemsOf`, `startTestServer`, `controlClient` — so that the doubles are in before
+  built as `launched` builds it, from `RECORDER` and `problemsOf` of `test-page/helpers/shell.ts`,
+  `startTestServer` of `test/helpers/window.ts` and `controlClient` of `src/window/client.ts`
+  (ruled on review B's re-check) — so that the doubles are in before
   it loads, and `shell.ts` stays out of stage B; review B, B4): a session that finishes while
   another is selected → its row's bar and `finished · not seen`, the title `(1) skydeck`;
-  Ctrl+Shift+J selects it; 1.5 s later the mark is gone and the title `skydeck`. The same with a
-  stand-in that turned focus reporting on (`/red` with `ESC [ ? 1004 h`, as
-  `test-page/terminal.test.ts`'s focus case does): selected by Ctrl+Shift+J, its mark is still
-  there after 1 s (the focus report the selection sends is not typing; F1). The page unfocused
+  Ctrl+Shift+J selects it; after the hold (not before 1.5 s) the mark is gone and the title
+  `skydeck`. The same with a stand-in that turned focus reporting on (`/red` with
+  `ESC [ ? 1004 h`, as `test-page/terminal.test.ts`'s focus case does), in a window without focus
+  so that no hold can clear the mark: selected by Ctrl+Shift+J, once the stand-in has read the
+  `ESC [ I` the selection makes xterm.js send (ruled on review A's re-check: counted as
+  `test-page/terminal.test.ts` counts them, not "after 1 s") the store holds no seen and the mark
+  is still there (F1); with focus it then goes after the hold. The page unfocused
   (`pageFocus`) and a turn that ends → one notification `finished` with the session's title; its
   click selects the session.
 

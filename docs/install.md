@@ -730,16 +730,20 @@ look at it before you save.
   you have changed nothing, and say `save or cancel the edit first` once you have. Closing the
   window, or Edge's own reload, with changed text asks first (Edge's own prompt). Ctrl+V and
   Ctrl+Shift+V paste into the field.
-- Right after a save, the same key on that session can say `the label is not here yet; press l
-  again` (likewise for the group and the note) until the list that holds the new text has come,
-  within a second; right after you select a session, `n` can say `the note is not here yet; press
-  n again`. A refusal that comes after you closed its dialog shows in the toast as `not saved:
-  <why>`.
+- Right after this window saved a label, group or note of a session, its dialogs wait for the
+  list that holds the new text (within a second). Until it has come, whichever of the three was
+  saved, each of these on that session only says so: `l` `the label is not here yet; press l
+  again`, F2 `the label is not here yet; press F2 again`, `g` `the group is not here yet; press g
+  again`, `n` `the note is not here yet; press n again`; the header's controls say the same with
+  the list's key (`press l again`, …). `p` never waits. Right after you select a session, `n`
+  can also say `the note is not here yet; press n again`. A refusal that comes after you closed
+  its dialog shows in the toast as `not saved: <why>`.
 
 **Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
 `Marked done: hidden from the list. It comes back on new activity.`, or for a session under Open
 (it runs) `Marked done. Stays under Open while it runs; hidden once it stops.` — such a row stays
-under Open with a `done` mark until the session stops. A click on `Undo` marks it undone again.
+under Open with a `done` mark until the session stops. `Undo` marks it undone again: a click
+presses it, or Tab until it has the keyboard and then Enter.
 After `d` in the list, once the row is gone, the row after it in the same section is selected,
 else the one before it, else none; never a row of Open. That row is another session, and the
 next key acts on it: to take the `d` back, click `Undo` first. `Undo` selects the session again,
@@ -948,8 +952,9 @@ said before.
 - **Two windows.** Label, group and done are last-write-wins between two windows, and between a
   window and a command, as between two commands. Only the note is guarded: a save over a note that
   changed meanwhile is refused, with your text kept in the box.
-- **The toast's Undo takes a click**; no key presses it. It is shown for 5 seconds, and the next
-  toast replaces it. Once it is gone: `a` shows done sessions, then `d` on the session.
+- **The toast's Undo has no key of its own.** It is a button: a click presses it, or Tab until
+  it has the keyboard and then Enter. The toast is shown for 5 seconds, and the next toast
+  replaces it. Once it is gone: `a` shows done sessions, then `d` on the session.
 - **A long note** (over 64 KiB, 65,536 bytes of UTF-8) is edited with `skydeck note <short id>`
   only: its dialog says `this note is longer than the window edits; use skydeck note <short id>`.
   A label or group over 1,024 bytes is refused before it is sent (`the label is longer than skydeck

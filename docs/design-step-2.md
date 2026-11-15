@@ -1530,6 +1530,13 @@ Any number of pages may attach to one terminal; they share its ordered stream. I
 them goes to the program in the order the server receives it. `list` goes to every page; each
 page's `view` state is its own. Notifications go to one page only (13).
 
+Attention (12.4, 13; stage B's plan, B20) is the server's, so it is the same in every window: the
+marks, the title bar's count and the window title — but for what a window lists at all: a done
+session that has stopped counts only in a window that shows done sessions (`showDone`, 12.8); and
+`needYou.order` follows each window's own filter and fold. A session seen in any window that has focus is seen for all of them, and a typing
+from any window counts. A notification goes to the one window that had focus last, and only while
+no window has it.
+
 #### 8.2.8 Backpressure
 
 The server never pauses a program; it may stop reading a keeper's connection (7.3, Reading), which
@@ -1722,7 +1729,12 @@ and turn ends (10.3); check the keep-alive. Every second tick: the refresh every
 (design 5.3: ingest, reconcile, transcript scan, lock sweep), the automatic pull-request refresh
 (design 7.3) for the sessions the pages list, and a reload of the rows when that refresh saved
 something, a live file or its trust changed, another process committed to the store
-(`Store.dataVersion()`), or a minute passed — the interactive list's rule. The server then sends
+(`Store.dataVersion()`), or a minute passed — the interactive list's rule — or when a row's last
+holding that was alive at the last load is gone now (stage B, ruled 2026-11-15): a session's end
+event can be ingested before its process exits, `ended-unexpectedly` (design 6.3) and a window end
+judged on it (12.4) need that process gone, and an exit after the live file went moves no change
+mark, so without it the mark would wait for the minute. A /proc read that fails, or a boot id that
+cannot be read, is not taken for gone (design 5.5). The server then sends
 `list` to every page whose view model changed. An edit a page made (12.5) does not wait for that:
 the server's own writes move no change mark, so after one the server loads the rows again and
 sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
@@ -2197,7 +2209,8 @@ exits it settled (7.8) — each terminal of the window in state `ended` or `lost
 its exit time is the server's clock) that started its program is judged, once, at the first refresh
 where its session's row no longer runs and that row's last holder is gone (a lost keeper's program
 lives on its SIGHUP for a moment, and its end event can be ingested before it exits, while
-`ended-unexpectedly` needs the holder gone, design 6.3):
+`ended-unexpectedly` needs the holder gone, design 6.3; the rows are loaded again once that holder
+is gone, 10.1):
 its session, the one it shows or else the one it was opened for, gets `window_end_seq` and, as
 `window_end_ns`, the exit's time when that row is marked `ended-unexpectedly`; nothing when the
 session ended deliberately. A terminal that leaves the list is forgotten. It is the same end when the stored `window_end_ns` equals the exit's
@@ -3276,7 +3289,7 @@ grants a permission through Playwright.
   Playwright's version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
   `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
-  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 30
+  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 45
   minutes.
 
 ## 18. Manual checks for step 2
@@ -3316,9 +3329,9 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404? Answered for Chromium by the page suite (17.4, plan task 26): no, the worker keeps answering and stays registered; Edge itself is still to be checked here. | A | 15.3 |
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
-| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check keeps a copy of `config.json` first and puts it back at the end. | D | 12.5, 9.6 |
+| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end (when there was none, it removes the file it created), and clears the label it set. | D | 12.5, 9.6 |
 | W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
-| W29 | On the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key. | D | 12.5, 12.9 |
+| W29 | On the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
