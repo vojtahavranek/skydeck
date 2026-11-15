@@ -758,7 +758,9 @@ keeper this test kills also uses `registrySandbox`, on `realTestPlatform`, A36)
   clock) → finished too; the first look of a new module records nothing for a file that was idle
   already; two holders of one session that end at one look → one turn end with the later time,
   finished, in either order; a holder whose idle file a look missed, seen ending later with an
-  earlier time → the latest idle time, finished; a holder still busy lends no time;
+  earlier time → the latest idle time, finished; a holder idle since later whose file this look
+  cannot read still counts (the baselines, not only the files read); a holder still busy lends no
+  time;
   `statusUpdatedAt` before `updatedAt`; a time past 2^63 − 1 ns → unknown, and the other sessions'
   turn ends of that look are stored (review 2).
 - While `seen.take()` gives the session, a turn end and its seen are one write (seen = turn + 1);

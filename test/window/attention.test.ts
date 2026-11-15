@@ -438,6 +438,21 @@ describe('the look (S2 10.3; B4)', () => {
     assert.equal(reasonOf(w, S1), 'finished');
   });
 
+  test("the time comes from the idle baselines, not only from this look's files: a holder idle since later, whose file a look cannot read, still counts", (t) => {
+    const w = world(t);
+    liveFile(w.d, PID, S1, 'busy', T0);
+    liveFile(w.d, PID2, S1, 'busy', T0);
+    w.attention.look();
+    liveFile(w.d, PID2, S1, 'idle', T0 + 6n * SEC);
+    w.attention.look();
+    assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 6n * SEC }]);
+    writeFileSync(join(w.d.deck.places.claudeHome, 'sessions', `${PID2}.json`), '{"pid": 43');
+    liveFile(w.d, PID, S1, 'idle', T0 + 4n * SEC);
+    w.attention.look();
+    assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 6n * SEC }]);
+    assert.equal(reasonOf(w, S1), 'finished');
+  });
+
   test("a holder that is still busy lends a turn end no time: the end's time is its idle holders' only", (t) => {
     const w = world(t);
     liveFile(w.d, PID, S1, 'busy', T0);
@@ -454,7 +469,8 @@ describe('the look (S2 10.3; B4)', () => {
     liveFile(w.d, PID, S1, 'busy', T0);
     liveFile(w.d, PID2, S1, 'busy', T0);
     w.attention.look();
-    // B5 shows the first holder's time (the lower pid), which is the later one here.
+    // B5 shows the first baseline's time: both pids first appeared at one look, so the lower pid's,
+    // which is the later one here.
     liveFile(w.d, PID, S1, 'idle', T0 + 4n * SEC);
     liveFile(w.d, PID2, S1, 'idle', T0 + 2n * SEC);
     w.attention.look();
