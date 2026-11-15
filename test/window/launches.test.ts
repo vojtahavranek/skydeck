@@ -533,6 +533,125 @@ describe('resume and refusal(): already open while a terminal may still run (S2 
   });
 });
 
+describe('resume and refusal(): a lost terminal whose program may still run (task 82; S2 7.8)', () => {
+  // A keeper that died: its exit is made up at once (SIGHUP); its program may outlive the hangup
+  // before its SessionStart, so no holder shows it to the guard and no lock may be left.
+  const PROGRAM = { pid: 6161, procStart: 7777 };
+  const lostOf = (over: Partial<TerminalInfo> = {}): TerminalInfo =>
+    info('aaaaaaaaaaa1', 'lost', {
+      program: PROGRAM,
+      exit: exit({ signal: 1, atNs: String(T0) }),
+      ...over,
+    });
+  const running = (...pids: number[]): string =>
+    `${S1.slice(0, 8)} is running (${pids.map((pid) => `pid ${pid}`).join(', ')})`;
+  const alive = (d: TestDeck, pid = 6161, start = 7777): void => {
+    d.proc.setProcess(pid, { stat: statLine(pid, start), cmdline: ['claude'] });
+  };
+
+  test("its program lives and the loss is less than 60 s old: refused with code 4 in the guard's own words, before the guard; nothing built, closed or taken", async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    alive(d);
+    const h = harness(d, { terminals: [lostOf()] });
+    assert.equal(h.launches.refusal(S1), running(6161));
+    assert.deepEqual(await h.launches.resume(S1, SIZE), refusedWith(4, [running(6161)]));
+    assert.deepEqual(h.events, [], 'no terminal built, none closed');
+    nothingStarted(h, S1);
+    assert.deepEqual(h.logs, [], 'a refusal is answered, never logged');
+    // Word for word what the guard says when it sees a holder with that pid.
+    const g = deckOf(t);
+    writeTranscript(g, S1);
+    startRunning(g, S1, 6161);
+    assert.deepEqual((await harness(g).launches.resume(S1, SIZE)).lines, [running(6161)]);
+  });
+
+  test('what cannot be told may still run: a stat read that throws, a stat line without a start — refused, nothing logged', async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    d.proc.setProcess(6161, { stat: '6161 (claude) S', cmdline: ['claude'] });
+    const noStart = harness(d, { terminals: [lostOf()] });
+    assert.equal(noStart.launches.refusal(S1), running(6161));
+    const failing = harness(d, {
+      terminals: [lostOf()],
+      deck: deckWith(d.deck, {
+        proc: {
+          stat: () => {
+            throw Object.assign(new Error(SECRET), { code: 'EMFILE' });
+          },
+        },
+      }),
+    });
+    assert.equal(failing.launches.refusal(S1), running(6161));
+    assert.equal((await failing.launches.resume(S1, SIZE)).code, 4);
+    assert.deepEqual([...noStart.logs, ...failing.logs], []);
+  });
+
+  test('once its program is gone, or its pid has another start: no refusal — the resume closes the lost terminal and opens', async (t) => {
+    for (const gone of [
+      (d: TestDeck) => d.proc.setProcess(6161, null),
+      (d: TestDeck) => alive(d, 6161, 8888),
+    ]) {
+      const d = deckOf(t);
+      resumableSession(d);
+      gone(d);
+      const h = harness(d, { terminals: [lostOf()] });
+      assert.equal(h.launches.refusal(S1), null);
+      assert.equal((await h.launches.resume(S1, SIZE)).code, 0);
+      assert.deepEqual(h.hub.closed, ['aaaaaaaaaaa1']);
+    }
+  });
+
+  test('only for less than 60 s after the loss by the server’s clock: refused at 59 s and when the clock stepped back, not at 60 s (the named limit)', async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    alive(d);
+    const h = harness(d, { terminals: [lostOf()] });
+    d.clock.setNs(T0 + 59n * SEC);
+    assert.equal(h.launches.refusal(S1), running(6161), '59 s');
+    d.clock.setNs(T0 - 3600n * SEC);
+    assert.equal(h.launches.refusal(S1), running(6161), 'the clock stepped back');
+    d.clock.setNs(T0 + 60n * SEC);
+    assert.equal(h.launches.refusal(S1), null, '60 s');
+    assert.equal((await h.launches.resume(S1, SIZE)).code, 0);
+  });
+
+  test('several lost terminals whose programs may run: every pid, the terminal opened last first', (t) => {
+    const d = deckOf(t);
+    alive(d);
+    alive(d, 6262, 8282);
+    const h = harness(d, {
+      terminals: [
+        lostOf(),
+        lostOf({ id: 'aaaaaaaaaaa2', program: { pid: 6262, procStart: 8282 }, openedNs: T0 + SEC }),
+        lostOf({ id: 'aaaaaaaaaaa3', program: { pid: 6363, procStart: 1 } }), // gone
+      ],
+    });
+    assert.equal(h.launches.refusal(S1), running(6262, 6161));
+  });
+
+  test('a terminal that may still start comes first ("already open"); a lost terminal of another session refuses only that one', (t) => {
+    const d = deckOf(t);
+    alive(d);
+    const h = harness(d, {
+      terminals: [lostOf(), info('aaaaaaaaaaa2', 'running', { sessionId: null })],
+    });
+    assert.equal(h.launches.refusal(S1), ALREADY_OPEN);
+    const other = harness(d, { terminals: [lostOf({ expectedSessionId: S2, sessionId: S2 })] });
+    assert.equal(other.launches.refusal(S1), null);
+    assert.equal(other.launches.refusal(S2), `${S2.slice(0, 8)} is running (pid 6161)`);
+  });
+
+  test('an exit the keeper sent (ended, not started) refuses nothing, even with its program’s pid and start alive', (t) => {
+    const d = deckOf(t);
+    alive(d);
+    for (const state of ['ended', 'not-started'] as const) {
+      const h = harness(d, { terminals: [lostOf({ state })] });
+      assert.equal(h.launches.refusal(S1), null, state);
+    }
+  });
+});
+
 // --- new --------------------------------------------------------------------------------------
 
 describe('newSession goes through prepareNew as the request is (design 7.7, S2 11.1)', () => {
