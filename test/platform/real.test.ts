@@ -78,6 +78,27 @@ describe('real clock', () => {
     }
   });
 
+  test('monotonicNs (plan C 2.3, task 74) never decreases and moves on with the time that passes, whatever the wall clock does', async () => {
+    const { clock } = realPlatform();
+    let previous = clock.monotonicNs();
+    for (let i = 0; i < 1000; i++) {
+      const now = clock.monotonicNs();
+      assert.ok(now >= previous, `call ${i}: ${now} < ${previous}`);
+      previous = now;
+    }
+    // Measured against Node.js's own monotonic reading, not against Date.now() (WSL steps that).
+    const before = clock.monotonicNs();
+    const started = performance.now();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const passedNs = clock.monotonicNs() - before;
+    const measuredNs = BigInt(Math.floor((performance.now() - started) * 1e6));
+    assert.ok(passedNs >= 20_000_000n, `${passedNs} ns passed`);
+    assert.ok(
+      passedNs <= measuredNs + 5_000_000n,
+      `${passedNs} ns against ${measuredNs} ns measured`,
+    );
+  });
+
   test('sleep resolves after about that many milliseconds', async () => {
     const { clock } = realPlatform();
     const before = clock.nowNs();

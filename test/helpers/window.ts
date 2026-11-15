@@ -284,6 +284,7 @@ function crashable(base: Platform): { platform: Platform; drop(): Promise<void> 
   };
   const clock: Clock = {
     nowNs: () => base.clock.nowNs(),
+    monotonicNs: () => base.clock.monotonicNs(),
     sleep: (ms) => base.clock.sleep(ms),
     every: (ms, callback) => timer((cb) => base.clock.every(ms, cb), callback),
     after: (ms, callback) => timer((cb) => base.clock.after(ms, cb), callback),

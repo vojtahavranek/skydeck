@@ -32,12 +32,13 @@ export interface FakeClock extends Clock {
   /**
    * Jumps to `ns`. No timer is called; each running one of `every` is next due one period after
    * `ns`, as a real interval is after the wall clock jumped, and one of `after` keeps the time it
-   * had left (a real timeout counts on a clock that does not jump).
+   * had left (a real timeout counts on a clock that does not jump). A step of the wall clock:
+   * `monotonicNs` (from 0 at the start) does not move.
    */
   setNs(ns: Ns): void;
   /**
-   * Moves the time on by `ms`. Every timer of `every` and `after` that falls due on the way is
-   * called at its time (nowNs() answers that time meanwhile), once per period, in time order; of
+   * Moves the time on by `ms`, `monotonicNs` with it. Every timer of `every` and `after` that falls
+   * due on the way is called at its time (nowNs() answers that time meanwhile), once per period, in time order; of
    * two due at once, the one started first. `sleep(ms)` calls this and resolves on the next
    * microtask.
    */
@@ -55,6 +56,8 @@ interface FakeTimer {
 
 export function fakeClock(startNs: Ns): FakeClock {
   let now = startNs;
+  /** The reading of monotonicNs: it moves with advanceMs (and so sleep) only, never with setNs. */
+  let mono: Ns = 0n;
   const running = new Set<FakeTimer>();
   /** The timer due first at or before `endNs`; of two due at once, the one started first. */
   const nextDue = (endNs: Ns): FakeTimer | undefined => {
@@ -70,6 +73,7 @@ export function fakeClock(startNs: Ns): FakeClock {
     const endNs = now + nsFromMs(ms);
     for (let timer = nextDue(endNs); timer !== undefined; timer = nextDue(endNs)) {
       if (timer.dueNs > now) {
+        mono += timer.dueNs - now;
         now = timer.dueNs;
       }
       if (timer.periodNs === null) {
@@ -80,6 +84,7 @@ export function fakeClock(startNs: Ns): FakeClock {
       timer.callback();
     }
     if (endNs > now) {
+      mono += endNs - now;
       now = endNs;
     }
   };
@@ -92,6 +97,7 @@ export function fakeClock(startNs: Ns): FakeClock {
   };
   return {
     nowNs: () => now,
+    monotonicNs: () => mono,
     sleep: (ms) => {
       advanceMs(ms);
       return Promise.resolve();
