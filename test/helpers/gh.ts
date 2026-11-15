@@ -89,7 +89,9 @@ function resultOf(answer: GhPullRequest | RunResult, count: number): RunResult {
   const { checks, ...fields } = answer;
   const pullRequest = {
     ...fields,
-    commits: { nodes: checks === null ? [] : [{ commit: { statusCheckRollup: { state: checks } } }] },
+    commits: {
+      nodes: checks === null ? [] : [{ commit: { statusCheckRollup: { state: checks } } }],
+    },
   };
   const data = Object.fromEntries(
     Array.from({ length: count }, (_, i) => [`p${i}`, { pullRequest }]),

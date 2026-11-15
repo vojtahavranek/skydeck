@@ -239,7 +239,11 @@ test('the signal aborted while one runs: idle() resolves, the one waiting and an
   f.prs.fetch([PR3]);
   f.prs.refresh(S1);
   await f.prs.idle();
-  assert.equal(reads, readsAtAbort, 'no run started after the abort, not even one that gh would refuse');
+  assert.equal(
+    reads,
+    readsAtAbort,
+    'no run started after the abort, not even one that gh would refuse',
+  );
   assert.equal(f.gh.runs.length, 1);
   assert.equal(levelOf(f.d, PR1), 'unfetched', 'nothing saved after the abort');
   assert.equal(f.changes(), 0);

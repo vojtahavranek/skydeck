@@ -224,7 +224,10 @@ test("selectedPayload: ticketUrl is ticketAddress of the row's group with the co
   const cases: [Partial<ListRow>, string | null][] = [
     [{ group: 'ORB-2107', groupSource: 'meta' }, 'https://example.atlassian.net/browse/ORB-2107'],
     [{ group: 'ABC-12', groupSource: 'title' }, 'https://example.atlassian.net/browse/ABC-12'],
-    [{ group: 'ABC-12 cleanup', groupSource: 'meta' }, 'https://example.atlassian.net/browse/ABC-12'],
+    [
+      { group: 'ABC-12 cleanup', groupSource: 'meta' },
+      'https://example.atlassian.net/browse/ABC-12',
+    ],
     [{ group: 'no key here', groupSource: 'meta' }, null],
     [{ group: null, groupSource: null }, null],
   ];

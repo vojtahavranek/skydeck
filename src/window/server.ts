@@ -30,6 +30,7 @@ import { rotateLog, serverLog } from './log.ts';
 import { createPages } from './pages.ts';
 import type { PageState } from './pages.ts';
 import { formatPidLine, parsePidLine } from './pidline.ts';
+import { createPrFetches } from './pr-fetches.ts';
 import type {
   KeepAlivePayload,
   ListMessage,
@@ -378,12 +379,23 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         },
       };
     };
+    // Plan D7, D8: an edit shows in every window at once; the pull-request fetches the window asks
+    // for run in the background, one at a time, aborted by the stop.
+    const stopPrs = new AbortController();
+    const prFetches = createPrFetches({
+      deck,
+      signal: stopPrs.signal,
+      changed: () => tick?.reloadNow(),
+      log,
+    });
     const acting = createActions({
       deck,
       hub: created,
       terminalFor,
       openLink: (url) => openLink(platform, deck.config.window, url, interop.current()),
       log,
+      changed: () => tick?.reloadNow(),
+      prs: prFetches,
     });
     const actions: ActionHandler = {
       async act(page, action) {
@@ -609,7 +621,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     /** S2 5.5. */
     const orderlyStop = async (reason: string): Promise<void> => {
       log('server: stopping');
+      stopPrs.abort();
       await startedTick.stop();
+      await prFetches.idle(); // aborted: it saves nothing more and starts no other (plan D8)
       await control.close(); // no command reaches it any more; its file goes with it
       await pages.bye(reason); // then an upgrade is answered 503 until the port closes (task 17)
       for (const listener of listeners) {
