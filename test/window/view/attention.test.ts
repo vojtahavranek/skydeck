@@ -290,7 +290,7 @@ test('attentionOf: asks before ended before finished when several hold', () => {
           S1,
           marks({
             turnEndedSeq: 6,
-            turnEndedNs: T0 - SEC,
+            turnEndedNs: T0, // the status time: a turn end of this run, so finished holds too
             windowEndSeq: 5,
             windowEndNs: T0 - 2n * SEC,
           }),
