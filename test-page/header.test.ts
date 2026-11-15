@@ -741,6 +741,105 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
     },
   );
 
+  await t.test(
+    "refusals and waits (plan D 2.5, D13, D17): a drag over a pull request or the note's line opens nothing; a refused link of the header is a line in the key bar; in the dialog a refused link, × and ↻ show under the field, × and ↻ send one act while it waits, × from the keyboard leaves the keyboard in the field, a refusal after the dialog closed is the toast `not saved: …`; the fold is closed at every open",
+    async (t) => {
+      const s = await scripted(t, chromium, {
+        sections: {
+          week: [
+            row(S1, {
+              hasNote: true,
+              noteHead: ['a note to select'],
+              ...prsOf([pr(7, 'checks-failing'), pr(8, 'merged')]),
+            }),
+          ],
+        },
+      });
+      const { page, w } = s;
+      const actsOf = (kind: string): Row[] => w.acts().filter((act) => act['kind'] === kind);
+      const drag = async (selector: string): Promise<void> => {
+        const box = await page.locator(selector).first().boundingBox();
+        assert.ok(box !== null, selector);
+        await page.mouse.move(box.x + 1, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 8 });
+        await page.mouse.up();
+        await sleep(300);
+        assert.notEqual(await page.evaluate(() => getSelection()?.toString() ?? ''), '', selector);
+        await page.evaluate(() => getSelection()?.removeAllRanges());
+      };
+      await showsAll(page, '#cards .header-pr', ['acme/web #7 · failing']);
+      await drag('#cards .header-pr');
+      await drag('#cards .header-note-text');
+      assert.deepEqual(w.acts(), [], 'a drag opens nothing');
+      assert.equal((await dialog(page)).shown, false);
+
+      await page.locator('#cards .header-pr').click();
+      const link = await eventually(async () => actsOf('open-link')[0] ?? null, 'open-link');
+      assert.equal(link['url'], PR7);
+      w.answer(link, { ok: false, error: 'skydeck does not open that link' });
+      await showsText(page, '#key-message', /^skydeck does not open that link$/);
+
+      await page.locator('#cards .header-prs-button').click();
+      await dialogShown(page, true);
+      await page.locator('#editor .edit-pr-text').first().click();
+      const lineLink = await eventually(async () => actsOf('open-link')[1] ?? null, 'the line');
+      assert.equal(lineLink['url'], PR7);
+      w.answer(lineLink, { ok: false, error: 'not that one' });
+      await eventually(async () => (await dialog(page)).message === 'not that one', 'shown');
+
+      const remove = page.locator('#editor .edit-pr-remove').first();
+      await remove.click();
+      await remove.click({ force: true }); // disabled while its answer waits
+      await sleep(300);
+      assert.equal(actsOf('pr-rm').length, 1, 'one pr-rm while it waits');
+      w.answer(actsOf('pr-rm')[0] as Row, { ok: false, error: `${PR7} is not attached` });
+      await eventually(
+        async () => (await dialog(page)).message === `${PR7} is not attached`,
+        "×'s refusal",
+      );
+      const refresh = page.locator('#editor .edit-pr-refresh');
+      await refresh.click();
+      await refresh.click({ force: true });
+      await sleep(300);
+      assert.equal(actsOf('pr-refresh').length, 1, 'one pr-refresh while it waits');
+      assert.equal(actsOf('pr-refresh')[0]?.['sessionId'], S1);
+      w.answer(actsOf('pr-refresh')[0] as Row, { ok: false, error: "skydeck's database is busy" });
+      await eventually(
+        async () => (await dialog(page)).message === "skydeck's database is busy",
+        "↻'s refusal",
+      );
+
+      // × pressed from the keyboard: the keyboard goes back to the field, the toast follows.
+      await page.focus('#editor .edit-pr-remove');
+      await page.keyboard.press('Enter');
+      await eventually(async () => actsOf('pr-rm').length === 2, 'the second pr-rm');
+      assert.ok((await dialog(page)).inField, 'the keyboard is in the field');
+      w.answer(actsOf('pr-rm')[1] as Row, { ok: true });
+      await eventually(async () => (await toast(page)).text === 'Detached acme/web #7', 'toast');
+
+      // A refusal after the dialog closed: the toast.
+      await remove.click();
+      await eventually(async () => actsOf('pr-rm').length === 3, 'the third pr-rm');
+      await page.keyboard.press('Escape');
+      await dialogShown(page, false);
+      w.answer(actsOf('pr-rm')[2] as Row, { ok: false, error: 'it went' });
+      await eventually(async () => (await toast(page)).text === 'not saved: it went', 'toast');
+
+      // The fold: open, closed by the next open.
+      await page.locator('#cards .header-prs-button').click();
+      await dialogShown(page, true);
+      await page.locator('#editor .edit-pr-fold').click();
+      await showsAll(page, '#editor .edit-pr-fold', ['1 merged ▾']);
+      await page.keyboard.press('Escape');
+      await dialogShown(page, false);
+      await page.locator('#cards .header-prs-button').click();
+      await dialogShown(page, true);
+      await showsAll(page, '#editor .edit-pr-fold', ['1 merged ▸']);
+      assert.deepEqual(await prLines(page), ['acme/web #7 · checks failing · checked 4m ago']);
+    },
+  );
+
   // --- the controls (the real server) -----------------------------------------------------------
 
   await t.test(

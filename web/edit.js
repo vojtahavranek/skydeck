@@ -181,8 +181,10 @@ export function createEditor(root, deps) {
     }
     current = null;
     place.replaceChildren();
-    openLines.replaceChildren();
-    finishedLines.replaceChildren();
+    for (const lines of [openLines, finishedLines]) {
+      lines.replaceChildren();
+      delete lines.dataset['urls']; // drawn again whole at the next open
+    }
     root.hidden = true;
     deps.closed();
   };

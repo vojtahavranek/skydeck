@@ -349,6 +349,8 @@ export function createCards(root, deps) {
     editHere('group'),
   );
   const state = element('span', 'header-state');
+  const stateText = element('span', 'header-state-text');
+  state.append(stateText);
   const noteButton = headerButton('header-note-button', 'Note', 'the note (n)', () =>
     editHere('note'),
   );
@@ -737,8 +739,8 @@ export function createCards(root, deps) {
       // D14: with a group, the chip and ✎; with a ticket address (the server's, S2 12.5) the chip is
       // a link — the key, `↗`, the address as its tooltip —, else plain text.
       const hasGroup = row.group !== null;
-      const address =
-        hasGroup && typeof selected?.ticketUrl === 'string' ? selected.ticketUrl : null;
+      // The server sends an address only for a group that holds a ticket key (task 35).
+      const address = typeof selected?.ticketUrl === 'string' ? selected.ticketUrl : null;
       ticket = address;
       setHidden(group, !hasGroup);
       setHidden(groupEdit, !hasGroup);
@@ -747,7 +749,7 @@ export function createCards(root, deps) {
       setText(groupArrow, address === null ? '' : ' ↗');
       setData(group, 'link', String(address !== null));
       setTip(group, address ?? (row.groupSource === 'title' ? 'group (from the title)' : 'group'));
-      setText(state, stateOf(row));
+      setText(stateText, stateOf(row));
       setText(doneButton, row.done ? 'Undone' : 'Done');
       setTip(doneButton, row.done ? 'show it again (d)' : 'mark it done (d)');
       setText(dir, row.dir ?? 'directory not known');
