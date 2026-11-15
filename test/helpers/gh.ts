@@ -33,9 +33,10 @@ export interface GhOptions {
    */
   answer?: GhPullRequest | RunResult;
   /**
-   * When a run answers: `now` (the default); `held` until release() (an abort of the run's signal
-   * still rejects it, as it would kill a real gh); `signal` only when the run's own signal fires —
-   * it then rejects as an aborted run does, and a run without a signal is a mistake of the test.
+   * When a run answers: `now` (the default: at the next turn of the event loop); `held` until
+   * release() (an abort of the run's signal still rejects it, as it would kill a real gh); `signal`
+   * only when the run's own signal fires — it then rejects as an aborted run does, and a run without
+   * a signal is a mistake of the test.
    */
   hold?: 'now' | 'held' | 'signal';
 }
@@ -138,7 +139,9 @@ export function ghRunner(inner: Runner, options: GhOptions = {}): GhRunner {
       const prs = asked(args);
       runs.push({ prs: prs.map((pr) => `${pr.owner}/${pr.repo}#${pr.number}`), args });
       const result = resultOf(answer, prs.length);
-      if (hold === 'now') return Promise.resolve(result);
+      // At the next turn of the event loop, as a real program's answer comes: a run started again
+      // and again cannot starve the timers (a case's own timeout still fires).
+      if (hold === 'now') return new Promise((resolve) => setImmediate(() => resolve(result)));
       if (hold === 'signal' && signal === undefined) {
         return Promise.reject(new Error("ghRunner: hold 'signal' needs a run with a signal"));
       }
