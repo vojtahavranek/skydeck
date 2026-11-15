@@ -506,8 +506,8 @@ test('restoreOffer: an empty text, `>` alone, and `>` with what is no start of `
     ' >restore',
     '\t>r',
     // Only ASCII `>` and the ASCII letters of `restore`: a look-alike is no command.
-    '＞restore',
-    '>rеstore',
+    '\uff1erestore',
+    '>r\u0435store',
   ];
   for (const text of texts) {
     assert.equal(restoreOffer(text, banner()), null, JSON.stringify(text));
