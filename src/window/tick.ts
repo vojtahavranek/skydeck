@@ -61,7 +61,9 @@ export interface Tick {
   rows(): readonly ListRow[];
   /** Running sessions none of whose holders is in a terminal of the window (the mapping's). */
   elsewhere(): ReadonlyMap<string, { pid: number; tty: string | null }>;
-  /** A terminal ended (any exit): settled at the next refresh with this, its latest hello. */
+  /** A terminal ended (any exit): settled at the next refresh with this, its latest hello, and the
+   *  terminal as `hub.list()` gives it now — a lost keeper's exit whose program may still run is
+   *  settled only once that program is gone or 60 s after the loss (plan task 82). */
   ended(hello: KeeperHello): void;
   /** Sessions a page lists: the next automatic pull-request refresh asks about theirs. */
   listed(sessionIds: Iterable<string>): void;
@@ -78,7 +80,9 @@ export interface Tick {
   start(): Promise<void>;
   /** No tick from now on; resolves once a running tick and a pull-request fetch have ended. */
   stop(): Promise<void>;
-  /** Settles the exits not settled yet, now (the server's stop); a failure is logged by kind. */
+  /** Settles the exits not settled yet, now (the server's stop); a failure is logged by kind. A lost
+   *  keeper's exit whose program may still run stays unsettled: its lock expires by itself, and a
+   *  new session's label and group stay for good (no session is derived from them alone). */
   settleAll(): void;
 }
 
@@ -138,8 +142,12 @@ export function createTick(deps: TickDeps): Tick {
   let reloadOwed = false;
   /** How many ticks ran: the second of the schedule. */
   let second = 0;
-  /** The exits not settled yet, by terminal id, each with the terminal's latest hello. */
-  const unsettled = new Map<string, KeeperHello>();
+  /**
+   * The exits not settled yet, by terminal id, each with the terminal's latest hello and the
+   * terminal as the hub listed it when its exit came (null when it did not list it): what tells a
+   * lost keeper's exit and its program (plan task 82), also once the terminal was closed.
+   */
+  const unsettled = new Map<string, { hello: KeeperHello; terminal: TerminalInfo | null }>();
   /** The sessions the pages listed since the last pull-request refresh started. */
   let listed = new Set<string>();
   /** The failure kind logged for the refresh failing now; null while it works. */
@@ -165,11 +173,13 @@ export function createTick(deps: TickDeps): Tick {
   /**
    * S2 7.8: settleEndedTerminal for each exit not settled yet. A failure of the database keeps it
    * for the next refresh and fails this one; any other failure is logged and that exit is given up.
+   * A lost keeper's exit whose program may still run is kept for a later refresh, as settleEndedTerminal
+   * answers (plan task 82): at most 60 s after the loss, then it is settled as any other.
    */
   const settle = (): void => {
-    for (const [id, hello] of [...unsettled]) {
+    for (const [id, { hello, terminal }] of [...unsettled]) {
       try {
-        settleEndedTerminal(deck, hello);
+        if (!settleEndedTerminal(deck, hello, terminal)) continue;
         unsettled.delete(id);
         // It ingested the spool and may have written, on the server's own connection after the
         // refresh's result was made: the rows are loaded again (review 2).
@@ -346,7 +356,16 @@ export function createTick(deps: TickDeps): Tick {
     rows: () => rows,
     elsewhere: () => elsewhere,
     ended(hello) {
-      unsettled.set(hello.id, hello);
+      // The registry calls this inside its exit event, where it lists the terminal with its exit:
+      // `lost` and the program for a lost keeper. A hub that cannot be read gives no terminal, and
+      // the exit is settled as before.
+      let terminal: TerminalInfo | null;
+      try {
+        terminal = hub.list().find((candidate) => candidate.id === hello.id) ?? null;
+      } catch {
+        terminal = null;
+      }
+      unsettled.set(hello.id, { hello, terminal });
     },
     listed(sessionIds) {
       for (const id of sessionIds) listed.add(id);

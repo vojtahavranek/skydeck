@@ -863,7 +863,7 @@ test('listed: sessions step 1 does not list are not listed (an expired one with 
 
 // --- filter ------------------------------------------------------------------------------------
 
-test('filter: design 7.4 — title, group, note, directory, pull requests; case-insensitive', () => {
+test("filter: design 7.4's fields — title, group, note, directory, pull requests; case-insensitive (S2 12.8, E2)", () => {
   const pr = prRow('acme/web', 4711);
   const list = rows(
     [
@@ -938,7 +938,7 @@ test('filter: the title bar counts do not depend on the filter', () => {
   assert.deepEqual(ids(filtered, 'open'), []);
 });
 
-test('filter: does not show done sessions in stage A; doneHidden counts the matching ones', () => {
+test('filter: lists the done sessions it matches, with their done mark; doneHidden is 0 (S2 12.8, E5)', () => {
   const message = buildListMessage(
     input({
       rows: rows([
@@ -949,8 +949,10 @@ test('filter: does not show done sessions in stage A; doneHidden counts the matc
       view: { filter: 'parser' },
     }),
   );
-  assert.deepEqual(ids(message, 'week'), [S3]);
-  assert.equal(message.doneHidden, 1);
+  assert.deepEqual(ids(message, 'week'), [S1, S3]);
+  assert.equal(rowIn(message, S1).done, true);
+  assert.equal(rowIn(message, S3).done, false);
+  assert.equal(message.doneHidden, 0);
   const shown = buildListMessage(
     input({
       rows: rows([ds({ id: S1, hidden: true, doneAtNs: T0, transcript: { aiTitle: 'parser' } })]),
@@ -1131,7 +1133,17 @@ test('dirs: the known project directories, as projectDirs gives them', () => {
 
 // --- needs nothing but its input ---------------------------------------------------------------
 
-test("src/window/view/ imports values only from text, the two list functions of A8, D4's CHIP_ORDER and windowChip, and B's attention", () => {
+/** The value imports of a source file: the names and the module of each `import` that is not
+ *  `import type`. */
+function valueImports(path: string): [string[], string][] {
+  const source = readFileSync(path, 'utf8');
+  const imports = [...source.matchAll(/^import\s+(type\s+)?([^;]*?)\s+from\s+'([^']+)';/gms)];
+  return imports
+    .filter(([, isType]) => isType === undefined)
+    .map(([, , what, from]) => [(what ?? '').replace(/[{}\s]/g, '').split(','), from ?? '']);
+}
+
+test("src/window/view/ imports values only from text, A8's isListed, D4's CHIP_ORDER and windowChip, B's attention and E's search/; search/ only from its own files and sanitize", () => {
   const dir = join(import.meta.dirname, '../../../src/window/view');
   const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
   assert.deepEqual(files.sort(), [
@@ -1142,24 +1154,37 @@ test("src/window/view/ imports values only from text, the two list functions of 
     'sections.ts',
   ]);
   for (const name of files) {
-    const source = readFileSync(join(dir, name), 'utf8');
-    const imports = [...source.matchAll(/^import\s+(type\s+)?([^;]*?)\s+from\s+'([^']+)';/gms)];
-    for (const [, isType, what, from] of imports) {
-      if (isType !== undefined) {
-        continue;
-      }
-      const names = (what ?? '').replace(/[{}\s]/g, '').split(',');
+    for (const [names, from] of valueImports(join(dir, name))) {
       const allowed =
         from === './sections.ts' ||
         from === './attention.ts' ||
         (from === './chip.ts' && names.every((n) => n === 'windowChip')) ||
         from === '../../text/sanitize.ts' ||
-        (from === '../../sessions/list.ts' &&
-          names.every((n) => n === 'isListed' || n === 'matchesFilter')) ||
-        (from === '../../github.ts' && names.every((n) => n === 'CHIP_ORDER'));
-      assert.ok(allowed, `${name}: import ${what ?? ''} from '${from ?? ''}'`);
+        (from === '../../sessions/list.ts' && names.every((n) => n === 'isListed')) ||
+        (from === '../../github.ts' && names.every((n) => n === 'CHIP_ORDER')) ||
+        from === './search/filter.ts' ||
+        from === './search/stacks.ts' ||
+        from === './search/switcher.ts';
+      assert.ok(allowed, `${name}: import ${names.join(', ')} from '${from}'`);
     }
   }
+  // Stage E's directory (plan E 2.1): its files by name, values only from its own files and
+  // `text`'s `sanitize` (its own guard, search/imports.test.ts, also holds the types).
+  const searchDir = join(dir, 'search');
+  const searchFiles = readdirSync(searchDir).filter((name) => name.endsWith('.ts'));
+  assert.deepEqual(searchFiles.sort(), ['filter.ts', 'stacks.ts', 'switcher.ts']);
+  for (const name of searchFiles) {
+    for (const [names, from] of valueImports(join(searchDir, name))) {
+      const allowed =
+        /^\.\/[\w-]+\.ts$/.test(from) ||
+        (from === '../../../text/sanitize.ts' && names.every((n) => n === 'sanitize'));
+      assert.ok(allowed, `search/${name}: import ${names.join(', ')} from '${from}'`);
+    }
+  }
+  // build.ts no longer imports design 7.4's matchesFilter (plan E1).
+  const build = valueImports(join(dir, 'build.ts'));
+  assert.ok(!build.some(([names]) => names.includes('matchesFilter')));
+  assert.ok(build.some(([, from]) => from === './search/filter.ts'));
 });
 
 // --- attention (stage B, S2 12.4, plan B7) -----------------------------------------------------

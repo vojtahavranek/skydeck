@@ -43,10 +43,38 @@
 //                           server's answer the command line's client cannot read whole)
 //   FAKE_SERVE_ON_SHUTDOWN  exit (default): after answering, removes server.json, server.pid and
 //                           server.sock and exits 0; stay: answers and goes on
+// Stage C's routes (plan C2–C5; task 76), answered through the server's own handler and parser
+// (an unknown field, a label over 1,024 bytes: 400). Without FAKE_SERVE_LAUNCH and
+// FAKE_SERVE_RESTORE there is no `launch`: `POST /resume`, `/new` and `/restore` are 404
+// `route: unknown`, as a server before stage C answers them.
+//   FAKE_SERVE_LAUNCH       `POST /resume` and `/new`: `answer:<JSON>` answers that value as it is
+//                           (any JSON: a LaunchAnswer, or one of another shape); `silent` never
+//                           answers them; `status:<code>` answers that HTTP status with
+//                           `{ error: 'body: too long' }` before anything else, as for a body over
+//                           64 KiB. Unset while FAKE_SERVE_RESTORE is set: they fail (500)
+//   FAKE_SERVE_RESTORE      `POST /restore`: a JSON array of RestoreStreamLine, written 100 ms apart
+//                           (the first at once), then the answer ends; `silent-after:<n>` writes n
+//                           lines `{ "line": "line <i>" }` 100 ms apart and then nothing until the
+//                           asker goes. Unset while FAKE_SERVE_LAUNCH is set: it fails (500)
+//   FAKE_SERVE_STATE        the server's launch state (C4): `starting` or `stopping` — every stage C
+//                           request is answered 503 { error } —, or `starting:<n>`: the first n
+//                           requests 503 `starting`, then they act
+//   FAKE_SERVE_REQUESTS     an absolute path: each stage C request that reaches `launch` is appended
+//                           as one JSON line, `{ route, ...body }` (none for a 503, a 400, a 404 or
+//                           FAKE_SERVE_LAUNCH's `status:`)
+// A value of these of another form ends the fake at once (exit 2), as for the timed options.
 // It writes one line to stdout and one to stderr at start (so that a test sees where they go)
 // and prints `ready` on stdout once server.json is written (idle: at once). It ends itself when
 // SKYDECK_HOME is gone (checked every 200 ms) or 120 s after it started.
-import { existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -56,8 +84,14 @@ import { openDeck } from '../../../src/sessions/deck.ts';
 import { createTokens } from '../../../src/window/auth.ts';
 import { computeBuild } from '../../../src/window/build.ts';
 import { controlHandler } from '../../../src/window/control.ts';
+import type { ControlLaunch } from '../../../src/window/control.ts';
 import { formatPidLine } from '../../../src/window/pidline.ts';
-import type { PingAnswer, StatusAnswer } from '../../../src/window/protocol.ts';
+import type {
+  LaunchAnswer,
+  PingAnswer,
+  RestoreStreamLine,
+  StatusAnswer,
+} from '../../../src/window/protocol.ts';
 import {
   prepareRuntimeDir,
   resolveRuntimeDir,
@@ -100,8 +134,17 @@ setTimeout(() => process.exit(0), 120_000);
 refuseMalformed('FAKE_SERVE_PAGES_AFTER', /^[0-9]+:[0-9]+$/);
 refuseMalformed('FAKE_SERVE_STARTING_MS', /^(0|[1-9][0-9]*)$/);
 refuseMalformed('FAKE_SERVE_WINDOW_EXPECTED_MS', /^((0|[1-9][0-9]*)|json:.*)$/s, (text) =>
-  text.startsWith('json:') ? isJson(text) : true,
+  text.startsWith('json:') ? isJson(text.slice('json:'.length)) : true,
 );
+// Stage C's options, likewise.
+refuseMalformed('FAKE_SERVE_LAUNCH', /^(answer:.*|silent|status:[1-5][0-9][0-9])$/s, (text) =>
+  text.startsWith('answer:') ? isJson(text.slice('answer:'.length)) : true,
+);
+refuseMalformed('FAKE_SERVE_RESTORE', /^(\[.*\]|silent-after:(0|[1-9][0-9]*))$/s, (text) =>
+  text.startsWith('[') ? isJson(text) && Array.isArray(JSON.parse(text)) : true,
+);
+refuseMalformed('FAKE_SERVE_STATE', /^(starting(:(0|[1-9][0-9]*))?|stopping)$/);
+refuseMalformed('FAKE_SERVE_REQUESTS', /^\/./);
 
 const mode = env.FAKE_SERVE_MODE ?? 'serve';
 if (mode === 'exit') {
@@ -188,10 +231,11 @@ async function serve(silent: boolean): Promise<void> {
     log: (line) => {
       process.stderr.write(`fake-serve: ${line}\n`);
     },
+    ...stageC(),
   });
   const listener = await platform.net.listenHttp(
     { path: files.serverSock },
-    { request: silent ? () => {} : handler },
+    { request: silent ? () => {} : withLaunchStatus(handler) },
   );
   stop = async () => {
     platform.files.remove(files.serverJson);
@@ -233,7 +277,7 @@ function refuseMalformed(name: string, form: RegExp, valid = (_text: string) => 
 
 function isJson(text: string): boolean {
   try {
-    JSON.parse(text.slice('json:'.length));
+    JSON.parse(text);
     return true;
   } catch {
     return false;
@@ -279,5 +323,99 @@ function timedStatus(pages: number): {
       fields.windowExpectedMs = pagesNow > 0 || left <= 0 ? null : Math.ceil(left);
       return fields;
     },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Stage C's routes (task 76)
+
+const LAUNCH_PATHS: ReadonlySet<string> = new Set(['/resume', '/new']);
+
+/** One stage C request in FAKE_SERVE_REQUESTS, as `launch` was given it. */
+function recordRequest(request: Record<string, unknown>): void {
+  const path = env.FAKE_SERVE_REQUESTS;
+  if (path !== undefined) appendFileSync(path, `${JSON.stringify(request)}\n`);
+}
+
+/** `launch` and `launchState` of the server's handler, from FAKE_SERVE_LAUNCH, _RESTORE, _STATE. */
+function stageC(): {
+  launch?: ControlLaunch;
+  launchState?: () => 'starting' | 'stopping' | null;
+} {
+  const launchText = env.FAKE_SERVE_LAUNCH;
+  const restoreText = env.FAKE_SERVE_RESTORE;
+  if (launchText === undefined && restoreText === undefined) return {};
+  const answer = (): Promise<LaunchAnswer> => {
+    if (launchText === undefined || launchText.startsWith('status:')) {
+      return Promise.reject(new Error('FAKE_SERVE_LAUNCH gives no answer'));
+    }
+    if (launchText === 'silent') return new Promise(() => {});
+    return Promise.resolve(JSON.parse(launchText.slice('answer:'.length)) as LaunchAnswer);
+  };
+  const launch: ControlLaunch = {
+    resume(sessionId) {
+      recordRequest({ route: 'resume', sessionId });
+      return answer();
+    },
+    newSession(request) {
+      recordRequest({ route: 'new', ...request });
+      return answer();
+    },
+    async restore(request, write, closed) {
+      recordRequest({ route: 'restore', ...request });
+      if (restoreText === undefined) throw new Error('FAKE_SERVE_RESTORE gives no stream');
+      const after = /^silent-after:([0-9]+)$/.exec(restoreText);
+      const lines: unknown[] = after === null ? (JSON.parse(restoreText) as unknown[]) : [];
+      const count = after === null ? lines.length : Number(after[1]);
+      for (let i = 0; i < count && !closed.aborted; i++) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 100));
+        write((after === null ? lines[i] : { line: `line ${i + 1}` }) as RestoreStreamLine);
+      }
+      if (after !== null && !closed.aborted) {
+        // Then nothing, until the asker goes.
+        await new Promise((resolve) => closed.addEventListener('abort', resolve, { once: true }));
+      }
+    },
+  };
+  const stateText = env.FAKE_SERVE_STATE;
+  if (stateText === undefined) return { launch };
+  const counted = /^starting:([0-9]+)$/.exec(stateText);
+  let left = counted === null ? Infinity : Number(counted[1]);
+  return {
+    launch,
+    launchState: () => {
+      if (stateText === 'stopping') return 'stopping';
+      if (left <= 0) return null;
+      left--;
+      return 'starting';
+    },
+  };
+}
+
+/**
+ * FAKE_SERVE_LAUNCH `status:<code>`: `POST /resume` and `/new` answered with that status and
+ * `{ error: 'body: too long' }` before the server's handler sees them (as a body over 64 KiB is);
+ * every other request goes to `handler`.
+ */
+function withLaunchStatus(
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+): (req: IncomingMessage, res: ServerResponse) => void {
+  const status = /^status:([0-9]+)$/.exec(env.FAKE_SERVE_LAUNCH ?? '');
+  if (status === null) return handler;
+  return (req, res) => {
+    if (req.method !== 'POST' || !LAUNCH_PATHS.has(req.url ?? '')) {
+      handler(req, res);
+      return;
+    }
+    req.resume();
+    req.on('end', () => {
+      const body = JSON.stringify({ error: 'body: too long' });
+      res.writeHead(Number(status[1]), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': String(Buffer.byteLength(body)),
+        Connection: 'close',
+      });
+      res.end(body);
+    });
   };
 }

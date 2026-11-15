@@ -529,16 +529,24 @@ test('the list', async (t) => {
       // `a` (show done) and `j` (move) typed here are letters of the filter, nothing else.
       await page.keyboard.type('betaj');
       await page.keyboard.press('Backspace');
-      // A filter unfolds every section (S2 12.8): the match in Earlier is shown; the done one is
-      // counted in the footer, not shown.
-      await untilDrawn(
+      // A filter unfolds every section and lists the done sessions it matches (S2 12.8): the match
+      // in Earlier is shown, and the done one with its mark `done`; no footer.
+      const matched = await untilDrawn(
         page,
-        (rows) => rows.map((row) => row.id).join() === [S2, S3].join(),
+        (rows) => rows.map((row) => row.id).join() === [S2, S4, S3].join(),
         'the rows that match',
+      );
+      assert.deepEqual(
+        matched.map((row) => [row.id, row.marks.includes('done')]),
+        [
+          [S2, false],
+          [S4, true],
+          [S3, false],
+        ],
       );
       assert.equal(await page.inputValue('#list .list-filter'), 'beta');
       assert.equal(await inField(), true);
-      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      await showsText(page, '#list .list-footer', /^$/);
       // No move: the selection (S1) is filtered out, and no row that is drawn got it.
       assert.equal(await selectedRow(page), null);
 

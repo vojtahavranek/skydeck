@@ -34,7 +34,9 @@ export interface KeepAlivePayload {
 // Limits (the validator refuses more): sizes (`cols`, `rows`) are whole numbers 1–65535; strings
 // are measured in UTF-8 bytes — paths and URLs at most 4096, other text 1024, `input.data` 64 KiB,
 // a note's `text` and `base` 64 KiB each (plan D5); every string must be well formed (no lone
-// surrogate). A restore names 1–1,000 distinct session ids (plan C 2.2).
+// surrogate). A restore names 1–1,000 distinct session ids (plan C 2.2). A view's `chips` are
+// distinct chips, its `opened` at most MAX_OPENED distinct texts, its `switcher` null or a text
+// (plan E 2.3).
 
 /** The page's first message (S2 8.2.2). Any `protocol` number is read; the server closes with 4426
  *  for one it does not speak. `nonce`, `proof`: base64url, checked by the server's authentication. */
@@ -59,15 +61,24 @@ export interface PingMessage {
   t: 'ping';
   n: number;
 }
-/** Stage A: no `chips` (stage E adds them). `unfolded`: section names ('earlier'), each once.
- *  `selected`: a session id (lower-case UUID) or null. */
+/** `unfolded`: section names ('earlier'), each once. `selected`: a session id (lower-case UUID) or
+ *  null. Stage E's fields (plan E 2.3) are each optional, as a page before stage E sends none:
+ *  absent `chips` is none, absent `opened` is no stacks at all (E6), absent `switcher` is closed. */
 export interface ViewMessage {
   t: 'view';
   filter: string;
   unfolded: string[];
   showDone: boolean;
   selected: string | null;
+  /** E4: each once. */
+  chips?: SearchChip[];
+  /** E6: the groups whose stacks the user opened; at most MAX_OPENED, each a text, each once. */
+  opened?: string[];
+  /** E8: the switcher's text while it is shown; null while it is not. */
+  switcher?: string | null;
 }
+/** E6: the most groups view.opened names. */
+export const MAX_OPENED = 64;
 /** Window focus, selection and the terminal area at the page's font (S2 8.2.3, 8.2.6). */
 export interface FocusMessage {
   t: 'focus';
@@ -226,7 +237,9 @@ export interface RowPayload {
   starting: boolean;
   /** S2 12.4: why the row needs you, null when it needs nothing (stage B, plan B 2.3). */
   attention: AttentionPayload | null;
-  stack: null; // stage E
+  /** S2 12.2's stack the row is drawn in (plan E6), null in none (always while filtering, in Open,
+   *  and for a view without `opened`). */
+  stack: StackPayload | null;
 }
 export interface SectionPayload {
   name: 'open' | 'week' | 'earlier';
@@ -293,6 +306,63 @@ export interface ListMessage {
   selected: SelectedPayload | null;
   /** Known project directories, most recent first (S2 12.6, the new form). */
   dirs: string[];
+  // Stage E (plan E 2.3): optional for the reader — a list without them (a scripted list of the
+  // test helpers, a server before stage E) counts as false and null.
+  /** E5: the view's words or chips are set (the page draws its empty line and folds nothing). */
+  filtering?: boolean;
+  /** E8, E9: while view.switcher is a string; else null. */
+  switcher?: SwitcherPayload | null;
+}
+
+// Stage E (plan E 2.2, 2.3): search's message types, made by `src/window/view/search/`.
+
+/** E4: the chips that narrow the list (S2 12.8); Show done is `view.showDone`. */
+export type SearchChip = 'running' | 'open-pr' | 'note';
+/** RowPayload.stack (E6). */
+export interface StackPayload {
+  /** The group the stack is of (the rows' group, as sanitised). */
+  group: string;
+  /** Its rows, the head included: at least 2. */
+  size: number;
+  /** E6: `opened` names the group, or a member other than the head is selected. */
+  open: boolean;
+  role: 'head' | 'member';
+  /** The head's session id. */
+  head: string;
+}
+export type SwitchRank = 'need' | 'open' | 'not-running' | 'done';
+/** E10: what the page changes so that its list shows the row, in this order of meaning:
+ *  `filter` — its words or chips do not match the row; `done` — the row is done and not open and
+ *  the view shows no done sessions once the filter is cleared; `folded` — the row is in Earlier
+ *  and Earlier is folded once the filter is cleared. [] when the list shows the row. */
+export type HiddenBy = 'filter' | 'done' | 'folded';
+export interface SwitchItem {
+  rank: SwitchRank;
+  row: RowPayload;
+  /** foundIn(row.title, words). */
+  found: [number, number][];
+  hiddenBy: HiddenBy[];
+}
+/** E12: stage C's offer, listed in the switcher. */
+export interface RestoreOffer {
+  /** The preselected entries: at least 1. */
+  count: number;
+  /** The banner's `lastActivityNs`. */
+  lastActivityNs: NsText | null;
+  /** The preselected entries' ids, in the banner's order. */
+  sessionIds: string[];
+}
+export interface SwitcherPayload {
+  /** The text it answers (view.switcher), as the page sent it; E10's picks compare it. */
+  query: string;
+  /** E12 (ruled): the text is in command form — its first character is `>` — so `items` is []
+   *  and `more` 0; the page says so from this field and never tests the text itself. */
+  command: boolean;
+  items: SwitchItem[];
+  /** How many matching sessions were left out after MAX_ITEMS. */
+  more: number;
+  /** E12: switcherPayload gives null; the server's listFor sets it (task 98). */
+  restore: RestoreOffer | null;
 }
 /** One session the banner offers (design 7.8's entry). */
 export interface BannerEntryPayload {
@@ -513,12 +583,12 @@ const WELL_FORMED: Check = (value, where) => {
   return value.isWellFormed() ? null : `${where}: wrong value`;
 };
 
-/** An array of 1 (`nonEmpty`) or 0 up to LIST_LIMIT items, each passing `item`; `distinct`: no
- *  item twice. */
-function list(item: Check, nonEmpty: boolean, distinct: boolean): Check {
+/** An array of 1 (`nonEmpty`) or 0 up to `max` items, each passing `item`; `distinct`: no item
+ *  twice. */
+function list(item: Check, nonEmpty: boolean, distinct: boolean, max = LIST_LIMIT): Check {
   return (value, where) => {
     if (!Array.isArray(value)) return `${where}: wrong type`;
-    if (value.length > LIST_LIMIT) return `${where}: too long`;
+    if (value.length > max) return `${where}: too long`;
     if (nonEmpty && value.length === 0) return `${where}: wrong value`;
     const seen = new Set<unknown>();
     for (const one of value as unknown[]) {
@@ -594,6 +664,18 @@ const UNFOLDED: Check = (value, where) => {
   return null;
 };
 
+/** E4's chips. A record over the type, so that the compiler holds that it names every chip and no
+ *  other; `SEARCH_CHIPS` of the view model is the same list (a case of the protocol's tests ties
+ *  them: this module imports nothing of the view model). */
+const CHIPS: Readonly<Record<SearchChip, true>> = { running: true, 'open-pr': true, note: true };
+
+const CHIP: Check = (value, where) => {
+  if (typeof value !== 'string') return `${where}: wrong type`;
+  return Object.hasOwn(CHIPS, value) ? null : `${where}: wrong value`;
+};
+const VIEW_CHIPS = list(CHIP, false, true, Object.keys(CHIPS).length);
+const OPENED = list(TEXT, false, true, MAX_OPENED);
+
 const AREA = object({ cols: SIZE, rows: SIZE });
 
 /** `t` and `kind` were read before a message's own check runs. */
@@ -646,13 +728,20 @@ const MESSAGES: Readonly<Record<string, Check>> = {
     theme: object({ fg: TEXT, bg: TEXT }),
   }),
   ping: object({ t: ANY, n: COUNT }),
-  view: object({
-    t: ANY,
-    filter: TEXT,
-    unfolded: UNFOLDED,
-    showDone: BOOLEAN,
-    selected: nullable(SESSION),
-  }),
+  view: object(
+    {
+      t: ANY,
+      filter: TEXT,
+      unfolded: UNFOLDED,
+      showDone: BOOLEAN,
+      selected: nullable(SESSION),
+      // Stage E (plan E 2.3), each optional: a page before stage E sends none of them.
+      chips: VIEW_CHIPS,
+      opened: OPENED,
+      switcher: nullable(TEXT),
+    },
+    ['chips', 'opened', 'switcher'],
+  ),
   focus: object({ t: ANY, focused: BOOLEAN, selected: nullable(SESSION), area: AREA }),
   attach: object({ t: ANY, term: TERM, cols: SIZE, rows: SIZE }),
   detach: object({ t: ANY, term: TERM }),
