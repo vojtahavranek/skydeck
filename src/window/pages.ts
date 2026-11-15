@@ -27,6 +27,11 @@
  * hub's first call on it; what follows (a terminal's exit or notice of the state it was already
  * in, then every later record) is forwarded as it comes.
  *
+ * Attention (S2 12.4, 13; plan B 2.7). Each page's focus and selection (its `start`, then each
+ * `focus`), its typing into a terminal (an `input` that `isTyping` takes: never binary, never a
+ * report a terminal sends by itself) and its end are told to `seen`; nothing is told for a page
+ * after its end. `notify` goes to the page that had focus last, and only while no page has it.
+ *
  * Backpressure (S2 8.2.8, ruled at review 2): a page is behind once a record or its list finds
  * more than 1 MiB queued after its latest snap; its records are dropped and its list held until
  * the drain, when only the streams that lost something snap again. Above 64 MiB queued the
@@ -58,6 +63,7 @@ import type {
   InputMessage,
   ListMessage,
   NoticeMessage,
+  NotifyMessage,
   PageMessage,
   ResultMessage,
   ServerMessage,
@@ -65,6 +71,8 @@ import type {
   ViewMessage,
   WelcomeMessage,
 } from './protocol.ts';
+import { isTyping } from './seen.ts';
+import type { Seen } from './seen.ts';
 import { sizeAfter } from './size.ts';
 import type { SizeState } from './size.ts';
 import { acceptWebSocket } from './websocket.ts';
@@ -97,6 +105,9 @@ export interface PagesDeps {
   /** While it returns true the server is still starting (S2 5.2: its keepers not found yet): an
    *  upgrade with the right Host is answered 503, as after `bye` (ruled, task 23). Default false. */
   starting?: () => boolean;
+  /** S2 12.4: told each page's focus and selection, its typing (an `input` for which isTyping is
+   *  true: never a focus or mouse report) and its end. */
+  seen?: Pick<Seen, 'focus' | 'typed' | 'gone'>;
 }
 
 export interface Pages {
@@ -108,6 +119,10 @@ export interface Pages {
   /** Sends `list` to every page whose list differs from the last one it got, at most once a second each. */
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
+  /** S2 13: while no page has focus, `message` to the page that had focus last; false when it was
+   *  not sent (a page has focus, or none is open — none is once `bye` has run: nothing follows a
+   *  `bye`). */
+  notify(message: NotifyMessage): boolean;
   /** `bye` to every page that got `welcome`, then every connection closed with 1001; resolves once
    *  every socket has closed (a 'close' listener on the raw socket, ruled; at most CLOSE_WAIT_MS).
    *  From then on an upgrade with the right Host is answered 503 (ruled). */
@@ -545,6 +560,12 @@ export function createPages(deps: PagesDeps): Pages {
       send(conn, { t: 'notice', kind: 'input-full', term: input.term, text: INPUT_FULL });
     }
     sizeEvent(conn, 'input', input.term);
+    // S2 12.4 (B9): typing makes the session the terminal shows seen; a focus or mouse report the
+    // terminal sends by itself is no typing (F1).
+    if (deps.seen !== undefined && isTyping(input.data, input.binary === true)) {
+      const shown = hub.list().find((term) => term.id === input.term)?.sessionId ?? null;
+      if (shown !== null) deps.seen.typed(conn, shown);
+    }
   };
 
   const onAct = (conn: Connection, action: ActMessage): void => {
@@ -678,6 +699,7 @@ export function createPages(deps: PagesDeps): Pages {
       conn.focusedAt = ++focusOrder;
       hub.setTheme(conn.theme);
     }
+    deps.seen?.focus(conn, start.focused, null);
   };
 
   const onMessage = (conn: Connection, parsed: Parsed): void => {
@@ -708,6 +730,7 @@ export function createPages(deps: PagesDeps): Pages {
           conn.focusedAt = ++focusOrder;
           if (conn.theme !== null) hub.setTheme(conn.theme);
         }
+        deps.seen?.focus(conn, message.focused, message.selected);
         return;
       case 'attach':
         onAttach(conn, message.term, message.cols, message.rows);
@@ -742,6 +765,7 @@ export function createPages(deps: PagesDeps): Pages {
     conn.attachments.clear();
     for (const attachment of attachments) attempt(() => endStream(attachment));
     for (const attachment of attachments) attempt(() => sizeEvent(conn, 'detach', attachment.term));
+    attempt(() => deps.seen?.gone(conn));
   };
 
   /**
@@ -869,6 +893,22 @@ export function createPages(deps: PagesDeps): Pages {
       for (const conn of open) {
         guard(conn, () => send(conn, { t: 'notice', kind, term: null, text }));
       }
+    },
+    notify(message) {
+      if (stopping) return false;
+      let last: Connection | null = null;
+      for (const conn of open) {
+        if (conn.focused) return false;
+        if (last === null || conn.focusedAt >= last.focusedAt) last = conn;
+      }
+      if (last === null) return false;
+      const to = last;
+      let sent = false;
+      guard(to, () => {
+        send(to, message);
+        sent = true;
+      });
+      return sent;
     },
     async bye(reason) {
       stopping = true;
