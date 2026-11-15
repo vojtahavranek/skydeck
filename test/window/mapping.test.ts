@@ -608,13 +608,17 @@ describe('mapTerminals: a lost keeper’s program while it lives (task 57; S2 7.
       [5001, 901, 5000],
     ]);
     for (const state of ['reconnecting', 'running', 'lost'] as const) {
-      const got = map(
-        [lost({ state })],
-        [ds({ id: S1, state: 'running', holders: [holder(5001, 901)] })],
-        proc,
-      );
-      assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, state);
-      assert.equal(got.elsewhere.has(S1), false, state);
+      // The holder is the program itself, or its child below a wrapper.
+      for (const held of [holder(5000, 900), holder(5001, 901)]) {
+        const what = `${state}, holder ${held.process.pid}`;
+        const got = map(
+          [lost({ state })],
+          [ds({ id: S1, state: 'running', holders: [held] })],
+          proc,
+        );
+        assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, what);
+        assert.equal(got.elsewhere.has(S1), false, what);
+      }
     }
   });
 
