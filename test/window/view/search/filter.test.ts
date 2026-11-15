@@ -166,6 +166,9 @@ test('matchesWords: the note is sanitised line by line', () => {
   const target = row({ note: '\x1b]0;hidden\nvisible\rnext' });
   assert.equal(matches(target, 'visible next'), true);
   assert.equal(matches(target, 'hidden'), false);
+  // A lone carriage return ends a line too, as for `show` (design 7.4).
+  assert.equal(matches(row({ note: '\x1b]0;hidden\rvisible' }), 'visible'), true);
+  assert.equal(matches(row({ note: '\x1b]0;hidden\r\nvisible' }), 'visible'), true);
 });
 
 test('matchesWords: the id matches from its first 4 characters on, and only as its start', () => {
@@ -296,6 +299,19 @@ test('matchesWords: a title is searched in its first FIELD_UNITS units', () => {
   assert.equal(matches(ends, 'zebra'), true);
   const after = row({ title: `${'a'.repeat(FIELD_UNITS)}zebra` });
   assert.equal(matches(after, 'zebra'), false);
+});
+
+test('matchesWords: a field is cut to FIELD_UNITS also when its lower case is longer', () => {
+  // `İ` lower-cases to two units: the title's first half fills the field once lower-cased.
+  const title = `${'İ'.repeat(FIELD_UNITS / 2)}${'a'.repeat(FIELD_UNITS / 2 - 5)}zebra`;
+  assert.equal(title.length, FIELD_UNITS);
+  const target = row({ title });
+  assert.deepEqual(
+    searchable(target).fields.map((text) => text.length),
+    [FIELD_UNITS, '/home/dev/plain'.length],
+  );
+  assert.equal(matches(target, 'zebra'), false);
+  assert.equal(matches(target, 'i̇i̇'), true);
 });
 
 // --- searchable --------------------------------------------------------------------------------
