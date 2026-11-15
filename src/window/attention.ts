@@ -14,11 +14,11 @@
  * the store, so that a busy store costs its 250 ms once a look, never at every key (`seenNow` runs
  * at every key press on some paths; ruled). Any other failure of a write — B2's limit at 2^53 − 1,
  * a damaged table — drops it; a seen that would still clear a mark is made anew at the next look or
- * key while the hold lasts, and each such try is refused at once (logged once). A store migrated under the server (StoreNewerError) stops the module
- * (S2 10.1). The marks are read once, at the first look that can (only the server writes them),
- * and then follow from what each write returns; a read that fails for another reason than a busy
- * store leaves no attention facts from the store (ruled: one damaged row makes `attention()` throw
- * for every session).
+ * key while the hold lasts, and each such try is refused at once (logged once). A store migrated
+ * under the server (StoreNewerError) stops the module (S2 10.1). The marks are read once, at the
+ * first look that can (only the server writes them), and then follow from what each write returns;
+ * a read that fails for another reason than a busy store leaves no attention facts from the store
+ * (ruled: one damaged row makes `attention()` throw for every session).
  *
  * It never throws: its callers are the tick and Seen's listener (ruled: the listener must not
  * throw). Each failure is logged by its kind, once until that work works again; a log line names a
@@ -113,7 +113,7 @@ function hasEnd(write: AttentionWrite): boolean {
 }
 
 /**
- * B9: whether `sessionId` holds an unseen end once `writes` are stored after `stored`: every value a
+ * B9: whether `sessionId` holds an unseen end once `writes` are stored after `stored`: each value a
  * write takes is later than every stored one and than those of the writes before it, and inside one
  * write the seen comes after the ends (B3).
  */
@@ -135,7 +135,7 @@ function unseenAfter(
 
 /**
  * B11: `write` put behind `queue`. A turn end takes the place of an earlier one of its session (the
- * later is kept): the earlier write loses its turn end, and goes when nothing is left of it. Nothing
+ * later is kept): the earlier write loses its turn end, and goes if nothing is left of it. Nothing
  * else is folded — a seen folded into a later turn end would make that turn seen (B3) although the
  * user had left. A turn end's write holds no window end (the look writes turn ends, `refreshed`
  * window ends), so what is left of it is its seen.
@@ -160,7 +160,7 @@ function enqueue(queue: readonly AttentionWrite[], write: AttentionWrite): Atten
 /** The largest time an INTEGER column holds (design 9.2), in nanoseconds. */
 const INT64_MAX = 2n ** 63n - 1n;
 
-/** A live file's time, or null when no INTEGER column could hold it (a foreign file's, from the year
+/** A live file's time, or null when no INTEGER column holds it (a foreign file's, from the year
  *  2262 on): unknown, so that one file cannot make the write of every session fail. */
 function storable(ns: Ns | null): Ns | null {
   return ns !== null && ns <= INT64_MAX ? ns : null;
@@ -187,7 +187,7 @@ export function createAttention(deps: AttentionDeps): Attention {
   const { store, places } = deck;
   const { files, proc, clock } = deck.platform;
 
-  /** The stored rows by session (the facts' marks): filled by the read, and by each write's rows. */
+  /** The stored rows by session (the facts' marks): filled by the read and by each write's rows. */
   const marks = new Map<string, AttentionRow>();
   /** The statuses of the baselines (B4, B5). */
   let live: ReadonlyMap<string, LiveStatus> = new Map();
@@ -281,7 +281,7 @@ export function createAttention(deps: AttentionDeps): Attention {
    * This look's turn ends, one write per session. Its time is the latest status time among that
    * session's idle baselines after the look (ruled on review 2), so always an after-file's
    * `sinceNs`, and never earlier than the one the row shows (B5 shows the first idle holder's): the
-   * stale-turn rule of the view model compares the two for equality. That holds for two holders that
+   * stale-turn rule of the view model compares the two for equality. It holds for two holders that
    * end at one look (the later time) and for one whose idle file a look missed and that is seen
    * ending later with an earlier time. None known: the clock, the time the server saw the change.
    */
@@ -309,7 +309,7 @@ export function createAttention(deps: AttentionDeps): Attention {
    * B9: a seen for each session being seen: in the last write of its end among `writes` (after the
    * end: B3), whatever the rows say (ruled on review 2: the end makes the row, so F6's reason does
    * not hold, and a turn that ends in front of the user is never finished); else one of its own,
-   * for a session among the rows (F6), when the marks after the kept writes and `writes` would still
+   * for a session among the rows (F6), when the marks after the kept writes and `writes` will still
    * hold an unseen end — a write only when there is something to clear.
    */
   const addSeen = (writes: AttentionWrite[], taken: ReadonlySet<string>): void => {
@@ -355,7 +355,7 @@ export function createAttention(deps: AttentionDeps): Attention {
     return true;
   };
 
-  /** Outside the look: behind the kept writes when there are any (the look tries them), else now. */
+  /** Outside the look: behind the kept writes if there are any (the look tries them), else now. */
   const write = (writes: AttentionWrite[]): boolean => {
     if (kept.length === 0) return record(writes);
     for (const one of writes) kept = enqueue(kept, one);
