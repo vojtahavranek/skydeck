@@ -264,7 +264,12 @@ describe('resume goes through prepareResumeById (design 7.6, S2 11.1)', () => {
   test('two resumes of one session at once: the second meets the lock of the first and opens nothing', async (t) => {
     const d = deckOf(t);
     resumableSession(d);
-    const h = harness(d, { answer: () => new Promise<OpenResult>(() => undefined) }); // never answers
+    // The first open never answers (its program is starting); any later one would answer at once,
+    // so that a second open fails the case instead of hanging it.
+    let opens = 0;
+    const h = harness(d, {
+      answer: () => (++opens === 1 ? new Promise<OpenResult>(() => undefined) : { ok: true }),
+    });
     void h.launches.resume(S1, SIZE);
     assert.deepEqual(
       await h.launches.resume(S1, SIZE),
@@ -397,6 +402,34 @@ describe('resume goes through prepareResumeById (design 7.6, S2 11.1)', () => {
     assert.deepEqual(h.specs, []);
     assert.equal(d.deck.store.getKv(lockKey(S1)), null);
     assert.deepEqual(h.logs, []);
+  });
+
+  test('a lock that cannot be given back after such a throw: the first error is thrown on, one log line by kind', async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    const first = new Error('the read');
+    let reads = 0;
+    let failed = false;
+    const deck = deckWith(d.deck, {
+      store: {
+        getKv: (key) => {
+          if (key === lockKey(S1) && ++reads === 3) {
+            failed = true;
+            throw first;
+          }
+          return d.deck.store.getKv(key);
+        },
+        // releaseLock's transaction, after the read failed.
+        transaction: (fn) => {
+          if (failed) throw Object.assign(new RangeError(SECRET), { code: 'EIO' });
+          return d.deck.store.transaction(fn);
+        },
+      },
+    });
+    const h = harness(d, { deck });
+    await assert.rejects(h.launches.resume(S1, SIZE), (error) => error === first);
+    assert.deepEqual(h.logs, ['resume: the lock was not given back (RangeError (EIO))']);
+    assert.deepEqual(h.specs, []);
   });
 
   test('an unexpected throw after open() was called keeps the lock: the program may have started', async (t) => {
@@ -550,62 +583,155 @@ describe('newSession goes through prepareNew as the request is (design 7.7, S2 1
 
   test("what skydeck new refuses is refused with code 2 and the command line's own message; nothing started or stored, nothing logged", async (t) => {
     // Task 70's reviewer: the route passes label, group, dir and flags on raw; prepareNew is the
-    // one place that checks them.
-    const cases: { name: string; over: Partial<NewRequest>; words: string[]; cwd?: string }[] = [
+    // one place that checks them. Each case holds the rule by its text (`message`) and holds that
+    // the command line says the same (the command runs in `dir` when one is given).
+    const cases: {
+      name: string;
+      over: Partial<NewRequest>;
+      words: string[];
+      dir?: (d: TestDeck) => string;
+      message: RegExp;
+    }[] = [
       {
         name: 'a label that is a flag',
         over: { label: '--dangerously-skip-permissions' },
         words: ['new', '--label=--dangerously-skip-permissions'],
+        message: /^a label cannot start with '-' \(Claude Code would read it as a flag\)$/,
       },
       {
         name: 'a label with an escape sequence',
         over: { label: 'red \x1b[31mtext' },
         words: ['new', '--label=red \x1b[31mtext'],
+        message: /^a label cannot contain control characters$/,
       },
       {
         name: 'a label of two lines',
         over: { label: 'two\nlines' },
         words: ['new', '--label=two\nlines'],
+        message: /^a label must be one line$/,
       },
-      { name: 'a blank label', over: { label: ' ' }, words: ['new', '--label= '] },
-      { name: 'an empty label', over: { label: '' }, words: ['new', '--label='] },
+      {
+        name: 'a blank label',
+        over: { label: ' ' },
+        words: ['new', '--label= '],
+        message: /^a label cannot be empty$/,
+      },
+      {
+        name: 'an empty label',
+        over: { label: '' },
+        words: ['new', '--label='],
+        message: /^a label cannot be empty$/,
+      },
       {
         name: 'a group with an escape sequence',
         over: { group: 'a\x1b]0;x\x07b' },
         words: ['new', '--group=a\x1b]0;x\x07b'],
+        message: /^a group cannot contain control characters$/,
       },
-      { name: 'a group of two lines', over: { group: 'a\nb' }, words: ['new', '--group=a\nb'] },
-      { name: 'a blank group', over: { group: '\t' }, words: ['new', '--group=\t'] },
-      { name: 'an empty directory', over: { dir: '' }, words: ['new'], cwd: '' },
+      {
+        name: 'a group of two lines',
+        over: { group: 'a\nb' },
+        words: ['new', '--group=a\nb'],
+        message: /^a group must be one line$/,
+      },
+      {
+        name: 'a blank group',
+        over: { group: '\t' },
+        words: ['new', '--group=\t'],
+        message: /^a group cannot be empty$/,
+      },
+      {
+        name: 'an empty directory',
+        over: {},
+        words: ['new'],
+        dir: () => '',
+        message: /^the directory  is not absolute$/,
+      },
       {
         name: 'a relative directory',
-        over: { dir: 'projects/demo' },
+        over: {},
         words: ['new'],
-        cwd: 'projects/demo',
+        dir: () => 'projects/demo',
+        message: /^the directory projects\/demo is not absolute$/,
+      },
+      {
+        // It exists from the test's own working directory: only the rule refuses it.
+        name: 'a relative directory that exists',
+        over: {},
+        words: ['new'],
+        dir: () => '.',
+        message: /^the directory \. is not absolute$/,
       },
       {
         name: 'a directory with an escape sequence',
-        over: { dir: 'rel\x1b]0;x\x07/dir' },
+        over: {},
         words: ['new'],
-        cwd: 'rel\x1b]0;x\x07/dir',
+        dir: () => 'rel\x1b]0;x\x07/dir',
+        message: /^the directory rel\/dir is not absolute$/,
+      },
+      {
+        name: 'an absolute directory that is missing',
+        over: {},
+        words: ['new'],
+        dir: (d) => join(d.sandbox.home, 'nope'),
+        message: /^the directory \/.*\/nope does not exist$/,
+      },
+      {
+        name: 'an absolute path that is a file',
+        over: {},
+        words: ['new'],
+        dir: (d) => {
+          const file = join(d.sandbox.home, 'a-file');
+          writeFileSync(file, '');
+          return file;
+        },
+        message: /^the directory \/.*\/a-file does not exist$/,
       },
       {
         name: '--resume <id> among the flags',
         over: { flags: ['--model', 'opus', '--resume', S1] },
         words: ['new', '--', '--model', 'opus', '--resume', S1],
+        message:
+          /^cannot pass --resume to claude: it picks an existing session; use skydeck resume$/,
       },
-      { name: '-r <id>', over: { flags: ['-r', S1] }, words: ['new', '--', '-r', S1] },
-      { name: '--continue', over: { flags: ['--continue'] }, words: ['new', '--', '--continue'] },
-      { name: 'a cluster with -c', over: { flags: ['-cp'] }, words: ['new', '--', '-cp'] },
-      { name: '--name', over: { flags: ['--name', 'x'] }, words: ['new', '--', '--name', 'x'] },
+      {
+        name: '-r <id>',
+        over: { flags: ['-r', S1] },
+        words: ['new', '--', '-r', S1],
+        message: /^cannot pass -r to claude: it picks an existing session; use skydeck resume$/,
+      },
+      {
+        name: '--continue',
+        over: { flags: ['--continue'] },
+        words: ['new', '--', '--continue'],
+        message:
+          /^cannot pass --continue to claude: it picks an existing session; use skydeck resume$/,
+      },
+      {
+        name: 'a cluster with -c',
+        over: { flags: ['-cp'] },
+        words: ['new', '--', '-cp'],
+        message: /^cannot pass .+ to claude: it picks an existing session; use skydeck resume$/,
+      },
+      {
+        name: '--name',
+        over: { flags: ['--name', 'x'] },
+        words: ['new', '--', '--name', 'x'],
+        message: /^cannot pass --name to claude: the label is given with --label/,
+      },
     ];
-    for (const { name, over, words, cwd } of cases) {
+    for (const { name, over, words, dir, message } of cases) {
       await t.test(name, async (t) => {
         const d = deckOf(t);
-        const said = await commandSays(d, words, cwd);
+        const where = dir?.(d);
+        const said = await commandSays(d, words, where);
+        assert.match(said, message);
         const h = harness(d);
         assert.deepEqual(
-          await h.launches.newSession(newRequest(d, over), SIZE),
+          await h.launches.newSession(
+            newRequest(d, where === undefined ? over : { ...over, dir: where }),
+            SIZE,
+          ),
           refusedWith(2, [said]),
         );
         nothingStarted(h, NEW_ID);
@@ -750,12 +876,15 @@ describe('gone(): why a session can no longer start from its terminal (plan C8)'
     const d = deckOf(t);
     const h = harness(d, {
       terminals: [
-        info('aaaaaaaaaaa1', 'not-started', {
+        // The registry lists in the order of opening; the one opened last stands in the middle
+        // here, so that neither the first nor the last listed passes for it.
+        info('aaaaaaaaaaa1', 'ended', { openedNs: T0, exit: exit({ code: 0 }) }),
+        info('aaaaaaaaaaa2', 'not-started', {
           sessionId: null,
           openedNs: T0 + SEC,
           exit: exit({ notStarted: 'later one' }),
         }),
-        info('aaaaaaaaaaa2', 'ended', { openedNs: T0, exit: exit({ code: 0 }) }),
+        info('aaaaaaaaaaa3', 'ended', { openedNs: T0 - SEC, exit: exit({ code: 3 }) }),
       ],
     });
     assert.equal(h.launches.gone(S1), 'not started: later one');
