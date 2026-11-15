@@ -32,7 +32,7 @@ import { createHelp } from './help.js';
 import { cancels, listKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { createNotifications } from './notify.js';
-import { paneFor } from './pane.js';
+import { paneFor, sessionRow } from './pane.js';
 import { createTerminalView } from './terminal-view.js';
 import { createToast } from './toast.js';
 
@@ -670,14 +670,17 @@ function listNow() {
   return state.list === null ? '' : serverNow(state.list.nowNs, performance.now() - state.listAt);
 }
 
-/** The selected session's row, when the list shows it (S2 12.9: else none is selected). */
+/** The selected session's row, when the list shows it (S2 12.9: else none is selected). The list
+ *  keys take it from here: they act on no session the list does not show (E13, ruled); the right
+ *  side and the header's controls take `sessionRow`'s. */
 function selectedRow() {
   return state.selected === null ? undefined : rowOf(state.selected);
 }
 
 /**
  * Opens the dialog `what` for `sessionId` (D1–D3): the list keys on the selected row, and the
- * header's controls (task 38) through the cards' `edit`. The note's dialog needs the list's
+ * header's controls (task 38) through the cards' `edit` — the session's row from `sessionRow`, so
+ * also one the list does not show (E13). The note's dialog needs the list's
  * `selected` of that session, which holds the whole note (D3); a label, group or note that this
  * page's own act just changed waits for the list that holds it (C1). `key` is the key that opened
  * it ('' from the cards), `code` its physical key.
@@ -690,8 +693,8 @@ function edit(what, sessionId, key, code) {
   if (modal()) {
     return;
   }
-  const row = rowOf(sessionId);
-  if (row === undefined) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
     say('no session selected');
     return;
   }
@@ -746,13 +749,14 @@ function placeOf(sessionId) {
  * D15: `d` and the header's Done mark the session done, or undone for a done row; one act per
  * session at a time, and none while its own act waits. A `done` that the server took shows the
  * Undo toast. `fromList`: this page's `d` in the list, after which S2 12.9's exception moves the
- * selection (`leaveDone`); the Done button leaves it to the main rule.
+ * selection (`leaveDone`); the Done button leaves it to the main rule. The row is `sessionRow`'s:
+ * the header's Done also marks a session the list does not show (E13).
  * @param {string} sessionId
  * @param {boolean} fromList
  */
 function markDone(sessionId, fromList) {
-  const row = rowOf(sessionId);
-  if (row === undefined) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
     say('no session selected');
     return;
   }
@@ -778,7 +782,11 @@ function markDone(sessionId, fromList) {
     if (kind === 'undone') {
       return;
     }
-    toast.show(place?.section === 'open' ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
+    // A row with no section (`selectedRow`'s, E13) says whether it runs by itself: the server's
+    // rule of Open (`open` in src/window/view/build.ts; ruled 13:05Z).
+    const running =
+      place !== null ? place.section === 'open' : row.starting || row.state !== 'not-running';
+    toast.show(running ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
     if (state.leaving?.sessionId === sessionId) {
       state.leaving.answered = true;
       if (state.leaving.listed) {
@@ -1065,7 +1073,13 @@ function received(message) {
 /** Renders the list and the right side for the current state. */
 function render() {
   list.render(state.list, state.selected, state.zone);
-  const pane = paneFor(state.selected, rows(), state.list?.terminals ?? [], state.newOpen);
+  const pane = paneFor(
+    state.selected,
+    rows(),
+    state.list?.terminals ?? [],
+    state.newOpen,
+    sessionRow(state.list, state.selected), // E13: also a session the list does not show
+  );
   const exit = pane.kind === 'terminal' ? (state.exits.get(pane.term.id) ?? null) : null;
   // `list.selected` when it is the pane's session, for every pane (plan D 2.4, ruled on review B).
   const paneRow = pane.kind === 'new' || pane.kind === 'none' ? null : pane.row;

@@ -172,7 +172,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | E10 | **A pick** (Enter on an item, a click on one). Enter and a click act only while `list.switcher.query` is the text the page last sent (after the cuts of E3); otherwise Enter waits for that list and then acts on its highlighted item, and a click does nothing (ruled: so that a fast `orb`, Enter never picks an item of the list for `or`). The switcher closes; when the list does not show the picked row, the page first changes its view so that it does — the filter and the chips cleared (the key bar says `the filter was cleared to show <short id>`), done sessions shown, Earlier unfolded, as `hiddenBy` says; then it selects the row and does what Enter on that row in the list does (S2 12.6): a session with a terminal of the window shows it (an open one with the keyboard; an ended one under its bar); a session elsewhere shows its card; one that is not running is resumed into the window (11.3), and a refusal shows on its card (an expired one too, as the list's Enter). A closed stack needs nothing (E6). | S2 12.8: "Enter switches to a running one and resumes one that is not running"; S2 12.9: the selection is never on a row the list does not show, and the card must be shown for a refusal to be seen (question 2). | 98 (12.8) |
 | E11 | **The switcher is modal**, by stage D's rule for its dialogs (D2): a scrim covers the window; while the switcher is shown `app.js` moves the keyboard nowhere (no `setZone`, `giveKeyboard`, `keepKeyboard` or `terminalView.focus` for a result, a list or a render) and acts on no list key; Ctrl+Shift+P closes it; every other window chord, Ctrl+Shift+H too, says `close the switcher first (Esc)` and does nothing else — its footer names its keys, and the help never covers its items; the reload keys reload as usual (nothing typed there is worth keeping). Opening it hides the help when the help is shown; stage D's toast lies under the switcher's panel and over its scrim, so that it never covers the items and its Undo can still be clicked. In its field: ↑ ↓ move the highlight, PgUp PgDn by a page, Enter picks, Esc closes, Tab and Shift+Tab stay in the field (they do nothing); every other key is text. A mousedown in the panel anywhere but in the field is cancelled, so that the keyboard never leaves the field (a heading or the footer would otherwise take it, and the modal rule would never give it back). A click on an item picks it; a click outside the panel closes it. While the page is not connected it shows `skydeck's server is not connected` in place of its items, and Enter waits (E10). When it closes without a pick the keyboard goes back where it was; after a pick, where the pick puts it (a terminal this page's resume brought meanwhile takes it then, as after D's dialogs). A held Esc that closes it over a terminal sends the program nothing (stage A's held-key rule); Esc while the New form is open closes the switcher only (app.js's Esc branch of the form comes after the modal check). Ctrl+Shift+P, and a click on the title bar's `Switch…` (which goes through the same gate of a window chord, stage B's B15), while one of D's dialogs is shown say D's `close the edit first (Esc)` and open nothing. | D2; S2 12.9 names only the chord. | 98 (12.9) |
 | E12 | **The restore offer in the switcher** (S2 12.7, stage C) is never one Enter away (ruled). It is listed only in COMMAND FORM (ruled, as the mockup's toast says, "> restore"): a switcher's text whose first character is `>` (nothing trimmed before it) is a command whatever follows, and lists no session; the offer is listed when what follows the `>`, trimmed and lower-cased with `toLowerCase()`, is a start of `restore` of at least one letter (`>r`, `> rest`, `>Restore`, `> RESTORE`); `>` alone and `> foo` list neither the offer nor a session. Any other text searches sessions only, so `restore drill`, typed for a session, never puts the offer under the highlight, and ` >restore` (a space first) searches sessions for the word `>restore`. Never for an empty text. And only while stage C's banner is not shown (S2 12.7's case after "Not now": `banner.shown` false), holds preselected entries and no restore runs. Whether it is listed is the server's answer: `list.switcher.restore` (`restoreOffer`, 2.2), set by `listFor` after stage C has put the banner on the list. Listed, it is the switcher's first entry, `Restore <n> sessions from <time>` (`1 session`; `n` the preselected entries; the time from C's `activityTime` with the page's own clock in milliseconds, `Date.now()`, as C's banner calls it — never the switcher's `now()`, which is the server's time in nanoseconds); its Enter sends `act restore` with the preselected ids in the banner's order. Since the offer is listed only while the banner is not shown, no tick of the banner can disagree with those ids. The run's report shows where stage C shows it: C's banner draws its report while it holds lines, whatever the payload says (ruled for stage C's plan), so stage E changes nothing of C's page. | S2 12.7: "the switcher still offers 'Restore 3 sessions from <time>' until the next WSL restart"; S2 12.6: a resume costs a process, and Ctrl+Shift+P, Enter must not start every preselected session. | 98 (12.7) |
-| E13 | **The selected session the list does not show** (stage A's known limit, S2 12.6). `list` gains `selectedRow`: the row of the session `view.selected` names, as the sections would carry it, also when they leave it out (a filter, the chips, done hidden, a folded Earlier). The page uses it only when its id is the page's own selection (the server's answer can be for the selection before, until the next list or while the connection is lost). One helper of the page, `sessionRow(list, id)` — the sections' row of that id, else `selectedRow` when its id is that id, else null — gives "the selected session's row" everywhere: to `paneFor`, to stage D's handlers of the header's `edit` and `done`, and to D's `editor.update`. With such a row the pane is decided as for a listed row, by `row.terminal` (the server's answer, not the page's guess from the terminals): a terminal of the window is shown with that row, its header (stage D's, so it can be edited) and its ended bar with Resume and Close at once. Without a terminal the right side shows nothing, as S2 12.9 says (ruled for stage A's task 27). The list still shows no row selected and its keys act on none; when the filter shows the row again it is selected again. A session the view model does not list even with done ones shown (an ended terminal of a session without a transcript) has no `selectedRow`: its bar stays stage A's, without Resume — the limit narrows to that case. | Stage D's plan leaves exactly this to stage E (its section 5). | 95 (8.2.3, 12.6, 12.9) |
+| E13 | **The selected session the list does not show** (stage A's known limit, S2 12.6). `list` gains `selectedRow`: the row of the session `view.selected` names, as the sections would carry it, also when they leave it out (a filter, the chips, done hidden, a folded Earlier). The page uses it only when its id is the page's own selection (the server's answer can be for the selection before, until the next list or while the connection is lost). One helper of the page, `sessionRow(list, id)` — the sections' row of that id, else `selectedRow` when its id is that id, else null — gives "the selected session's row" everywhere: to `paneFor`, to stage D's handlers of the header's `edit` and `done`, and to D's `editor.update`. With such a row the pane is decided as for a listed row, by `row.terminal` (the server's answer, not the page's guess from the terminals): a terminal of the window is shown with that row, its header (stage D's, so it can be edited) and its ended bar with Resume and Close at once. Without a terminal the right side shows nothing, as S2 12.9 says (ruled for stage A's task 27): a row from `selectedRow` gives the pane `terminal` when `row.terminal` names a terminal the list carries, else `none` — no elsewhere card and no resume card for a session the list does not show (ruled on review A's re-check of this plan). The list still shows no row selected and its keys act on none: stage D's list keys (`l`, F2, `g`, `n`, `p`, `d`) take the sections' row only, never `sessionRow`'s, and say `no session selected` (ruled on review B's re-check); when the filter shows the row again it is selected again. The header's Done on such a session takes stage D's toast from the row, which is in no section: `DONE_RUNNING` when `row.starting \|\| row.state !== 'not-running'` (the server's rule of Open in `build.ts`), else `DONE_HIDDEN` (ruled 13:05Z; a row with a section keeps D's rule, and E5's limit for `d` while filtering stays). A session the view model does not list even with done ones shown (an ended terminal of a session without a transcript) has no `selectedRow`: its bar stays stage A's, without Resume — the limit narrows to that case. | Stage D's plan leaves exactly this to stage E (its section 5). | 95 (8.2.3, 12.6, 12.9) |
 | E14 | **The icon** (S2 12.12). `web/icons/skydeck.svg` is the source; `icon-16/32/48/192/512.png`, and `icon-192-maskable.png`, `icon-512-maskable.png` (the drawing inside the maskable safe zone, the middle 80 %, on a full background), and `favicon.ico` (the 16, 32 and 48 PNGs in one ICO) are made once from it by `scripts/icons.ts` with Playwright's Chromium and committed. `web/manifest.webmanifest` holds `name` and `short_name` `skydeck`, `display` `standalone` and the seven PNGs, their `src` with `/assets/__VERSION__/`; it is served only as `GET /manifest.webmanifest` with the build put in (as `index.html`), `application/manifest+json`; `GET /favicon.ico` is `web/icons/favicon.ico`, `image/x-icon`; both `no-store` (stage A's rule for paths outside `/assets/`) and with the headers every answer carries. `index.html` names the versioned `favicon.ico` (`sizes="16x16 32x32 48x48"`) and the manifest. Nothing is fetched from outside, at build time or at run time. | S2 8.2.1 lists both paths; S2 12.12 the files; no build step. | 97 (8.2.1, 12.12) |
 
 ## 2. Contracts
@@ -483,8 +483,10 @@ export function switcherFooter(action, more) {} // → string
 export function sessionRow(list, id) {}      // → RowPayload | null
 // paneFor(selected, rows, terminals, newOpen, selectedRow = null): `selectedRow` is what
 // sessionRow gave for a session the rows lack (null otherwise). With a row — listed, or that one —
-// the pane is decided by `row.terminal`, as for a listed row; with none, as in stage A (a terminal
-// whose sessionId is the selection, with row null; else 'none').
+// the pane is decided by `row.terminal`, as for a listed row, but a row from `selectedRow` without
+// a terminal the list carries gives 'none', never a card (ruled); with none, as in stage A (a
+// terminal whose sessionId is the selection, with row null; else 'none'). A `selectedRow` whose id
+// is not `selected` is not used.
 
 // web/chips.js — task 97
 /** @param {HTMLElement} root  the row of chips under the filter field (list.js makes it)
@@ -551,7 +553,9 @@ export function switcherKey(e) {}
 `web/app.js` (task 95) uses `sessionRow` for the selected session's row in its three places:
 `render()`'s `paneFor` call, and stage D's `edit` and `done` handlers of the header (the row they
 hand to `editor.open`); `web/edit.js`'s `update(list)` takes the dialog's session's row through
-it, so that a dialog whose session a filter hides meanwhile goes on finding its row.
+it, so that a dialog whose session a filter hides meanwhile goes on finding its row. Stage D's list
+keys keep the sections' row (app.js's `selectedRow()`): they act on no session the list does not
+show (ruled).
 
 `web/app.js` (task 98) owns: `state.view.switcher`; `changeView` cuts the filter's and the
 switcher's text after 1,024 bytes (stage A) and then after 16 words (`cutWords`), the key bar
@@ -957,11 +961,12 @@ and a page from before task 97 still gets stage A's list (no stacks); `npm run c
 **To resolve when merging `origin/main`:** the end of `ListMessage` in `protocol.ts` (after
 96's `switcher`); the object `buildListMessage` returns (B 51's `needYou`, D 34's terminal
 fields, 96's fields): `selectedRow` goes last; `render()` in `app.js`, rebuilt by D 37 around
-`header(row, selected, term, now)` and its render key, and touched by B 55 and C 75 (the title,
-the banner): only its `paneFor(…)` call changes; D 37's `edit` and `done` handlers in `app.js`
+`header(row, selected, term, now)` and its render key, and touched by B 55 (the title; C 75 calls
+`banner.render` in `received()`'s `case 'list'`, not in `render()`): only its `paneFor(…)` call
+changes; D 37's `edit` and `done` handlers in `app.js`
 (the row they look up) and D 38's `update(list)` in `web/edit.js` (the row it looks up): only that
-lookup changes, to `sessionRow`; the ends of `build.test.ts` and `pane.test.ts`, where D 34, B 51
-and C 73 add cases: E's cases go after theirs; S2 8.2.3's `list` row (after 96's fields); S2
+lookup changes, to `sessionRow`; the ends of `build.test.ts` and `pane.test.ts`, where D 34 and
+B 51 add cases (C 73 changes only the pinned list of `build.test.ts`): E's cases go after theirs; S2 8.2.3's `list` row (after 96's fields); S2
 12.6's paragraph on the ended terminal and S2 12.9's sentence on the selection (D's plan and task
 97 write other sentences of 12.9: keep them).
 
@@ -990,23 +995,27 @@ a test server with sessions made by step 1's helpers and the stand-in in a windo
 - `build.test.ts`: `selectedRow` for a selected session the filter hides equals the payload the
   sections carry once the filter is cleared; for a done one while done ones are hidden; for one
   in a folded Earlier; for one shown in the sections the same row; null with nothing selected and
-  for an id no row has.
+  for an id no row has, and for a session not listed even with done ones shown.
 - `pane.test.ts`: `sessionRow` gives the sections' row, else `selectedRow` of that id, else null —
   and null for a `selectedRow` of another id (the selection before; the connection lost); a
   hidden session whose `selectedRow.terminal` names a running terminal → `terminal` with that row;
   an ended one → the same with `ended`; `selectedRow.terminal` null while a terminal's `sessionId`
   is the selection (an ended terminal of a session that runs again elsewhere) → not that
-  terminal, decided by the row as for a listed row; a hidden session whose terminal is starting →
-  `terminal`; no row at all → stage A's answer.
+  terminal, decided by the row: `none`; a hidden session whose terminal is starting →
+  `terminal`; a hidden one without a terminal, not running or running elsewhere → `none` (no
+  card, ruled); no row at all → stage A's answer.
 - `hidden-selection.test.ts`: a stand-in in a window terminal is selected; a filter that hides it
   → the list shows no row selected, the terminal is still shown and its header shows its title
   and short id, the header keeps its height and the page sends no `resize` (named: "a filter that
   hides the selected running session sends no resize"); `/exit` in it → the ended bar with Resume
   and Close at once (before the exit arrives, too: "claude is not running in this terminal" with
   both); Resume → it runs again in the window; `/exit` again, then Close → the terminal is
-  forgotten and the right side is empty; the filter cleared → the row is selected again. A
-  selected session without a terminal hidden by the filter → the right side shows nothing (S2
-  12.9). With stage D: the header's label control opens the label dialog for the hidden session;
+  forgotten and the right side is empty; the filter cleared → the row is selected again. The
+  ended bar before its exit has arrived is held by a scripted stand-in server (the real server's
+  order of `exit` and `list` is not the test's to choose). A selected session without a terminal
+  hidden by the filter → the right side shows nothing (S2 12.9); on that hidden selection the
+  list keys `d`, `l`, `n` (and F2, `g`, `p`) → `no session selected`, nothing sent (named, ruled).
+  With stage D: the header's label control opens the label dialog for the hidden session;
   with the filter `repo#12` matching the session only by a pull request, `p`'s dialog stays
   open after × detaches it and goes on listing the session's row (`update` finds it through
   `sessionRow`). The page of the real server reports no problem at the end of each case.
