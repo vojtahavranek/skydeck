@@ -2,7 +2,8 @@
 <!-- The window's page (S2 12.1). The server puts its build where /assets/__VERSION__/ is (S2
      8.2.1); no script is inline (the policy allows none). Regions: the title bar, the bars of S2
      6.3 and 8.2.2, the list zone (task 27), the right side — header and cards (task 29), the
-     terminal (task 28) —, the key bar, the key help (task 29). -->
+     terminal (task 28) —, the key bar, the key help (task 29); stage D's dialogs (`#editor`) and
+     Undo toast (`#toast`) over the page (plan D task 37). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -13,6 +14,7 @@
     <link rel="stylesheet" href="/assets/__VERSION__/web/list.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/terminal-view.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/cards.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/edit.css" />
     <script type="module" src="/assets/__VERSION__/web/app.js"></script>
   </head>
   <body>
@@ -54,7 +56,9 @@
         <span class="hint"><kbd>Ctrl+Shift+H</kbd> keys</span>
       </footer>
     </div>
+    <div class="editor" id="editor" hidden></div>
     <div class="help" id="help" hidden></div>
+    <div class="toast" id="toast" role="status" hidden></div>
     <span class="cell-measure" id="cell-measure" aria-hidden="true">WWWWWWWWWWWWWWWWWWWW</span>
   </body>
 </html>
