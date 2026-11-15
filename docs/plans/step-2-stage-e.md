@@ -196,8 +196,10 @@ those of stages B, C and D as merged, hold where these do not change them.
   `import '…'` and an `import('…')` by the same allowed sources as a static import. The check reads
   the files' text: it stops a slip, not code written to get past it (an alias of `RegExp`,
   `Reflect.construct`, `String.prototype.match.call`, a computed member such as `t['match']`,
-  `import(name)`), which review keeps out (ruled on task 90's review 2). This prints nothing after
-  task 90 and every later one (the globs leave out the page's files that are not there yet):
+  `import(name)`, an `import()` of a template or with a comment before its source
+  (``import(`node:fs`)``, `import(/* x */ 'node:fs')`), `process.getBuiltinModule('node:fs')`,
+  `require('node:fs')`), which review keeps out (ruled on task 90's review 2). This prints nothing
+  after task 90 and every later one (the globs leave out the page's files that are not there yet):
   ```sh
   # no pattern is built from a search text
   rg -n "RegExp\s*\(" src/window/view/search web -g '*.ts' -g 'search-text.js' -g 'chips.js' -g 'switcher.js'
