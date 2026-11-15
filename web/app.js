@@ -4,21 +4,30 @@
 // the title bar, the bars and the key bar say. The list, the terminal view, the cards and the key
 // help are reached only through contract 2.9's functions; pane.js chooses the right side.
 //
+// Stage D (plan D task 37): the list keys `l` / F2, `g`, `n`, `p` open the dialogs of
+// web/edit.js and `d` marks done (D15), with web/toast.js's Undo toast. While a dialog is shown
+// it is modal (D2): `.app` is inert under its scrim, app.js moves the keyboard nowhere and acts
+// on no list key, and every window chord passes `windowChordGate` first; when it closes,
+// `dialogClosed` gives the keyboard back.
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
-/** @import { ExitMessage, ListMessage, ResultMessage, RowPayload, ServerMessage, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
-/** @import { ListAction, WindowChord, Zone } from './keys.js' */
+/** @import { ExitMessage, ListMessage, ResultMessage, RowPayload, SectionPayload, ServerMessage, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
+/** @import { EditWhat, ListAction, WindowChord, Zone } from './keys.js' */
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
 import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
+import { createEditor } from './edit.js';
+import { serverNow } from './format.js';
 import { createHelp } from './help.js';
 import { cancels, listKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { paneFor } from './pane.js';
 import { createTerminalView } from './terminal-view.js';
+import { createToast } from './toast.js';
 
 // S2 8.2.2: before anything else.
 let token = takeToken();
@@ -28,6 +37,9 @@ const NO_KEY =
 const RESTARTED = "skydeck's server restarted; your sessions kept running";
 /** How long a line of the key bar stays. */
 const KEY_MESSAGE_MS = 5000;
+/** D15: the toast's words (the mockup's), for a session hidden by done and for a running one. */
+const DONE_HIDDEN = 'Marked done: hidden from the list. It comes back on new activity.';
+const DONE_RUNNING = 'Marked done. Stays under Open while it runs; hidden once it stops.';
 /** S2 8.2.6's limits of a proposed size. */
 const MAX_COLS = 1000;
 const MAX_ROWS = 500;
@@ -60,8 +72,12 @@ const dom = {
   focusZone: byId('focus-zone'),
   keyMessage: byId('key-message'),
   help: byId('help'),
+  editor: byId('editor'),
+  toast: byId('toast'),
   measure: byId('cell-measure'),
 };
+/** The page under a dialog: inert while one is shown (D2), so that nothing in it takes the keyboard. */
+const appRoot = /** @type {HTMLElement} */ (document.querySelector('.app'));
 
 /** The build the page was loaded with: its own URL is /assets/<build>/web/app.js. */
 const assetVersion =
@@ -76,6 +92,16 @@ document.documentElement.dataset.display = inTab ? 'tab' : 'app';
 const state = {
   /** @type {ListMessage | null} */
   list: null,
+  /** When the list shown came (performance.now()), for the server's now (`serverNow`, plan D6). */
+  listAt: 0,
+  /** How many lists came, to tell whether one came since an act was sent (ruled 06:38Z). */
+  lists: 0,
+  /**
+   * The sessions whose label, group or note this page's own act changed, while no list that holds
+   * that result has come (review 2's C1, ruled): their dialog would start from the old text.
+   * @type {Set<string>}
+   */
+  unlisted: new Set(),
   /** @type {string | null} */
   selected: null,
   /** @type {Zone} */
@@ -108,6 +134,24 @@ const state = {
    */
   bringing: null,
   lastFocus: '',
+  /** The sessions whose `done` or `undone` of this page waits for its answer (D15). @type {Set<string>} */
+  marking: new Set(),
+  /**
+   * This page's own `d` in the list (S2 12.9's exception, D15): the session, the section it was
+   * last listed in and that section's order then, whether a list came since its act was sent, and
+   * whether the answer came.
+   * @type {{ sessionId: string, section: SectionPayload['name'], order: string[], listed: boolean, answered: boolean } | null}
+   */
+  leaving: null,
+  /**
+   * Where that `d` left the selection (`at`: the row it selected, or the done session itself when
+   * it selected none), so that its Undo selects the session again (ruled); `answered` once the
+   * Undo's answer came. @type {{ sessionId: string, at: string, answered: boolean } | null}
+   */
+  undoTo: null,
+  /** The key (`code`) whose keydown opened the dialog shown, until it is released: its
+   *  auto-repeats type nothing into the field. */
+  openedBy: '',
 };
 
 /** @type {ReturnType<typeof createConnection> | null} */
@@ -160,8 +204,23 @@ const fitting = terminalView;
 const cards = createCards(dom.cards, {
   act: (action) => act(action),
   select: (id) => select(id, 'click'),
+  edit: (what, sessionId) => edit(what, sessionId, '', ''),
+  done: (sessionId) => markDone(sessionId, false),
+  say: (text) => say(text),
 });
 const help = createHelp(dom.help);
+const toast = createToast(dom.toast);
+const editor = createEditor(dom.editor, {
+  act: (action) => act(action),
+  toast: (text, undo) => toast.show(text, undo),
+  closed: () => dialogClosed(),
+  now: () => listNow(),
+});
+
+/** Whether a dialog is shown (D2: then the page is modal). */
+function modal() {
+  return editor.shown();
+}
 
 // --- what the page says -------------------------------------------------------------------------
 
@@ -228,8 +287,8 @@ for (const chrome of [
 // away from a terminal whose holder is a text control, as xterm.js's is).
 addEventListener('mouseup', () => {
   setTimeout(() => {
-    if (textSelected()) {
-      return;
+    if (modal() || textSelected()) {
+      return; // D2: a dialog keeps the keyboard (it gives its own field the keyboard back)
     }
     if (document.activeElement === dom.rightZone && state.pane.kind === 'terminal') {
       terminalView.focus();
@@ -366,9 +425,10 @@ function focusChanged() {
   }
 }
 
-/** S2 8.2.3's limits of a string a page sends, in bytes of UTF-8. */
+/** S2 8.2.3's limits of a string a page sends, in bytes of UTF-8; a note's text and base: D5. */
 const TEXT_BYTES = 1024;
 const PATH_BYTES = 4096;
+const NOTE_BYTES = 65536;
 const utf8 = new TextEncoder();
 
 /**
@@ -409,6 +469,12 @@ function changeView(change) {
   sendView();
 }
 
+/** The acts whose result a dialog starts from: after this page's own `ok`, it waits for the list
+ *  that holds it (C1). */
+const EDITS = new Set(['label', 'group', 'note']);
+/** Each dialog's list key, for D3's sentence. */
+const KEY_OF = { label: 'l', group: 'g', note: 'n', pr: 'p' };
+
 /** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
 const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
   new: [
@@ -418,11 +484,21 @@ const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
     ['flags', 'the flags', TEXT_BYTES],
   ],
   'open-link': [['url', 'the link', PATH_BYTES]],
+  // Stage D (plan D 2.2, 2.4).
+  label: [['text', 'the label', TEXT_BYTES]],
+  group: [['text', 'the group', TEXT_BYTES]],
+  note: [
+    ['text', 'the note', NOTE_BYTES],
+    ['base', 'the note as it was', NOTE_BYTES],
+  ],
+  'pr-add': [['url', 'the address', PATH_BYTES]],
+  'pr-rm': [['url', 'the address', PATH_BYTES]],
 });
 
 /**
- * Why S2 8.2.3 would refuse `action` (the server closes the connection for such a message), or
- * null when it would not.
+ * Why S2 8.2.3 would refuse `action` (the server closes the connection for such a message, and a
+ * dialog must not lose the user's text that way): a field over its limit, or text that is not
+ * well formed (a lone surrogate); null when it would not.
  * @param {Record<string, unknown> & { kind: string }} action
  * @returns {string | null}
  */
@@ -436,7 +512,7 @@ function overLimit(action) {
       return `${name} holds text that is not well formed; skydeck cannot take it`;
     }
     if (utf8.encode(value).length > bytes) {
-      return `${name} is longer than skydeck takes: at most ${bytes === TEXT_BYTES ? '1,024' : '4,096'} bytes of UTF-8`;
+      return `${name} is longer than skydeck takes: at most ${bytes.toLocaleString('en-US')} bytes of UTF-8`;
     }
   }
   return null;
@@ -519,8 +595,24 @@ function act(action) {
   if (!send({ t: 'act', id, ...sized })) {
     return Promise.resolve(unsent);
   }
+  const listsAtSend = state.lists;
   return new Promise((resolve) => {
     pending.set(id, (result) => {
+      // C1 (ruled): the list that holds an edit's result is one that came since the act was sent
+      // (the real server sends it before the answer), else the next one; until then a dialog of
+      // that session would start from the old text.
+      if (
+        result.ok &&
+        EDITS.has(action.kind) &&
+        typeof action['sessionId'] === 'string' &&
+        state.lists === listsAtSend
+      ) {
+        state.unlisted.add(action['sessionId']);
+        // The server sends no list equal to the last one, so after a save that changed nothing
+        // shown none would come: a `view` asks for one, which the server answers at once
+        // (review 2 of task 37, M2).
+        sendView();
+      }
       if (action.kind === 'resume' && typeof action['sessionId'] === 'string') {
         state.lines.set(
           action['sessionId'],
@@ -536,6 +628,243 @@ function act(action) {
       resolve(result);
     });
   });
+}
+
+// --- stage D: the dialogs and done (plan D task 37) ------------------------------------------
+
+/** The server's now as the page estimates it: the shown list's, counted on (plan D6, 2.4). */
+function listNow() {
+  return state.list === null ? '' : serverNow(state.list.nowNs, performance.now() - state.listAt);
+}
+
+/** The selected session's row, when the list shows it (S2 12.9: else none is selected). */
+function selectedRow() {
+  return state.selected === null ? undefined : rowOf(state.selected);
+}
+
+/**
+ * Opens the dialog `what` for `sessionId` (D1–D3): the list keys on the selected row, and the
+ * header's controls (task 38) through the cards' `edit`. The note's dialog needs the list's
+ * `selected` of that session, which holds the whole note (D3); a label, group or note that this
+ * page's own act just changed waits for the list that holds it (C1). `key` is the key that opened
+ * it ('' from the cards), `code` its physical key.
+ * @param {EditWhat} what
+ * @param {string} sessionId
+ * @param {string} key
+ * @param {string} code
+ */
+function edit(what, sessionId, key, code) {
+  if (modal()) {
+    return;
+  }
+  const row = rowOf(sessionId);
+  if (row === undefined) {
+    say('no session selected');
+    return;
+  }
+  const selected = state.list?.selected?.sessionId === sessionId ? state.list.selected : null;
+  if ((what === 'note' && selected === null) || (what !== 'pr' && state.unlisted.has(sessionId))) {
+    // D3's sentence; from the header's controls (no key) it names the dialog's own key.
+    say(`the ${what} is not here yet; press ${key === '' ? KEY_OF[what] : key} again`);
+    return;
+  }
+  state.openedBy = code;
+  editor.open(what, row, selected); // the keyboard is in its field now
+  appRoot.inert = true; // D2: nothing under the scrim takes the keyboard or a click
+}
+
+/**
+ * The dialog closed, whatever closed it (`deps.closed`, D2): the page is no longer inert, and a
+ * terminal that this page's resume or new brought meanwhile takes the keyboard, else the zone's
+ * holder gets it — at once, without waiting for a list.
+ */
+function dialogClosed() {
+  appRoot.inert = false;
+  state.openedBy = '';
+  const bringing = state.bringing;
+  if (bringing === null) {
+    giveKeyboard();
+    return;
+  }
+  setZone('terminal'); // S2 11.3: the user's own action (and gives the zone the keyboard)
+  const pane = state.pane;
+  if (pane.kind === 'terminal' && (pane.row?.id === bringing || pane.term.sessionId === bringing)) {
+    terminalView.focus();
+    state.bringing = null;
+  }
+  // Not shown yet: render gives it the keyboard when its list comes.
+}
+
+/**
+ * The section a session is listed in, and that section's order.
+ * @param {string} sessionId
+ * @returns {{ section: SectionPayload['name'], order: string[] } | null}
+ */
+function placeOf(sessionId) {
+  const section = state.list?.sections.find((candidate) =>
+    candidate.rows.some((row) => row.id === sessionId),
+  );
+  return section === undefined
+    ? null
+    : { section: section.name, order: section.rows.map((row) => row.id) };
+}
+
+/**
+ * D15: `d` and the header's Done mark the session done, or undone for a done row; one act per
+ * session at a time, and none while its own act waits. A `done` that the server took shows the
+ * Undo toast. `fromList`: this page's `d` in the list, after which S2 12.9's exception moves the
+ * selection (`leaveDone`); the Done button leaves it to the main rule.
+ * @param {string} sessionId
+ * @param {boolean} fromList
+ */
+function markDone(sessionId, fromList) {
+  const row = rowOf(sessionId);
+  if (row === undefined) {
+    say('no session selected');
+    return;
+  }
+  if (state.marking.has(sessionId)) {
+    return;
+  }
+  const kind = row.done ? 'undone' : 'done';
+  const place = placeOf(sessionId);
+  if (fromList && kind === 'done' && place !== null) {
+    state.leaving = { sessionId, ...place, listed: false, answered: false };
+    state.undoTo = null;
+  }
+  state.marking.add(sessionId);
+  void act({ kind, sessionId }).then((result) => {
+    state.marking.delete(sessionId);
+    if (!result.ok) {
+      if (state.leaving?.sessionId === sessionId) {
+        state.leaving = null; // a refused `d` moves nothing
+      }
+      say(result.error ?? 'skydeck could not do that');
+      return;
+    }
+    if (kind === 'undone') {
+      return;
+    }
+    toast.show(place?.section === 'open' ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
+    if (state.leaving?.sessionId === sessionId) {
+      state.leaving.answered = true;
+      if (state.leaving.listed) {
+        leaveDone(); // a list since the act was sent holds the result (ruled 06:38Z, 08:15Z)
+      } else {
+        sendView(); // as M2: the list that holds it comes at once (review 2's S3, ruled)
+      }
+    }
+  });
+}
+
+/**
+ * The toast's Undo of a `done`: `undone`. When it undoes this page's own `d` in the list, the
+ * session is selected again once it is back, if the selection is still where that `d` left it
+ * (ruled; `followUndo`); a `d` whose selection has not moved yet moves it no more.
+ * @param {string} sessionId
+ */
+function undoDone(sessionId) {
+  if (state.leaving?.sessionId === sessionId) {
+    state.leaving = null;
+  }
+  if (state.marking.has(sessionId)) {
+    return;
+  }
+  state.marking.add(sessionId);
+  const back = state.undoTo?.sessionId === sessionId ? state.undoTo : null;
+  void act({ kind: 'undone', sessionId }).then((result) => {
+    state.marking.delete(sessionId);
+    if (!result.ok) {
+      if (state.undoTo === back) {
+        state.undoTo = null;
+      }
+      say(result.error ?? 'skydeck could not do that');
+      return;
+    }
+    if (back !== null && state.undoTo === back) {
+      back.answered = true;
+      followUndo();
+    }
+  });
+  keepKeyboard(); // pressed from the keyboard, the toast's Undo is gone
+}
+
+/**
+ * At each list while this page's `d` waits. Before its answer, a list holds the result only when
+ * the row is gone from its section or marked done there (`listed`); one that still shows it as
+ * not done is older than the write — a list that crossed the act, or one a busy store left stale
+ * (review 2's S3, ruled 08:15Z) —, and only the row's place in it is kept. After its answer, with
+ * no list holding it before, the next list decides, whatever it shows.
+ */
+function followDone() {
+  const leaving = state.leaving;
+  if (leaving === null) {
+    return;
+  }
+  if (leaving.answered) {
+    leaveDone();
+    return;
+  }
+  const row = state.list?.sections
+    .find((section) => section.name === leaving.section)
+    ?.rows.find((candidate) => candidate.id === leaving.sessionId);
+  if (row === undefined || row.done) {
+    leaving.listed = true;
+    return;
+  }
+  const place = placeOf(leaving.sessionId);
+  if (place !== null) {
+    Object.assign(leaving, place);
+  }
+}
+
+/**
+ * S2 12.9's exception (D15, ruled), decided once, on the list that holds the result of this
+ * page's `d` — one that came since its act was sent and shows the write, else the next one, which
+ * the page asks for (ruled 06:38Z and 08:15Z): when that
+ * list no longer has the row, while that session is still the selected one, the row after it in
+ * the same section is selected, else the one before it, else none — never a row of Open. A row
+ * that list still has (it runs, under Open; done sessions shown) moves nothing, then or later.
+ */
+function leaveDone() {
+  const leaving = state.leaving;
+  if (leaving === null || !leaving.answered) {
+    return;
+  }
+  state.leaving = null;
+  if (rowOf(leaving.sessionId) !== undefined) {
+    return;
+  }
+  if (state.selected !== leaving.sessionId) {
+    return; // the user moved the selection meanwhile: it stays
+  }
+  const section = state.list?.sections.find((candidate) => candidate.name === leaving.section);
+  const listed = new Set(section?.rows.map((row) => row.id) ?? []);
+  const at = leaving.order.indexOf(leaving.sessionId);
+  const next =
+    leaving.section === 'open'
+      ? undefined
+      : (leaving.order.slice(at + 1).find((id) => listed.has(id)) ??
+        leaving.order
+          .slice(0, at)
+          .reverse()
+          .find((id) => listed.has(id)));
+  state.undoTo = { sessionId: leaving.sessionId, at: next ?? leaving.sessionId, answered: false };
+  if (next !== undefined) {
+    select(next, 'key');
+  }
+}
+
+/** At each list, once the Undo's answer came: the session back, selected again (ruled). */
+function followUndo() {
+  const back = state.undoTo;
+  if (back === null || !back.answered || rowOf(back.sessionId) === undefined) {
+    return;
+  }
+  state.undoTo = null;
+  if (state.selected === back.at && state.selected !== back.sessionId) {
+    select(back.sessionId, 'key');
+  }
 }
 
 /** Every pending action ends when the connection is lost: its result never comes. */
@@ -618,6 +947,9 @@ function received(message) {
   switch (message.t) {
     case 'list':
       state.list = message;
+      state.listAt = performance.now();
+      state.lists++;
+      state.unlisted.clear(); // a list after the answer holds the result
       dom.tick.hidden = true;
       if (state.selected === null) {
         // Nothing selected yet: the first row (Open's first slot when there is one).
@@ -629,7 +961,12 @@ function received(message) {
           sendFocus();
         }
       }
+      followDone();
+      followUndo();
       render();
+      if (modal()) {
+        editor.update(message); // the dialog's session's row (task 38's list)
+      }
       if (state.welcomed) {
         state.welcomed = false;
         nextReattach();
@@ -689,10 +1026,11 @@ function render() {
   list.render(state.list, state.selected, state.zone);
   const pane = paneFor(state.selected, rows(), state.list?.terminals ?? [], state.newOpen);
   const exit = pane.kind === 'terminal' ? (state.exits.get(pane.term.id) ?? null) : null;
+  // `list.selected` when it is the pane's session, for every pane (plan D 2.4, ruled on review B).
+  const paneRow = pane.kind === 'new' || pane.kind === 'none' ? null : pane.row;
   const selected =
-    pane.kind === 'resume' && state.list?.selected?.sessionId === pane.row.id
-      ? state.list.selected
-      : null;
+    paneRow !== null && state.list?.selected?.sessionId === paneRow.id ? state.list.selected : null;
+  const term = pane.kind === 'terminal' ? pane.term : null;
   const lines = pane.kind === 'resume' ? (state.lines.get(pane.row.id) ?? []) : [];
   const key = JSON.stringify(pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines]);
   state.pane = pane;
@@ -708,40 +1046,43 @@ function render() {
   cards.hide();
   switch (pane.kind) {
     case 'terminal':
-      cards.header(pane.row);
+      cards.header(pane.row, selected, term, listNow);
       if (pane.ended) {
         cards.endedBar(pane.row, exit);
       }
       break;
     case 'elsewhere':
-      cards.header(pane.row);
+      cards.header(pane.row, selected, null, listNow);
       cards.elsewhere(pane.row);
       break;
     case 'resume':
-      cards.header(pane.row);
+      cards.header(pane.row, selected, null, listNow);
       cards.resumeCard(pane.row, selected, lines);
       break;
     case 'new': {
       const row = state.selected === null ? undefined : rowOf(state.selected);
       const dirs = state.list?.dirs ?? [];
-      cards.header(null);
+      cards.header(null, null, null, listNow);
       cards.newForm({ dir: row?.dir ?? dirs[0] ?? '', dirs });
       break;
     }
     case 'none':
-      cards.header(null);
+      cards.header(null, null, null, listNow);
       break;
   }
   // S2 11.3: a terminal that comes to be shown in the terminal zone gets the keyboard (after a
   // resume its list comes after the result), unless a text field of the page has it.
   // A terminal the user's own action brought (a resume or new of this page) takes it whatever is
   // selected, as a zone chord does (S2 11.3 comes first); one that only a list brought does not
-  // take it while text of the page is selected (ruled, review 2 of task 26).
+  // take it while text of the page is selected (ruled, review 2 of task 26). While a dialog is
+  // shown nothing takes the keyboard (D2): the terminal of a resume takes it when the dialog
+  // closes (`dialogClosed`), so `bringing` is kept until then.
   const ownAction =
     pane.kind === 'terminal' &&
     state.bringing !== null &&
     (pane.row?.id === state.bringing || pane.term.sessionId === state.bringing);
   if (
+    !modal() &&
     pane.kind === 'terminal' &&
     pane.term.id !== before &&
     state.zone === 'terminal' &&
@@ -750,7 +1091,7 @@ function render() {
   ) {
     terminalView.focus();
   }
-  if (ownAction) {
+  if (ownAction && !modal()) {
     state.bringing = null;
   }
   // What had the keyboard was replaced or hidden (a card): the zone takes it back.
@@ -780,6 +1121,9 @@ function headerHeight() {
  * @param {boolean} [moveFocus] false when the focus moved there already
  */
 function setZone(zone, moveFocus = true) {
+  if (modal()) {
+    return; // D2: a dialog keeps the keyboard; `dialogClosed` gives it to the zone
+  }
   state.zone = zone;
   dom.listZone.classList.toggle('focused', zone === 'list');
   dom.rightZone.classList.toggle('focused', zone === 'terminal');
@@ -824,8 +1168,9 @@ function textSelected() {
  */
 function keepKeyboard() {
   // Never while text of the page is selected: giving a text control (xterm.js's) the keyboard
-  // would take the selection away, and a Ctrl+C meant to copy it would reach the program.
-  if (textSelected()) {
+  // would take the selection away, and a Ctrl+C meant to copy it would reach the program. Never
+  // while a dialog is shown (D2).
+  if (modal() || textSelected()) {
     return;
   }
   const element = document.activeElement;
@@ -845,6 +1190,9 @@ function keepKeyboard() {
  * would press it (S2 12.6: nothing resumes but on purpose).
  */
 function giveKeyboard() {
+  if (modal()) {
+    return; // D2
+  }
   if (state.zone === 'list') {
     dom.list.focus();
     return;
@@ -933,11 +1281,40 @@ function keyName(event) {
 }
 
 /**
- * A window chord (keys.js): its action.
+ * THE GATE EVERY WINDOW CHORD PASSES before it acts (S2 12.9, plan D2), whether its keydown came
+ * to the page's listener or through the terminal view's `chord`; the list zone's reload keys pass
+ * it too, as `reload`. Later stages send their own chord-like actions through it (stage B's click
+ * on a notification, stage E's switcher). With no dialog shown everything passes. While one is
+ * shown: Ctrl+Shift+H (`help`) passes; a reload passes unless the dialog holds text the user typed
+ * and did not save, when the key bar says `save or cancel the edit first`; everything else says
+ * `close the edit first (Esc)` and does nothing else.
+ * @param {WindowChord['kind'] | string} kind
+ * @returns {boolean} whether it may act
+ */
+function windowChordGate(kind) {
+  if (!modal() || kind === 'help') {
+    return true;
+  }
+  if (kind === 'reload') {
+    if (!editor.changed()) {
+      return true;
+    }
+    say('save or cancel the edit first');
+    return false;
+  }
+  say('close the edit first (Esc)');
+  return false;
+}
+
+/**
+ * A window chord (keys.js): its action, once it passed `windowChordGate`.
  * @param {WindowChord} chord
  * @param {KeyboardEvent} event
  */
 function doChord(chord, event) {
+  if (!windowChordGate(chord.kind)) {
+    return;
+  }
   switch (chord.kind) {
     case 'slot': {
       const row = rows().find((candidate) => candidate.slot === chord.slot);
@@ -1007,11 +1384,33 @@ function doChord(chord, event) {
 function doListKey(action, event) {
   switch (action.kind) {
     case 'reload':
-      void connection?.reload();
+      if (windowChordGate('reload')) {
+        void connection?.reload();
+      }
       return true;
-    case 'later':
-      say(`${keyName(event)}: comes in a later stage`);
+    case 'edit': {
+      // Stage D (plan D 2.4): on the selected row.
+      const row = selectedRow();
+      if (row === undefined) {
+        say('no session selected');
+      } else {
+        edit(action.what, row.id, event.key, event.code);
+      }
       return true;
+    }
+    case 'done': {
+      // D15: at the first keydown only; its auto-repeats are cancelled and do nothing.
+      if (event.repeat) {
+        return true;
+      }
+      const row = selectedRow();
+      if (row === undefined) {
+        say('no session selected');
+      } else {
+        markDone(row.id, true);
+      }
+      return true;
+    }
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
       // back to the terminal; a held Esc does only the first step (Z1, item 6).
@@ -1065,6 +1464,12 @@ function onKeyDown(event) {
   if (heldIntoTerminal(event)) {
     return; // swallowed: a held key that went into the terminal (Z1, item 6)
   }
+  if (heldFromDialog(event)) {
+    return; // swallowed: a held key that closed a dialog (review 2 of task 37)
+  }
+  if (modal() && dialogKey(event)) {
+    return;
+  }
   const zone = state.zone;
   let handled = false;
   const chord = windowChord(event, zone);
@@ -1084,7 +1489,8 @@ function onKeyDown(event) {
     if (action !== null && action.kind === 'reload') {
       // The page's reload, in the list zone and while the page (not xterm.js) has the keyboard.
       handled = doListKey(action, event);
-    } else if (action !== null && zone === 'list' && listHasKeyboard()) {
+    } else if (action !== null && zone === 'list' && listHasKeyboard() && !modal()) {
+      // (D2: while a dialog is shown no list key acts; its keys are the dialog's.)
       handled = doListKey(action, event);
     } else if (
       zone === 'terminal' &&
@@ -1100,16 +1506,102 @@ function onKeyDown(event) {
       handled = true;
     }
   }
-  if (cancels(event, zone, handled)) {
+  // While a dialog is shown the terminal sends nothing: its keys (Shift+Enter) are the field's.
+  if (cancels(event, modal() ? 'list' : zone, handled)) {
     event.preventDefault();
   }
   if (chord !== null) {
     event.stopPropagation();
   }
 }
+
+/**
+ * D2: the keys a shown dialog takes before anything else, in the capture phase — Esc, handed to
+ * the dialog (`escape()`, once per press: a held Esc is one), and the auto-repeats of the key that
+ * opened it, which type nothing into its field. True when it took the key; every other key goes
+ * on to onKeyDown's dispatch, where the chords meet `windowChordGate` and no list key acts.
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function dialogKey(event) {
+  if (event.repeat && state.openedBy !== '' && event.code === state.openedBy) {
+    event.preventDefault();
+    return true;
+  }
+  if (event.isComposing || event.keyCode === 229) {
+    return false; // a key of an IME composition (its Esc cancels it) is the IME's, never the dialog's
+  }
+  if (
+    event.key === 'Escape' &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    !event.metaKey
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) {
+      editor.escape();
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Keys whose keydown came while a dialog was shown, by `code`, until they are released. A key
+ * that closes a dialog — Enter in its field, on Cancel or on Save, Ctrl+Enter in the note — must
+ * not act where the keyboard then goes (S2 12.9: a key pressed elsewhere acts there only when it
+ * is pressed again): over a terminal `heldIntoTerminal` swallows its events, and over the list its
+ * auto-repeats would be list keys (an Enter that resumes). Once the dialog is gone they act on
+ * nothing; the next press acts (review 2 of task 37). Forgotten at the key's release, at a fresh
+ * press, and when the window loses focus.
+ * @type {Set<string>}
+ */
+const pressedInDialog = new Set();
+
+/**
+ * Keeps `pressedInDialog` and swallows an auto-repeat of a key held since a dialog was shown,
+ * once the dialog is gone. True when it swallowed the event.
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function heldFromDialog(event) {
+  if (MODIFIER_KEYS.has(event.key)) {
+    return false;
+  }
+  if (modal()) {
+    if (!event.repeat) {
+      pressedInDialog.add(event.code);
+    }
+    return false;
+  }
+  if (!pressedInDialog.has(event.code)) {
+    return false;
+  }
+  if (event.repeat) {
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+  pressedInDialog.delete(event.code); // a fresh press acts
+  return false;
+}
+
 addEventListener('keydown', onKeyDown, true);
 addEventListener('keypress', (event) => void heldIntoTerminal(event), true);
-addEventListener('keyup', (event) => void heldIntoTerminal(event), true);
+addEventListener(
+  'keyup',
+  (event) => {
+    if (event.code === state.openedBy) {
+      state.openedBy = '';
+    }
+    pressedInDialog.delete(event.code);
+    heldIntoTerminal(event);
+  },
+  true,
+);
+addEventListener('blur', () => pressedInDialog.clear());
 
 /**
  * Keys pressed while the keyboard was not on the program's holder, by `code`, until they are
@@ -1183,6 +1675,15 @@ byId('new-button').addEventListener('click', openNew);
 
 // --- the window ---------------------------------------------------------------------------------
 
+// C2 (ruled): while a dialog holds text the user typed and did not save, leaving the page — the
+// tab's reload, closing the window, connection.js's reload for another build, and a reload key's
+// reload when text was typed after the key passed windowChordGate (the dialog was unchanged then)
+// — asks first (the browser's own prompt).
+addEventListener('beforeunload', (event) => {
+  if (editor.changed()) {
+    event.preventDefault();
+  }
+});
 // A dropped file must not navigate the window (S2 17.4).
 for (const type of ['dragover', 'drop']) {
   addEventListener(type, (event) => event.preventDefault());
