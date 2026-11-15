@@ -8,6 +8,7 @@
 // before it is printed (the server may be of another build).
 import { SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
+import { isDatabaseFailure } from '../store/store.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { computeBuild } from '../window/build.ts';
 import { controlClient } from '../window/client.ts';
@@ -187,7 +188,9 @@ async function inWindow(
 /**
  * Plan C12: when no page is connected, a window opened as `skydeck window` opens one (C20's wait
  * included: a window the server expects back is waited for). A window that cannot be opened is one
- * line on stderr and changes nothing else. Under CLAUDECODE no window is ever opened (S2 5.1
+ * line on stderr and changes nothing else — also when the store fails while the window's lock is
+ * taken (locked past its busy timeout, read-only): the answer's code stays, and a restore still
+ * sends its request. Under CLAUDECODE no window is ever opened (S2 5.1
  * refuses `skydeck window` there; this is no second door): the command says so when no page is
  * connected.
  */
@@ -207,9 +210,15 @@ async function windowFor(
     }
     await launchWindow(deck, server.client, server.ping, false, true, times, say);
   } catch (error) {
-    if (!(error instanceof SkydeckError)) throw error;
+    const reason =
+      error instanceof SkydeckError
+        ? error.message
+        : isDatabaseFailure(error)
+          ? `the database ${deck.store.path} failed: ${sanitize(error instanceof Error ? error.message : String(error))}`
+          : null;
+    if (reason === null) throw error;
     say(
-      `the window could not be opened: ${error.message}; run skydeck window${inClaudeCode ? ' in a terminal of your own' : ''}`,
+      `the window could not be opened: ${reason}; run skydeck window${inClaudeCode ? ' in a terminal of your own' : ''}`,
     );
   }
 }

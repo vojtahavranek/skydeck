@@ -15,6 +15,7 @@ import type { Net } from '../../src/platform/types.ts';
 import { controlClient } from '../../src/window/client.ts';
 import type { ControlClient } from '../../src/window/client.ts';
 import type { LaunchAnswer, NewRequest, RestoreOutcomeLine } from '../../src/window/protocol.ts';
+import { until } from '../helpers/keeper.ts';
 import { S1, S2 } from '../helpers/platform.ts';
 import { startFakeServe, windowMachine } from '../helpers/window-machine.ts';
 import type { WindowMachine } from '../helpers/window-machine.ts';
@@ -45,6 +46,8 @@ interface Bench {
   /** Every request this client sent over the socket. */
   sent: Sent[];
   client: ControlClient;
+  /** The fake serve. */
+  fake: Awaited<ReturnType<typeof startFakeServe>>;
 }
 
 /** A machine, the fake serve with `env` (and FAKE_SERVE_REQUESTS), and a client with the clock. */
@@ -54,7 +57,7 @@ async function bench(
 ): Promise<Bench> {
   const m = windowMachine(t);
   const file = join(m.s.root, 'requests.jsonl');
-  await startFakeServe(t, m, { FAKE_SERVE_REQUESTS: file, ...env });
+  const fake = await startFakeServe(t, m, { FAKE_SERVE_REQUESTS: file, ...env });
   const sent: Sent[] = [];
   const net: Net = {
     ...m.platform.net,
@@ -65,6 +68,7 @@ async function bench(
   };
   return {
     m,
+    fake,
     sent,
     requests: () =>
       existsSync(file)
@@ -308,6 +312,18 @@ describe('controlClient: POST /restore (plan C5, C14)', () => {
     );
     const took = performance.now() - started;
     assert.ok(took >= 590 && took < 10_000, `after answerMs of silence (${took} ms)`);
+    assert.deepEqual(seen, ['line 1']);
+  });
+
+  test('a server that dies after the first line (its connection reset): the stopped-answering line', async (t) => {
+    const b = await bench(t, { FAKE_SERVE_RESTORE: 'silent-after:1' });
+    const seen: string[] = [];
+
+    const asked = b.client.restore({ sessionIds: [S1], all: false }, (line) => seen.push(line));
+    await until(() => seen.length === 1, 'the first line', 10_000);
+    b.fake.child.kill('SIGKILL');
+
+    await rejectsWith(asked, STOPPED_ANSWERING);
     assert.deepEqual(seen, ['line 1']);
   });
 

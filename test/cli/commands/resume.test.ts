@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
@@ -709,6 +710,59 @@ describe('resume --window (S2 11.4; plan C11, C12)', () => {
     assert.equal(
       r.stderr,
       `${FLAGS_LINE}\nskydeck: the window could not be opened: the window's server gave an answer to GET /status that cannot be read; run skydeck window in a terminal of your own\n`,
+    );
+    assert.deepEqual(w.edgeCalls(), []);
+  });
+
+  test('the window a command opens keeps C20’s wait: a window the server expects back is waited for, not opened beside it', async (t) => {
+    const w = windowCase(t);
+    await serving(t, w, STARTED, {
+      FAKE_SERVE_WINDOW_EXPECTED_MS: '5000',
+      FAKE_SERVE_PAGES_AFTER: '600:1',
+    });
+
+    const r = await w.run(['resume', '0b5f', '--window']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stderr,
+      `${FLAGS_LINE}\nskydeck: waiting up to 7 s for the open window to come back; --new-window opens one now\n`,
+    );
+    assert.ok(!r.asked.includes('POST /token'), JSON.stringify(r.asked));
+    assert.deepEqual(w.edgeCalls(), []);
+  });
+
+  test('the store locked past its busy timeout while the window’s lock is taken: C12’s line with the failure, the answer’s code (review 2)', async (t) => {
+    const w = windowCase(t);
+    await serving(t, w, { ...STARTED, code: 4 });
+    let other: DatabaseSync | null = null;
+    t.after(() => {
+      try {
+        other?.exec('ROLLBACK');
+      } catch {
+        // nothing held
+      }
+      other?.close();
+    });
+    const net: Net = {
+      ...w.m.platform.net,
+      async requestUnix(path, request) {
+        const answer = await w.m.platform.net.requestUnix(path, request);
+        if (request.path === '/status' && other === null) {
+          // Another process writes the store for longer than the command's busy timeout.
+          other = new DatabaseSync(w.m.deck.places.dbPath);
+          other.exec('BEGIN IMMEDIATE');
+        }
+        return answer;
+      },
+    };
+
+    const r = await runOn(w.m, ['resume', '0b5f', '--window'], { net });
+
+    assert.equal(r.code, 4, r.stderr);
+    assert.equal(
+      r.stderr,
+      `${FLAGS_LINE}\nskydeck: the window could not be opened: the database ${w.m.deck.places.dbPath} failed: database is locked; run skydeck window\n`,
     );
     assert.deepEqual(w.edgeCalls(), []);
   });
