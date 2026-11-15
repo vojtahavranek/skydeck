@@ -1510,11 +1510,13 @@ chip on. Write down how many sessions the title bar counts.
    Earlier again now, with a click on its header. When its row is in Earlier, leave Earlier
    unfolded until the end of step 6 (folding Earlier with the selection inside it selects the
    row above it, which may be a real session).
-5. **The switcher, without Enter.** Press Ctrl+Shift+P. Expected: a panel over the window with a
-   field on top, `Switch to a session…  (title, group, note, PR, directory, short id)`, whose
-   caret blinks; under it your sessions under `Needs you`, `Open`, `Not running` and `Done`, each
-   with its short id at the right; at the bottom a footer that starts `↑ ↓ move · Enter`. When no
-   such panel shows, type nothing and write that down. Type the ticket key of step 1 (`orb-2107`).
+5. **The switcher, without Enter.** Look at the key bar's `Focus: …` and keep it in mind. Press
+   Ctrl+Shift+P. Expected: a panel over the window with a field on top whose caret blinks,
+   `Switch to a session…  (title, group, note, PR, directory, short id)` while it is empty;
+   under it your sessions under the headings `Needs you`, `Open`, `Not running` and `Done` (a
+   heading shows only when it has a session), each with its short id at the right; at the bottom
+   a footer that starts `↑ ↓ move · Enter`. When no such panel shows, type nothing and write that
+   down. Type the ticket key of step 1 (`orb-2107`).
    Expected: the list narrows at each keystroke, and the key's letters are marked in the titles.
    Press ↓ a few times, then ↑: the highlight moves, and the footer's `Enter switch` or `Enter
    resume here` follows the highlighted session. **Press no Enter**: it would switch to that
@@ -1529,7 +1531,8 @@ chip on. Write down how many sessions the title bar counts.
    the window) or `Enter switch` (its terminal is in the window). Then press Enter once. Expected:
    the panel goes and the throwaway session is selected; with `Enter resume here`, it is resumed
    into the window (its row under Open, `starting…`, then its terminal, which takes the keyboard:
-   `Focus: terminal`); with `Enter switch`, its terminal shows and has the keyboard. Type nothing into it: it stays as it
+   `Focus: terminal`); with `Enter switch`, its terminal shows and has the keyboard — or, when it
+   runs in another terminal, its card shows and the list has the keyboard. Type nothing into it: it stays as it
    is, for the other checks. When step 4 left Earlier unfolded: with the throwaway session's row
    now under Open, fold Earlier with a click on its header; with its row still in Earlier, leave
    Earlier unfolded and write that down.

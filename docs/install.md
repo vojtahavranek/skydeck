@@ -1141,9 +1141,10 @@ window.
 switch`), opens the quick switcher over the window: a field with the keyboard in it, `Switch to a
 session…  (title, group, note, PR, directory, short id)` while it is empty, and under it every
 session the list lists with done ones shown — also those that the filter, the chips, the folded
-Earlier or a closed stack leave out of the list — under four headings: `Needs you` (in
-Ctrl+Shift+J's order), `Open` (in Open's order, the slots first), `Not running` (the most recent
-first) and `Done` (the done sessions that are not running, the most recent first). Each session
+Earlier or a closed stack leave out of the list — under those of four headings that have a
+session: `Needs you` (in Ctrl+Shift+J's order), `Open` (in Open's order, the slots first), `Not
+running` (the most recent first) and `Done` (the done sessions that are not running, the most
+recent first). Each session
 shows its title, its state (`not running · 3h` for one that is not running) and its directory,
 its pull-request chip, its slot and, at the right, its short id. Type to narrow it: the words
 are the filter's (each must be found in a field, or, with at least 4 characters, start the id),
