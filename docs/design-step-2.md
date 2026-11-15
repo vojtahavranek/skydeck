@@ -1073,10 +1073,12 @@ The server, on `exit`:
   millisecond congruent to the take's (mod 999,999, about one in a million) by a restore that then
   renews it reads as a renewal of this launch's take; if this terminal ends while that restore
   waits, the restore's lock is given back and its next renewal finds it gone;
-- does neither while the exit is a **lost** keeper's (below) and its program may still run by
-  7.5's rule — the program its keeper reported, alive by design 5.5 or not readable, less than 60
-  seconds after the loss: the server made that exit up, nobody reaped the program, and a `claude`
-  before its `SessionStart` holds nothing the guard could see. The lock stays and a new session
+- for a **lost** keeper's exit (below) keeps the last screen under its bar as for any other, but
+  holds back the point above — the lock given back, a new session's label and group removed —
+  while its program may still run by 7.5's rule (the program its keeper reported, alive by
+  design 5.5 or not readable, less than 60 seconds after the loss): the server made that exit up,
+  nobody reaped the program, and a `claude` before its `SessionStart` holds nothing the guard
+  could see. The lock stays and a new session
   keeps its label and group (the program may yet report its start; ruled by the plan owner, stage
   C's plan, task 82, for both kinds), and the window refuses every start of the session — the
   page's Resume, `POST /resume`, restore's own check (11.1) — with the guard's words,

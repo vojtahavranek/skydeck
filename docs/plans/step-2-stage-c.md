@@ -39,9 +39,10 @@ the two test platforms, the `SKYDECK_TEST_*` seams only in a marked sandbox). It
 (section 2) stay in force where this plan does not change them; this plan's section 2 gives only
 the changes.
 
-**Task numbers** are 70–81 (stage D has 34–39, stage B 50–56), so that branch names, pull-request
+**Task numbers** are 70–82 (stage D has 34–39, stage B 50–57), so that branch names, pull-request
 titles and the lead's notes stay unique. Tasks 80 and 81 were added after the first version of
-this plan (the lead's guidance); their numbers do not follow their waves.
+this plan (the lead's guidance), and task 82 after a review's measurement (ruled 2026-11-15);
+their numbers do not follow their waves.
 
 **CI stays as it is**: two Node legs, one job each. No task changes `.github/workflows/`,
 `package.json` or a dependency.
@@ -85,6 +86,7 @@ merged at cadb490 and 4437256).
 | 73 | The restorer and the banner's view model | 70, 71 | D 34, B 50, B 51 | 2 | ~650 | `test/window/view/build.test.ts` (the pinned file list); S2 10.2 |
 | 75 | The banner on the page | 70 | D 37, B 55 | 2 | ~650 | `web/app.js`, `web/index.html`, `test-page/helpers/shell.ts` (a function) |
 | 81 | The second window after a cold start: the pages mark | 70 | — | 2 | ~350 | — |
+| 82 | A start is refused while a lost terminal's program may still live | 72; B 57 (on `main`; ruled 2026-11-15) | before 74; beside B 54 | 3 | ~900 | `src/window/tick.ts`, `test/window/tick.test.ts` (B 54) |
 | 74 | The server: launches, restore, the routes and the pages mark wired | 72, 73, 81 | D 36, B 54 | 3 | ~700 | `server.ts` |
 | 76 | The command line's side: the client, `--window` for `resume` and `new` | 70, 81 | — | 3 | ~750 | — |
 | 77 | `"terminal": "window"`: the configuration, `restore`, `R`, `doctor` | 74, 76 | D 35 | 4 | ~650 | `config.ts`, its test |
@@ -93,7 +95,7 @@ merged at cadb490 and 4437256).
 ```
 wave 1:  70  71  78  80
 wave 2:  72  73  75  81
-wave 3:  74  76
+wave 3:  82  74  76      (82 before 74)
 wave 4:  77
 wave 5:  79
 ```
@@ -127,6 +129,7 @@ same as its row here.
 | 73 | `src/window/restorer.ts`, `src/window/view/banner.ts`, `test/window/restorer.test.ts`, `test/window/view/banner.test.ts` | `test/window/view/build.test.ts`; `docs/design-step-2.md` (10.2, 11.3, 11.4, 12.7) |
 | 75 | `web/banner.js`, `web/banner-text.js`, `web/banner.css`, `test/web/banner.test.ts`, `test-page/banner.test.ts` | `web/app.js`, `web/index.html`; `test-page/helpers/shell.ts` |
 | 81 | `src/window/page-mark.ts`, `test/window/page-mark.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/window.test.ts`; `docs/design-step-2.md` (5.1, 8.3, 10.2) |
+| 82 | — | `src/window/mapping.ts`, `src/window/starts.ts`, `src/window/tick.ts`, `src/window/launches.ts`; `test/window/mapping.test.ts`, `test/window/starts.test.ts`, `test/window/tick.test.ts`, `test/window/launches.test.ts`, `test/window/actions.test.ts`; `docs/design-step-2.md` (7.5, 7.8) |
 | 74 | `test/helpers/window-restore.ts`, `test/window/server-launch.test.ts`, `test/window/server-restore.test.ts` | `src/window/server.ts` |
 | 76 | `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`, `test/cli/window-requests.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`; `docs/design-step-2.md` (11.4), `docs/design.md` (7.5) |
 | 77 | `test/cli/window-e2e.test.ts`, `test/cli/commands/restore-window.test.ts` | `src/platform/config.ts`, `src/cli/launching.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `src/cli/commands/restore.ts`, `src/cli/commands/doctor.ts`, `src/cli/tui/run.ts`; `test/platform/config.test.ts`, `test/cli/commands/doctor.test.ts`, `test/cli/tui/run.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`, `test/cli/commands/restore.test.ts`; `docs/design-step-2.md` (11.4, 16.4) |
@@ -1213,7 +1216,7 @@ about.
 
 ### Task 82: A start is refused while a lost terminal's program may still live
 
-**Depends on:** 72; stage B's task 57 (both on `main`) · **Merges before:** 74 · **Design:** S2 7.5 (a lost keeper's program), 7.8 (the settling of an exit; a lost keeper), 11.1 (the window's refusal) · **Contracts:** 2.3 (`Launches.refusal`'s text; `settleEndedTerminal`'s parameter and answer; `lostProgramMayRun` and `lives` exported) · **Decisions:** C24 · **Shared files:** none. Found by task 72's review 2 (C5, measured on `main` 27d6e0e and on tasks 57 + 72), added and ruled on 2026-11-15 10:12Z; the part for a new session ruled 11:48Z.
+**Depends on:** 72; stage B's task 57 (both on `main`) · **Merges before:** 74 · **Design:** S2 7.5 (a lost keeper's program), 7.8 (the settling of an exit; a lost keeper), 11.1 (the window's refusal) · **Contracts:** 2.3 (`Launches.refusal`'s text; `settleEndedTerminal`'s parameter and answer; `lostProgramMayRun` and `lives` exported) · **Decisions:** C24 · **Shared files:** `src/window/tick.ts`, `test/window/tick.test.ts` (stage B's task 54, built at the same time). Found by task 72's review 2 (C5, measured on `main` 27d6e0e and on tasks 57 + 72), added and ruled on 2026-11-15 10:12Z; the part for a new session ruled 11:48Z.
 
 **Goal.** A keeper dies (its terminal goes `lost`), its program outlives the hangup and has
 reported no session start yet (a `claude` before its `SessionStart`). On `main` every way to start
@@ -1324,6 +1327,12 @@ export function settleEndedTerminal(deck: Deck, hello: KeeperHello, terminal?: P
   lead, nothing to rule).
 - The terminal the settling reads is the one the hub listed at the exit, kept with the hello: the
   server's `exited` handler (`server.ts`, task 74's file) is unchanged.
+
+**At the merge** (beside B 54, which also changes `tick.ts` and `tick.test.ts`): whoever lands
+second merges `origin/main` and keeps both sides. In `tick.ts` this task changes only the
+settling of ended terminals — the `unsettled` map's entries (the hello and the terminal),
+`settle()`, `ended()` and the doc comments of `ended` and `settleAll`; in `tick.test.ts` it adds
+cases to the block "ended terminals" and one block after task 57's (its imports at the top).
 
 **Not in it:** NAMED LIMITS (S2 7.5, 7.8): a program that still runs 60 s after the loss and never
 reported a start is no longer seen — the exit is settled (the lock given back) and every way starts
