@@ -152,6 +152,9 @@ export function createEditor(root, deps) {
     const field = shown.field;
     shown.waiting = true;
     shown.warned = false;
+    if (document.activeElement === save) {
+      field.focus(); // a disabled Save would drop the keyboard (review 2 of task 37)
+    }
     save.disabled = true;
     field.readOnly = true;
     say('');
@@ -216,6 +219,29 @@ export function createEditor(root, deps) {
       }
     }, 0);
   });
+
+  // D2: the field has the keyboard while a dialog is shown. When nothing has it — after a click on
+  // the key help or on the toast over the dialog, or an Undo of the toast pressed from the keyboard
+  // and gone —, the next key gives it back to the field before that key acts (this listener is in
+  // place before app.js's own). Not while text is selected: a Ctrl+C may be about to copy it.
+  addEventListener(
+    'keydown',
+    () => {
+      if (current === null) {
+        return;
+      }
+      const holder = document.activeElement;
+      if (holder instanceof HTMLElement && holder !== document.body && holder.checkVisibility()) {
+        return;
+      }
+      const selection = getSelection();
+      if (selection !== null && !selection.isCollapsed) {
+        return;
+      }
+      (current.field ?? box).focus();
+    },
+    true,
+  );
 
   return {
     /**

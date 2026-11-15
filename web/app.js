@@ -1404,6 +1404,9 @@ function onKeyDown(event) {
   if (heldIntoTerminal(event)) {
     return; // swallowed: a held key that went into the terminal (Z1, item 6)
   }
+  if (heldFromDialog(event)) {
+    return; // swallowed: a held key that closed a dialog (review 2 of task 37)
+  }
   if (modal() && dialogKey(event)) {
     return;
   }
@@ -1481,6 +1484,47 @@ function dialogKey(event) {
   }
   return false;
 }
+
+/**
+ * Keys whose keydown came while a dialog was shown, by `code`, until they are released. A key
+ * that closes a dialog — Enter in its field, on Cancel or on Save, Ctrl+Enter in the note — must
+ * not act where the keyboard then goes (S2 12.9: a key pressed elsewhere acts there only when it
+ * is pressed again): over a terminal `heldIntoTerminal` swallows its events, and over the list its
+ * auto-repeats would be list keys (an Enter that resumes). Once the dialog is gone they act on
+ * nothing; the next press acts (review 2 of task 37). Forgotten at the key's release, at a fresh
+ * press, and when the window loses focus.
+ * @type {Set<string>}
+ */
+const pressedInDialog = new Set();
+
+/**
+ * Keeps `pressedInDialog` and swallows an auto-repeat of a key held since a dialog was shown,
+ * once the dialog is gone. True when it swallowed the event.
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function heldFromDialog(event) {
+  if (MODIFIER_KEYS.has(event.key)) {
+    return false;
+  }
+  if (modal()) {
+    if (!event.repeat) {
+      pressedInDialog.add(event.code);
+    }
+    return false;
+  }
+  if (!pressedInDialog.has(event.code)) {
+    return false;
+  }
+  if (event.repeat) {
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+  pressedInDialog.delete(event.code); // a fresh press acts
+  return false;
+}
+
 addEventListener('keydown', onKeyDown, true);
 addEventListener('keypress', (event) => void heldIntoTerminal(event), true);
 addEventListener(
@@ -1489,10 +1533,12 @@ addEventListener(
     if (event.code === state.openedBy) {
       state.openedBy = '';
     }
+    pressedInDialog.delete(event.code);
     heldIntoTerminal(event);
   },
   true,
 );
+addEventListener('blur', () => pressedInDialog.clear());
 
 /**
  * Keys pressed while the keyboard was not on the program's holder, by `code`, until they are

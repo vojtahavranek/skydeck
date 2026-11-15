@@ -2251,7 +2251,7 @@ of plan task 26).
 **The dialogs** (stage D, plan D2; ruled by the lead on 2026-11-15 on the plan's review A). The
 label, group, note and pull-request dialogs (12.5) lie over the page and are modal: a scrim covers
 the window and takes clicks without acting, and the page under it takes no keyboard; a click inside
-the dialog that selects no text gives the keyboard back to its field, while a drag selects its text
+the dialog that selects no text gives the keyboard back to its field, and whenever nothing has the keyboard (a click on the key help or the toast, a disabled button) the next key gives it back to the field first, while a drag selects its text
 as anywhere. While a
 dialog is shown the page moves the keyboard nowhere by itself — not for a resume's or a new's
 answer, a list or a render: the rest of a note must never be typed into Claude Code, whose line
@@ -2266,7 +2266,7 @@ text`; a held Esc is one Esc). The reload keys (F5, Shift+F5, Ctrl+F5, Ctrl+R, C
 BrowserRefresh) say `save or cancel the edit first` while the dialog holds changed text, and do not
 reload; otherwise they reload as anywhere. A held Enter or Esc that closes a dialog over a terminal
 is a key pressed off the program's holder: its repeats and its release are the page's, and the next
-press is the program's. A save keeps the dialog open with its text and its keyboard when it is
+press is the program's. Over the list, the auto-repeats of a key that closed a dialog act on no list key (an Enter must not resume a session); the next press does (review 2 of plan D task 37). A save keeps the dialog open with its text and its keyboard when it is
 refused, the connection is lost or the page refuses it before sending (over a limit of 8.2.3, or
 text that is not well formed); its `ok` closes the dialog, except Attach in the pull-request dialog,
 which empties the field and keeps the dialog open so that the new pull request shows in its list

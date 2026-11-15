@@ -934,6 +934,116 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
     },
   );
 
+  for (const how of ['in the field', 'on Cancel'] as const) {
+    await t.test(
+      `a held Enter ${how} that closes a dialog opened over the list resumes nothing; the next press does (review 2, M1)`,
+      async (t) => {
+        const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+        const { page, w } = d;
+        await clickRow(page, S2);
+        await page.keyboard.press('l');
+        await dialogShown(page, true);
+        if (how === 'on Cancel') {
+          await page.keyboard.press('Tab');
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.className),
+            'edit-cancel',
+            'Tab: Cancel has the keyboard',
+          );
+          await page.keyboard.down('Enter'); // presses Cancel
+        } else {
+          await page.keyboard.type('a name');
+          await page.keyboard.down('Enter'); // saves
+          w.answer(await w.act(1), { ok: true });
+        }
+        await dialogShown(page, false);
+        assert.equal(await active(page), '#list');
+        await page.keyboard.down('Enter'); // held: an auto-repeat (repeat: true)
+        await page.keyboard.down('Enter');
+        await page.keyboard.up('Enter');
+        await sleep(300);
+        assert.deepEqual(
+          w.acts().map((act) => act['kind']),
+          how === 'on Cancel' ? [] : ['label'],
+          'the held Enter resumed nothing',
+        );
+        await page.keyboard.press('Enter');
+        await eventually(
+          async () => w.acts().at(-1)?.['kind'] === 'resume',
+          'the next press resumes',
+        );
+      },
+    );
+  }
+
+  await t.test(
+    "the dialog's field takes the keyboard back whenever nothing has it: after a save from the Save button (refused) or the Attach button (ok), after a click on the key help, after the toast's Undo pressed from the keyboard (review 2, S1)",
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2)] } });
+      const { page, w } = d;
+      const value = async (): Promise<string | null> => (await dialog(page)).value;
+
+      // A refused save from Save: the text and the keyboard stay.
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.type('ab');
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab'); // Save
+      await page.keyboard.press('Enter');
+      w.answer(await w.act(1), { ok: false, error: 'refused' });
+      await showsText(page, '#editor .edit-message', /^refused$/);
+      await page.keyboard.type('cd');
+      assert.equal(await value(), 'abcd', 'typed after the refusal: in the field');
+
+      // A click on the key help (over the dialog), the help away again.
+      await page.keyboard.press('Control+Shift+H');
+      await page.waitForSelector('#help:not([hidden])', { state: 'attached' });
+      await page.locator('#help .help-title').click();
+      await page.keyboard.press('Control+Shift+H');
+      await page.waitForSelector('#help[hidden]', { state: 'attached' });
+      await page.keyboard.type('ef');
+      assert.equal(await value(), 'abcdef', 'typed after the help: in the field');
+      await page.click('#editor .edit-cancel');
+      await dialogShown(page, false);
+
+      // Attach's `ok` from the Attach button.
+      await page.keyboard.press('p');
+      await dialogShown(page, true);
+      await page.keyboard.type('https://github.com/owner/repo/pull/9');
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab'); // Attach
+      await page.keyboard.press('Enter');
+      w.answer(await w.act(2), { ok: true });
+      await eventually(async () => (await value()) === '', 'the field emptied');
+      await page.keyboard.type('x');
+      assert.equal(await value(), 'x', 'typed after Attach: in the field');
+      await page.click('#editor .edit-cancel');
+      await dialogShown(page, false);
+
+      // The toast's Undo over a dialog, reached with Tab and pressed with Enter.
+      await clickRow(page, S1);
+      await page.keyboard.press('d');
+      w.answer(await w.act(3), { ok: true });
+      await eventually(async () => (await toast(page)).undo, 'the toast');
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      for (let tab = 0; tab < 6; tab++) {
+        await page.keyboard.press('Tab');
+        if (await page.evaluate(() => document.activeElement?.className === 'toast-undo')) break;
+      }
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.className),
+        'toast-undo',
+        "Tab reaches the toast's Undo",
+      );
+      await page.keyboard.press('Enter');
+      assert.equal((await w.act(4))['kind'], 'undone');
+      await page.keyboard.type('gh');
+      assert.equal(await value(), 'gh', 'typed after the Undo: in the field');
+    },
+  );
+
   for (const key of ['Enter', 'Escape'] as const) {
     await t.test(
       `a held ${key} that closes a dialog opened over a terminal types nothing into the terminal; the next press does`,
