@@ -297,7 +297,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
         return wrote();
       case 'pr-add': {
         const key = attachManualPr(deck, sessionId, action.url);
-        wrote();
+        deps.changed();
         deps.prs.fetch([key.url]);
         return { ok: true, lines: [`attached ${key.url}`], error: null, sessionId: null };
       }
