@@ -84,7 +84,8 @@ export function liveStatuses(
 }
 
 /** B13: a waitingFor sanitised, then cut to DETAIL_MAX units with the cut marked by '…', never
- *  inside a surrogate pair; null when there is none or it is nothing once sanitised. */
+ *  inside a surrogate pair; null when there is none or it is blank once sanitised (empty, or only
+ *  white space: the page would write `needs you ·  · 3m`; ruled). */
 function detailOf(waitingFor: string | null): string | null {
   if (waitingFor === null) {
     return null;

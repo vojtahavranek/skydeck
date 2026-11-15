@@ -1934,11 +1934,12 @@ the first one's detail and time. A session running without a readable live file 
 end counts while its `*_seq` is greater than `seen_seq`, or no `seen_seq` is stored; an equal value
 is not later. The detail of an ask is the `waitingFor` sanitised (design 7.4) and cut to 120 UTF-16
 units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit, and the list is
-sent whole); one that is empty once sanitised is no detail. The time a row shows is the file's
-`statusUpdatedAt` (else `updatedAt`) for an ask, `window_end_ns` for an end of the window,
-`turn_ended_ns` for a finished turn. Ctrl+Shift+J's order, in full: those that ask by that time, the
-longest-waiting first and an unknown time last; then those that ended by `window_end_seq`; then
-those that finished by `turn_ended_seq`, the oldest first; ties by session id.
+sent whole); one that is blank once sanitised (empty, or only white space) is no detail. The time a
+row shows is the file's `statusUpdatedAt` (else `updatedAt`) for an ask, `window_end_ns` for an end
+of the window, `turn_ended_ns` for a finished turn. Ctrl+Shift+J's order, in full: those that ask by
+that time, the longest-waiting first and an unknown time last; then those that ended by
+`window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties by session
+id.
 
 Seen is a **condition that holds**, not a moment: a session **is being seen** while it is the
 selected one in a window that has focus, from 1.5 seconds after it was selected; typing into its

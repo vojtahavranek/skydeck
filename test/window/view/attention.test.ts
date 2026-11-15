@@ -98,7 +98,7 @@ test("attentionOf: an ask's detail is sanitised; markup comes back as text", () 
   assert.equal(detailOf('two\nlines'), 'two lines');
 });
 
-test('attentionOf: an ask without a waitingFor, or one that is nothing once sanitised, has no detail', () => {
+test('attentionOf: an ask without a waitingFor, or one that is blank once sanitised, has no detail', () => {
   const payload = attentionOf(runningRow(S1), facts({ live: [[S1, live('waiting')]] }));
   assert.deepEqual(payload, { reason: 'asks', detail: null, sinceNs: null });
   assert.equal(detailOf(''), null);
