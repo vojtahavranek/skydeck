@@ -839,7 +839,8 @@ terminal has no exit, so a lost terminal's own living program counts as outside 
 its session is "running in another terminal" (7.9) and the tick closes the lost terminal as "its
 session runs elsewhere" — after which no terminal is left whose window end could be recorded.
 This task makes S2 7.8's sentence true: a terminal whose program may still run is never dropped
-this way.
+this way — for a lost terminal, for 60 seconds after the loss (ruled on review 2; 7.8 says so
+too).
 
 **Files**
 - Modify: `src/window/mapping.ts` (the programs of `mapTerminals`; the private `keeperExitApplied`
@@ -871,13 +872,14 @@ hangup must not leave a row that looks healthy, a refused Resume and a lost term
 for ever). An exit the keeper sent
 comes after it reaped the program, so such a terminal's program never counts (the case "an ended
 terminal keeps the session it showed; its old program pid is no one" stays as it is). So while the
-lost program lives, the terminal shows its session, the session is not `elsewhere`, and the tick
-does not close the terminal; once the program is gone the terminal is an ended one as any other —
+lost program may still run and the loss is less than 60 s old, the terminal shows its session,
+the session is not `elsewhere`, and the tick does not close the terminal; once the program is
+gone the terminal is an ended one as any other —
 its exit stays the lost one, the row is not running and marked `ended-unexpectedly`, and task 52's
 module judges it. A session that really runs elsewhere — in a program outside the window, or in
 another terminal — still closes its ended terminal, as before. A session held by the lost program
-AND by a process outside is not elsewhere until the program is gone; then the terminal is closed
-(as for a running terminal: one holder in a terminal is enough). `holderPlace` and
+AND by a process outside is not elsewhere until the program is gone or the loss is 60 s old; then
+the terminal is closed (as for a running terminal: one holder in a terminal is enough). `holderPlace` and
 `src/window/in-window.ts` are unchanged, and so is every other decision of the mapping and the
 tick.
 

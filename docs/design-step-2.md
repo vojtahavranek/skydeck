@@ -984,7 +984,9 @@ both in memory: the **expected session**. Which session it shows is decided agai
   program yet. A terminal whose keeper sent `exit` has none any more (the keeper reaped it, 7.8).
   A **lost** keeper's program (7.8) stays its terminal's while it may still run — its stat line
   names that pid and start, or cannot be read (design 5.5: what cannot be read is not taken for
-  gone) — and for less than 60 seconds after the loss (the exit's time, on the server's clock):
+  gone) — and for less than 60 seconds after the loss (the exit's time, on the server's wall
+  clock: a clock that stepped back keeps it longer, one that stepped forward, as after a sleep of
+  the host, ends it early):
   the server knows the loss at once, while the program, given SIGHUP, runs its end for a moment,
   so its session is not "running in another terminal" (7.9) meanwhile and the lost terminal is not
   dropped for it (7.8; stage B's plan, task 57). The pid alone never counts: it may be another
@@ -1050,7 +1052,8 @@ The server, on `exit`:
   session's terminals whose program is over (ended, lost, not started) once the guard and the
   lock have let it through and before it opens the new one (a refused resume leaves them), and
   the tick closes an ended terminal whose session is seen running anywhere else. A terminal whose
-  program may still run is never dropped this way;
+  program may still run is never dropped this way — for a lost terminal, for 60 seconds after the
+  loss (7.5);
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
   and the session's lock is still of the take this launch made (the lock it took, or a renewal of

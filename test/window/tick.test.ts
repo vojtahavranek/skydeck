@@ -28,7 +28,7 @@ import type { Tick, TickDeps } from '../../src/window/tick.ts';
 import { windowTerminal } from '../../src/window/window-terminal.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { until } from '../helpers/keeper.ts';
+import { procStartOf, stillRuns, until } from '../helpers/keeper.ts';
 import { S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
 import { info } from '../helpers/registry.ts';
 import { startRunning, writeTranscript } from '../helpers/session-files.ts';
@@ -814,6 +814,8 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
     const holder = readRecords(record).find((entry) => entry.ev === 'start')?.pid;
     const program = info(r.registry, id).program?.pid;
     assert.ok(holder !== undefined && program !== undefined && holder !== program);
+    const holderStart = procStartOf(holder);
+    assert.ok(holderStart !== null);
 
     const closed: string[] = [];
     const tick = createTick({
@@ -864,6 +866,9 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
 
     writeFileSync(release, '');
     await waitForRecord(record, (entry) => entry.ev === 'exit', 15_000);
+    // The exit record comes a moment before the exit, and `ended-unexpectedly` needs the last
+    // holder's process gone (derive: `!lastHolding.alive`), not only its end ingested.
+    await until(() => !stillRuns(holder, holderStart), 'the holder is gone', 15_000);
     const deadline = performance.now() + 15_000;
     while ((rowOf()?.state ?? 'not-running') !== 'not-running') {
       assert.ok(performance.now() < deadline, 'the row no longer runs within 15 s');

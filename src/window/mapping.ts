@@ -224,8 +224,8 @@ export function mapTerminals(input: {
  * Whether the terminal's exit is one its keeper sent, applied (`ended`, `not-started`): the keeper
  * reaped the program before it sent it (S2 7.8), so the program is over whatever /proc says. Any
  * other exit is a lost keeper's, made up at once (`lost`), or one still on its way through the
- * screen side (the state not over yet); its program counts while it lives (plan task 57) — which a
- * sent exit's reaped program does not.
+ * screen side (the state not over yet); its program counts while it may still run and the loss is
+ * less than 60 s old (plan task 57) — which a sent exit's reaped program never does.
  */
 function keeperExitApplied(terminal: TerminalInfo): boolean {
   return terminal.state === 'ended' || terminal.state === 'not-started';
