@@ -2062,9 +2062,10 @@ refused with the same message; a note is edited in a text box instead of `$VISUA
 began ("the note was changed elsewhere while you edited it; your text is still in the box"); `+ PR`
 attaches with origin `manual` and fetches at once (design 7.3). Done shows an Undo toast. An edit
 acts only on a session the store knows (a `new` session not started yet: "this session has not
-started yet; edit it once it runs"); a note whose stored text already is the text sent is saved
-with nothing written (a save sent again after its answer was lost), and between two windows label,
-group and done are last-write-wins, as two commands are. That fetch, and ↻'s explicit refresh,
+started yet; edit it once it runs"); a note whose stored text already is the text sent, or whose
+text stores nothing (empty or white space) while there is no note, is saved with nothing written (a
+save sent again after its answer was lost, also one that cleared the note), and between two windows
+label, group and done are last-write-wins, as two commands are. That fetch, and ↻'s explicit refresh,
 run in the background on the server, so that the dialog answers at once: one at a time per
 server, a request the running one already covers joining it and every other waiting to run
 together when it ends, all of them ended by the server's stop; one that fails shows as `can't
