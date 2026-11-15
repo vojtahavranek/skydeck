@@ -49,9 +49,11 @@ changes `.github/workflows/`, `package.json` or a dependency.
 - A test of migration 2 starts from a database made as step 1 and stage A leave one, with data
   in it (`test/helpers/schema1.ts`, task 50), never from a database on the machine.
 
-**Known flakes** (not stage B's to fix): `personal/skydeck-design/LEFT-TO-YOU.md` section 4,
-"Tests" — the input-full page case under load, `test/platform/real.test.ts:1005` and its
-streamed-answer case, the stand-in's record order, `test/window/mapping.test.ts:623`. A run that
+**Known flakes** (not stage B's to fix): `test/platform/real.test.ts`, "a streamed answer that
+keeps coming…", and its case at line 1005 (it reads the wall clock, which WSL steps back);
+`test/standin/standin.test.ts` (records in the wrong order now and then);
+`test/window/mapping.test.ts:623` (ENOTEMPTY at the sandbox's clean-up); `test-page/terminal.test.ts`,
+"input-full (the program stalled, a large paste)" (under load the key can be taken). A run that
 fails only with one of them is run once more, and the pull request names both runs.
 
 ## 1. Tasks and waves
@@ -60,12 +62,12 @@ Task 0 is `main` at 9c5cbfb (stage A complete) with this plan merged.
 
 | # | Task | Depends on | Wave | Shared files (section 1c) | Size (code + tests) |
 |---|---|---|---|---|---|
-| 50 | Migration 2 and the store's attention | 0 | 1 | `src/store/types.ts` (one line) | ~450 |
-| 51 | Contracts and the view model of attention | 0 | 1 | `src/window/protocol.ts`, `src/window/view/build.ts`, their tests, `test/helpers/pages.ts` | ~500 |
+| 50 | Migration 2 and the store's attention | 0 | 1 | `src/store/types.ts` (one line); `test/store/store.test.ts` | ~450 |
+| 51 | Contracts and the view model of attention | 0 | 1 | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts` | ~500 |
 | 53 | The turn-end rule and seen | 0 | 1 | — | ~350 |
 | 52 | Attention on the server: the look, the writes, the notifier | 50, 51, 53 | 2 | — | ~650 |
-| 55 | The page: marks, the title, Ctrl+Shift+J, notifications | 51 | 2 | `web/app.js`, `keys.js`, `help.js`, `list.js`, `list-text.js`, `list.css`, `index.html`, `test/web/keys.test.ts`, `test-page/shell.test.ts`, `test-page/helpers/browser.ts` | ~750 |
-| 54 | The server assembly, and attention end to end | 52, 53, 55 | 3 | `src/window/tick.ts`, `server.ts`, `pages.ts`, `test/window/tick.test.ts`, `test/helpers/pages.ts`, tests that pin a stand-in's second line | ~650 |
+| 55 | The page: marks, the title, Ctrl+Shift+J, notifications | 51 | 2 | `web/app.js`, `keys.js`, `help.js`, `list.js`, `list-text.js`, `list.css`, `index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/helpers/browser.ts` | ~750 |
+| 54 | The server assembly, and attention end to end | 52, 53, 55 | 3 | `src/window/tick.ts`, `server.ts`, `pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts` | ~650 |
 | 56 | Documentation of stage B | all | 4 | `docs/*`, `README.md` | docs only |
 
 ```
@@ -132,24 +134,53 @@ table and stage A's `kv` entries, migrates to schema 2 with every row of migrati
 an empty `attention`; opening it again changes nothing; the guard of S2 10.1 refuses a write into
 a store one version newer (stage A's tests, kept on `SCHEMA_VERSION + 1`).
 
-### 1c. Shared files, and what a rebase brings
+### 1c. Every file of every task, and what a rebase brings
 
-Every new module is its own file with its own test file. The files more than one task edits, here
-and in the other stages:
+Every new module is its own file with its own test file. Each task's own **Files** list says the
+same as its row here.
 
-| File | Stage B (wave) | Other stages |
+| # | Creates | Changes |
 |---|---|---|
-| `src/store/types.ts` | 50 (1): `KvKey` `attention_seq`, two types | C may add `window_restore_dismissed` |
-| `src/window/protocol.ts`, `test/window/protocol.test.ts` | 51 (1) | D 34 (1); C |
-| `src/window/view/build.ts`, `test/window/view/build.test.ts` | 51 (1) | D 34 (1); C (the banner); E |
-| `test/helpers/pages.ts` | 51 (1: `defaultList`'s new field), 54 (3: the `seen` dependency) | — |
-| `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`, `test/web/keys.test.ts`, `test-page/shell.test.ts` | 55 (2) | D 37 (2); C; E |
-| `web/list.js`, `web/list-text.js`, `web/list.css`, `test/web/list.test.ts` | 55 (2) | D 34 (1); C; E |
-| `test-page/helpers/browser.ts` | 55 (2) | — |
-| `src/window/tick.ts`, `src/window/server.ts`, `test/window/tick.test.ts` | 54 (3) | D 36 (2); C |
-| `src/window/pages.ts` | 54 (3) | — known; C possibly |
-| `docs/design-step-2.md` | each task records its decisions of 1d in the sections named there; 51 and 53 both add to 12.4, 52 and 55 both to 12.4 and 13, each its own sentences: a conflict is rebased keeping both edits | all |
-| `docs/install.md`, `docs/manual-checks.md`, `README.md` | 56 (4) only | D 39, C |
+| 50 | `test/helpers/schema1.ts`, `test/store/migration-2.test.ts` | `src/store/migrations.ts`, `src/store/store.ts`, `src/store/types.ts`; `test/store/store.test.ts`; `docs/design-step-2.md` (10.2) |
+| 51 | `src/window/view/attention.ts`, `test/window/view/attention.test.ts` | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.3, 12.1, 12.4) |
+| 53 | `src/window/seen.ts`, `test/window/seen.test.ts` | `src/claude/terminal.ts`; `test/claude/terminal.test.ts`; `docs/design-step-2.md` (10.3, 12.4) |
+| 52 | `src/window/attention.ts`, `src/window/notify.ts`, `test/window/attention.test.ts`, `test/window/notify.test.ts` | `docs/design-step-2.md` (10.3, 12.4, 13) |
+| 55 | `web/attention-text.js`, `web/notify.js`, `web/attention.css`, `test/web/attention-text.test.ts`, `test-page/attention.test.ts`, `test-page/helpers/notification.ts` | `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/helpers/browser.ts`; `docs/design-step-2.md` (12.2, 12.4, 13, 17.4) |
+| 54 | `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`, `test-page/attention-server.test.ts` | `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.7) |
+| 56 | — | `docs/install.md`, `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (19, and any decision of 1d still missing) |
+
+**Shared source files** (changed by another stage too; never two stage B tasks of one wave):
+`src/store/types.ts` (50; C may add a `KvKey`), `src/window/protocol.ts` and
+`src/window/view/build.ts` (51; D 34, C, E), `web/app.js`, `web/keys.js`, `web/help.js`,
+`web/index.html` (55; D 37, C, E), `web/list.js`, `web/list-text.js`, `web/list.css` (55; D 34,
+C, E), `src/window/tick.ts` and `src/window/server.ts` (54; D 36, C), `src/window/pages.ts` (54;
+no other stage known to this author). `docs/design-step-2.md`: each task records its decisions of
+1d in the sections named above; 51 and 53 both add to 12.4 in wave 1, 52 and 55 both to 12.4 and
+13 in wave 2, each its own sentences — the second to merge rebases and keeps both. `docs/install.md`,
+`docs/manual-checks.md`, `README.md`: 56 only in stage B (D 39 and C edit them too).
+
+**What each task does to a shared test file**, so that stages C and D can be scheduled around it:
+
+| Test file | Task | What it does |
+|---|---|---|
+| `test/store/store.test.ts` | 50 | the migration count becomes 2; the table list of a new database gains `attention`; the one literal `'2'` that means "newer than this build" becomes `SCHEMA_VERSION + 1`; new cases at the end |
+| `test/window/protocol.test.ts` | 51 | the `LIST` fixture gains `needYou: { count: 0, order: [] }`; the case "an object of each ServerMessage type" gains a `NotifyMessage`; nothing else (D 34 changes the same file's `ROW`) |
+| `test/window/view/build.test.ts` | 51 | new cases at the end; the case that pins the view's files and imports gains `attention.ts` in its file list and `./attention.ts` among the allowed imports (D 34 adds `chip.ts` and `CHIP_ORDER` there: keep both) |
+| `test/helpers/pages.ts` | 51, 54 | 51: `defaultList` gains `needYou: { count: 0, order: [] }` (D 34 adds `openedNs` in the same object); 54: `startPages` takes an optional `seen` and passes it on |
+| `test/web/keys.test.ts` | 55 | Ctrl+Shift+J's two rows give `next-attention` instead of `later` B; the "every later key" case leaves Ctrl+Shift+J out (D 37 changes the rows of `l`, `g`, `n`, `p`, `d`, F2) |
+| `test/web/list.test.ts` | 55 | new cases at the end (D 34 changes the chip's cases) |
+| `test-page/shell.test.ts` | 55 | in the keys case, the two lines of Ctrl+Shift+J's `comes in a later stage` become `no session needs you` (D 37 changes the lines of the six list keys of the same case) |
+| `test-page/helpers/browser.ts` | 55 | `newPage` adds one `context.addInitScript` (B17) |
+| `test/window/tick.test.ts` | 54 | new cases at the end (D 36 adds `reloadNow`'s) |
+
+**Not changed by stage B** although the type changes reach them: `test-page/helpers/shell.ts`
+(`scriptedList` and the worlds build plain records, and the page reads a missing `needYou` as
+none), `test-page/cards.test.ts`, `test-page/real-modules.test.ts`, `test/web/pane.test.ts`,
+`test/window/view/sections.test.ts` (their rows' `attention: null` still type-checks), and
+`test-page/fixtures/minimal-help.js` (the shell's pinned stage A help; no case compares it with
+`keys.js`). No existing case on `main` makes a stand-in end a turn or wait under a running server
+(`rg -l '/idle|/waiting' test test-page` gives only the registry's and the stand-in's own tests,
+which run no attention); should `npm run check` name one in task 54, it pins stage B's text.
 
 Stage B never edits `src/window/view/sections.ts`, `src/window/actions.ts`, `src/window/selected.ts`
 or `web/cards.js` (stage D's): attention is added in `build.ts` over `rowPayload`'s result, and the
@@ -175,11 +206,11 @@ decision in the design in its own pull request; `—` means it is an implementat
 | B11 | A write the store refuses (busy, S2 14) is kept and tried again at the next look, merged with what comes meanwhile; the baselines move on, so a turn end is neither lost nor recorded twice. A store migrated under the server stops it (S2 10.1). | A turn end is seen once, at one look. | 52 (10.3) |
 | B12 | The server judges "starts to need you" over the rows a page without a filter lists (it builds that list with `buildListMessage`); the first judgement after the server starts records without notifying; a session whose reason changes does not start to need you. `Pages.notify` sends only while no page has focus, to the page that had it last. | S2 13; a restart must not notify everything that already needed you. | 52 (13) |
 | B13 | The page's words: a row that needs you has the reason on its second line — `needs you · <detail> · 3m` (`needs you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — also a row that is not running (an ended one), which then has two lines; the title bar starts with `● 3 need you`; the window title is `(3) skydeck`, and `skydeck` when none; a notification's body is `asks: <detail>` (`asks`), `finished`, `ended unexpectedly`. | S2 12.2's and 13's examples; S2 12.4: "the reason on its second line". Question 2 in section 7. | 55 (12.2, 12.4) |
-| B14 | Ctrl+Shift+J selects the next id of `needYou.order` after the selected one, else the first; after the last the first. None: the key bar says `no session needs you`; only the selected one: it stays selected and the key bar says `no other session needs you`. | S2 12.4 "pressed again it goes on"; what the key does with nothing to go to. | 55 (12.4) |
-| B15 | The page asks for the permission only from a click on `Turn on notifications`, a button in the title bar shown while `Notification` exists and its permission is `default`. A `notify` is shown only with the permission `granted`, never for the session that is selected while the page has focus, with the session's title (sanitised) as title, B13's body and `tag` the session id; a click calls `window.focus()` and selects the session. | S2 13. | 55 (13) |
+| B14 | Ctrl+Shift+J selects the next id of `needYou.order` after the selected one, else the first; after the last the first. None: the key bar says `no session needs you`; only the selected one: it stays selected and the key bar says `no other session needs you`. While a dialog of stage D is shown (when D is merged; its D2: `app.js` moves the keyboard nowhere and acts on no list key), Ctrl+Shift+J is a chord like the others there: it says D's `close the edit first (Esc)` and selects nothing. | S2 12.4 "pressed again it goes on"; what the key does with nothing to go to; an edit belongs to the session it was opened for. | 55 (12.4) |
+| B15 | The page asks for the permission only from a click on `Turn on notifications`, a button in the title bar shown while `Notification` exists and its permission is `default`. A `notify` is shown only with the permission `granted`, never for the session that is selected while the page has focus, with the session's title (sanitised) as title, B13's body and `tag` the session id; a click calls `window.focus()` and selects the session through `select(id, 'chord')`. While a dialog of stage D is shown (when D is merged), the click only brings the window to the front: nothing is selected, the keyboard and the dialog stay, and the key bar says `close the edit first (Esc)`. | S2 13; a click must not take an edit away from its session. | 55 (13) |
 | B16 | A notification stays in Windows' notification centre after its session no longer needs you; the page closes none. | Not in S2 13; a named limit. | 55 (13) |
 | B17 | `newPage` gives every page of the page suite an inert `Notification` (permission `denied`, `requestPermission` answers `denied` and asks nothing); the cases about notifications put a recording double over it and a `document.hasFocus` double, each through an init script. | No test may show a notification or ask for a permission, whatever a server sends. | 55 (17.4) |
-| B18 | Stage B leaves the header as it is: attention shows on the row, in the title bar, the window title and the notification. | S2 12.5 names no attention; stage D rebuilds the header (its D12). | — |
+| B18 | Stage B leaves the header as it is: attention shows on the row, in the title bar, the window title and the notification. Nothing of stage B changes the header's height or resizes a terminal (the list's rows are not under a terminal). | S2 12.5 names no attention; the header keeps one fixed height for every session (S2 12.5, kept by the lead's ruling on stage D's plan). | — |
 | B19 | No hook entry and no settings change: `install`, `uninstall` and `doctor`'s hook check stay as they are, and nobody needs to run `install` again. | S2 10.3 decided against turn hooks. | — |
 | B20 | Several windows (S2 8.2.7): the marks, the counts and the window title are the same in every window (the facts are the server's); `needYou.order` follows each window's own filter; a session seen in any focused window is seen for all; a notification goes to one window (B12). | S2 12.4 and 13 say it for one window and for the notification only. | 54 (8.2.7) |
 
@@ -455,7 +486,7 @@ the proof that a database in use since step 1 migrates without loss (section 1b)
   `rg -n "schema_version" test` lists them)
 
 **Behaviour.** Writes go through `#run` / `#runReturning` and reads through `#all` / `#get`, so
-that the guard and `prepareRead` hold (notes of task 4); the counter's value is computed inside the
+that the guard and `prepareRead` hold (stage A's contract 2.6, `openStore`); the counter's value is computed inside the
 same transaction (B2). Integer `*_seq` columns are numbers, `*_ns` bigints (design 9.2).
 
 **Tests** (platform: none — the store on a sandbox path)
@@ -486,7 +517,7 @@ new table; `attention` and `recordAttention` keep B2 and B3; `npm run check` pas
 
 ### Task 51: Contracts and the view model of attention
 
-**Depends on:** 0 · **Wave:** 1 · **Design:** S2 4.3, 8.2.3 (`list`, `notify`), 12.1 (the counts), 12.4 · **Contracts:** 2.3, 2.4 · **Decisions:** B5, B6, B7, B8 (update S2 8.2.3, 12.1, 12.4) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`. If stage D's task 34 is merged first: `RowPayload.chip` is D's `ChipPayload`, `PrPayload` has `okAtNs`, `TerminalPayload` `openedNs`, `SelectedPayload` the note's fields, and `build.ts` puts each terminal's `openedNs` — B's lines go beside them unchanged.
+**Depends on:** 0 · **Wave:** 1 · **Design:** S2 4.3, 8.2.3 (`list`, `notify`), 12.1 (the counts), 12.4 · **Contracts:** 2.3, 2.4 · **Decisions:** B5, B6, B7, B8 (update S2 8.2.3, 12.1, 12.4) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`. If stage D's task 34 is merged first: `RowPayload.chip` is D's `ChipPayload`, `PrPayload` has `okAtNs`, `openedNs` is in the message (where D's plan puts it), `SelectedPayload` has the note's fields, `src/window/view/` holds `chip.ts`, and the pinned view case and `defaultList` carry D's additions — B's lines go beside them unchanged.
 
 **Goal.** Fix as code every message and view-model function the other stage B tasks meet at, and
 the one rule of S2 4.3 that judges attention.
@@ -496,8 +527,10 @@ the one rule of S2 4.3 that judges attention.
 - Modify: `src/window/protocol.ts` (2.3), `src/window/view/build.ts` (`ViewInput.attention`,
   each row's `attention`, `needYou`, the counts of B7), `test/window/protocol.test.ts` (the `LIST`
   fixture gains `needYou`; `NotifyMessage` in the case "an object of each ServerMessage type"),
-  `test/window/view/build.test.ts` (the cases below), `test/helpers/pages.ts` (`defaultList` gains
-  `needYou: { count: 0, order: [] }`), `docs/design-step-2.md` 8.2.3, 12.1, 12.4
+  `test/window/view/build.test.ts` (the cases below at the end; the case that pins the view's files
+  and imports gains `attention.ts` and the import `./attention.ts`), `test/helpers/pages.ts`
+  (`defaultList` gains `needYou: { count: 0, order: [] }`), `docs/design-step-2.md` 8.2.3, 12.1,
+  12.4
 
 **Tests** (platform: none — pure, step 1's builders of `test/helpers/derived.ts`)
 - `attentionOf`: asks for a running row whose status is `waiting`, with its sanitised detail (an
@@ -610,7 +643,7 @@ and the judgement of S2 13 is tested; `npm run check` passes.
 
 ### Task 55: The page — marks, the title, Ctrl+Shift+J, notifications
 
-**Depends on:** 51 · **Wave:** 2 · **Design:** S2 12.1 (the title bar, the window title), 12.2 (the second line), 12.4 (the marks, Ctrl+Shift+J), 12.9 (the key help), 13 (the page's side), 17.4 · **Contracts:** 2.8; stage A's 2.9 · **Decisions:** B13, B14, B15, B16, B17 (update S2 12.2, 12.4, 13, 17.4) · **Shared files:** `web/app.js`, `web/keys.js`, `web/help.js`, `web/list.js`, `web/list-text.js`, `web/list.css`, `web/index.html`, `test/web/keys.test.ts`, `test-page/shell.test.ts`, `test-page/helpers/browser.ts`. If stage D is merged first: `list-text.js`'s chip is D's (`chipText` of a `ChipPayload`), `app.js` holds D's dialog, whose modal rule makes Ctrl+Shift+J say `close the edit first (Esc)` while a dialog is open, `keys.js`'s `later` then has only stages B and E (B removes B), `help.js` lists D's keys, `index.html` has `#editor` and `#toast`, and `shell.test.ts`'s case of the six list keys is D's.
+**Depends on:** 51 · **Wave:** 2 · **Design:** S2 12.1 (the title bar, the window title), 12.2 (the second line), 12.4 (the marks, Ctrl+Shift+J), 12.9 (the key help), 13 (the page's side), 17.4 · **Contracts:** 2.8; stage A's 2.9 · **Decisions:** B13, B14, B15, B16, B17 (update S2 12.2, 12.4, 13, 17.4) · **Shared files:** `web/app.js`, `web/keys.js`, `web/help.js`, `web/list.js`, `web/list-text.js`, `web/list.css`, `web/index.html`, `test/web/keys.test.ts`, `test-page/shell.test.ts`, `test-page/helpers/browser.ts`. If stage D is merged first: `list-text.js`'s chip is D's (`chipText` of a `ChipPayload`); `app.js` holds D's dialog, the toast, the new list keys and the header's call with `list.selected` for every pane — while a dialog is shown it moves the keyboard nowhere and acts on no list key, so Ctrl+Shift+J says `close the edit first (Esc)` (B14) and a notification's click only brings the window to the front (B15), and the second of 55 and D's 37 to merge adds a page case for each; `keys.js`'s `later` then has only stages B and E (B removes B); `help.js` lists D's keys; `index.html` has `#editor` and `#toast`; `shell.test.ts`'s case of the six list keys is D's.
 
 **Goal.** The window shows what S2 12.4 and 13 say, from exactly what the server sends: the marks,
 the counts and the window title, Ctrl+Shift+J, and desktop notifications with the permission asked
@@ -663,7 +696,7 @@ Ctrl+Shift+J as a key that acts, and no page test can show a notification; `npm 
 
 ### Task 54: The server assembly, and attention end to end
 
-**Depends on:** 52, 53, 55 · **Wave:** 3 · **Design:** S2 8.2.7 (several windows), 10.1, 10.3, 12.4, 13, 14, 17.3, 17.4 · **Contracts:** 2.7 · **Decisions:** B20 (update S2 8.2.7) · **Shared files:** `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`, `test/window/tick.test.ts`, `test/helpers/pages.ts` (`startPages` passes `seen`), and the existing cases whose stand-in ends a turn or waits (below). If stage D's task 36 is merged first: `tick.ts` has `reloadNow` and `server.ts` gives the actions `changed`, `fetchPrs` and `refreshPrs` — B's lines are beside them, and an edit's `reloadNow` brings the attention facts along through `listFor`.
+**Depends on:** 52, 53, 55 · **Wave:** 3 · **Design:** S2 8.2.7 (several windows), 10.1, 10.3, 12.4, 13, 14, 17.3, 17.4 · **Contracts:** 2.7 · **Decisions:** B20 (update S2 8.2.7) · **Shared files:** `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`, `test/window/tick.test.ts`, `test/helpers/pages.ts` (`startPages` passes `seen`). If stage D's task 36 is merged first: `tick.ts` has `reloadNow` and `server.ts` gives the actions `changed`, `fetchPrs` and `refreshPrs` — B's lines are beside them, and an edit's `reloadNow` brings the attention facts along through `listFor`.
 
 **Goal.** Wire 52, 53 and 55 into the running server so that a real turn end, a real selection
 and a real typing in a real page do what S2 12.4 and 13 say, in every window.
@@ -675,10 +708,10 @@ and a real typing in a real page do what S2 12.4 and 13 say, in every window.
   `notify`), `test/helpers/pages.ts`, `docs/design-step-2.md` 8.2.7
 - Create: `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`,
   `test-page/attention-server.test.ts`
-- Test: `test/window/tick.test.ts`; and every existing case in `test/window/` and `test-page/`
-  whose stand-in goes `/busy` then `/idle`, or `/waiting`, while its row is not being seen: its
-  second line or the counts are now B13's and B7's (`npm run check` names them); each is changed to
-  pin the new text, never to avoid it
+- Test: `test/window/tick.test.ts` (new cases at the end). No existing case on `main` makes a
+  stand-in end a turn or wait under a running server (1c); should `npm run check` name one, it is
+  changed to pin stage B's text (B7, B13), never to avoid it, and joins this list in the pull
+  request
 
 **Tests** (platform: `realTestPlatform`, through `startTestServer` and `TestPage`, unless marked)
 - `tick.test.ts`: `look` every second before the keep-alive, `refreshed` after each refresh that
@@ -739,8 +772,8 @@ in the safe order, and knows which checks only they can make.
 - `README.md`: one sentence in the window's paragraph — what needs you, and notifications.
 - `docs/manual-checks.md`: a part "The window (step 2, stage B)" with W11, W19 and W21, and W3
   gains the title `(n) skydeck` on its taskbar button. Each says what to set up, what to type, what
-  to look at and what to write down, and every step can do no harm (the rules of task 30's review,
-  `notes-for-tasks.md`, "Task 30 (#71), OPUS review 2"):
+  to look at and what to write down, and every step can do no harm to the machine or to the
+  user's running sessions (the rules stage A's checks were held to in their review):
   - every **real claude** step uses stage A's throwaway session in `~/skydeck-try` ("A throwaway
     session in the window"), started by the step itself, never a real work session, and names the
     session it acts on — no step presses Enter on whatever is selected;
@@ -758,8 +791,11 @@ in the safe order, and knows which checks only they can make.
     whether `finished` or a notification came before its end (question 6 in section 7).
 
 **Steps**
-- [ ] Run every command of the new text on a clean `SKYDECK_HOME` (`skydeck window --print-url`,
-      no Edge) to check it is exact.
+- [ ] Run no `skydeck` command at all: a "clean `SKYDECK_HOME`" is no sandbox (`show` and others
+      read the real `~/.claude`, `window` reaches port 47613 and the real Edge). What a command
+      prints is held by the sandboxed tests of the task that changes it; stage B changes no
+      command's output, so every line the documents quote is checked against the code and the
+      tests of tasks 50–55 instead.
 - [ ] `npm run check` → pass. Open the pull request.
 
 **Done when:** the user can use stage B from `docs/install.md` alone, and W3's title, W11, W19 and
@@ -795,14 +831,14 @@ Stage B works without C, D and E and touches their files only where its own line
 leaves `banner`, `stack`, `chips`, the chip and every `act` kind as they are; in `build.ts` it adds
 the attention lines beside the rows' payloads, where D changes the chip and C the banner; in
 `web/keys.js` it turns only Ctrl+Shift+J from `later` into its action, so Ctrl+Shift+P (E) still
-says it comes later; in `web/app.js` it adds the title, the chord and the notifications, which D's
-dialog rule (its D2) covers like any chord; in `tick.ts` it adds the look beside D's `reloadNow`.
-It does not touch the header (B18). Stage E's switcher ranks "needs you" first through
-`attentionOf` and `attentionOrder` of `src/window/view/attention.ts`.
+says it comes later; in `web/app.js` it adds the title, the chord and the notifications, which
+respect a shown dialog of D (B14, B15); in `tick.ts` it adds the look beside D's `reloadNow`. It
+does not touch the header, its height or any terminal's size (B18). Stage E's switcher ranks
+"needs you" first through `attentionOf` and `attentionOrder` of `src/window/view/attention.ts`.
 
-**One follow-up lies exactly on stage B's path** (`LEFT-TO-YOU.md` section 4, the first product
-item): a second window opens when `skydeck window` starts a server while an old window is still
-open. Migration 2 is the first update after which the old server stops by itself when a command
+**One follow-up lies exactly on stage B's path** (stage A's known limit "A second window",
+`docs/install.md`, "Known limits of stage A"): a second window opens when `skydeck window` starts
+a server while an old window is still open. Migration 2 is the first update after which the old server stops by itself when a command
 other than `skydeck window` runs first (1b). **Not carried**: the fix (a mark in the store while
 pages are connected) changes stage A's start of the window; stage B's documents give the order
 that avoids it instead (task 56, section 6). Question 5 in section 7.
