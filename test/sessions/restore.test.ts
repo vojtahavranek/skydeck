@@ -20,7 +20,13 @@ import type {
   RestoreOutcome,
 } from '../../src/sessions/restore.ts';
 import { ResumeRefusedError, SkydeckError } from '../../src/platform/errors.ts';
-import { acquireLock, lockKey, prepareResume, readLock } from '../../src/sessions/resume.ts';
+import {
+  acquireLock,
+  lockKey,
+  lockTakenNs,
+  prepareResume,
+  readLock,
+} from '../../src/sessions/resume.ts';
 import { handoffScript, hereTerminal } from '../../src/terminals/here.ts';
 import { shellQuote } from '../../src/text/shell.ts';
 import type { LaunchSpec, OpenResult, Terminal } from '../../src/terminals/types.ts';
@@ -1618,11 +1624,14 @@ test('signal aborted while the second batch waits: that wait ends at its next lo
     'stopped: the command that asked for it stopped',
     notStartedLine(entries, 5),
   ]);
-  // Their terminals may still start them: each keeps its lock, renewed at the last look.
+  // Their terminals may still start them: each keeps its lock, renewed at the last look (its time,
+  // read to the millisecond, is that look's, a second after the open; a renewal's mark alone would
+  // make any renewed value differ from the open's).
   for (const id of [sid(3), sid(4)]) {
     const lock = d.deck.store.getKv(lockKey(id));
     assert.notEqual(lock, null, id);
-    assert.notEqual(lock, lockAtOpen.get(id), id);
+    assert.equal(lockTakenNs(lock ?? ''), d.clock.nowNs(), id);
+    assert.equal(lockTakenNs(lockAtOpen.get(id) ?? ''), d.clock.nowNs() - SEC, id);
   }
 });
 
