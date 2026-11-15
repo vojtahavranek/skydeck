@@ -179,7 +179,9 @@ describe('pull requests in the window (S2 12.5, design 7.3; plan D8)', () => {
   });
 
   test('the server stopped while a fetch waits for gh: the stop does not wait for it', async (t) => {
-    const { d, test, gh } = await serverWithGh(t, { hold: 'signal' });
+    // Held until its signal fires (gh's own 10 s never come); release() only frees a stop that
+    // would otherwise hang, so that a regression fails this case instead of the whole file.
+    const { d, test, gh } = await serverWithGh(t, { hold: 'held' });
     // The page lists nothing: the tick's own pull-request refresh asks about nothing.
     const page = await connectTestPage(t, d, test.server, { view: { filter: 'nothing-matches' } });
     await page.next('list', 'the first list');
@@ -187,9 +189,13 @@ describe('pull requests in the window (S2 12.5, design 7.3; plan D8)', () => {
     assert.equal(result.ok, true, JSON.stringify(result));
     await gh.started(1);
     const stopping = performance.now();
-    await test.server.stop('the test stops it');
+    const stopped = test.server.stop('the test stops it').then(() => true);
+    const late = new Promise<false>((resolve) => setTimeout(() => resolve(false), 5000));
+    const inTime = await Promise.race([stopped, late]);
     const took = performance.now() - stopping;
-    assert.ok(took < 5000, `the stop took ${Math.round(took)} ms`);
+    if (!inTime) gh.release();
+    await stopped;
+    assert.ok(inTime, `the stop waited for gh: ${Math.round(took)} ms`);
     assert.equal(gh.runs.length, 1);
     assert.equal(d.deck.store.prs()[0]?.triedAtNs, null, 'nothing saved after the abort');
   });

@@ -1045,6 +1045,7 @@ describe('note (S2 12.5; plan D9, D10)', () => {
     assert.deepEqual(await h.act(note(longest, typed)), ok(33));
     assert.equal(d.deck.store.meta(S1)?.note, longest);
     assert.deepEqual(h.told, ['changed', 'changed']);
+    assert.deepEqual(h.logs, [], 'a note sent is never logged');
   });
 
   test('an empty text, or one of only white space, clears the note', async (t) => {
@@ -1078,6 +1079,18 @@ describe('note (S2 12.5; plan D9, D10)', () => {
     setNote(d.deck, S1, 'set meanwhile');
     assert.equal((await h.act(note('mine', ''))).ok, false);
     assert.equal(d.deck.store.meta(S1)?.note, 'set meanwhile');
+    // The base is the stored string exactly (plan D3): a space or a line break of another kind is
+    // another note.
+    const differing: [stored: string, base: string][] = [
+      ['text ', 'text'],
+      ['one\r\ntwo', 'one\ntwo'],
+      ['one\ntwo', 'one\r\ntwo'],
+    ];
+    for (const [stored, base] of differing) {
+      setNote(d.deck, S1, stored);
+      assert.equal((await h.act(note('mine', base))).ok, false, JSON.stringify(base));
+      assert.equal(d.deck.store.meta(S1)?.note, stored);
+    }
   });
 
   test('the same save sent twice (its answer lost): both ok, one write', async (t) => {
@@ -1204,6 +1217,7 @@ describe('done and undone (S2 12.10)', () => {
     assert.deepEqual(await h.act({ t: 'act', id: 45, kind: 'undone', sessionId: S1 }), ok(45));
     assert.equal(d.deck.store.meta(S1)?.doneAtNs, null);
     assert.deepEqual(h.told, ['changed', 'changed']);
+    assert.deepEqual(h.logs, []);
   });
 });
 
@@ -1227,6 +1241,7 @@ describe('pull requests (S2 12.5, design 7.3; plan D8)', () => {
     assert.equal(link?.origin, 'manual');
     assert.equal(link?.detachedAtNs, null, 'the earlier detach is gone');
     assert.deepEqual(h.told, ['changed', `fetch ${PR7}`], 'its key URL, once, after the write');
+    assert.deepEqual(h.logs, [], 'an address sent is never logged');
   });
 
   test("pr-add of a URL that is not a pull request: requirePrKey's message, nothing attached", async (t) => {
@@ -1256,6 +1271,7 @@ describe('pull requests (S2 12.5, design 7.3; plan D8)', () => {
     assert.deepEqual(await h.act(rm), ok(48));
     assert.notEqual(d.deck.store.sessionPrs()[0]?.detachedAtNs, null);
     assert.deepEqual(h.told, ['changed']);
+    assert.deepEqual(h.logs, []);
   });
 
   test("pr-refresh asks for the explicit refresh of the session's pull requests and answers ok at once", async (t) => {
@@ -1264,6 +1280,7 @@ describe('pull requests (S2 12.5, design 7.3; plan D8)', () => {
     const h = harness(d);
     assert.deepEqual(await h.act({ t: 'act', id: 46, kind: 'pr-refresh', sessionId: S1 }), ok(46));
     assert.deepEqual(h.told, [`refresh ${S1}`], 'nothing written: no changed()');
+    assert.deepEqual(h.logs, []);
   });
 });
 
