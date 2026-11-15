@@ -252,8 +252,9 @@ export function createEditor(root, deps) {
   };
 
   /**
-   * A refusal of an act of the list: under the field while that session's pull-request dialog is
-   * shown, else the toast `not saved: <the error>` (as C4: it must still be seen).
+   * A refusal of an act of the list (a line's link, ×, its Undo, ↻): under the field while that
+   * session's pull-request dialog is shown, else the toast `not saved: <the error>` (as C4: it must
+   * still be seen).
    * @param {string} sessionId
    * @param {ResultMessage} result
    */
@@ -341,11 +342,14 @@ export function createEditor(root, deps) {
     if (target.closest('.edit-pr-remove') !== null) {
       void detach(url);
     } else if (target.closest('.edit-pr-text') !== null && !textSelected()) {
-      // S2 9.6's `open-link` (the server checks the address again).
-      const shown = current;
+      // S2 9.6's `open-link` (the server checks the address again); a refusal as `refused` says.
+      const sessionId = current?.row.id;
+      if (sessionId === undefined) {
+        return;
+      }
       void deps.act({ kind: 'open-link', url }).then((result) => {
-        if (!result.ok && current === shown) {
-          say(errorOf(result));
+        if (!result.ok) {
+          refused(sessionId, result);
         }
       });
     }

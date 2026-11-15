@@ -742,7 +742,7 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
   );
 
   await t.test(
-    "refusals and waits (plan D 2.5, D13, D17): a drag over a pull request or the note's line opens nothing; a refused link of the header is a line in the key bar; in the dialog a refused link, × and ↻ show under the field, × and ↻ send one act while it waits, × from the keyboard leaves the keyboard in the field, a refusal after the dialog closed is the toast `not saved: …`; the fold is closed at every open",
+    "refusals and waits (plan D 2.5, D13, D17): a drag over a pull request or the note's line opens nothing; a refused link of the header is a line in the key bar; in the dialog a refused link, × and ↻ show under the field, × and ↻ send one act while it waits, × from the keyboard leaves the keyboard in the field, a refusal after the dialog closed is the toast `not saved: …` (a line's link and ×); the fold is closed at every open",
     async (t) => {
       const s = await scripted(t, chromium, {
         sections: {
@@ -818,7 +818,15 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       w.answer(actsOf('pr-rm')[1] as Row, { ok: true });
       await eventually(async () => (await toast(page)).text === 'Detached acme/web #7', 'toast');
 
-      // A refusal after the dialog closed: the toast.
+      // A refusal after the dialog closed: the toast — of a line's link (review 1) and of ×.
+      await page.locator('#editor .edit-pr-text').first().click();
+      const closedLink = await eventually(async () => actsOf('open-link')[2] ?? null, 'a link');
+      await page.keyboard.press('Escape');
+      await dialogShown(page, false);
+      w.answer(closedLink, { ok: false, error: 'no such link' });
+      await eventually(async () => (await toast(page)).text === 'not saved: no such link', 'toast');
+      await page.locator('#cards .header-prs-button').click();
+      await dialogShown(page, true);
       await remove.click();
       await eventually(async () => actsOf('pr-rm').length === 3, 'the third pr-rm');
       await page.keyboard.press('Escape');
