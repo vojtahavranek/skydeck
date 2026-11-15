@@ -851,7 +851,8 @@ knows which checks only they can make.
   or, when there was none, by removing the file it created (and `skydeck window --restart`); it
   never just removes the user's configuration (ruled 14:38Z on review 1), and copies nothing back
   over a file that changed since but for the check's own line: a `diff` first, else the user mends
-  the file by hand (review 2); a leftover of an unfinished run is recognised first; it says
+  the file by hand (review 2); it removes no file for what it holds: a file that already holds a
+  `ticketUrl` is used as it is and is the same at the end (ruled on review 2's re-check); it says
   that a mistake in the file makes every command name the key and exit 1, and nothing else. W28
   attaches a pull request of the user's own and detaches it at the end. Each check sets what it
   needs at its start and clears what it set at its end (ruled 14:38Z). No step marks a real

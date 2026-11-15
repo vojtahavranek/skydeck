@@ -852,17 +852,8 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 
 - **`config.json.before-w27` is listed**: an earlier W27 did not finish. Do its step 4 first (it
   compares the two files before anything is copied), then start again.
-- **Only `config.json` is listed, and `cat ~/.config/skydeck/config.json` prints exactly the one
-  line this check writes** below, with your site in it:
-
-  ```
-  { "ticketUrl": "https://<your site>.atlassian.net/browse/{key}" }
-  ```
-
-  It is left over from an earlier W27 that started with no file and did not finish. Remove it
-  (`rm ~/.config/skydeck/config.json`) and go on as when both are missing.
-- **Only `config.json` is listed** (anything else in it): you have a configuration. Copy it aside,
-  as it is (`-n`: an existing copy is never written over):
+- **Only `config.json` is listed**: you have a configuration, whatever it holds. Copy it aside, as
+  it is (`-n`: an existing copy is never written over):
 
   ```sh
   cp -p -n ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
@@ -870,8 +861,10 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 
   Then add one line, on a line of its own right after the opening `{`, as its first key:
   `"ticketUrl": "https://<your site>.atlassian.net/browse/{key}",` (for Jira; else your ticket
-  system's address, with `{key}` where the key goes). When the file already has a `"ticketUrl"`
-  line, add none.
+  system's address, with `{key}` where the key goes). When the file already holds a
+  `"ticketUrl"` line (yours, or one left by an earlier W27 that did not finish), add nothing: the
+  check uses it, and the file is the same at the end. If you do not want that link, remove the
+  line by hand afterwards.
 - **Both are missing** (`No such file or directory` twice): you have none. Create the file with
   only this key (put your site's address; the command writes nothing when the file exists):
 
@@ -919,8 +912,8 @@ skydeck window --restart
      by a program): copy nothing back. Look at both files, take out of `config.json` by hand the
      `ticketUrl` line this check added, keep everything else, and only then remove the copy
      (`rm ~/.config/skydeck/config.json.before-w27`).
-   - **You had no file before** (or removed a leftover): `cat ~/.config/skydeck/config.json` must
-     print exactly the one line this check writes; then remove it,
+   - **You had no file before**: `cat ~/.config/skydeck/config.json` must print exactly the one
+     line this check wrote; then remove the file this run created,
      `rm ~/.config/skydeck/config.json`. When it holds more, something was added since: take out
      only the `ticketUrl` key, by hand.
 
