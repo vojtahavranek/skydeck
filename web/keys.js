@@ -1,7 +1,8 @@
 // The page's key policy (S2 9.1, S2 12.9, A11): which keys are the window's, what the terminal's
 // key handler does with the keys it maps, the list keys, and which keys the page cancels.
 // Pure: functions of a KeyboardEvent-like object, no DOM, no state. Tested by
-// test/web/keys.test.ts on a US and a Czech layout.
+// test/web/keys.test.ts on a US and a Czech layout. Stage D's list keys (`l`, F2, `g`, `n`, `p`,
+// `d`) are no longer `later` (plan D 2.4); only windowChord's Ctrl+Shift+J and Ctrl+Shift+P are.
 //
 // Matching (S2 12.9): a letter is matched by the character the key types (`key`), never by the
 // physical key, as Claude Code does. A digit is matched by the character typed when that is a
@@ -21,11 +22,12 @@
  *   | { kind: 'help' } | { kind: 'reload' } | { kind: 'later', stage: 'B' | 'E' }} WindowChord
  */
 /** @typedef {{ send: string } | 'browser' | null} TerminalMapping */
+/** @typedef {'label' | 'group' | 'note' | 'pr'} EditWhat */
 /**
  * @typedef {{ kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' }
  *   | { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' }
  *   | { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' }
- *   | { kind: 'later', stage: 'D' }} ListAction
+ *   | { kind: 'edit', what: EditWhat } | { kind: 'done' }} ListAction
  */
 
 /**
@@ -109,7 +111,9 @@ export function terminalKey(e) {
  * Alt or Meta; Shift may be held, since it chose the character (`/` is Shift+ú on a Czech
  * layout), and an upper-case letter is another key. A named key (arrows, Home, Enter, Esc, F2 …)
  * takes no modifier. The reload keys are F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and the
- * BrowserRefresh key alone, with Shift or with Ctrl (S2 12.9, 15.3). The keys of stage D — `l`, `g`, `n`, `p`, `d` and F2 — give `later` (A11).
+ * BrowserRefresh key alone, with Shift or with Ctrl (S2 12.9, 15.3). The keys of stage D (plan D
+ * 2.4): `l` and F2 edit the label, `g` the group, `n` the note, `p` the pull requests; `d` marks
+ * done, or undone for a done row (app.js decides which).
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -130,11 +134,15 @@ export function listKey(e) {
     case 'a':
       return { kind: 'show-done' };
     case 'l':
+      return { kind: 'edit', what: 'label' };
     case 'g':
+      return { kind: 'edit', what: 'group' };
     case 'n':
+      return { kind: 'edit', what: 'note' };
     case 'p':
+      return { kind: 'edit', what: 'pr' };
     case 'd':
-      return { kind: 'later', stage: 'D' };
+      return { kind: 'done' };
   }
   if (e.shiftKey) {
     return null;
@@ -161,7 +169,7 @@ export function listKey(e) {
     case 'Escape':
       return { kind: 'escape' };
     case 'F2':
-      return { kind: 'later', stage: 'D' };
+      return { kind: 'edit', what: 'label' };
   }
   return null;
 }
@@ -174,7 +182,7 @@ export function listKey(e) {
  *   zones; the reload keys in the list zone (so that Edge never reloads the page by itself,
  *   15.3); in the terminal zone the keys the page sends itself (`terminalKey` gives `{ send }`).
  * - Every other key: exactly when `handled` — the page acted on it. That covers the list keys
- *   the page applied (and the `later` list keys, whose message it shows), and keys it used
+ *   the page applied (stage D's too), and keys it used
  *   outside the table (Enter in the find bar). While a text field of the page has the keyboard
  *   (the filter, the new form) the caller passes false for the keys it leaves to the field, so
  *   that `j` or `/` type there. A key xterm.js sends is cancelled by xterm.js, not by the page.

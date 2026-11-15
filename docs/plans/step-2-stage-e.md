@@ -171,7 +171,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | E9 | **The switcher's ranking** (S2 12.8). Over every session the list lists with done ones shown, also those the page's filter, chips, folded Earlier or closed stacks leave out: the rows whose fields match every word of its text (E2, E3; all rows for none), ranked — needs you (stage B's attention, in B's order), open (Open's order: slots, then by opening time, then those elsewhere), not running (most recent first), done (not running and done, most recent first). At most 50 items; `more` says how many were left out. Each item carries where the words are in its title (every occurrence of each word, overlapping ones merged, at most 32; none when lower-casing changes the title's length — a named limit) and why this page's list does not show it (`hiddenBy`, E10). | One matching rule for the filter and the switcher (question 1: the mockup matched titles by subsequence); a bounded message. | 96 (12.8) |
 | E10 | **A pick** (Enter on an item, a click on one). Enter and a click act only while `list.switcher.query` is the text the page last sent (after the cuts of E3); otherwise Enter waits for that list and then acts on its highlighted item, and a click does nothing (ruled: so that a fast `orb`, Enter never picks an item of the list for `or`). The switcher closes; when the list does not show the picked row, the page first changes its view so that it does — the filter and the chips cleared (the key bar says `the filter was cleared to show <short id>`), done sessions shown, Earlier unfolded, as `hiddenBy` says; then it selects the row and does what Enter on that row in the list does (S2 12.6): a session with a terminal of the window shows it (an open one with the keyboard; an ended one under its bar); a session elsewhere shows its card; one that is not running is resumed into the window (11.3), and a refusal shows on its card (an expired one too, as the list's Enter). A closed stack needs nothing (E6). | S2 12.8: "Enter switches to a running one and resumes one that is not running"; S2 12.9: the selection is never on a row the list does not show, and the card must be shown for a refusal to be seen (question 2). | 98 (12.8) |
 | E11 | **The switcher is modal**, by stage D's rule for its dialogs (D2): a scrim covers the window; while the switcher is shown `app.js` moves the keyboard nowhere (no `setZone`, `giveKeyboard`, `keepKeyboard` or `terminalView.focus` for a result, a list or a render) and acts on no list key; Ctrl+Shift+P closes it; every other window chord, Ctrl+Shift+H too, says `close the switcher first (Esc)` and does nothing else — its footer names its keys, and the help never covers its items; the reload keys reload as usual (nothing typed there is worth keeping). Opening it hides the help when the help is shown; stage D's toast lies under the switcher's panel and over its scrim, so that it never covers the items and its Undo can still be clicked. In its field: ↑ ↓ move the highlight, PgUp PgDn by a page, Enter picks, Esc closes, Tab and Shift+Tab stay in the field (they do nothing); every other key is text. A mousedown in the panel anywhere but in the field is cancelled, so that the keyboard never leaves the field (a heading or the footer would otherwise take it, and the modal rule would never give it back). A click on an item picks it; a click outside the panel closes it. While the page is not connected it shows `skydeck's server is not connected` in place of its items, and Enter waits (E10). When it closes without a pick the keyboard goes back where it was; after a pick, where the pick puts it (a terminal this page's resume brought meanwhile takes it then, as after D's dialogs). A held Esc that closes it over a terminal sends the program nothing (stage A's held-key rule); Esc while the New form is open closes the switcher only (app.js's Esc branch of the form comes after the modal check). Ctrl+Shift+P, and a click on the title bar's `Switch…` (which goes through the same gate of a window chord, stage B's B15), while one of D's dialogs is shown say D's `close the edit first (Esc)` and open nothing. | D2; S2 12.9 names only the chord. | 98 (12.9) |
-| E12 | **The restore offer in the switcher** (S2 12.7, stage C) is never one Enter away (ruled). It is listed only when a word of the switcher's text starts with `restore` — never for an empty text — and only while stage C's banner is not shown (S2 12.7's case after "Not now": `banner.shown` false), holds preselected entries and no restore runs. Whether it is listed is the server's answer: `list.switcher.restore` (`restoreOffer`, 2.2), set by `listFor` after stage C has put the banner on the list. Listed, it is the switcher's first entry, `Restore <n> sessions from <time>` (`1 session`; `n` the preselected entries; the time from C's `activityTime` with the page's own clock in milliseconds, `Date.now()`, as C's banner calls it — never the switcher's `now()`, which is the server's time in nanoseconds); its Enter sends `act restore` with the preselected ids in the banner's order. Since the offer is listed only while the banner is not shown, no tick of the banner can disagree with those ids. The run's report shows where stage C shows it: C's banner draws its report while it holds lines, whatever the payload says (ruled for stage C's plan), so stage E changes nothing of C's page. | S2 12.7: "the switcher still offers 'Restore 3 sessions from <time>' until the next WSL restart"; S2 12.6: a resume costs a process, and Ctrl+Shift+P, Enter must not start every preselected session. | 98 (12.7) |
+| E12 | **The restore offer in the switcher** (S2 12.7, stage C) is never one Enter away (ruled). It is listed only in COMMAND FORM (ruled, as the mockup's toast says, "> restore"): a switcher's text whose first character is `>` (nothing trimmed before it) is a command whatever follows, and lists no session; the offer is listed when what follows the `>`, trimmed and lower-cased with `toLowerCase()`, is a start of `restore` of at least one letter (`>r`, `> rest`, `>Restore`, `> RESTORE`); `>` alone and `> foo` list neither the offer nor a session. Any other text searches sessions only, so `restore drill`, typed for a session, never puts the offer under the highlight, and ` >restore` (a space first) searches sessions for the word `>restore`. Never for an empty text. And only while stage C's banner is not shown (S2 12.7's case after "Not now": `banner.shown` false), holds preselected entries and no restore runs. Whether it is listed is the server's answer: `list.switcher.restore` (`restoreOffer`, 2.2), set by `listFor` after stage C has put the banner on the list. Listed, it is the switcher's first entry, `Restore <n> sessions from <time>` (`1 session`; `n` the preselected entries; the time from C's `activityTime` with the page's own clock in milliseconds, `Date.now()`, as C's banner calls it — never the switcher's `now()`, which is the server's time in nanoseconds); its Enter sends `act restore` with the preselected ids in the banner's order. Since the offer is listed only while the banner is not shown, no tick of the banner can disagree with those ids. The run's report shows where stage C shows it: C's banner draws its report while it holds lines, whatever the payload says (ruled for stage C's plan), so stage E changes nothing of C's page. | S2 12.7: "the switcher still offers 'Restore 3 sessions from <time>' until the next WSL restart"; S2 12.6: a resume costs a process, and Ctrl+Shift+P, Enter must not start every preselected session. | 98 (12.7) |
 | E13 | **The selected session the list does not show** (stage A's known limit, S2 12.6). `list` gains `selectedRow`: the row of the session `view.selected` names, as the sections would carry it, also when they leave it out (a filter, the chips, done hidden, a folded Earlier). The page uses it only when its id is the page's own selection (the server's answer can be for the selection before, until the next list or while the connection is lost). One helper of the page, `sessionRow(list, id)` — the sections' row of that id, else `selectedRow` when its id is that id, else null — gives "the selected session's row" everywhere: to `paneFor`, to stage D's handlers of the header's `edit` and `done`, and to D's `editor.update`. With such a row the pane is decided as for a listed row, by `row.terminal` (the server's answer, not the page's guess from the terminals): a terminal of the window is shown with that row, its header (stage D's, so it can be edited) and its ended bar with Resume and Close at once. Without a terminal the right side shows nothing, as S2 12.9 says (ruled for stage A's task 27). The list still shows no row selected and its keys act on none; when the filter shows the row again it is selected again. A session the view model does not list even with done ones shown (an ended terminal of a session without a transcript) has no `selectedRow`: its bar stays stage A's, without Resume — the limit narrows to that case. | Stage D's plan leaves exactly this to stage E (its section 5). | 95 (8.2.3, 12.6, 12.9) |
 | E14 | **The icon** (S2 12.12). `web/icons/skydeck.svg` is the source; `icon-16/32/48/192/512.png`, and `icon-192-maskable.png`, `icon-512-maskable.png` (the drawing inside the maskable safe zone, the middle 80 %, on a full background), and `favicon.ico` (the 16, 32 and 48 PNGs in one ICO) are made once from it by `scripts/icons.ts` with Playwright's Chromium and committed. `web/manifest.webmanifest` holds `name` and `short_name` `skydeck`, `display` `standalone` and the seven PNGs, their `src` with `/assets/__VERSION__/`; it is served only as `GET /manifest.webmanifest` with the build put in (as `index.html`), `application/manifest+json`; `GET /favicon.ico` is `web/icons/favicon.ico`, `image/x-icon`; both `no-store` (stage A's rule for paths outside `/assets/`) and with the headers every answer carries. `index.html` names the versioned `favicon.ico` (`sizes="16x16 32x32 48x48"`) and the manifest. Nothing is fetched from outside, at build time or at run time. | S2 8.2.1 lists both paths; S2 12.12 the files; no build step. | 97 (8.2.1, 12.12) |
 
@@ -320,6 +320,9 @@ export interface RestoreOffer {
 export interface SwitcherPayload {
   /** The text it answers (view.switcher), as the page sent it; E10's picks compare it. */
   query: string;
+  /** E12 (ruled): the text is in command form — its first character is `>` — so `items` is []
+   *  and `more` 0; the page says so from this field and never tests the text itself. */
+  command: boolean;
   items: SwitchItem[];
   /** How many matching sessions were left out after MAX_ITEMS. */
   more: number;
@@ -328,9 +331,14 @@ export interface SwitcherPayload {
 }
 export const MAX_ITEMS = 50;
 /**
- * E12, over stage C's banner payload (structurally: only these fields are read): an offer when a
- * word of searchWords(query) starts with `restore`, the banner is not null, `shown` and `running`
- * are false and at least one entry is preselected; else null. Never for an empty text.
+ * E12, over stage C's banner payload (structurally: only these fields are read): an offer when the
+ * text is in command form and names the restore — its first character is `>` (nothing trimmed
+ * before it) and what follows, trimmed and lower-cased with toLowerCase(), is a start of `restore`
+ * of at least one letter (`>r`, `> rest`, `>Restore`, `> RESTORE`) — the banner is not null,
+ * `shown` and `running` are false and at least one entry is preselected; else null. `>` alone and
+ * `> foo` give none; a text whose first character is not `>` never does (ruled). The offer starts
+ * programs, so what is not positively known gives none (ruled): `shown` and `running` must be
+ * `false` itself, and an entry counts only when its `preselected` is `true`.
  */
 export function restoreOffer(
   query: string,
@@ -356,7 +364,9 @@ export interface SwitchCandidate {
  * whose row matches every word of searchWords(query) — all of them for none — ranked: `need`
  * (in needOrder's order, then any that needOrder lacks in the candidates' order), `open`,
  * `not-running` (not open, not done), `done` (not open, done); inside each rank in the
- * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null.
+ * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null. A text in command
+ * form — its first character `>`, whatever follows (E12, ruled) — lists no session: `command`
+ * true, `items` [] and `more` 0; any other text gives `command` false.
  */
 export function switcherPayload(
   query: string,
@@ -429,7 +439,8 @@ surrogate are each refused (`{ ok: false, kind }`, the kind holding none of the 
   as 2.2 says (Open's comparator for the open ones, the recent-first one for the others), each
   with its `hiddenBy` for this view (2.2's meanings) and `need` = its payload's `attention` is not
   null; `needOrder` is stage B's `attentionOrder` over those that need you (B's 2.4), [] without
-  stage B. Otherwise `switcher: null`. Its `restore` is null here; `listFor` sets it (2.6).
+  stage B. Otherwise `switcher: null`. Its `restore` is null here; `listFor` sets it (2.6). Its
+  `command` (2.2) is `switcherPayload`'s, passed on as it is.
 - Stage B's `needYou.order`, stage C's banner and the rest are untouched by any of it.
 
 `buildListMessage` (task 95): `selectedRow` is the payload the loop made for the candidate whose
@@ -440,16 +451,18 @@ id is `view.selected` (listed, or a done one), with `stack: null`; null when the
 ```js
 // web/search-text.js — task 93; pure, no DOM (node:test and the root tsc load it)
 export const MAX_WORDS = 16;
-/** E3: `text` up to the end of its MAX_WORDS-th word, split as the server splits (/\s+/u); `cut`
- *  when a word came after it. searchWords(cutWords(t).text) equals searchWords(t) (task 93's
- *  parity test). */
+/** E3: `text` up to the end of its MAX_WORDS-th word, split as the server splits (/\s+/u; a
+ *  zero-width or control character is part of a word); `cut` when a word came after it; a text
+ *  with no more words as typed; a word never cut. searchWords(cutWords(t).text) equals
+ *  searchWords(t) (task 93's parity test). */
 export function cutWords(text) {}            // → { text: string, cut: boolean }
 /** E7: `×4`. */
 export function stackBadge(size) {}          // → string
 /** E7: `+3 more in ORB-2107` for a stack of 4; the group passed through list-text.js's sanitize. */
 export function moreText(size, group) {}     // → string
 /** The parts of `text` with `found`'s ranges marked; ranges out of order, overlapping, empty or
- *  past the end are clamped or dropped, so that the parts always join to `text`. */
+ *  past the end are clamped or dropped (task 93 says how), so that the parts always join to
+ *  `text`; a part is text for `textContent`, never markup. */
 export function highlightParts(text, found) {} // → { text: string, found: boolean }[]
 /** E9: 'Needs you', 'Open', 'Not running', 'Done'. */
 export function rankHeading(rank) {}         // → string
@@ -690,6 +703,10 @@ accent colour; the mockup's logo is a rounded square with a blue gradient), squa
 no script, no `on…` attribute, no `<foreignObject>`, no `href` or `xlink:href` but to `#…`, no
 `@import`, no `url(` but to `#…`. `scripts/icons.ts` as 2.6; the implementer runs it once and
 commits what it wrote, and the pull request shows the 32 and 192 PNGs. The routes as 2.6.
+The manifest has no `start_url`, `scope` or `id` (ruled, review 2 of #87): the page is not meant
+to be installed as an app. Without `start_url` Chromium counts it as not installable
+(`start-url-not-valid`, run in the pinned Chromium with task 97's links), and the shortcut of an
+installed app would hold no launch token (S2 5.1).
 
 **Tests** (platform: `testPlatform`; the files read from the checkout)
 - `icons.test.ts`: each PNG starts with the PNG signature, its `IHDR` gives the size its name
@@ -698,7 +715,9 @@ commits what it wrote, and the pull request shows the 32 and 192 PNGs. The route
   are those of the three PNGs; the manifest is JSON with exactly `name`, `short_name`, `display`
   and `icons`, `skydeck`, `skydeck`, `standalone`, and seven icons whose `src` is
   `/assets/__VERSION__/web/icons/<file>` of a file that exists, with its `sizes` and `type`, the
-  two maskable ones `purpose` `maskable`; the SVG holds none of what the behaviour forbids.
+  two maskable ones `purpose` `maskable`, and no `start_url`, `scope` or `id` (a case of its
+  own); the SVG holds none of what the behaviour forbids (checked by what it may hold: the
+  elements and attributes of a drawing of shapes).
 - `assets.test.ts`: `/manifest.webmanifest` → 200, `application/manifest+json`, `no-store`, the
   build in every `src` and no `__VERSION__` left; every `src` is served under the build, `image/png`;
   `/favicon.ico` → 200, `image/x-icon`, `no-store`, the ICO's bytes; both carry the security
@@ -726,7 +745,16 @@ offer, as pure functions.
 
 **Behaviour.** As 2.2; `matchesWords` and `foundIn` of task 90 do the matching. Nothing in it
 knows stage B or C: `need` and `needOrder` are given, and `restoreOffer` reads only the four
-fields of a banner that 2.2 names.
+fields of a banner that 2.2 names. The command form (E12, ruled): a text whose first character is
+`>` lists no session in `switcherPayload`, whatever follows, and is the only text for which
+`restoreOffer` can give the offer; the command after the `>` is trimmed and lower-cased with
+`toLowerCase()`, so `> RESTORE` and `>Restore` name it as `>restore` does; `command` says that the
+text is a command, so that the page never tests the text itself. The offer starts programs, so
+what is not positively known gives none (ruled): `shown` and `running` must be `false` itself and
+an entry counts only when its `preselected` is `true`; a banner that is no object, or entries that
+are no array, are not guarded (the banner is the server's own typed value), and an id preselected
+twice is task 73's to hold. The cost is linear in the candidates and in `needOrder` (no lookup in
+`needOrder` per candidate, no sort).
 
 **Tests** (platform: none — candidates built from step 1's builders through task 90's `searchable`)
 - No text: every candidate, ranked need, open, not running, done; inside each the candidates'
@@ -737,12 +765,32 @@ fields of a banner that 2.2 names.
 - 60 candidates → 50 items and `more` 10; with a text that 3 match → 3 and `more` 0.
 - `found` is `foundIn(row.title, words)`; `hiddenBy` and `row` are passed on as they are; `query`
   is the text as given (not cut, not lower-cased); `restore` null.
-- Nothing → `{ query, items: [], more: 0, restore: null }`.
+- Nothing → `{ query, command: false, items: [], more: 0, restore: null }`. `command`: true for
+  `>`, `> foo`, `>restore`, `>>`; false for ` >restore`, `\t>r`, `restore`, `foo >`, `''`.
+- The command form (ruled): `>restore`, `>r`, `> rest`, `>Restore`, `> RESTORE`, `>`, `> `,
+  `> foo`, `>foo` → `{ query, command: true, items: [], more: 0, restore: null }` over sessions
+  whose titles hold those words; ` >restore` and `\t>r` (white space first) → searched as the
+  session words `>restore` and `>r`; `restore` and `RESTORE old` → the sessions that hold the
+  words. `switcherPayload` takes no banner: a `>` text lists no session with a banner or without
+  one (task 98's case).
 - `restoreOffer`: a banner with three entries, two preselected, `shown` false, `running` false →
-  for `restore`, `RESTORE`, `restore old` and `x restore2` the offer (`count` 2, the two ids in
-  the banner's order, its `lastActivityNs`); for `''`, `res`, `rest`, `x` and `xrestore` null;
-  the same banner with `shown` true, with `running` true,
-  with no entry preselected, and a null banner → null for `restore`.
+  for `>r`, `>re`, `> rest`, `>restor`, `>restore`, `>  restore  `, `>\trestore\n`, every
+  white space `trim()` strips after the `>` (U+00A0, U+FEFF, U+3000, U+2028) and, for case,
+  `> RESTORE`, `>Restore`, `>R`, `>Rest` the offer (`count` 2, the two ids in the banner's order,
+  its `lastActivityNs`); for `restore`, `RESTORE`, `restore old`, `x restore2`, `res`, `rest`, `x`
+  and `xrestore` (no `>`: sessions only) null; for `''`, `>`, `> `, `>restores`, `>restore old`,
+  `> re store`, `>x`, `> foo`, `>>restore`, `x >restore`, ` >restore`, `\t>r`, U+FEFF, U+00A0 or
+  U+200B before the `>`, U+200B after it, a look-alike `>` or letter (U+FF1E, the Cyrillic
+  U+0435, the long s U+017F, which `toUpperCase()` would take for `S`) and the command in quote
+  marks, null; the same banner with `shown` true, with `running` true, with no entry
+  preselected, and a null banner → null for `>restore`; through a cast, `shown` or `running`
+  `undefined`, `null`, `0`, `''`, `'false'`, `NaN` or absent → null, and an entry whose
+  `preselected` is `1`, `'true'`, `null`, `{}` or absent does not count.
+- `more` counts the ranks after the one the cut falls in (55 not running and 7 done → 50 items,
+  `more` 12); an id `needOrder` names twice counts at its first place; `found` is of the row's
+  title (U+0130 + `stanbul fix` and `fix` → `[]`, foundIn's named limit).
+- The cost: 40,000 candidates that all need you and match, `needOrder` their reverse → within
+  1 second, the least of three runs (a guard against a lookup in `needOrder` per candidate).
 
 **Done when:** E9 and E12's rule are tested pure functions; `npm run check` passes.
 
@@ -761,19 +809,52 @@ them and the page's cut of a search text is the server's.
 **Files**
 - Create: `web/search-text.js`, `test/web/search-text.test.ts`
 
-**Behaviour.** As 2.5. It imports `sanitize` of `web/list-text.js` and nothing else.
+**Behaviour.** As 2.5. It imports `sanitize` of `web/list-text.js` and nothing else. It is pure
+page code as `web/list-text.js` is (no DOM, no clock; JSDoc types, checked by the root `tsc` and
+`tsc -p web`). Ruled for task 93: the page and the server never disagree about a search text —
+what a word is (E2: split at white space as `filter.ts` splits it, `/\s+/u`; a zero-width or
+control character is part of a word), how many count (16, repeated ones too), that a word counts
+in its first 64 units AFTER lower-casing (the server cuts it; the page sends it whole), within the
+text's limit of 1,024 bytes of UTF-8 (stage A's cut in `app.js`, before `cutWords`); where this
+module cuts, it gives what `filter.ts` reads from the same text. Every text a user or a program
+wrote (a search text, a title, a group) is handed on as text for `textContent`, never as markup: a
+highlight is given as parts, not as HTML. Nothing in the module builds a pattern from a text (no
+`RegExp`, no `.match(` / `.matchAll(` / `.search(` but with a literal), and nothing is logged.
+`highlightParts` takes the ranges in their order, each clamped to the text and to start no earlier
+than where the last one ended, its ends moved inwards off the middle of a surrogate pair; one that
+is then empty, or that is not a pair of whole numbers, is dropped; neighbouring parts marked alike
+are one part and no part is empty (`[]` for an empty text). `rankHeading` of a rank it does not
+know gives that rank's text sanitised and trimmed (as `sectionText` does for a section), of
+anything that is not a string `''`.
 
-**Tests** (platform: none)
-- Parity: for a table of texts (white space of every kind of E2, 16 and 17 words, repeated words,
-  only white space, a word of 100 units, 1,024 bytes of one word) `searchWords(cutWords(t).text)`
-  equals `searchWords(t)` of task 90, and `cut` is true exactly when a 17th word was there (the
-  page does not cut a long word: the server counts its first 64 units, E3).
+**Tests** (platform: none; the test imports `filter.ts`, the page's module does not)
+- Parity: for a table of texts (white space of every kind of E2 — a space, a tab, a line break,
+  `\r\n`, the no-break space, U+3000, U+2028, U+FEFF … —, a zero-width space, a zero-width joiner,
+  a control character, U+0085 and U+180E inside a word, 16 and 17 words, white space before and
+  after them, repeated words, only white space, a word of 100 units, 1,024 bytes of one word (of
+  one-byte, two-byte and four-byte characters), `İ` (lower-casing makes it two units: 40 of them,
+  and 63 units then an `İ`), a surrogate pair at the server's 64th unit and at the page's cut, a
+  lone surrogate, 17 words in 1,024 bytes, a 16th word of 100 units or of 70 `İ` before a 17th),
+  for 17 words joined by each of the 65,536 UTF-16 units, and for 5,000 generated texts of those
+  characters: `searchWords(cutWords(t).text)` equals `searchWords(t)` of task 90, `cut` is true
+  exactly when a 17th word was there (for a unit: exactly when the server splits `a<unit>b` in
+  two), the result is a prefix of `t`, uncut it is `t` as typed, cut it ends where the 16th word
+  ends (the page does not cut a long word: the server counts its first 64 units, E3); a cut text
+  is not cut again.
 - `stackBadge(4)` → `×4`; `moreText(4, 'ORB-2107')` → `+3 more in ORB-2107`; a group holding an
-  escape sequence → sanitised.
+  escape sequence, a control or a line break → sanitised; a group holding markup → as it is.
 - `highlightParts`: two ranges → five parts that join to the text; ranges out of order,
-  overlapping, empty, past the end, negative → clamped or dropped, the parts still join to the
-  text; no range → one part.
-- `rankHeading` of each rank; `switcherFooter` for each action, with and without `more`.
+  overlapping, touching, empty, reversed, past the end, negative, not whole numbers, not pairs
+  (`[0, 2, 9]` too) → clamped or dropped, the parts still join to the text and none is empty; a
+  range never splits a surrogate pair; a dropped range leaves no trace for the ranges after it;
+  markup in a title stays text; no range → one part; the ranges of task 90's `foundIn` mark the
+  words of a search text.
+- `rankHeading` of each rank, of one it does not know and of no string; `switcherFooter` for each
+  action, with and without `more`.
+- The module's source (comments left out): no `RegExp`, no `.match(` / `.matchAll(` / `.search(`
+  with an argument that is not a literal nor those names as a computed member, no `eval` or
+  `Function(`, no `console`, no DOM, no clock or timer, no storage, no network, and its only
+  import is `sanitize` of `./list-text.js` (no `export … from`, no `import(`).
 
 **Done when:** the texts are tested and the page's cut equals the server's; `npm run check`
 passes.
@@ -850,8 +931,8 @@ D nothing differs.
   - the switcher: `switcher` null without `view.switcher`; with `''` every listed session with
     done ones, ranked; a done session and one the filter hides are items, with `hiddenBy`
     `['done']`, `['filter']`, `['filter', 'done', 'folded']` as 2.2 says; with stage B's facts the
-    sessions that need you first in B's order; `restore` null; `counts` and `needYou` the same
-    with and without a switcher;
+    sessions that need you first in B's order; `restore` null; `command` false for `''`, true
+    with no item for `>restore`; `counts` and `needYou` the same with and without a switcher;
   - every stage A, B and D case of `build.test.ts` passes but the filter's cases named above.
 
 **Done when:** every rule of S2 12.2 and 12.8 that the server decides is in the list a page gets,
@@ -1021,7 +1102,7 @@ E's; S2 12.7's paragraphs (C 73's rule, C 75's page) and 12.9 (D 37's D2 sentenc
 and 97's): keep theirs.
 
 **Goal.** Ctrl+Shift+P, or the title bar's `Switch…`, opens the quick switcher over every
-session; typing narrows it, Enter switches to the session or resumes it, a typed `restore` finds
+session; typing narrows it, Enter switches to the session or resumes it, a typed `>restore` finds
 stage C's offer, and the keyboard never leaves it while it is shown.
 
 **If absent:** without stage D, `app.js` has no modal rule yet: this task adds one for the
@@ -1069,7 +1150,10 @@ modal rule has its own gate; without C there is no offer, `server.ts` is not tou
 
 **Behaviour.** As E10, E11, E12 and 2.5. The panel lies over the page (the mockup's), with the
 field on top, the items grouped under `rankHeading`'s headings, and the footer (`switcherFooter`);
-`No session matches.` when nothing does. The highlight starts on the first item and follows
+`No session matches.` when nothing does and `switcher.command` is false; while it is true the
+switcher lists no session and shows the offer when there is one, or a line of its own for a
+command that names none (its words are task 98's): the page decides it from `switcher.command`,
+never from the text (S2 4.3). The highlight starts on the first item and follows
 ↑ ↓ PgUp PgDn, scrolled into view; a held key acts at each repeat for ↑ ↓ and once for Enter.
 
 **Tests** (platform: `realTestPlatform`; a test server with sessions made by step 1's helpers and
@@ -1079,9 +1163,9 @@ the stand-in, unless a scripted world is named; the contexts through stage B's `
   a letter.
 - `switcher-offer.test.ts` (a real test server; sessions of an earlier boot made by stage C's
   helper for a server's sandbox, task 74): while the banner is shown, a view with `switcher:
-  'restore'` → `restore` null; after `act dismiss-restore`, `''` and `res` → null, `restore` and
-  `restore x` → the offer with the preselected ids in the banner's order; while a restore runs →
-  null.
+  '>restore'` → `restore` null and no session listed; after `act dismiss-restore`, `''`, `restore` and `restore x` (no
+  `>`: sessions only) → null, `>restore` and `> rest` → the offer with the preselected ids in the
+  banner's order and no session listed; while a restore runs → null (E12, ruled).
 - `switcher.test.ts`, opening and typing: Ctrl+Shift+P from the terminal and from the list, and a
   click on the title bar's `Switch…` → the panel, the keyboard in its field, the help hidden if it
   was shown; typing → items of the server's ranking, the matched parts in `mark` elements, each
@@ -1160,9 +1244,10 @@ Needs you only with stage B, the header's editing only with stage D).
   the chips, stacks (`×4`, `+3 more`, a click, → and ←, a filter flattens them, a stack opened by
   selecting one of its members stays open until it is closed), the quick switcher (Ctrl+Shift+P or
   `Switch…`, the order, the keys, what Enter does for each kind of session, that a pick clears a
-  filter that hides the session, the restore offer with stage C — found by typing `restore`, only
-  after "Not now" —, Esc), the right side of a selected session the filter hides (its terminal
-  with its header and the ended bar's Resume and Close), and the icon. Stage D's known limit "a
+  filter that hides the session, the restore offer with stage C — found by typing `>restore` (the
+  command form; a text without `>` lists sessions only), only after "Not now" —, Esc), the right
+  side of a selected session the filter hides (its terminal with its header and the ended bar's
+  Resume and Close), and the icon. Stage D's known limit "a
   session the filter hides has no header" is taken out of the text. "Known limits of stage E": a
   word counts in its first 64 characters, 16 words count, and a note is searched in its first
   16,384 characters; the switcher shows 50 sessions (type to narrow); a title whose lower case is
@@ -1272,7 +1357,8 @@ write down whether it does.
   letters as the mockup did (E9); a word matches the short id from 4 characters on (E2); a pick
   clears a filter that hides the session (E10); a row that has a terminal of the window or needs
   you never stacks, and a stack opened by selecting a member stays open until you close it (E6);
-  the restore offer is found only by typing `restore`, after "Not now" (E12).
+  the restore offer is found only by typing `>restore` (or `>r`, the command form), after "Not
+  now", and a text that starts with `>` lists no session (E12).
 
 ## 7. Questions for the lead, and the rulings
 

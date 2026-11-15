@@ -159,7 +159,7 @@ test('the page shell', async (t) => {
   );
 
   await t.test(
-    'keys: the page cancels exactly the keys it handles; Alt+F4 and keys no zone uses are not cancelled; the keys of later stages say so',
+    'keys: the page cancels exactly the keys it handles; Alt+F4 and keys no zone uses are not cancelled; the keys of later stages say so; the stage D keys with no row selected say so',
     async (t) => {
       const standin = await standinServer(t);
       const page = await newPage(t, chromium);
@@ -249,16 +249,15 @@ test('the page shell', async (t) => {
       for (const [key, cancelled] of listZone) {
         assert.equal(await pressed(key), cancelled, `${key} in the list zone`);
       }
-      for (const [key, name] of [
-        ['l', 'l'],
-        ['g', 'g'],
-        ['n', 'n'],
-        ['p', 'p'],
-        ['d', 'd'],
-        ['F2', 'F2'],
-      ]) {
-        assert.equal(await pressed(key as string), true, `${key} in the list zone`);
-        await showsText(page, '#key-message', new RegExp(`^${name}: comes in a later stage$`));
+      // Stage D's keys (plan D task 37) act on the selected row; with none (this page has no
+      // list), the key bar says so. Each is cancelled in the list zone.
+      for (const key of ['l', 'g', 'n', 'p', 'd', 'F2']) {
+        await page.evaluate(() => {
+          const message = document.getElementById('key-message');
+          if (message !== null) message.textContent = '';
+        });
+        assert.equal(await pressed(key), true, `${key} in the list zone`);
+        await showsText(page, '#key-message', /^no session selected$/);
       }
       // `/` gives the filter the keyboard: then `j` types there and is not cancelled.
       assert.equal(await pressed('/'), true);
