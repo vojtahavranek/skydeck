@@ -19,6 +19,7 @@ import type { Context } from '../context.ts';
 import { refreshWithProgress, withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 import { windowTimes } from '../window-open.ts';
+import type { WindowTimes } from '../window-open.ts';
 import { restoreInWindow, windowServer } from '../window-requests.ts';
 import type { WindowServer } from '../window-requests.ts';
 
@@ -65,16 +66,10 @@ export const command: Command = {
       );
     }
     return withDeck(ctx, { refresh: false }, async (deck) => {
-      const times = windowTimes(deck.platform.env);
-      const { terminal } = deck.config;
       // Where the sessions start; none for --dry-run, which starts nothing and asks the window's
       // server nothing (S2 11.4). Plan C14: the window's server is looked for first, so that "the
       // window is not running" comes before the list and the prompt.
-      const where: { server: WindowServer } | { terminal: Terminal } | null = dryRun
-        ? null
-        : terminal === 'window'
-          ? { server: await windowServer(deck, times, false) }
-          : { terminal: terminalFor(terminal, deck.platform, deck.config) };
+      const where = dryRun ? null : await whereTo(deck);
       refreshWithProgress(ctx, deck);
       const { entries } = restorePlan(deck, all);
       if (entries.length === 0) {
@@ -96,7 +91,7 @@ export const command: Command = {
         // The server runs the restore (S2 11.4); restoreInWindow prints its lines and both of
         // C14's own (ruled, task 76).
         const sessionIds = chosen.map((entry) => entry.row.id);
-        return restoreInWindow(ctx, deck, where.server, { sessionIds, all }, times);
+        return restoreInWindow(ctx, deck, where.server, { sessionIds, all }, where.times);
       }
       const outcome = await runRestore(
         {
@@ -123,6 +118,19 @@ export const command: Command = {
     });
   },
 };
+
+/**
+ * Where a restore starts its sessions: the window's server (C11's lookup; its lines without
+ * `, or use --here`) with `"terminal": "window"`, else the configured terminal.
+ */
+async function whereTo(
+  deck: Deck,
+): Promise<{ server: WindowServer; times: WindowTimes } | { terminal: Terminal }> {
+  const { terminal } = deck.config;
+  if (terminal !== 'window') return { terminal: terminalFor(terminal, deck.platform, deck.config) };
+  const times = windowTimes(deck.platform.env);
+  return { server: await windowServer(deck, times, false), times };
+}
 
 /** "<n>. [x| ] <short>  <title>  <how it ended>[  was working]" */
 function entryLine(entry: RestoreEntry, index: number, selected: boolean): string {

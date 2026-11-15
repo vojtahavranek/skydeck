@@ -410,7 +410,7 @@ class TerminalList {
     try {
       return (await server.client.status()).pages > 0;
     } catch (error) {
-      failureMessage(error);
+      if (!(error instanceof SkydeckError)) throw error;
       return true;
     }
   }
