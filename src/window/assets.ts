@@ -15,7 +15,8 @@ export interface Assets {
   /** The keeper's code as read at start (S2 16.5). */
   keeperCode: string;
   /**
-   * By the path of a request without its query: '/' (index.html with the build put in) or
+   * By the path of a request without its query: '/' (index.html with the build put in),
+   * '/manifest.webmanifest' (the manifest with the build put in), '/favicon.ico' or
    * '/assets/<build>/<path in the checkout>'. null when the path is not on the list.
    */
   get(path: string): { body: Uint8Array; type: string } | null;
@@ -23,15 +24,22 @@ export interface Assets {
 
 const KEEPER = 'bin/skydeck-keeper';
 const INDEX = 'web/index.html';
-/** The contract with web/index.html (task 26): every occurrence becomes `/assets/<build>/`. */
+/** The page's manifest and icon (S2 12.12), served at the paths S2 8.2.1 gives them. */
+const MANIFEST = 'web/manifest.webmanifest';
+const FAVICON = 'web/icons/favicon.ico';
+/** The contract with web/index.html (task 26) and the manifest: every occurrence becomes
+ *  `/assets/<build>/`. */
 const PLACEHOLDER = '/assets/__VERSION__/';
-/** Files of web/ not on the versioned list: the type checker's, and index.html, which is served as
- *  '/' with the build put in (as it is on disk it would be a second, broken page). */
-const NOT_SERVED = new Set(['web/tsconfig.json', INDEX]);
+/** Files of web/ not on the versioned list: the type checker's, and index.html and the manifest,
+ *  which are served with the build put in at their own paths (as they are on disk, they would name
+ *  files of no build). */
+const NOT_SERVED = new Set(['web/tsconfig.json', INDEX, MANIFEST]);
 /** Vendored files the page loads: the bundles and the stylesheet (S2 16.6). */
 const LOADED_FROM_VENDOR = /\.(mjs|css)$/;
 
 const HTML = 'text/html; charset=utf-8';
+const ICO = 'image/x-icon';
+const WEB_MANIFEST = 'application/manifest+json';
 const TYPES: Readonly<Record<string, string>> = {
   '.html': HTML,
   '.js': 'text/javascript; charset=utf-8',
@@ -40,6 +48,8 @@ const TYPES: Readonly<Record<string, string>> = {
   '.json': 'application/json',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.ico': ICO,
+  '.webmanifest': WEB_MANIFEST,
 };
 /** With `nosniff`, a file of another kind is never run or shown as a page. */
 const OTHER_TYPE = 'application/octet-stream';
@@ -48,18 +58,22 @@ function refuse(reason: string): never {
   throw new SkydeckError(`skydeck cannot serve this checkout: ${reason}`);
 }
 
-/** index.html with the build put in: done on the bytes, which keep every other byte as it was. */
-function withBuild(index: Uint8Array, build: string): Uint8Array {
-  const latin1 = Buffer.from(index).toString('latin1'); // one character per byte, both ways
+/** index.html (or the manifest) with the build put in: done on the bytes, which keep every other
+ *  byte as it was. */
+function withBuild(file: Uint8Array, build: string): Uint8Array {
+  const latin1 = Buffer.from(file).toString('latin1'); // one character per byte, both ways
   return Buffer.from(latin1.replaceAll(PLACEHOLDER, `/assets/${build}/`), 'latin1');
 }
 
 /**
- * Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only), the vendored files of
- * the manifest that the page loads (`vendor/xterm/**` .mjs and .css) and bin/skydeck-keeper.
+ * Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only, and
+ * web/manifest.webmanifest as '/manifest.webmanifest' only, each with the build put in), the
+ * vendored files of the manifest that the page loads (`vendor/xterm/**` .mjs and .css) and
+ * bin/skydeck-keeper; web/icons/favicon.ico is also served as '/favicon.ico' (S2 8.2.1, 12.12).
  * Refuses (Error) when verifyVendored
  * reports a problem. A missing or empty web/ is no error (task 23's tests run before task 26
- * creates it): then `GET /` is 404.
+ * creates it): then `GET /` is 404, as are the manifest's and the icon's paths for a checkout
+ * without them.
  *
  * Every file is read once, by `readBuild`, and the build is the hash of exactly the bytes served
  * (S2 8.2.1). A served vendored file must have the manifest's hash in those bytes too, so that a
@@ -103,6 +117,14 @@ export function loadAssets(files: Files, appRoot: string): Assets {
   const index = read.get(INDEX);
   if (index !== undefined) {
     served.set('/', { body: withBuild(index, build), type: HTML });
+  }
+  const manifest = read.get(MANIFEST);
+  if (manifest !== undefined) {
+    served.set('/manifest.webmanifest', { body: withBuild(manifest, build), type: WEB_MANIFEST });
+  }
+  const favicon = read.get(FAVICON);
+  if (favicon !== undefined) {
+    served.set('/favicon.ico', { body: favicon, type: ICO });
   }
   return { build, keeperCode, get: (path) => served.get(path) ?? null };
 }
@@ -189,7 +211,7 @@ export function httpHandler(
       refusal(404, 'not found');
       return;
     }
-    // Immutable only under the versioned path: '/' (and the icon of stage E) keep their address.
+    // Immutable only under the versioned path: '/', the manifest and the icon keep their address.
     const cache = path.startsWith('/assets/') ? 'max-age=31536000, immutable' : 'no-store';
     answer(200, asset.type, asset.body, cache);
   };
