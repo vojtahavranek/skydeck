@@ -6,6 +6,8 @@ import { SkydeckError } from '../platform/errors.ts';
 import type { Ns } from '../platform/types.ts';
 import { MIGRATIONS, SCHEMA_VERSION } from './migrations.ts';
 import type {
+  AttentionRow,
+  AttentionWrite,
   EventKind,
   EventRow,
   KvKey,
@@ -113,6 +115,22 @@ export interface Store {
   detachPr(sessionId: string, url: string, nowNs: Ns): boolean;
   /** All session_prs rows, detached ones included. */
   sessionPrs(): SessionPrRow[];
+
+  // attention (S2 10.2): the server's observations, ordered by a counter, never by a clock
+  /** Every attention row, ordered by session id. */
+  attention(): AttentionRow[];
+  /**
+   * S2 10.2 in ONE transaction (the guarded connection refuses it whole: StoreNewerError): for each
+   * write in order, each observation takes the next value (B2) in B3's order — turn end, window
+   * end, seen; a row is created when absent and never removed. Returns the rows it wrote, as
+   * stored: one per session the writes name, in its state after them, ordered by session id. An
+   * empty list writes nothing; a write with no observation is a RangeError and nothing is written.
+   * B2: each value is one more than the larger of kv attention_seq — 0 unless it is a canonical
+   * decimal whole number below 2^53 — and every *_seq of attention; attention_seq is left at the
+   * last value given. A value that would pass 2^53 - 1 is a RangeError, and nothing is written.
+   * Like transaction(), not to be called inside one.
+   */
+  recordAttention(writes: readonly AttentionWrite[]): AttentionRow[];
 
   // kv
   getKv(key: KvKey): string | null;
@@ -283,6 +301,29 @@ function mapPr(row: Row): PrRow {
     triedAtNs: optNs(row, 'tried_at_ns'),
     error: optStr(row, 'error'),
   };
+}
+
+function mapAttention(row: Row): AttentionRow {
+  return {
+    sessionId: reqStr(row, 'session_id'),
+    turnEndedSeq: optInt(row, 'turn_ended_seq'),
+    turnEndedNs: optNs(row, 'turn_ended_ns'),
+    seenSeq: optInt(row, 'seen_seq'),
+    windowEndSeq: optInt(row, 'window_end_seq'),
+    windowEndNs: optNs(row, 'window_end_ns'),
+  };
+}
+
+/**
+ * B2: the value of kv attention_seq when it is a canonical decimal whole number that a number holds
+ * exactly, else 0 — a damaged counter then gives way to the values stored in attention.
+ */
+function counterValue(text: string | null): number {
+  if (text === null || !/^(0|[1-9][0-9]*)$/.test(text)) {
+    return 0;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : 0;
 }
 
 function mapSessionPr(row: Row): SessionPrRow {
@@ -808,6 +849,71 @@ class SqliteStore implements Store {
     return this.#all('SELECT * FROM session_prs ORDER BY first_seen_ns, session_id, url').map(
       mapSessionPr,
     );
+  }
+
+  attention(): AttentionRow[] {
+    return this.#all('SELECT * FROM attention ORDER BY session_id').map(mapAttention);
+  }
+
+  recordAttention(writes: readonly AttentionWrite[]): AttentionRow[] {
+    for (const write of writes) {
+      if (
+        write.turnEndedNs === undefined &&
+        write.windowEndNs === undefined &&
+        write.seen !== true
+      ) {
+        throw new RangeError(`an attention write for ${write.sessionId} has no observation`);
+      }
+    }
+    if (writes.length === 0) {
+      return [];
+    }
+    return this.transaction(() => {
+      // Inside the write lock, so that no other connection takes a value in between (B2).
+      const stored = this.#get(
+        `SELECT max(coalesce(max(turn_ended_seq), 0), coalesce(max(seen_seq), 0),
+                    coalesce(max(window_end_seq), 0)) AS top
+         FROM attention`,
+      );
+      let seq = Math.max(
+        counterValue(this.getKv('attention_seq')),
+        stored === undefined ? 0 : reqInt(stored, 'top'),
+      );
+      const next = (): bigint => {
+        if (seq >= Number.MAX_SAFE_INTEGER) {
+          throw new RangeError('the attention counter is at 2^53 - 1 and cannot go on');
+        }
+        seq += 1;
+        return int(seq);
+      };
+      for (const write of writes) {
+        // B3's order: turn end, window end, seen.
+        const columns: [column: string, value: bigint][] = [];
+        if (write.turnEndedNs !== undefined) {
+          columns.push(['turn_ended_seq', next()], ['turn_ended_ns', write.turnEndedNs]);
+        }
+        if (write.windowEndNs !== undefined) {
+          columns.push(['window_end_seq', next()], ['window_end_ns', write.windowEndNs]);
+        }
+        if (write.seen === true) {
+          columns.push(['seen_seq', next()]);
+        }
+        const names = columns.map(([name]) => name);
+        this.#run(
+          `INSERT INTO attention (session_id${names.map((n) => `, ${n}`).join('')})
+           VALUES (?${', ?'.repeat(columns.length)})
+           ON CONFLICT (session_id) DO UPDATE SET ${names.map((n) => `${n} = excluded.${n}`).join(', ')}`,
+          write.sessionId,
+          ...columns.map(([, value]) => value),
+        );
+      }
+      this.setKv('attention_seq', String(seq));
+      return this.#all(
+        `SELECT * FROM attention WHERE session_id IN (SELECT value FROM json_each(?))
+         ORDER BY session_id`,
+        JSON.stringify(writes.map((write) => write.sessionId)),
+      ).map(mapAttention);
+    });
   }
 
   getKv(key: KvKey): string | null {
