@@ -3,12 +3,12 @@
 The short checklist to run by hand after installing skydeck on a machine, and before trusting a new
 Claude Code version. It covers what the tests cannot: they never start `claude`, never open a
 terminal tab, never restart WSL and never start a Windows program. Each item gives the command and
-the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 check the window of
-step 2 (stage A) and start at "The window (step 2, stage A)" below; W27–W29 check editing in the
-window (stage D), at "The window (step 2, stage D)"; W11, W19 and W21 check which sessions need
-you and the desktop notifications (stage B), at "The window (step 2, stage B)"; W30, W31 and W3's
-icon check search, the quick switcher and the page's icon (stage E), at "The window (step 2,
-stage E)".
+the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 but W11, W16,
+W19 and W21 check the window of step 2 (stage A) and start at "The window (step 2, stage A)"
+below; W27–W29 check editing in the window (stage D), at "The window (step 2, stage D)"; W11, W19
+and W21 check which sessions need you and the desktop notifications (stage B), at "The window
+(step 2, stage B)"; W30, W31 and W3's icon check search, the quick switcher and the page's
+icon (stage E), at "The window (step 2, stage E)".
 
 Setup:
 
@@ -350,7 +350,7 @@ devtools pane, history, reload). What the ones with something to see do:
 | Ctrl+Shift+H | the key help; again: it goes |
 | Ctrl+Shift+P | the key bar says `Ctrl+Shift+P: comes in a later stage` |
 | Ctrl+Shift+J | look at the title bar first: while it shows a count (`1 needs you`, …), leave this key out here (W21 checks it), since it would select a session that needs you, maybe a real one, and 1.5 seconds later clear that session's mark. With no count: the key bar says `no session needs you` |
-| in the list (Ctrl+Shift+L first), with the throwaway session selected (its short id in the header): `l`, F2, `g`, `n`, `p` | its dialog opens over the page (`Label — <title>`, …); Esc closes it and saves nothing. `d` marks the session done: it is W29's |
+| in the list (Ctrl+Shift+L first), with the throwaway session selected (its short id in the header): `l`, F2, `g`, `n`, `p` | its dialog opens over the page (`Label — <title>`, …); Esc closes it and saves nothing. Do not press `d` here: it marks the session done, and W29 checks it |
 | in the list: F5, Ctrl+R, Ctrl+F5, Shift+F5, Ctrl+Shift+R | the page reloads itself (the terminals come back) after it has checked the server |
 | in the terminal: F5, Ctrl+R | they reach Claude Code; Ctrl+Shift+R reloads the page |
 | Alt+F4 | the window closes (`skydeck window` opens it again) |
@@ -835,6 +835,13 @@ Setup:
   the directory, the times and where the title comes from): it must be the throwaway session's
   (`skydeck ls` in W prints the short ids as the last column). In a dialog, the heading names the
   session (`Label — <title>`): it must be the throwaway session's title.
+- **Type text only into an open dialog.** After `l`, F2, `g`, `n`, `p` or a click that opens one,
+  look that the dialog is there before you type: its heading names the session, and its field has
+  the keyboard (the cursor blinks in it). When the key bar says `the … is not here yet; press …
+  again` instead (for up to a second right after a save), no dialog opened: type nothing, and
+  press that key again. Text typed while the list has the keyboard is list keys: `k` moves to the
+  row above, which may be a real session, `d` marks the selected row done, Enter resumes or shows
+  it.
 - No step marks a real session done, edits a real note or closes a window. After `d` the selection
   moves to the next row, which may be a real session: click `Undo` in the toast before the next
   key.
@@ -848,23 +855,31 @@ Setup: one of your ticket keys (`ABC-123` below: with the default `groupPattern`
 and digits, a hyphen and a number) and your ticket system's address for a ticket, with `{key}`
 where the key goes. The throwaway session has no group of its own: its header shows `+ group`.
 
-**Your configuration comes first.** The paths below are the default ones (with `XDG_CONFIG_HOME`
-set, the file is under that folder: install.md, "Places"). In W:
+**Your configuration comes first.** The paths below are the default ones: with `XDG_CONFIG_HOME`
+set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME` set, it is
+`$SKYDECK_HOME/config/config.json` (install.md, "Environment variables"). In W:
 
 ```sh
 ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 ```
 
-- **`config.json.before-w27` is listed**: an earlier W27 did not finish. Do its step 4 first,
-  then start again.
-- **Only `config.json` is listed**: you have a configuration. Copy it aside, as it is:
+- **`config.json.before-w27` is listed**: an earlier W27 did not finish. Do its step 4 first (it
+  compares the two files before anything is copied), then start again.
+- **Only `config.json` is listed**: you have a configuration, whatever it holds. Copy it aside, as
+  it is (`-n`: an existing copy is never written over):
 
   ```sh
-  cp -p ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
+  cp -p -n ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
   ```
 
-  Then add the line `"ticketUrl": "https://<your site>.atlassian.net/browse/{key}",` among its
-  keys (for Jira; else your ticket system's address, with `{key}` where the key goes).
+  Then add one line, on a line of its own right after the opening `{`, as its first key:
+  `"ticketUrl": "https://<your site>.atlassian.net/browse/{key}",` (for Jira; else your ticket
+  system's address, with `{key}` where the key goes). In a file written on one line
+  (`{ "terminal": "wezterm" }`), put the key right after `{` on that line instead. In a file
+  that holds no key yet (`{}`, `{ }`, or `{` and `}` on two lines), add it without the trailing
+  comma. When the file already holds a `"ticketUrl"` line (yours, or one left by an earlier W27
+  that did not finish), add nothing: the check uses it, and the file is the same at the end. If
+  you do not want that link, remove the line by hand afterwards.
 - **Both are missing** (`No such file or directory` twice): you have none. Create the file with
   only this key (put your site's address; the command writes nothing when the file exists):
 
@@ -875,16 +890,18 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 
 A mistake in the file makes every skydeck command print one line that names the file and the key
 and exit 1, and do nothing else (`skydeck doctor` shows it as a problem line); correct the line, or
-go on with step 4. Then, in W (the server reads the file when it starts; the window stays and
-connects again):
+go on with step 4. To see that the file is valid: `skydeck ls > /dev/null` prints nothing; a line
+that names `config.json` says what is wrong. Then, in W (the server reads the file when it starts;
+the window stays and connects again):
 
 ```sh
 skydeck window --restart
 ```
 
 1. In the window, select the throwaway session. In the list (Ctrl+Shift+L until the key bar says
-   `Focus: list`) press `l`: the dialog's heading is `Label — <the throwaway session's title>`.
-   Type `ABC-123 skydeck check` and press Enter. Expected: the dialog closes, the header's title is
+   `Focus: list`) press `l`, and wait for the dialog: its heading is `Label — <the throwaway
+   session's title>` and the cursor is in its field (setup: type only into an open dialog). Type
+   `ABC-123 skydeck check` and press Enter. Expected: the dialog closes, the header's title is
    `ABC-123 skydeck check`, and the group chip shows `ABC-123 ↗`, underlined, with your ticket's
    address as its tooltip.
 2. In W: `skydeck show <short id>`. Expected: the line `group:     ABC-123`, and after it
@@ -892,22 +909,47 @@ skydeck window --restart
 3. Click the group chip once. Expected: the ticket opens in your own Edge window, not in skydeck's,
    where you are logged in. A drag over the chip selects its text and opens nothing.
 4. **Give your configuration back**, by the branch you took above:
-   - you made the copy: put it back, then remove the copy only once the two are the same:
+   - **You made the copy.** Compare first; copy nothing yet:
+
+     ```sh
+     diff ~/.config/skydeck/config.json.before-w27 ~/.config/skydeck/config.json
+     ```
+
+     It must show only your own change: the `ticketUrl` line you added, after `> ` (with a line
+     such as `1a2` above it); for a file on one line, that line before (`< `) and after (`> `),
+     differing only by your key (with `1c1` above them); or nothing when you added none. Only
+     then put the copy back, and remove it once the two are the same:
 
      ```sh
      cp -p ~/.config/skydeck/config.json.before-w27 ~/.config/skydeck/config.json
      cmp ~/.config/skydeck/config.json.before-w27 ~/.config/skydeck/config.json && rm ~/.config/skydeck/config.json.before-w27
      ```
 
-   - you had no file before: remove the one you created, `rm ~/.config/skydeck/config.json`.
+     **When `diff` says `config.json: No such file or directory`**, the file was removed since
+     (after an unfinished run), and your keys are only in the copy: put the copy back with the
+     same `cp -p` line as above, then `cmp` and `rm` as above. Change nothing in it: the copy was
+     taken before this check added its line, so a `ticketUrl` in it is your own.
+
+     **When `diff` shows anything else**, the file was changed since the copy was made (by you or
+     by a program): copy nothing back. Look at both files, take out of `config.json` by hand the
+     `ticketUrl` line this check added, keep everything else, and only then remove the copy
+     (`rm ~/.config/skydeck/config.json.before-w27`).
+   - **You had no file before**: `cat ~/.config/skydeck/config.json` must print exactly the one
+     line this check wrote; then remove the file this run created,
+     `rm ~/.config/skydeck/config.json`. When it holds more, something was added since: take out
+     only the `ticketUrl` key, by hand.
 
    Then `skydeck window --restart`. Expected: the chip shows `ABC-123` without `↗`, not
    underlined, with the tooltip `group (from the title)`; a click on it opens nothing; `skydeck
-   show <short id>` prints no `ticket:` line. (To keep the link for good, add the key again
-   afterwards.)
-5. Clear the label: select the throwaway session (look at the short id), `l`, Backspace (the field
-   holds the label, selected), Enter. Expected: the title is the one it had before step 1, the
-   header shows `+ group`, and `skydeck show <short id>` prints `label:     -`.
+   show <short id>` prints no `ticket:` line. (When your own configuration has a `ticketUrl` of
+   its own, the chip keeps its `↗`: write that down instead. To keep the link for good, set it
+   afterwards as install.md, "The ticket link", shows.)
+5. Clear the label: select the throwaway session (look at the short id), Ctrl+Shift+L until the
+   key bar says `Focus: list` (a click on a running row gives the keyboard to its terminal, and
+   these keys would reach Claude Code), then `l`; once the dialog is open (the cursor in its
+   field), Backspace (the field holds the label, selected) and Enter. Expected: the title is the
+   one it had before step 1, the header shows `+ group`, and `skydeck show <short id>` prints
+   `label:     -`.
 
 Write down: where the ticket opened, and whether you were logged in there; whether the chip was a
 link only with `ticketUrl`; the `ticket:` line.
@@ -918,16 +960,18 @@ Setup: an open pull request of yours on GitHub that your `gh` can read (`gh auth
 are logged in), and its address, `https://github.com/<owner>/<repo>/pull/<n>`. In the window,
 select the throwaway session: the header's third line says `no pull request` and `+ PR`.
 
-1. Click `+ PR`. The dialog's heading is `Pull requests — <the throwaway session's title>`, and it
-   says `no pull request attached`. Paste the address into its field (Ctrl+V) and press Enter.
-   Expected: the field empties, the dialog stays open, and a line `<owner>/<repo> #<n> · not
-   fetched` appears; within seconds it shows the pull request's state, read through your `gh`
-   (`… · checks pending · checked 2s ago`, `… · approved, green · checked 2s ago`, …). Its
-   tooltip is the pull request's title.
+1. Click `+ PR`. The dialog's heading is `Pull requests — <the throwaway session's title>`, it
+   says `no pull request attached`, and the cursor is in its field. Paste the address into the
+   field (Ctrl+V) and press Enter. Expected: the field empties, the dialog stays open, and a line
+   for the pull request appears: `<owner>/<repo> #<n> · not fetched` when skydeck has never read
+   it, else its last state (it may already be attached to the session you made it in). Within
+   seconds the line shows its state read now, through your `gh` (`… · checks pending · checked
+   2s ago`, `… · approved, green · checked 2s ago`, …). Its tooltip is the pull request's title.
 2. Esc. Expected: the header's third line shows the chip (`PR · pending`, …), the item
    `<owner>/<repo> #<n> · pending` (the same state) and `Pull requests`; the session's row in the
    list has the same chip.
-3. In W: `skydeck show <short id>`. Expected: a `pr:` line with the same state.
+3. In W: `skydeck show <short id>`. Expected: a `pr:` line with the same state, in the command
+   line's words (`checks-pending`, `approved-green`, …).
 4. Click the item on the header's third line. Expected: the pull request opens in your own Edge
    window.
 5. `Pull requests`, then `↻`. Expected: within seconds the line's `checked … ago` starts again
@@ -939,49 +983,54 @@ select the throwaway session: the header's third line says `no pull request` and
 Write down: how long the state took to show; whether the dialog's line, the header, the list's
 chip and `skydeck show` agreed; any `can't read`, with its error.
 
-## W29. The edit keys on your layouts
+## W29. The edit keys on your layouts (real claude)
 
 Run it once on the US layout and once on the Czech one (Win+Space switches, W8). Setup: the
 throwaway session running in the window (Enter on its row resumes it) and selected, and the list
 has the keyboard (Ctrl+Shift+L until the key bar says `Focus: list`). Look at the header's short
-id before every key. Right after a save, the next of these keys can say `the … is not here yet;
-press … again` for up to a second: press it again then.
+id before every key, and type text only into an open dialog (the setup above): right after a
+save, the next of these keys can say `the … is not here yet; press … again` for up to a second
+instead of opening its dialog; type nothing then, and press the key again.
 
-1. `l`: the label's dialog (`Label — <title>`). Type `W29 label` (on the Czech layout also
-   `ěščř`) and press Enter. Expected: the dialog closes; the header's title and the row show the
-   new label. F2: the same dialog; Esc closes it and changes nothing.
-2. `g`: the group's dialog. Type `w29-group` and press Enter. Expected: the group chip shows
-   `w29-group`, with ✎ beside it.
-3. `n`: the note's dialog, with a text box. Type two lines (Enter between them is a line break),
-   then press Ctrl+Enter. Expected: the dialog closes; the header's fourth line shows the first
-   line followed by ` …`.
-4. `n` again; change the text and press Esc. Expected: the dialog stays and says `Esc again
-   discards your text`. With the text still changed, press F5, Shift+F5, Ctrl+F5, Ctrl+R and
-   Ctrl+Shift+R, then the keyboard's refresh key if it has one (alone, with Shift, with Ctrl).
-   Expected for each: the key bar says `save or cancel the edit first` and the window does not
-   reload. **If one of them reloads the window, your text is lost: write down which key, and
-   report it** (the page's guard against a reload does not hold in Edge for that key). Then Esc
+1. `l`: the label's dialog (`Label — <title>`, the cursor in its field). Type `W29 label` (on
+   the Czech layout also `ěščř`) and press Enter. Expected: the dialog closes; the header's title
+   and the row show the new label. F2: the same dialog; Esc closes it and changes nothing.
+2. `g`: the group's dialog, once it is open. Type `w29-group` and press Enter. Expected: the
+   group chip shows `w29-group`, with ✎ beside it.
+3. `n`: the note's dialog, with a text box, once it is open. Type two lines (Enter between them
+   is a line break), then press Ctrl+Enter. Expected: the dialog closes; the header's fourth line
+   shows the first line followed by ` …`.
+4. `n` again; once the dialog is open, change the text and press Esc. Expected: the dialog stays
+   and says `Esc again discards your text`. With the text still changed, press F5, Shift+F5,
+   Ctrl+F5, Ctrl+R and Ctrl+Shift+R, then the keyboard's refresh key if it has one (alone, with
+   Shift, with Ctrl).
+   Expected for each: the key bar says `save or cancel the edit first`, and the window neither
+   reloads nor asks. **If Edge asks whether to reload or leave the page, that key got through the
+   page's guard: choose Cancel (your text stays in the box), write down which key, and report
+   it.** If the window reloads without asking, the text is lost: write that down too. Then Esc
    again: the dialog closes, and the note is the one saved in step 3.
 5. `p`: the pull-request dialog. Esc closes it.
 6. In W: `skydeck show <short id>`. Expected: its `label:`, `group:` and `note:` lines are what you
    typed in steps 1 to 3.
-7. Back in the window (the key bar says `Focus: list`), `d`. Expected: the toast `Marked done.
-   Stays under Open while it runs; hidden once it stops.` with `Undo`; the row stays under Open
-   with a `done` mark, and stays selected. Click `Undo` within 5 seconds: the mark goes.
+7. Back in the window, Ctrl+Shift+L until the key bar says `Focus: list`, then `d`. Expected:
+   the toast `Marked done. Stays under Open while it runs; hidden once it stops.` with `Undo`;
+   the row stays under Open with a `done` mark, and stays selected. Click `Undo` within 5
+   seconds: the mark goes.
 8. End the throwaway session: Ctrl+Shift+L to its terminal, look at the short id (`/exit` ends
    the session it is typed into), `/exit`, then `Close` on its ended bar. Its row moves to This
-   week. Click it (the list gets the keyboard; look at the short id)
-   and press `d`. Expected: the row disappears, the toast says `Marked done: hidden from the list.
-   It comes back on new activity.`, and the row after it in This week is selected (the one before
-   it when it was the last; none when it was alone) — another session: **click `Undo` now, before
-   any key**. Expected: the throwaway session is back in This week and selected again. (When the
-   toast went before you clicked: `a` shows the done sessions; click the throwaway session's row,
-   look at its short id, press `d`, then `a` again.)
-9. Clear what this check set, with the throwaway session selected (look at the short id): `l`,
-   Backspace (the field holds the label, selected), Enter; `g`, Backspace, Enter; `n`, Ctrl+A,
-   Backspace, Ctrl+Enter. Expected: the header shows the title it had before step 1, `+ group`
-   and `no note`; `skydeck show <short id>` in W prints `label:     -` and `group:     -`, and no
-   `note:`.
+   week. Click it (it no longer runs, so the list gets the keyboard: the key bar says `Focus:
+   list`; look at the short id) and press `d`. Expected: the row disappears, the toast says
+   `Marked done: hidden from the list. It comes back on new activity.`, and the row after it in
+   This week is selected (the one before it when it was the last; none when it was alone) —
+   another session: **click `Undo` now, before any key**. Expected: the throwaway session is back
+   in This week and selected again. (When the toast went before you clicked: `a` shows the done
+   sessions; click the throwaway session's row, look at its short id, press `d`, then `a` again.)
+9. Clear what this check set, with the throwaway session selected (look at the short id) and the
+   key bar saying `Focus: list` (Ctrl+Shift+L until it does), each key only once its dialog is
+   open: `l`, Backspace (the field holds the label, selected), Enter; `g`, Backspace, Enter; `n`,
+   Ctrl+A, Backspace, Ctrl+Enter. Expected:
+   the header shows the title it had before step 1, `+ group` and `no note`; `skydeck show <short
+   id>` in W prints `label:     -` and `group:     -`, and no `note:`.
 
 Write down, per layout: every key that did something else than described here, or nothing; in
 step 4, whether a reload key reloaded the window with changed text, and which.
@@ -998,17 +1047,28 @@ Setup:
 - The setup of "The window (step 2, stage A)" above, with its **throwaway session in the window**.
   Every prompt here goes to that session or to the other throwaway session below, never to one of
   your real work. **Before every key you type into the window**, look at the header's short id
-  (on its second line, at the right): it must be the throwaway session's. No step presses Enter
-  on a row whose short id you have not looked at.
-- **The other throwaway session**, in a terminal of your own: open one more WSL terminal, **T**,
-  and in it `cd ~/skydeck-try && claude`; send it one prompt (`say hello in one word`). In the
-  window its row is under Open and says `running in another terminal`; once its answer is written,
-  its second line is `finished · not seen · <age>` instead: click the row, and the mark goes after
-  1.5 seconds or a little more (its card shows). When a step says "click the other session's row",
-  click that row: the window shows its card, and nothing you type in the window reaches it. **When
-  you are done with the checks of this part**, end it: `/exit` in T.
-- **The story prompt** is `write a story of about 300 words about a lighthouse`: Claude Code
-  writes for a while and runs no command.
+  (on its second line, after the directory, the times and where the title comes from): it must be
+  that of one of the two throwaway sessions, the one the step names. No step presses Enter on a
+  row whose short id you have not looked at.
+- **A prompt is typed only into a terminal that has the keyboard**: the key bar says `Focus:
+  terminal` (else Ctrl+Shift+L until it does), and the header's short id is the throwaway session's.
+  When that session's terminal has ended (its last screen is dimmed under a bar with Resume and
+  Close), click `Resume` on the bar first and wait until it runs; when it has no terminal in the
+  window at all (after a restart of the PC or of WSL), its resume card shows instead: click `Resume
+  here` on the card and wait until it runs. Type nothing otherwise: text typed while the list has
+  the keyboard is list keys — `k` moves to the row above, which may be a real session, `n` opens its
+  note, `l` its label, `d` marks it done.
+- **The other throwaway session**, in a terminal of your own: open one more WSL terminal, **T**, and
+  in it `cd ~/skydeck-try && claude`; send it one prompt (`say hello in one word`). In the window
+  its row is under Open and says `running in another terminal`; once its answer is written, its
+  second line is `finished · not seen · <age>` instead: click the row, and the mark goes after 1.5
+  seconds or a little more (its card shows). A turn this short can also be over between two of the
+  server's looks and leave no mark: then there is nothing to clear. When a step says "click the
+  other session's row", click that row: the window shows its card, and nothing you type in the
+  window reaches it. **When you are done with the checks of this part**, end it: `/exit` in T.
+- **The story prompt** is `write a story of about 300 words about a lighthouse; reply in this
+  chat, with no tool and no file`: Claude Code writes for a while. When it asks for anything all
+  the same (to run a command, to write a file), answer **No** and send the prompt again.
 - A permission prompt is made with a command that asks and does no harm if it were allowed
   (`touch skydeck-check.txt` in the throwaway folder), answered **No**; a question by asking
   Claude Code for one, answered.
@@ -1019,7 +1079,8 @@ Setup:
 - **Your real sessions keep running** and can need you meanwhile: a notification can be one of
   theirs. Click only a notification titled with a throwaway session's title: a click selects its
   session, and 1.5 seconds later that session's mark is cleared. Likewise Ctrl+Shift+J is pressed
-  only where a step says so, after it has looked at the count.
+  only where a step says so, once it has said how to see that the session it goes to is the
+  throwaway one.
 - The checks run in any order; each clears the marks it made. W3's title is looked at while a
   session needs you, which W21's step 1 makes.
 - What to look at: a row's left bar and second line, the title bar's count at its left
@@ -1039,26 +1100,28 @@ Setup: look at the right of the title bar.
    page at `127.0.0.1:47613` (or your `window.port`) may show notifications. Choose `Allow` or
    `Block`; both are valid answers. Expected either way: the button goes. When no prompt comes and
    the button goes at once, Edge or the company's policy refused: write that down. When you close
-   the prompt without choosing, the button stays: click it again. After `Block` or a refusal, do
-   only step 5 of W11: steps 2 to 4 and 6 need notifications, and the title bar's count and the
-   window's title (W21, W3) are what shows you that a session needs you.
+   the prompt without choosing, the button stays: click it again. When no prompt comes and the
+   button stays (Edge may ask quietly, with a small icon where an address bar would be, and the
+   window has none): write that down, change nothing, and leave W11 there. After `Block` or a
+   refusal, do only step 5 of W11: steps 2 to 4 and 6 need notifications, and the title bar's count
+   and the window's title (W21, W3) are what shows you that a session needs you.
 2. **A notification, and a click on it.** Select the throwaway session; its terminal has the
-   keyboard (`Focus: terminal`). Type the story prompt and press Enter. At once click the other
-   session's row (its card shows), then click into W, so that no skydeck window has the focus;
-   leave the skydeck window where you can see it. Expected: while the story is written, the
-   throwaway session's second line starts with `working`; once it is done, the line is
-   `finished · not seen · <age>`, and a desktop notification comes, titled with the throwaway
-   session's title, its text `finished`. Click the notification. Expected: the skydeck window comes
-   to the front with the throwaway session selected (its terminal shows; the header's short id is
-   its), and its mark goes after 1.5 seconds or a little more.
+   keyboard (the key bar says `Focus: terminal`). Type the story prompt and press Enter. At once
+   click the other session's row (its card shows), then click into W, so that no skydeck window has
+   the focus; leave the skydeck window where you can see it. Expected: while the story is written,
+   the throwaway session's second line starts with `working`; once it is done, the line is `finished
+   · not seen · <age>`, and a desktop notification comes, titled with the throwaway session's title,
+   its text `finished`. Click the notification. Expected: the skydeck window comes to the front with
+   the throwaway session selected (its terminal shows; the header's short id is its), and its mark
+   goes after 1.5 seconds or a little more.
 3. **A notification the page closes.** Do step 2 again up to the notification, but do not click
    it: let it go from the screen (Windows keeps it in its notification centre: Win+N shows it).
    Click the throwaway session's row in the skydeck window and wait until its mark goes. Then open
    the notification centre (Win+N). Expected, from skydeck's side: the page has closed that
    notification. Whether Windows still lists it is what this step finds out.
-4. **The PC locked while the window is in front.** The commonest way of being away: the session
-   you work in is selected, its window in front, and you lock the PC. Select the throwaway session
-   (its terminal has the keyboard), type the story prompt and press Enter, and keep the skydeck
+4. **The PC locked while the window is in front.** The commonest way of being away: the session you
+   work in is selected, its window in front, and you lock the PC. Select the throwaway session (the
+   key bar says `Focus: terminal`), type the story prompt and press Enter, and keep the skydeck
    window in front with that session selected (click nothing else). Lock the PC at once (Win+L) and
    wait two minutes; when Windows shows a notification on the lock screen, write it down. Unlock,
    and the moment the desktop is back, before you click anything, look at the throwaway session's
@@ -1066,7 +1129,7 @@ Setup: look at the right of the title bar.
    (Win+N). Expected, one of two:
    - Edge still said that the window had the focus while the PC was locked: the session was seen
      at its turn end, so no `finished · not seen`, no count and no notification. Then a turn that
-     ends while you are away from the session you work in tells you nothing until you look at it.
+     ends in the session you work in while you are away gives no mark and no notification.
    - Locking took the focus from the window: a notification `finished` came (on the lock screen,
      or in the notification centre), and the row says `finished · not seen` — but only for a
      moment: once the window has the focus again, its selected session is seen after 1.5 seconds
@@ -1108,7 +1171,7 @@ hour, and whether its click brought the minimised window back (step 6).
 ## W19. What a session that asks shows (real claude)
 
 In the window, select the throwaway session (look at the short id); its terminal has the
-keyboard.
+keyboard (the key bar says `Focus: terminal`; else Ctrl+Shift+L).
 
 1. Type `please run: touch skydeck-check.txt` and press Enter. Expected: Claude Code shows its
    permission prompt for the command; meanwhile the throwaway session's row has a bar at its left
@@ -1134,35 +1197,38 @@ path — what a notification shows to anyone who can see your screen.
 
 ## W21. A finished turn, and seen (real claude)
 
-1. **Finished, not seen.** Select the throwaway session (its terminal has the keyboard), type the
-   story prompt, press Enter, and at once click the other session's row. Stay in the skydeck
+1. **Finished, not seen.** Select the throwaway session (the key bar says `Focus: terminal`), type
+   the story prompt, press Enter, and at once click the other session's row. Stay in the skydeck
    window. Expected: once the story is written, the throwaway session's row has a green bar at its
-   left and a bold title, and its second line is `finished · not seen · <age>`, in green; the
-   title bar's count went up by one (`1 needs you`, after a dot, when no other session needs
-   you); no notification comes, since the window has the focus. Look at the taskbar button's
-   title now (W3).
-2. **Seen.** Look at the count first. When it says `1 needs you`, press Ctrl+Shift+J. Expected:
-   the throwaway session is selected and its terminal takes the keyboard; after 1.5 seconds or a
-   little more its mark goes, and the count with it. Press Ctrl+Shift+J again: the key bar says
-   `no session needs you`. When the count is higher, other sessions need you too, and Ctrl+Shift+J
-   would go to them first (those that ask, then those that ended, then the older finished ones):
-   click the throwaway session's row instead, and leave out both Ctrl+Shift+J.
-3. **A turn that ends in front of you.** With the throwaway session selected and the window in
-   front, type the story prompt, press Enter, and keep it selected, the window in front, until the
-   story is written. Expected: no mark, and the count does not change.
+   left and a bold title, and its second line is `finished · not seen · <age>`, in green; the title
+   bar's count went up by one (`1 needs you`, after a dot, when no other session needs you); no
+   notification comes, since the window has the focus. Look at the taskbar button's title now (W3).
+2. **Seen.** Look first: only when the title bar's count says `1 needs you` and the throwaway
+   session's row is the one with the green bar, press Ctrl+Shift+J. Expected: the throwaway session
+   is selected (look at the header's short id) and its terminal takes the keyboard; after 1.5
+   seconds or a little more its mark goes, and the count with it. Look again before the next press:
+   with no count left in the title bar, press Ctrl+Shift+J once more, and the key bar says `no
+   session needs you`. When the count is higher, or another row has a bar, other sessions need you
+   too, and Ctrl+Shift+J would go to them first (those that ask, then those that ended, then the
+   older finished ones) and clear a real session's mark: click the throwaway session's row instead,
+   and leave out both presses.
+3. **A turn that ends in front of you.** With the throwaway session selected, the window in front
+   and the key bar saying `Focus: terminal`, type the story prompt, press Enter, and keep it
+   selected, the window in front, until the story is written. Expected: no mark, and the count does
+   not change.
 4. **An ask** is W19's step 1: `needs you · …` while the prompt is open, also on the selected
    session, gone once it is answered.
-5. **Several tool calls.** Select the throwaway session, type `list the files here, then count
-   them` and press Enter; at once click the other session's row, then click into W, so that no
-   skydeck window has the focus. Watch the throwaway session's row until the turn is over: its
-   second line starts with `working` while Claude Code works. When Claude Code asks to run a
-   command, the row says `needs you · …` (with notifications allowed, a notification `asks: …`
-   comes too): click the row and read the command it proposes. Answer the plain `Yes` (not the
-   one that stops asking) only when the command only lists or counts the files of the throwaway
-   folder (`ls`, `find`, `wc` on `~/skydeck-try` or `.`); otherwise answer **No**, write the
-   command down, and type the prompt again. After a `Yes`, click the other session's row and W
-   again. Expected: `finished · not seen`, and its notification when they are allowed, only once
-   Claude Code has written its answer, not between two of its steps. Then click the throwaway
+5. **Several tool calls.** Select the throwaway session (the key bar says `Focus: terminal`), type
+   `list the files here, then count them` and press Enter; at once click the other session's row,
+   then click into W, so that no skydeck window has the focus. Watch the throwaway session's row
+   until the turn is over: its second line starts with `working` while Claude Code works. When
+   Claude Code asks to run a command, the row says `needs you · …` (with notifications allowed, a
+   notification `asks: …` comes too): click the row and read the command it proposes. Answer the
+   plain `Yes` (not the one that stops asking) only when the command only lists or counts the files
+   of the throwaway folder (`ls`, `find`, `wc` on `~/skydeck-try` or `.`); otherwise answer **No**,
+   write the command down, and type the prompt again. After a `Yes`, click the other session's row
+   and W again. Expected: `finished · not seen`, and its notification when they are allowed, only
+   once Claude Code has written its answer, not between two of its steps. Then click the throwaway
    session's row and wait until its mark goes (1.5 seconds or a little more): the count goes down
    with it, and the taskbar button's title is `skydeck` again when no other session needs you.
 
