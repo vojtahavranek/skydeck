@@ -37,6 +37,7 @@
 //                           reports a page — as the server's page mark does (so 0 is null from the
 //                           start, also while it starts); `json:<JSON value>` reports that value
 //                           as it is, all the time (`json:0`, `json:"3000"`, `json:-1`, `json:null`).
+//                           A value of these three of another form ends the fake at once (exit 2).
 //                           Default: none (a server before stage C)
 //   FAKE_SERVE_STATUS       pages-only: /status answers `{ pages }` and nothing else (an old
 //                           server's answer the command line's client cannot read whole)
@@ -94,6 +95,13 @@ setInterval(() => {
   if (!existsSync(home)) process.exit(0);
 }, 200);
 setTimeout(() => process.exit(0), 120_000);
+
+// The timed /status options: a value of another form ends the fake at once (exit 2).
+refuseMalformed('FAKE_SERVE_PAGES_AFTER', /^[0-9]+:[0-9]+$/);
+refuseMalformed('FAKE_SERVE_STARTING_MS', /^(0|[1-9][0-9]*)$/);
+refuseMalformed('FAKE_SERVE_WINDOW_EXPECTED_MS', /^((0|[1-9][0-9]*)|json:.*)$/s, (text) =>
+  text.startsWith('json:') ? isJson(text) : true,
+);
 
 const mode = env.FAKE_SERVE_MODE ?? 'serve';
 if (mode === 'exit') {
@@ -212,6 +220,24 @@ async function serve(silent: boolean): Promise<void> {
   );
   timed.ready();
   process.stdout.write('ready\n');
+}
+
+/** Ends the fake with exit 2 when `name` is set but not of `form`: a typo in a test must not pass. */
+function refuseMalformed(name: string, form: RegExp, valid = (_text: string) => true): void {
+  const text = env[name];
+  if (text !== undefined && (!form.test(text) || !valid(text))) {
+    process.stderr.write(`fake-serve: ${name} is not ${String(form)}: ${JSON.stringify(text)}\n`);
+    process.exit(2);
+  }
+}
+
+function isJson(text: string): boolean {
+  try {
+    JSON.parse(text.slice('json:'.length));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

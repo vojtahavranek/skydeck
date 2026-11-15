@@ -1098,7 +1098,8 @@ side, and task 74 wires the mark into the server.
   also while it starts); `json:<value>` reports a value as it is (`json:0` is 0 throughout);
   `FAKE_SERVE_STARTING_MS=<ms>`: `starting` true for that long after it was ready;
   `FAKE_SERVE_PAGES_AFTER=<ms>:<n>`: `/status` reports `n` pages once `ms` have passed since the
-  first `/status` it answered, so that a case does not depend on how long the command took to ask);
+  first `/status` it answered, so that a case does not depend on how long the command took to ask;
+  a value of these three of another form ends the fake at once, exit 2);
   `test/cli/commands/window.test.ts` (cases at the end); `docs/design-step-2.md` (5.1's paragraph on
   the wait after a restart, 8.3's `GET /status` row — task 81's, not 70's: ruled, review B's
   re-check —, 10.2's `kv` table: C20)
@@ -1125,12 +1126,15 @@ from, for the command, as stage A's restart-wait cases)
   token minted (this case fails when `launch`'s two booleans are swapped); no page → Edge once,
   after the server's deadline (it went on at an answer that said null); a server still starting
   (`windowExpectedMs` constant while it starts, also at 0) → the wait goes through the start, then
-  the count-down; a server whose expectation never ends → Edge after `startMs` + `reconnectMs`;
+  the count-down, and it goes on at the first look that says null; a server whose expectation
+  never ends → Edge after `startMs` + `reconnectMs` (measured from the wait's first look, with two
+  different values), also when its start never ends;
   with `--new-window` → no wait; with `--new-secret` → no wait although the new server's mark says
   a window is expected (ruled, F3); without the expectation (none, null or 0) → Edge at once, no
   line; a `windowExpectedMs` the client cannot read (a text, a fraction, below 0, `true`, an
   object) → the answer that cannot be read, exit 1, nothing started; the reader keeps the number
-  and null and leaves out what an older server does not send. Edge starts are counted where the
+  and null and leaves out what an older server does not send; the fake serve refuses a timing
+  option of another form (exit 2). Edge starts are counted where the
   command starts them (the fake Edge's own record may come after a command that does not wait for
   its page).
 - "The wait is the server's fact": two `skydeck window` started one after the other while the fake
