@@ -18,13 +18,17 @@ import {
   isLockHeld,
   lockEventId,
   lockKey,
+  lockMark,
+  lockTakenNs,
   openSafely,
   prepareNew,
   prepareResume,
   readLock,
   releaseLock,
+  releaseLockOfTake,
   renewLock,
   resumeStarted,
+  sameTake,
   settleFailedLaunch,
   sweepLocks,
 } from '../../src/sessions/resume.ts';
@@ -802,12 +806,16 @@ test("readLock is the value of the session's lock, null without one", (t) => {
   assert.equal(readLock(d.deck, S1), `${T0}:0`);
 });
 
+/** The take mark of a lock acquireLock writes at T0 (C19): 1 + (T0 in ms mod 999,999). */
+const MARK_T0 = 1n + ((T0 / 1_000_000n) % 999_999n);
+
 test('renewLock moves a lock that is still ours to now and returns its new value', (t) => {
   const d = testDeck(t);
   acquireLock(d.deck, S1, sawNow(d));
   d.clock.setNs(T0 + 50n * SEC);
-  assert.equal(renewLock(d.deck, S1, `${T0}:0`), `${T0 + 50n * SEC}:0`);
-  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC}:0`);
+  // Now, to the millisecond, plus the take's mark in the last six digits (C19).
+  assert.equal(renewLock(d.deck, S1, `${T0}:0`), `${T0 + 50n * SEC + MARK_T0}:0`);
+  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC + MARK_T0}:0`);
   d.clock.setNs(T0 + 100n * SEC); // 50 s after the renewal: it still holds
   assert.throws(() => acquireLock(d.deck, S1, sawNow(d)), /is being resumed \(50 s ago\)/);
 });
@@ -817,8 +825,8 @@ test('renewLock keeps the event id the lock records: only a later start releases
   const ahead = startAhead(d);
   acquireLock(d.deck, S1, { latestEventId: ahead });
   d.clock.setNs(T0 + 50n * SEC);
-  assert.equal(renewLock(d.deck, S1, `${T0}:${ahead}`), `${T0 + 50n * SEC}:${ahead}`);
-  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC}:${ahead}`);
+  assert.equal(renewLock(d.deck, S1, `${T0}:${ahead}`), `${T0 + 50n * SEC + MARK_T0}:${ahead}`);
+  assert.equal(lockOf(d, S1), `${T0 + 50n * SEC + MARK_T0}:${ahead}`);
   assert.equal(isLockHeld(d.deck, S1), true);
 });
 
@@ -869,6 +877,235 @@ test('isLockHeld is true for a lock that holds, by the rules of acquireLock, and
   isLockHeld(w.deck, S2);
   assert.equal(w.transactions(), 0);
   assert.equal(lockOf(d, S2), null);
+});
+
+// --- the take mark (C19): lockMark, sameTake, releaseLockOfTake -----------------------------------
+
+/**
+ * Takes S1's lock at T0 (the session has no event: id 0), then renews it at each time of
+ * `renewedAt`, in order. Every value the lock had, the first one acquireLock's.
+ */
+function takeAndRenew(d: TestDeck, ...renewedAt: Ns[]): string[] {
+  acquireLock(d.deck, S1, sawNow(d));
+  const values = [lockOf(d, S1) ?? ''];
+  for (const atNs of renewedAt) {
+    d.clock.setNs(atNs);
+    const renewed = renewLock(d.deck, S1, values.at(-1) ?? '');
+    assert.ok(renewed !== null, `renewed at T0+${atNs - T0} ns`);
+    values.push(renewed);
+  }
+  return values;
+}
+
+/** A lock taken over: the session's lock gone stale and taken by acquireLock at `atNs`, no new event. */
+function takeOver(d: TestDeck, atNs: Ns): string {
+  d.clock.setNs(atNs);
+  acquireLock(d.deck, S1, sawNow(d));
+  const value = lockOf(d, S1);
+  assert.ok(value !== null);
+  return value;
+}
+
+test('lockMark: a lock acquireLock wrote has 1 + (its ms mod 999,999); every renewal keeps it', (t) => {
+  const d = testDeck(t);
+  const [taken = '', renewed = '', again = ''] = takeAndRenew(d, T0 + 50n * SEC, T0 + 100n * SEC);
+  assert.equal(MARK_T0, 794_476n); // T0 is 1,794,474,000,000 ms
+  assert.equal(taken, `${T0}:0`); // acquireLock writes what it wrote before
+  assert.equal(lockMark(taken), Number(MARK_T0));
+  assert.equal(renewed, `${T0 + 50n * SEC + MARK_T0}:0`);
+  assert.equal(lockMark(renewed), Number(MARK_T0));
+  assert.equal(again, `${T0 + 100n * SEC + MARK_T0}:0`); // a renewal of a renewal
+  assert.equal(lockMark(again), Number(MARK_T0));
+});
+
+test('lockMark: last six digits that are not 0 are the mark; 1 to 999,999, never 0; null for no lock', () => {
+  assert.equal(lockMark(`${T0 + 42n}:7`), 42);
+  assert.equal(lockMark(`${T0 + 999_999n}:7`), 999_999);
+  const ms = 999_999n * 1_794_475n; // a millisecond ≡ 0 (mod 999,999)
+  assert.equal(lockMark(`${ms * 1_000_000n}:0`), 1);
+  assert.equal(lockMark(`${(ms - 1n) * 1_000_000n}:0`), 999_999); // ≡ 999,998: still six digits
+  assert.equal(lockMark(`${T0}`), Number(MARK_T0)); // an earlier skydeck's lock, no event id
+  for (const value of ['soon', '', `${T0}:x`, `${T0}:1:2`, `:1`, `${T0} `]) {
+    assert.equal(lockMark(value), null, JSON.stringify(value));
+  }
+});
+
+test('sameTake: a lock and its renewals are one take; a take-over with no new event is another', (t) => {
+  const d = testDeck(t);
+  const [taken = '', renewed = '', again = ''] = takeAndRenew(d, T0 + 50n * SEC, T0 + 100n * SEC);
+  for (const [a, b] of [
+    [taken, taken],
+    [taken, renewed],
+    [renewed, taken],
+    [taken, again],
+    [renewed, again],
+  ] as const) {
+    assert.equal(sameTake(a, b), true, `${a} ${b}`);
+  }
+  // Stage A's "acquireLock replaces a lock older than 60 s": the same event id, another take.
+  const over = takeOver(d, T0 + 161n * SEC);
+  assert.equal(over, `${T0 + 161n * SEC}:0`);
+  for (const ours of [taken, renewed, again]) {
+    assert.equal(sameTake(ours, over), false, ours);
+    assert.equal(sameTake(over, ours), false, ours);
+  }
+  const first = testDeck(t);
+  const [unrenewed = ''] = takeAndRenew(first);
+  assert.equal(sameTake(unrenewed, takeOver(first, T0 + 61n * SEC)), false);
+});
+
+test('sameTake: a take-over at any millisecond from T0 + 60 s to T0 + 61 s is another take, and so are its renewals', () => {
+  // A take-over's renewal (another skydeck's restore took the stale lock over and renews it) has
+  // the taker's mark: only the mark tells it from a renewal of the first take.
+  const taken = `${T0}:0`; // what acquireLock writes at T0 (takeOver checks the shape)
+  for (let ms = 60_000n; ms <= 61_000n; ms++) {
+    const over = `${T0 + ms * 1_000_000n}:0`;
+    assert.notEqual(lockMark(over), lockMark(taken), `T0 + ${ms} ms`);
+    const renewed = `${T0 + (ms + 1000n) * 1_000_000n + BigInt(lockMark(over) ?? 0)}:0`;
+    for (const value of [over, renewed]) {
+      assert.equal(sameTake(taken, value), false, value);
+      assert.equal(sameTake(value, taken), false, value);
+    }
+  }
+});
+
+test('sameTake: other event ids are other takes; no event id: only itself; no lock: no take', () => {
+  const renewed = `${T0 + 50n * SEC + MARK_T0}`;
+  assert.equal(sameTake(`${T0}:1`, `${T0}:2`), false);
+  assert.equal(sameTake(`${T0}:1`, `${renewed}:2`), false); // the same mark, another event id
+  assert.equal(sameTake(`${T0}:1`, `${T0 + 50n * SEC + 42n}:1`), false); // a renewal of another take
+  assert.equal(sameTake(`${T0}`, `${T0}`), true); // an earlier skydeck's lock (no event id)
+  assert.equal(sameTake(`${T0}`, renewed), false); // … even its own renewal: the exact value only
+  assert.equal(sameTake(`${T0}`, `${T0}:0`), false);
+  assert.equal(sameTake(`${T0}:0`, `${T0}`), false);
+  for (const bad of ['soon', '', `${T0}:x`]) {
+    assert.equal(sameTake(bad, bad), false, JSON.stringify(bad));
+    assert.equal(sameTake(`${T0}:0`, bad), false, JSON.stringify(bad));
+    assert.equal(sameTake(bad, `${T0}:0`), false, JSON.stringify(bad));
+  }
+});
+
+test('sameTake: a renewal an older skydeck wrote (now, no mark) is another take to this build', () => {
+  // Stage A's renewLock sets the time to now (last six digits 0): its mark is that of a new take.
+  // Conservative: the window refuses such a keeper and leaves the lock, as stage A does today.
+  assert.equal(sameTake(`${T0}:0`, `${T0 + 50n * SEC}:0`), false);
+});
+
+test('sameTake: a take-over whose millisecond is ≡ the take’s (mod 999,999) is another take all the same (ruled)', (t) => {
+  // 999,999 ms (16 min 40 s) after the take, with no new event: the same mark and event id. But
+  // only acquireLock writes a time whose last six digits are 0 (renewLock's mark is 1 to 999,999),
+  // so two different such values are always two takes.
+  const d = testDeck(t);
+  const [taken = ''] = takeAndRenew(d);
+  const over = takeOver(d, T0 + 999_999n * 1_000_000n);
+  assert.equal(lockMark(over), lockMark(taken));
+  assert.equal(sameTake(taken, over), false);
+  assert.equal(sameTake(over, taken), false);
+  for (const k of [2n, 3n, 1000n]) {
+    const value = `${T0 + k * 999_999n * 1_000_000n}:0`;
+    assert.equal(sameTake(taken, value), false, value);
+  }
+});
+
+test('sameTake: a renewal of such a take-over still looks like the take (the named limit that stays)', (t) => {
+  // Only a restore renews: one that took the lock over at that millisecond, renewed it, and is
+  // still waiting. A settlement of the first take's terminal then gives that lock back, and the
+  // restore's next renewLock returns null (C19).
+  const d = testDeck(t);
+  const [taken = ''] = takeAndRenew(d);
+  const overAtNs = T0 + 999_999n * 1_000_000n;
+  const over = takeOver(d, overAtNs);
+  d.clock.setNs(overAtNs + SEC);
+  const renewed = renewLock(d.deck, S1, over);
+  assert.equal(renewed, `${overAtNs + SEC + MARK_T0}:0`);
+  assert.equal(sameTake(taken, renewed), true);
+});
+
+/** Stage A's pattern of a lock value (`parseLock` on main at bd86f91), copied: what an older skydeck reads. */
+const STAGE_A_LOCK = /^([0-9]{1,30})(?::([0-9]{1,15}))?$/;
+
+test('an older skydeck reads a renewed lock as a lock, its time less than 1 ms after the renewal', (t) => {
+  const d = testDeck(t);
+  const renewedAtNs = T0 + 50n * SEC;
+  const [, renewed = ''] = takeAndRenew(d, renewedAtNs);
+  const match = STAGE_A_LOCK.exec(renewed);
+  assert.ok(match !== null, renewed);
+  assert.equal(match[2], '0'); // the event id, as recorded
+  const olderTimeNs = BigInt(match[1] ?? '');
+  assert.ok(olderTimeNs >= renewedAtNs && olderTimeNs - renewedAtNs < 1_000_000n, renewed);
+  // So by the older rule (age = now − that time; stale at 60 s) it holds until less than 1 ms
+  // after 60 s from the renewal: an older server neither sweeps it nor takes it over before.
+  // This build: fresh until exactly 60 s after the renewal.
+  d.clock.setNs(renewedAtNs + LOCK_TTL_NS - 1_000_000n);
+  assert.equal(isLockHeld(d.deck, S1), true);
+  assert.equal(sweepLocks(d.deck), 0);
+  d.clock.setNs(renewedAtNs + LOCK_TTL_NS);
+  assert.equal(isLockHeld(d.deck, S1), false);
+  assert.equal(sweepLocks(d.deck), 1);
+});
+
+test("a lock's time is read to the millisecond: a renewal's mark changes no age, wait or deadline (ruled)", (t) => {
+  // An age from the whole value would be up to 1 ms short: "9 s ago; try again in 51 s".
+  const d = testDeck(t);
+  const [, renewed = ''] = takeAndRenew(d, T0 + 50n * SEC);
+  assert.equal(lockTakenNs(renewed), T0 + 50n * SEC); // what startDeadline counts from
+  d.clock.setNs(T0 + 60n * SEC);
+  assert.equal(
+    refusal(() => acquireLock(d.deck, S1, sawNow(d))),
+    '0b5f3c1e is being resumed (10 s ago); try again in 50 s',
+  );
+  d.clock.setNs(T0 + 110n * SEC); // exactly 60 s after the renewal: stale, as a lock taken then
+  acquireLock(d.deck, S1, sawNow(d));
+  assert.equal(lockOf(d, S1), `${T0 + 110n * SEC}:0`);
+});
+
+test("a renewed lock without an event id is released by a start at the renewal's millisecond, as before", (t) => {
+  // The exact rule of an earlier skydeck's lock: a start dated at or after the lock's time, which
+  // is the renewal's millisecond, not that plus the mark.
+  const d = testDeck(t);
+  writeLock(d, S1, `${T0}`);
+  d.clock.setNs(T0 + 50n * SEC);
+  const renewed = renewLock(d.deck, S1, `${T0}`);
+  assert.equal(renewed, `${T0 + 50n * SEC + MARK_T0}`);
+  startEvent(d, S1, T0 + 50n * SEC);
+  assert.equal(isLockHeld(d.deck, S1), false);
+  assert.equal(sweepLocks(d.deck), 1);
+});
+
+test('renewLock writes the time of now to the millisecond, then the mark', (t) => {
+  const d = testDeck(t);
+  acquireLock(d.deck, S1, sawNow(d));
+  d.clock.setNs(T0 + 50n * SEC + 999_999n); // a clock finer than skydeck's (the real one is ms)
+  assert.equal(renewLock(d.deck, S1, `${T0}:0`), `${T0 + 50n * SEC + MARK_T0}:0`);
+});
+
+test('releaseLockOfTake removes the lock of its take after two renewals, in one transaction', (t) => {
+  const d = testDeck(t);
+  const [taken = ''] = takeAndRenew(d, T0 + 50n * SEC, T0 + 100n * SEC);
+  const w = watched(d);
+  assert.equal(releaseLockOfTake(w.deck, S1, taken), true);
+  assert.equal(lockOf(d, S1), null);
+  assert.equal(w.transactions(), 1);
+  assert.deepEqual(w.depths, [1, 1]); // the read and the removal, both inside
+});
+
+test('releaseLockOfTake leaves a lock taken over, one of another event id, and none; and says so', (t) => {
+  const d = testDeck(t);
+  const [taken = ''] = takeAndRenew(d, T0 + 50n * SEC);
+  const over = takeOver(d, T0 + 111n * SEC);
+  const w = watched(d);
+  assert.equal(releaseLockOfTake(w.deck, S1, taken), false);
+  assert.equal(lockOf(d, S1), over);
+  assert.equal(w.transactions(), 1);
+  const theirs = `${T0 + 50n * SEC + MARK_T0}:9`; // the same mark, another event id
+  writeLock(d, S1, theirs);
+  assert.equal(releaseLockOfTake(d.deck, S1, taken), false);
+  assert.equal(lockOf(d, S1), theirs);
+  assert.equal(releaseLockOfTake(d.deck, S2, taken), false);
+  assert.equal(lockOf(d, S2), null);
+  writeLock(d, S2, 'soon');
+  assert.equal(releaseLockOfTake(d.deck, S2, 'soon'), false); // no lock skydeck writes: no take
+  assert.equal(lockOf(d, S2), 'soon');
 });
 
 // --- what the command line and restore share about a launch ---------------------------------------

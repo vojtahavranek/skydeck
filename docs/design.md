@@ -598,6 +598,28 @@ start event had been ingested. A lock dated 60 seconds or more in the future, or
 value that is not a lock skydeck writes, counts as stale too; stale locks are deleted, again in
 one transaction, at the end of every refresh.
 
+**A renewal keeps the mark of its take.** skydeck's clock counts milliseconds, so the last six
+digits of a lock's time in nanoseconds are 0 when a lock is taken. A renewal writes the time of
+now, to the millisecond, and puts the take's mark in those six digits: 1 + (the take's
+milliseconds mod 999,999), never 0; a renewal of a renewal keeps it. **Those six digits of a
+renewed lock are a mark, not time**: every age, wait and deadline counts from the lock's
+millisecond. Two values are of one take when both record an event id, the same one, and the same
+mark — except two different values whose six digits are both 0, which are always two takes (only a
+take writes such a value); a value without an event id is of one take only with itself. A
+take-over is therefore always another take, and a renewal is the take it renews: the window's
+server lets a terminal it finds start on a renewal of the lock that terminal took, and gives such
+a lock back when the terminal ended before its session started (design-step-2.md 7.3, 7.8). An
+older skydeck reads a renewed value as a lock renewed less than 1 ms later, so a server of an
+older build that still runs after an update neither sweeps it nor takes it over early; a renewal
+that an older skydeck writes carries no mark and is another take to this one, the cautious side
+(the window refuses such a terminal and leaves the lock to expire, as before). Known limit: a
+take-over at a millisecond congruent to the take's (mod 999,999: about one in a million, and at
+least 16 min 40 s later) that a restore then renews reads as a renewal of the first take. A
+terminal of that first take is then past its start deadline and starts nothing, but if it ends
+while that restore still waits for the session, the restore's lock is given back: the restore's
+next renewal finds it gone, and until the session's start event is seen no lock keeps another
+resume out.
+
 **Where.** `--here` replaces skydeck with `claude` in the current terminal: the command line tool
 hands the directory and the argument list back to the `bin/skydeck` launcher through a handoff
 file, and the launcher `exec`s it, so no wrapper process stays behind. `--tab` opens a new tab

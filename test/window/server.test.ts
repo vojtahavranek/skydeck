@@ -536,8 +536,8 @@ describe('a keeper found unstarted (S2 7.3; plan task 21)', () => {
   test('its hello goes through decideFoundKeeper before any G: a lock taken over → N, nothing started', async (t) => {
     const d = serverSandbox(t);
     const { keeper, lock } = await unstarted(d);
-    // Another skydeck took the session's lock over meanwhile.
-    d.deck.store.setKv(lockKey(S1), `${BigInt(lock.split(':')[0] ?? '0') + 1n}:0`);
+    // Another skydeck took the session's lock over meanwhile (acquireLock: a later millisecond).
+    d.deck.store.setKv(lockKey(S1), `${BigInt(lock.split(':')[0] ?? '0') + 1_000_000n}:0`);
     const test = await d.start();
     await until(
       () => test.server.hub.list().some((term) => term.id === keeper.spec.id && term.exit !== null),
@@ -546,7 +546,7 @@ describe('a keeper found unstarted (S2 7.3; plan task 21)', () => {
     );
     const term = test.server.hub.list().find((candidate) => candidate.id === keeper.spec.id);
     assert.equal(term?.state, 'not-started');
-    assert.match(term?.exit?.notStarted ?? '', /renewed or taken over/);
+    assert.match(term?.exit?.notStarted ?? '', /its resume lock was taken over/);
     assert.equal(term?.program, null);
     assert.deepEqual(readRecords(keeper.record), [], 'the program never ran');
   });
