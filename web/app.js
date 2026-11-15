@@ -1662,8 +1662,9 @@ byId('new-button').addEventListener('click', openNew);
 // --- the window ---------------------------------------------------------------------------------
 
 // C2 (ruled): while a dialog holds text the user typed and did not save, leaving the page — the
-// tab's reload, closing the window, connection.js's reload for another build — asks first (the
-// browser's own prompt). The reload keys do not get this far: windowChordGate refuses them.
+// tab's reload, closing the window, connection.js's reload for another build, and a reload key's
+// reload when text was typed after the key passed windowChordGate (the dialog was unchanged then)
+// — asks first (the browser's own prompt).
 addEventListener('beforeunload', (event) => {
   if (editor.changed()) {
     event.preventDefault();

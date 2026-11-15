@@ -2295,16 +2295,20 @@ which empties the field and keeps the dialog open so that the new pull request s
 After this page's own save of a label, group or note, its key waits for the list that holds the
 result (one that arrived since the act was sent, else the next one: `the label is not here yet;
 press l again`), so that the dialog never starts from the old text and an Enter never writes the
-old label back (the pull-request dialog does not wait). A refusal whose dialog was closed meanwhile
+old label back (the pull-request dialog does not wait). When no list came by the answer, the page asks
+for one (a `view`, which the server answers at once; it sends no list equal to the last one, so a
+save that changed nothing shown would otherwise wait for good). A named limit: when the store was
+busy at that save, the list asked for may come before the server could read the rows again, and the
+dialog then starts from the old text (a note's save is then refused as a conflict). A refusal whose dialog was closed meanwhile
 (Enter, then Esc at once) is shown as a toast, `not saved: <the error>`. While a dialog holds
 changed text, leaving the page in a way the keys do not cover — the tab's reload button, closing
 the window, the page's own reload when a reconnect meets a server of another build (15.3) — asks
 first, with the browser's own prompt; staying keeps the dialog and its text. In the last case the
 page then stays not connected (a save says `skydeck's server is not connected; try again`) until
-it is reloaded: copy the text, then reload. Two named limits (ruled for plan D task 37): text typed
-between an F5 on an unchanged dialog and the server's proof is lost with the reload, and the
-page's own reload on another build is not held back as the reload keys are: with changed text, only
-that prompt stands between it and the text.
+it is reloaded: copy the text, then reload. Two named limits (ruled for plan D task 37): text typed between an F5 on an
+unchanged dialog and the server's proof, and the page's own reload on another build, are not held
+back as the reload keys are: with changed text, only that prompt stands between the reload and the
+text.
 
 ### 12.10 Done
 
