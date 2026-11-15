@@ -710,8 +710,8 @@ leaves the keyboard where it was.
 heading names the session (`Label — <title>`, `Group — …`, `Note — …`, `Pull requests — …`):
 look at it before you save.
 
-- The label's field holds your label; it is empty, with the title as its hint, while the title is
-  Claude Code's. An empty label clears yours. The label is also the session's name for Claude
+- The label's field holds your label; it is empty, with the title as its hint, while you have set
+  none. An empty label clears yours. The label is also the session's name for Claude
   Code at its next start or resume.
 - The group's field holds the group you set; it is empty, with the title's ticket key as its
   hint, while the group comes from the title. An empty group gives the session the ticket key at
@@ -766,8 +766,9 @@ again). On a line:
 `↻`, under the open ones, reads the status of the session's pull requests that are not merged or
 closed from GitHub now, in the background; the lines follow. The field takes a pull request's
 address (`https://github.com/owner/repo/pull/123`): Enter or `Attach` attaches it, as `skydeck pr
-add` does, empties the field and keeps the dialog open, where the new line shows `not fetched`,
-then its state within seconds, read through your `gh`; an address that is not a pull request's is
+add` does, empties the field and keeps the dialog open, where the new line shows `not fetched`
+(or its last state, when skydeck has read that pull request before), then within seconds its
+state read now, through your `gh`; an address that is not a pull request's is
 refused (`not a GitHub pull-request URL: <the text>`). `Close` or Esc closes the dialog. With
 none attached it says `no pull request attached`. Pull requests a session touched are still
 attached by themselves (design.md 7.3).
@@ -783,7 +784,7 @@ line's chip (design.md 7.3).
 #### The ticket link
 
 With `ticketUrl` in `config.json` ("Configuration" above), the group chip opens the session's
-ticket. For Jira:
+ticket. For Jira, a file with only this key (in a file with others, add the key beside them):
 
 ```json
 {
@@ -793,10 +794,11 @@ ticket. For Jira:
 
 When the session's group holds a ticket key — the text `groupPattern` matches in it, made of
 letters, digits, `-`, `_` and `.` and starting with a letter or a digit; with the default pattern
-a key such as `ABC-123` at its start — the chip shows `ABC-123 ↗`, underlined, with the ticket's
-address as its tooltip, and a click on it that selected no text opens the ticket in your own Edge.
-Without such a key, or without `ticketUrl`, the chip is plain text. The chip never edits: ✎ and
-`g` edit the group. skydeck reads nothing from the ticket system.
+a key such as `ABC-123` at its start — the chip shows the group with `↗` after it (`ABC-123 ↗`,
+`ABC-123 cleanup ↗`), underlined, with the ticket's address as its tooltip, and a click on it that
+selected no text opens the ticket in your own Edge. Without such a key, or without `ticketUrl`,
+the chip is plain text. The chip never edits: ✎ and `g` edit the group. skydeck reads nothing
+from the ticket system.
 
 `ticketUrl` must be an `http` or `https` address with `{key}` exactly once, after its host, with
 no user name or password, no white space, control character, `"` or backslash, no `%` (or `%` and
@@ -889,15 +891,16 @@ ticket:    https://example.atlassian.net/browse/ABC-123
   only: its dialog says `this note is longer than the window edits; use skydeck note <short id>`.
   A label or group over 1,024 bytes is refused before it is sent (`the label is longer than skydeck
   takes: at most 1,024 bytes of UTF-8`).
-- **Line breaks.** A note whose line breaks are CR alone (another program wrote it) is saved with
-  LF ones after an edit in the window.
+- **Line breaks.** A note whose line breaks are CR or CRLF (another program wrote it) is saved
+  with LF ones after an edit in the window.
 - **Text in a dialog and a reload.** While a dialog holds changed text, closing the window, Edge's
   reload and the page's own reload when it reconnects to a server of another build (after an
   update) ask first, with Edge's own prompt; leaving loses the text. Staying after an update keeps
   the dialog and its text, but the page stays not connected (a save says `skydeck's server is not
-  connected; try again`): copy the text, then reload (F5). Text typed between an F5 on an unchanged
+  connected; try again`): copy the text, close the dialog (Esc; twice for a changed note), then
+  press F5. Text typed between an F5 on an unchanged
   dialog and the reload is held back only by that prompt.
-- **A busy database.** When the database was busy at a save, a dialog opened right after it can
+- **A busy database.** When the database was busy right after a save, a dialog opened then can
   start from the text before the save; a note saved from there is refused as changed elsewhere.
   Close the dialog and open it again.
 
