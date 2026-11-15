@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { lockKey } from '../../src/sessions/resume.ts';
 import type { ListRow } from '../../src/sessions/list.ts';
 import type { DerivedSession, LastHolding, Mark } from '../../src/sessions/types.ts';
+import { parsePageMessage } from '../../src/window/protocol.ts';
 import { selectedPayload } from '../../src/window/selected.ts';
 import { testDeck } from '../helpers/deck.ts';
 import { ds } from '../helpers/derived.ts';
@@ -45,6 +46,9 @@ test('selectedPayload: the command a resume would run, with the recorded flags a
     ended: null,
     expiring: false,
     expired: false,
+    note: null,
+    noteTooLong: false,
+    ticketUrl: null,
   });
 });
 
@@ -146,4 +150,77 @@ test('selectedPayload: expiring and expired from the marks', (t) => {
   assert.deepEqual([expired.expiring, expired.expired], [false, true]);
   const neither = selectedPayload(d.deck, row({ marks: ['continued'] }));
   assert.deepEqual([neither.expiring, neither.expired], [false, false]);
+});
+
+// --- the note and the ticket address (plan D5, D6) -----------------------------------------------
+
+/** S1's row with the note `note` as stored. */
+function noted(note: string | null): ListRow {
+  return row({}, { note, hasNote: note !== null });
+}
+
+test('selectedPayload: the note exactly as stored, not sanitised (an escape character and CRLF kept)', (t) => {
+  const d = testDeck(t);
+  const note = 'first \x1b[31mred\x1b[0m line\r\nsecond\rthird\n\n  spaces  \t\n';
+  const payload = selectedPayload(d.deck, noted(note));
+  assert.equal(payload.note, note);
+  assert.equal(payload.noteTooLong, false);
+});
+
+test('selectedPayload: no note gives null, and it is not too long', (t) => {
+  const d = testDeck(t);
+  const payload = selectedPayload(d.deck, noted(null));
+  assert.equal(payload.note, null);
+  assert.equal(payload.noteTooLong, false);
+});
+
+test('selectedPayload: a note of 65,536 bytes of UTF-8 is sent; one of 65,537 is null with noteTooLong', (t) => {
+  const d = testDeck(t);
+  const exact = `${'a'.repeat(65536 - 3)}€`; // € is three bytes: exactly 65,536
+  assert.equal(Buffer.byteLength(exact, 'utf8'), 65536);
+  assert.deepEqual(
+    [selectedPayload(d.deck, noted(exact)).note, selectedPayload(d.deck, noted(exact)).noteTooLong],
+    [exact, false],
+  );
+  // The multi-byte character lies across the limit: 65,534 + 3 bytes, fewer than 65,536 characters.
+  const over = `${'a'.repeat(65536 - 2)}€`;
+  assert.equal(Buffer.byteLength(over, 'utf8'), 65537);
+  assert.ok(over.length < 65536);
+  const payload = selectedPayload(d.deck, noted(over));
+  assert.equal(payload.note, null);
+  assert.equal(payload.noteTooLong, true);
+  // Counted in bytes, not characters: 32,768 two-byte characters are the limit, one more is over.
+  assert.equal(selectedPayload(d.deck, noted('é'.repeat(32768))).noteTooLong, false);
+  assert.equal(selectedPayload(d.deck, noted('é'.repeat(32769))).noteTooLong, true);
+  assert.equal(selectedPayload(d.deck, noted('🙂'.repeat(16385))).note, null);
+});
+
+test("selectedPayload's limit is act note's: the largest note it sends goes back as base, the first it withholds would not", (t) => {
+  const d = testDeck(t);
+  const asBase = (base: string): boolean =>
+    parsePageMessage(
+      JSON.stringify({ t: 'act', id: 1, kind: 'note', sessionId: S1, text: '', base }),
+    ).ok;
+  for (const [largest, first] of [
+    ['a'.repeat(65536), 'a'.repeat(65537)],
+    [`${'a'.repeat(65533)}€`, `${'a'.repeat(65534)}€`],
+  ] as const) {
+    assert.equal(selectedPayload(d.deck, noted(largest)).note, largest);
+    assert.equal(asBase(largest), true);
+    assert.equal(selectedPayload(d.deck, noted(first)).note, null);
+    assert.equal(asBase(first), false);
+  }
+});
+
+test('selectedPayload: an empty stored note is a note (the empty text, not null)', (t) => {
+  const d = testDeck(t);
+  assert.equal(selectedPayload(d.deck, noted('')).note, '');
+});
+
+test('selectedPayload: ticketUrl is null (task 36 fills it)', (t) => {
+  const d = testDeck(t);
+  assert.equal(
+    selectedPayload(d.deck, row({}, { group: 'ORB-2107', groupSource: 'meta' })).ticketUrl,
+    null,
+  );
 });

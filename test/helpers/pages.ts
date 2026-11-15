@@ -385,6 +385,7 @@ export function defaultList(
     t: 'list',
     nowNs: String(nowNs),
     counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
+    needYou: { count: 0, order: [] },
     sections: [],
     doneHidden: 0,
     banner: null,
@@ -397,6 +398,7 @@ export function defaultList(
       cols: info.cols,
       rows: info.rows,
       ownsSize: true, // pages replaces it
+      openedNs: String(info.openedNs),
     })),
     selected: null,
     dirs: [...dirs, `filter:${page.view.filter}`],

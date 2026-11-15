@@ -2,7 +2,8 @@
  * The messages between the page and the server (S2 8.2.2, 8.2.3) and the requests on
  * `server.sock` (S2 8.3), stage A: the TypeScript types every side codes against (the page reads
  * them through JSDoc `@import`), strict validators for what arrives from a page or a command, and
- * the binary output frame. Later stages add their messages and `act` kinds here.
+ * the binary output frame. Later stages add their messages and `act` kinds here: stage D's are
+ * label, group, note, done, undone, pr-refresh, pr-add and pr-rm (plan D 2.2).
  *
  * The validators read foreign input: they never throw and return `{ ok: false, kind }` with a fixed
  * kind that never quotes the input (plan A22), so a caller can log the kind. This module imports
@@ -30,8 +31,9 @@ export interface KeepAlivePayload {
 // page → server
 //
 // Limits (the validator refuses more): sizes (`cols`, `rows`) are whole numbers 1–65535; strings
-// are measured in UTF-8 bytes — paths and URLs at most 4096, other text 1024, `input.data` 64 KiB;
-// every string must be well formed (no lone surrogate).
+// are measured in UTF-8 bytes — paths and URLs at most 4096, other text 1024, `input.data` 64 KiB,
+// a note's `text` and `base` 64 KiB each (plan D5); every string must be well formed (no lone
+// surrogate).
 
 /** The page's first message (S2 8.2.2). Any `protocol` number is read; the server closes with 4426
  *  for one it does not speak. `nonce`, `proof`: base64url, checked by the server's authentication. */
@@ -100,7 +102,13 @@ export interface ResizeMessage {
 }
 /** An action (S2 8.2.3); the server answers `result` with the same `id` (a whole number from 0).
  *  `new.dir` is a path, `open-link.url` is held to the path limit (S2 9.6 opens up to 2,048
- *  characters); `label`, `group` and `flags` (the text as typed) are text. */
+ *  characters); `label`, `group` and `flags` (the text as typed) are text.
+ *
+ *  Stage D (plan D 2.2): `label` and `group` set the session's label or group (`text`, at most
+ *  1,024 bytes; empty clears it); `note` sets its note (`text` as typed) when the stored note is
+ *  still `base`, the note the edit started from (each at most 65,536 bytes, D5); `done`, `undone`
+ *  and `pr-refresh` name only the session; `pr-add` and `pr-rm` attach or detach the pull request
+ *  `url` (the URL limit, 4,096 bytes). `sessionId` is a session id (isSessionId). */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -115,7 +123,11 @@ export type ActMessage =
       rows: number;
     }
   | { t: 'act'; id: number; kind: 'close-terminal'; term: string }
-  | { t: 'act'; id: number; kind: 'open-link'; url: string };
+  | { t: 'act'; id: number; kind: 'open-link'; url: string }
+  | { t: 'act'; id: number; kind: 'label' | 'group'; sessionId: string; text: string }
+  | { t: 'act'; id: number; kind: 'note'; sessionId: string; text: string; base: string }
+  | { t: 'act'; id: number; kind: 'done' | 'undone' | 'pr-refresh'; sessionId: string }
+  | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string };
 export type PageMessage =
   | HelloMessage
   | StartMessage
@@ -162,6 +174,17 @@ export interface PrPayload {
   title: string | null;
   level: string;
   error: string | null;
+  /** The last successful read (design 7.3), null before one. */
+  okAtNs: NsText | null;
+}
+/** S2 12.3's chip, made by windowChip (plan D 2.3) over a row's attached pull requests. */
+export interface ChipPayload {
+  /** The open one that most needs the user, in design 7.3's order without merged and closed;
+   *  with none open, `merged` when one is merged, else `closed`. */
+  level: string;
+  /** Attached and not known to be merged or closed: open, draft, never fetched, can't read. */
+  open: number;
+  merged: number;
 }
 /** A session running in another terminal (S2 7.9). */
 export interface ElsewherePayload {
@@ -187,13 +210,15 @@ export interface RowPayload {
   noteHead: string[];
   done: boolean;
   prs: PrPayload[];
-  chip: { level: string; count: number } | null;
+  /** S2 12.3's chip (plan D4); null when no pull request is attached. */
+  chip: ChipPayload | null;
   terminal: string | null;
   slot: number | null;
   elsewhere: ElsewherePayload | null;
   /** S2 7.5: a terminal of the window whose program holds no session yet. */
   starting: boolean;
-  attention: null; // stage B
+  /** S2 12.4: why the row needs you, null when it needs nothing (stage B, plan B 2.3). */
+  attention: AttentionPayload | null;
   stack: null; // stage E
 }
 export interface SectionPayload {
@@ -214,8 +239,11 @@ export interface TerminalPayload {
   cols: number;
   rows: number;
   ownsSize: boolean;
+  /** When the window opened it: the header's "opened <time>" (S2 12.5, plan D6). */
+  openedNs: NsText;
 }
-/** For the selected session only: what the resume card shows (S2 12.6). */
+/** For the selected session only: what the resume card shows (S2 12.6), and what the header and
+ *  the dialogs of stage D need (plan D6). */
 export interface SelectedPayload {
   sessionId: string;
   command: string | null; // printableCommand of the command a resume would run, null when it cannot be printed
@@ -224,6 +252,15 @@ export interface SelectedPayload {
   ended: 'exited' | 'unexpectedly' | 'mid-turn' | null;
   expiring: boolean;
   expired: boolean;
+  /** The note exactly as stored — not sanitised: the page puts it only into a text box's value
+   *  and sends it back as `base` — when it holds at most 65,536 bytes of UTF-8; null when there
+   *  is none or it is longer (plan D5). */
+  note: string | null;
+  /** The stored note is longer than the window edits (plan D5): `note` is null. */
+  noteTooLong: boolean;
+  /** S2 12.5's ticket address (`ticketAddress`, plan D 2.3), null without one. Task 34 sends
+   *  null; task 36 fills it. */
+  ticketUrl: string | null;
 }
 /** The view model (S2 12), sent whole when it changed, at most once a second. */
 export interface ListMessage {
@@ -237,6 +274,10 @@ export interface ListMessage {
     elsewhere: number;
     notRunning: number;
   };
+  /** Plan B7: `count`, the listed rows that need you, whatever the filter or the fold (the title
+   *  bar's count and the window title's `(n)`; such a row is in no field of `counts`); `order`, the
+   *  ids of the rows this page shows that need you, in Ctrl+Shift+J's order (B6). */
+  needYou: { count: number; order: string[] };
   sections: SectionPayload[];
   doneHidden: number;
   banner: null;
@@ -244,6 +285,18 @@ export interface ListMessage {
   selected: SelectedPayload | null;
   /** Known project directories, most recent first (S2 12.6, the new form). */
   dirs: string[];
+}
+/** S2 12.4's three reasons, in their order. */
+export type AttentionReason = 'asks' | 'ended' | 'finished';
+/** S2 12.4: why a row needs you. `detail`: for `asks` the live file's waitingFor, sanitised,
+ *  trimmed and cut to 120 UTF-16 units with `…` (plan B13; null without one, or when it is blank
+ *  once sanitised); else null. `sinceNs`: asks — the file's statusUpdatedAt, else updatedAt;
+ *  ended — window_end_ns; finished — turn_ended_ns; null when not known. Display only (S2 10.2):
+ *  the order is decided by the counter. */
+export interface AttentionPayload {
+  reason: AttentionReason;
+  detail: string | null;
+  sinceNs: NsText | null;
 }
 /** `ch`: the channel number of this terminal's output frames for this page (S2 8.2.4). */
 export interface SnapMessage {
@@ -291,6 +344,16 @@ export interface ByeMessage {
   t: 'bye';
   reason: string;
 }
+/** S2 13, plan B8: a session started to need you while no window had focus; sent to one page.
+ *  `title`: the row's title (sanitised); `detail` as the row's attention's; the page writes the
+ *  words of the notification. */
+export interface NotifyMessage {
+  t: 'notify';
+  sessionId: string;
+  title: string;
+  reason: AttentionReason;
+  detail: string | null;
+}
 export type ServerMessage =
   | ChallengeMessage
   | WelcomeMessage
@@ -301,7 +364,8 @@ export type ServerMessage =
   | ExitMessage
   | ResultMessage
   | NoticeMessage
-  | ByeMessage;
+  | ByeMessage
+  | NotifyMessage;
 
 /** Output frames (S2 8.2.3): byte 1, the channel as 4-byte big-endian, the record's bytes.
  *  RangeError for a channel that is not a whole number 0–2³²−1. */
@@ -326,6 +390,9 @@ type Fields = Record<string, unknown>;
 const TEXT_LIMIT = 1024;
 const PATH_LIMIT = 4096;
 const DATA_LIMIT = 64 * 1024;
+/** A note's `text` and `base` (plan D5): its largest `act`, every character escaped by JSON (six
+ *  bytes), stays under the WebSocket's message limit of 1 MiB. */
+const NOTE_LIMIT = 64 * 1024;
 const SIZE_MAX = 0xffff;
 const TERMINAL_ID = /^[0-9a-f]{12}$/;
 const WINDOW_ID = /^[0-9a-f]{16}$/;
@@ -361,6 +428,7 @@ function text(limit: number): Check {
 }
 const TEXT = text(TEXT_LIMIT);
 const PATH = text(PATH_LIMIT);
+const NOTE = text(NOTE_LIMIT);
 
 /** A byte string (S2 8.2.3 `binary`): each character U+0000–U+00FF. */
 function bytes(limit: number): Check {
@@ -465,6 +533,15 @@ const ACTS: Readonly<Record<string, Check>> = {
   }),
   'close-terminal': object({ t: ANY, id: COUNT, kind: ANY, term: TERM }),
   'open-link': object({ t: ANY, id: COUNT, kind: ANY, url: PATH }),
+  // Stage D (plan D 2.2).
+  label: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, text: TEXT }),
+  group: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, text: TEXT }),
+  note: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, text: NOTE, base: NOTE }),
+  done: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  undone: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  'pr-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  'pr-add': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
+  'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);
@@ -524,7 +601,8 @@ function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
 }
 
 /** Strict: a type, kind or field it does not know, a wrong type, a string over its limit (paths
- *  4096, text fields 1024, `input.data` 64 KiB) is { ok: false, kind }. Never throws. */
+ *  and URLs 4096, text fields 1024, `input.data` and a note's `text` and `base` 64 KiB) is
+ *  { ok: false, kind }. Never throws. */
 export function parsePageMessage(
   text: string,
 ): { ok: true; value: PageMessage } | { ok: false; kind: string } {

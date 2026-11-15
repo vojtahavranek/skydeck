@@ -5,7 +5,12 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { sanitize as serverSanitize } from '../../src/text/sanitize.ts';
-import type { RowPayload, SectionPayload, TerminalPayload } from '../../src/window/protocol.ts';
+import type {
+  ChipPayload,
+  RowPayload,
+  SectionPayload,
+  TerminalPayload,
+} from '../../src/window/protocol.ts';
 import {
   chipText,
   countsText,
@@ -65,11 +70,17 @@ function terminal(over: Partial<TerminalPayload> = {}): TerminalPayload {
     cols: 80,
     rows: 24,
     ownsSize: true,
+    openedNs: ago(HOUR),
     ...over,
   };
 }
 
-function pr(level: string, number: number, error: string | null = null): RowPayload['prs'][number] {
+function pr(
+  level: string,
+  number: number,
+  error: string | null = null,
+  okAtNs: string | null = ago(4n * MIN),
+): RowPayload['prs'][number] {
   return {
     url: `https://github.com/o/r/pull/${number}`,
     repo: 'o/r',
@@ -77,8 +88,15 @@ function pr(level: string, number: number, error: string | null = null): RowPayl
     title: null,
     level,
     error,
+    okAtNs,
   };
 }
+
+/** S2 12.3's chip of a row (what windowChip sends). */
+const chip = (level: string, open: number, merged = 0): ChipPayload => ({ level, open, merged });
+/** `n` pull requests of `level`, numbered from `from`. */
+const many = (n: number, level: string, from: number): RowPayload['prs'] =>
+  Array.from({ length: n }, (_, at) => pr(level, from + at));
 
 describe('rowText: a running row has two lines', () => {
   test('working, in slot 1: the state line is the state and its time; no age on the first line', () => {
@@ -177,7 +195,7 @@ describe('rowText: a row that is not running has one line', () => {
         hasNote: true,
         noteHead: ['first line', 'second'],
         prs: [pr('checks-failing', 7)],
-        chip: { level: 'checks-failing', count: 1 },
+        chip: chip('checks-failing', 1),
       }),
       now,
       null,
@@ -203,8 +221,10 @@ describe('rowText: a row that is not running has one line', () => {
     assert.doesNotMatch(text.marks.map((mark) => `${mark.text} ${mark.tip}`).join(' '), /\d/);
     assert.deepEqual(text.chip, {
       text: 'PR · failing',
+      merged: '',
       tip: 'o/r #7 · failing',
       dotted: false,
+      dim: false,
     });
     assert.equal(text.note, 'first line');
   });
@@ -248,7 +268,7 @@ describe('rowText: a row that is not running has one line', () => {
   });
 });
 
-describe("rowText: the chip (design 7.3's rule, S2 12.3's words)", () => {
+describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
   const cases: ReadonlyArray<readonly [string, string]> = [
     ['cant-read', "can't read"],
     ['unfetched', 'not fetched'],
@@ -258,31 +278,161 @@ describe("rowText: the chip (design 7.3's rule, S2 12.3's words)", () => {
     ['review-required', 'review'],
     ['draft', 'draft'],
     ['approved-green', 'approved'],
-    ['merged', 'merged'],
-    ['closed', 'closed'],
   ];
   for (const [level, words] of cases) {
-    test(`one pull request of level ${level}: "PR · ${words}"`, () => {
-      const text = rowText(row({ prs: [pr(level, 1)], chip: { level, count: 1 } }), now, null);
+    test(`one open pull request of level ${level}: "PR · ${words}"`, () => {
+      const text = rowText(row({ prs: [pr(level, 1)], chip: chip(level, 1) }), now, null);
       assert.equal(text.chip?.text, `PR · ${words}`);
+      assert.equal(text.chip?.merged, '');
       assert.equal(text.chip?.dotted, level === 'cant-read');
+      assert.equal(text.chip?.dim, false);
     });
   }
 
-  test('several: the count and the worst, each in the tooltip with its own state and error', () => {
+  // S2 12.3's table, row by row: the chip, its merged part apart, and the tooltip.
+  const table: ReadonlyArray<
+    readonly [
+      string,
+      RowPayload['prs'],
+      ChipPayload,
+      NonNullable<ReturnType<typeof rowText>['chip']>,
+    ]
+  > = [
+    [
+      '1 open, review required',
+      [pr('review-required', 7)],
+      chip('review-required', 1),
+      { text: 'PR · review', merged: '', tip: 'o/r #7 · review', dotted: false, dim: false },
+    ],
+    [
+      '1 open, checks failing; 30 merged',
+      [pr('checks-failing', 7), ...many(30, 'merged', 100)],
+      chip('checks-failing', 1, 30),
+      {
+        text: 'PR · failing',
+        merged: '+30',
+        tip: 'o/r #7 · failing\n30 merged',
+        dotted: false,
+        dim: false,
+      },
+    ],
+    [
+      '2 open: a draft and an approved, green one',
+      [pr('approved-green', 1), pr('draft', 2)],
+      chip('draft', 2),
+      {
+        text: '2 PRs · draft',
+        merged: '',
+        tip: 'o/r #1 · approved\no/r #2 · draft',
+        dotted: false,
+        dim: false,
+      },
+    ],
+    [
+      'one that cannot be read and one with changes requested; 4 merged',
+      [
+        pr('cant-read', 3, 'gh: HTTP 502', ago(3n * HOUR + 5n * MIN)),
+        ...many(4, 'merged', 10),
+        pr('changes-requested', 5),
+      ],
+      chip('cant-read', 2, 4),
+      {
+        text: "2 PRs · can't read",
+        merged: '+4',
+        tip: "o/r #3 · can't read · last read 3h ago · gh: HTTP 502\no/r #5 · changes\n4 merged",
+        dotted: true,
+        dim: false,
+      },
+    ],
+    [
+      '3 open, the worst failing; 30 merged',
+      [
+        pr('checks-pending', 1),
+        pr('checks-failing', 2),
+        pr('draft', 3),
+        ...many(30, 'merged', 100),
+      ],
+      chip('checks-failing', 3, 30),
+      {
+        text: '3 PRs · failing',
+        merged: '+30',
+        tip: 'o/r #1 · pending\no/r #2 · failing\no/r #3 · draft\n30 merged',
+        dotted: false,
+        dim: false,
+      },
+    ],
+    [
+      'none open; 3 merged, 1 closed',
+      [...many(3, 'merged', 1), pr('closed', 9)],
+      chip('merged', 0, 3),
+      { text: '3 merged', merged: '', tip: '3 merged · 1 closed', dotted: false, dim: true },
+    ],
+    [
+      'none open; 1 closed',
+      [pr('closed', 9)],
+      chip('closed', 0),
+      { text: 'closed', merged: '', tip: '1 closed', dotted: false, dim: true },
+    ],
+  ];
+  for (const [name, prs, given, expected] of table) {
+    test(name, () => {
+      assert.deepEqual(rowText(row({ prs, chip: given }), now, null).chip, expected);
+    });
+  }
+
+  test("can't read: the age of the last read, or never read without one; then the error", () => {
+    const text = (okAtNs: string | null, error: string | null): string =>
+      rowText(
+        row({ prs: [pr('cant-read', 9, error, okAtNs)], chip: chip('cant-read', 1) }),
+        now,
+        null,
+      ).chip?.tip ?? '';
+    assert.equal(
+      text(ago(3n * HOUR), 'gh: HTTP 502'),
+      "o/r #9 · can't read · last read 3h ago · gh: HTTP 502",
+    );
+    assert.equal(text(null, 'gh: HTTP 502'), "o/r #9 · can't read · never read · gh: HTTP 502");
+    assert.equal(text(ago(2n * DAY), null), "o/r #9 · can't read · last read 2d ago");
+    // A time that is not one gives no age: never read is said only when there was no read.
+    assert.equal(text('soon', null), "o/r #9 · can't read");
+  });
+
+  test('the age of the last read counts on with the time given (the list repaints its ages)', () => {
+    const later = String(NOW + 2n * HOUR);
+    const unreadable = row({
+      prs: [pr('cant-read', 9, null, ago(HOUR))],
+      chip: chip('cant-read', 1),
+    });
+    assert.equal(
+      rowText(unreadable, now, null).chip?.tip,
+      "o/r #9 · can't read · last read 1h ago",
+    );
+    assert.equal(
+      rowText(unreadable, later, null).chip?.tip,
+      "o/r #9 · can't read · last read 3h ago",
+    );
+  });
+
+  test('only open ones are listed in the tooltip, each once; the finished ones as counts after them', () => {
     const text = rowText(
       row({
-        prs: [pr('cant-read', 3, 'gh: HTTP 502'), pr('merged', 4), pr('draft', 5)],
-        chip: { level: 'cant-read', count: 3 },
+        prs: [pr('merged', 1), pr('closed', 2), pr('unfetched', 3, null, null), pr('closed', 4)],
+        chip: chip('unfetched', 1, 1),
       }),
       now,
       null,
     );
-    assert.deepEqual(text.chip, {
-      text: "3 PRs · can't read",
-      tip: "o/r #3 · can't read · gh: HTTP 502\no/r #4 · merged\no/r #5 · draft",
-      dotted: true,
-    });
+    assert.equal(text.chip?.tip, 'o/r #3 · not fetched\n1 merged · 2 closed');
+  });
+
+  test('a level the page does not know is shown as the server named it, sanitised', () => {
+    const text = rowText(
+      row({ prs: [pr('later\x1b[31m-level', 1)], chip: chip('later\x1b[31m-level', 1) }),
+      now,
+      null,
+    );
+    assert.equal(text.chip?.text, 'PR · later-level');
+    assert.equal(text.chip?.tip, 'o/r #1 · later-level');
   });
 
   test('no chip without a pull request', () => {
@@ -290,23 +440,40 @@ describe("rowText: the chip (design 7.3's rule, S2 12.3's words)", () => {
   });
 });
 
-describe("chipText: the chip's words, for the row and for task 29's header", () => {
-  test('one pull request: "PR · <state>"; several: "<n> PRs · <the worst>"', () => {
-    assert.equal(chipText({ level: 'review-required', count: 1 }), 'PR · review');
-    assert.equal(chipText({ level: 'checks-failing', count: 3 }), '3 PRs · failing');
-    assert.equal(chipText({ level: 'cant-read', count: 2 }), "2 PRs · can't read");
+describe("chipText: the chip's whole text, for the row and for the header (S2 12.3)", () => {
+  test('open ones: "PR · <state>" for one, "<n> PRs · <the worst>" for several, then +<merged>', () => {
+    assert.equal(chipText(chip('review-required', 1)), 'PR · review');
+    assert.equal(chipText(chip('checks-failing', 3)), '3 PRs · failing');
+    assert.equal(chipText(chip('checks-failing', 1, 30)), 'PR · failing +30');
+    assert.equal(chipText(chip('cant-read', 2, 4)), "2 PRs · can't read +4");
+    assert.equal(chipText(chip('checks-failing', 3, 30)), '3 PRs · failing +30');
+  });
+
+  test('none open: "<n> merged" when any is merged, else "closed"', () => {
+    assert.equal(chipText(chip('merged', 0, 3)), '3 merged');
+    assert.equal(chipText(chip('merged', 0, 1)), '1 merged');
+    assert.equal(chipText(chip('closed', 0)), 'closed');
   });
 
   test('a level the page does not know is shown as the server named it, sanitised', () => {
-    assert.equal(chipText({ level: 'later\x1b[31m-level', count: 1 }), 'PR · later-level');
+    assert.equal(chipText(chip('later\x1b[31m-level', 1)), 'PR · later-level');
   });
 
-  test('exactly what a row shows for its chip', () => {
-    for (const level of ['cant-read', 'unfetched', 'draft', 'approved-green', 'merged', 'closed']) {
-      for (const count of [1, 2, 30]) {
-        const chip = { level, count };
-        assert.equal(chipText(chip), rowText(row({ chip, prs: [] }), now, null).chip?.text);
+  test('exactly what a row shows for its chip: its text, then its merged part', () => {
+    for (const level of ['cant-read', 'unfetched', 'draft', 'approved-green']) {
+      for (const open of [1, 2, 30]) {
+        for (const merged of [0, 1, 30]) {
+          const given = chip(level, open, merged);
+          const shown = rowText(row({ chip: given, prs: [] }), now, null).chip;
+          assert.equal(
+            chipText(given),
+            [shown?.text, shown?.merged].filter((part) => part !== '').join(' '),
+          );
+        }
       }
+    }
+    for (const given of [chip('merged', 0, 3), chip('closed', 0)]) {
+      assert.equal(chipText(given), rowText(row({ chip: given, prs: [] }), now, null).chip?.text);
     }
   });
 });
@@ -375,15 +542,21 @@ describe('rowText: text from the server is shown as text, sanitised', () => {
         title: '<img src=x onerror=alert(1)>\x1b[2J',
         group: 'G\x1b]0;title\x07',
         groupSource: 'meta',
-        prs: [pr('cant-read', 9, 'boom\x1b[31m!')],
-        chip: { level: 'cant-read', count: 1 },
+        prs: [pr('cant-read', 9, 'boom\x1b[31m!', null)],
+        chip: chip('cant-read', 1),
       }),
       now,
       null,
     );
     assert.equal(text.title, '<img src=x onerror=alert(1)>');
     assert.equal(text.group, 'G');
-    assert.equal(text.chip?.tip, "o/r #9 · can't read · boom!");
+    assert.equal(text.chip?.tip, "o/r #9 · can't read · never read · boom!");
+  });
+
+  test("a pull request's repository with an escape sequence or a line break is shown sanitised in the tooltip", () => {
+    const hostile = { ...pr('checks-failing', 7), repo: 'o/r\x1b]8;;http://x\x07\n<b>x</b>' };
+    const text = rowText(row({ prs: [hostile], chip: chip('checks-failing', 1) }), now, null);
+    assert.equal(text.chip?.tip, 'o/r <b>x</b> #7 · failing');
   });
 
   test('a bad time gives no age, and nothing throws', () => {
