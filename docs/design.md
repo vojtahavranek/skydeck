@@ -458,7 +458,7 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 |---|---|
 | `skydeck` | Interactive list. |
 | `skydeck ls [--all] [--json] [--refresh]` | Print the list. `--refresh` first fetches the pull requests of the sessions it prints that are not merged or closed (7.3). |
-| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
+| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, the ticket address when `ticketUrl` gives one (design-step-2.md 12.5; not in `--json`), launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
 | `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text (or with an empty text), clear. The text is all the arguments after `<ref>`, joined by one space. |
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
@@ -812,7 +812,8 @@ relative (8).
 
 Configuration keys, all optional: `terminal` (`here` or `wezterm`; default `here`), `wezterm.domain`,
 `groupPattern`, `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
-`restoreStartTimeoutSeconds`, `claudeHome`, `claudeCommand`. Unknown keys are an error.
+`restoreStartTimeoutSeconds`, `claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4;
+asked for by the user on 2026-11-15). Unknown keys are an error.
 
 ### 9.2 Database
 
