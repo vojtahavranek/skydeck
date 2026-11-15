@@ -25,6 +25,18 @@
 //   FAKE_SERVE_PAGES        the pages /status reports: a decimal number (default 0), or
 //                           `json:<JSON value>` for a count that is not a whole number
 //                           (`json:"3"`, `json:2.5`, `json:9007199254740993`)
+//   FAKE_SERVE_PAGES_AFTER  `<ms>:<n>`: /status reports n pages once ms have passed since the
+//                           first /status it answered (FAKE_SERVE_PAGES before then): a window
+//                           that comes back, timed from the command's first look, not from its
+//                           own start
+//   FAKE_SERVE_STARTING_MS  /status says `starting: true` for this many ms after `ready`, then
+//                           `false` (default: no `starting` at all, as a server before it)
+//   FAKE_SERVE_WINDOW_EXPECTED_MS  plan C20: /status reports `windowExpectedMs`: this many ms while
+//                           it starts (FAKE_SERVE_STARTING_MS), then counting down from the end of
+//                           its start (`ready`, without a start), null once it is down to 0 or
+//                           reports a page — as the server's page mark does; `json:<JSON value>`
+//                           reports that value as it is (`json:"3000"`, `json:-1`, `json:null`).
+//                           Default: none (a server before stage C)
 //   FAKE_SERVE_STATUS       pages-only: /status answers `{ pages }` and nothing else (an old
 //                           server's answer the command line's client cannot read whole)
 //   FAKE_SERVE_ON_SHUTDOWN  exit (default): after answering, removes server.json, server.pid and
@@ -128,10 +140,11 @@ async function serve(silent: boolean): Promise<void> {
   };
   const terminals = Number(env.FAKE_SERVE_TERMINALS ?? '0');
   const pagesText = env.FAKE_SERVE_PAGES ?? '0';
+  const pages = pagesText.startsWith('json:')
+    ? (JSON.parse(pagesText.slice('json:'.length)) as number)
+    : Number(pagesText);
   const status: StatusAnswer = {
-    pages: pagesText.startsWith('json:')
-      ? (JSON.parse(pagesText.slice('json:'.length)) as number)
-      : Number(pagesText),
+    pages,
     terminals: Array.from({ length: terminals }, (_, i) => ({
       id: String(i).padStart(12, '0'),
       slot: i + 1,
@@ -150,12 +163,13 @@ async function serve(silent: boolean): Promise<void> {
   // A server removes the server.sock a dead server left (S2 5.2); a test's fakes are all its own.
   platform.files.remove(files.serverSock);
   let stop = async (): Promise<void> => {};
+  const timed = timedStatus(pages);
   const handler = controlHandler({
     ping: () => ping,
     status: () =>
       env.FAKE_SERVE_STATUS === 'pages-only'
         ? ({ pages: status.pages } as unknown as StatusAnswer)
-        : status,
+        : { ...status, ...timed.now() },
     tokens: createTokens(platform.clock, platform.randomBytes, () => {}),
     shutdown: () => {
       if (env.FAKE_SERVE_ON_SHUTDOWN !== 'stay') {
@@ -195,5 +209,48 @@ async function serve(silent: boolean): Promise<void> {
     formatPidLine({ pid: platform.pid, procStart, bootId }),
     0o600,
   );
+  timed.ready();
   process.stdout.write('ready\n');
+}
+
+/**
+ * The fields of /status that change with time (FAKE_SERVE_PAGES_AFTER, FAKE_SERVE_STARTING_MS,
+ * FAKE_SERVE_WINDOW_EXPECTED_MS), on the monotonic clock. Before `ready` the start counts as not
+ * begun: the full expectation, and `starting` true when a start is set.
+ */
+function timedStatus(pages: number): {
+  ready(): void;
+  now(): Pick<StatusAnswer, 'pages' | 'starting' | 'windowExpectedMs'>;
+} {
+  const after = /^([0-9]+):([0-9]+)$/.exec(env.FAKE_SERVE_PAGES_AFTER ?? '');
+  const startingText = env.FAKE_SERVE_STARTING_MS;
+  const startingMs = startingText === undefined ? null : Number(startingText);
+  const expectedText = env.FAKE_SERVE_WINDOW_EXPECTED_MS;
+  let readyAt: number | null = null;
+  let firstAsked: number | null = null;
+  return {
+    ready() {
+      readyAt = performance.now();
+    },
+    now() {
+      const at = performance.now();
+      firstAsked ??= at;
+      const pagesNow = after !== null && at - firstAsked >= Number(after[1]) ? Number(after[2]) : pages;
+      const sinceStartDone = readyAt === null ? null : at - readyAt - (startingMs ?? 0);
+      const fields: Pick<StatusAnswer, 'pages' | 'starting' | 'windowExpectedMs'> = {
+        pages: pagesNow,
+      };
+      if (startingMs !== null) fields.starting = sinceStartDone === null || sinceStartDone < 0;
+      if (expectedText === undefined) return fields;
+      if (expectedText.startsWith('json:')) {
+        fields.windowExpectedMs = JSON.parse(expectedText.slice('json:'.length)) as number | null;
+        return fields;
+      }
+      const expected = Number(expectedText);
+      const left =
+        sinceStartDone === null || sinceStartDone < 0 ? expected : expected - sinceStartDone;
+      fields.windowExpectedMs = pagesNow > 0 || left <= 0 ? null : Math.ceil(left);
+      return fields;
+    },
+  };
 }
