@@ -341,7 +341,14 @@ step 2 says. After a restart this wait follows the one above. The cost: after a 
 shutdown with the window left open the entry may still be there (WSL can end before the server's
 next refresh sees the page go), and the first `skydeck window` then waits 7 seconds for a window
 that cannot come; the entry a server that died left is removed by the next server's first refresh
-without a page (plan C20).
+without a page (plan C20). Three named limits (ruled by the plan owner, plan C20, task 81's review
+2): a server replaced within its own expectation (`--restart`, a crash, another `wsl --shutdown`
+within those 7 seconds) has removed the entry at its first refresh, so the next server expects
+nothing and the command opens a second window — no worse than before; the 7 seconds rest on a page
+that tries again at least every 5 seconds, but Chromium wakes a window hidden for more than 5
+minutes only once a minute (6.3), so such a window can come back after the command has opened a
+new one; and the waits add up when a start hangs: 10 and 17 seconds on a cold start, 10, 7 and 17
+seconds after a restart with a page.
 
 When a page is already connected it starts nothing on Windows and says
 `skydeck window: a window is already open`; `--new-window` opens another one anyway (several

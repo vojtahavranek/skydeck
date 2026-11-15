@@ -34,7 +34,7 @@ export interface PageMark {
    *  the server expects a window back while foundAtStart, no page has connected since (`pages`
    *  > 0 seen by update or by this call) and 7 s have not passed: the ms left (a whole number,
    *  never 0 and never more than 7,000: a clock that stepped back does not lengthen it beyond the
-   *  step), else null. `nowNs` and `startDoneNs` are of one clock. */
+   *  step), else null. `nowNs` and `startDoneNs` are of the one clock the server gives it. */
   expectedMs(nowNs: Ns, startDoneNs: Ns | null, pages: number): number | null;
 }
 
