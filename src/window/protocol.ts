@@ -217,7 +217,8 @@ export interface RowPayload {
   elsewhere: ElsewherePayload | null;
   /** S2 7.5: a terminal of the window whose program holds no session yet. */
   starting: boolean;
-  attention: null; // stage B
+  /** S2 12.4: why the row needs you, null when it needs nothing (stage B, plan B 2.3). */
+  attention: AttentionPayload | null;
   stack: null; // stage E
 }
 export interface SectionPayload {
@@ -273,6 +274,10 @@ export interface ListMessage {
     elsewhere: number;
     notRunning: number;
   };
+  /** Plan B7: `count`, the listed rows that need you, whatever the filter or the fold (the title
+   *  bar's count and the window title's `(n)`; such a row is in no field of `counts`); `order`, the
+   *  ids of the rows this page shows that need you, in Ctrl+Shift+J's order (B6). */
+  needYou: { count: number; order: string[] };
   sections: SectionPayload[];
   doneHidden: number;
   banner: null;
@@ -280,6 +285,18 @@ export interface ListMessage {
   selected: SelectedPayload | null;
   /** Known project directories, most recent first (S2 12.6, the new form). */
   dirs: string[];
+}
+/** S2 12.4's three reasons, in their order. */
+export type AttentionReason = 'asks' | 'ended' | 'finished';
+/** S2 12.4: why a row needs you. `detail`: for `asks` the live file's waitingFor, sanitised,
+ *  trimmed and cut to 120 UTF-16 units with `…` (plan B13; null without one, or when it is blank
+ *  once sanitised); else null. `sinceNs`: asks — the file's statusUpdatedAt, else updatedAt;
+ *  ended — window_end_ns; finished — turn_ended_ns; null when not known. Display only (S2 10.2):
+ *  the order is decided by the counter. */
+export interface AttentionPayload {
+  reason: AttentionReason;
+  detail: string | null;
+  sinceNs: NsText | null;
 }
 /** `ch`: the channel number of this terminal's output frames for this page (S2 8.2.4). */
 export interface SnapMessage {
@@ -327,6 +344,16 @@ export interface ByeMessage {
   t: 'bye';
   reason: string;
 }
+/** S2 13, plan B8: a session started to need you while no window had focus; sent to one page.
+ *  `title`: the row's title (sanitised); `detail` as the row's attention's; the page writes the
+ *  words of the notification. */
+export interface NotifyMessage {
+  t: 'notify';
+  sessionId: string;
+  title: string;
+  reason: AttentionReason;
+  detail: string | null;
+}
 export type ServerMessage =
   | ChallengeMessage
   | WelcomeMessage
@@ -337,7 +364,8 @@ export type ServerMessage =
   | ExitMessage
   | ResultMessage
   | NoticeMessage
-  | ByeMessage;
+  | ByeMessage
+  | NotifyMessage;
 
 /** Output frames (S2 8.2.3): byte 1, the channel as 4-byte big-endian, the record's bytes.
  *  RangeError for a channel that is not a whole number 0–2³²−1. */

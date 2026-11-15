@@ -748,6 +748,7 @@ describe('pages: a page that does not read', () => {
         t: 'list',
         nowNs: '1',
         counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
+        needYou: { count: 0, order: [] },
         sections: [],
         doneHidden: 0,
         banner: null,
