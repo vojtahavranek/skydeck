@@ -270,8 +270,15 @@ const readStatus: Reader<StatusAnswer> = (body) => {
     return null;
   }
   const { starting, pages, terminals, python, build, checkout, startedAtNs, envOrigin } = body;
+  const { windowExpectedMs } = body;
   if (
     (starting !== undefined && typeof starting !== 'boolean') ||
+    // Plan C20: a whole number of ms or null; absent from a server of an older build.
+    !(
+      windowExpectedMs === undefined ||
+      windowExpectedMs === null ||
+      isWhole(windowExpectedMs, 0)
+    ) ||
     !isWhole(pages, 0) ||
     !Array.isArray(terminals) ||
     !isObject(python) ||
@@ -301,6 +308,8 @@ const readStatus: Reader<StatusAnswer> = (body) => {
     checkout,
     startedAtNs,
     envOrigin: { dir: envOrigin['dir'], atNs: envOrigin['atNs'] },
+    // Left out when the server sent none: absent and null both mean that it expects no window.
+    ...(windowExpectedMs === undefined ? {} : { windowExpectedMs }),
   };
 };
 
