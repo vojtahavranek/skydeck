@@ -937,8 +937,8 @@ a WSL terminal of your own, run `skydeck window`:
   started while sessions are left (`stopped: no session of this batch started`: a `claudeCommand`
   that the server cannot start would otherwise open a terminal for every session); a busy database
   (`stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the
-  rest`). The sessions it did not open are `not started`. A session whose terminal in the window
-  ended before its start was reported is `failed` at once.
+  rest`). After the first two, the sessions it did not open are reported `not started`. A session
+  whose terminal in the window ended before its start was reported is `failed` at once.
 - **A restore started from the banner cannot be stopped in the window**: `skydeck window --stop`
   ends it (`stopped: the window's server is stopping`); the sessions it already opened go on
   starting, the rest are `not started`. One that `skydeck restore` asked for stops with Ctrl+C in
@@ -991,9 +991,10 @@ there is none) makes the window the place for every command:
   chosen sessions to the server, which runs them as the banner's Restore does. It prints each line
   of the run on stdout as it comes, and `waiting for <n> sessions` when nothing else came for 10
   seconds; after 30 seconds without a line, `skydeck: the window's server stopped answering; run
-  skydeck to see what started`, exit 1. The exit code is the run's (design.md 7.8: 0; 1 when a
-  session failed, timed out or was no longer offered; 5 when the run was stopped), and with 5 it
-  ends with `skydeck: restore stopped before it finished; see above`. Ctrl+C stops the run (the
+  skydeck to see what started`, exit 1. The exit code is the run's (design.md 7.8): 0; 1 when a
+  session failed, timed out or was no longer offered, or the run could not go on (a busy database);
+  5 when it was stopped (for memory, after a batch in which no session started while others were
+  left, by Ctrl+C, by the server's stop), and with 5 it ends with `skydeck: restore stopped before it finished; see above`. Ctrl+C stops the run (the
   window's report says `stopped: the command that asked for it stopped`); the sessions already
   opened go on starting. `--dry-run` asks the server nothing.
 - `R` in the interactive list asks the server to resume the session: `opened <short id> in the
