@@ -1105,6 +1105,7 @@ test('POST /restore answers each line as it is written, in order, while the run 
   });
   assert.equal(head.status, 200);
   assert.equal(head.headers['transfer-encoding'], 'chunked');
+  assert.equal(head.headers['content-type'], 'application/x-ndjson; charset=utf-8');
   assert.equal(head.headers['content-length'], undefined);
   assert.equal(
     head.text,
@@ -1367,4 +1368,39 @@ test('what a restore writes after its promise settled goes nowhere, also while i
   await delay(20);
   (late as (line: RestoreStreamLine) => void)({ line: 'after the asker went' });
   assert.deepEqual(await c.client.ping(), PING);
+});
+
+test('the restore answer ends when the run settles, not at its outcome line', async (t) => {
+  const release = Promise.withResolvers<void>();
+  const fake = fakeLaunch({
+    restore: async (_request, write) => {
+      write({ line: 'restore: 2 sessions' });
+      write(OUTCOME);
+      await Promise.race([release.promise, delay(5000)]);
+    },
+  });
+  const c = await startControl(t, () => ({ launch: fake.launch }));
+  const lines: unknown[] = [];
+  let ended = false;
+  const answer = c.d.platform.net
+    .requestUnix(c.files.serverSock, {
+      method: 'POST',
+      path: '/restore',
+      body: RESTORE_BODY,
+      timeoutMs: 10_000,
+      onLine: (line) => lines.push(JSON.parse(line)),
+    })
+    .finally(() => {
+      ended = true;
+    });
+  await waitFor(() => lines.length === 2);
+  await delay(100);
+  assert.equal(
+    ended,
+    false,
+    'the answer goes on after the outcome line while the run has not settled',
+  );
+  release.resolve();
+  assert.deepEqual(await answer, { status: 200, body: null });
+  assert.deepEqual(lines, [{ line: 'restore: 2 sessions' }, OUTCOME]);
 });

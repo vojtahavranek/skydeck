@@ -2,7 +2,10 @@
 // of mode 0o700 (S2 15.1), so only the user's own processes reach it and no request carries a
 // secret. No request carries a program or an argument list to run: stage C's `POST /resume`, `/new`
 // and `/restore` name a session, or a new session's directory, label, group and flags (plan C3),
-// and the server prepares every launch itself (`ControlLaunch`, task 74).
+// and the server prepares every launch itself (`ControlLaunch`, task 74). An asker keeps its side of
+// the connection open until the answer has ended: Node.js's server ends its own side when the asker
+// half-closes, so a half-closed `/resume` or `/new` gets no answer (its launch still runs), and a
+// half-closed `/restore` is stopped as by an asker that went (C22).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { failureKind } from './auth.ts';
@@ -32,7 +35,9 @@ export interface ControlLaunch {
   resume(sessionId: string): Promise<LaunchAnswer>;
   newSession(request: NewRequest): Promise<LaunchAnswer>;
   /** Calls `write` for each line, the outcome last; the answer ends when it resolves. `closed`
-   *  fires when the asker's connection closes before the answer ended (C22). */
+   *  fires when the asker's connection closes before the answer ended (C22) — also after the
+   *  outcome line was written while the promise has not settled: the restorer stops a run only
+   *  for a close before its outcome (plan C 2.3, `asker`). */
   restore(
     request: RestoreRequest,
     write: (line: RestoreStreamLine) => void,
@@ -73,7 +78,8 @@ interface Answer {
  * (failureKind), never its message.
  *
  * Stage C's routes (plan C2–C5, C22): without `deps.launch` they are 404 `route: unknown` whatever
- * the body, as a server before stage C answers them. With it, a body the parser refuses is 400;
+ * JSON the body holds, as a server before stage C answers them (413 and `body: not UTF-8` stay as
+ * for every route). With it, a body the parser refuses is 400;
  * then, while `launchState()` is not null, 503 `{ error: 'starting' | 'stopping' }` (not logged:
  * a command asks again every 500 ms while the server starts); otherwise `POST /resume` and `/new`
  * answer 200 with what `launch` resolves with, and `POST /restore` answers 200, chunked, with one
@@ -252,7 +258,8 @@ export function controlHandler(
     const path = req.url ?? '';
     const parsed = parseControlRequest(method, path, text);
     if (!parsed.ok) {
-      // Without `launch`, a stage C route is unknown whatever its body (a server before stage C).
+      // Without `launch`, a stage C route is unknown whatever JSON its body holds (a server before
+      // stage C; a body over 64 KiB is 413 and one that is not UTF-8 is 400, as there).
       const kind =
         deps.launch === undefined && method === 'POST' && LAUNCH_PATHS.has(path)
           ? 'route: unknown'
