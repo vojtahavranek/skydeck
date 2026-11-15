@@ -394,6 +394,8 @@ export function createList(root, hooks) {
     },
     true,
   );
+  // (Defensive: in such a sequence no row's `clicks.first` is set and ×n stops its own dblclick,
+  // so nothing would act on it today; a listener added later stays covered.)
   root.addEventListener(
     'dblclick',
     (event) => {

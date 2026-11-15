@@ -582,8 +582,11 @@ test('search and stacks in the list', async (t) => {
       await page.keyboard.press('/');
       await page.keyboard.type('one');
       await untilRows(page, [S1, S2], 'a filter while done ones are shown');
-      await sleep(300);
-      assert.equal(await shownText(page, '#list .list-footer'), '', 'no footer while filtering');
+      await page.waitForFunction(
+        () => document.querySelector('#list .list-footer')?.closest('[hidden]') !== null,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
       await page.keyboard.press('Escape');
       await showsText(page, '#list .list-footer', /^done sessions shown · hide$/);
 
@@ -1015,6 +1018,32 @@ test('search and stacks in the list', async (t) => {
         'terminal',
       );
       assert.ok(!(await sentAfter(page, 'double')).includes('act'), 'nothing resumed');
+
+      // A sequence begun on a row whose second click is on a closed stack's line: no toggle.
+      await page.locator(`#list [data-id="${S1}"] .row-stack`).click();
+      await untilRows(page, [S8, S1], 'closed');
+      const row = await page.locator(`#list [data-id="${S8}"] .row-title`).boundingBox();
+      const line = await page.locator(`#list .list-more[data-head="${S1}"]`).boundingBox();
+      assert.ok(row !== null && line !== null);
+      await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await page.mouse.move(line.x + line.width / 2, line.y + line.height / 2);
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.up({ clickCount: 2 });
+      await sleep(500);
+      assert.deepEqual(await rowIds(page), [S8, S1], 'still closed');
+      assert.deepEqual((await lastView(page))['opened'], []);
+
+      // Each sequence begins afresh: after the clicks on the line above, a double click on a row
+      // that is not running (the head S1) resumes it, as in stage A.
+      await mark(page, 'resume');
+      await doubleClick(page, `#list [data-id="${S1}"] .row-title`, () => Promise.resolve());
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (!(await sentAfter(page, 'resume')).includes('act')) {
+        assert.ok(performance.now() < deadline, 'a double click on S1 resumes it');
+        await sleep(50);
+      }
       await healthy(page, l.problems);
     },
   );
@@ -1027,24 +1056,25 @@ test('search and stacks in the list', async (t) => {
       session(d, S8, 1n * MIN, 'plain run');
       session(d, S1, 2n * MIN, 'ORB-1 first');
       session(d, S2, 3n * MIN, 'ORB-1 second');
-      await untilRows(page, [S8, S1], 'a row and a closed stack');
+      session(d, S3, 4n * MIN, 'plain idle');
+      await untilRows(page, [S8, S1, S3], 'a row, a closed stack, a row');
       await resumeFromList(page, S8);
-      await untilRows(page, [S8, S1], 'S8 under Open');
+      await untilRows(page, [S8, S1, S3], 'S8 under Open');
 
       const badge = `#list [data-id="${S1}"] .row-stack`;
       await page.locator(badge).click();
-      await untilRows(page, [S8, S1, S2], 'a click on ×2 opens it');
+      await untilRows(page, [S8, S1, S2, S3], 'a click on ×2 opens it');
       assert.equal(await keyboardOn(page), 'the terminal');
       await page.locator(badge).click();
-      await untilRows(page, [S8, S1], 'and closes it');
+      await untilRows(page, [S8, S1, S3], 'and closes it');
       assert.equal(await keyboardOn(page), 'the terminal');
 
       await mark(page, 'double');
       await doubleClick(page, badge, () =>
-        untilRows(page, [S8, S1, S2], 'open after the first click'),
+        untilRows(page, [S8, S1, S2, S3], 'open after the first click'),
       );
       await sleep(500);
-      assert.deepEqual(await rowIds(page), [S8, S1, S2], 'still open');
+      assert.deepEqual(await rowIds(page), [S8, S1, S2, S3], 'still open');
       assert.deepEqual((await lastView(page))['opened'], ['ORB-1']);
       assert.equal(await selectedRow(page), S8);
       assert.equal(await keyboardOn(page), 'the terminal');
@@ -1064,8 +1094,22 @@ test('search and stacks in the list', async (t) => {
       await page.mouse.down({ clickCount: 2 });
       await page.mouse.up({ clickCount: 2 });
       await sleep(500);
-      assert.deepEqual(await rowIds(page), [S8, S1, S2], 'not closed');
+      assert.deepEqual(await rowIds(page), [S8, S1, S2, S3], 'not closed');
       assert.ok(!(await sentAfter(page, 'row then badge')).includes('act'), 'nothing resumed');
+
+      // Each sequence begins afresh: a double click on a row that is not running resumes it, as
+      // in stage A, after all the clicks on ×2 above.
+      await mark(page, 'resume');
+      await doubleClick(page, `#list [data-id="${S3}"] .row-title`, () => Promise.resolve());
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (!(await sentAfter(page, 'resume')).includes('act')) {
+        assert.ok(performance.now() < deadline, 'a double click on S3 resumes it');
+        await sleep(50);
+      }
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
       await healthy(page, l.problems);
     },
   );
@@ -1101,8 +1145,8 @@ test('search and stacks in the list', async (t) => {
       await page.keyboard.press('ArrowLeft');
       await untilRows(page, [S1, S3, S5], 'ORB-2 closed');
       assert.equal(await selectedRow(page), S3);
-      await sleep(500);
-      assert.deepEqual(await rowIds(page), [S1, S3, S5], 'Earlier still unfolded');
+      assert.deepEqual((await lastView(page))['unfolded'], ['earlier'], 'Earlier still unfolded');
+      assert.deepEqual(await rowIds(page), [S1, S3, S5]);
       await healthy(page, l.problems);
     },
   );
