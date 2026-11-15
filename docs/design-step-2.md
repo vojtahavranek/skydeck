@@ -2217,12 +2217,15 @@ hidden again, the row gone from the list), no row is selected — the right side
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
 (ruled by the plan owner, plan task 27). One exception, ruled by the lead on 2026-11-15 (the user
 may change it): when this page's own `d` in the list has marked the selected session done — its
-answer came, and the next list no longer has the row, while that session is still the selected
-one (moved away meanwhile, the selection stays where the user put it) — the row after it in the
+answer came, and the list that holds its result (one that arrived since the act was sent, as the
+server sends it before the answer; else the next one) no longer has the row, while that session is
+still the selected one (moved away meanwhile, the selection stays where the user put it) — the row after it in the
 same section is selected, else the one before it in that section, else none; never a row of Open.
 The Undo of that `d` selects the session again once it is back in the list, if the selection is
 still where that `d` left it (the row it selected, or none); if the user moved it meanwhile, it
-stays (ruled for plan D task 37). The header's Done leaves the selection to the main rule. A held
+stays (ruled for plan D task 37). That list decides once: a row it still has (running, under
+Open) moves nothing later either. A named limit: a list that the server pushed just before it read
+the act also counts as holding the result. The header's Done leaves the selection to the main rule. A held
 `d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
@@ -2271,6 +2274,20 @@ refused, the connection is lost or the page refuses it before sending (over a li
 text that is not well formed); its `ok` closes the dialog, except Attach in the pull-request dialog,
 which empties the field and keeps the dialog open so that the new pull request shows in its list
 (ruled for plan D task 37).
+
+After this page's own save of a label, group or note, its key waits for the list that holds the
+result (one that arrived since the act was sent, else the next one: `the label is not here yet;
+press l again`), so that the dialog never starts from the old text and an Enter never writes the
+old label back (the pull-request dialog does not wait). A refusal whose dialog was closed meanwhile
+(Enter, then Esc at once) is shown as a toast, `not saved: <the error>`. While a dialog holds
+changed text, leaving the page in a way the keys do not cover — the tab's reload button, closing
+the window, the page's own reload when a reconnect meets a server of another build (15.3) — asks
+first, with the browser's own prompt; staying keeps the dialog and its text. In the last case the
+page then stays not connected (a save says `skydeck's server is not connected; try again`) until
+it is reloaded: copy the text, then reload. Two named limits (ruled for plan D task 37): text typed
+between an F5 on an unchanged dialog and the server's proof is lost with the reload, and the
+page's own reload on another build is not held back as the reload keys are: with changed text, only
+that prompt stands between it and the text.
 
 ### 12.10 Done
 
