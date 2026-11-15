@@ -16,7 +16,7 @@ import { serverKeepers } from '../test/helpers/registry.ts';
 import { readRecords } from '../test/helpers/standin.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import type { ServerSandbox } from '../test/helpers/window.ts';
-import { browser, newPage } from './helpers/browser.ts';
+import { browser, newContext, newPage } from './helpers/browser.ts';
 import {
   PAGE_WAIT_MS,
   RECORDER,
@@ -1240,11 +1240,7 @@ test('the terminal view', async (t) => {
     async (t) => {
       const started = await startTestServer(t);
       for (const ratio of [1, 1.25, 1.5, 2]) {
-        const context = await chromium.newContext({
-          timezoneId: 'UTC',
-          locale: 'en-US',
-          deviceScaleFactor: ratio,
-        });
+        const context = await newContext(chromium, { deviceScaleFactor: ratio });
         t.after(() => context.close());
         const page = await context.newPage();
         await page.goto(pageUrl(started.server.port));
@@ -1412,11 +1408,7 @@ test('the terminal view', async (t) => {
     async (t) => {
       const started = await startTestServer(t);
       for (const ratio of [1, 1.25, 1.5, 2]) {
-        const context = await chromium.newContext({
-          timezoneId: 'UTC',
-          locale: 'en-US',
-          deviceScaleFactor: ratio,
-        });
+        const context = await newContext(chromium, { deviceScaleFactor: ratio });
         t.after(() => context.close());
         const page = await context.newPage();
         await page.goto(pageUrl(started.server.port));

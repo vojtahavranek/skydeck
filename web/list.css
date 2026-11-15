@@ -1,5 +1,6 @@
 /* The list (S2 12.1, 12.2; plan task 27): the filter, the sections, the rows of one and two lines,
-   the footer, and the title bar's counts it writes into #counts. Colours are style.css's. */
+   the footer, and the title bar's counts it writes into #counts; stage B's marks of attention
+   (plan B task 55). Colours are style.css's, those of attention attention.css's. */
 
 /* The list scrolls its rows; the filter stays above them and the footer below. */
 .list-zone .list {
@@ -292,4 +293,52 @@
 }
 .counts .count[data-state='waiting'] {
   color: var(--wait);
+}
+
+/* Stage B (S2 12.4, plan B13): a row that needs you has a coloured left bar, in its reason's
+   colour (attention.css's), a bold title, and its reason's line in that colour. */
+.list-row[data-attention]::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: -3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--need);
+}
+.list-row[data-attention='finished']::before {
+  background: var(--need-finished);
+}
+.list-row[data-attention='ended']::before {
+  background: var(--need-ended);
+}
+.list-row[data-attention] .row-title {
+  color: var(--text);
+  font-weight: 700;
+}
+.list-row[data-attention='asks'] .row-state {
+  color: var(--need);
+}
+.list-row[data-attention='finished'] .row-state {
+  color: var(--need-finished);
+}
+.list-row[data-attention='ended'] .row-state {
+  color: var(--need-ended);
+}
+/* The count of those that need you, first in the title bar: its dot is drawn here, not a
+   character of its text (B13), in the rows' attention colour. */
+.counts .count[data-state='need-you'] {
+  color: var(--need);
+  font-weight: 600;
+}
+.counts .count[data-state='need-you']::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--need);
+  vertical-align: 1px;
 }

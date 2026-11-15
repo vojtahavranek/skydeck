@@ -3,7 +3,8 @@
      8.2.1); no script is inline (the policy allows none). Regions: the title bar, the bars of S2
      6.3 and 8.2.2, the list zone (task 27), the right side — header and cards (task 29), the
      terminal (task 28) —, the key bar, the key help (task 29); stage D's dialogs (`#editor`) and
-     Undo toast (`#toast`) over the page (plan D task 37). -->
+     Undo toast (`#toast`) over the page (plan D task 37); stage B's `Turn on notifications` in the
+     title bar (`#notify-on`, plan B task 55). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -15,6 +16,7 @@
     <link rel="stylesheet" href="/assets/__VERSION__/web/terminal-view.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/cards.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/edit.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/attention.css" />
     <script type="module" src="/assets/__VERSION__/web/app.js"></script>
   </head>
   <body>
@@ -25,6 +27,7 @@
         <span class="spacer"></span>
         <span class="title-notice" id="tick" hidden></span>
         <span class="title-notice warning" id="keepalive" hidden>WSL is not kept running</span>
+        <button class="notify-on" id="notify-on" type="button" hidden>Turn on notifications</button>
       </header>
       <div class="bar gone" id="gone" role="alert" hidden>
         <span id="gone-text"></span>

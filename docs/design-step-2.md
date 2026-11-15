@@ -1700,10 +1700,10 @@ something, a live file or its trust changed, another process committed to the st
 `list` to every page whose view model changed. An edit a page made (12.5) does not wait for that:
 the server's own writes move no change mark, so after one the server loads the rows again and
 sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
-of 12.5 that saved something; a reload that fails is logged by kind and left to the next refresh
-(stage D, plan D7). A tick that fails is logged and shown once to the pages; the next tick tries
-again. The server's store connection checks the schema version at the start of every write
-transaction, and before every write that is a single statement; when the
+of 12.5 that saved something or failed after it may have; a reload that fails is logged by kind
+and left to the next refresh (stage D, plan D7). A tick that fails is logged and shown once to the
+pages; the next tick tries again. The server's store connection checks the schema version at the
+start of every write transaction, and before every write that is a single statement; when the
 store is newer than the server knows (a command of an updated checkout migrated it, 16.5), the
 write is not made and the server stops (5.5) with `bye "skydeck was updated; run skydeck window"`.
 A tick between the migration and the next write therefore writes nothing into the migrated store.
@@ -1759,7 +1759,7 @@ the first time one of them is known and never removed.
 | `window_alarm` | The time a used launch token was presented a second time (8.2.2); cleared by `--new-secret`. Launch tokens themselves are never stored. |
 | `window_launching` | The lock of the one command that starts Edge (5.1). |
 | `attention_seq` | The counter above. |
-| `window_restore_dismissed` | The boot id whose restore the user dismissed (12.7). |
+| `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 | `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; the server leaves it as it is when it stops or dies, so that the next server knows that a window may come back. |
 
 ### 10.3 When a turn ends
@@ -1945,7 +1945,19 @@ gives them back when its program never started (7.8).
   `stopped: no session of this batch started`, the rest `not started` —, because a `claudeCommand`
   that cannot start (the server's `PATH` after a boot) would otherwise open a keeper for every
   session in turn. A last (or only) batch that starts nothing ends the run as any run with
-  failures. Its report lines go to the banner. One restore runs at a time.
+  failures. **One restore runs at a time** in the server, whoever asked for it (a page or a
+  command, 11.4): another request meanwhile is refused with `a restore is already running; wait
+  until it has finished`, and a refused request is no run — only its asker gets that line, no page
+  does. Every report line of every run goes to every page (12.7), and **every run ends with exactly
+  one line** `restore finished: <n> started, <n> timed out, <n> failed, <n> not started` (the parts
+  that are 0 left out; `restore finished: nothing was started` when all are), also after a stop of
+  any kind — its `timed out` lines for the sessions still waited for, the `stopped:` line and the
+  `not started` lines come before it — and after a run that cannot begin (the boot id unreadable,
+  the store busy: its line first). A run that a busy store ends says `stopped: skydeck's database
+  is busy; press Restore again (or run skydeck restore) for the rest`; one that fails otherwise
+  says `stopped unexpectedly (<kind>); the sessions it opened go on starting: run skydeck to see
+  which`, logged by kind. Whatever ends a run, the terminals it opened go on starting their
+  sessions, and a session it still waited for keeps its lock (its terminal may still start it).
 
 ### 11.4 `skydeck resume` (and `new`, `restore`) in a terminal while the window runs
 
@@ -1990,14 +2002,23 @@ gives them back when its program never started (7.8).
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
   sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
   after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
-  terminals start at the window's size and a start dialog can be answered. The server takes design 7.8's
-  set from freshly refreshed rows, keeps the entries the user selected (an id no longer in the set
-  is reported `failed <short>: no longer offered for restore`), and runs `runRestore` with the
-  window terminal (11.3). The command prints each report line as it arrives and exits with design
-  7.8's code for the outcome. `--dry-run` asks the server nothing. The command asks the server for
-  `GET /ping` before it plans or prompts, so "the window is not running" comes before any
-  question. While a restore runs, the server sends a line at least every 10 seconds (`waiting for
-  <n> sessions` when nothing else happened); a command that hears nothing for 30 seconds says `the
+  terminals start at the window's size and a start dialog can be answered. The server takes
+  design 7.8's set from freshly refreshed rows, keeps the entries the user selected (an id no
+  longer in the set is reported `failed <short>: no longer offered for restore`), and runs
+  `runRestore` with the
+  window terminal (11.3), the selected entries in the set's order. Each terminal starts at the area
+  the page that had focus last reported (8.2.6), read when that terminal is opened; the
+  configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`)
+  is the one the server read at its start. The command prints each report line as it arrives and
+  exits with design 7.8's code for the outcome. **A restore asked for so stops when its command
+  goes**: when the command's connection closes before the outcome (Ctrl+C, as in step 1), the run
+  stops at its next step — `stopped: the command that asked for it stopped`, the sessions already
+  opened go on starting, the rest are `not started`, then the finished line (to the pages); the
+  server lives on. A command that goes after its outcome changes nothing. `--dry-run` asks the
+  server nothing. The command asks the server for `GET /ping` before it plans or prompts, so "the
+  window is not running" comes before any question. While a restore runs, the server sends a line at least every 10 seconds (`waiting for
+  <n> sessions` when nothing else happened, `n` the selected sessions without an outcome yet; to
+  the command only, not to the pages); a command that hears nothing for 30 seconds says `the
   window's server stopped answering; run skydeck to see what started` and exits 1.
 
 ## 12. What the window shows
@@ -2043,6 +2064,11 @@ rule (4.3; stage B, plan B7).
 - A running session has two lines: the first as below, the second its state line (`working 4m`,
   `needs you · permission · Bash · 3m`, `finished · not seen · 2m`, `running in another
   terminal`, `starting…`).
+- A row that needs you (12.4) has two lines whatever its state, an ended one that is not running
+  too: the second is its reason, in place of the state line — `needs you · <detail> · 3m` (`needs
+  you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` —,
+  its age from the time 12.4 names, left out while that time is not known; the first line then
+  has no age (stage B, plan B13).
 - A session that is not running has one line: state icon, the ticket key (dim, monospaced) and the
   title, marks (`crashed`, `crashed mid-turn`, `expires 3d`, `expired`, `done`: design 6.3's marks
   in words), the pull-request chip (12.3), `✎` when it has a note, and its age. Stage A shows every
@@ -2178,7 +2204,26 @@ Ctrl+Shift+J selects the next session that needs you: those that ask, the longes
 then those that ended; then those that finished, oldest first. Pressed again it goes on; after the
 last it starts over.
 
+How the page goes (stage B, plan B14): Ctrl+Shift+J selects the id of the list's `needYou.order`
+(8.2.3, the order above over the rows this page shows) after the selected one, else the first, and
+after the last the first again, as a slot chord selects (the session's terminal takes the keyboard
+when it has one, else the list). With none, the key bar says `no session needs you`; when only the
+selected one needs you it stays selected and the key bar says `no other session needs you`. When
+`needYou.count` is greater than the order — the filter or the folded Earlier hides some —, the key
+bar says how many instead: `2 more that need you are hidden by the filter or the fold` (`1 more that
+needs you is hidden …`), with none shown `2 that need you are hidden by the filter or the fold`.
+While a dialog of stage D is shown it is a window chord like the others (12.9): it says `close the
+edit first (Esc)` and selects nothing.
+
 A row that needs you has a coloured left bar, a bold title and the reason on its second line.
+
+The page's marks and words (stage B, plan B13): the bar and the reason's line are in the reason's
+colour — an ask in the waiting colour, a finished turn in green, an end of the window in the crash
+colour (the mockup's) —, the line is 12.2's, and the title bar's counts start with `3 need you`
+(`1 needs you`), with a dot before it that the style sheet draws in the colour of an ask (a mark,
+not a character of the text); the window title is `(3) skydeck`, and `skydeck` while none needs
+you. A list without `needYou`, or a row without `attention` (a server of stage A), shows no count
+and no mark.
 
 ### 12.5 The header
 
@@ -2210,10 +2255,11 @@ refused with the same message; a note is edited in a text box instead of `$VISUA
 began ("the note was changed elsewhere while you edited it; your text is still in the box"); `+ PR`
 attaches with origin `manual` and fetches at once (design 7.3). Done shows an Undo toast. An edit
 acts only on a session the store knows (a `new` session not started yet: "this session has not
-started yet; edit it once it runs"); a note whose stored text already is the text sent is saved
-with nothing written (a save sent again after its answer was lost), and between two windows label,
-group and done are last-write-wins, as two commands are. That fetch, and ↻'s explicit refresh,
-run in the background on the server, so that the dialog answers at once: one at a time per
+started yet; edit it once it runs"); a note whose stored text already is the text sent, or whose
+text stores nothing (empty or white space) while there is no note, is saved with nothing written (a
+save sent again after its answer was lost, also one that cleared the note), and between two windows
+label, group and done are last-write-wins, as two commands are. That fetch, and ↻'s explicit
+refresh, run in the background on the server, so that the dialog answers at once: one at a time per
 server, a request the running one already covers joining it and every other waiting to run
 together when it ends, all of them ended by the server's stop; one that fails shows as `can't
 read`, as after `pr add`. A note saved in the window removes the note file a failed editor kept,
@@ -2298,6 +2344,35 @@ show under Open as `starting…` and the banner reports each line of the run (st
 failed, stopped for memory). "Not now" stores the boot id (10.2): the banner does not come back for
 that boot, and the switcher still offers "Restore 3 sessions from <time>" until the next WSL
 restart.
+
+The banner is the view model's (4.3: the page decides no rule). It offers design 7.8's default set
+of the latest earlier boot, in list order, each session once, every text sanitised as the list's
+are; the last activity is that boot's last event (11.1). An earlier boot whose id is not of the
+form of `/proc/sys/kernel/random/boot_id` (a lower-case UUID) gets no offer: "Not now" could not
+name it. "Not now" names the boot the banner offers and is stored only when that is still the one
+offered (otherwise `this offer to restore is no longer shown`, nothing stored); while it is, the
+banner is not shown, and the switcher still finds the offer. The server makes the banner again only
+when its rows, the dismissal or whether a restore runs changed. While a restore runs — asked for by
+any page or command — the banner says so and nothing more can be started from it. It has no Stop
+control: `skydeck window --stop` ends a restore started from it (the sessions it opened go on); a
+Stop in the banner is a follow-up candidate.
+
+The page keeps the report lines it receives (`notice restore-progress`), as text, at most the last
+200, in a report under the banner's place. A line that comes after a `restore finished:` line starts
+a new report; no other line is a boundary (11.3: every run ends with exactly one). The report is
+drawn while it holds lines, whatever the banner says — none, or not shown: a restore asked for by a
+command, or from the switcher after "Not now", shows its report too — and after its finished line
+it has a × that removes it. A page that connects during a run sees that one runs and the lines from
+then on (a named limit). The banner and the report together take at most 40 % of the list zone's
+height and scroll inside it, so that the filter and the list keep their room. Their controls take
+no keyboard on a mouse click, as the page's other controls; "Restore" and "Not now" act once — not
+while their own `act` waits, not on a key's auto-repeat.
+
+The banner lies in the list zone above the list, in the list's width: it takes height from the list
+(the list scrolls under it), never width, so the right side, the header's one height and every
+terminal's area stay as they are — its coming and going sends no `resize`. A restore selects
+nothing and moves no keyboard, in any page, also while a dialog is shown: its sessions are listed
+under Open, and a command's restore does not move the window's selection either.
 
 ### 12.8 Search
 
@@ -2508,6 +2583,32 @@ taskbar button show it is check W3. Low priority: stage E (19).
   Bash`, `finished`, `ended unexpectedly`), both plain text; `tag` = the session id, so a newer
   notification for a session replaces the older one. A click focuses the window and selects the
   session.
+- How the page does it (stage B, plan B15, B16). The permission is asked only by a click on `Turn
+  on notifications`, in the title bar while the API exists and its permission is `default`; the
+  item follows a permission changed in the browser's settings when the window comes back to the
+  front or a list comes. A held key asks once: its auto-repeats on the item do nothing. Pressed
+  from the keyboard and answered at once (a policy that denies), the keyboard goes back to the
+  zone's holder and a held Enter acts on nothing there (12.9). A `notify`
+  is shown only with the permission `granted`, never for the session that is selected while the
+  page has focus: its title is the session's title, its body `asks: <detail>` (`asks` without a
+  detail), `finished` or `ended unexpectedly`, both sanitised and nothing added — the detail is the
+  server's, cut at 120 units (12.4) —, and its `tag` the session id. A click calls `window.focus()`,
+  closes the notification and goes through the gate of a window chord (12.9): it selects the
+  session, or while a dialog is shown says `close the edit first (Esc)` and selects nothing. A
+  session that this page's list does not show (the filter, the folded Earlier) and that has no
+  terminal of the window is not selected either: the key bar says `that session is hidden by the
+  filter or the fold`, and the selection, the right side and what the page reports stay as they
+  were — the pane would be empty, and a focused page's selection is seen after 1.5 s, which would
+  clear a mark the user never saw (ruled on review 2 of plan B task 55; showing a selected session
+  the list hides is stage E's). The
+  page closes a session's notification once that session no longer needs you: at a list that holds
+  the session's row without attention, or in which nothing needs you (`needYou.count` 0); a session
+  the list does not show (the filter, the folded Earlier) keeps its notification until a list shows
+  its row (ruled). Best effort: what Windows does with a closed notification is check W11. Named
+  limits: a notification whose session changes its reason (it asked, then finished) keeps the words
+  it was shown with, since only a start notifies; and one shown before the page reloads is not
+  closed by the new page. What a notification shows — the session's title and an ask's detail — is
+  the user's to judge on a shared screen (ruled).
 - No notification for the session that is selected in a focused window, and none while the page
   has no permission.
 - Permission is asked once, on a user gesture: a "Turn on notifications" item in the title bar
@@ -3028,6 +3129,17 @@ In the browser suite, besides those:
   server is back, whether the worker still answers the next load (the 404 of 15.3) is recorded, so
   that W25 and 15.3 can be settled. Recorded in Chromium (plan task 26): it does — the worker
   answers the next loads, and an update check that gets the 404 fails and leaves it registered.
+
+No test shows a desktop notification or asks for a permission (stage B, plan B17), whatever a
+server sends: every browser context of the suite is made by `newContext` of
+`test-page/helpers/browser.ts` (and `newPage` with it), which gives its pages an inert
+`Notification` — its permission `denied`, `requestPermission` answers `denied` and asks nothing, a
+notification made anyway shows nothing — unless a recording double is there, and in any case a
+service worker's `showNotification` that refuses. The cases about notifications install one, and a double of
+`document.hasFocus` (`test-page/helpers/notification.ts`); the double sets a marker, so that either
+order of the two init scripts ends with it (Playwright orders a context's and a page's init scripts
+in no defined way). A case pins that no context is made elsewhere under `test-page/`, and no test
+grants a permission through Playwright.
 
 ### 17.5 Where the tests are, and what CI runs
 

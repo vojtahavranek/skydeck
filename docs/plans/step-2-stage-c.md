@@ -166,7 +166,7 @@ scheduled around it:
 | Test file | Task | What it does |
 |---|---|---|
 | `test/window/protocol.test.ts` | 70 | new cases at the end; the three routes leave the "no route" list and `restore`, `dismiss-restore` the case of unknown kinds; no fixture changes (`banner: null` still type-checks) |
-| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end, and the hostile case's `restore` entry made malformed; 72: new cases at the end, every existing case unchanged |
+| `test/window/actions.test.ts` | 70, 72 | 70: one case at the end, and the hostile case's `restore` entry made malformed; 72: new cases at the end, every existing case unchanged but 70's interim one, which becomes the case without the deps |
 | `test/window/view/build.test.ts` | 73 | `banner.ts` in the pinned file list; nothing else |
 | `test/window/server.test.ts` | 80 | one line (about 549): the refusal's new words `its resume lock was taken over` |
 | `test-page/helpers/shell.ts` | 75 | a new function `bannerWorld` after `actsWorld`; `scriptedList`, the worlds and `MINIMAL_MODULES` unchanged |
@@ -195,7 +195,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C3 | The bodies: `POST /resume` `{ sessionId }`; `POST /new` `{ dir, label, group, flags }` with `label` and `group` null when the option was not given and passed to `prepareNew` exactly as the command passes them (a blank `--label ' '` is refused, unlike the window's form, S2 12.6), `flags` the words after `--` as an array (no splitting); `POST /restore` `{ sessionIds, all }` with 1–1,000 distinct session ids. Every session id passes `isSessionId`, as `act resume`'s does. Strings well formed; no NUL in `dir` or a flag; `dir` 4,096 bytes, `label` and `group` 1,024, at most 1,000 flags; the body's 64 KiB bounds the rest. An unknown or missing field is 400. | S2 8.3: fixed fields, no program, no argument list; a prompt after `--` is the user's and is passed on (design 7.7). | 70 (8.3) |
 | C4 | While the server starts (its upgrade answers 503) the three routes answer 503 `{ error: 'starting' }`, and the client asks again every 500 ms within its answer time; once its stop has begun, 503 `{ error: 'stopping' }`, which the command reports (`the window's server is stopping; run skydeck window, or use --here`, exit 1). | Before its keepers are found the server does not know its terminals (S2 8.2.1's reason for 503): the "already open" rule could not see one. | 70 (8.3) |
 | C5 | `POST /restore` answers 200 with JSON lines (2.2 `RestoreStreamLine`): `{ "line": … }` per report line, `{ "line": "waiting for <n> sessions" }` after 10 s without one (`1 session`), and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore is already running, the boot id unreadable, the store busy) is the same stream: its line, then an outcome with code 1. `code`: 5 when a stop ended the run — the memory check, the server's stop, the asker's close (C22), or C23's empty batch with entries left (ruled on review A's re-check) —, else 1 when any selected session failed, was not offered any more or timed out, else 0 (design 7.8's codes). | S2 8.3 and 11.4: a stream of lines, the outcome last, a line at least every 10 s. One reading path for the client. | 70 (8.3) |
-| C6 | One restore runs at a time in the server, whoever asked (a page or a command). Another request meanwhile is refused with `a restore is already running; wait until it has finished`: `act restore` answers it as its result, `POST /restore` as its one line. `act restore` answers at once (`ok`, no lines) once the run has begun; every report line of every run, whoever asked, goes to every page as `notice restore-progress` (its text sanitised). **Every run ends with exactly one line `restore finished: <n> started, <n> timed out, <n> failed, <n> not started`** (the parts that are 0 left out; `restore finished: nothing was started` when all are 0), also after a stop of either kind — the memory stop and the signal: their `timed out …` lines for the sessions still waited for, then `stopped: …`, then `not started …`, come before it — and after a run that cannot begin (its refusal line first). Heartbeats go to the command line only. | S2 11.3 ("one restore runs at a time"), 12.7 ("the banner reports each line of the run"), 8.2.3's `restore-progress`. One end mark is the page's only boundary between two reports (C10; ruled on review B). A result that waited for the whole run (minutes) would be lost by a page that reconnects meanwhile. | 73 (11.3, 12.7) |
+| C6 | One restore runs at a time in the server, whoever asked (a page or a command). Another request meanwhile is refused with `a restore is already running; wait until it has finished`: `act restore` answers it as its result, `POST /restore` as its one line. `act restore` answers at once (`ok`, no lines) once the run has begun; every report line of every run, whoever asked, goes to every page as `notice restore-progress` (its text sanitised). **Every run ends with exactly one line `restore finished: <n> started, <n> timed out, <n> failed, <n> not started`** (the parts that are 0 left out; `restore finished: nothing was started` when all are 0), also after a stop of either kind — the memory stop and the signal: their `timed out …` lines for the sessions still waited for, then `stopped: …`, then `not started …`, come before it — and after a run that cannot begin (its refusal line first). **A refused request is no run** (ruled on review A's re-check, F1): while one runs (or once the server's stop began), nothing goes to the pages — its asker alone gets its line and the outcome —, so no `restore finished:` line ends the running run's report. Heartbeats go to the command line only. | S2 11.3 ("one restore runs at a time"), 12.7 ("the banner reports each line of the run"), 8.2.3's `restore-progress`. One end mark is the page's only boundary between two reports (C10; ruled on review B). A result that waited for the whole run (minutes) would be lost by a page that reconnects meanwhile. | 73 (11.3, 12.7) |
 | C7 | The restore's set is taken on freshly refreshed rows at the moment it starts (`refresh`, then `restorePlan`, 2.3), design 7.8's default set for the banner and `all` as asked over `server.sock`; the selected ids are kept in the set's order, and an id not in the set is reported `failed <short>: no longer offered for restore` before the run. Each terminal's first size is the area the page that had focus last reported, else 120 × 40, read when that terminal is opened (S2 8.2.6). The server's configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`) is the one it read at its start. | S2 11.4 and 8.2.6 say it; the configuration is the server's like every launch it makes (S2 5.2). | 73 (11.4) |
 | C8 | `runRestore` gains optional hooks (C23 adds `stopAfterEmptyBatch` to these three) and the outcome of each report line (2.3, `RestoreHooks`): `refuse` before the guard (the window's "already open"), `gone` at every look of the wait — a session whose window terminals have all ended, were lost, were not started or were closed before restore saw its start is reported `failed <short>: <reason>` at once and restore's own lock (its last renewed value) is given back —, and `signal`, with which the server's stop ends the run at its next step (`stopped: the window's server is stopping`, the rest `not started`). The command passes none and nothing changes for it. | S2 11.1's rule must hold for restore; a window terminal that ended is known to the server, where a tab is not, so waiting the full `restoreStartTimeoutSeconds` would only make the user wait; the server's stop must not leave a restore writing into a closed store. Question 1. | 71 (4.4, 11.1, 11.3) |
 | C9 | The banner is the view model's (`bannerPayload`, 2.3): null when design 7.8's default set is empty and no restore runs; otherwise its payload with `shown` false once the user said "Not now" for its earlier boot (the page then shows nothing; stage E's switcher still finds the offer) and `running` while any restore runs. `dismiss-restore` names the earlier boot whose sessions the banner offers (`banner.bootId`) and stores it in `kv` `window_restore_dismissed` only when it is the banner's current one (else `this offer to restore is no longer shown`, nothing stored). The server computes it from the tick's rows, again only when the rows array, the dismissal or `running` changed (one read of the events each time). | S2 12.7 and 10.2: "the user has not dismissed it for that boot", and the switcher's offer after "Not now". The page decides no rule (S2 4.3). | 70 (8.2.3), 73 (12.7, 10.2) |
@@ -364,15 +364,20 @@ export interface Launches {
   resume(sessionId: string, size: Size): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
   /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
-   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. */
+   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. Never
+   *  throws: a hub that cannot be read gives `the window's terminals could not be read (<kind>)`. */
   refusal(sessionId: string): string | null;
   /** C8: null while a terminal of the session may still run; else why it cannot start any more —
-   *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost),
+   *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost, once
+   *  the program its keeper reported is gone by design 5.5: null while it may live),
    *  `claude ended before the session started (status <n>)` / `(signal <n>)`, `its terminal was
-   *  closed` (none listed). */
+   *  closed` (none listed). Never throws: null when the hub cannot be read. */
   gone(sessionId: string): string | null;
   /** The terminal restore opens with (size read once, when built): its open(spec) closes the
-   *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. */
+   *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. A
+   *  factory that throws: its open fails with `timedOut: false` (nothing was spawned). A spec that
+   *  is not a resume: `restore starts only resumes`, `timedOut: false`, nothing closed or opened
+   *  (ruled: restore never starts a new session). */
   restoreTerminal(size: Size): Terminal;
 }
 /** Throws only what is not a refusal: a busy store (isBusy) and unexpected errors; callers map them. */
@@ -387,7 +392,11 @@ export function createLaunches(deps: LaunchesDeps): Launches;
 ```ts
 // src/window/view/banner.ts — task 73; pure
 /** C9 over the plan of the tick's rows (null when it could not be made), the stored dismissal and
- *  whether a restore runs. */
+ *  whether a restore runs. The entries: the plan's of its earlier boot, each session once (stage
+ *  E's switcher counts them), every text sanitised as the list's; no offer for an earlier boot
+ *  whose id is not a lower-case UUID (`dismiss-restore` could not name it). No offer: null, or
+ *  while a restore runs `{ bootId: null, lastActivityNs: null, entries: [], shown: true,
+ *  running: true }`. */
 export function bannerPayload(input: { plan: RestorePlan | null; dismissedBootId: string | null; running: boolean }): BannerPayload | null;
 
 // src/window/restorer.ts — task 73
@@ -412,8 +421,10 @@ export interface Restorer {
    *  filtered, runRestore with the hooks (stopAfterEmptyBatch on) and its signal — and returns at
    *  once. `write` gets every line, the heartbeats, and the outcome last; `done` resolves when the
    *  run is over. `asker` (C22, a command's connection): when it fires before the outcome, the run
-   *  stops with the reason `the command that asked for it stopped`. Every run, also a refused or
-   *  stopped one, ends with exactly one `restore finished: …` line to `progress` (C6). */
+   *  stops with the reason `the command that asked for it stopped`; after it, it changes nothing.
+   *  Every run, also one that cannot begin or is stopped, ends with exactly one `restore
+   *  finished: …` line to `progress` (C6). A refused request is no run (ruled, F1): its asker
+   *  alone gets its line and the outcome, nothing goes to `progress`. */
   start(request: RestoreRequest, write?: (line: RestoreStreamLine) => void, asker?: AbortSignal):
     { ok: true; done: Promise<void> } | { ok: false; error: string };
   /** C9. */
@@ -585,7 +596,7 @@ The rules of the requests that start programs, and the test that holds each:
 | Only the user's own processes reach the routes | stage A's `test/window/control.test.ts` "server.sock has mode 0o600, in the runtime directory of mode 0o700" (unchanged) |
 | No request carries a program, an argument list or a path the server runs | 70: `protocol.test.ts` "the stage C routes refuse every field they do not define (argv, program, cwd, command, env)"; 74: `server-launch.test.ts` "a body with argv, program, cwd, command or env is 400 and no keeper is spawned" |
 | The program is `claudeCommand`, the arguments `buildResumeCommand`'s or `buildNewCommand`'s | 74: "POST /resume runs buildResumeCommand's argv with claudeCommand in the session's directory"; "POST /new runs buildNewCommand's" |
-| `new`'s directory and flags checked as `skydeck new` checks them | 74: "POST /new refuses what skydeck new refuses, with the same lines and code" |
+| `new`'s directory and flags checked as `skydeck new` checks them | 72: `launches.test.ts` "what skydeck new refuses is refused with code 2 and the command line's own message"; 74: "POST /new refuses what skydeck new refuses, with the same lines and code" |
 | The guard on freshly refreshed rows, the boot-id refusal, the lock | 72: `launches.test.ts` "resume goes through prepareResumeById"; 74: "two POST /resume of one session at once start one keeper" |
 | The window's own rule (already open) | 72: "resume and refusal(): already open while a terminal may still run"; 74 `server-restore.test.ts` "restore does not open a second terminal for a session the window is starting" |
 | Every restored session through the guard and its lock on fresh rows; batches; memory | 71: `restore.test.ts` (step 1's cases, unchanged, and the hooks); 74: "act restore starts the banner's sessions, restoreBatch at a time" |
@@ -879,10 +890,14 @@ exit codes), and give `act restore` and `act dismiss-restore` their final cases.
   its own deps and map `Launched` to a result exactly as `launched()` and `refusedBy()` do today;
   `guarded`, `terminalsOf`, `giveBackLock` and `closeEnded` move to `launches.ts` — whatever stage
   D's cases call of them (D 36's not-started refusal looks the hub up by session) stays callable
-  from `actions.ts`, kept there or re-exported from `launches.ts`; `restore` →
-  `deps.restore(sessionIds)`, `dismiss-restore` → `deps.dismissRestore(bootId)`, each answering
-  `ok` with no lines or `ok: false` with its error; absent → `skydeck cannot do that action`)
-- Test: `test/window/actions.test.ts`
+  from `actions.ts`, kept there or re-exported from `launches.ts` (as built: D's cases call none
+  of them, so all four moved); `restore` → `deps.restore(sessionIds)`, `dismiss-restore` →
+  `deps.dismissRestore(bootId)`, each answering `ok` with no lines or `ok: false` with its error;
+  absent → `skydeck cannot do that action`, nothing logged; `NOT_YET` and its line go, since no
+  kind is left for it ("Tasks 36 and 70: who holds `NOT_YET`"); the file's header comment names
+  stage C's kinds and `launches.ts`)
+- Test: `test/window/actions.test.ts` (task 70's interim case "restore and dismiss-restore are
+  known but not acted on yet" becomes the case without the deps; new cases at the end)
 
 **Behaviour.** `resume`: the window's refusal (`refused`, code 4), then `prepareResumeById` (a
 SkydeckError → `refused`, its `exitCode`, its message lines), `closeEnded`, `launchPrepared` with
@@ -893,9 +908,43 @@ blank field), then `launchPrepared`. A busy store and unexpected errors are thro
 which answers them (actions: stage A's texts; the server: C2's). `gone` reads the hub's terminals
 of the session as `refusal` does.
 
+As built, with the rulings of the lead's start message for this task:
+- **`/new` goes only through `prepareNew`.** Task 70's routes pass `label`, `group`, `dir` and
+  `flags` on raw (a label `--dangerously-skip-permissions`, an escape sequence, a line break, a
+  blank label, an empty or relative `dir`, `--resume <id>` among the flags all pass the parser):
+  `newSession` hands them to `prepareNew` exactly as `skydeck new`'s options reach it
+  (`cleanLabel`, `cleanGroup`, `refuseSessionFlags`, `refuseDirectory`), nothing is checked a
+  second time with another rule, and every refusal is the command line's own message (code 2).
+  The program is always the configured `claudeCommand` with `buildResumeCommand`'s or
+  `buildNewCommand`'s arguments.
+- **`gone` stays null while a program may live** (task 71's review: `gone` gives restore's lock
+  back on the server's word). A `lost` terminal (its keeper died; its program got SIGHUP, which a
+  program can survive) gives `its terminal's keeper ended` only once the program the keeper
+  reported (`TerminalInfo.program`) is gone by design 5.5 — `/proc/<pid>/stat` absent, or with
+  another start; a read that fails or a line without a start is "may live" (null). A keeper lost
+  before T reported no program: gone at once, as S2 7.8 settles it. When several terminals of the
+  session are over, the one opened last gives the reason. A reason the keeper sent is sanitised.
+- **The hooks never throw** (a hook that throws would reject the whole run, task 71): `refusal`
+  answers `the window's terminals could not be read (<kind>)` when the hub cannot be read
+  (nothing is started on what could not be checked), `gone` answers null (restore's own time limit
+  ends the wait), each with one log line by kind. `resume` keeps stage A's behaviour there: a
+  throw is the caller's, as any unexpected error.
+- **`restoreTerminal`** builds its terminal at once with the size given; a factory that throws
+  does not make it throw: its `open` answers `{ ok: false, error: 'the terminal failed
+  unexpectedly (<kind>)', timedOut: false }` (nothing was spawned, so restore gives the lock
+  back), closes nothing, and the failure is logged once by kind. Ruled on review 2 (C4): RESTORE
+  NEVER STARTS A NEW SESSION — `open` answers a spec whose `kind` is not `resume` with `{ ok:
+  false, error: 'restore starts only resumes', timedOut: false }`, closes nothing and opens
+  nothing; a resume spec is opened as given (it is `runRestore`'s, which ran the guard and took
+  the lock).
+- **Log lines** name the launch they were part of (`resume: …`, `new: …`, `restore: …`) and carry
+  kinds only; the caller's `log` adds its prefix (`createActions` passes `act `, so stage A's lines
+  `act resume: the terminal failed (<kind>)` are unchanged). A refusal is answered, never logged.
+
 **Tests** (platform: `testPlatform` through `testDeck`; a fake terminal and a fake hub as stage A's
 actions tests)
-- Every case of `test/window/actions.test.ts` passes unchanged (the refactor's check).
+- Every case of `test/window/actions.test.ts` passes unchanged (the refactor's check), but task
+  70's interim case (its rule held "until task 72").
 - `launches.test.ts`: "resume goes through prepareResumeById" — a running session → code 4 with the
   guard's line; a held lock → code 4 `is being resumed`; no boot id → code 4; an unknown id → code
   3; started → 0, `sessionId`, the spec's argv `buildResumeCommand`'s; the terminal failing → 1
@@ -906,8 +955,17 @@ actions tests)
   starting or running. `restoreTerminal`: an ended terminal of the spec's session closed before
   `open`, a running one of another session kept; `open` throwing → `{ ok: false, timedOut: true }`
   and one log line by kind.
+- As built (the rulings above): a lock another skydeck holds → code 4, its lock left as it is;
+  two resumes at once → the second meets the lock; the configured `claudeCommand` in both specs;
+  "what skydeck new refuses is refused with code 2 and the command line's own message" — each body
+  the ruling names (and a group's, `--continue`, `-cp`, `--name`), compared with what `skydeck new`
+  prints for the same options, nothing started, stored or logged; a lost terminal whose program
+  lives, is another process, is gone, has a stat line without a start, or whose `/proc` cannot be
+  read; "the hooks never throw" (a hub whose `list()` throws); `restoreTerminal` with a factory
+  that throws, and with a `new` spec (nothing closed or opened).
 - Actions: `restore` and `dismiss-restore` call their deps with the fields and answer what they
-  return; without the deps → `skydeck cannot do that action`.
+  return; without the deps → `skydeck cannot do that action`; a dep that throws is answered by
+  kind; a malformed one never reaches the dep.
 
 **Done when:** the window starts sessions through `launches.ts` only, stage A's behaviour is
 unchanged, and the two new kinds reach their deps; `npm run check` passes.
@@ -937,31 +995,48 @@ both tested without a server: the window terminal, the refusal and `gone` are in
   already, so the allowed imports stay); `docs/design-step-2.md` (C6, C22, C23: 11.3 and 11.4; C9,
   C10, C21: 12.7 — the only stage C task that writes 12.7 —; C9: 10.2's `kv` table)
 
-**Behaviour.** `start`: refused while a run is going or after `stop()` (for `write`: the refusal's
-line, `restore finished: nothing was started`, an outcome with code 1); otherwise, synchronously,
-`refresh(deck)` and `restorePlan(deck, request.all)` (a SkydeckError or a busy store → `ok: false`
-with its text, or for `write` that line, the finished line and an outcome with code 1), the ids
-filtered (C7), then the run begins: `deps.changed()`, `runRestore` with `terminal:
+**Behaviour.** `start`: refused while a run is going (`a restore is already running; wait until it
+has finished`) or after `stop()` (`the window's server is stopping`) — a refused request is no run
+(ruled, F1): for `write` the refusal's line and an outcome with code 1, nothing to `progress`, no
+`changed()`; otherwise, synchronously, `refresh(deck)` and `restorePlan(deck, request.all)` (a
+SkydeckError — its message, sanitised — or a busy store — `skydeck's database is busy; try again`
+— or another failure — `restore could not begin (<kind>)`, logged by kind — is a run that cannot
+begin: `ok: false` with that text, the line and the finished line to `progress` and `write`, an
+outcome with code 1), the ids filtered (C7), then the run begins: `deps.changed()`, `runRestore`
+(on the next microtask: `start` returns before the run opens anything) with `terminal:
 deps.terminalFor(deps.size())` built for each opening (wrap it: `open(spec)` builds the terminal of
 the size of that moment and opens), `refuse`, `gone`, `stopAfterEmptyBatch`, the signal (aborted
 by `stop()` or by `asker`), and `report` sending each line to `deps.progress` and `write`. A
 heartbeat timer (`deck.platform.clock.after`) writes `waiting for <n> sessions` to `write` only,
-`n` the sessions without an outcome yet, re-armed by every line. The run's end, whatever ended it:
+`n` the sessions without an outcome yet, re-armed by every line (none without `write`;
+`heartbeatMs` a whole number from 1 to 2^31 − 1 ms, else `createRestorer` throws a RangeError). The
+asker's `closed` (task 70) can also fire after the outcome was written while the promise is still
+pending: the run has no step left then and nothing changes. The run's end, whatever ended it:
 exactly one `restore finished: …` line (C6) to `progress` and `write`, then the outcome to `write`
 (C5's code), then `deps.changed()`. A rejection of `runRestore` is the line `stopped: skydeck's
 database is busy; press Restore again (or run skydeck restore) for the rest` for a busy store, else
 `stopped unexpectedly (<kind>); the sessions it opened go on starting: run skydeck to see which`,
-then the finished line, an outcome with code 1, and one log line by kind. `banner`:
-`restorePlan(deck, false, rows)` and `kv window_restore_dismissed` read when the rows array, the
-stored dismissal or `running` changed since the last call, else the last payload; a failure keeps
-the last payload. `dismiss`: C9; a stored dismissal calls `deps.changed()`.
+then the finished line, an outcome with code 1, and one log line by kind. Nothing is written after
+the outcome, and `done` resolves right after it (task 74's `launch.restore` awaits it and so
+settles soon after its outcome). A `progress`, `write` or `changed` of the server that throws is
+logged by kind and the run goes on (a run left half way would refuse every restore until the
+server restarts). `banner`: `restorePlan(deck, false, rows)` and `kv window_restore_dismissed`
+read when the rows array, the stored dismissal or `running` changed since the last banner made,
+else that payload; rows without a boot id give no plan (no offer); a failure keeps the last
+payload, logged by kind, and is tried again at the next call. `dismiss`: C9 — the banner's
+current boot is the one of the last banner made; a stored dismissal calls `deps.changed()`.
+Every case that shows a lock renewed compares the lock's time (`lockTakenNs`) or its mark, never
+"the value changed" (task 80: every renewal changes the value).
 
 **Tests** (platform: `testPlatform` through `restoreDeck` of `test/helpers/restore.ts`; a fake
 terminal that opens what the test says, a `gone` the test scripts)
 - `bannerPayload`: no plan, or no entries and not running → null; entries → the payload in list
   order with `shortId`, title, `endedAtNs` null for no exit, `wasWorking`, preselection, `bootId`
   and `lastActivityNs` from `earlier`; `dismissedBootId` equal → `shown` false; another boot →
-  shown; running with no entries → `{ bootId: null, entries: [], running: true, shown: true }`.
+  shown; running with no entries (or no plan) → `{ bootId: null, lastActivityNs: null, entries:
+  [], running: true, shown: true }`; each session once, at its first place; an earlier boot whose
+  id is not a lower-case UUID → no offer (an offer exactly for the ids `parsePageMessage` takes
+  in `dismiss-restore`); a hostile title → sanitised; only the earlier boot's entries.
 - A run of three over a batch of two: `progress` gets `started …` three times and `restore
   finished: 3 started`; `write` the same lines and `{ outcome: { code: 0, started: 3, … } }`; each
   terminal opened with the size `deps.size()` gave at that moment (it changes between the two
@@ -971,20 +1046,33 @@ terminal that opens what the test says, a `gone` the test scripts)
   `stopped: only …`, the `not started` lines, then the finished line, code 5), `stop()` while it
   waits (`timed out …` for those waited for, `stopped: the window's server is stopping`, `not
   started …`, the finished line, code 5; `stop()` resolves after `done`; `start` afterwards
-  refused), an `asker` that fires (`stopped: the command that asked for it stopped`, code 5), an
-  empty batch (`stopped: no session of this batch started`, code 5), a refused start (`a restore
-  is already running…`), a busy store in the run (the busy line, code 1): each `progress` sequence
-  holds the finished line once, as its last.
+  refused), an `asker` that fires (`stopped: the command that asked for it stopped`, code 5; one
+  already aborted at the start: nothing opened), an empty batch with entries left (`stopped: no
+  session of this batch started`, code 5), an empty last batch (no `stopped:` line, code 1), a
+  busy store in the run (the busy line, code 1), another rejection (`stopped unexpectedly …`, code
+  1), a run that cannot begin (no boot id, a busy store, another failure): each `progress`
+  sequence holds the finished line once, as its last.
+- An `asker` that fires after the outcome was written does nothing.
+- The set on freshly refreshed rows (C7): a session the last refresh has not seen is offered and
+  started.
 - An id not in the set → `failed <short>: no longer offered for restore` first, code 1; a session
   `refuse` names → its line, never opened; `gone` → `failed`, the run goes on, code 1.
 - A second `start` while running → `a restore is already running; wait until it has finished`,
-  nothing planned; after `done` → accepted.
+  nothing planned; its `write` gets that line and an outcome with code 1, `progress` nothing (the
+  running run's report ends once); after `done` → accepted. After `stop()`, also while the stopped
+  run still ends → `the window's server is stopping`.
 - Heartbeat: 10 s (the fake clock) without a line → `waiting for 2 sessions` to `write`, not to
-  `progress`; with `heartbeatMs` 1000 every second.
+  `progress`; `waiting for 1 session`; the ids no longer offered are not counted; with
+  `heartbeatMs` 1000 every second; a line re-arms it.
 - `dismiss(bootId)` of the banner's boot → stored, the next `banner(rows)` has `shown` false;
   another id → `this offer to restore is no longer shown`, nothing stored. `banner` called twice
-  with the same rows reads the events once (a counting store wrapper).
+  with the same rows reads the events once (a counting store wrapper), again for new rows, a
+  dismissal and a run; a store that fails keeps the last banner. `dismiss` while the banner only
+  says a restore runs → refused, nothing stored.
 - A title holding an escape sequence → no control character in any `progress` or `write` line.
+- A `progress`, `write` and `changed` that throw → logged by what failed and its kind (never a
+  message: nor a SkydeckError's, which is said, not logged), the run ends, the next `start` is
+  accepted.
 
 **Done when:** a restore can be run, refused, watched, stopped and its banner decided by the
 restorer alone; `npm run check` passes.
@@ -1139,8 +1227,8 @@ from, for the command, as stage A's restart-wait cases)
   after the server's deadline (it went on at an answer that said null); a server still starting
   (`windowExpectedMs` constant while it starts, also at 0) → the wait goes through the start, then
   the count-down, and it goes on at the first look that says null; a server whose expectation
-  never ends → Edge after `startMs` + `reconnectMs` (measured from the wait's first look, with two
-  different values), also when its start never ends;
+  never ends → Edge after `startMs` + `reconnectMs` (measured from stage A's look before the wait,
+  with two different values), also when its start never ends;
   with `--new-window` → no wait; with `--new-secret` → no wait although the new server's mark says
   a window is expected (ruled, F3); without the expectation (none, null or 0) → Edge at once, no
   line; a `windowExpectedMs` the client cannot read (a text, a fraction, below 0, `true`, an

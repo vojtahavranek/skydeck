@@ -25,9 +25,9 @@ const REPORTS = new RegExp(
     // A private marker: SGR mouse reports, DA1 `?…c`, DA2 `>…c`, DEC mode reports `?…$y`,
     // DEC status reports `?…n`, DECXCPR `?…R`.
     /\x1b\[[<=>?][0-9;]*\$?[A-Za-z~]/.source,
-    // No marker: focus reports `I` and `O`, device attributes `c`, status reports `n`, window
-    // reports `t`, ANSI mode reports `$y`.
-    /\x1b\[[0-9;]*(?:[IOcnt]|\$y)/.source,
+    // No marker: focus reports `I` and `O`, status reports `n`, window reports `t`, ANSI mode
+    // reports `$y`. A device attributes answer always has its marker (above).
+    /\x1b\[[0-9;]*(?:[IOnt]|\$y)/.source,
     // A cursor position report.
     /\x1b\[[0-9]+;[0-9]+R/.source,
     // OSC answers (the colours of OSC 4, 10 and 11), ended by BEL or ST.
@@ -61,9 +61,10 @@ export interface Seen {
    *  typed into since the last call (given once). */
   take(): Set<string>;
   /** A session began to be seen: a hold completed, or a typing when it was not yet seen (a key
-   *  into a session already being seen calls no listener). Listeners must not throw; a throw out
-   *  of a completed hold is dropped so that the timer cannot end the server; `typed` throws only
-   *  if a listener throws. */
+   *  into a session already being seen calls no listener: keys into one session call the
+   *  listeners at most once between two `take()`s, unless a `focus` or `gone` in between ended
+   *  the hold that made it seen). Listeners must not throw; a throw out of a completed hold is
+   *  dropped so that the timer cannot end the server; `typed` throws only if a listener throws. */
   onChange(listener: () => void): () => void;
   /** Every timer stopped (the server's stop); nothing is seen or told after it. */
   stop(): void;
