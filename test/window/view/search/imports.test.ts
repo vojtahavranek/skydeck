@@ -21,11 +21,13 @@ const TYPE_SOURCES = new Set(['../../protocol.ts', '../../hub.ts', '../sections.
 
 /** `import … from '…'` and `export … from '…'`, over several lines too. An `export` counts only
  *  before `*` or `{` (a re-export), so that a `from '…'` in an exported declaration's comment or
- *  string is no import. The clause takes a block or a line comment or a string whole, and
- *  anything else but `;`, `/` and quotes: a `;` or a `from '…'` inside a comment or a string of
- *  the clause neither ends it nor names its source, so whatever the clause holds is judged. */
+ *  string is no import. The clause takes a block comment, a line comment with its line end or a
+ *  string whole, and anything else but `;`, `/` and quotes: a `;` or a `from '…'` inside a
+ *  comment or a string of the clause neither ends it nor names its source, so whatever the clause
+ *  holds is judged, and each comment has one reading (a statement that reaches no source is read
+ *  once, not once per way to split its comments). */
 const STATEMENT =
-  /^(?:import|export(?=\s+(?:type\s+)?[*{]))\s+(type\s+)?((?:\/\*(?:(?!\*\/).)*\*\/|\/\/[^\n]*|'[^'\n]*'|"[^"\n]*"|[^;\/'"])*?)\s*from\s+'([^']+)'/gms;
+  /^(?:import|export(?=\s+(?:type\s+)?[*{]))\s+(type\s+)?((?:\/\*(?:(?!\*\/).)*\*\/|\/\/[^\n]*\n|'[^'\n]*'|"[^"\n]*"|[^;\/'"])*?)\s*from\s+'([^']+)'/gms;
 /** `import '…';`: a value import, for its effects. */
 const BARE_IMPORT = /^import\s+'([^']+)'/gm;
 /** `import('…')`: in a type position or at run time; either way it names a module. */
@@ -117,8 +119,23 @@ test('the check itself: what it lets through', () => {
     // `export` that re-exports nothing: a `from '…'` in its comment or string is no import.
     "export function f(): number {\n  // taken from 'the plan'\n  return 1;\n}",
     'export const s = "x from \'y\'";',
+    // A statement whose own source cannot be read is not judged by a `from '…'` inside one of
+    // its comments or strings: each is taken whole, however the match goes on.
+    'import {\n  a, // from \'node:fs\'\n} from "./filter.ts";',
+    'import { a /* from \'node:fs\' */ } from "./filter.ts";',
+    'import { "from \'node:fs\'" as a } from "./filter.ts";',
   ].join('\n');
   assert.deepEqual(violations(source), []);
+});
+
+test('the check itself: a statement that never reaches a source is read once', () => {
+  // A local export list with six line comments. A line comment that could end anywhere in its
+  // line made the pattern try every way to split each one: 20 s and more for these six.
+  const names = Array.from({ length: 6 }, (_, index) => `  name${index}, // the rule of plan 2.1`);
+  const start = performance.now();
+  assert.deepEqual(violations(`export {\n${names.join('\n')}\n};\n`), []);
+  const took = performance.now() - start;
+  assert.ok(took < 1000, `${Math.round(took)} ms`);
 });
 
 test('the check itself: what it refuses', () => {
