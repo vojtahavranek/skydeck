@@ -61,15 +61,18 @@ export interface Launches {
   resume(sessionId: string, size: Size): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
   /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
-   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. */
+   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. Never
+   *  throws: a hub that cannot be read gives `the window's terminals could not be read (<kind>)`. */
   refusal(sessionId: string): string | null;
   /** C8: null while a terminal of the session may still run; else why it cannot start any more —
-   *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost),
+   *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost, once
+   *  the program its keeper reported is gone by design 5.5: null while it may live),
    *  `claude ended before the session started (status <n>)` / `(signal <n>)`, `its terminal was
-   *  closed` (none listed). */
+   *  closed` (none listed). Never throws: null when the hub cannot be read. */
   gone(sessionId: string): string | null;
   /** The terminal restore opens with (size read once, when built): its open(spec) closes the
-   *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. */
+   *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. A
+   *  factory that throws: its open fails with `timedOut: false` (nothing was spawned). */
   restoreTerminal(size: Size): Terminal;
 }
 

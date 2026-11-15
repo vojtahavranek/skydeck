@@ -855,7 +855,8 @@ exit codes), and give `act restore` and `act dismiss-restore` their final cases.
   of them, so all four moved); `restore` → `deps.restore(sessionIds)`, `dismiss-restore` →
   `deps.dismissRestore(bootId)`, each answering `ok` with no lines or `ok: false` with its error;
   absent → `skydeck cannot do that action`, nothing logged; `NOT_YET` and its line go, since no
-  kind is left for it ("Tasks 36 and 70: who holds `NOT_YET`"))
+  kind is left for it ("Tasks 36 and 70: who holds `NOT_YET`"); the file's header comment names
+  stage C's kinds and `launches.ts`)
 - Test: `test/window/actions.test.ts` (task 70's interim case "restore and dismiss-restore are
   known but not acted on yet" becomes the case without the deps; new cases at the end)
 

@@ -1529,7 +1529,15 @@ describe('restore and dismiss-restore reach their deps (plan C 2.3)', () => {
       await h.act(stageC[0] as ActMessage),
       refused(31, 'the action failed unexpectedly (TypeError)'),
     );
-    assert.deepEqual(h.logs, ['act restore: failed (TypeError)']);
+    assert.deepEqual(
+      await h.act(stageC[1] as ActMessage),
+      refused(32, 'the action failed unexpectedly (TypeError)'),
+    );
+    assert.deepEqual(h.logs, [
+      'act restore: failed (TypeError)',
+      'act dismiss-restore: failed (TypeError)',
+    ]);
+    for (const line of h.logs) assert.ok(!line.includes(SECRET), line);
   });
 
   test('a malformed restore never reaches the dep', async (t) => {
