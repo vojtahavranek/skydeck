@@ -110,6 +110,7 @@ describe("serverNow: the server's time now as the page estimates it (plan D 2.4)
     // performance.now() has fractions of a millisecond: counted in nanoseconds, rounded down.
     assert.equal(serverNow(String(listNow), 0.25), String(listNow + 250_000n));
     assert.equal(serverNow(String(listNow), 2.0000004), String(listNow + 2_000_000n));
+    assert.equal(serverNow(String(listNow), 2.0000006), String(listNow + 2_000_000n));
   });
 
   test("ages from it are the list's: 59 s after a list that said 1 s ago is 1m", () => {

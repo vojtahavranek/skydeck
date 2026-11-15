@@ -337,6 +337,17 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ ...VALID['act open-link'], id: -1 }));
   });
 
+  test("every act's id is a whole number from 0 (stage A's and stage D's kinds alike)", () => {
+    const acts = Object.entries(VALID).filter(([, message]) => message.t === 'act');
+    assert.equal(acts.length, 13);
+    for (const [name, message] of acts) {
+      for (const id of [-1, 1.5, 2 ** 53]) {
+        refused(page({ ...message, id }));
+      }
+      assert.equal(page({ ...message, id: Number.MAX_SAFE_INTEGER }).ok, true, name);
+    }
+  });
+
   test('unfolded holds section names, each once', () => {
     assert.equal(page({ ...VALID['view'], unfolded: ['open', 'week', 'earlier'] }).ok, true);
     refused(page({ ...VALID['view'], unfolded: [MARKER] }));

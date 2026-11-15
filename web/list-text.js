@@ -142,14 +142,6 @@ function levelWords(level) {
 }
 
 /**
- * @param {unknown} value
- * @returns {number} a count of the chip: a whole number from 0, else 0
- */
-function countOf(value) {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 0;
-}
-
-/**
  * S2 12.3's chip in its words, its two parts apart: the open ones — `PR · failing` for one,
  * `3 PRs · failing` for several, with the state of the one that most needs the user — and `+30`
  * for the merged ones beside them; with none open, `3 merged` when any is merged, else `closed`.
@@ -157,8 +149,7 @@ function countOf(value) {
  * @returns {{ text: string, merged: string }}
  */
 function chipParts(chip) {
-  const open = countOf(chip.open);
-  const merged = countOf(chip.merged);
+  const { open, merged } = chip;
   if (open === 0) {
     return { text: merged > 0 ? `${merged} merged` : 'closed', merged: '' };
   }
@@ -231,7 +222,7 @@ function chipOf(row, nowNs) {
     ...chipParts(row.chip),
     tip,
     dotted: row.chip.level === 'cant-read',
-    dim: countOf(row.chip.open) === 0,
+    dim: row.chip.open === 0,
   };
 }
 
