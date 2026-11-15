@@ -19,6 +19,11 @@ const TRANSPARENT = [16, 32, 48, 192, 512].map((size) => ({ file: `icon-${size}.
 const MASKABLE = [192, 512].map((size) => ({ file: `icon-${size}-maskable.png`, size }));
 const PNGS = [...TRANSPARENT, ...MASKABLE];
 const IN_ICO = [16, 32, 48];
+/** The tile's colour (the page's accent, `#2f6fde`): the maskable icons' full background. */
+const TILE = [0x2f, 0x6f, 0xde];
+/** How far a pixel may differ from the background and still count as background: at 153.6 and
+ *  409.6 pixels the tile's edge leaves a seam one step off the background, which no eye sees. */
+const SEAM = 2;
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -32,17 +37,26 @@ interface Png {
   channels: number;
 }
 
-/** Just enough of PNG to look at the pixels: 8-bit RGB or RGBA, not interlaced. */
+/** The only chunks the files may hold: no metadata (a text chunk could carry a name or a path of
+ *  the machine that drew them, in a file the server serves). */
+const CHUNKS = ['IHDR', 'IDAT', 'IEND'];
+
+/**
+ * Just enough of PNG to look at the pixels: 8-bit RGB or RGBA, not interlaced, IHDR first, only
+ * the chunks of CHUNKS, and nothing after IEND.
+ */
 function decodePng(bytes: Buffer): Png {
   assert.deepEqual(bytes.subarray(0, 8), SIGNATURE, 'the PNG signature');
   let at = 8;
   let header: Buffer | null = null;
   const data: Buffer[] = [];
   let ended = false;
-  while (at < bytes.length) {
+  while (!ended) {
+    assert.ok(at + 12 <= bytes.length, 'the file ends before IEND');
     const length = bytes.readUInt32BE(at);
     const type = bytes.toString('latin1', at + 4, at + 8);
     const body = bytes.subarray(at + 8, at + 8 + length);
+    assert.ok(CHUNKS.includes(type), `a chunk ${JSON.stringify(type)}`);
     if (header === null) {
       assert.equal(type, 'IHDR', 'IHDR comes first');
     }
@@ -50,12 +64,12 @@ function decodePng(bytes: Buffer): Png {
       header = body;
     } else if (type === 'IDAT') {
       data.push(body);
-    } else if (type === 'IEND') {
+    } else {
       ended = true;
     }
     at += 12 + length;
   }
-  assert.ok(header !== null && ended, 'IHDR and IEND');
+  assert.ok(header !== null, 'IHDR');
   assert.equal(at, bytes.length, 'nothing after IEND');
   const width = header.readUInt32BE(0);
   const height = header.readUInt32BE(4);
@@ -112,6 +126,12 @@ function alpha(png: Png, x: number, y: number): number {
   return png.channels === 4 ? (png.pixels[(y * png.width + x) * 4 + 3] ?? -1) : 255;
 }
 
+/** The colour of a pixel, without its alpha. */
+function rgb(png: Png, x: number, y: number): number[] {
+  const at = (y * png.width + x) * png.channels;
+  return [...png.pixels.subarray(at, at + 3)];
+}
+
 function corners(png: Png): number[] {
   const last = png.width - 1;
   return [alpha(png, 0, 0), alpha(png, last, 0), alpha(png, 0, last), alpha(png, last, last)];
@@ -148,6 +168,27 @@ describe('the PNG files', () => {
           }
         }
       }
+    }
+  });
+
+  test("the maskable ones: the drawing on the tile's colour, inside the safe zone (a circle of 0.4 of the size)", () => {
+    for (const { file, size } of MASKABLE) {
+      const png = decodePng(read(`${ICONS}/${file}`));
+      const background = rgb(png, 0, 0);
+      const drawn = (x: number, y: number): boolean =>
+        rgb(png, x, y).some((value, i) => Math.abs(value - (background[i] ?? 0)) > SEAM);
+
+      assert.deepEqual(background, TILE, `${file}: the background is the tile's colour`);
+      assert.ok(drawn(size >> 1, size >> 1), `${file}: the drawing is there`);
+      let farthest = 0;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (drawn(x, y)) {
+            farthest = Math.max(farthest, Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2));
+          }
+        }
+      }
+      assert.ok(farthest <= 0.4 * size, `${file}: drawn ${farthest / size} of the size out`);
     }
   });
 
@@ -244,35 +285,118 @@ describe('web/manifest.webmanifest', () => {
   });
 });
 
+/** The elements and attributes a drawing of shapes needs; nothing in them runs, loads or names a
+ *  file. */
+const SVG_ELEMENTS = new Set([
+  'svg',
+  'g',
+  'defs',
+  'rect',
+  'path',
+  'circle',
+  'ellipse',
+  'line',
+  'polyline',
+  'polygon',
+  'linearGradient',
+  'radialGradient',
+  'stop',
+]);
+const SVG_ATTRIBUTES = new Set([
+  'xmlns',
+  'viewBox',
+  'id',
+  'x',
+  'y',
+  'width',
+  'height',
+  'rx',
+  'ry',
+  'cx',
+  'cy',
+  'r',
+  'd',
+  'points',
+  'x1',
+  'y1',
+  'x2',
+  'y2',
+  'fill',
+  'stroke',
+  'stroke-width',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'opacity',
+  'fill-opacity',
+  'stroke-opacity',
+  'transform',
+  'offset',
+  'stop-color',
+  'stop-opacity',
+  'gradientUnits',
+  'gradientTransform',
+]);
+/** A paint: a colour, none, or a gradient of the file itself. */
+const PAINT = /^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|none|url\(#[A-Za-z][\w-]*\))$/;
+
 /**
- * What the SVG must not hold (plan task 94): a script, an `on…` attribute, a foreignObject, an
- * image, a reference outside the file (`href`, `xlink:href` or `url(` to anything but `#…`), an
- * `@import`, a DOCTYPE or an entity (a comment is allowed). Lower-cased first, so that no spelling
- * slips past.
+ * What in the SVG is outside what a self-contained drawing may hold (plan task 94: no script, no
+ * `on…` attribute, no foreignObject, no reference outside the file, no `@import`). It allows
+ * rather than forbids, so that no spelling slips past: only the elements and attributes above, no
+ * prefixed name (`s:script`, `xml:base`, `inkscape:…`), the SVG namespace only, a paint for
+ * `fill` and `stroke`, no `url(` elsewhere, no `&` (no character reference can spell anything),
+ * no `<!` but a comment, no `<?`, and no text between the tags. One line per thing found; none
+ * for a clean file.
  */
-function forbidden(svg: string): string[] {
-  const text = svg.toLowerCase();
+function outsideAllowed(svg: string): string[] {
   const found: string[] = [];
+  const text = svg.replace(/<!--[\s\S]*?-->/g, ' ');
   for (const [what, pattern] of [
-    ['a script', /<script/],
-    ['an on… attribute', /\son[a-z]*\s*=/],
-    ['a foreignObject', /<foreignobject/],
-    ['an image', /<image/],
-    ['an href outside the file', /href\s*=(?!\s*["']?\s*#)/],
-    ['a url( outside the file', /url\((?!\s*["']?\s*#)/],
-    ['an @import', /@import/],
-    ['a DOCTYPE or an entity', /<!(?!--)/],
+    ['a DOCTYPE, an entity or a CDATA section', /<!/],
+    ['a processing instruction', /<\?/],
+    ['a character or entity reference', /&/],
   ] as const) {
     if (pattern.test(text)) {
       found.push(what);
+    }
+  }
+  const tag = /<\/?([^\s/>]+)([^>]*)>/g;
+  const between = text.replace(tag, '').trim();
+  if (between !== '') {
+    found.push(`text outside the tags: ${JSON.stringify(between.slice(0, 40))}`);
+  }
+  for (const [, name = '', rest = ''] of text.matchAll(tag)) {
+    if (!SVG_ELEMENTS.has(name)) {
+      found.push(`the element ${name}`);
+    }
+    const attribute = /([^\s=/]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+    for (const [, attr = '', double, single] of rest.matchAll(attribute)) {
+      const value = double ?? single ?? '';
+      if (!SVG_ATTRIBUTES.has(attr)) {
+        found.push(`the attribute ${attr} of ${name}`);
+      } else if (attr === 'fill' || attr === 'stroke') {
+        if (!PAINT.test(value)) {
+          found.push(`the paint ${JSON.stringify(value)} of ${name}`);
+        }
+      } else if (attr === 'xmlns') {
+        if (value !== 'http://www.w3.org/2000/svg') {
+          found.push(`the namespace ${JSON.stringify(value)}`);
+        }
+      } else if (/url\(/i.test(value)) {
+        found.push(`a url( in ${attr} of ${name}`);
+      }
+    }
+    const left = rest.replace(attribute, '').replace(/\/$/, '').trim();
+    if (left !== '') {
+      found.push(`${JSON.stringify(left.slice(0, 40))} in the tag ${name}`);
     }
   }
   return found;
 }
 
 describe('web/icons/skydeck.svg', () => {
-  test('holds no script, no reference outside the file, no image', () => {
-    assert.deepEqual(forbidden(read(`${ICONS}/skydeck.svg`).toString('utf8')), []);
+  test('holds only shapes: no script, no reference outside the file, no image', () => {
+    assert.deepEqual(outsideAllowed(read(`${ICONS}/skydeck.svg`).toString('utf8')), []);
   });
 
   test('is square and in the SVG namespace', () => {
@@ -284,33 +408,61 @@ describe('web/icons/skydeck.svg', () => {
     assert.equal(viewBox[1], viewBox[2]);
   });
 
-  test('the check finds each thing it looks for', () => {
+  test('the check refuses each thing a drawing must not hold, in every spelling tried', () => {
     const svg = (inner: string): string =>
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${inner}</svg>`;
 
     assert.deepEqual(
-      forbidden(
-        svg('<!-- a note --><rect fill="url(#g)"/><use href = " #a"/><use xlink:href=\'#b\'/>'),
+      outsideAllowed(
+        svg(
+          '<!-- a note --><defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/>' +
+            '</linearGradient></defs><rect fill=\'url(#g)\' stroke="none"/>',
+        ),
       ),
       [],
     );
-    for (const [inner, what] of [
-      ['<script>alert(1)</script>', 'a script'],
-      ['<SCRIPT/>', 'a script'],
-      ['<rect onload="x()"/>', 'an on… attribute'],
-      ['<rect\nONCLICK="x()"/>', 'an on… attribute'],
-      ['<foreignObject/>', 'a foreignObject'],
-      ['<image href="#a"/>', 'an image'],
-      ['<use href="https://example.com/a.svg#a"/>', 'an href outside the file'],
-      ['<use xlink:href="data:image/svg+xml,x"/>', 'an href outside the file'],
-      ['<use href=a.svg#x />', 'an href outside the file'],
-      ['<rect fill="url(https://example.com/x)"/>', 'a url( outside the file'],
-      ['<rect style="fill:url( \'x.svg#g\')"/>', 'a url( outside the file'],
-      ['<style>@import "x.css";</style>', 'an @import'],
-      ['<!ENTITY x SYSTEM "file:///etc/passwd">', 'a DOCTYPE or an entity'],
-      ['<!DOCTYPE svg>', 'a DOCTYPE or an entity'],
-    ] as const) {
-      assert.ok(forbidden(svg(inner)).includes(what), `${inner}: ${what}`);
+    for (const inner of [
+      '<script>alert(1)</script>',
+      '<SCRIPT/>',
+      '<rect onload="x()"/>',
+      '<rect\nONCLICK="x()"/>',
+      '<foreignObject/>',
+      '<image href="#a"/>',
+      '<use href="https://example.com/a.svg#a"/>',
+      '<use xlink:href="data:image/svg+xml,x"/>',
+      '<use href=a.svg#x />',
+      '<rect fill="url(https://example.com/x)"/>',
+      '<rect style="fill:url( \'x.svg#g\')"/>',
+      '<style>@import "x.css";</style>',
+      '<!ENTITY x SYSTEM "file:///etc/passwd">',
+      '<s:script xmlns:s="http://www.w3.org/2000/svg">alert(1)</s:script>',
+      '<s:foreignObject xmlns:s="http://www.w3.org/2000/svg"/>',
+      '<s:image xmlns:s="http://www.w3.org/2000/svg" href="x.png"/>',
+      '<a><set attributeName="href" to="https://example.com/"/></a>',
+      '<animate attributeName="xlink:href" values="https://example.com/a.svg#x"/>',
+      '<rect style="fill:u\\72l(https://example.com/x.svg#g)"/>',
+      '<style>@\\69mport "https://example.com/x.css";</style>',
+      '<iframe xmlns="http://www.w3.org/1999/xhtml" src="https://example.com/"/>',
+      '<g xml:base="https://example.com/"/>',
+      '<metadata><x inkscape:export-filename="/home/u/icon.png"/></metadata>',
+      '<!DOCTYPE svg>',
+      '<rect fill="url(https://example.com/x.svg#g)"/>',
+      '<rect fill="u&#114;l(x.svg#g)"/>',
+      '<rect fill="red"/>',
+      '<rect x="1" onload="x()"/>',
+      '<rect x=1 />',
+      '<rect transform="url(x)"/>',
+      '<title>a</title>',
+      'text',
+      '<?xml-stylesheet href="x.css"?>',
+      '<![CDATA[x]]>',
+    ]) {
+      assert.notDeepEqual(outsideAllowed(svg(inner)), [], inner);
     }
+    assert.notDeepEqual(
+      outsideAllowed('<svg xmlns="http://www.w3.org/1999/xhtml" viewBox="0 0 64 64"></svg>'),
+      [],
+      'another namespace',
+    );
   });
 });
