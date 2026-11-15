@@ -1253,19 +1253,27 @@ test('a launch that answers after its asker went away writes into nothing; the s
   assert.deepEqual(c.logs, []);
 });
 
-test('a hostile label or field in a refused body is not in the log', async (t) => {
+test('a hostile label or field in a refused body is not in the log, nor in the answer', async (t) => {
   const fake = fakeLaunch();
   const c = await startControl(t, () => ({ launch: fake.launch }));
   const hostile: [string, unknown][] = [
     ['/new', { ...NEW_BODY, label: `MARKER-7c8d${'x'.repeat(1100)}` }],
-    ['/new', { ...NEW_BODY, group: 'MARKER-7c8d\u0000', dir: 'MARKER-7c8d'.repeat(500) }],
+    ['/new', { ...NEW_BODY, dir: 'MARKER-7c8d'.repeat(500) }],
+    ['/new', { ...NEW_BODY, dir: '/home/MARKER-7c8d\u0000' }],
+    ['/new', { ...NEW_BODY, flags: ['--model', 'MARKER-7c8d\u0000'] }],
+    ['/new', { ...NEW_BODY, flags: [['MARKER-7c8d']] }],
     ['/new', { ...NEW_BODY, argv: ['MARKER-7c8d'] }],
     ['/new', { ...NEW_BODY, 'MARKER-7c8d': 1 }],
     ['/resume', { sessionId: 'MARKER-7c8d' }],
     ['/restore', { sessionIds: ['MARKER-7c8d'], all: false }],
   ];
   for (const [path, body] of hostile) {
-    assert.equal((await ask(c, 'POST', path, body)).status, 400, path);
+    const answer = await ask(c, 'POST', path, body);
+    assert.equal(answer.status, 400, path);
+    // The whole answer is the kind: fixed text, nothing of the body.
+    assert.deepEqual(Object.keys(answer.body as object), ['error'], path);
+    assert.match((answer.body as { error: string }).error, /^body[\w.]*: [a-z ]+$/, path);
+    assert.ok(!JSON.stringify(answer.body).includes('MARKER'), JSON.stringify(answer.body));
   }
   assert.equal(c.logs.length, hostile.length, c.logs.join('\n'));
   for (const line of c.logs) {
@@ -1275,12 +1283,15 @@ test('a hostile label or field in a refused body is not in the log', async (t) =
   assert.deepEqual(fake.calls, []);
 });
 
-test('every field of a body reaches launch as it was sent: a group, a null label, all true', async (t) => {
+test('every field of a body reaches launch as it was sent: a group, a null label, all true, a blank label, a repeated flag', async (t) => {
   const fake = fakeLaunch();
   const c = await startControl(t, () => ({ launch: fake.launch }));
   const news: NewRequest[] = [
     { dir: '/home/dev/projects/web', label: null, group: 'ORB-2107', flags: [] },
     { dir: '/home/dev', label: 'a label', group: 'a group', flags: ['--model', 'sonnet'] },
+    // C3: `--label ' '` reaches prepareNew as typed, whose refusal is the answer (exit 2).
+    { dir: '/home/dev', label: ' ', group: '', flags: ['-v', '-v'] },
+    { dir: '/home/dev', label: '  ORB-2107 fix  ', group: ' g ', flags: ['--add-dir', '/a'] },
   ];
   const restores: RestoreRequest[] = [
     { sessionIds: [S2], all: true },
@@ -1296,4 +1307,64 @@ test('every field of a body reaches launch as it was sent: a group, a null label
     ...news.map((request) => ({ route: 'new', request })),
     ...restores.map((request) => ({ route: 'restore', request })),
   ]);
+});
+
+test('a resume whose launch resolves with what JSON cannot write is 500, logged by kind; the server goes on', async (t) => {
+  const cycle: Record<string, unknown> = { code: 0, lines: [], sessionId: null };
+  cycle['self'] = cycle;
+  const answers: unknown[] = [undefined, { ...ANSWER, code: 0n }, cycle];
+  let next = 0;
+  const fake = fakeLaunch({
+    resume: () => Promise.resolve(answers[next++] as LaunchAnswer),
+  });
+  const c = await startControl(t, () => ({ launch: fake.launch }));
+  for (let n = 0; n < answers.length; n++) {
+    assert.deepEqual(await ask(c, 'POST', '/resume', RESUME_BODY), {
+      status: 500,
+      body: { error: 'failed' },
+    });
+  }
+  assert.equal(c.logs.length, answers.length, c.logs.join('\n'));
+  for (const line of c.logs) {
+    assert.match(line, /^server\.sock: resume failed \(TypeError( \([A-Z_]+\))?\)$/);
+  }
+  assert.deepEqual(await c.client.ping(), PING);
+});
+
+test('what a restore writes after its promise settled goes nowhere, also while its answer is not yet flushed', async (t) => {
+  let late: ((line: RestoreStreamLine) => void) | null = null;
+  const settled = Promise.withResolvers<void>();
+  const fake = fakeLaunch({
+    restore: async (_request, write) => {
+      // More than the socket holds, to an asker that does not read: the answer stays unflushed.
+      const filler = 'x'.repeat(1024);
+      for (let at = 0; at < 3000; at++) write({ line: filler });
+      write(OUTCOME);
+      late = write;
+      settled.resolve();
+    },
+  });
+  const c = await startControl(t, () => ({ launch: fake.launch }));
+  const stalled = createConnection({ path: c.files.serverSock });
+  t.after(() => {
+    stalled.destroy();
+  });
+  await once(stalled, 'connect');
+  stalled.pause();
+  const body = JSON.stringify(RESTORE_BODY);
+  stalled.write(
+    `POST /restore HTTP/1.1\r\nHost: skydeck\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+  );
+  await settled.promise;
+  await delay(20); // the run's end is handled: the answer ended, not yet flushed
+  assert.ok(late !== null);
+  (late as (line: RestoreStreamLine) => void)({ line: 'after the outcome' });
+  (late as (line: RestoreStreamLine) => void)(OUTCOME);
+  await delay(50);
+  assert.deepEqual(await c.client.ping(), PING);
+  assert.deepEqual(c.logs, []);
+  stalled.destroy();
+  await delay(20);
+  (late as (line: RestoreStreamLine) => void)({ line: 'after the asker went' });
+  assert.deepEqual(await c.client.ping(), PING);
 });

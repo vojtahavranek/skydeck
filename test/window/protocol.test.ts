@@ -912,12 +912,29 @@ describe("parseControlRequest: stage C's routes (plan C3)", () => {
     });
   });
 
-  test('POST /new { dir, label, group, flags } → new, the flags as given (no splitting)', () => {
+  test('POST /new { dir, label, group, flags } → new, every field as given: the flags not split, a repeated word kept, a blank or padded label and group kept', () => {
     assert.deepEqual(post('/new', NEW), { ok: true, value: { route: 'new', ...NEW } });
     const words = { ...NEW, flags: ['--append-system-prompt', "be brief, 'really'", ''] };
     assert.deepEqual(post('/new', words), { ok: true, value: { route: 'new', ...words } });
     const none = { ...NEW, flags: [] };
     assert.deepEqual(post('/new', none), { ok: true, value: { route: 'new', ...none } });
+    // `-- --add-dir /a --add-dir /b -v -v`: the same word twice is the user's.
+    const repeated = { ...NEW, flags: ['--add-dir', '/a', '--add-dir', '/b', '-v', '-v'] };
+    assert.deepEqual(post('/new', repeated), { ok: true, value: { route: 'new', ...repeated } });
+    // C3: `--label ' '` reaches prepareNew as typed, whose refusal (exit 2) is the answer; as
+    // null it would start a session without a label. Nothing is trimmed.
+    for (const [label, group] of [
+      [' ', ''],
+      ['', ' '],
+      ['  ORB-2107 fix  ', '\tORB-2107 '],
+    ]) {
+      const blank = { ...NEW, label, group };
+      assert.deepEqual(
+        post('/new', blank),
+        { ok: true, value: { route: 'new', ...blank } },
+        JSON.stringify([label, group]),
+      );
+    }
   });
 
   test('POST /restore { sessionIds, all } → restore', () => {
@@ -974,9 +991,23 @@ describe("parseControlRequest: stage C's routes (plan C3)", () => {
         );
       }
     }
+    // A wrong type that holds the marker: the kind quotes none of it.
+    for (const [path, body] of bodies) {
+      for (const field of Object.keys(body)) {
+        const value = typeof body[field] === 'string' ? [MARKER] : MARKER;
+        assert.match(
+          refused(post(path, { ...body, [field]: value })),
+          /^body\b/,
+          `${path} ${field}`,
+        );
+      }
+    }
     // Arrays hold strings only.
     assert.match(refused(post('/new', { ...NEW, flags: ['--model', 7] })), /^body\b/);
     assert.match(refused(post('/new', { ...NEW, flags: [null] })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: ['--model', [MARKER]] })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: [{ [MARKER]: 1 }] })), /^body\b/);
+    assert.match(refused(post('/restore', { ...RESTORE, sessionIds: [S1, [MARKER]] })), /^body\b/);
     assert.match(refused(post('/restore', { ...RESTORE, all: 'false' })), /^body\b/);
   });
 
@@ -1003,10 +1034,12 @@ describe("parseControlRequest: stage C's routes (plan C3)", () => {
 
   test('POST /new: a NUL in dir or in a flag is refused, and a lone surrogate in any text', () => {
     assert.match(refused(post('/new', { ...NEW, dir: '/home/u\u0000/x' })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, dir: `/home/${MARKER}\u0000/x` })), /^body\b/);
     assert.match(refused(post('/new', { ...NEW, flags: ['--model', 'op\u0000us'] })), /^body\b/);
+    assert.match(refused(post('/new', { ...NEW, flags: [`${MARKER}\u0000`] })), /^body\b/);
     const lone = (field: string, flag = false): string => {
       const body = flag ? { ...NEW, flags: ['--model', 'LONE'] } : { ...NEW, [field]: 'LONE' };
-      return JSON.stringify(body).replace('"LONE"', '"a\\ud800b"');
+      return JSON.stringify(body).replace('"LONE"', `"${MARKER}\\ud800b"`);
     };
     for (const [field, flag] of [
       ['dir', false],
