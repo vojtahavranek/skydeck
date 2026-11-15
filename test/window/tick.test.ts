@@ -743,7 +743,7 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
             '#!/bin/sh',
             `release=${shellWord(release)}`,
             `root=${shellWord(s.root)}`,
-            // At most 20 s, and not past the sandbox (the hook above releases it at the end).
+            // 200 rounds (20 s and more), and not past the sandbox; the hook above releases it.
             'trap \'n=0; while [ ! -e "$release" ] && [ -d "$root" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n + 1)); done; exit 129\' HUP',
             'exec 3<&0',
             `${shellWord(standin)} "$@" <&3 3<&- &`,

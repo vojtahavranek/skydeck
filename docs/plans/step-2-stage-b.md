@@ -895,7 +895,11 @@ tick.
   elsewhere; then the file, the stand-in's `exit` record, refreshes until the row is
   `not-running` → the terminal is still there, `lost`, its exit `{ code: null, signal: 1 }`, the
   row marked `ended-unexpectedly`. It fails on `main` 27d6e0e (the terminal is closed at the
-  first refresh after the loss) and passes with the fix.
+  first refresh after the loss) and passes with the fix. It holds the shape "the holder below the
+  program"; the real `claude` is the program itself, a shape the mapping's cases carry (the
+  states on the way, the holder being the program). An `after` hook registered before
+  `windowDeck`'s releases the `sh`, kills the test's own keeper while it runs and waits for the
+  stand-in's `exit` record, so that a failure half way leaves no process and no sandbox.
 
 **Done when:** a lost terminal whose program still runs is never closed as "its session runs
 elsewhere"; every existing case of `mapping.test.ts`, `tick.test.ts`, `terminals*.test.ts` and
