@@ -1045,8 +1045,15 @@ Setup:
 - The setup of "The window (step 2, stage A)" above, with its **throwaway session in the window**.
   Every prompt here goes to that session or to the other throwaway session below, never to one of
   your real work. **Before every key you type into the window**, look at the header's short id
-  (on its second line, at the right): it must be the throwaway session's. No step presses Enter
-  on a row whose short id you have not looked at.
+  (on its second line, after the directory, the times and where the title comes from): it must be
+  that of one of the two throwaway sessions, the one the step names. No step presses Enter on a
+  row whose short id you have not looked at.
+- **A prompt is typed only into a terminal that has the keyboard**: the key bar says `Focus:
+  terminal` (else Ctrl+Shift+L until it does), and the header's short id is the throwaway
+  session's. When that session's terminal has ended (its last screen is dimmed under a bar with
+  Resume and Close), click `Resume` on the bar first and wait until it runs. Type nothing
+  otherwise: text typed while the list has the keyboard is list keys — `k` moves to the row
+  above, which may be a real session, `n` opens its note, `l` its label, `d` marks it done.
 - **The other throwaway session**, in a terminal of your own: open one more WSL terminal, **T**,
   and in it `cd ~/skydeck-try && claude`; send it one prompt (`say hello in one word`). In the
   window its row is under Open and says `running in another terminal`; once its answer is written,
@@ -1054,8 +1061,9 @@ Setup:
   1.5 seconds or a little more (its card shows). When a step says "click the other session's row",
   click that row: the window shows its card, and nothing you type in the window reaches it. **When
   you are done with the checks of this part**, end it: `/exit` in T.
-- **The story prompt** is `write a story of about 300 words about a lighthouse`: Claude Code
-  writes for a while and runs no command.
+- **The story prompt** is `write a story of about 300 words about a lighthouse; reply in this
+  chat, with no tool and no file`: Claude Code writes for a while. When it asks for anything all
+  the same (to run a command, to write a file), answer **No** and send the prompt again.
 - A permission prompt is made with a command that asks and does no harm if it were allowed
   (`touch skydeck-check.txt` in the throwaway folder), answered **No**; a question by asking
   Claude Code for one, answered.
@@ -1066,7 +1074,8 @@ Setup:
 - **Your real sessions keep running** and can need you meanwhile: a notification can be one of
   theirs. Click only a notification titled with a throwaway session's title: a click selects its
   session, and 1.5 seconds later that session's mark is cleared. Likewise Ctrl+Shift+J is pressed
-  only where a step says so, after it has looked at the count.
+  only where a step says so, once it has said how to see that the session it goes to is the
+  throwaway one.
 - The checks run in any order; each clears the marks it made. W3's title is looked at while a
   session needs you, which W21's step 1 makes.
 - What to look at: a row's left bar and second line, the title bar's count at its left
@@ -1090,22 +1099,22 @@ Setup: look at the right of the title bar.
    only step 5 of W11: steps 2 to 4 and 6 need notifications, and the title bar's count and the
    window's title (W21, W3) are what shows you that a session needs you.
 2. **A notification, and a click on it.** Select the throwaway session; its terminal has the
-   keyboard (`Focus: terminal`). Type the story prompt and press Enter. At once click the other
-   session's row (its card shows), then click into W, so that no skydeck window has the focus;
-   leave the skydeck window where you can see it. Expected: while the story is written, the
-   throwaway session's second line starts with `working`; once it is done, the line is
-   `finished · not seen · <age>`, and a desktop notification comes, titled with the throwaway
-   session's title, its text `finished`. Click the notification. Expected: the skydeck window comes
-   to the front with the throwaway session selected (its terminal shows; the header's short id is
-   its), and its mark goes after 1.5 seconds or a little more.
+   keyboard (the key bar says `Focus: terminal`). Type the story prompt and press Enter. At once
+   click the other session's row (its card shows), then click into W, so that no skydeck window has
+   the focus; leave the skydeck window where you can see it. Expected: while the story is written,
+   the throwaway session's second line starts with `working`; once it is done, the line is `finished
+   · not seen · <age>`, and a desktop notification comes, titled with the throwaway session's title,
+   its text `finished`. Click the notification. Expected: the skydeck window comes to the front with
+   the throwaway session selected (its terminal shows; the header's short id is its), and its mark
+   goes after 1.5 seconds or a little more.
 3. **A notification the page closes.** Do step 2 again up to the notification, but do not click
    it: let it go from the screen (Windows keeps it in its notification centre: Win+N shows it).
    Click the throwaway session's row in the skydeck window and wait until its mark goes. Then open
    the notification centre (Win+N). Expected, from skydeck's side: the page has closed that
    notification. Whether Windows still lists it is what this step finds out.
-4. **The PC locked while the window is in front.** The commonest way of being away: the session
-   you work in is selected, its window in front, and you lock the PC. Select the throwaway session
-   (its terminal has the keyboard), type the story prompt and press Enter, and keep the skydeck
+4. **The PC locked while the window is in front.** The commonest way of being away: the session you
+   work in is selected, its window in front, and you lock the PC. Select the throwaway session (the
+   key bar says `Focus: terminal`), type the story prompt and press Enter, and keep the skydeck
    window in front with that session selected (click nothing else). Lock the PC at once (Win+L) and
    wait two minutes; when Windows shows a notification on the lock screen, write it down. Unlock,
    and the moment the desktop is back, before you click anything, look at the throwaway session's
@@ -1155,7 +1164,7 @@ hour, and whether its click brought the minimised window back (step 6).
 ## W19. What a session that asks shows (real claude)
 
 In the window, select the throwaway session (look at the short id); its terminal has the
-keyboard.
+keyboard (the key bar says `Focus: terminal`; else Ctrl+Shift+L).
 
 1. Type `please run: touch skydeck-check.txt` and press Enter. Expected: Claude Code shows its
    permission prompt for the command; meanwhile the throwaway session's row has a bar at its left
@@ -1181,35 +1190,38 @@ path — what a notification shows to anyone who can see your screen.
 
 ## W21. A finished turn, and seen (real claude)
 
-1. **Finished, not seen.** Select the throwaway session (its terminal has the keyboard), type the
-   story prompt, press Enter, and at once click the other session's row. Stay in the skydeck
+1. **Finished, not seen.** Select the throwaway session (the key bar says `Focus: terminal`), type
+   the story prompt, press Enter, and at once click the other session's row. Stay in the skydeck
    window. Expected: once the story is written, the throwaway session's row has a green bar at its
-   left and a bold title, and its second line is `finished · not seen · <age>`, in green; the
-   title bar's count went up by one (`1 needs you`, after a dot, when no other session needs
-   you); no notification comes, since the window has the focus. Look at the taskbar button's
-   title now (W3).
-2. **Seen.** Look at the count first. When it says `1 needs you`, press Ctrl+Shift+J. Expected:
-   the throwaway session is selected and its terminal takes the keyboard; after 1.5 seconds or a
-   little more its mark goes, and the count with it. Press Ctrl+Shift+J again: the key bar says
-   `no session needs you`. When the count is higher, other sessions need you too, and Ctrl+Shift+J
-   would go to them first (those that ask, then those that ended, then the older finished ones):
-   click the throwaway session's row instead, and leave out both Ctrl+Shift+J.
-3. **A turn that ends in front of you.** With the throwaway session selected and the window in
-   front, type the story prompt, press Enter, and keep it selected, the window in front, until the
-   story is written. Expected: no mark, and the count does not change.
+   left and a bold title, and its second line is `finished · not seen · <age>`, in green; the title
+   bar's count went up by one (`1 needs you`, after a dot, when no other session needs you); no
+   notification comes, since the window has the focus. Look at the taskbar button's title now (W3).
+2. **Seen.** Look first: only when the title bar's count says `1 needs you` and the throwaway
+   session's row is the one with the green bar, press Ctrl+Shift+J. Expected: the throwaway session
+   is selected (look at the header's short id) and its terminal takes the keyboard; after 1.5
+   seconds or a little more its mark goes, and the count with it. Look again before the next press:
+   with no count left in the title bar, press Ctrl+Shift+J once more, and the key bar says `no
+   session needs you`. When the count is higher, or another row has a bar, other sessions need you
+   too, and Ctrl+Shift+J would go to them first (those that ask, then those that ended, then the
+   older finished ones) and clear a real session's mark: click the throwaway session's row instead,
+   and leave out both presses.
+3. **A turn that ends in front of you.** With the throwaway session selected, the window in front
+   and the key bar saying `Focus: terminal`, type the story prompt, press Enter, and keep it
+   selected, the window in front, until the story is written. Expected: no mark, and the count does
+   not change.
 4. **An ask** is W19's step 1: `needs you · …` while the prompt is open, also on the selected
    session, gone once it is answered.
-5. **Several tool calls.** Select the throwaway session, type `list the files here, then count
-   them` and press Enter; at once click the other session's row, then click into W, so that no
-   skydeck window has the focus. Watch the throwaway session's row until the turn is over: its
-   second line starts with `working` while Claude Code works. When Claude Code asks to run a
-   command, the row says `needs you · …` (with notifications allowed, a notification `asks: …`
-   comes too): click the row and read the command it proposes. Answer the plain `Yes` (not the
-   one that stops asking) only when the command only lists or counts the files of the throwaway
-   folder (`ls`, `find`, `wc` on `~/skydeck-try` or `.`); otherwise answer **No**, write the
-   command down, and type the prompt again. After a `Yes`, click the other session's row and W
-   again. Expected: `finished · not seen`, and its notification when they are allowed, only once
-   Claude Code has written its answer, not between two of its steps. Then click the throwaway
+5. **Several tool calls.** Select the throwaway session (the key bar says `Focus: terminal`), type
+   `list the files here, then count them` and press Enter; at once click the other session's row,
+   then click into W, so that no skydeck window has the focus. Watch the throwaway session's row
+   until the turn is over: its second line starts with `working` while Claude Code works. When
+   Claude Code asks to run a command, the row says `needs you · …` (with notifications allowed, a
+   notification `asks: …` comes too): click the row and read the command it proposes. Answer the
+   plain `Yes` (not the one that stops asking) only when the command only lists or counts the files
+   of the throwaway folder (`ls`, `find`, `wc` on `~/skydeck-try` or `.`); otherwise answer **No**,
+   write the command down, and type the prompt again. After a `Yes`, click the other session's row
+   and W again. Expected: `finished · not seen`, and its notification when they are allowed, only
+   once Claude Code has written its answer, not between two of its steps. Then click the throwaway
    session's row and wait until its mark goes (1.5 seconds or a little more): the count goes down
    with it, and the taskbar button's title is `skydeck` again when no other session needs you.
 

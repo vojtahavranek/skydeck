@@ -835,9 +835,11 @@ The age is left out while skydeck does not know when the reason began.
 **Seen.** You have seen a session once it has been the selected one for 1.5 seconds in a skydeck
 window that has the focus (in front: the one you work in), or at once when you type into its
 terminal. Selecting it is enough, also for a session that runs in another terminal (its card
-shows). A turn that ends while you look at its session never shows `finished`. Selecting another
-session, or the window losing the focus, ends the looking; when the window comes back to the
-front, the session selected in it is seen 1.5 seconds later.
+shows). A turn that ends while you look at its session never shows `finished`, and a terminal
+that ends while you look at its session never shows `ended unexpectedly`: both are seen as they
+happen. Selecting another session, or the window losing the focus, ends the looking; when the
+window comes back to the front, the session selected in it is seen after 1.5 seconds or a little
+more.
 
 Asks and finished turns come from the files Claude Code itself keeps for every running session,
 so they show for the sessions that run in another terminal too; `ended unexpectedly` is only for
@@ -868,8 +870,9 @@ session seen in one window is seen in all of them.
 **Desktop notifications.** At the right of the title bar, `Turn on notifications` shows until Edge
 has your answer. Click it once: Edge asks whether the page may show notifications (its own
 prompt). Allow, or Block: either way the button goes, and it comes back only when that answer is
-reset in Edge's settings for the site. Edge keeps the answer for the window's address and profile
-folder (after a change of `window.port` the button shows again). Closed without an answer, the
+reset in Edge's settings for the site. The window's own Edge profile (its profile folder, above)
+keeps the answer, not your own Edge's, and keeps it per address: after a change of `window.port`
+the button shows again. Closed without an answer, the
 prompt leaves the button there. When Edge or the company's policy refuses (the button is not there
 at all, or it goes at once without a prompt), or you chose Block, nothing else changes: the count
 in the title bar and `(3) skydeck` on the taskbar still show what needs you.
@@ -989,7 +992,9 @@ said before.
   it shows there.
 - **One notification, to one window**, the one that had the focus last, and only while no skydeck
   window has the focus. With no window open none comes, and none comes later for what happened
-  meanwhile: the marks and the count are there when you open one.
+  meanwhile: the marks and the count are there when you open one. A browser tab of a
+  `--print-url` address counts as a window: when it had the focus last, the notification goes to
+  it, and it shows nothing unless that browser allows the page's notifications.
 - **A notification keeps its first words** when its session's reason changes (it asked, then
   finished): only a start notifies. One that was shown before the page reloaded (after an update,
   or F5) is not closed by the new page; a session the filter or the folded Earlier hides keeps its
