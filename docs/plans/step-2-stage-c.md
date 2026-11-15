@@ -156,7 +156,7 @@ one landed, resolving the places named:
 | `test/window/view/build.test.ts` (the case that pins the view's files and imports, about line 1111) | D 34 → B 51 → C 73 | 73 adds `banner.ts` to the file list (`chip.ts` and `attention.ts` kept); the allowed imports stay |
 | `src/cli/output.ts`, `src/cli/commands/show.ts` and their tests | D 35 → C 78 | 78: `inWindow` after D's `ticket` parameter; the mark on the holder line; cases at the end |
 | `web/app.js` (the import block; `received()`'s `case 'list'` and `case 'notice'`), `web/index.html` (the style-sheet links after `cards.css`; the list zone), `test-page/helpers/shell.ts` | C 70's one line (wave 1) first; then D 37 → B 55 → C 75 | 75: its import after B's; `banner.render` in `case 'list'` beside D's dialog update and B's title; the `restore-progress` branch in `case 'notice'` that 70 left out; `banner.css` after `attention.css`; `#banner` before `#list`; `bannerWorld` after `actsWorld` |
-| `src/window/server.ts` (`createActions`' deps, `listFor`, `afterRefresh`, `GET /status`, the orderly stop) | D 36 → B 54 → C 74 | 74: its two deps beside D's; the banner set on `buildListMessage`'s result after B's attention; `pageMark.update` beside `decidePostponed`; `windowExpectedMs` in the status; `restorer.stop()` as the stop's FIRST step, before D's fetch wait and B's `seen.stop()`. C changes nothing in `tick.ts` |
+| `src/window/server.ts` (`createActions`' deps, `listFor`, `afterRefresh`, `GET /status`, the orderly stop) | D 36 → B 54 → C 74 | 74: its two deps beside D's; the banner set on `buildListMessage`'s result after B's attention; `pageMark.update` beside `decidePostponed`; `windowExpectedMs` in the status; `restorer.stop()` as the stop's FIRST step, before D's fetch wait and B's `seen.stop()`. C 74 changes nothing in `tick.ts` (C 82, added later, changes only its settling of ended terminals: `ended`, `settle`, C24) |
 | `src/platform/config.ts`, `test/platform/config.test.ts` | D 35 → C 77 (proposed: different places) | 77: only the `terminal` type, its check and message; cases at the end |
 | `docs/install.md`, `docs/manual-checks.md`, `README.md` | B 50 ("Updating" only); then D 39 → B 56 → C 79 → E 99 | 79: its parts after D's and B's; the README's command table last (the formatter re-pads it whole when a row widens) |
 
@@ -179,7 +179,8 @@ scheduled around it:
 `test-page/real-modules.test.ts` (it loads the real `banner.js` through `app.js`; with a null banner
 and no report it draws nothing, and its cases' "no problem" still holds), `test/web/pane.test.ts`,
 `test-page/list.test.ts` and the shell's pinned modules (the shell tests load the real `banner.js`,
-which draws nothing for their lists). Stage C changes nothing in `src/window/tick.ts`,
+which draws nothing for their lists). Stage C changes nothing in `src/window/tick.ts` but task
+82's settling of ended terminals (`ended`, `settle`; C24, added later), nothing in
 `src/window/view/build.ts`, `sections.ts`, `src/window/selected.ts`, `web/list.js`, `web/keys.js`,
 `web/help.js` or `web/cards.js`, and adds no key (`test/web/keys.test.ts` is untouched).
 
@@ -213,6 +214,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C21 | The banner lies in the list zone, above `#list`, in the list's width; it takes height from the list (the list scrolls under it), never width, so the right side, the header's one height (stage D) and every terminal's area stay as they are: its coming and going sends no `resize`. A restore selects nothing and moves no keyboard, in any page, also while a dialog of stage D is shown: its result carries no `sessionId` (stage A's `act` selects only a resume's or a new session's). | S2 12.7: "at the top of the list"; the size a restored terminal starts with is the last focused page's area (S2 8.2.6), which the banner must not change. | 73 (12.7) |
 | C22 | **A restore asked for by a command stops when its asker goes** (ruled on review A). The asker's connection closing before the outcome was written ends the run through C8's `signal`, with the reason `the command that asked for it stopped`: the server lives, the sessions already opened go on starting, the rest are `not started`, then `restore finished: …` (to the pages). So Ctrl+C in `skydeck restore` stops it, as in step 1. A restore started from the banner has no stop in stage C; `skydeck window --stop` ends it (the opened sessions go on), and `docs/install.md` says so. A Stop control in the banner is a follow-up candidate. | Otherwise Ctrl+C would end the command and the server would go on opening every batch. | 73 (11.4) |
 | C23 | **A batch in which no session started stops the run** in the server: once a batch that opened at least one terminal ends with none of its sessions started **while entries are left**, the restore reports `stopped: no session of this batch started` and the rest `not started`, then `restore finished: …` — a hook of `runRestore` (`stopAfterEmptyBatch`), which the command does not pass, so step 1's restore is unchanged. A restore whose last (or only) batch starts nothing ends as any finished run with failures does: no `stopped:` line, code 1 (C5), not 5 (ruled on review A's re-check). A run that a busy store ended says `stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the rest`. | A `claudeCommand` that cannot start (the server's `PATH` after a boot) would otherwise open every keeper and fill the slots with ended terminals. The server's connection waits 250 ms for the store, not the commands' 5 s. | 71 (11.3), 73 (11.3) |
+| C24 | **A lost terminal's program refuses a start** (task 82; ruled 2026-11-15 10:12Z, the new session's part 11:48Z). The exit the server makes up for a lost keeper is not the program's: while that program may still run by task 57's one rule (`lostProgramMayRun`, `mapping.ts`: the program its keeper reported, alive by design 5.5 or not readable, the loss less than 60 s old by the server's clock), `settleEndedTerminal` settles nothing — a resume keeps its lock, a new session its label and group — and the tick keeps that exit for a later refresh (the terminal as the hub listed it at `ended()`; `settleAll` leaves it to expire); and `Launches.refusal` and `resume` refuse a start of its session with `checkResumable`'s words, `<short> is running (pid <p>)`, code 4, after "already open". Once the program is gone, or 60 s after the loss, all is as before. | Measured by task 72's review 2 (C5): a program that has reported no session start outlives the hangup, and from the first refresh after the loss every way to start the session started a second one. The guard cannot see a program that holds nothing yet, and the lock is all the command line has. Named limits: after the 60 s such a program is no longer seen; a keeper lost when its launch is older than the lock's 60 s leaves the command line open (the window still refuses). | 82 (S2 7.5, 7.8) |
 
 ## 2. Contracts
 
@@ -364,8 +366,11 @@ export interface Launches {
   resume(sessionId: string, size: Size): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
   /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
-   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. Never
-   *  throws: a hub that cannot be read gives `the window's terminals could not be read (<kind>)`. */
+   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else (task 82, C24)
+   *  `<short> is running (pid <p>[, pid <p>…])` while a lost terminal of the session has a program
+   *  that may still run (`lostProgramMayRun`), the terminal opened last first; else null. `resume`
+   *  refuses with the same line, code 4. Never throws: a hub that cannot be read gives `the
+   *  window's terminals could not be read (<kind>)`. */
   refusal(sessionId: string): string | null;
   /** C8: null while a terminal of the session may still run; else why it cannot start any more —
    *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost, once
@@ -482,6 +487,9 @@ export function releaseLockOfTake(deck: Deck, sessionId: string, taken: string):
 // src/window/starts.ts — task 80: decideFoundKeeper compares the stored lock with the hello's by
 // sameTake ("its resume lock was taken over" otherwise); settleEndedTerminal releases with
 // releaseLockOfTake.
+// src/window/starts.ts — task 82 (C24): settleEndedTerminal(deck, hello, terminal?: Pick<TerminalInfo,
+// 'state' | 'program' | 'exit'> | null): boolean — false (nothing settled) while that terminal's lost
+// program may still run (lostProgramMayRun, exported from mapping.ts beside lives).
 
 // src/window/page-mark.ts — task 81 (C20)
 export interface PageMark {
@@ -1203,6 +1211,130 @@ about.
 
 ---
 
+### Task 82: A start is refused while a lost terminal's program may still live
+
+**Depends on:** 72; stage B's task 57 (both on `main`) · **Merges before:** 74 · **Design:** S2 7.5 (a lost keeper's program), 7.8 (the settling of an exit; a lost keeper), 11.1 (the window's refusal) · **Contracts:** 2.3 (`Launches.refusal`'s text; `settleEndedTerminal`'s parameter and answer; `lostProgramMayRun` and `lives` exported) · **Decisions:** C24 · **Shared files:** none. Found by task 72's review 2 (C5, measured on `main` 27d6e0e and on tasks 57 + 72), added and ruled on 2026-11-15 10:12Z; the part for a new session ruled 11:48Z.
+
+**Goal.** A keeper dies (its terminal goes `lost`), its program outlives the hangup and has
+reported no session start yet (a `claude` before its `SessionStart`). On `main` every way to start
+that session — the page's Resume (`act resume`), `POST /resume`, restore and `skydeck resume <id>`
+— started a SECOND program from the first refresh after the loss while the first one lived: the
+settling of the exit took the exit the server made up for the lost keeper for the program's own
+and gave the lock back ("no start reported"), the window's refusal did not count a `lost`
+terminal, and the guard has no holder to see. A program that has reported its start is refused by
+the guard (`… is running (pid N)`), and stays so. This task makes task 57's rule — the one rule
+for "a lost keeper's program may still run" — hold back the settling of the exit and refuse a start
+of its session through the window.
+
+**Files**
+- Modify: `src/window/mapping.ts` (task 57's rule exported: `lostProgramMayRun`, `lives`; the
+  mapping reads the first), `src/window/starts.ts` (`settleEndedTerminal`), `src/window/tick.ts`
+  (`ended`, the settling), `src/window/launches.ts` (the window's refusal; `gone` reads `lives`),
+  `docs/design-step-2.md` 7.5 and 7.8, this plan (this section, C24, 2.3's lines)
+- Test: `test/window/mapping.test.ts`, `test/window/starts.test.ts`, `test/window/tick.test.ts`
+  (unit cases, and two end-to-end cases after task 57's), `test/window/launches.test.ts`,
+  `test/window/actions.test.ts` (one case at the end)
+
+**Behaviour.**
+- **The one rule** (`lostProgramMayRun(terminal, proc, nowNs)` in `mapping.ts`): the terminal has
+  an exit its keeper did not send (its state is neither `ended` nor `not-started`: `lost`, or
+  `lose()`'s exit still on its way), a program its keeper reported, that program may still run by
+  design 5.5 (`lives`: its stat line names that start, or cannot be read, or has no start), and the
+  loss is less than 60 s before `nowNs` (a clock that stepped back keeps it; a time that is no
+  decimal number does not). `mapTerminals` reads it for a terminal with an exit, so task 57's
+  mapping is unchanged.
+- **The settling waits** (`settleEndedTerminal(deck, hello, terminal)`): `terminal` is the
+  terminal as the registry listed it when its exit came (null: not known — settled as before).
+  While the rule holds for it nothing is settled — ruled: the whole of it, a resume's lock as a new
+  session's label and group (the program may yet report its start) — and the answer is `false`;
+  otherwise it settles as before and answers `true`. The tick's `ended(hello)` keeps the terminal
+  that `hub.list()` gives at that moment (the server calls it inside the registry's exit event, so
+  a lost terminal is listed `lost` with its program; a hub that cannot be read gives none), and the
+  settling of each refresh keeps an exit answered `false` for the next one. A close of the terminal
+  meanwhile changes nothing (what was kept decides). `settleAll` (the server's stop) leaves such an
+  exit unsettled: its lock expires by itself. A database failure keeps an exit unsettled as before.
+- **The window refuses** (`Launches.refusal`, and `resume` before anything is built or taken):
+  "this session is already open in the window" while a terminal of the session is in `MAY_START`,
+  as before; else, while a lost terminal of the session has a program for which the rule holds,
+  the guard's own words — `checkResumable`'s, word for word — `<short> is running (pid <p>)`, code
+  4, `refused`, every such program's pid, the terminal opened last first (`, ` between them). So
+  the page's Resume answers that line, `POST /resume` its code and line (task 74), and restore's
+  `refuse` reports `failed <short>: <short> is running (pid <p>)`, as it reports the guard's own
+  refusal. `MAY_START` (`view/sections.ts`) is unchanged: the page's view model shows the lost
+  terminal as before.
+- `gone` (C8) reads `lives` instead of a copy of it; its answer is unchanged (no 60 s bound there:
+  restore's own time limit ends its wait).
+
+```ts
+// src/window/mapping.ts — task 82: task 57's rule, exported (mapTerminals reads it)
+export function lostProgramMayRun(terminal: Pick<TerminalInfo, 'state' | 'program' | 'exit'>, proc: Proc, nowNs: Ns): boolean;
+export function lives(program: { pid: number; procStart: number }, proc: Proc): boolean;
+// src/window/starts.ts — task 82: true when settled; false while a lost keeper's program may still run
+export function settleEndedTerminal(deck: Deck, hello: KeeperHello, terminal?: Pick<TerminalInfo, 'state' | 'program' | 'exit'> | null): boolean;
+```
+
+**Tests** (unit: `testDeck`'s fake clock and `/proc`; end to end: `windowDeck`, real keepers)
+- `mapping.test.ts`: `lostProgramMayRun` at 0 s, 59 s, 60 s − 1 ns (true), at 60 s, 61 s, an hour
+  (false); `lose()`'s exit on its way (`running`, `reconnecting`) true; a read that throws, a line
+  without a start true; a clock stepped back an hour true; the program gone, its pid with another
+  start (899, 901), an exit time that is no number, no exit, no program, `ended`, `not-started`
+  false. Task 57's cases pass unchanged.
+- `starts.test.ts`: a resume whose program lives → `false`, the lock kept (a second resume meets
+  it), the program gone → `true`, released; a read that throws, a line without a start → kept;
+  another start → released; 59 s and a clock stepped back → kept, 60 s → released; a start
+  reported meanwhile → still `false`, then `true` with the lock kept; an exit the keeper sent, a
+  keeper lost before `T`, no terminal → released as before; a new session (ruled) → its label and
+  group kept while the program lives, kept for good once it reported its start, removed once it is
+  gone without a start and 60 s after the loss.
+- `tick.test.ts`: a lost exit kept at every refresh until its program is gone, then released,
+  nothing logged; a lost new session's label kept, removed at the refresh after its program is gone;
+  the terminal closed after `ended()` still keeps the lock; `settleAll` leaves it; a hub whose
+  `list()` throws at `ended()` → settled as before.
+- `launches.test.ts`: refused with code 4 and the guard's words (compared with what the guard says
+  for a holder with that pid), nothing built, closed, taken or logged; a read that throws, a line
+  without a start → refused; the program gone or its pid another start → no refusal, the resume
+  closes the lost terminal and opens; 59 s and a clock stepped back → refused, 60 s → not; several
+  lost programs → every pid, opened last first; `MAY_START` first ("already open"); a lost
+  terminal of another session refuses only that one; an exit the keeper sent refuses nothing. Every
+  case of task 72 passes unchanged.
+- `actions.test.ts`: `act resume` answers the line; nothing built or taken; once the program is
+  gone the resume goes through and closes the lost terminal.
+- End to end (`tick.test.ts`): program B of the measurement — a `claudeCommand` `sh` that ignores
+  SIGHUP, reports nothing and waits for a file the test writes (900 rounds of `sleep 0.1`, and not
+  past the sandbox) — started through the window terminal; the test kills ITS OWN keeper (`keeperOf`,
+  `signalKeeper`) and tells the tick of the exit once the registry reported it lost, as the server
+  does. (1) Before the first refresh after the loss and after it: `launches.resume` → `4: <short> is
+  running (pid <program>)`, `act resume` the same line, `skydeck resume <id> --here` → exit 4, `is
+  being resumed`, no handoff; `refusal()` the line; the lock the launch took kept; no second keeper.
+  The program released and gone → the next refresh gives the lock back, `refusal()` is null, and
+  `launches.resume` starts it (code 0, one new keeper, the lost terminal closed). (2) The lock as the
+  store holds it once the launch is older than its 60 s (written stale, its event id kept), the loss
+  less than 60 s old: the window's two ways and `refusal()` still refuse; `skydeck resume` hands off
+  (the named limit). Both fail on `main` 2a08836 (the window resumes or answers `is being resumed`)
+  and pass with the fix; each waits on facts (the program's mark that it ignores the hangup, the
+  registry's exit event, the program gone), not on times. An `after` hook registered before
+  `windowDeck`'s releases the program and kills the test's own keeper while it runs.
+
+**As built** (the rulings):
+- RULED 2026-11-15 11:48Z (asked by the implementer): a lost new session's exit waits as a
+  resume's does — the whole settling, not only the lock. No double start exists for a new session
+  (it has no row to resume before its start); a program that reports its start within the 60 s
+  keeps the label and group it was started with.
+- The refusal's text is the guard's own (`checkResumable`), so no new text was needed (told to the
+  lead, nothing to rule).
+- The terminal the settling reads is the one the hub listed at the exit, kept with the hello: the
+  server's `exited` handler (`server.ts`, task 74's file) is unchanged.
+
+**Not in it:** NAMED LIMITS (S2 7.5, 7.8): a program that still runs 60 s after the loss and never
+reported a start is no longer seen — the exit is settled (the lock given back) and every way starts
+a second program; a keeper lost when its launch is older than the lock's 60 s has no lock left to
+keep — the window still refuses for 60 s after the loss (case 2), but `skydeck resume` starts a
+second program, since its guard sees no holder and no lock; the state of the tick (the kept exits)
+is the server's memory, so a server restart in between settles nothing for them (as before). The
+wiring of `refusal` into the server's restore and routes (74).
+
+---
+
 ### Task 74: The server — launches, restore and the routes wired
 
 **Depends on:** 72, 73, 81 · **Merges after:** D 36, B 54 · **Wave:** 3 · **Design:** S2 8.3, 11.3, 11.4, 12.7, 8.2.6 (first size), 5.5 (the stop), 7.3, 7.8, 14 · **Contracts:** 2.3, 2.5 · **Decisions:** C2, C4, C6, C7, C9, C19, C20, C22 · **Shared files:** `src/window/server.ts`
@@ -1591,7 +1723,8 @@ as they are; in `src/window/actions.ts` it moves stage A's resume and new into `
 adds its two cases beside D's; in `src/window/server.ts` it adds the launches, the restorer, the
 banner in `listFor`, the pages mark after each refresh and the restorer's stop as the stop's first
 step; in `web/app.js` it adds the banner and one notice kind, and no key; in `web/index.html` one
-element and one stylesheet. It changes nothing in `tick.ts`, `src/window/view/build.ts`,
+element and one stylesheet. It changes nothing in `tick.ts` but task 82's settling of ended
+terminals (C24), nothing in `src/window/view/build.ts`,
 `sections.ts`, `web/list.js`, `web/keys.js`, `web/help.js` or `web/cards.js`. Two store keys, no
 migration. The banner changes neither the header's one height (stage D) nor a terminal's area
 (C21).

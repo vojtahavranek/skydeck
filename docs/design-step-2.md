@@ -989,10 +989,14 @@ both in memory: the **expected session**. Which session it shows is decided agai
   the host, ends it early):
   the server knows the loss at once, while the program, given SIGHUP, runs its end for a moment,
   so its session is not "running in another terminal" (7.9) meanwhile and the lost terminal is not
-  dropped for it (7.8; stage B's plan, task 57). The pid alone never counts: it may be another
+  dropped for it (7.8; stage B's plan, task 57). The same one rule holds back the settling of the
+  lost exit and refuses a start of the session through the window while it holds (7.8; stage C's
+  plan, task 82). The pid alone never counts: it may be another
   process's by then. Known limits: a program that has not ended 60 seconds after the loss counts
   as running in another terminal, as 7.9 shows it, and the lost terminal is dropped, so its later
-  end is not marked in the window; a wrapper `claudeCommand` that ends at the SIGHUP before its
+  end is not marked in the window; one that has not reported its session start by then is not
+  seen at all any more, so a start of its session is no longer refused (7.8);
+  a wrapper `claudeCommand` that ends at the SIGHUP before its
   `claude` child leaves that child outside every terminal, so the lost terminal is dropped while
   the child runs its end;
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
@@ -1068,7 +1072,20 @@ The server, on `exit`:
   plan, C19, task 80; 7.3 has the other half). Known limit (design 7.6): a take-over at a
   millisecond congruent to the take's (mod 999,999, about one in a million) by a restore that then
   renews it reads as a renewal of this launch's take; if this terminal ends while that restore
-  waits, the restore's lock is given back and its next renewal finds it gone.
+  waits, the restore's lock is given back and its next renewal finds it gone;
+- does neither while the exit is a **lost** keeper's (below) and its program may still run by
+  7.5's rule — the program its keeper reported, alive by design 5.5 or not readable, less than 60
+  seconds after the loss: the server made that exit up, nobody reaped the program, and a `claude`
+  before its `SessionStart` holds nothing the guard could see. The lock stays and a new session
+  keeps its label and group (the program may yet report its start; ruled by the plan owner, stage
+  C's plan, task 82, for both kinds), and the window refuses every start of the session — the
+  page's Resume, `POST /resume`, restore's own check (11.1) — with the guard's words,
+  `<short> is running (pid <p>)`. Once that program is gone, or 60 seconds after the loss, the exit
+  is settled as above. Known limits: a program that still runs 60 seconds after the loss and never
+  reported a start is no longer seen — its lock is given back and a start of its session starts a
+  second one; and a keeper lost when its launch is older than the lock's 60 seconds has no lock
+  left to keep — the window still refuses for 60 seconds after the loss, but `skydeck resume`
+  starts a second program, since its guard sees no holder and no lock.
 
 A keeper whose connection ends without `exit` is **lost** only when its process is dead by design
 5.5's rule (its `.pid` line) or its socket refuses connections: then its program got SIGHUP
