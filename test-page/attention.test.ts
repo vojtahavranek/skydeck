@@ -643,20 +643,23 @@ test('attention in the page', async (t) => {
       assert.equal(record.closed.includes(1), false);
 
       // A list in which S1 is listed and no longer needs you closes S1's.
-      w.send({ t: 'notify', sessionId: S3, title: 'gamma', reason: 'finished', detail: null });
-      await recorded(w.page, (r) => r.made.length === 3, "gamma's notification");
-      w.set((view) => {
-        const list = threeNeed(view);
-        const open = (list['sections'] as { rows: Row[] }[])[0]?.rows ?? [];
-        const alpha = open.find((listed) => listed['id'] === S1);
-        if (alpha !== undefined) alpha['attention'] = null;
-        list['needYou'] = { count: 2, order: [S2, S3] };
-        return list;
-      });
+      const alphaSeen =
+        (count: number) =>
+        (view: { filter: string; selected: string | null }): Row => {
+          const list = threeNeed(view);
+          const open = (list['sections'] as { rows: Row[] }[])[0]?.rows ?? [];
+          const alpha = open.find((listed) => listed['id'] === S1);
+          if (alpha !== undefined) alpha['attention'] = null;
+          list['needYou'] = { ...(list['needYou'] as Row), count };
+          return list;
+        };
+      w.set(alphaSeen(2));
       record = await recorded(w.page, (r) => r.closed.includes(1), "alpha's closed");
-      assert.equal(record.closed.includes(2), false, "gamma's stays");
+      await titleIs(w.page, '(2) skydeck');
 
-      // A filter that hides gamma: the list does not carry its row, and its notification stays.
+      // A filter that hides gamma, then gamma's notification, then a list (ruled): the list does
+      // not carry gamma's row, so its notification stays; and once the row is back with its
+      // attention, too.
       await toZone(w.page, 'list');
       await w.page.keyboard.press('/');
       await w.page.keyboard.type('bet');
@@ -664,6 +667,11 @@ test('attention in the page', async (t) => {
         state: 'detached',
         timeout: PAGE_WAIT_MS,
       });
+      w.send({ t: 'notify', sessionId: S3, title: 'gamma', reason: 'finished', detail: null });
+      await recorded(w.page, (r) => r.made.length === 3, "gamma's notification");
+      w.set(alphaSeen(3)); // a list that differs: its count
+      await titleIs(w.page, '(3) skydeck');
+      assert.equal((await notificationsOf(w.page)).closed.includes(2), false, "gamma's stays");
       await w.page.keyboard.press('Escape'); // the filter cleared: gamma is listed again
       await w.page.waitForSelector(`#list [data-id="${S3}"]`, { timeout: PAGE_WAIT_MS });
       assert.equal((await notificationsOf(w.page)).closed.includes(2), false, "gamma's stays");
@@ -837,6 +845,18 @@ test('attention in the page', async (t) => {
         };
       });
       assert.deepEqual(inert, { permission: 'denied', answer: 'denied', native: false });
+      const shown = await plain.evaluate(async () => {
+        const registration = Reflect.get(globalThis, 'ServiceWorkerRegistration') as {
+          prototype: { showNotification(this: unknown, title: string): Promise<void> };
+        };
+        try {
+          await registration.prototype.showNotification.call(null, 'nothing is shown');
+          return 'shown';
+        } catch (error) {
+          return String(error);
+        }
+      });
+      assert.equal(shown, 'TypeError: no notification is shown in a test', "a worker's refuses");
       assert.equal(await plain.locator('#notify-on').isHidden(), true);
 
       const doubleArg = {
