@@ -1526,6 +1526,115 @@ async function scriptedPickCases(t: TestContext, chromium: Browser): Promise<voi
   );
 
   await t.test(
+    'Enter held on `Switch…` opens the switcher and picks nothing: its repeats in the field act on no item, and none reaches the list (review 2, S1)',
+    async (t) => {
+      const d = await world(t, chromium, ORB_WORLD);
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      await page.focus('#switch-button');
+      await page.keyboard.down('Enter'); // opens the switcher (the button's click)
+      await switcherShown(page, true);
+      await untilAnswer(page, '', (v) => v.items.length === ORB.length, 'every session listed');
+      for (let i = 0; i < 3; i++) {
+        await page.keyboard.down('Enter'); // auto-repeats, in the switcher's field
+      }
+      await page.keyboard.up('Enter');
+      await sleep(400);
+      assert.deepEqual(w.acts(), [], 'no pick, no resume');
+      assert.equal((await switcherView(page)).shown, true, 'the switcher stays');
+      assert.equal(await selectedRow(page), S3, 'the selection where it was');
+      assert.equal(await keyboardOn(page), FIELD);
+    },
+  );
+
+  await t.test(
+    'the highlight goes to the first item for the answer to another text, also when the highlighted session is in it: ↓ ↓ on `orbit`, then `or` → `orange` highlighted, Enter resumes it (review 2, S2)',
+    async (t) => {
+      const d = await world(t, chromium, ORB_WORLD);
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      await openSwitcher(page);
+      await untilAnswer(page, '', (v) => v.items.length === ORB.length, 'every session listed');
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      await untilSwitcher(
+        page,
+        (v) => v.items.find((item) => item.active)?.id === S2,
+        'the highlight on orbit',
+      );
+      await page.keyboard.type('or');
+      const view = await untilAnswer(
+        page,
+        'or',
+        (v) => idsOf(v).join() === [S1, S2].join(),
+        'the answer to or: orange, orbit',
+      );
+      assert.deepEqual(
+        view.items.map((item) => item.active),
+        [true, false],
+        'the first item is highlighted',
+      );
+      await page.keyboard.press('Enter');
+      const act = await w.act(1);
+      assert.deepEqual([act['kind'], act['sessionId']], ['resume', S1]);
+    },
+  );
+
+  await t.test(
+    'opened from the filter field, a pick of a session without a terminal puts the keyboard on the list, where Enter on its row would: a session elsewhere, and one not running whose resume is refused (review 2, S4)',
+    async (t) => {
+      const d = await world(t, chromium, {
+        sections: {
+          week: [
+            row(S3, { title: 'plain' }),
+            row(S1, {
+              title: 'far away',
+              state: 'running',
+              elsewhere: { pid: 77, tty: null, dir: null },
+            }),
+            row(S2, { title: 'resting' }),
+          ],
+        },
+        entries: [
+          {
+            id: S1,
+            title: 'far away',
+            rank: 'open',
+            row: { state: 'running', elsewhere: { pid: 77, tty: null, dir: null } },
+          },
+          { id: S2, title: 'resting', rank: 'not-running' },
+        ],
+      });
+      const { page, w } = d;
+      await untilSelected(page, S3);
+      for (const [id, text] of [
+        [S1, 'far'],
+        [S2, 'resting'],
+      ] as const) {
+        await toZone(page, 'list');
+        await page.keyboard.press('/');
+        await keyboardIs(page, 'the filter');
+        await openSwitcher(page);
+        await page.keyboard.type(text);
+        await untilAnswer(page, text, (v) => idsOf(v).join() === id, `the answer to ${text}`);
+        await page.keyboard.press('Enter');
+        await switcherShown(page, false);
+        await untilSelected(page, id);
+        await keyboardIs(page, 'the list');
+        if (id === S2) {
+          const act = await w.act(1);
+          assert.deepEqual([act['kind'], act['sessionId']], ['resume', S2]);
+          w.answer(act, { ok: false, error: 'resting cannot be resumed' });
+          await showsText(page, '#cards', /resting cannot be resumed/);
+          await keyboardIs(page, 'the list');
+        }
+        await page.keyboard.type('j');
+        assert.equal(await page.inputValue('#list input.list-filter'), '', 'the filter holds no j');
+      }
+    },
+  );
+
+  await t.test(
     'the click guard lets go again: after a pick by a click, and after a click outside closed the switcher, a later double click on a row of the list resumes it (ruled on review 1)',
     async (t) => {
       const d = await world(t, chromium, ORB_WORLD);
@@ -2213,6 +2322,16 @@ async function modalCases(t: TestContext, chromium: Browser): Promise<void> {
         );
         assert.equal(seen.undoOnTop, true, 'the Undo is on top of the scrim');
         assert.notEqual(seen.panelOverToast, false, 'the panel is over the toast where they meet');
+        // A click on the toast's text leaves the keyboard on nothing; the next key gives it back
+        // to the field before it acts (E11): `j` is text there, nothing moves, nothing is sent.
+        await page.locator('#toast .toast-text').click();
+        assert.equal(await keyboardOn(page), 'nothing', 'the click took the keyboard away');
+        const sentBefore = w.acts().length;
+        await page.keyboard.type('j');
+        assert.equal((await switcherView(page)).value, 'j', 'the field holds j');
+        assert.equal(await keyboardOn(page), FIELD);
+        assert.equal(await selectedRow(page), S2, 'the selection unmoved');
+        assert.equal(w.acts().length, sentBefore, 'nothing sent');
         await page.mouse.click(seen.undoAt.x, seen.undoAt.y);
         const undone = await w.act(n + 1);
         assert.deepEqual([undone['kind'], undone['sessionId']], ['undone', S2]);

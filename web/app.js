@@ -928,6 +928,13 @@ function switcherPick(item) {
       say(`the filter was cleared to show ${row.shortId}`);
     }
   }
+  // The keyboard goes where the pick puts it (E11), as Enter on the row in the list would: to the
+  // list, or to the row's terminal — not back into the text field the switcher was opened from
+  // and gave it back to as it closed (the filter's, where a `d` would be text; review 2, S4).
+  const holder = document.activeElement;
+  if (holder instanceof HTMLElement && isTextField(holder)) {
+    holder.blur();
+  }
   select(row.id, 'click');
   if (row.terminal !== null || row.elsewhere !== null) {
     return;
