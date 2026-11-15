@@ -2558,7 +2558,9 @@ stays (ruled for plan D task 37). That list decides once: a row it still has (ru
 Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
 of plan D task 37). The header's Done leaves the selection to the main rule. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
-(ruled for plan D task 38). A held
+(ruled for plan D task 38), nor does it on a stack's `+n more` line or `×n`, wherever the list
+has moved under it: such a double click opens or closes the stack once, and its second click
+selects no row, takes no keyboard and resumes nothing (ruled for plan E task 97). A held
 `d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is

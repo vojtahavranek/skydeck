@@ -165,7 +165,9 @@ function makeRow(id, hooks, clicks, toggleStack) {
   stack.addEventListener('mousedown', (event) => event.preventDefault());
   stack.addEventListener('click', (event) => {
     event.stopPropagation(); // not a click on the row: it selects nothing
-    toggleStack(id);
+    if (event.detail <= 1) {
+      toggleStack(id); // the first click of a sequence only (task 38's rule)
+    }
   });
   stack.addEventListener('dblclick', (event) => event.stopPropagation()); // and resumes nothing
   const title = element('row-title');
@@ -354,11 +356,49 @@ export function createList(root, hooks) {
    * off a row — on blank space, on a header — never matches an older click on a row.
    */
   const clicks = { first: /** @type {string | null} */ (null) };
+  /**
+   * The current click sequence began on a stack's `×4` or `+3 more` line (E7, ruled on review 2):
+   * its first click opened or closed the stack, so the list may have moved under the pointer, and
+   * the later clicks of the sequence (`detail` above 1) are not acted on anywhere in the list —
+   * their press takes no keyboard, their click selects no row and toggles no stack, a double click
+   * resumes nothing (task 38's rule for the header's buttons). Set at each sequence's first press.
+   */
+  let onStack = false;
+  /** @param {EventTarget | null} target */
+  const isStackControl = (target) =>
+    target instanceof Element && target.closest('.row-stack, .list-more') !== null;
+  /** @param {Event} event */
+  const drop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  root.addEventListener(
+    'mousedown',
+    (event) => {
+      if (event.detail <= 1) {
+        onStack = isStackControl(event.target);
+      } else if (onStack) {
+        drop(event);
+      }
+    },
+    true,
+  );
   root.addEventListener(
     'click',
     (event) => {
       if (event.detail <= 1) {
         clicks.first = null;
+      } else if (onStack) {
+        drop(event);
+      }
+    },
+    true,
+  );
+  root.addEventListener(
+    'dblclick',
+    (event) => {
+      if (onStack) {
+        drop(event);
       }
     },
     true,
@@ -477,7 +517,11 @@ export function createList(root, hooks) {
       made.dataset.head = head;
       made.title = 'open the stack';
       made.addEventListener('mousedown', (event) => event.preventDefault());
-      made.addEventListener('click', () => toggleStack(head));
+      made.addEventListener('click', (event) => {
+        if (event.detail <= 1) {
+          toggleStack(head); // the first click of a sequence only (task 38's rule)
+        }
+      });
       moreLines.set(head, made);
       line = made;
     }

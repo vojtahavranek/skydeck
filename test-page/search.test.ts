@@ -21,7 +21,10 @@ import type { ServerSandbox } from '../test/helpers/window.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
+  after,
   connection,
+  logOf,
+  mark,
   PAGE_WAIT_MS,
   pageUrl,
   problemsOf,
@@ -39,6 +42,7 @@ const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 const S5 = '4f9d7a5c-2b6e-4d0f-9a7b-6c5d4e3f2a1b';
 const S6 = '5a0e8b6d-3c7f-4e1a-8b8c-7d6e5f4a3b2c';
 const S7 = '6b1f9c7e-4d8a-4f2b-9c9d-8e7f6a5b4c3d';
+const S8 = '7c2a0d8f-5e9b-4a3c-8dae-9f8a7b6c5d4e';
 
 const SEC = 1_000_000_000n;
 const MIN = 60n * SEC;
@@ -292,6 +296,33 @@ async function chips(page: Page): Promise<[string, string][]> {
 /** A click on the chip named `name` (`Running`, `Open PR`, `Has note`, `Show done`). */
 async function clickChip(page: Page, name: string): Promise<void> {
   await page.locator('#list .list-chips button', { hasText: name }).click();
+}
+
+/**
+ * A double click at a human pace on the centre of `selector`: the first click, then `between`
+ * (the list has redrawn under the pointer meanwhile, as it does within a person's double click),
+ * then the second press, with the click count Chromium gives the second click of a double click.
+ */
+async function doubleClick(
+  page: Page,
+  selector: string,
+  between: () => Promise<unknown>,
+): Promise<void> {
+  const box = await page.locator(selector).boundingBox();
+  assert.ok(box !== null, selector);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down({ clickCount: 1 });
+  await page.mouse.up({ clickCount: 1 });
+  await between();
+  await page.mouse.down({ clickCount: 2 });
+  await page.mouse.up({ clickCount: 2 });
+}
+
+/** The types of the messages the page sent after the mark `name` (helpers/shell.ts's log). */
+async function sentAfter(page: Page, name: string): Promise<string[]> {
+  return after(await logOf(page), name)
+    .filter((entry) => entry.e === 'out')
+    .map((entry) => entry.t ?? '');
 }
 
 /**
@@ -780,12 +811,13 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
-    'a group of 1,025 bytes is never in a view the page sends (its stack opens only while a member is selected); one of 1,024 bytes is',
+    'a group of 1,025 bytes is never in a view the page sends (its stack opens only while a member is selected), nor one of 400 `€` (400 units, 1,200 bytes); one of 1,024 bytes of non-ASCII text is',
     async (t) => {
       const l = await launchedWithViews(t, chromium);
       const { page, d } = l;
       const long = 'g'.repeat(1025);
-      const fits = 'f'.repeat(1024);
+      const fits = `${'€'.repeat(341)}f`; // 1,024 bytes of UTF-8 in 342 units
+      const euros = '€'.repeat(400); // 1,200 bytes in 400 units
       // The member of the long group first, alone: the page selects it (its first row).
       session(d, S2, 2n * MIN, 'long member');
       setGroup(d.deck, S2, long);
@@ -827,6 +859,178 @@ test('search and stacks in the list', async (t) => {
       await page.locator(`#list .list-more[data-head="${S3}"]`).click();
       await untilRows(page, [S1, S3, S4], 'the stack of 1,024 bytes open');
       await untilOpened(page, [fits]);
+
+      // 400 `€`: the bytes count, not the units: never sent, the stack stays closed.
+      session(d, S6, 5n * MIN, 'euro head');
+      session(d, S7, 6n * MIN, 'euro member');
+      setGroup(d.deck, S6, euros);
+      setGroup(d.deck, S7, euros);
+      await untilRows(page, [S1, S3, S4, S6], 'a third stack, closed');
+      await page.locator(`#list .list-more[data-head="${S6}"]`).click();
+      await page.locator(`#list [data-id="${S6}"]`).click();
+      await untilSelected(page, S6);
+      await page.keyboard.press('ArrowRight');
+      await sleep(500);
+      assert.deepEqual(await rowIds(page), [S1, S3, S4, S6], 'it stays closed');
+      assert.deepEqual((await lastView(page))['opened'], [fits]);
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'at most 64 groups in `opened`: opening a 65th stack drops the oldest, and the page stays connected (the server refuses a 65th)',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      const id = (n: number): string =>
+        `${String(n).padStart(8, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
+      for (let g = 1; g <= 65; g++) {
+        session(d, id(2 * g), BigInt(2 * g) * MIN, `GR-${g} head`);
+        session(d, id(2 * g + 1), BigInt(2 * g + 1) * MIN, `GR-${g} member`);
+      }
+      await untilLines(
+        page,
+        (drawn) => drawn.filter((line) => line.kind === 'more').length === 65,
+        '65 closed stacks',
+      );
+      for (let g = 1; g <= 65; g++) {
+        await page.locator(`#list .list-more[data-head="${id(2 * g)}"]`).click();
+        const deadline = performance.now() + PAGE_WAIT_MS;
+        while (!((await lastView(page))['opened'] as string[]).includes(`GR-${g}`)) {
+          assert.ok(performance.now() < deadline, `GR-${g} opened`);
+          await sleep(20);
+        }
+      }
+      const opened = (await lastView(page))['opened'] as string[];
+      assert.equal(opened.length, 64);
+      assert.deepEqual(
+        opened,
+        Array.from({ length: 64 }, (_, i) => `GR-${i + 2}`),
+      );
+      // The oldest is closed again; the page never lost its connection.
+      await untilLines(
+        page,
+        (drawn) => drawn.some((line) => line.kind === 'more' && line.id === id(2)),
+        'GR-1 closed again',
+      );
+      assert.equal((await logOf(page)).filter((entry) => entry.e === 'ws').length, 1);
+      await connection(page, 'open');
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'a filter of blanks is no filter (the list decides by `list.filtering`): the stacks are drawn, the footer is shown, ← and → fold and unfold Earlier',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'ORB-1 first');
+      session(d, S2, 2n * MIN, 'ORB-1 second');
+      session(d, S3, 3n * MIN, 'plain work');
+      session(d, S4, 20n * DAY, 'old work');
+      session(d, S5, 4n * MIN, 'done work');
+      markDone(d.deck, S5);
+      await untilRows(page, [S1, S3], 'This week: a closed stack and a row');
+
+      await toZone(page, 'list');
+      await page.keyboard.press('/');
+      await page.keyboard.type('   ');
+      await page.keyboard.press('Enter');
+      await sleep(500);
+      assert.deepEqual((await lastView(page))['filter'], '   ');
+      const drawn = await untilLines(
+        page,
+        (lines) =>
+          lines.map((line) => `${line.kind}${line.id}`).join() === `row${S1},more${S1},row${S3}`,
+        'the stack as before',
+      );
+      assert.equal(drawn[0]?.badge, '×2');
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      assert.equal(await shownText(page, '#list .list-empty'), '');
+      await page.locator(`#list [data-id="${S3}"]`).click();
+      await untilSelected(page, S3);
+      await page.keyboard.press('ArrowRight');
+      await untilRows(page, [S1, S3, S4], '→ unfolds Earlier');
+      await page.keyboard.press('ArrowLeft');
+      await untilRows(page, [S1, S3], '← folds it');
+      await page.keyboard.press('ArrowUp');
+      await untilSelected(page, S1);
+      await page.keyboard.press('ArrowRight');
+      await untilRows(page, [S1, S2, S3], '→ on the head opens the stack');
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'the `+n more` line from a terminal: a click opens the stack and takes no keyboard; a double click at a human pace opens it, and its second click — landing on the first member — selects nothing, moves the keyboard nowhere and resumes nothing',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S8, 1n * MIN, 'plain run');
+      session(d, S1, 2n * MIN, 'ORB-1 first');
+      session(d, S2, 3n * MIN, 'ORB-1 second');
+      await untilRows(page, [S8, S1], 'a row and a closed stack');
+      await resumeFromList(page, S8);
+      await untilRows(page, [S8, S1], 'S8 under Open');
+      assert.equal(await keyboardOn(page), 'the terminal');
+
+      // One click: open, the keyboard in the terminal, the selection on S8.
+      await page.locator(`#list .list-more[data-head="${S1}"]`).click();
+      await untilRows(page, [S8, S1, S2], 'a click on the line opens it');
+      assert.equal(await keyboardOn(page), 'the terminal');
+      assert.equal(await selectedRow(page), S8);
+      await page.locator(`#list [data-id="${S1}"] .row-stack`).click();
+      await untilRows(page, [S8, S1], 'closed again by its ×2');
+      assert.equal(await keyboardOn(page), 'the terminal');
+
+      // A double click: its second press lands on S2, drawn where the line was.
+      await mark(page, 'double');
+      await doubleClick(page, `#list .list-more[data-head="${S1}"]`, () =>
+        untilRows(page, [S8, S1, S2], 'open after the first click'),
+      );
+      await sleep(500);
+      assert.deepEqual(await rowIds(page), [S8, S1, S2], 'open');
+      assert.equal(await selectedRow(page), S8, 'the selection where it was');
+      assert.equal(await keyboardOn(page), 'the terminal', 'the keyboard where it was');
+      assert.equal(
+        await page.evaluate(() => document.getElementById('right-zone')?.dataset['pane']),
+        'terminal',
+      );
+      assert.ok(!(await sentAfter(page, 'double')).includes('act'), 'nothing resumed');
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    "a stack's ×n from a terminal: a click opens and closes it and takes no keyboard; a double click at a human pace opens it once (its second click does not close it again) and moves nothing else",
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S8, 1n * MIN, 'plain run');
+      session(d, S1, 2n * MIN, 'ORB-1 first');
+      session(d, S2, 3n * MIN, 'ORB-1 second');
+      await untilRows(page, [S8, S1], 'a row and a closed stack');
+      await resumeFromList(page, S8);
+      await untilRows(page, [S8, S1], 'S8 under Open');
+
+      const badge = `#list [data-id="${S1}"] .row-stack`;
+      await page.locator(badge).click();
+      await untilRows(page, [S8, S1, S2], 'a click on ×2 opens it');
+      assert.equal(await keyboardOn(page), 'the terminal');
+      await page.locator(badge).click();
+      await untilRows(page, [S8, S1], 'and closes it');
+      assert.equal(await keyboardOn(page), 'the terminal');
+
+      await mark(page, 'double');
+      await doubleClick(page, badge, () =>
+        untilRows(page, [S8, S1, S2], 'open after the first click'),
+      );
+      await sleep(500);
+      assert.deepEqual(await rowIds(page), [S8, S1, S2], 'still open');
+      assert.deepEqual((await lastView(page))['opened'], ['ORB-1']);
+      assert.equal(await selectedRow(page), S8);
+      assert.equal(await keyboardOn(page), 'the terminal');
+      assert.ok(!(await sentAfter(page, 'double')).includes('act'), 'nothing resumed');
       await healthy(page, l.problems);
     },
   );

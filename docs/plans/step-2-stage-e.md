@@ -1076,7 +1076,11 @@ contexts through stage B's `newContext`)
   row outside it; Ctrl+Tab back to a member of an open stack selects it, and (named) Ctrl+Tab
   skips a member of a stack the user closed — app.js's `previous` takes only a row the list
   draws, and the page never knows a closed stack's members;
-  a filter → no stack; a group of 1,025 bytes → never in a view the page sends; a hostile group
+  a filter → no stack; a double click at a human pace from a terminal on the `+n more` line (its
+  second click lands on the first member) and on `×n` → the stack open once, the selection, the
+  keyboard and the pane where they were, no `act` (ruled on review 2: the later clicks of a
+  sequence begun on either are not acted on, task 38's rule); a group of 1,025 bytes → never in a
+  view the page sends; a hostile group
   `<img src=x onerror=…>` in the line and a hostile title on a member are text
   (`querySelector('img')` null); exactly one `#list [data-id]` per drawn row.
 - `icon.test.ts`: the page's icon link names `/assets/<build>/web/icons/favicon.ico` and it
