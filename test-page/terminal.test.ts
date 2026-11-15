@@ -31,12 +31,14 @@ import {
   mark,
   pageUrl,
   problemsOf,
+  readPage,
   scriptedList,
   showsText,
   standinServer,
   storeKey,
   zone,
 } from './helpers/shell.ts';
+import type { Logged } from './helpers/shell.ts';
 import {
   hexOf,
   inputOf,
@@ -164,50 +166,118 @@ async function keyAnswered(
 }
 
 /**
- * Waits until the page has received every `input-full` the server sent for `term` (one for each
- * input it refused), as the recorder saw them come: the view has taken each into account then.
+ * A wait until no `input-full` the server sent for `term` can still reach the page: each one has
+ * come (as the recorder saw it, before the view took it into account), or went with a connection
+ * the page dropped. The page drops one whose ping had no pong for 3 s (S2 6.3) and connects
+ * again; a large paste under heavy load can cause it (the ping waits behind the paste at the
+ * server), and what the old connection still carried never comes. Once the server has answered
+ * all the old one carried (every input the page sent, or nothing new for 3 s) and the new one is
+ * open, what has not come is lost. The recorder logs no notice's kind, so a gap or newer-keeper
+ * notice for `term` would count too; the case that uses this has none.
  */
-async function untilRefusalsReached(
+async function refusalSync(
   page: Page,
   answers: InputAnswer[],
   term: string,
-): Promise<void> {
-  const refused = answers.filter((a) => a.term === term && a.answer === 'full').length;
-  await until(
-    async () =>
-      (await logOf(page)).filter((e) => e.e === 'in' && e.t === 'notice' && e.term === term)
-        .length >= refused,
-    `the page has the ${refused} input-full notices the server sent`,
-  );
+): Promise<() => Promise<void>> {
+  const socketsOf = (log: Logged[]): number => log.filter((e) => e.e === 'ws').length;
+  let sockets = socketsOf(await logOf(page));
+  let lost = 0;
+  return async () => {
+    let answered = -1;
+    let quietSince = 0;
+    await until(
+      async () => {
+        const log = await logOf(page);
+        const mine = answers.filter((a) => a.term === term);
+        const refused = mine.filter((a) => a.answer === 'full').length;
+        const received = log.filter(
+          (e) => e.e === 'in' && e.t === 'notice' && e.term === term,
+        ).length;
+        if (received + lost >= refused) return true;
+        if (socketsOf(log) === sockets) return false; // the same connection: they are on their way
+        if (mine.length !== answered) {
+          answered = mine.length;
+          quietSince = performance.now();
+        }
+        const sent = log.filter((e) => e.e === 'out' && e.t === 'input' && e.term === term).length;
+        if (mine.length < sent && performance.now() - quietSince < 3000) return false;
+        if (
+          (await readPage(page, () => document.documentElement.dataset['connection'], null)) !==
+          'open'
+        )
+          return false;
+        sockets = socketsOf(log);
+        lost = refused - received;
+        return true;
+      },
+      'every input-full the server sent has reached the page, or went with a dropped connection',
+      60_000,
+    );
+  };
 }
 
 /**
- * Records in the page, from now on, which terminals hold an input-full notice, at every change:
- * `inputFullChanges` gives the ids after each change, in order (a notice shown for a moment only
- * is in it too).
+ * What the page got after it last sent `term` input, as the recorder logged it in the page's own
+ * order: the input-full notices for `term` (the view keeps the notice after an input exactly when
+ * one came, S2 12.6), and whether it made a new connection since.
+ */
+function afterInput(log: Logged[], term: string): { refusals: number; reconnected: boolean } {
+  let refusals = 0;
+  let reconnected = false;
+  for (const e of log) {
+    if (e.e === 'out' && e.t === 'input' && e.term === term) {
+      refusals = 0;
+      reconnected = false;
+    } else if (e.e === 'in' && e.t === 'notice' && e.term === term) {
+      refusals++;
+    } else if (e.e === 'ws') {
+      reconnected = true;
+    }
+  }
+  return { refusals, reconnected };
+}
+
+/** Which terminals held an input-full notice after a change, and how many notices for a terminal
+ *  the page had received by then (as the recorder logged them, before the page handled each). */
+interface InputFullChange {
+  terms: string[];
+  notices: number;
+}
+
+/**
+ * Records in the page, from now on, every change of which terminals hold an input-full notice
+ * (one shown for a moment only is in it too); `inputFullChanges` gives them in order.
  */
 async function watchInputFull(page: Page): Promise<void> {
   await page.evaluate(() => {
     const area = document.getElementById('terminal');
     if (area === null) throw new Error('no #terminal');
-    const changes: string[][] = [];
+    const changes: { terms: string[]; notices: number }[] = [];
     let last = '';
     new MutationObserver(() => {
       const terms = [...area.querySelectorAll<HTMLElement>('.tv-term')]
         .filter((box) => box.querySelector('.tv-bar[data-kind="input-full"]') !== null)
         .map((box) => box.dataset['term'] ?? '');
-      if (terms.join(' ') !== last) {
-        last = terms.join(' ');
-        changes.push(terms);
-      }
+      if (terms.join(' ') === last) return;
+      last = terms.join(' ');
+      const log = JSON.parse(sessionStorage.getItem('skydeck-test-log') ?? '[]') as {
+        e: string;
+        t?: string;
+        term?: string;
+      }[];
+      const notices = log.filter(
+        (e) => e.e === 'in' && e.t === 'notice' && e.term !== undefined,
+      ).length;
+      changes.push({ terms, notices });
     }).observe(area, { childList: true, subtree: true });
     Object.assign(window, { inputFullChanges: changes });
   });
 }
 
-async function inputFullChanges(page: Page): Promise<string[][]> {
+async function inputFullChanges(page: Page): Promise<InputFullChange[]> {
   return page.evaluate(
-    () => (window as unknown as { inputFullChanges: string[][] }).inputFullChanges,
+    () => (window as unknown as { inputFullChanges: InputFullChange[] }).inputFullChanges,
   );
 }
 
@@ -620,16 +690,27 @@ test('the terminal view', async (t) => {
       // refuses a large paste early, while the keeper is slow to fill, and a key right after can
       // then be taken (the queue fell back under its limit) — and the notice rightly goes.
       const answers = inputAnswers(l.server);
+      const sinks = captureSinks(l.server);
       const refused = (some: InputAnswer[]): number =>
         some.filter((a) => a.answer === 'full').length;
       const shown = async (): Promise<boolean> =>
         (await noticeText(page, 'input-full')) === INPUT_FULL;
       d.resumable(S1);
+      d.resumable(S2);
+      // Two terminals attached, so that "on its terminal" can fail: S2's stays attached, hidden.
+      const other = await resumeHere(page, S2);
+      await untilScreen(page, promptOf(S2));
       const term = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
       await watchInputFull(page);
-      await typeLine(page, '/stall 20');
-      await untilScreen(page, /stalling 20 s/);
+      const refusalsReached = await refusalSync(page, answers, term);
+      // Long enough that everything up to the second paste reaches the server while it stalls,
+      // even under heavy load (it took 17 s at a load of 50); checked below, not assumed.
+      const stall = '/stall 40\r';
+      await typeLine(page, stall.slice(0, -1));
+      await untilScreen(page, /stalling 40 s/);
+      const stalled = (): boolean => inputOf(d.record, S1).endsWith(hexOf(stall));
+      const stillStalled = 'the stall still on (the program read nothing since /stall)';
       // Input the server takes shows nothing: the typed line, and a paste it takes whole while
       // the program stalls (the keeper alone takes 4 MiB).
       await pasteAnswered(page, answers, term, MiB);
@@ -638,57 +719,90 @@ test('the terminal view', async (t) => {
       assert.deepEqual(await inputFullChanges(page), [], 'no notice without a refusal');
       // More than the keeper (4 MiB), the sockets and the server (4 MiB) take while it stalls.
       const first = await pasteAnswered(page, answers, term, 10 * MiB);
+      assert.ok(stalled(), stillStalled);
       assert.ok(refused(first) > 0, 'part of the paste refused');
       await until(shown, 'shown');
-      assert.deepEqual((await inputFullChanges(page)).at(-1), [term], 'on its terminal');
+      const firstShown = await inputFullChanges(page);
+      assert.deepEqual(firstShown.at(-1)?.terms, [term], 'on its terminal only');
+      assert.ok((firstShown[0]?.notices ?? 0) > 0, 'shown only once a refusal reached the page');
+      // Every refusal of the first paste is in before the second is sent: only the second's can
+      // keep the notice then.
+      await refusalsReached();
       // Input refused while it shows keeps it: a second paste, refused in part whatever the
-      // first left room for (all that is taken while it stalls is far below 21 MiB).
-      const second = await pasteAnswered(page, answers, term, 10 * MiB);
+      // first left room for (all that is taken while it stalls, some 8.3 MiB, is far below the
+      // 17 MiB pasted; at most 8.3 - 1 - 4 MiB is left for this one).
+      const second = await pasteAnswered(page, answers, term, 6 * MiB);
+      assert.ok(stalled(), stillStalled);
       assert.ok(refused(second) > 0, 'part of the second paste refused');
-      await untilRefusalsReached(page, answers, term);
+      await refusalsReached();
       await sleep(1500);
-      assert.ok(await shown(), 'kept while input is refused');
+      // Kept when a refusal of it reached the page, which it does unless the page dropped its
+      // connection meanwhile (then the page never learns of it, and the notice rightly goes).
+      const keeps = async (what: string): Promise<void> => {
+        const got = afterInput(await logOf(page), term);
+        if (got.refusals === 0) {
+          assert.ok(got.reconnected, `a refusal reached the page ${what}`);
+          assert.equal(await shown(), false, `gone ${what}: no refusal of it came`);
+        } else {
+          assert.equal(await shown(), true, `kept ${what}`);
+        }
+      };
+      await keeps('while input is refused');
       // Keys, each another letter, until the server takes one (it refuses them while more than
       // 4 MiB wait for the keeper, which may outlast the stall): a refused key keeps the notice,
       // the taken one makes it go. Each is pressed once the page has every refusal sent before.
       const letters = 'xabcdefghijklmnopqrstuvwz0123456789';
       const keys: { key: string; answer: string }[] = [];
-      const deadline = performance.now() + 60_000;
+      const deadline = performance.now() + 90_000;
       for (;;) {
         assert.ok(performance.now() < deadline, `a key taken: ${JSON.stringify(keys)}`);
-        await untilRefusalsReached(page, answers, term);
+        await refusalsReached();
         const key = letters.charAt(keys.length % letters.length);
         const answer = await keyAnswered(page, answers, term, key);
         keys.push({ key, answer });
         if (answer === 'ok') break;
         assert.equal(answer, 'full', `the server's answer to ${key}`);
         await sleep(1500);
-        await untilRefusalsReached(page, answers, term);
-        assert.ok(await shown(), `kept after ${key} was refused`);
+        await refusalsReached();
+        await keeps(`after ${key} was refused`);
       }
       await until(
         async () => (await noticeText(page, 'input-full')) === '',
         'gone once a key is taken',
       );
       const changes = await inputFullChanges(page);
-      assert.deepEqual(changes.at(-1), [], 'gone from every terminal');
+      assert.deepEqual(changes.at(-1)?.terms, [], 'gone from every terminal');
       assert.ok(
-        changes.flat().every((id) => id === term),
-        'never on another terminal',
+        changes.every((change) => change.terms.every((id) => id === term)),
+        'never on the other terminal',
       );
+      // A refusal for the other terminal (sent through its stream while this one is shown) is
+      // shown on that one only.
+      const sink = sinks.get(other);
+      assert.ok(sink !== undefined, "the other terminal's sink");
+      sink.notice('input-full', INPUT_FULL);
+      await until(
+        async () => (await inputFullChanges(page)).at(-1)?.terms.join(' ') === other,
+        'on the other terminal only',
+      );
+      assert.equal(await noticeText(page, 'input-full'), '', 'not on the shown terminal');
       // The program reads the key the server took, and none it refused.
       const taken = keys.at(-1)?.key ?? '';
       const keysRead = (): string => {
         const read = Buffer.from(inputOf(d.record, S1), 'hex').toString('latin1');
         return read
-          .slice(read.indexOf('/stall 20\r') + '/stall 20\r'.length)
+          .slice(read.indexOf(stall) + stall.length)
           .replaceAll('\x1b[200~', '')
           .replaceAll('\x1b[201~', '')
           .replaceAll('y', '');
       };
       // (Polled slowly: the record holds all the program read, several MiB.)
       for (const readBy = performance.now() + 60_000; !keysRead().includes(taken);) {
-        assert.ok(performance.now() < readBy, `${taken} read: ${JSON.stringify(keysRead())}`);
+        if (performance.now() >= readBy) {
+          assert.fail(
+            `the program read ${taken} within 60 s; besides the pastes it read ${JSON.stringify(keysRead())}`,
+          );
+        }
         await sleep(500);
       }
       assert.equal(keysRead(), taken, 'only the key taken reached the program');
