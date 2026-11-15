@@ -1,30 +1,73 @@
 /* The header and the cards (S2 7.8, 7.9, 12.5, 12.6) and the key help's content (S2 12.9);
-   task 29. The help's box itself (`.help`, its place over the page) is in style.css. Text stays
-   selectable everywhere here (S2 12.9: a header's or a card's text can be copied), and a command,
-   a path, a terminal device and a result's lines keep every space they have (pre-wrap): copied, a
-   collapsed `My  Project` would name another directory. */
+   task 29, and the header of stage D (plan D task 38). The help's box itself (`.help`, its place
+   over the page) is in style.css. Text stays selectable everywhere here (S2 12.9: a header's or a
+   card's text can be copied), and a command, a path, a terminal device and a result's lines keep
+   every space they have (pre-wrap): copied, a collapsed `My  Project` would name another
+   directory. */
 
 .card-header {
-  padding: 8px 14px 7px;
+  padding: 7px 14px 6px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
-.header-top {
+.card-header [hidden] {
+  display: none;
+}
+/* Four lines of one line each and of a fixed height whatever they hold (D12, ruled): nothing
+   skydeck knows about a session changes the header's height, so the terminal under it is never
+   resized for it. What does not fit is cut (an ellipsis on a text) or left out (the pull requests
+   that do not fit on their line); the short id and the buttons are never cut. */
+.header-top,
+.header-sub,
+.header-prs,
+.header-note {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: nowrap;
   min-width: 0;
+  overflow: clip;
+  white-space: nowrap;
 }
+.header-top {
+  height: 24px;
+  gap: 8px;
+}
+.header-sub {
+  height: 18px;
+  margin-top: 2px;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.header-prs {
+  height: 20px;
+  margin-top: 3px;
+  gap: 8px;
+  font-size: 12px;
+}
+.header-note {
+  height: 18px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--dim);
+}
+/* The title gives way first: the group chip and the state are short and bounded. */
 .header-title {
+  flex: 0 1 auto;
   font-size: 15px;
   font-weight: 650;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  cursor: pointer;
 }
 .header-group {
+  display: inline-flex;
+  flex: 0 0.001 auto;
+  min-width: 0;
+  max-width: 16em;
   font:
     12px 'Cascadia Mono',
     Consolas,
@@ -33,9 +76,30 @@
   border-radius: 5px;
   padding: 1px 6px;
   color: var(--dim);
-  white-space: nowrap;
+  white-space: pre;
+}
+.header-group-key {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-group-arrow {
+  flex: none;
+}
+/* D14: a group chip that opens the ticket shows that it is a link. */
+.header-group[data-link='true'] {
+  color: var(--accent);
+  cursor: pointer;
+}
+.header-group[data-link='true'] .header-group-key {
+  text-decoration: underline;
 }
 .header-state {
+  flex: 0 0.001 auto;
+  min-width: 0;
+  max-width: 18em;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 11.5px;
   font-weight: 600;
   border-radius: 10px;
@@ -44,7 +108,40 @@
   background: var(--kbd);
   color: var(--dim);
 }
+.header-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+.header-button {
+  flex: none;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 16px;
+  padding: 1px 8px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.header-button:hover {
+  border-color: var(--selline);
+}
+.header-group-edit {
+  padding: 1px 4px;
+  border-color: transparent;
+  background: none;
+  color: var(--faint);
+}
+.header-group-add {
+  border-style: dashed;
+  color: var(--dim);
+}
 .header-chip {
+  flex: none;
   font-size: 11px;
   border-radius: 9px;
   padding: 0 6px;
@@ -70,17 +167,52 @@
 .header-chip[data-level='unfetched'] {
   border-style: dashed;
 }
-.header-sub {
-  /* One line whatever the directory and the width, so that the header has one height (ruled):
-     the directory is cut with an ellipsis (whole in the page and its tooltip), the id never. */
+/* S2 12.3: the merged ones beside open ones (`+30`), and a chip with none open, are dim. */
+.header-chip-merged,
+.header-chip[data-dim='true'] {
+  color: var(--faint);
+}
+/* The open pull requests as far as they fit: one that does not fit goes to a second row of the
+   box, which is not shown; one wider than the box alone is cut with an ellipsis. */
+.header-pr-items {
   display: flex;
-  gap: 12px;
-  margin-top: 3px;
-  font-size: 12px;
-  color: var(--dim);
-  align-items: center;
-  flex-wrap: nowrap;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-content: flex-start;
   min-width: 0;
+  height: 18px;
+  overflow: clip;
+  gap: 0 12px;
+}
+.header-pr {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  line-height: 18px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.header-pr:hover,
+.header-note-text:hover {
+  color: var(--text);
+}
+.header-prs-none {
+  flex: none;
+  color: var(--faint);
+}
+.header-prs-button {
+  margin-left: auto;
+}
+.header-note-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  cursor: pointer;
+}
+.header-note-text[data-empty='true'] {
+  color: var(--faint);
 }
 .header-dir,
 .header-id,
@@ -100,11 +232,27 @@
   overflow-wrap: anywhere;
 }
 .header-dir {
+  flex: 0 1 auto;
+  max-width: 50%;
   font-size: 11.5px;
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+/* Where the title comes from gives way first, then the directory (at most half the line) and the
+   times together; the short id never. */
+.header-times,
+.header-source {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.header-source {
+  flex-shrink: 1000;
+  color: var(--faint);
 }
 .header-id {
   flex: none;

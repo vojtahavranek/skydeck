@@ -1,8 +1,13 @@
 // The dialogs of stage D (S2 12.5, 12.9; plan D1–D3, D2, D17; plan D's contract 2.4): the label,
 // the group, the note and the pull requests of one session, edited in a dialog that lies over the
 // page, as the mockup shows — a heading that names the session, the field (a text box for the
-// note), a line of help, Cancel and Save (Close and Attach in the pull-request dialog, ruled). Task 38 adds the
-// pull-request dialog's list above its field.
+// note), a line of help, Cancel and Save (Close and Attach in the pull-request dialog, ruled). The
+// pull-request dialog lists every attached pull request above its field (plan D task 38, D13): each
+// on its line, in the dialog's words (web/header-text.js) — a click on a line that selected no text
+// opens it (`act open-link`), × detaches it with an Undo toast —, the merged and closed ones folded
+// into `30 merged, 2 closed ▸`, and ↻ (`pr-refresh`). The list follows every `list` while the dialog
+// is shown (`update`), never its field; its ages count from `deps.now()` and are drawn again on the
+// dialog's own 1 s tick (A18).
 //
 // The dialog decides no rule (S2 4.3): it sends the `act` through app.js's `deps.act` and shows
 // the answer — `ok` closes it (Attach's `ok` empties the field and keeps the pull-request dialog
@@ -18,8 +23,9 @@
 // click there that selected nothing gives the keyboard back to the field. The scrim takes clicks
 // without acting. Every text a user or a program wrote reaches the DOM as text.
 
-/** @import { ListMessage, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
+/** @import { ListMessage, PrPayload, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
+import { foldText, prLineText, prLineTip, prName, splitPrs } from './header-text.js';
 
 /**
  * @typedef {object} EditorDeps
@@ -40,6 +46,8 @@ const HELP = {
   pr: 'Pull requests a session touched are attached by themselves.',
 };
 const ESC_AGAIN = 'Esc again discards your text';
+/** How often the pull-request dialog's ages are drawn again (A18, as the list's). */
+const AGE_TICK_MS = 1000;
 
 /**
  * @param {string} tag
@@ -63,6 +71,25 @@ function element(tag, className, text) {
  */
 function errorOf(result) {
   return result.error ?? (result.lines.join(' ') || 'skydeck could not do that');
+}
+
+/**
+ * Sets `text` only when it differs, so that a selection in an unchanged text survives.
+ * @param {HTMLElement} target
+ * @param {string} text
+ */
+function setText(target, text) {
+  if (target.textContent !== text) {
+    target.textContent = text;
+  }
+}
+
+/**
+ * Whether the page holds selected text: a click that ends a drag over a line opens nothing (D17).
+ */
+function textSelected() {
+  const selection = getSelection();
+  return selection !== null && !selection.isCollapsed && selection.toString() !== '';
 }
 
 /**
@@ -96,7 +123,18 @@ export function createEditor(root, deps) {
   const save = button('edit-save', 'Save');
   const actions = element('div', 'edit-actions');
   actions.append(cancel, save);
-  box.append(heading, place, help, message, actions);
+  // The pull-request dialog's list (D13): the open ones, the fold and ↻, the merged and closed ones.
+  const prList = element('div', 'edit-prs');
+  const prNone = element('div', 'edit-pr-none', 'no pull request attached');
+  const openLines = element('div', 'edit-prs-open');
+  const fold = button('edit-pr-fold', '');
+  const refresh = button('edit-pr-refresh', '↻');
+  refresh.title = 'read their status from GitHub now';
+  const foot = element('div', 'edit-prs-foot');
+  foot.append(fold, refresh);
+  const finishedLines = element('div', 'edit-prs-finished');
+  prList.append(prNone, openLines, foot, finishedLines);
+  box.append(heading, prList, place, help, message, actions);
   root.replaceChildren(scrim, box);
   root.hidden = true;
 
@@ -109,6 +147,19 @@ export function createEditor(root, deps) {
    *          base: string, start: string, waiting: boolean, warned: boolean } | null}
    */
   let current = null;
+  /** The merged and closed pull requests are shown (the fold is open); folded at every open. */
+  let unfolded = false;
+  /**
+   * The pull requests whose × waits for its answer (`<session id> <address>`): no second `pr-rm`
+   * meanwhile.
+   * @type {Set<string>}
+   */
+  const removing = new Set();
+  /**
+   * The sessions whose ↻ waits for its answer.
+   * @type {Set<string>}
+   */
+  const refreshing = new Set();
 
   /** @param {string} text */
   const say = (text) => {
@@ -130,9 +181,183 @@ export function createEditor(root, deps) {
     }
     current = null;
     place.replaceChildren();
+    openLines.replaceChildren();
+    finishedLines.replaceChildren();
     root.hidden = true;
     deps.closed();
   };
+
+  /** The attached pull requests of the pull-request dialog shown, [] for any other dialog. */
+  const prsShown = () =>
+    current !== null && current.what === 'pr' && Array.isArray(current.row.prs)
+      ? current.row.prs
+      : [];
+
+  /**
+   * Draws `prs` as the lines of `container`, one each, in their order: made again only when the
+   * addresses change, so that a selection in a line whose text stays survives a list.
+   * @param {HTMLElement} container
+   * @param {PrPayload[]} prs
+   */
+  const drawLines = (container, prs) => {
+    const key = prs.map((pr) => pr.url).join('\n');
+    if (container.dataset['urls'] !== key) {
+      container.dataset['urls'] = key;
+      container.replaceChildren(
+        ...prs.map((pr) => {
+          const line = element('div', 'edit-pr');
+          line.dataset['url'] = pr.url;
+          const remove = button('edit-pr-remove', '×');
+          remove.title = 'detach it';
+          line.append(element('span', 'edit-pr-text'), remove);
+          return line;
+        }),
+      );
+    }
+    const now = deps.now();
+    prs.forEach((pr, at) => {
+      const line = container.children[at];
+      const text = line?.querySelector('.edit-pr-text');
+      const remove = line?.querySelector('.edit-pr-remove');
+      if (text instanceof HTMLElement && remove instanceof HTMLButtonElement) {
+        setText(text, prLineText(pr, now));
+        if (text.title !== prLineTip(pr)) {
+          text.title = prLineTip(pr);
+        }
+        remove.disabled = current !== null && removing.has(`${current.row.id} ${pr.url}`);
+      }
+    });
+  };
+
+  /** The pull-request dialog's list for its row as the last list had it (D13); hidden otherwise. */
+  const drawPrs = () => {
+    const isPr = current !== null && current.what === 'pr';
+    prList.hidden = !isPr;
+    if (!isPr) {
+      return;
+    }
+    const prs = prsShown();
+    const { open, finished } = splitPrs(prs);
+    const merged = finished.filter((pr) => pr.level === 'merged').length;
+    prNone.hidden = prs.length !== 0;
+    drawLines(openLines, open);
+    drawLines(finishedLines, finished);
+    finishedLines.hidden = !unfolded || finished.length === 0;
+    setText(fold, foldText(merged, finished.length - merged, unfolded));
+    fold.hidden = finished.length === 0;
+    refresh.disabled = current !== null && refreshing.has(current.row.id);
+    foot.hidden = prs.length === 0;
+  };
+
+  /**
+   * A refusal of an act of the list: under the field while that session's pull-request dialog is
+   * shown, else the toast `not saved: <the error>` (as C4: it must still be seen).
+   * @param {string} sessionId
+   * @param {ResultMessage} result
+   */
+  const refused = (sessionId, result) => {
+    if (current !== null && current.what === 'pr' && current.row.id === sessionId) {
+      say(errorOf(result));
+    } else {
+      deps.toast(`not saved: ${errorOf(result)}`, null);
+    }
+  };
+
+  /**
+   * Keeps the keyboard in the field when a control of the list that had it (pressed from the
+   * keyboard) is about to be disabled or removed (as Save, review 2 of task 37).
+   */
+  const keepField = () => {
+    const holder = document.activeElement;
+    if (current !== null && current.field !== null && holder !== null && prList.contains(holder)) {
+      current.field.focus();
+    }
+  };
+
+  /**
+   * ×: `pr-rm`, then the toast `Detached owner/repo #7` whose Undo sends `pr-add` with that
+   * address (D13). The line goes with the list that no longer holds it: the server pushes one
+   * after the write (D7) — usually before the answer, else within a second (the once-a-second
+   * rule), or at its next refresh when the store was busy —, so nothing here waits for a list.
+   * @param {string} url
+   */
+  const detach = async (url) => {
+    const shown = current;
+    const pr = prsShown().find((candidate) => candidate.url === url);
+    if (shown === null || pr === undefined) {
+      return;
+    }
+    const sessionId = shown.row.id;
+    const key = `${sessionId} ${url}`;
+    if (removing.has(key)) {
+      return;
+    }
+    const name = prName(pr);
+    keepField();
+    removing.add(key);
+    drawPrs();
+    const result = await deps.act({ kind: 'pr-rm', sessionId, url });
+    removing.delete(key);
+    drawPrs();
+    if (!result.ok) {
+      refused(sessionId, result);
+      return;
+    }
+    deps.toast(`Detached ${name}`, () => {
+      void deps.act({ kind: 'pr-add', sessionId, url }).then((again) => {
+        if (!again.ok) {
+          refused(sessionId, again);
+        }
+      });
+    });
+  };
+
+  /** ↻: `pr-refresh`, the server's explicit refresh in the background (D8); the lists follow. */
+  const refreshPrs = async () => {
+    const sessionId = current?.row.id;
+    if (sessionId === undefined || refreshing.has(sessionId)) {
+      return;
+    }
+    keepField();
+    refreshing.add(sessionId);
+    drawPrs();
+    const result = await deps.act({ kind: 'pr-refresh', sessionId });
+    refreshing.delete(sessionId);
+    drawPrs();
+    if (!result.ok) {
+      refused(sessionId, result);
+    }
+  };
+
+  prList.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const line = target?.closest('.edit-pr');
+    const url = line instanceof HTMLElement ? line.dataset['url'] : undefined;
+    if (target === null || url === undefined) {
+      return;
+    }
+    if (target.closest('.edit-pr-remove') !== null) {
+      void detach(url);
+    } else if (target.closest('.edit-pr-text') !== null && !textSelected()) {
+      // S2 9.6's `open-link` (the server checks the address again).
+      const shown = current;
+      void deps.act({ kind: 'open-link', url }).then((result) => {
+        if (!result.ok && current === shown) {
+          say(errorOf(result));
+        }
+      });
+    }
+  });
+  fold.addEventListener('click', () => {
+    unfolded = !unfolded;
+    drawPrs();
+  });
+  refresh.addEventListener('click', () => void refreshPrs());
+  setInterval(() => {
+    if (current !== null && current.what === 'pr') {
+      drawPrs();
+    }
+  }, AGE_TICK_MS);
 
   /** The act of the dialog shown, from its field. */
   const actionOf = () => {
@@ -184,8 +409,11 @@ export function createEditor(root, deps) {
       return;
     }
     if (shown.what === 'pr') {
-      // Ruled: Attach's `ok` empties the field and keeps the dialog open, whose list (task 38)
-      // shows the new pull request.
+      // Ruled: Attach's `ok` empties the field and keeps the dialog open, whose list shows the
+      // new pull request (`not fetched`, then its state) with the list that holds it: the server
+      // pushes one after the write (D7) — usually before this answer, else within a second (the
+      // once-a-second rule), or at its next refresh when the store was busy. An address attached
+      // already changes nothing, so no list comes for it, and its line is there.
       field.value = '';
       shown.start = '';
       return;
@@ -316,6 +544,8 @@ export function createEditor(root, deps) {
         warned: false,
       };
       box.dataset['what'] = what;
+      unfolded = false;
+      drawPrs();
       heading.textContent = `${HEADINGS[what]} — ${row.title}`;
       place.replaceChildren(...(field === null ? [] : [field]));
       help.textContent = HELP[what];
@@ -344,14 +574,15 @@ export function createEditor(root, deps) {
       if (shown === null) {
         return;
       }
-      // The dialog's session's row, for what it lists (task 38) — never a field's text or the
-      // note's base (D3).
+      // The dialog's session's row, for what the pull-request dialog lists — never a field's text
+      // or the note's base (D3). A row the list no longer has keeps its last lines.
       const row = list.sections
         .flatMap((section) => section.rows)
         .find((candidate) => candidate.id === shown.row.id);
       if (row !== undefined) {
         shown.row = row;
       }
+      drawPrs();
     },
     escape() {
       if (current === null) {

@@ -57,8 +57,14 @@ export function splitPrs(prs) {
   };
 }
 
-/** `owner/repo #7`. @param {PrPayload} pr */
-const nameOf = (pr) => `${clean(pr.repo)} #${pr.number}`;
+/**
+ * A pull request by its repository and number: `acme/web #7` (the toast of ×, D13).
+ * @param {PrPayload} pr
+ * @returns {string}
+ */
+export function prName(pr) {
+  return `${clean(pr.repo)} #${pr.number}`;
+}
 
 /**
  * An open pull request in the header's line (S2 12.5): `acme/web #7 · failing`, in the chip's own
@@ -67,7 +73,7 @@ const nameOf = (pr) => `${clean(pr.repo)} #${pr.number}`;
  * @returns {string}
  */
 export function prItemText(pr) {
-  return `${nameOf(pr)} · ${chipText({ level: pr.level, open: 1, merged: 0 }).replace(/^PR · /, '')}`;
+  return `${prName(pr)} · ${chipText({ level: pr.level, open: 1, merged: 0 }).replace(/^PR · /, '')}`;
 }
 
 /** A level in the dialog's words (D13); an unknown one is shown as sent, sanitised. */
@@ -99,7 +105,7 @@ export function prLineText(pr, nowNs, cutError = true) {
   const words = Object.hasOwn(LINE_WORDS, pr.level)
     ? (LINE_WORDS[pr.level] ?? pr.level)
     : clean(pr.level);
-  const parts = [nameOf(pr), words];
+  const parts = [prName(pr), words];
   const age = pr.okAtNs === null ? '' : ageBetween(nowNs, pr.okAtNs);
   if (pr.level === 'cant-read') {
     parts.push(pr.okAtNs === null ? 'never read' : age === '' ? '' : `last read ${age} ago`);

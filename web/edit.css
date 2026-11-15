@@ -1,7 +1,7 @@
-/* The dialogs of stage D (web/edit.js; plan D1, D2) and the Undo toast (web/toast.js; D15), over
-   the page as the mockup's: a scrim over the whole window, the dialog above it, the toast above
-   both. xterm.js stacks its own layers up to z-index 11 in the page's root stacking context, so
-   these sit above that. The key help (style.css) is shown over a dialog too, since Ctrl+Shift+H
+/* The dialogs of stage D (web/edit.js; plan D1, D2, D13) and the Undo toast (web/toast.js; D15),
+   over the page as the mockup's: a scrim over the whole window, the dialog above it, the toast
+   above both. xterm.js stacks its own layers up to z-index 11 in the page's root stacking context,
+   so these sit above that. The key help (style.css) is shown over a dialog too, since Ctrl+Shift+H
    works while one is shown (D2); the toast lies over the help. */
 .edit-scrim {
   position: fixed;
@@ -31,6 +31,72 @@
   font-size: 14px;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+/* The pull-request dialog's list (D13), above its field: one line per pull request, the fold and
+   ↻ under the open ones, the merged and closed ones under the fold; it scrolls by itself, so that
+   the field and Attach stay in view. */
+.edit-prs {
+  margin: 0 0 12px;
+  max-height: 45vh;
+  overflow: auto;
+  font-size: 12.5px;
+}
+.edit-prs[hidden],
+.edit-prs [hidden] {
+  display: none;
+}
+.edit-pr {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+.edit-pr-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.edit-pr-text:hover {
+  color: var(--accent);
+}
+.edit-pr-none {
+  color: var(--faint);
+}
+.edit-prs-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.edit-prs-foot button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+}
+.edit-prs-foot .edit-pr-refresh {
+  margin-left: auto;
+  padding: 0 4px;
+}
+.edit-pr-remove {
+  flex: none;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  cursor: pointer;
+}
+.edit-pr-remove:hover {
+  color: var(--crash);
+}
+.edit-prs-foot button[disabled],
+.edit-pr-remove[disabled] {
+  opacity: 0.45;
+  cursor: default;
 }
 .edit-field {
   display: block;

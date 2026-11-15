@@ -13,6 +13,7 @@ import {
   prItemText,
   prItemTip,
   prLineText,
+  prName,
   prLineTip,
   splitPrs,
   timesText,
@@ -98,6 +99,16 @@ const LINE_WORDS = [
   ['merged', 'merged'],
   ['closed', 'closed'],
 ] as const;
+
+describe('prName: a pull request by its repository and number (the toast of ×, D13)', () => {
+  test('`owner/repo #7`, the repository sanitised', () => {
+    assert.equal(prName(pr('draft')), 'acme/web #7');
+    assert.equal(
+      prName(pr('draft', { repo: 'ac\x1b[1mme/web\u0007', number: 12 })),
+      'acme/web #12',
+    );
+  });
+});
 
 describe("prItemText: an open pull request in the header's line (S2 12.5)", () => {
   test("the repository, the number and the chip's own words for its state (S2 12.3)", () => {
