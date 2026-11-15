@@ -1061,4 +1061,26 @@ describe('restoreTerminal(): the terminal restore opens with', () => {
     assert.deepEqual(await h.launches.restoreTerminal(SIZE).open(restoreSpec(S1)), { ok: true });
     assert.deepEqual(h.logs, ['restore: an ended terminal was not closed (RangeError)']);
   });
+
+  test('a spec that is not a resume is refused for certain: nothing closed, nothing opened (no export starts a program past resume() and newSession())', async (t) => {
+    // Ruled on review 2 (C4): restore never starts a new session.
+    const d = deckOf(t);
+    const h = harness(d, {
+      terminals: [info('aaaaaaaaaaa1', 'ended', { expectedSessionId: NEW_ID, sessionId: null })],
+    });
+    const spec: LaunchSpec = {
+      ...restoreSpec(NEW_ID),
+      argv: [CLAUDE, '--session-id', NEW_ID],
+      kind: 'new',
+      lock: null,
+    };
+    assert.deepEqual(await h.launches.restoreTerminal(SIZE).open(spec), {
+      ok: false,
+      error: 'restore starts only resumes',
+      timedOut: false,
+    });
+    assert.deepEqual(h.events, ['terminalFor 100x30'], 'built, never opened, nothing closed');
+    assert.deepEqual(h.specs, []);
+    assert.deepEqual(h.logs, []);
+  });
 });

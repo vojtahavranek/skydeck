@@ -27,7 +27,7 @@ import type { LaunchOutcome } from '../sessions/launch.ts';
 import { prepareNew, readLock, releaseLock } from '../sessions/resume.ts';
 import type { PreparedLaunch } from '../sessions/resume.ts';
 import { prepareResumeById } from '../sessions/resume-by-id.ts';
-import type { Terminal } from '../terminals/types.ts';
+import type { OpenResult, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import type { TerminalHub, TerminalInfo } from './hub.ts';
@@ -72,7 +72,8 @@ export interface Launches {
   gone(sessionId: string): string | null;
   /** The terminal restore opens with (size read once, when built): its open(spec) closes the
    *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. A
-   *  factory that throws: its open fails with `timedOut: false` (nothing was spawned). */
+   *  factory that throws: its open fails with `timedOut: false` (nothing was spawned). A spec that
+   *  is not a resume: `restore starts only resumes`, `timedOut: false`, nothing closed or opened. */
   restoreTerminal(size: Size): Terminal;
 }
 
@@ -84,6 +85,12 @@ const REFUSED_CODE = 4;
 const KEEPER_ENDED = "its terminal's keeper ended";
 const CLOSED = 'its terminal was closed';
 const ENDED = 'claude ended before the session started';
+/** restoreTerminal's answer to a spec that is not a resume: nothing was started (ruled, review 2). */
+const NOT_A_RESUME: OpenResult = {
+  ok: false,
+  error: 'restore starts only resumes',
+  timedOut: false,
+};
 
 /** Where a log line comes from: the launch it was part of. */
 type Part = 'resume' | 'new' | 'restore';
@@ -315,7 +322,10 @@ export function createLaunches(deps: LaunchesDeps): Launches {
       return {
         name: terminal.name,
         opensTabs: terminal.opensTabs,
-        open(spec) {
+        async open(spec) {
+          // Ruled on review 2: restore only resumes, so no export starts a program that did not
+          // come through resume() or newSession() (a `new` spec would start with any argv).
+          if (spec.kind !== 'resume') return NOT_A_RESUME;
           closeEnded(spec.sessionId, 'restore');
           return terminal.open(spec);
         },
