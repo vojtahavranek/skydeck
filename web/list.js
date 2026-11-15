@@ -369,6 +369,9 @@ export function createList(root, hooks) {
   /** @type {string | null} */
   let selected = null;
   let showDone = false;
+  /** Whether the page's view unfolds Earlier (`unfolded`): only the list sends it, app.js starts
+   *  with none, so the list knows it as it knows `showDone` (reveal sends only what changes). */
+  let earlierUnfolded = false;
   /** When `current` arrived (performance.now()), to count its ages on (A18). */
   let receivedAt = 0;
   /** The section the selected row was drawn in, to scroll to it when it moves to another. */
@@ -722,6 +725,7 @@ export function createList(root, hooks) {
         hooks.select(before.id, 'key');
       }
     }
+    earlierUnfolded = !folded;
     hooks.view({ unfolded: folded ? [] : ['earlier'] });
   };
 
@@ -839,7 +843,8 @@ export function createList(root, hooks) {
       showDone = true;
       change.showDone = true;
     }
-    if (hiddenBy.includes('folded')) {
+    if (hiddenBy.includes('folded') && !earlierUnfolded) {
+      earlierUnfolded = true;
       change.unfolded = ['earlier'];
     }
     if (Object.keys(change).length > 0) {

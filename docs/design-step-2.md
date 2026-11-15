@@ -2058,8 +2058,9 @@ the group again at the next list). The keys are 12.9's. The page sends `opened` 
 well formed, or over 1,024 bytes (8.2.3) — is never sent, so its stack opens only while one of
 its members is selected (a named limit). `d` on a closed stack's head marks that session only:
 the next member becomes the head (or the last one stands alone), and stage D's selection after
-`d` (12.9) takes the row after it of those the list drew when `d` was pressed — the row after the
-stack, whose members were not drawn. While filtering every row stands alone (12.8).
+`d` (12.9) takes the row after it of those the list drew when `d` was pressed — for a closed
+stack's head, the row after the stack, whose members were not drawn (ruled). While filtering
+every row stands alone (12.8).
 
 ### 12.3 The pull-request chip in the window
 
@@ -2483,10 +2484,7 @@ E7), → on a closed head opens it, ← on an open head closes it, and ← on a 
 and closes the stack, as folding Earlier first selects the row above it; on any other row ← and →
 fold and unfold Earlier. Ctrl+Shift+1–9 are unchanged: the rows with a slot never stack. Ctrl+Tab
 skips a member of a closed stack (ruled: the page never knows a closed stack's members), as it
-skips a row a filter or a folded Earlier hides. While
-filtering (a word or a chip, 12.8) nothing folds and no stack is formed, so ← and → do nothing.
-The chips under the filter field (12.8) take no keyboard on a click: the keyboard stays where it
-was (in the field, on the list, in the terminal). The selection is never on a row the
+skips a row a filter or a folded Earlier hides. The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown

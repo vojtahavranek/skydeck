@@ -853,7 +853,7 @@ test('search and stacks in the list', async (t) => {
       const open = await untilRows(page, [S1, S2, S6, S7], 'open');
       assert.equal(open[1]?.stack, 'member');
       assert.equal(open[1]?.text, hostileTitle);
-      assert.equal(await page.evaluate(() => document.querySelector('#list img')), null);
+      assert.equal(await page.evaluate(() => document.querySelector('img')), null);
       assert.equal(await page.evaluate(() => Reflect.get(globalThis, 'pwned')), undefined);
       await untilOpened(page, [hostile]);
       await healthy(page, l.problems);
