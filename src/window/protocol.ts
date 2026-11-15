@@ -312,6 +312,11 @@ export interface ListMessage {
   filtering?: boolean;
   /** E8, E9: while view.switcher is a string; else null. */
   switcher?: SwitcherPayload | null;
+  /** E13: the row of the session view.selected names, as the sections would carry it (its
+   *  `stack` null), also when they leave it out; null when the view selects none or a session
+   *  the view model does not list even with done ones shown. The page uses it only when its id
+   *  is the page's selection. */
+  selectedRow?: RowPayload | null;
 }
 
 // Stage E (plan E 2.2, 2.3): search's message types, made by `src/window/view/search/`.
