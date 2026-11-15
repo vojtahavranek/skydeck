@@ -1378,12 +1378,12 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions) when it changed, at most once a second: `counts`; `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests, chip) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests, chip) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null). |
-| `notify` | `sessionId`, `title`, `reason` (13). |
+| `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. |
 | `bye` | `reason` (5.5). |
 
@@ -1860,6 +1860,12 @@ switcher search done ones too (12.8).
 The title bar shows the counts, e.g. `● 3 need you · 3 working · 2 idle`, and the window title is
 `(3) skydeck` while 3 sessions need you, so the taskbar shows it.
 
+The `need you` count is every listed session that needs you (12.4), whatever the filter or the
+fold; a session that needs you is counted there and in no other count, so that the parts add up
+(3 + 3 + 2 above). The window title's `(3)` is the same count. Which rows need you, and in which
+order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
+rule (4.3; stage B, plan B7).
+
 ### 12.2 Rows
 
 - A running session has two lines: the first as below, the second its state line (`working 4m`,
@@ -1919,6 +1925,20 @@ A session **needs you** for one of three reasons, in this order:
    `ended-unexpectedly` at the next refresh: `window_end_seq` is set (10.2). It ends when seen.
 3. **finished**: `turn_ended_seq` is greater than `seen_seq`, and the session is running and idle.
    It ends when seen or when the next turn starts.
+
+How the view model judges them (stage B, plan B5, B6, B13). "Running" is the row's state: anything
+but not running (an ask and a finished turn need it; an end of the window does not). A session with
+several holders (a duplicate) has one status: `waiting` when any holder waits, else `busy` when any
+is busy, else `idle` when any is idle, else the first holder's; of several holders with that status,
+the first one's detail and time. A session running without a readable live file is not finished. An
+end counts while its `*_seq` is greater than `seen_seq`, or no `seen_seq` is stored; an equal value
+is not later. The detail of an ask is the `waitingFor` sanitised (design 7.4) and cut to 120 UTF-16
+units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit, and the list is
+sent whole); one that is empty once sanitised is no detail. The time a row shows is the file's
+`statusUpdatedAt` (else `updatedAt`) for an ask, `window_end_ns` for an end of the window,
+`turn_ended_ns` for a finished turn. Ctrl+Shift+J's order, in full: those that ask by that time, the
+longest-waiting first and an unknown time last; then those that ended by `window_end_seq`; then
+those that finished by `turn_ended_seq`, the oldest first; ties by session id.
 
 Seen is a **condition that holds**, not a moment: a session **is being seen** while it is the
 selected one in a window that has focus, from 1.5 seconds after it was selected; typing into its
