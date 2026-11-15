@@ -1497,6 +1497,8 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       const d = await deck(t, chromium, { sections: { week: [row(S2)] } }, { modules: RECORDING });
       const { page, w } = d;
       await clickRow(page, S2);
+      await selectedHasCome(page, S2);
+      w.holdViews(true); // no list comes after an answer: only the page's own rule decides
       await page.keyboard.press('l');
       await dialogShown(page, true);
       await page.keyboard.type('-x');
@@ -1510,7 +1512,6 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       await page.click('#editor .edit-cancel');
       await dialogShown(page, false);
 
-      w.holdViews(true); // no list comes after the next `ok`
       await page.keyboard.press('l');
       await dialogShown(page, true);
       await page.keyboard.press('Enter');
