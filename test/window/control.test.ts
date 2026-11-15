@@ -1002,6 +1002,8 @@ test('with a launch and launchState null, the routes act; while it says starting
     }
   }
   assert.deepEqual(fake.calls, []);
+  // Not a refusal of the request: the command asks again every 500 ms, so nothing is logged.
+  assert.deepEqual(c.logs, []);
   // The others answer meanwhile.
   assert.deepEqual(await c.client.ping(), PING);
   state = null;
