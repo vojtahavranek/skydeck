@@ -333,7 +333,7 @@ took until the page showed, and anything Windows showed meanwhile (W20).
 ## W2. The keys reach the page
 
 **In the window.** The page owns every key of the design's table from stage A on, also those whose
-action comes later. Setup: the window open with the throwaway session in slot 1 (its number shows
+action came with a later stage. Setup: the window open with the throwaway session in slot 1 (its number shows
 at the left of its row in Open). Press every key the key help lists (Ctrl+Shift+H): the page must do
 what the help says, and Edge nothing of its own (no new window or tab, find bar, print dialog,
 devtools pane, history, reload). What the ones with something to see do:
@@ -348,7 +348,7 @@ devtools pane, history, reload). What the ones with something to see do:
 | Ctrl+Shift+C | with text selected in the terminal: copies it (paste it into Notepad) |
 | Ctrl+Shift+V | Claude Code's image paste (W6) |
 | Ctrl+Shift+H | the key help; again: it goes |
-| Ctrl+Shift+P | the key bar says `Ctrl+Shift+P: comes in a later stage` |
+| Ctrl+Shift+P | the quick switcher opens over the window, the caret in its field; press Esc and nothing else: it closes (Enter there would switch to the highlighted session, or resume it). W30 checks it |
 | Ctrl+Shift+J | look at the title bar first: while it shows a count (`1 needs you`, …), leave this key out here (W21 checks it), since it would select a session that needs you, maybe a real one, and 1.5 seconds later clear that session's mark. With no count: the key bar says `no session needs you` |
 | in the list (Ctrl+Shift+L first), with the throwaway session selected (its short id in the header): `l`, F2, `g`, `n`, `p` | its dialog opens over the page (`Label — <title>`, …); Esc closes it and saves nothing. Do not press `d` here: it marks the session done, and W29 checks it |
 | in the list: F5, Ctrl+R, Ctrl+F5, Shift+F5, Ctrl+Shift+R | the page reloads itself (the terminals come back) after it has checked the server |
@@ -1306,9 +1306,32 @@ chip on. Write down how many sessions the title bar counts.
    once) and click it again: it closes; neither click moved the selection or the keyboard. Then
    click the throwaway session's row once (look at the short id): the next steps start from it.
    When you unfolded Earlier, fold it again now, with a click on its header.
+5. **The switcher, without Enter.** Press Ctrl+Shift+P. Expected: a panel over the window with a
+   field on top, `Switch to a session…  (title, group, note, PR, directory, short id)`, whose
+   caret blinks; under it your sessions under `Needs you`, `Open`, `Not running` and `Done`, each
+   with its short id at the right; at the bottom a footer that starts `↑ ↓ move · Enter`. When no
+   such panel shows, type nothing and write that down. Type the ticket key of step 1 (`orb-2107`).
+   Expected: the list narrows at each keystroke, and the key's letters are marked in the titles.
+   Press ↓ a few times, then ↑: the highlight moves, and the footer's `Enter switch` or `Enter
+   resume here` follows the highlighted session. **Press no Enter**: it would switch to that
+   session, or resume it. Press Esc. Expected: the panel goes, and the key bar shows the `Focus: …`
+   it showed before.
+6. **The throwaway session, with Enter.** Press Ctrl+Shift+P again (the panel shows, its caret
+   blinks) and type the first 6 characters of the throwaway session's short id. Wait until the
+   sessions stop changing (a second). Look at the highlighted session: its short id, at the right,
+   must be the one you wrote down, whole. When it is another one, press ↓ until the highlighted
+   session's short id is the throwaway session's; when no session shows it, press Esc and leave
+   this step out. Read the footer: `Enter resume here` (the throwaway session is not running) or
+   `Enter switch` (its terminal is in the window). Then press Enter once. Expected: the panel goes
+   and the throwaway session is selected; not running, it is resumed into the window (its row
+   under Open, `starting…`, then its terminal, which has the keyboard: `Focus: terminal`); running
+   in the window, its terminal shows and has the keyboard. Type nothing into it: it stays as it
+   is, for the other checks.
 
 Write down: whether any answer of the list came late enough to notice (the filter as you typed,
-the chips, the stack); every step that showed something else than described.
+the chips, the stack, the switcher); whether the switcher's order — those that need you, then
+Open, then the ones not running, then the done ones — is the one you want; what Enter did in
+step 6; every step that showed something else than described.
 
 ## W31. The filter's and the switcher's fields on your layouts
 
@@ -1320,9 +1343,15 @@ throwaway session selected (look at the short id), the filter empty.
    keys: háček, then `e` (`ě`), čárka, then `e` (`é`). Expected: each character shows in the field
    as typed, and nothing else happens: no dialog, no other session selected, the key bar shows
    no new message. Press Esc: the field is empty.
+2. Press Ctrl+Shift+P. Expected: the switcher's panel, its caret blinking in its field. When no
+   panel shows, type nothing: write that down and leave this step out. Type the same characters
+   and, on the Czech layout, the same dead keys; press no Enter. Expected: each character shows in
+   the switcher's field as typed, and nothing else happens (most likely the panel says `No session
+   matches.`). Press Ctrl+Shift+P: the panel goes. Press Ctrl+Shift+P again: it shows, with an
+   empty field; press Esc: it goes.
 
 Write down, per layout and per field: every character that did not show as typed, or that did
-something else.
+something else; whether Ctrl+Shift+P opened and closed the switcher.
 
 ## W3, the icon
 
