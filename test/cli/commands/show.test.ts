@@ -1,25 +1,31 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { EXIT } from '../../../src/cli/exit.ts';
+import { jsonText } from '../../../src/cli/json.ts';
 import { formatShow, showJson } from '../../../src/cli/output.ts';
 import type { ShowJson } from '../../../src/cli/output.ts';
 import { main } from '../../../src/cli/main.ts';
+import { openDeck, resolveDeckPlaces } from '../../../src/sessions/deck.ts';
+import type { Deck } from '../../../src/sessions/deck.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
 import { attachManualPr, setNote } from '../../../src/sessions/meta.ts';
 import { refCases } from '../../helpers/command-cases.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
+import { SESSION, keeperSandbox, startProgram } from '../../helpers/keeper.ts';
 import { S1, S2, SEC, T0, fakeRunner, runResult } from '../../helpers/platform.ts';
 import type { RunCall } from '../../helpers/platform.ts';
 import {
+  startRunning,
   twoSessions,
   userRecord,
   withRunner,
   writeTranscript,
 } from '../../helpers/session-files.ts';
 import { testDeck } from '../../helpers/deck.ts';
-import { testContext } from '../../helpers/context.ts';
+import { testContext, testContextOn } from '../../helpers/context.ts';
 
 const USAGE_FIRST_LINE = 'skydeck show <ref> [--json] [--refresh]';
 const PR1 = 'https://github.com/o/r/pull/1';
@@ -382,3 +388,56 @@ for (const args of [['show', S1], ['show', S1, '--json'], ['ls']]) {
     assert.equal(c.stdout(), '');
   });
 }
+
+// --- the window's mark (C15, S2 11.4) ------------------------------------------------------------
+
+test('show marks a holder that runs in a keeper of the window; show --json is unchanged for it', async (t) => {
+  let deck: Deck | null = null;
+  t.after(() => deck?.store.close());
+  const box = keeperSandbox(t);
+  const c = testContextOn(box.tp);
+  const { claudeHome } = resolveDeckPlaces(box.tp.platform).places;
+  mkdirSync(join(claudeHome, 'projects'), { recursive: true });
+  mkdirSync(join(claudeHome, 'sessions'), { recursive: true });
+  const keeper = await box.start();
+  // Its prompt is on the screen: its SessionStart hook has run, the stand-in holds SESSION.
+  const { started } = await startProgram(keeper);
+
+  assert.equal(await main(['show', SESSION.slice(0, 8)], c.ctx), EXIT.ok);
+
+  const holders = c
+    .stdout()
+    .split('\n')
+    .filter((line) => line.startsWith('holder:'));
+  assert.equal(holders.length, 1, c.stdout());
+  assert.match(
+    holders[0] ?? '',
+    new RegExp(`^holder: {4}pid ${started.pid} since \\S+Z \\(in the skydeck window\\)$`),
+  );
+  assert.equal(c.stderr(), '');
+
+  const before = c.stdout().length;
+  assert.equal(await main(['show', SESSION.slice(0, 8), '--json'], c.ctx), EXIT.ok);
+  const text = c.stdout().slice(before);
+  deck = openDeck(box.tp.platform);
+  const row = loadRows(deck).find((candidate) => candidate.id === SESSION);
+  assert.ok(row !== undefined);
+  assert.equal(text, jsonText(showJson(row, deck.store.links())));
+  assert.deepEqual(
+    (JSON.parse(text) as ShowJson).holders.map((h) => h.pid),
+    [started.pid],
+  );
+  assert.doesNotMatch(text, /window/);
+});
+
+test('show of a session held outside the window prints its holder line as before and creates no runtime directory', async (t) => {
+  const d = twoSessions(t);
+  startRunning(d, S1, 4242);
+
+  assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+
+  assert.equal(d.stdout(), formatShow(rowOf(d), d.deck.store.links(), T0));
+  assert.ok(d.stdout().includes('\nholder:    pid 4242 since '), d.stdout());
+  assert.doesNotMatch(d.stdout(), /skydeck window/);
+  assert.equal(existsSync(join(d.sandbox.skydeckHome, 'run')), false);
+});

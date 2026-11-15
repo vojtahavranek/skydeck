@@ -220,12 +220,16 @@ function doneField(row: ListRow): string[] {
  * One session in full (design 7.5): its title, then one line per field. Nothing is left to a
  * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4. `ticket` is the
  * session's ticket address (`ticketAddress`, S2 12.5), printed after the group when there is one.
+ * `inWindow` holds the pids of the holders that run in the window (`holdersInWindow`, S2 11.4):
+ * their lines end with `(in the skydeck window)`. A row's holders are processes of this boot, so
+ * a pid names one of them.
  */
 export function formatShow(
   row: ListRow,
   links: readonly LinkRow[],
   nowNs: Ns,
   ticket: string | null = null,
+  inWindow: ReadonlySet<number> = new Set(),
 ): string {
   const launch =
     row.session.launch === null || row.session.launch.length === 0 ? null : row.session.launch;
@@ -259,8 +263,12 @@ export function formatShow(
   }
   for (const holder of row.session.holders) {
     const what = holder.scripted ? ' (scripted run)' : '';
+    const where = inWindow.has(holder.process.pid) ? ' (in the skydeck window)' : '';
     lines.push(
-      field('holder:', `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}${what}`),
+      field(
+        'holder:',
+        `pid ${holder.process.pid} since ${isoFromNs(holder.sinceNs)}${what}${where}`,
+      ),
     );
   }
   lines.push(...row.prs.map(prField));
