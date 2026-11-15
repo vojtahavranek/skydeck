@@ -41,21 +41,23 @@ type Place = { termId: string; steps: number } | 'outside' | 'gone' | 'unknown';
 
 /**
  * S2 7.5: walks up from the holder's process — the holder itself, then its parent, at most
- * MAX_STEPS parents — until it reaches a terminal's program (pid AND process start). Each step is
+ * `maxSteps` parents (stage A's MAX_STEPS by default; `show` passes 9 to reach a keeper, plan task
+ * 78) — until it reaches one of `programs` (pid AND process start). Each step is
  * judged alive by design 5.5's rule: its stat line exists and its start is the one known for it (the
  * holder's recorded start; for a parent, the start its own stat line gives, which may not be later
  * than its child's — a parent that started after its child is another process that took a pid
  * freed meanwhile). The holder itself is judged first, also when there is no terminal: when its
  * stat line is gone or names another start it is dead by design 5.5 — 'gone', running nowhere
  * (review 2: sessions derived a moment before the terminals or /proc were read). A parent that is
- * gone or not alive, a chain that leaves through init or goes on past MAX_STEPS, is 'outside' (the
+ * gone or not alive, a chain that leaves through init or goes on past `maxSteps`, is 'outside' (the
  * holder lives). A read that throws, a stat line without a readable process start or parent, or a
  * holder without a recorded start is 'unknown': nothing is decided on it (design 5.5; ruled).
  */
-function placeOf(
+export function holderPlace(
   holder: Holder,
   programs: ReadonlyMap<number, { procStart: number; termId: string }>,
   proc: Proc,
+  maxSteps: number = MAX_STEPS,
 ): Place {
   let pid = holder.process.pid;
   let start = holder.process.procStart;
@@ -67,7 +69,7 @@ function placeOf(
     if (program !== undefined && program.procStart === start) {
       return { termId: program.termId, steps };
     }
-    if (steps === MAX_STEPS) {
+    if (steps >= maxSteps) {
       return 'outside';
     }
     let stat: string | null;
@@ -115,7 +117,7 @@ function placeOf(
  *
  * - A terminal's program is the process its keeper reported (`program`), while the terminal has no
  *   exit; a holder of the current boot belongs to the terminal whose program it is or descends from
- *   (`placeOf`). A holder of another boot is no live holder and is left out. Without a boot id no
+ *   (`holderPlace`). A holder of another boot is no live holder and is left out. Without a boot id no
  *   holder can be judged: each is unknown.
  * - `shown`: of the holders that belong to a terminal, the one nearest its program decides (a
  *   scripted run that the program started does not move it), then the latest event, then the
@@ -161,7 +163,7 @@ export function mapTerminals(input: {
       if (bootId !== null && holder.process.bootId !== bootId) {
         continue; // of another boot: not alive now
       }
-      const place: Place = bootId === null ? 'unknown' : placeOf(holder, programs, proc);
+      const place: Place = bootId === null ? 'unknown' : holderPlace(holder, programs, proc);
       if (place === 'gone') {
         continue; // dead since the sessions were derived: it holds nothing
       }

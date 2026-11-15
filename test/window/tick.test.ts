@@ -12,7 +12,7 @@ import type { TestContext } from 'node:test';
 
 import { openDeck } from '../../src/sessions/deck.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
-import { attachManualPr } from '../../src/sessions/meta.ts';
+import { attachManualPr, setLabel } from '../../src/sessions/meta.ts';
 import { lockKey } from '../../src/sessions/resume.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import { openStore } from '../../src/store/store.ts';
@@ -380,6 +380,81 @@ describe('the rows (A24: the interactive list rule)', () => {
     f.tick.reload();
     await ticks(f, 2);
     assert.notEqual(f.tick.rows(), before);
+  });
+});
+
+describe('reloadNow (plan D7)', () => {
+  test("loads the rows and pushes the lists at once, without waiting for a tick (a write on the server's own connection moves no change mark)", async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const f = fixture(t, { d });
+    await ticks(f, 2);
+    setLabel(d.deck, S1, 'renamed');
+    const pushes = f.pushes();
+    f.tick.reloadNow();
+    assert.equal(f.tick.rows().find((row) => row.id === S1)?.title, 'renamed');
+    assert.equal(f.pushes(), pushes + 1);
+    assert.deepEqual(f.logs, []);
+  });
+
+  test('counts as a load: the next refresh does not load again for what it loaded, nor a minute after the load before it', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const f = fixture(t, { d });
+    await ticks(f, 2);
+    d.clock.advanceMs(30_000);
+    f.tick.reload(); // owed, as after an action
+    f.tick.reloadNow();
+    const loaded = f.tick.rows();
+    await ticks(f, 2);
+    assert.equal(f.tick.rows(), loaded, 'the reload owed was made');
+    d.clock.advanceMs(30_000); // a minute after the first load, 30 s after this one
+    await ticks(f, 2);
+    assert.equal(f.tick.rows(), loaded, 'the minute counts from this load');
+  });
+
+  test('a store that is busy: one log line by kind, nothing pushed, and the rows are loaded at the next refresh', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    let failing = false;
+    const f = fixture(t, {
+      d,
+      deck: (deck) =>
+        deckWith(deck, {
+          store: {
+            allMeta: () => {
+              if (failing) throw busyError('database is locked (marker-secret)');
+              return deck.store.allMeta();
+            },
+          },
+        }),
+    });
+    await ticks(f, 2);
+    const before = f.tick.rows();
+    setLabel(d.deck, S1, 'renamed');
+    const pushes = f.pushes();
+    failing = true;
+    f.tick.reloadNow();
+    assert.deepEqual(f.logs, ['tick: the rows were not loaded again (Error (ERR_SQLITE_ERROR))']);
+    assert.equal(f.pushes(), pushes, 'nothing new to push');
+    assert.equal(f.tick.rows(), before, 'the rows kept');
+    failing = false;
+    await ticks(f, 2);
+    assert.equal(f.tick.rows().find((row) => row.id === S1)?.title, 'renamed', 'the next refresh');
+  });
+
+  test('after stop() it loads nothing and pushes nothing', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const f = fixture(t, { d });
+    await ticks(f, 2);
+    const before = f.tick.rows();
+    await f.tick.stop();
+    setLabel(d.deck, S1, 'renamed');
+    const pushes = f.pushes();
+    f.tick.reloadNow();
+    assert.equal(f.tick.rows(), before);
+    assert.equal(f.pushes(), pushes);
   });
 });
 

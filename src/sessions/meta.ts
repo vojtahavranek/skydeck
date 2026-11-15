@@ -1,5 +1,7 @@
 // What the user attaches to a session (design 7.1) and the pull requests they attach by hand (7.3).
 // Nothing here stops a process, and nothing moves a note from one session to another (principle 6).
+import { join } from 'node:path';
+
 import { prKey } from '../github.ts';
 import type { PrKey } from '../github.ts';
 import { SkydeckError, UsageError } from '../platform/errors.ts';
@@ -23,6 +25,24 @@ export function setGroup(deck: Deck, sessionId: string, group: string | null): v
 export function setNote(deck: Deck, sessionId: string, note: string | null): void {
   const stored = note === null || note.trim() === '' ? null : note;
   deck.store.updateMeta(sessionId, { note: stored }, deck.platform.clock.nowNs());
+}
+
+/** The file `skydeck note`'s editor works on, and keeps when it fails: `<stateDir>/note-<id>.md`. */
+export function keptNotePath(deck: Deck, sessionId: string): string {
+  return join(deck.places.stateDir, `note-${sessionId}.md`);
+}
+
+/**
+ * Removes the note file a failed edit of this session kept: the user has now set the note
+ * another way (`note --set`, the window), so that unsaved text is not wanted any more. Failing to
+ * is not worth ending anything for: the next edit of the same note opens what is left.
+ */
+export function discardKeptNote(deck: Deck, sessionId: string): void {
+  try {
+    deck.platform.files.remove(keptNotePath(deck, sessionId));
+  } catch {
+    // a leftover file is replaced by the next edit of the same note
+  }
 }
 
 /** Hides the session from now on (7.1). The session itself is not touched. */
