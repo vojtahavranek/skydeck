@@ -7,7 +7,8 @@
  * and in which order, is given (`need`, `needOrder`), and the offer reads only the four fields of
  * a banner it names. A search text is foreign input, typed at every keystroke and ranked on the
  * server's one thread: nothing here builds a pattern from it, and the cost is linear in the
- * candidates (and in `needOrder`).
+ * candidates (each matched once, as `matchesWords` costs) and in `needOrder`, plus one `foundIn`
+ * for each of at most MAX_ITEMS titles, whatever the number of candidates.
  *
  * Imports (plan 2.1): values only from this directory; types from `protocol.ts`.
  */

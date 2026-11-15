@@ -149,11 +149,19 @@ test('switcherPayload: needOrder orders only; an id in it that does not need you
     candidate({ id: 'n1', need: true }),
   ];
   // `o1` and `r1` are named but do not need you: they keep their own ranks. `zz` is no candidate.
-  // `n1` named twice counts at its first place.
+  // `n1` is named twice (where it counts then is the next case's).
   assert.deepEqual(ranked(switcherPayload('', candidates, ['zz', 'r1', 'n1', 'o1', 'n1'])), [
     'n1:need',
     'o1:open',
     'r1:not-running',
+  ]);
+});
+
+test('switcherPayload: an id that needOrder names twice counts at its first place', () => {
+  const candidates = [candidate({ id: 'n2', need: true }), candidate({ id: 'n1', need: true })];
+  assert.deepEqual(ranked(switcherPayload('', candidates, ['n1', 'n2', 'n1'])), [
+    'n1:need',
+    'n2:need',
   ]);
 });
 
@@ -349,6 +357,19 @@ test('switcherPayload: the cut is taken after the ranking: the last ranks are le
   assert.equal(payload.more, 10);
 });
 
+test('switcherPayload: `more` also counts the ranks after the one the cut falls in', () => {
+  // 55 not running, then 7 done: the 50th item is the 50th not running; the 5 not running left
+  // and all 7 done are left out.
+  const candidates = [
+    ...many(55),
+    ...Array.from({ length: 7 }, (_, i) => candidate({ id: `d${i}`, done: true })),
+  ];
+  const payload = switcherPayload('', candidates, []);
+  assert.equal(payload.items.length, 50);
+  assert.ok(payload.items.every((item) => item.rank === 'not-running'));
+  assert.equal(payload.more, 12);
+});
+
 test('switcherPayload: with a text that 3 of 60 match, 3 items and `more` 0', () => {
   const candidates = [
     ...many(20),
@@ -381,6 +402,15 @@ test("switcherPayload: an item is exactly its rank, the candidate's row and hidd
     [8, 13],
     [19, 24],
   ]);
+});
+
+test("switcherPayload: `found` is of the row's title as it is, not of its lower-cased field", () => {
+  // `\u0130` lower-cases to two units: foundIn's named limit gives no range, so that a range is
+  // never one unit off in the title the page draws.
+  const c = candidate({ id: 'a', title: '\u0130stanbul fix' });
+  const [item] = switcherPayload('fix', [c], []).items;
+  assert.equal(item?.row.title, '\u0130stanbul fix');
+  assert.deepEqual(item?.found, []);
 });
 
 test('switcherPayload: with no text an item has no found ranges', () => {
@@ -512,6 +542,12 @@ test('restoreOffer: `>` and a start of `restore` of at least one letter give the
     '>restore',
     '>  restore  ',
     '>\trestore\n',
+    // Every white space that splits words (searchWords) is trimmed: the no-break space (AltGr or
+    // Option with Space types it), the byte-order mark, the ideographic space, a line separator.
+    '>\u00a0restore',
+    '>\ufeffrestore',
+    '>\u3000r',
+    '> r\u2028',
   ]) {
     assert.deepEqual(restoreOffer(text, banner()), OFFER, JSON.stringify(text));
   }
@@ -558,9 +594,20 @@ test('restoreOffer: an empty text, `>` alone, and `>` with what is no start of `
     // `>` must be the text's first character.
     ' >restore',
     '\t>r',
-    // Only ASCII `>` and the ASCII letters of `restore`: a look-alike is no command.
+    // Nothing is trimmed before the `>`, white space or not.
+    '\ufeff>restore',
+    '\u00a0>restore',
+    '\u200b>restore',
+    // A zero-width space is no white space: it is part of the command.
+    '>\u200brestore',
+    // Only ASCII `>` and the ASCII letters of `restore`: a look-alike is no command. The long s
+    // upper-cases to `S`, so a comparison through toUpperCase() would take it.
     '\uff1erestore',
     '>r\u0435store',
+    '>re\u017ftore',
+    // The mockup's toast quotes it; the quotes are not the command.
+    '"> restore"',
+    '\u201c> restore\u201d',
   ];
   for (const text of texts) {
     assert.equal(restoreOffer(text, banner()), null, JSON.stringify(text));

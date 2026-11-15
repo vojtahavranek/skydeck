@@ -753,13 +753,19 @@ the candidates and in `needOrder` (no lookup in `needOrder` per candidate, no so
   and `>r`; `restore` and `RESTORE old` → the sessions that hold the words. `switcherPayload` takes
   no banner: a `>` text lists no session with a banner or without one (task 98's case).
 - `restoreOffer`: a banner with three entries, two preselected, `shown` false, `running` false →
-  for `>r`, `>re`, `> rest`, `>restor`, `>restore`, `>  restore  `, `>\trestore\n` and, for case,
+  for `>r`, `>re`, `> rest`, `>restor`, `>restore`, `>  restore  `, `>\trestore\n`, every
+  white space `trim()` strips after the `>` (U+00A0, U+FEFF, U+3000, U+2028) and, for case,
   `> RESTORE`, `>Restore`, `>R`, `>Rest` the offer (`count` 2, the two ids in the banner's order,
   its `lastActivityNs`); for `restore`, `RESTORE`, `restore old`, `x restore2`, `res`, `rest`, `x`
   and `xrestore` (no `>`: sessions only) null; for `''`, `>`, `> `, `>restores`, `>restore old`,
-  `> re store`, `>x`, `> foo`, `>>restore`, `x >restore`, ` >restore`, `\t>r`, and a look-alike
-  `>` or letter, null; the same banner with `shown` true, with `running` true, with no entry
+  `> re store`, `>x`, `> foo`, `>>restore`, `x >restore`, ` >restore`, `\t>r`, U+FEFF, U+00A0 or
+  U+200B before the `>`, U+200B after it, a look-alike `>` or letter (U+FF1E, the Cyrillic
+  U+0435, the long s U+017F, which `toUpperCase()` would take for `S`) and the command in quote
+  marks, null; the same banner with `shown` true, with `running` true, with no entry
   preselected, and a null banner → null for `>restore`.
+- `more` counts the ranks after the one the cut falls in (55 not running and 7 done → 50 items,
+  `more` 12); an id `needOrder` names twice counts at its first place; `found` is of the row's
+  title (U+0130 + `stanbul fix` and `fix` → `[]`, foundIn's named limit).
 - The cost: 40,000 candidates that all need you and match, `needOrder` their reverse → within
   1 second, the least of three runs (a guard against a lookup in `needOrder` per candidate).
 
