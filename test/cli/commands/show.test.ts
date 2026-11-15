@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { formatShow } from '../../../src/cli/output.ts';
+import { EXIT } from '../../../src/cli/exit.ts';
+import { formatShow, showJson } from '../../../src/cli/output.ts';
 import type { ShowJson } from '../../../src/cli/output.ts';
 import { main } from '../../../src/cli/main.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
@@ -17,6 +19,7 @@ import {
   writeTranscript,
 } from '../../helpers/session-files.ts';
 import { testDeck } from '../../helpers/deck.ts';
+import { testContext } from '../../helpers/context.ts';
 
 const USAGE_FIRST_LINE = 'skydeck show <ref> [--json] [--refresh]';
 const PR1 = 'https://github.com/o/r/pull/1';
@@ -282,3 +285,100 @@ test('show prints the error of a pull request without its escape sequences', asy
   assert.ok(!/[\x1b\x07]/.test(d.stdout()), JSON.stringify(d.stdout()));
   assert.ok(d.stdout().includes('(boom red)'), d.stdout());
 });
+
+// --- the ticket address (S2 12.5, D16) ---------------------------------------------------------
+
+const JIRA = 'https://example.atlassian.net/browse/{key}';
+
+test('show prints the ticket address after the group set by the user, with ticketUrl set', async (t) => {
+  const d = twoSessions(t, { config: { ticketUrl: JIRA } });
+  d.deck.store.updateMeta(S1, { group: 'ABC-12 cleanup' }, T0);
+
+  assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+
+  assert.ok(
+    d
+      .stdout()
+      .includes(
+        '\ngroup:     ABC-12 cleanup\nticket:    https://example.atlassian.net/browse/ABC-12\n',
+      ),
+    d.stdout(),
+  );
+  assert.equal(d.stderr(), '');
+});
+
+test('show prints the ticket address of a group taken from the title', async (t) => {
+  const d = twoSessions(t, { config: { ticketUrl: 'https://Example.net:443/t/{key}' } });
+  d.deck.store.updateMeta(S1, { label: 'ABC-12 fix the retry' }, T0);
+
+  assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+
+  assert.equal(rowOf(d).groupSource, 'title');
+  assert.ok(
+    d.stdout().includes('\ngroup:     ABC-12\nticket:    https://example.net/t/ABC-12\n'),
+    d.stdout(),
+  );
+});
+
+test('show finds the key with the configured groupPattern', async (t) => {
+  const d = twoSessions(t, { config: { ticketUrl: JIRA, groupPattern: '[a-z]+-[0-9]+' } });
+  d.deck.store.updateMeta(S1, { group: 'abc-12 cleanup' }, T0);
+
+  assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+
+  assert.ok(
+    d
+      .stdout()
+      .includes(
+        '\ngroup:     abc-12 cleanup\nticket:    https://example.atlassian.net/browse/abc-12\n',
+      ),
+    d.stdout(),
+  );
+});
+
+test('show prints no ticket line without ticketUrl, or without a ticket key in the group', async (t) => {
+  const without = twoSessions(t);
+  without.deck.store.updateMeta(S1, { group: 'ABC-12' }, T0);
+  assert.equal(await main(['show', '0b5f'], without.ctx), EXIT.ok);
+  assert.ok(without.stdout().includes('\ngroup:     ABC-12\n'), without.stdout());
+  assert.doesNotMatch(without.stdout(), /ticket:/);
+
+  const noKey = twoSessions(t, { config: { ticketUrl: JIRA } });
+  noKey.deck.store.updateMeta(S1, { group: 'cleanup' }, T0);
+  assert.equal(await main(['show', '0b5f'], noKey.ctx), EXIT.ok);
+  assert.ok(noKey.stdout().includes('\ngroup:     cleanup\n'), noKey.stdout());
+  assert.doesNotMatch(noKey.stdout(), /ticket:/);
+
+  const noGroup = twoSessions(t, { config: { ticketUrl: JIRA } });
+  assert.equal(await main(['show', '0b5f'], noGroup.ctx), EXIT.ok);
+  assert.doesNotMatch(noGroup.stdout(), /ticket:/);
+});
+
+test('show --json is unchanged by ticketUrl: no ticket key', async (t) => {
+  const d = twoSessions(t, { config: { ticketUrl: JIRA } });
+  d.deck.store.updateMeta(S1, { group: 'ABC-12' }, T0);
+
+  assert.equal(await main(['show', '0b5f', '--json'], d.ctx), EXIT.ok);
+
+  assert.equal(
+    d.stdout(),
+    `${JSON.stringify(showJson(rowOf(d), d.deck.store.links()), null, 2)}\n`,
+  );
+  assert.doesNotMatch(d.stdout(), /ticket|atlassian/);
+});
+
+for (const args of [['show', S1], ['show', S1, '--json'], ['ls']]) {
+  test(`a wrong ticketUrl fails skydeck ${args.join(' ')} with its one line, exit 1`, async (t) => {
+    const c = testContext(t);
+    mkdirSync(c.places.configDir, { recursive: true });
+    writeFileSync(c.places.configPath, JSON.stringify({ ticketUrl: 'https:///{key}/browse' }));
+
+    assert.equal(await main(args, c.ctx), EXIT.failure);
+
+    assert.equal(
+      c.stderr(),
+      `skydeck: ${c.places.configPath}: "ticketUrl" must be null or an http or https address with {key} once, after its host\n`,
+    );
+    assert.equal(c.stdout(), '');
+  });
+}
