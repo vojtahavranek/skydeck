@@ -1,0 +1,64 @@
+/* Search in the list (S2 12.2, 12.8; plan E task 97, E4, E7): the chips under the filter field, a
+   stack's `×4` on its head, a closed stack's `+3 more in ORB-2107` line and an open stack's
+   members, indented. Colours are style.css's. Only the elements stage E adds are styled here, so
+   that a page whose list is another module (the page shell's pinned one) looks as before. */
+
+/* The chips: Running, Open PR, Has note, Show done; a pressed one is drawn as selected. */
+.list-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.list-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.list-chip:hover {
+  color: var(--text);
+}
+.list-chip[aria-pressed='true'] {
+  border-color: var(--selline);
+  background: var(--sel);
+  color: var(--text);
+}
+
+/* A stack's head: `×4` after its ticket key (or group); a click opens or closes the stack. */
+.row-stack {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--panel2);
+  color: var(--dim);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.row-stack:hover {
+  color: var(--text);
+}
+
+/* An open stack's members follow their head, indented. */
+.list-row[data-stack='member'] {
+  margin-left: 26px;
+}
+
+/* A closed stack's `+3 more in ORB-2107` line: no row, a click opens the stack. */
+.list-more {
+  overflow: hidden;
+  padding: 1px 10px 3px 38px;
+  color: var(--faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.list-more:hover {
+  color: var(--text);
+}
