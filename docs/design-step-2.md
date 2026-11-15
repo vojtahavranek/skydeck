@@ -323,6 +323,33 @@ A page that comes back in that time is "a page is already connected" (below): th
 exit code, no token, no Edge. An old server that did not answer, or whose answer has no page count
 that can be read, counts as none: no wait (ruled by the plan owner, stage A's plan task 25).
 
+After a WSL restart, a crash of the server or `--stop`, no old server is there to tell its pages,
+but the old window may still be open, and its page connects a few seconds after the new server's
+start is done (6.3). So the server keeps the `kv` entry `window_pages_open` while pages are
+connected (10.2), and a server that finds it at its start **expects a window back**: from the end
+of its start until a page connects or 7 seconds have passed, and says so in `GET /status`
+(`windowExpectedMs`, 8.3). The wait is the server's fact, not each command's guess: unless
+`--new-window`, `--print-url` or `--new-secret` (its old windows are refused, so none comes back),
+step 2 first reads `GET /status`, and while the server is starting with `windowExpectedMs` set, or
+`windowExpectedMs` is above 0, and no page is connected, it prints `skydeck: waiting up to 7 s
+for the open window to come back; --new-window opens one now` on standard error once and looks again every 100
+ms — every command that would open a window, a second `skydeck window` meanwhile too, so they wait
+for one deadline. It waits at most the start wait (10 seconds) and 7 seconds more of its own, from
+its first look, whatever the server says: a mark that is stale never leaves the user without a
+window. A page that comes back is "a page is already connected" (below); otherwise it goes on as
+step 2 says. After a restart this wait follows the one above. The cost: after a PC restart or
+shutdown with the window left open the entry may still be there (WSL can end before the server's
+next refresh sees the page go), and the first `skydeck window` then waits 7 seconds for a window
+that cannot come; the entry a server that died left is removed by the next server's first refresh
+without a page (plan C20). Three named limits (ruled by the plan owner, plan C20, task 81's review
+2): a server replaced within its own expectation (`--restart`, a crash, another `wsl --shutdown`
+within those 7 seconds) has removed the entry at its first refresh, so the next server expects
+nothing and the command opens a second window — no worse than before; the 7 seconds rest on a page
+that tries again at least every 5 seconds, but Chromium wakes a window hidden for more than 5
+minutes only once a minute (6.3), so such a window can come back after the command has opened a
+new one; and the waits add up when a start hangs: 10 and 17 seconds on a cold start, 10, 7 and 17
+seconds after a restart with a page.
+
 When a page is already connected it starts nothing on Windows and says
 `skydeck window: a window is already open`; `--new-window` opens another one anyway (several
 windows are supported, 8.2.7). A command cannot bring an existing window to the front: Edge's
@@ -1519,7 +1546,7 @@ absolute and existing, no flag that picks a session or names it). The program is
 | Request | Answer |
 |---|---|
 | `GET /ping` | `{ serverId, bootId, build, protocol, pid, port, checkout }` (`checkout`: the checkout the server runs from, which 5.1 compares). |
-| `GET /status` | `{ starting, pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin }` (`envOrigin`: where the server's environment came from and when, 5.2; `starting`: true while the server's start is not done and a page's upgrade is answered 503 (8.2.1) — a server answers before then, 5.2; a server of an older build sends none, which means false; ruled by the plan owner, follow-up "server-findable"), for `skydeck window` and `doctor`. |
+| `GET /status` | `{ starting, pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin, windowExpectedMs }` (`envOrigin`: where the server's environment came from and when, 5.2; `starting`: true while the server's start is not done and a page's upgrade is answered 503 (8.2.1) — a server answers before then, 5.2; a server of an older build sends none, which means false; ruled by the plan owner, follow-up "server-findable"; `windowExpectedMs`: the milliseconds left while the server expects a window back (5.1) — 7,000 while its start is not done, then counting down from its end —, else null; a server of an older build sends none, which means null; plan C20), for `skydeck window` and `doctor`. |
 | `POST /resume` | `{ sessionId }` (a session id) → `prepareResumeById` and the window terminal (11.2) → `{ code, lines, sessionId }`: the exit code `skydeck resume` would end with and the lines it prints on stderr (design 7.6), refusals included, each as printed (`skydeck: …`); `sessionId`, the session it started, else null. |
 | `POST /new` | `{ dir, label, group, flags }` (`label` and `group` null when the option was not given, and passed to `prepareNew` as the command passes them; `flags` the words after `--`, an array of strings, not split again) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
 | `POST /restore` | `{ sessionIds, all }` (the ids the user selected, 1 to 1,000; `all` as `--all`) → 11.4. The answer (200, chunked) is a stream of JSON lines: `{ "line": … }` per report line of the run, `{ "line": "waiting for <n> sessions" }` (`waiting for 1 session` for one) after 10 s without one, and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore runs already, the boot id cannot be read, the store is busy) is the same stream: its line, then an outcome with code 1. |
@@ -1733,6 +1760,7 @@ the first time one of them is known and never removed.
 | `window_launching` | The lock of the one command that starts Edge (5.1). |
 | `attention_seq` | The counter above. |
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
+| `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; the server leaves it as it is when it stops or dies, so that the next server knows that a window may come back. |
 
 ### 10.3 When a turn ends
 
