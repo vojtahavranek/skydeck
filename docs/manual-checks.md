@@ -911,6 +911,11 @@ skydeck window --restart
      cmp ~/.config/skydeck/config.json.before-w27 ~/.config/skydeck/config.json && rm ~/.config/skydeck/config.json.before-w27
      ```
 
+     **When `diff` says `config.json: No such file or directory`**, the file was removed since
+     (after an unfinished run), and your keys are only in the copy: put the copy back with the
+     same `cp -p` line as above, then `cmp` and `rm` as above. Change nothing in it: the copy was
+     taken before this check added its line, so a `ticketUrl` in it is your own.
+
      **When `diff` shows anything else**, the file was changed since the copy was made (by you or
      by a program): copy nothing back. Look at both files, take out of `config.json` by hand the
      `ticketUrl` line this check added, keep everything else, and only then remove the copy
