@@ -385,6 +385,7 @@ export function defaultList(
     t: 'list',
     nowNs: String(nowNs),
     counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
+    needYou: { count: 0, order: [] },
     sections: [],
     doneHidden: 0,
     banner: null,
