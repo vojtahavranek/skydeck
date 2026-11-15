@@ -745,6 +745,7 @@ export function scriptedList(
       cols: 80,
       rows: 24,
       ownsSize: true,
+      openedNs: '1794470400000000000',
     })),
     selected,
     dirs: [],
@@ -808,6 +809,9 @@ export async function actsWorld(
             ended: 'exited',
             expiring: false,
             expired: false,
+            note: null,
+            noteTooLong: false,
+            ticketUrl: null,
           },
     );
     for (const term of list['terminals'] as Record<string, unknown>[]) {
