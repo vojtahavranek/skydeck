@@ -45,6 +45,7 @@ const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 
 const SEC = 1_000_000_000n;
 const MIN = 60n * SEC;
+const HOUR = 60n * MIN;
 const DAY = 86_400n * SEC;
 
 // ---------------------------------------------------------------------------------------------
@@ -286,6 +287,25 @@ function fullTerminal(id: string, over: Partial<TerminalPayload> = {}): Terminal
     cols: 80,
     rows: 24,
     ownsSize: true,
+    openedNs: ago(HOUR),
+    ...over,
+  };
+}
+
+/** A fetched pull request `o/r #<number>` of `level`, last read 4 minutes ago. */
+function fullPr(
+  number: number,
+  level: string,
+  over: Partial<RowPayload['prs'][number]> = {},
+): RowPayload['prs'][number] {
+  return {
+    url: `https://github.com/o/r/pull/${number}`,
+    repo: 'o/r',
+    number,
+    title: null,
+    level,
+    error: null,
+    okAtNs: ago(4n * MIN),
     ...over,
   };
 }
@@ -694,24 +714,10 @@ test('the list', async (t) => {
               hasNote: true,
               noteHead: note,
               prs: [
-                {
-                  url: 'https://github.com/o/r/pull/7',
-                  repo: 'o/r',
-                  number: 7,
-                  title: null,
-                  level: 'cant-read',
-                  error: 'gh: HTTP 502',
-                },
-                {
-                  url: 'https://github.com/o/r/pull/8',
-                  repo: 'o/r',
-                  number: 8,
-                  title: null,
-                  level: 'merged',
-                  error: null,
-                },
+                fullPr(7, 'cant-read', { error: 'gh: HTTP 502', okAtNs: ago(3n * HOUR) }),
+                fullPr(8, 'merged'),
               ],
-              chip: { level: 'cant-read', count: 2 },
+              chip: { level: 'cant-read', open: 1, merged: 1 },
             }),
           ],
         },
@@ -766,12 +772,15 @@ test('the list', async (t) => {
         group: 'infra',
         title: 'tidy the logs',
         marks: ['crashed mid-turn', 'expires soon'],
-        chip: "2 PRs · can't read",
+        chip: "PR · can't read +1",
         age: '3d',
         state: '',
       });
       assert.equal(rows[3]?.dotted, true);
-      assert.equal(rows[3]?.chipTip, "o/r #7 · can't read · gh: HTTP 502\no/r #8 · merged");
+      assert.equal(
+        rows[3]?.chipTip,
+        "o/r #7 · can't read · last read 3h ago · gh: HTTP 502\n1 merged",
+      );
       assert.equal(rows[3]?.note, true);
       assert.equal(rows[3]?.noteTip, 'call Bob first', "the note's first line, sanitised");
       await showsText(
@@ -1003,6 +1012,83 @@ test('the list', async (t) => {
   );
 
   await t.test(
+    "S2 12.3's chip: one open failing pull request and 30 merged show `PR · failing` and a dim `+30`; a chip with none open is dim, an unreadable one dotted",
+    async (t) => {
+      const merged = Array.from({ length: 30 }, (_, at) => fullPr(100 + at, 'merged'));
+      const list = fullList({
+        week: [
+          fullRow(S1, {
+            prs: [fullPr(7, 'checks-failing'), ...merged],
+            chip: { level: 'checks-failing', open: 1, merged: 30 },
+          }),
+          fullRow(S2, {
+            prs: [...merged.slice(0, 3), fullPr(9, 'closed')],
+            chip: { level: 'merged', open: 0, merged: 3 },
+          }),
+          fullRow(S3, {
+            prs: [fullPr(9, 'closed')],
+            chip: { level: 'closed', open: 0, merged: 0 },
+          }),
+          fullRow(S4, {
+            prs: [fullPr(5, 'cant-read', { okAtNs: null, error: 'gh: HTTP 502' })],
+            chip: { level: 'cant-read', open: 1, merged: 0 },
+          }),
+        ],
+      });
+      const s = await scripted(t, chromium, () => list, 44);
+      const rows = await untilDrawn(s.page, (rows) => rows.length === 4, 'four rows');
+      assert.deepEqual(
+        rows.map((row) => [row.chip, row.chipTip, row.dotted]),
+        [
+          ['PR · failing +30', 'o/r #7 · failing\n30 merged', false],
+          ['3 merged', '3 merged · 1 closed', false],
+          ['closed', '1 closed', false],
+          ["PR · can't read", "o/r #5 · can't read · never read · gh: HTTP 502", true],
+        ],
+      );
+      const looks = await readPage(
+        s.page,
+        (ids) => {
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--faint)';
+          document.body.append(probe);
+          const faint = getComputedStyle(probe).color;
+          probe.remove();
+          const colour = (id: string, part: string): string => {
+            const found = document.querySelector(`#list [data-id="${id}"] ${part}`);
+            return found instanceof HTMLElement && found.checkVisibility()
+              ? getComputedStyle(found).color
+              : 'not shown';
+          };
+          return {
+            faint,
+            failing: colour(ids[0] ?? '', '.row-chip-text'),
+            failingText: document.querySelector(`#list [data-id="${ids[0]}"] .row-chip-text`)
+              ?.textContent,
+            plus: colour(ids[0] ?? '', '.row-chip-merged'),
+            plusText: document.querySelector(`#list [data-id="${ids[0]}"] .row-chip-merged`)
+              ?.textContent,
+            merged: colour(ids[1] ?? '', '.row-chip-text'),
+            mergedPlus: colour(ids[1] ?? '', '.row-chip-merged'),
+            closed: colour(ids[2] ?? '', '.row-chip-text'),
+          };
+        },
+        [S1, S2, S3],
+      );
+      assert.equal(looks.failingText, 'PR · failing');
+      assert.equal(looks.plusText, ' +30');
+      assert.equal(looks.plus, looks.faint, 'the +30 is dim');
+      assert.notEqual(looks.failing, looks.faint, 'the open part is not');
+      assert.equal(looks.merged, looks.faint, '3 merged is dim');
+      assert.equal(looks.mergedPlus, 'not shown', 'no +n with none open');
+      assert.equal(looks.closed, looks.faint, 'closed is dim');
+      // The same chip without pull requests: no chip at all.
+      s.send(fullList({ week: [fullRow(S1)] }));
+      await untilDrawn(s.page, (rows) => rows.length === 1 && rows[0]?.chip === '', 'no chip');
+    },
+  );
+
+  await t.test(
     'a list that changes a row between the mousedown and the mouseup on its title loses no click',
     async (t) => {
       const quiet = fullList({ week: [fullRow(S1), fullRow(S2, { title: 'the second' })] });
@@ -1025,7 +1111,7 @@ test('the list', async (t) => {
               marks: ['ended-unexpectedly'],
               hasNote: true,
               noteHead: ['n'],
-              chip: { level: 'draft', count: 1 },
+              chip: { level: 'draft', open: 1, merged: 0 },
             }),
           ],
         }),
