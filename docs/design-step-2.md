@@ -2457,8 +2457,10 @@ A done session that needs you and that a filter lists shows its mark and Ctrl+Sh
 but the `need you` count leaves it out (it is not listed without the filter), so the key bar's
 count of those hidden by the filter (12.4) is then one too low for each such row. The switcher
 marks no match in a title whose length lower-casing changes. The server's automatic refresh of
-pull requests (design 7.3) follows the rows the sections carry, so the members of a closed stack
-and the switcher's items are not refreshed by it, as a folded Earlier's rows never were.
+pull requests (design 7.3) follows the rows the sections carry, and a selected session the list
+does not show while a terminal of the window holds it (its header shows its pull requests, 12.9),
+so the members of a closed stack and the switcher's items are not refreshed by it, as a folded
+Earlier's rows never were.
 
 ### 12.9 Keys and focus
 
