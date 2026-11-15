@@ -1732,7 +1732,7 @@ the first time one of them is known and never removed.
 | `window_alarm` | The time a used launch token was presented a second time (8.2.2); cleared by `--new-secret`. Launch tokens themselves are never stored. |
 | `window_launching` | The lock of the one command that starts Edge (5.1). |
 | `attention_seq` | The counter above. |
-| `window_restore_dismissed` | The boot id whose restore the user dismissed (12.7). |
+| `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 
 ### 10.3 When a turn ends
 
@@ -1917,7 +1917,19 @@ gives them back when its program never started (7.8).
   `stopped: no session of this batch started`, the rest `not started` —, because a `claudeCommand`
   that cannot start (the server's `PATH` after a boot) would otherwise open a keeper for every
   session in turn. A last (or only) batch that starts nothing ends the run as any run with
-  failures. Its report lines go to the banner. One restore runs at a time.
+  failures. **One restore runs at a time** in the server, whoever asked for it (a page or a
+  command, 11.4): another request meanwhile is refused with `a restore is already running; wait
+  until it has finished`, and a refused request is no run — only its asker gets that line, no page
+  does. Every report line of every run goes to every page (12.7), and **every run ends with exactly
+  one line** `restore finished: <n> started, <n> timed out, <n> failed, <n> not started` (the parts
+  that are 0 left out; `restore finished: nothing was started` when all are), also after a stop of
+  any kind — its `timed out` lines for the sessions still waited for, the `stopped:` line and the
+  `not started` lines come before it — and after a run that cannot begin (the boot id unreadable,
+  the store busy: its line first). A run that a busy store ends says `stopped: skydeck's database
+  is busy; press Restore again (or run skydeck restore) for the rest`; one that fails otherwise
+  says `stopped unexpectedly (<kind>); the sessions it opened go on starting: run skydeck to see
+  which`, logged by kind. Whatever ends a run, the terminals it opened go on starting their
+  sessions, and a session it still waited for keeps its lock (its terminal may still start it).
 
 ### 11.4 `skydeck resume` (and `new`, `restore`) in a terminal while the window runs
 
@@ -1945,11 +1957,19 @@ gives them back when its program never started (7.8).
   sends the selected session ids (and `--all`) to `POST /restore`. The server takes design 7.8's
   set from freshly refreshed rows, keeps the entries the user selected (an id no longer in the set
   is reported `failed <short>: no longer offered for restore`), and runs `runRestore` with the
-  window terminal (11.3). The command prints each report line as it arrives and exits with design
-  7.8's code for the outcome. `--dry-run` asks the server nothing. The command asks the server for
-  `GET /ping` before it plans or prompts, so "the window is not running" comes before any
-  question. While a restore runs, the server sends a line at least every 10 seconds (`waiting for
-  <n> sessions` when nothing else happened); a command that hears nothing for 30 seconds says `the
+  window terminal (11.3), the selected entries in the set's order. Each terminal starts at the area
+  the page that had focus last reported (8.2.6), read when that terminal is opened; the
+  configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`)
+  is the one the server read at its start. The command prints each report line as it arrives and
+  exits with design 7.8's code for the outcome. **A restore asked for so stops when its command
+  goes**: when the command's connection closes before the outcome (Ctrl+C, as in step 1), the run
+  stops at its next step — `stopped: the command that asked for it stopped`, the sessions already
+  opened go on starting, the rest are `not started`, then the finished line (to the pages); the
+  server lives on. A command that goes after its outcome changes nothing. `--dry-run` asks the
+  server nothing. The command asks the server for `GET /ping` before it plans or prompts, so "the
+  window is not running" comes before any question. While a restore runs, the server sends a line at least every 10 seconds (`waiting for
+  <n> sessions` when nothing else happened, `n` the selected sessions without an outcome yet; to
+  the command only, not to the pages); a command that hears nothing for 30 seconds says `the
   window's server stopped answering; run skydeck to see what started` and exits 1.
 
 ## 12. What the window shows
@@ -2250,6 +2270,35 @@ show under Open as `starting…` and the banner reports each line of the run (st
 failed, stopped for memory). "Not now" stores the boot id (10.2): the banner does not come back for
 that boot, and the switcher still offers "Restore 3 sessions from <time>" until the next WSL
 restart.
+
+The banner is the view model's (4.3: the page decides no rule). It offers design 7.8's default set
+of the latest earlier boot, in list order, each session once, every text sanitised as the list's
+are; the last activity is that boot's last event (11.1). An earlier boot whose id is not of the
+form of `/proc/sys/kernel/random/boot_id` (a lower-case UUID) gets no offer: "Not now" could not
+name it. "Not now" names the boot the banner offers and is stored only when that is still the one
+offered (otherwise `this offer to restore is no longer shown`, nothing stored); while it is, the
+banner is not shown, and the switcher still finds the offer. The server makes the banner again only
+when its rows, the dismissal or whether a restore runs changed. While a restore runs — asked for by
+any page or command — the banner says so and nothing more can be started from it. It has no Stop
+control: `skydeck window --stop` ends a restore started from it (the sessions it opened go on); a
+Stop in the banner is a follow-up candidate.
+
+The page keeps the report lines it receives (`notice restore-progress`), as text, at most the last
+200, in a report under the banner's place. A line that comes after a `restore finished:` line starts
+a new report; no other line is a boundary (11.3: every run ends with exactly one). The report is
+drawn while it holds lines, whatever the banner says — none, or not shown: a restore asked for by a
+command, or from the switcher after "Not now", shows its report too — and after its finished line
+it has a × that removes it. A page that connects during a run sees that one runs and the lines from
+then on (a named limit). The banner and the report together take at most 40 % of the list zone's
+height and scroll inside it, so that the filter and the list keep their room. Their controls take
+no keyboard on a mouse click, as the page's other controls; "Restore" and "Not now" act once — not
+while their own `act` waits, not on a key's auto-repeat.
+
+The banner lies in the list zone above the list, in the list's width: it takes height from the list
+(the list scrolls under it), never width, so the right side, the header's one height and every
+terminal's area stay as they are — its coming and going sends no `resize`. A restore selects
+nothing and moves no keyboard, in any page, also while a dialog is shown: its sessions are listed
+under Open, and a command's restore does not move the window's selection either.
 
 ### 12.8 Search
 

@@ -1134,7 +1134,13 @@ test('dirs: the known project directories, as projectDirs gives them', () => {
 test("src/window/view/ imports values only from text, the two list functions of A8, D4's CHIP_ORDER and windowChip, and B's attention", () => {
   const dir = join(import.meta.dirname, '../../../src/window/view');
   const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
-  assert.deepEqual(files.sort(), ['attention.ts', 'build.ts', 'chip.ts', 'sections.ts']);
+  assert.deepEqual(files.sort(), [
+    'attention.ts',
+    'banner.ts',
+    'build.ts',
+    'chip.ts',
+    'sections.ts',
+  ]);
   for (const name of files) {
     const source = readFileSync(join(dir, name), 'utf8');
     const imports = [...source.matchAll(/^import\s+(type\s+)?([^;]*?)\s+from\s+'([^']+)';/gms)];
