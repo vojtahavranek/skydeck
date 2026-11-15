@@ -195,7 +195,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C3 | The bodies: `POST /resume` `{ sessionId }`; `POST /new` `{ dir, label, group, flags }` with `label` and `group` null when the option was not given and passed to `prepareNew` exactly as the command passes them (a blank `--label ' '` is refused, unlike the window's form, S2 12.6), `flags` the words after `--` as an array (no splitting); `POST /restore` `{ sessionIds, all }` with 1–1,000 distinct session ids. Every session id passes `isSessionId`, as `act resume`'s does. Strings well formed; no NUL in `dir` or a flag; `dir` 4,096 bytes, `label` and `group` 1,024, at most 1,000 flags; the body's 64 KiB bounds the rest. An unknown or missing field is 400. | S2 8.3: fixed fields, no program, no argument list; a prompt after `--` is the user's and is passed on (design 7.7). | 70 (8.3) |
 | C4 | While the server starts (its upgrade answers 503) the three routes answer 503 `{ error: 'starting' }`, and the client asks again every 500 ms within its answer time; once its stop has begun, 503 `{ error: 'stopping' }`, which the command reports (`the window's server is stopping; run skydeck window, or use --here`, exit 1). | Before its keepers are found the server does not know its terminals (S2 8.2.1's reason for 503): the "already open" rule could not see one. | 70 (8.3) |
 | C5 | `POST /restore` answers 200 with JSON lines (2.2 `RestoreStreamLine`): `{ "line": … }` per report line, `{ "line": "waiting for <n> sessions" }` after 10 s without one (`1 session`), and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run (a restore is already running, the boot id unreadable, the store busy) is the same stream: its line, then an outcome with code 1. `code`: 5 when a stop ended the run — the memory check, the server's stop, the asker's close (C22), or C23's empty batch with entries left (ruled on review A's re-check) —, else 1 when any selected session failed, was not offered any more or timed out, else 0 (design 7.8's codes). | S2 8.3 and 11.4: a stream of lines, the outcome last, a line at least every 10 s. One reading path for the client. | 70 (8.3) |
-| C6 | One restore runs at a time in the server, whoever asked (a page or a command). Another request meanwhile is refused with `a restore is already running; wait until it has finished`: `act restore` answers it as its result, `POST /restore` as its one line. `act restore` answers at once (`ok`, no lines) once the run has begun; every report line of every run, whoever asked, goes to every page as `notice restore-progress` (its text sanitised). **Every run ends with exactly one line `restore finished: <n> started, <n> timed out, <n> failed, <n> not started`** (the parts that are 0 left out; `restore finished: nothing was started` when all are 0), also after a stop of either kind — the memory stop and the signal: their `timed out …` lines for the sessions still waited for, then `stopped: …`, then `not started …`, come before it — and after a run that cannot begin (its refusal line first). Heartbeats go to the command line only. | S2 11.3 ("one restore runs at a time"), 12.7 ("the banner reports each line of the run"), 8.2.3's `restore-progress`. One end mark is the page's only boundary between two reports (C10; ruled on review B). A result that waited for the whole run (minutes) would be lost by a page that reconnects meanwhile. | 73 (11.3, 12.7) |
+| C6 | One restore runs at a time in the server, whoever asked (a page or a command). Another request meanwhile is refused with `a restore is already running; wait until it has finished`: `act restore` answers it as its result, `POST /restore` as its one line. `act restore` answers at once (`ok`, no lines) once the run has begun; every report line of every run, whoever asked, goes to every page as `notice restore-progress` (its text sanitised). **Every run ends with exactly one line `restore finished: <n> started, <n> timed out, <n> failed, <n> not started`** (the parts that are 0 left out; `restore finished: nothing was started` when all are 0), also after a stop of either kind — the memory stop and the signal: their `timed out …` lines for the sessions still waited for, then `stopped: …`, then `not started …`, come before it — and after a run that cannot begin (its refusal line first). **A refused request is no run** (ruled on review A's re-check, F1): while one runs (or once the server's stop began), nothing goes to the pages — its asker alone gets its line and the outcome —, so no `restore finished:` line ends the running run's report. Heartbeats go to the command line only. | S2 11.3 ("one restore runs at a time"), 12.7 ("the banner reports each line of the run"), 8.2.3's `restore-progress`. One end mark is the page's only boundary between two reports (C10; ruled on review B). A result that waited for the whole run (minutes) would be lost by a page that reconnects meanwhile. | 73 (11.3, 12.7) |
 | C7 | The restore's set is taken on freshly refreshed rows at the moment it starts (`refresh`, then `restorePlan`, 2.3), design 7.8's default set for the banner and `all` as asked over `server.sock`; the selected ids are kept in the set's order, and an id not in the set is reported `failed <short>: no longer offered for restore` before the run. Each terminal's first size is the area the page that had focus last reported, else 120 × 40, read when that terminal is opened (S2 8.2.6). The server's configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`) is the one it read at its start. | S2 11.4 and 8.2.6 say it; the configuration is the server's like every launch it makes (S2 5.2). | 73 (11.4) |
 | C8 | `runRestore` gains optional hooks (C23 adds `stopAfterEmptyBatch` to these three) and the outcome of each report line (2.3, `RestoreHooks`): `refuse` before the guard (the window's "already open"), `gone` at every look of the wait — a session whose window terminals have all ended, were lost, were not started or were closed before restore saw its start is reported `failed <short>: <reason>` at once and restore's own lock (its last renewed value) is given back —, and `signal`, with which the server's stop ends the run at its next step (`stopped: the window's server is stopping`, the rest `not started`). The command passes none and nothing changes for it. | S2 11.1's rule must hold for restore; a window terminal that ended is known to the server, where a tab is not, so waiting the full `restoreStartTimeoutSeconds` would only make the user wait; the server's stop must not leave a restore writing into a closed store. Question 1. | 71 (4.4, 11.1, 11.3) |
 | C9 | The banner is the view model's (`bannerPayload`, 2.3): null when design 7.8's default set is empty and no restore runs; otherwise its payload with `shown` false once the user said "Not now" for its earlier boot (the page then shows nothing; stage E's switcher still finds the offer) and `running` while any restore runs. `dismiss-restore` names the earlier boot whose sessions the banner offers (`banner.bootId`) and stores it in `kv` `window_restore_dismissed` only when it is the banner's current one (else `this offer to restore is no longer shown`, nothing stored). The server computes it from the tick's rows, again only when the rows array, the dismissal or `running` changed (one read of the events each time). | S2 12.7 and 10.2: "the user has not dismissed it for that boot", and the switcher's offer after "Not now". The page decides no rule (S2 4.3). | 70 (8.2.3), 73 (12.7, 10.2) |
@@ -387,7 +387,11 @@ export function createLaunches(deps: LaunchesDeps): Launches;
 ```ts
 // src/window/view/banner.ts — task 73; pure
 /** C9 over the plan of the tick's rows (null when it could not be made), the stored dismissal and
- *  whether a restore runs. */
+ *  whether a restore runs. The entries: the plan's of its earlier boot, each session once (stage
+ *  E's switcher counts them), every text sanitised as the list's; no offer for an earlier boot
+ *  whose id is not a lower-case UUID (`dismiss-restore` could not name it). No offer: null, or
+ *  while a restore runs `{ bootId: null, lastActivityNs: null, entries: [], shown: true,
+ *  running: true }`. */
 export function bannerPayload(input: { plan: RestorePlan | null; dismissedBootId: string | null; running: boolean }): BannerPayload | null;
 
 // src/window/restorer.ts — task 73
@@ -412,8 +416,10 @@ export interface Restorer {
    *  filtered, runRestore with the hooks (stopAfterEmptyBatch on) and its signal — and returns at
    *  once. `write` gets every line, the heartbeats, and the outcome last; `done` resolves when the
    *  run is over. `asker` (C22, a command's connection): when it fires before the outcome, the run
-   *  stops with the reason `the command that asked for it stopped`. Every run, also a refused or
-   *  stopped one, ends with exactly one `restore finished: …` line to `progress` (C6). */
+   *  stops with the reason `the command that asked for it stopped`; after it, it changes nothing.
+   *  Every run, also one that cannot begin or is stopped, ends with exactly one `restore
+   *  finished: …` line to `progress` (C6). A refused request is no run (ruled, F1): its asker
+   *  alone gets its line and the outcome, nothing goes to `progress`. */
   start(request: RestoreRequest, write?: (line: RestoreStreamLine) => void, asker?: AbortSignal):
     { ok: true; done: Promise<void> } | { ok: false; error: string };
   /** C9. */
@@ -918,31 +924,47 @@ both tested without a server: the window terminal, the refusal and `gone` are in
   already, so the allowed imports stay); `docs/design-step-2.md` (C6, C22, C23: 11.3 and 11.4; C9,
   C10, C21: 12.7 — the only stage C task that writes 12.7 —; C9: 10.2's `kv` table)
 
-**Behaviour.** `start`: refused while a run is going or after `stop()` (for `write`: the refusal's
-line, `restore finished: nothing was started`, an outcome with code 1); otherwise, synchronously,
-`refresh(deck)` and `restorePlan(deck, request.all)` (a SkydeckError or a busy store → `ok: false`
-with its text, or for `write` that line, the finished line and an outcome with code 1), the ids
-filtered (C7), then the run begins: `deps.changed()`, `runRestore` with `terminal:
+**Behaviour.** `start`: refused while a run is going (`a restore is already running; wait until it
+has finished`) or after `stop()` (`the window's server is stopping`) — a refused request is no run
+(ruled, F1): for `write` the refusal's line and an outcome with code 1, nothing to `progress`, no
+`changed()`; otherwise, synchronously, `refresh(deck)` and `restorePlan(deck, request.all)` (a
+SkydeckError — its message, sanitised — or a busy store — `skydeck's database is busy; try again`
+— or another failure — `restore could not begin (<kind>)`, logged by kind — is a run that cannot
+begin: `ok: false` with that text, the line and the finished line to `progress` and `write`, an
+outcome with code 1), the ids filtered (C7), then the run begins: `deps.changed()`, `runRestore`
+(on the next microtask: `start` returns before the run opens anything) with `terminal:
 deps.terminalFor(deps.size())` built for each opening (wrap it: `open(spec)` builds the terminal of
 the size of that moment and opens), `refuse`, `gone`, `stopAfterEmptyBatch`, the signal (aborted
 by `stop()` or by `asker`), and `report` sending each line to `deps.progress` and `write`. A
 heartbeat timer (`deck.platform.clock.after`) writes `waiting for <n> sessions` to `write` only,
-`n` the sessions without an outcome yet, re-armed by every line. The run's end, whatever ended it:
+`n` the sessions without an outcome yet, re-armed by every line (none without `write`). The
+asker's `closed` (task 70) can also fire after the outcome was written while the promise is still
+pending: the run has no step left then and nothing changes. The run's end, whatever ended it:
 exactly one `restore finished: …` line (C6) to `progress` and `write`, then the outcome to `write`
 (C5's code), then `deps.changed()`. A rejection of `runRestore` is the line `stopped: skydeck's
 database is busy; press Restore again (or run skydeck restore) for the rest` for a busy store, else
 `stopped unexpectedly (<kind>); the sessions it opened go on starting: run skydeck to see which`,
-then the finished line, an outcome with code 1, and one log line by kind. `banner`:
-`restorePlan(deck, false, rows)` and `kv window_restore_dismissed` read when the rows array, the
-stored dismissal or `running` changed since the last call, else the last payload; a failure keeps
-the last payload. `dismiss`: C9; a stored dismissal calls `deps.changed()`.
+then the finished line, an outcome with code 1, and one log line by kind. Nothing is written after
+the outcome, and `done` resolves right after it (task 74's `launch.restore` awaits it and so
+settles soon after its outcome). A `progress`, `write` or `changed` of the server that throws is
+logged by kind and the run goes on (a run left half way would refuse every restore until the
+server restarts). `banner`: `restorePlan(deck, false, rows)` and `kv window_restore_dismissed`
+read when the rows array, the stored dismissal or `running` changed since the last banner made,
+else that payload; rows without a boot id give no plan (no offer); a failure keeps the last
+payload, logged by kind, and is tried again at the next call. `dismiss`: C9 — the banner's
+current boot is the one of the last banner made; a stored dismissal calls `deps.changed()`.
+Every case that shows a lock renewed compares the lock's time (`lockTakenNs`) or its mark, never
+"the value changed" (task 80: every renewal changes the value).
 
 **Tests** (platform: `testPlatform` through `restoreDeck` of `test/helpers/restore.ts`; a fake
 terminal that opens what the test says, a `gone` the test scripts)
 - `bannerPayload`: no plan, or no entries and not running → null; entries → the payload in list
   order with `shortId`, title, `endedAtNs` null for no exit, `wasWorking`, preselection, `bootId`
   and `lastActivityNs` from `earlier`; `dismissedBootId` equal → `shown` false; another boot →
-  shown; running with no entries → `{ bootId: null, entries: [], running: true, shown: true }`.
+  shown; running with no entries (or no plan) → `{ bootId: null, lastActivityNs: null, entries:
+  [], running: true, shown: true }`; each session once, at its first place; an earlier boot whose
+  id is not a lower-case UUID → no offer; a hostile title → sanitised; only the earlier boot's
+  entries.
 - A run of three over a batch of two: `progress` gets `started …` three times and `restore
   finished: 3 started`; `write` the same lines and `{ outcome: { code: 0, started: 3, … } }`; each
   terminal opened with the size `deps.size()` gave at that moment (it changes between the two
@@ -952,20 +974,28 @@ terminal that opens what the test says, a `gone` the test scripts)
   `stopped: only …`, the `not started` lines, then the finished line, code 5), `stop()` while it
   waits (`timed out …` for those waited for, `stopped: the window's server is stopping`, `not
   started …`, the finished line, code 5; `stop()` resolves after `done`; `start` afterwards
-  refused), an `asker` that fires (`stopped: the command that asked for it stopped`, code 5), an
-  empty batch (`stopped: no session of this batch started`, code 5), a refused start (`a restore
-  is already running…`), a busy store in the run (the busy line, code 1): each `progress` sequence
-  holds the finished line once, as its last.
+  refused), an `asker` that fires (`stopped: the command that asked for it stopped`, code 5; one
+  already aborted at the start: nothing opened), an empty batch with entries left (`stopped: no
+  session of this batch started`, code 5), an empty last batch (no `stopped:` line, code 1), a
+  busy store in the run (the busy line, code 1), another rejection (`stopped unexpectedly …`, code
+  1), a run that cannot begin (no boot id, a busy store, another failure): each `progress`
+  sequence holds the finished line once, as its last.
+- An `asker` that fires after the outcome was written does nothing.
 - An id not in the set → `failed <short>: no longer offered for restore` first, code 1; a session
   `refuse` names → its line, never opened; `gone` → `failed`, the run goes on, code 1.
 - A second `start` while running → `a restore is already running; wait until it has finished`,
-  nothing planned; after `done` → accepted.
+  nothing planned; its `write` gets that line and an outcome with code 1, `progress` nothing (the
+  running run's report ends once); after `done` → accepted. After `stop()` → `the window's server
+  is stopping`.
 - Heartbeat: 10 s (the fake clock) without a line → `waiting for 2 sessions` to `write`, not to
-  `progress`; with `heartbeatMs` 1000 every second.
+  `progress`; `waiting for 1 session`; with `heartbeatMs` 1000 every second; a line re-arms it.
 - `dismiss(bootId)` of the banner's boot → stored, the next `banner(rows)` has `shown` false;
   another id → `this offer to restore is no longer shown`, nothing stored. `banner` called twice
-  with the same rows reads the events once (a counting store wrapper).
+  with the same rows reads the events once (a counting store wrapper), again for new rows, a
+  dismissal and a run; a store that fails keeps the last banner.
 - A title holding an escape sequence → no control character in any `progress` or `write` line.
+- A `progress`, `write` and `changed` that throw → logged by kind, the run ends, the next `start`
+  is accepted.
 
 **Done when:** a restore can be run, refused, watched, stopped and its banner decided by the
 restorer alone; `npm run check` passes.
