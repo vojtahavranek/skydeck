@@ -9,23 +9,42 @@
 // and bold title are list.css's) and the reason's line as its second line (list-text.js), and the
 // counts start with `3 need you` on an element `data-state="need-you"`, whose dot list.css draws.
 //
+// Stage E (plan E task 97, E4–E7): the chips under the filter field (web/chips.js) and the stacks
+// of This week and Earlier as the server sends them — a head with its `×4`, a closed stack's
+// `+3 more in ORB-2107` line (no row: never selected, no `data-id`), an open stack's members
+// indented after it —, ← and → on a stack, and done sessions while filtering. The list keeps the
+// chips and the stacks the user opened as it keeps `showDone`: its own state, sent whole in the
+// page's `view`, `opened` in every view (E6: a view without it gets no stacks). Which rows match,
+// which stack, and whether the list is filtering are the server's (`list.filtering`); the page
+// decides no rule.
+//
 // A render never loses a click (contract 2.9): app.js renders when a list arrives and when only
 // the zone changed — the focus a mousedown moves, before its mouseup —, so every element the list
 // draws is made once and kept: a row keeps its element and every element inside it across
 // renders, and a render only changes texts and `hidden`. Lines no longer drawn are removed.
 
-/** @import { ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
+/** @import { HiddenBy, ListMessage, RowPayload, SearchChip, SectionPayload, StackPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { ListAction, Zone } from './keys.js' */
 /** @import { RowText } from './list-text.js' */
 import { needYouText } from './attention-text.js';
+import { createChips } from './chips.js';
 import { serverNow } from './format.js';
 import { countsText, footerText, rowText, sectionText } from './list-text.js';
+import { moreText, stackBadge } from './search-text.js';
 
+/**
+ * @typedef {object} ViewChange
+ * @property {string} [filter]
+ * @property {string[]} [unfolded]
+ * @property {boolean} [showDone]
+ * @property {SearchChip[]} [chips] E4: the chips set, each once
+ * @property {string[]} [opened] E6: the groups whose stacks the user opened
+ */
 /**
  * @typedef {object} ListHooks
  * @property {(id: string, how: 'click' | 'key') => void} select
  * @property {(id: string) => void} activate
- * @property {(change: { filter?: string, unfolded?: string[], showDone?: boolean }) => void} view
+ * @property {(change: ViewChange) => void} view
  */
 
 /** The marks a row can show, each in an element of its own (list-text.js's kinds). */
@@ -34,6 +53,26 @@ const MARK_KINDS = ['crashed', 'continued', 'expired', 'expiring', 'duplicate', 
 const AGE_TICK_MS = 1000;
 /** A row's height when none is drawn to measure (PgUp and PgDn move by a page). */
 const ROW_PX = 28;
+/** E4: the chips that narrow the list, in the order a view names them (`Show done` is `showDone`). */
+const SEARCH_CHIPS = /** @type {const} */ (['running', 'open-pr', 'note']);
+/** E6: the most groups a view's `opened` names (the parser's MAX_OPENED; web/ imports only types
+ *  from src/, so the page holds the number itself). */
+const MAX_OPENED = 64;
+/** S2 8.2.3: a text of a view is at most 1,024 bytes of UTF-8 and well formed. */
+const TEXT_BYTES = 1024;
+const utf8 = new TextEncoder();
+
+/**
+ * Whether the server takes `group` in a view's `opened`: one it would refuse would close the
+ * connection, so such a group is never sent and its stack opens only while a member is selected
+ * (a named limit).
+ * @param {string} group
+ */
+function sendable(group) {
+  return (
+    typeof group === 'string' && group.isWellFormed() && utf8.encode(group).length <= TEXT_BYTES
+  );
+}
 
 /**
  * @param {string} className
@@ -92,11 +131,16 @@ function setTip(target, tip) {
  * click by time and distance, not by element, so a list that moved the rows between the two
  * clicks would otherwise resume a session the user clicked once (S2 12.6: nothing resumes but on
  * purpose). Then they are two single clicks: each selects the row it landed on.
+ *
+ * A stack's head shows `×4` after its ticket key (or group) (E7): a click on it opens or closes
+ * the stack (`toggleStack`) and does nothing else — it selects no row and, its mousedown
+ * cancelled, takes no keyboard.
  * @param {string} id
  * @param {ListHooks} hooks
  * @param {{ first: string | null }} clicks the row of the last click that began a sequence
+ * @param {(head: string) => void} toggleStack
  */
-function makeRow(id, hooks, clicks) {
+function makeRow(id, hooks, clicks, toggleStack) {
   const root = element('list-row', 'div');
   root.dataset.id = id;
   root.addEventListener('click', (event) => {
@@ -116,6 +160,16 @@ function makeRow(id, hooks, clicks) {
   const slot = element('row-slot');
   const key = element('row-key');
   const group = element('row-group');
+  const stack = element('row-stack');
+  stack.hidden = true;
+  stack.addEventListener('mousedown', (event) => event.preventDefault());
+  stack.addEventListener('click', (event) => {
+    event.stopPropagation(); // not a click on the row: it selects nothing
+    if (event.detail <= 1) {
+      toggleStack(id); // the first click of a sequence only (task 38's rule)
+    }
+  });
+  stack.addEventListener('dblclick', (event) => event.stopPropagation()); // and resumes nothing
   const title = element('row-title');
   const marks = new Map(MARK_KINDS.map((kind) => [kind, element('row-mark')]));
   for (const [kind, mark] of marks) {
@@ -128,7 +182,7 @@ function makeRow(id, hooks, clicks) {
   const note = element('row-note');
   const age = element('row-age');
   const state = element('row-state', 'div');
-  first.append(slot, key, group, title, ...marks.values(), chip, note, age);
+  first.append(slot, key, group, stack, title, ...marks.values(), chip, note, age);
   main.append(first, state);
   root.append(icon, main);
   return {
@@ -137,6 +191,7 @@ function makeRow(id, hooks, clicks) {
     slot,
     key,
     group,
+    stack,
     title,
     marks,
     chip,
@@ -200,6 +255,25 @@ function paintRow(row, text, done) {
   setText(row.state, text.stateLine ?? '');
 }
 
+/**
+ * Draws a row's place in a stack (E7): `data-stack="head"` with its `×4`, `data-stack="member"`
+ * (indented by search.css), nothing for a row in no stack.
+ * @param {RowElements} row
+ * @param {StackPayload | null} stack
+ */
+function paintStack(row, stack) {
+  if (stack === null) {
+    if (row.root.dataset['stack'] !== undefined) {
+      delete row.root.dataset['stack'];
+    }
+  } else {
+    setData(row.root, 'stack', stack.role === 'head' ? 'head' : 'member');
+  }
+  const head = stack !== null && stack.role === 'head';
+  setText(row.stack, head ? stackBadge(stack.size) : '');
+  setTip(row.stack, head ? (stack.open ? 'close the stack' : 'open the stack') : '');
+}
+
 /** A section header's elements, made once (S2 12.1). @param {SectionPayload['name']} name */
 function makeHeader(name) {
   const root = element('list-section', 'div');
@@ -224,11 +298,20 @@ export function createList(root, hooks) {
   const filterBar = element('list-filterbar', 'div');
   const filter = /** @type {HTMLInputElement} */ (element('list-filter', 'input'));
   filter.type = 'text';
-  filter.placeholder = 'Filter: title, group, note, PR, directory   /';
+  filter.placeholder = 'Filter: title, group, note, PR, directory, short id   /';
   filter.autocomplete = 'off';
   filter.spellcheck = false;
   filter.setAttribute('aria-label', 'Filter the list');
-  filterBar.append(filter);
+  // The chips under the field (S2 12.8, E4): the list's own state, as `showDone` is.
+  const chipsRow = element('list-chips', 'div');
+  filterBar.append(filter, chipsRow);
+  /** E4: the chips set, in SEARCH_CHIPS's order. @type {SearchChip[]} */
+  let chips = [];
+  /** E6: the groups whose stacks the user opened, the oldest first. @type {string[]} */
+  let opened = [];
+  const chipsView = createChips(chipsRow, {
+    toggle: (chip) => (chip === 'done' ? toggleDone() : toggleChip(chip)),
+  });
   filter.addEventListener('input', () => hooks.view({ filter: filter.value }));
   /** The Enter or Esc that ended the entry, until it is released ('' when none). */
   let leaving = '';
@@ -273,11 +356,51 @@ export function createList(root, hooks) {
    * off a row — on blank space, on a header — never matches an older click on a row.
    */
   const clicks = { first: /** @type {string | null} */ (null) };
+  /**
+   * The current click sequence began on a stack's `×4` or `+3 more` line (E7, ruled on review 2):
+   * its first click opened or closed the stack, so the list may have moved under the pointer, and
+   * the later clicks of the sequence (`detail` above 1) are not acted on anywhere in the list —
+   * their press takes no keyboard, their click selects no row and toggles no stack, a double click
+   * resumes nothing (task 38's rule for the header's buttons). Set at each sequence's first press.
+   */
+  let onStack = false;
+  /** @param {EventTarget | null} target */
+  const isStackControl = (target) =>
+    target instanceof Element && target.closest('.row-stack, .list-more') !== null;
+  /** @param {Event} event */
+  const drop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  root.addEventListener(
+    'mousedown',
+    (event) => {
+      if (event.detail <= 1) {
+        onStack = isStackControl(event.target);
+      } else if (onStack) {
+        drop(event);
+      }
+    },
+    true,
+  );
   root.addEventListener(
     'click',
     (event) => {
       if (event.detail <= 1) {
         clicks.first = null;
+      } else if (onStack) {
+        drop(event);
+      }
+    },
+    true,
+  );
+  // (Defensive: in such a sequence no row's `clicks.first` is set and ×n stops its own dblclick,
+  // so nothing would act on it today; a listener added later stays covered.)
+  root.addEventListener(
+    'dblclick',
+    (event) => {
+      if (onStack) {
+        drop(event);
       }
     },
     true,
@@ -288,6 +411,9 @@ export function createList(root, hooks) {
   /** @type {string | null} */
   let selected = null;
   let showDone = false;
+  /** Whether the page's view unfolds Earlier (`unfolded`): only the list sends it, app.js starts
+   *  with none, so the list knows it as it knows `showDone` (reveal sends only what changes). */
+  let earlierUnfolded = false;
   /** When `current` arrived (performance.now()), to count its ages on (A18). */
   let receivedAt = 0;
   /** The section the selected row was drawn in, to scroll to it when it moves to another. */
@@ -315,9 +441,94 @@ export function createList(root, hooks) {
   const rowElements = new Map();
   /** @type {Map<string, ReturnType<typeof makeHeader>>} */
   const headers = new Map();
+  /** A closed stack's `+3 more in ORB-2107` line, by its head's session id (E7). @type {Map<string, HTMLElement>} */
+  const moreLines = new Map();
 
   /** @returns {RowPayload[]} the rows drawn, in order */
   const rows = () => current?.sections.flatMap((section) => section.rows) ?? [];
+
+  /** The selected session's row, when the list draws it. */
+  const selectedRow = () =>
+    selected === null ? undefined : rows().find((row) => row.id === selected);
+
+  /** Whether the list is filtering (E5): the server's answer; a list without it, stage A's rule. */
+  const filtering = () =>
+    typeof current?.filtering === 'boolean' ? current.filtering : filter.value !== '';
+
+  /** @param {string[]} next */
+  const sendOpened = (next) => {
+    opened = next;
+    hooks.view({ opened: [...opened] });
+  };
+
+  /**
+   * Opens the stacks of `group` (E6): adds it to `opened`, the oldest dropped past MAX_OPENED.
+   * A group the server would refuse is never sent. False when nothing was sent.
+   * @param {string} group
+   * @returns {boolean}
+   */
+  const openStack = (group) => {
+    if (opened.includes(group) || !sendable(group)) {
+      return false;
+    }
+    sendOpened([...opened, group].slice(-MAX_OPENED));
+    return true;
+  };
+
+  /**
+   * Closes the stacks of `group` (E7). With one of their members selected the head is selected
+   * first, as ← on a member does: a selected member keeps its stack open (E6), and the page's
+   * memory would add the group again at the next list.
+   * @param {string} group
+   */
+  const closeStack = (group) => {
+    const stack = selectedRow()?.stack ?? null;
+    if (stack !== null && stack.role === 'member' && stack.group === group) {
+      hooks.select(stack.head, 'key');
+    }
+    if (opened.includes(group)) {
+      sendOpened(opened.filter((other) => other !== group));
+    }
+  };
+
+  /**
+   * A click on a head's `×4` or on its `+3 more` line (E7): opens the stack, or closes it.
+   * @param {string} head the head's session id
+   */
+  const toggleStack = (head) => {
+    const stack = rows().find((row) => row.id === head)?.stack ?? null;
+    if (stack === null || stack.role !== 'head') {
+      return;
+    }
+    if (stack.open) {
+      closeStack(stack.group);
+    } else {
+      openStack(stack.group);
+    }
+  };
+
+  /**
+   * The line after a closed stack's head, made once (E7): no row — no `data-id`, never selected —,
+   * and a click on it opens the stack and, its mousedown cancelled, takes no keyboard.
+   * @param {string} head the head's session id
+   */
+  const moreFor = (head) => {
+    let line = moreLines.get(head);
+    if (line === undefined) {
+      const made = element('list-more', 'div');
+      made.dataset.head = head;
+      made.title = 'open the stack';
+      made.addEventListener('mousedown', (event) => event.preventDefault());
+      made.addEventListener('click', (event) => {
+        if (event.detail <= 1) {
+          toggleStack(head); // the first click of a sequence only (task 38's rule)
+        }
+      });
+      moreLines.set(head, made);
+      line = made;
+    }
+    return line;
+  };
 
   /** The server's time now: the list's, counted on by the time since it came (`serverNow`). */
   const nowNs = () =>
@@ -357,7 +568,7 @@ export function createList(root, hooks) {
   const rowFor = (id) => {
     let row = rowElements.get(id);
     if (row === undefined) {
-      row = makeRow(id, hooks, clicks);
+      row = makeRow(id, hooks, clicks, toggleStack);
       rowElements.set(id, row);
     }
     return row;
@@ -430,9 +641,9 @@ export function createList(root, hooks) {
     current = list;
     selected = selectedId;
     const now = nowNs();
-    const filtering = filter.value !== '';
+    const searching = filtering();
     const sections = list?.sections ?? [];
-    const nothing = filtering && sections.every((section) => section.count === 0);
+    const nothing = searching && sections.every((section) => section.count === 0);
     /** @type {HTMLElement[]} */
     const lines = [];
     let sectionNow = '';
@@ -453,12 +664,19 @@ export function createList(root, hooks) {
       lines.push(header.root);
       for (const row of section.rows) {
         const drawn = rowFor(row.id);
+        const stack = row.stack ?? null; // a list from before stage E has none
         paintRow(drawn, rowText(row, now, terminalOf(row)), row.done);
+        paintStack(drawn, stack);
         setData(drawn.root, 'selected', String(row.id === selectedId));
         if (row.id === selectedId) {
           sectionNow = section.name;
         }
         lines.push(drawn.root);
+        if (stack !== null && stack.role === 'head' && !stack.open) {
+          const more = moreFor(row.id);
+          setText(more, moreText(stack.size, stack.group));
+          lines.push(more);
+        }
       }
     }
     // Moved only where the order changed; lines no longer drawn are removed.
@@ -475,6 +693,12 @@ export function createList(root, hooks) {
         headers.delete(name);
       }
     }
+    for (const [head, more] of moreLines) {
+      if (!keep.has(more)) {
+        more.remove();
+        moreLines.delete(head);
+      }
+    }
     if (!keep.has(empty)) {
       empty.remove();
     }
@@ -484,7 +708,8 @@ export function createList(root, hooks) {
       }
     });
 
-    const foot = list === null ? null : footerText(list.doneHidden, showDone);
+    // While filtering the footer of done sessions is not shown (S2 12.8, E5): they are listed.
+    const foot = list === null || searching ? null : footerText(list.doneHidden, showDone);
     footer.hidden = foot === null;
     setText(footerLine, foot?.text ?? '');
     setText(footerAction, foot?.action ?? '');
@@ -497,11 +722,31 @@ export function createList(root, hooks) {
       rowElements.get(selectedId)?.root.scrollIntoView({ block: 'nearest' });
     }
     selectedSection = sectionNow;
+
+    // E6's memory (ruled): a stack that the selection opened — a member of it is selected, however
+    // it got there — stays open once the selection leaves, until the user closes it.
+    const stack = selectedRow()?.stack ?? null;
+    if (stack !== null && stack.role === 'member' && !opened.includes(stack.group)) {
+      openStack(stack.group);
+    }
   };
 
+  /** `a`, the footer's `show` / `hide` and the chip `Show done`: one state (E4). */
   const toggleDone = () => {
     showDone = !showDone;
+    chipsView.render(chips, showDone);
     hooks.view({ showDone });
+  };
+
+  /**
+   * A chip that narrows the list (E4), on or off.
+   * @param {SearchChip} chip
+   */
+  const toggleChip = (chip) => {
+    const on = !chips.includes(chip);
+    chips = SEARCH_CHIPS.filter((known) => (known === chip ? on : chips.includes(known)));
+    chipsView.render(chips, showDone);
+    hooks.view({ chips: [...chips] });
   };
 
   /**
@@ -512,9 +757,9 @@ export function createList(root, hooks) {
    */
   const fold = (folded) => {
     const earlier = current?.sections.find((section) => section.name === 'earlier');
-    // While a filter is set every section is unfolded (S2 12.8): nothing folds, and the
-    // selection stays on its row, which stays shown.
-    if (earlier === undefined || filter.value !== '') {
+    // While filtering (a word or a chip) every section is unfolded (S2 12.8, E5): nothing folds,
+    // and the selection stays on its row, which stays shown.
+    if (earlier === undefined || filtering()) {
       return;
     }
     if (folded && selected !== null && earlier.rows.some((row) => row.id === selected)) {
@@ -526,6 +771,7 @@ export function createList(root, hooks) {
         hooks.select(before.id, 'key');
       }
     }
+    earlierUnfolded = !folded;
     hooks.view({ unfolded: folded ? [] : ['earlier'] });
   };
 
@@ -566,12 +812,28 @@ export function createList(root, hooks) {
         }
         return;
       }
-      case 'fold':
-        fold(true);
+      case 'fold': {
+        // E7: ← on an open head closes its stack, ← on a member selects the head and closes it;
+        // otherwise ← folds Earlier, as in stage A.
+        const stack = selectedRow()?.stack ?? null;
+        if (stack !== null && (stack.open || stack.role === 'member')) {
+          closeStack(stack.group);
+        } else {
+          fold(true);
+        }
         return;
-      case 'unfold':
-        fold(false);
+      }
+      case 'unfold': {
+        // E7: → on a closed head opens its stack (a group the server would refuse: nothing);
+        // otherwise → unfolds Earlier, as in stage A.
+        const stack = selectedRow()?.stack ?? null;
+        if (stack !== null && stack.role === 'head' && !stack.open) {
+          openStack(stack.group);
+        } else {
+          fold(false);
+        }
         return;
+      }
       case 'enter':
         if (enterDown) {
           return; // an auto-repeat of an Enter that is still down
@@ -603,5 +865,39 @@ export function createList(root, hooks) {
     filter.setSelectionRange(filter.value.length, filter.value.length);
   };
 
-  return { render, key, editFilter };
+  /**
+   * E10: changes the list's view so that it shows a row the switcher picked, as the row's
+   * `hiddenBy` says — `filter`: the field and the chips cleared; `done`: Show done on; `folded`:
+   * Earlier unfolded. One `view` with every field that changed, none when nothing did. Task 98
+   * calls it.
+   * @param {readonly HiddenBy[]} hiddenBy
+   */
+  const reveal = (hiddenBy) => {
+    /** @type {ViewChange} */
+    const change = {};
+    if (hiddenBy.includes('filter')) {
+      if (filter.value !== '') {
+        filter.value = '';
+        change.filter = '';
+      }
+      if (chips.length > 0) {
+        chips = [];
+        change.chips = [];
+      }
+    }
+    if (hiddenBy.includes('done') && !showDone) {
+      showDone = true;
+      change.showDone = true;
+    }
+    if (hiddenBy.includes('folded') && !earlierUnfolded) {
+      earlierUnfolded = true;
+      change.unfolded = ['earlier'];
+    }
+    if (Object.keys(change).length > 0) {
+      chipsView.render(chips, showDone);
+      hooks.view(change);
+    }
+  };
+
+  return { render, key, editFilter, reveal };
 }
