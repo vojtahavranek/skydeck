@@ -1034,6 +1034,16 @@ test('search and stacks in the list', async (t) => {
       await sleep(500);
       assert.deepEqual(await rowIds(page), [S8, S1], 'still closed');
       assert.deepEqual((await lastView(page))['opened'], []);
+
+      // Each sequence begins afresh: after the clicks on the line above, a double click on a row
+      // that is not running (the head S1) resumes it, as in stage A.
+      await mark(page, 'resume');
+      await doubleClick(page, `#list [data-id="${S1}"] .row-title`, () => Promise.resolve());
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (!(await sentAfter(page, 'resume')).includes('act')) {
+        assert.ok(performance.now() < deadline, 'a double click on S1 resumes it');
+        await sleep(50);
+      }
       await healthy(page, l.problems);
     },
   );
