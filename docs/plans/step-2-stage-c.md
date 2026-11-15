@@ -908,8 +908,7 @@ terminal that opens what the test says, a `gone` the test scripts)
   waits (`timed out …` for those waited for, `stopped: the window's server is stopping`, `not
   started …`, the finished line, code 5; `stop()` resolves after `done`; `start` afterwards
   refused), an `asker` that fires (`stopped: the command that asked for it stopped`, code 5), an
-  empty batch with entries left (`stopped: no session of this batch started`, code 5; an empty
-  last batch: no `stopped:` line, code 1), a refused start (`a restore
+  empty batch (`stopped: no session of this batch started`, code 5), a refused start (`a restore
   is already running…`), a busy store in the run (the busy line, code 1): each `progress` sequence
   holds the finished line once, as its last.
 - An id not in the set → `failed <short>: no longer offered for restore` first, code 1; a session
