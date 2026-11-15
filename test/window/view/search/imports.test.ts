@@ -179,6 +179,8 @@ test('the check itself: what it refuses', () => {
       'value import',
     ],
     ["export { /* all; */ readFileSync } from 'node:fs';", "import from 'node:fs'"],
+    // A single-quoted string name is taken whole too.
+    ["import { 'isListed' as isListed } from '../../../sessions/list.ts';", 'value import'],
   ];
   for (const [source, expected] of cases) {
     const found = violations(source);
