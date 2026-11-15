@@ -2537,7 +2537,13 @@ a session takes its toast from the row, since it is in no section: `Marked done.
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
 `g`, `n`, `p`, `d`) act only on a row the list shows: on a hidden selection they say `no session
-selected` and send nothing. One exception, ruled by the lead on 2026-11-15 (the user
+selected` and send nothing. A named limit: when Ctrl+Tab, a slot chord or a click on its
+notification selects a session the list does not show that runs again in another terminal while an
+ended terminal of the window still names it, the right side first shows that ended terminal as
+stage A did (no header, no Resume or Close), until the list that answers the new selection comes —
+a few milliseconds —, then nothing, the focus zone still the terminal's: the server gives an ended
+terminal to no session that runs again elsewhere, and such a session gets no card here (a
+notification's session then counts as seen after 1.5 s, 12.4, though nothing of it was shown). One exception, ruled by the lead on 2026-11-15 (the user
 may change it): when this page's own `d` in the list has marked the selected session done — its
 answer came, and the list that holds its result (one that arrived since the act was sent — the
 server sends it before the answer, unless a list went to the page within the last second — and no

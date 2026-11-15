@@ -18,7 +18,6 @@ import { attachManualPr, requirePrKey } from '../src/sessions/meta.ts';
 import type { PrFetchResult } from '../src/store/types.ts';
 import { ghRunner } from '../test/helpers/gh.ts';
 import type { GhRunner } from '../test/helpers/gh.ts';
-import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import type { ServerSandbox } from '../test/helpers/window.ts';
 import { connectTestPage } from '../test/helpers/window.ts';
@@ -99,6 +98,25 @@ async function filterTo(page: Page, text: string, ids: string[]): Promise<void> 
   await until(
     async () => (await listed(page)).join() === ids.join(),
     `the list draws ${ids.join()}`,
+  );
+}
+
+/**
+ * Waits, in the page, until the terminal view has refitted to what is drawn now: two animation
+ * frames (the layout, then its ResizeObserver), then a timer queued after the view's refit timer
+ * (`REFIT_MS`, 100 ms, web/terminal-view.js) — an order, not a time, so a loaded machine only
+ * makes it later.
+ */
+async function refitted(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            setTimeout(resolve, 150);
+          }),
+        );
+      }),
   );
 }
 
@@ -215,7 +233,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       const first = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
       await showsText(page, '#cards .header-title', /^alpha work$/);
-      await sleep(500); // the terminal view has fitted its size
+      await refitted(page); // the terminal view has fitted its size
       const height = await headerHeight(page);
       assert.ok(height > 0, 'a header is shown');
       await mark(page, 'filter');
@@ -225,7 +243,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       await showsTerminal(page, first);
       assert.equal(await shownText(page, '#cards .header-title'), 'alpha work');
       assert.equal(await shownText(page, '#cards .header-id'), S1.slice(0, 8));
-      await sleep(1000); // a resize would follow the area's change
+      await refitted(page); // a resize would follow the area's change by then
       assert.equal(await headerHeight(page), height, 'the header keeps its height');
       assert.deepEqual(
         after(await logOf(page), 'filter').filter(
@@ -314,7 +332,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
         assert.equal(await keyMessage(page), 'no session selected', key);
         assert.equal(await page.locator('#editor:not([hidden])').count(), 0, `no dialog: ${key}`);
       }
-      await sleep(500);
+      // A key's message and its act are both made in its keydown, which `press` has awaited.
       assert.equal(await page.locator('#editor:not([hidden])').count(), 0, 'no dialog');
       assert.deepEqual(
         after(await logOf(page), 'keys').filter((entry) => entry.e === 'out' && entry.t === 'act'),
