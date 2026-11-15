@@ -1320,6 +1320,229 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
     },
   );
 
+  for (const order of ['before', 'after'] as const) {
+    await t.test(
+      `the selection after \`d\` with the list that holds its result ${order} the answer: the next row of the section (ruled 06:38Z)`,
+      async (t) => {
+        const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
+        const { page, w } = d;
+        await clickRow(page, S2);
+        await page.keyboard.press('d');
+        const act = await w.act(1);
+        if (order === 'before') {
+          // The real server: write, the lists, then the answer; no list after it.
+          d.set({ sections: { week: [row(S1), row(S3)] } });
+          await eventually(
+            async () => (await page.locator(`#list [data-id="${S2}"]`).count()) === 0,
+            'the row gone',
+          );
+          w.answer(act, { ok: true });
+        } else {
+          w.answer(act, { ok: true });
+          await eventually(async () => (await toast(page)).undo, 'the toast');
+          d.set({ sections: { week: [row(S1), row(S3)] } });
+        }
+        await eventually(async () => (await selectedRow(page)) === S3, 'the next row');
+      },
+    );
+  }
+
+  await t.test(
+    "the list that holds `d`'s result decides once: a list before the answer that still has the row (listed with `a`) → no move, and a later list without it moves nothing either (ruled 06:38Z)",
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('d');
+      const act = await w.act(1);
+      d.set({ sections: { week: [row(S1), row(S2, { done: true }), row(S3)] } });
+      await sleep(400);
+      w.answer(act, { ok: true });
+      await eventually(async () => (await toast(page)).undo, 'the toast');
+      await sleep(300);
+      assert.equal(await selectedRow(page), S2, 'still listed: no move');
+      d.set({ sections: { week: [row(S1), row(S3)] } }); // hidden later (done sessions hidden again)
+      await eventually(
+        async () => (await page.locator(`#list [data-id="${S2}"]`).count()) === 0,
+        'the row gone',
+      );
+      await sleep(300);
+      assert.equal(await selectedRow(page), null, 'the main rule: no row selected');
+    },
+  );
+
+  for (const [what, key, before, after] of [
+    ['label', 'l', { title: 'old', titleSource: 'label' }, { title: 'new', titleSource: 'label' }],
+    [
+      'group',
+      'g',
+      { group: 'OLD-1', groupSource: 'meta' },
+      { group: 'NEW-2', groupSource: 'meta' },
+    ],
+    ['note', 'n', {}, {}],
+  ] as const) {
+    await t.test(
+      `after this page's own \`ok\` of the ${what}, \`${key}\` waits for the list that holds it: none yet → \`the ${what} is not here yet; press ${key} again\`; that list (before or after the answer) → the dialog starts from it (review 2 C1, ruled)`,
+      async (t) => {
+        const d = await deck(t, chromium, {
+          sections: { week: [row(S2, before)] },
+          selected: { [S2]: { note: 'old note' } },
+        });
+        const { page, w } = d;
+        const newer = { sections: { week: [row(S2, after)] }, selected: { [S2]: { note: 'new' } } };
+        const expected = what === 'label' ? 'new' : what === 'group' ? 'NEW-2' : 'new';
+        await clickRow(page, S2);
+        await selectedHasCome(page, S2);
+        const save = async (n: number): Promise<Row> => {
+          await page.keyboard.press(key);
+          await dialogShown(page, true);
+          await page.keyboard.press('Control+Enter'); // saves in every dialog
+          return w.act(n);
+        };
+        // The answer first, no list yet: the key waits.
+        w.answer(await save(1), { ok: true });
+        await dialogShown(page, false);
+        await page.keyboard.press(key);
+        await showsText(
+          page,
+          '#key-message',
+          new RegExp(`^the ${what} is not here yet; press ${key} again$`),
+        );
+        assert.equal((await dialog(page)).shown, false);
+        d.set(newer);
+        await sleep(300);
+        await page.keyboard.press(key);
+        await dialogShown(page, true);
+        assert.equal((await dialog(page)).value, expected, 'from the list that holds it');
+        await page.click('#editor .edit-cancel');
+        await dialogShown(page, false);
+
+        // The list first (the real server's order), then the answer: nothing waits.
+        const act = await save(2);
+        d.set(newer);
+        await sleep(300);
+        w.answer(act, { ok: true });
+        await dialogShown(page, false);
+        await page.keyboard.press(key);
+        await dialogShown(page, true);
+        assert.equal((await dialog(page)).value, expected);
+      },
+    );
+  }
+
+  await t.test(
+    'the pull-request dialog does not wait after its own `ok` (review 2 C1, ruled)',
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('p');
+      await dialogShown(page, true);
+      await page.keyboard.type('https://github.com/owner/repo/pull/1');
+      await page.keyboard.press('Enter');
+      w.answer(await w.act(1), { ok: true });
+      await eventually(async () => (await dialog(page)).value === '', 'the field emptied');
+      await page.click('#editor .edit-cancel');
+      await dialogShown(page, false);
+      await page.keyboard.press('p');
+      await dialogShown(page, true);
+    },
+  );
+
+  await t.test(
+    'a refusal whose dialog was closed meanwhile shows as a toast `not saved: <the error>`, as text; an `ok` stays silent (review 2 C4, ruled)',
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      for (const [n, ok] of [
+        [1, true],
+        [2, false],
+      ] as const) {
+        await page.keyboard.press('l');
+        await dialogShown(page, true);
+        await page.keyboard.type('x');
+        await page.keyboard.press('Enter');
+        const act = await w.act(n);
+        await page.keyboard.press('Escape');
+        await dialogShown(page, false);
+        w.answer(act, ok ? { ok: true } : { ok: false, error: 'a label <b>refused</b>' });
+        await sleep(400);
+        assert.deepEqual(
+          await toast(page),
+          ok
+            ? { text: '', undo: false }
+            : { text: 'not saved: a label <b>refused</b>', undo: false },
+        );
+        if (!ok) assert.equal(await page.locator('#toast b').count(), 0, 'as text');
+        await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
+        d.set({ sections: { week: [row(S2)] } }); // the list after the answer
+        await sleep(300);
+      }
+    },
+  );
+
+  for (const answer of ['leave', 'stay'] as const) {
+    await t.test(
+      `a dialog with changed text asks before the page goes (the tab's reload, closing the window): ${answer} (review 2 C2, ruled)`,
+      async (t) => {
+        const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+        const { page } = d;
+        await clickRow(page, S2);
+        await page.keyboard.press('l');
+        await dialogShown(page, true);
+        await page.keyboard.type('unsaved');
+        const asked = Promise.race([
+          new Promise<string>((resolve) => {
+            page.once('dialog', (prompt) => {
+              resolve(prompt.type());
+              void (answer === 'leave' ? prompt.accept() : prompt.dismiss());
+            });
+          }),
+          sleep(5000).then(() => 'no prompt'),
+        ]);
+        const closed = new Promise<void>((resolve) => page.once('close', () => resolve()));
+        await page.close({ runBeforeUnload: true });
+        assert.equal(await asked, 'beforeunload');
+        if (answer === 'leave') {
+          await closed;
+          assert.equal(page.isClosed(), true);
+        } else {
+          await sleep(500);
+          assert.equal(page.isClosed(), false, 'the page stays');
+          const shown = await dialog(page);
+          assert.equal(shown.value, 'unsaved', 'the text is still in the field');
+          assert.equal(shown.inField, true);
+        }
+      },
+    );
+  }
+
+  await t.test(
+    'no prompt when nothing was changed: an unchanged dialog, and no dialog (review 2 C2, ruled)',
+    async (t) => {
+      for (const open of [true, false]) {
+        const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+        const { page } = d;
+        await clickRow(page, S2);
+        await page.keyboard.type('j'); // a user gesture, so that a prompt could be shown
+        if (open) {
+          await page.keyboard.press('l');
+          await dialogShown(page, true);
+        }
+        let asked = false;
+        page.on('dialog', (prompt) => {
+          asked = true;
+          void prompt.accept();
+        });
+        const closed = new Promise<void>((resolve) => page.once('close', () => resolve()));
+        await page.close({ runBeforeUnload: true });
+        await closed;
+        assert.equal(asked, false, open ? 'an unchanged dialog' : 'no dialog');
+      }
+    },
+  );
+
   for (const key of ['Enter', 'Escape'] as const) {
     await t.test(
       `a held ${key} that closes a dialog opened over a terminal types nothing into the terminal; the next press does`,

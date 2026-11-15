@@ -94,6 +94,14 @@ const state = {
   list: null,
   /** When the list shown came (performance.now()), for the server's now (`serverNow`, plan D6). */
   listAt: 0,
+  /** How many lists came, to tell whether one came since an act was sent (ruled 06:38Z). */
+  lists: 0,
+  /**
+   * The sessions whose label, group or note this page's own act changed, while no list that holds
+   * that result has come (review 2's C1, ruled): their dialog would start from the old text.
+   * @type {Set<string>}
+   */
+  unlisted: new Set(),
   /** @type {string | null} */
   selected: null,
   /** @type {Zone} */
@@ -130,8 +138,9 @@ const state = {
   marking: new Set(),
   /**
    * This page's own `d` in the list (S2 12.9's exception, D15): the session, the section it was
-   * last listed in and that section's order then, and whether the answer came.
-   * @type {{ sessionId: string, section: SectionPayload['name'], order: string[], answered: boolean } | null}
+   * last listed in and that section's order then, whether a list came since its act was sent, and
+   * whether the answer came.
+   * @type {{ sessionId: string, section: SectionPayload['name'], order: string[], listed: boolean, answered: boolean } | null}
    */
   leaving: null,
   /**
@@ -195,7 +204,7 @@ const fitting = terminalView;
 const cards = createCards(dom.cards, {
   act: (action) => act(action),
   select: (id) => select(id, 'click'),
-  edit: (what, sessionId) => edit(what, sessionId, ''),
+  edit: (what, sessionId) => edit(what, sessionId, '', ''),
   done: (sessionId) => markDone(sessionId, false),
   say: (text) => say(text),
 });
@@ -460,6 +469,10 @@ function changeView(change) {
   sendView();
 }
 
+/** The acts whose result a dialog starts from: after this page's own `ok`, it waits for the list
+ *  that holds it (C1). */
+const EDITS = new Set(['label', 'group', 'note']);
+
 /** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
 const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
   new: [
@@ -580,8 +593,20 @@ function act(action) {
   if (!send({ t: 'act', id, ...sized })) {
     return Promise.resolve(unsent);
   }
+  const listsAtSend = state.lists;
   return new Promise((resolve) => {
     pending.set(id, (result) => {
+      // C1 (ruled): the list that holds an edit's result is one that came since the act was sent
+      // (the real server sends it before the answer), else the next one; until then a dialog of
+      // that session would start from the old text.
+      if (
+        result.ok &&
+        EDITS.has(action.kind) &&
+        typeof action['sessionId'] === 'string' &&
+        state.lists === listsAtSend
+      ) {
+        state.unlisted.add(action['sessionId']);
+      }
       if (action.kind === 'resume' && typeof action['sessionId'] === 'string') {
         state.lines.set(
           action['sessionId'],
@@ -614,12 +639,15 @@ function selectedRow() {
 /**
  * Opens the dialog `what` for `sessionId` (D1–D3): the list keys on the selected row, and the
  * header's controls (task 38) through the cards' `edit`. The note's dialog needs the list's
- * `selected` of that session, which holds the whole note (D3). `code` is the key that opened it.
+ * `selected` of that session, which holds the whole note (D3); a label, group or note that this
+ * page's own act just changed waits for the list that holds it (C1). `key` is the key that opened
+ * it ('' from the cards), `code` its physical key.
  * @param {EditWhat} what
  * @param {string} sessionId
+ * @param {string} key
  * @param {string} code
  */
-function edit(what, sessionId, code) {
+function edit(what, sessionId, key, code) {
   if (modal()) {
     return;
   }
@@ -629,8 +657,8 @@ function edit(what, sessionId, code) {
     return;
   }
   const selected = state.list?.selected?.sessionId === sessionId ? state.list.selected : null;
-  if (what === 'note' && selected === null) {
-    say('the note is not here yet; press n again');
+  if ((what === 'note' && selected === null) || (what !== 'pr' && state.unlisted.has(sessionId))) {
+    say(`the ${what} is not here yet; ${key === '' ? 'try again' : `press ${key} again`}`);
     return;
   }
   state.openedBy = code;
@@ -694,7 +722,7 @@ function markDone(sessionId, fromList) {
   const kind = row.done ? 'undone' : 'done';
   const place = placeOf(sessionId);
   if (fromList && kind === 'done' && place !== null) {
-    state.leaving = { sessionId, ...place, answered: false };
+    state.leaving = { sessionId, ...place, listed: false, answered: false };
     state.undoTo = null;
   }
   state.marking.add(sessionId);
@@ -713,7 +741,9 @@ function markDone(sessionId, fromList) {
     toast.show(place?.section === 'open' ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
     if (state.leaving?.sessionId === sessionId) {
       state.leaving.answered = true;
-      leaveDone();
+      if (state.leaving.listed) {
+        leaveDone(); // a list came since the act was sent: it holds the result (ruled 06:38Z)
+      }
     }
   });
 }
@@ -750,33 +780,43 @@ function undoDone(sessionId) {
   keepKeyboard(); // pressed from the keyboard, the toast's Undo is gone
 }
 
-/** At each list: where this page's `d` is listed now, or the selection's move once it is gone. */
+/**
+ * At each list while this page's `d` waits: before its answer, the list is one that came since
+ * the act was sent (`listed`), and the place of the row in it is kept while it is there; after
+ * its answer, with none come before, it is the list that holds the result, and it decides.
+ */
 function followDone() {
   const leaving = state.leaving;
   if (leaving === null) {
     return;
   }
-  const place = placeOf(leaving.sessionId);
-  if (place === null) {
+  if (leaving.answered) {
     leaveDone();
-  } else if (leaving.answered) {
-    state.leaving = null; // the list after the answer still has it (it runs, under Open): no move
-  } else {
+    return;
+  }
+  leaving.listed = true;
+  const place = placeOf(leaving.sessionId);
+  if (place !== null) {
     Object.assign(leaving, place);
   }
 }
 
 /**
- * S2 12.9's exception (D15, ruled): once the answer of this page's `d` came and the list no longer
- * has the row, while that session is still the selected one, the row after it in the same section
- * is selected, else the one before it, else none — never a row of Open.
+ * S2 12.9's exception (D15, ruled), decided once, on the list that holds the result of this
+ * page's `d` — one that came since its act was sent, else the next one (ruled 06:38Z): when that
+ * list no longer has the row, while that session is still the selected one, the row after it in
+ * the same section is selected, else the one before it, else none — never a row of Open. A row
+ * that list still has (it runs, under Open; done sessions shown) moves nothing, then or later.
  */
 function leaveDone() {
   const leaving = state.leaving;
-  if (leaving === null || !leaving.answered || rowOf(leaving.sessionId) !== undefined) {
+  if (leaving === null || !leaving.answered) {
     return;
   }
   state.leaving = null;
+  if (rowOf(leaving.sessionId) !== undefined) {
+    return;
+  }
   if (state.selected !== leaving.sessionId) {
     return; // the user moved the selection meanwhile: it stays
   }
@@ -890,6 +930,8 @@ function received(message) {
     case 'list':
       state.list = message;
       state.listAt = performance.now();
+      state.lists++;
+      state.unlisted.clear(); // a list after the answer holds the result
       dom.tick.hidden = true;
       if (state.selected === null) {
         // Nothing selected yet: the first row (Open's first slot when there is one).
@@ -1334,7 +1376,7 @@ function doListKey(action, event) {
       if (row === undefined) {
         say('no session selected');
       } else {
-        edit(action.what, row.id, event.code);
+        edit(action.what, row.id, event.key, event.code);
       }
       return true;
     }
@@ -1615,6 +1657,14 @@ byId('new-button').addEventListener('click', openNew);
 
 // --- the window ---------------------------------------------------------------------------------
 
+// C2 (ruled): while a dialog holds text the user typed and did not save, leaving the page — the
+// tab's reload, closing the window, connection.js's reload for another build — asks first (the
+// browser's own prompt). The reload keys do not get this far: windowChordGate refuses them.
+addEventListener('beforeunload', (event) => {
+  if (editor.changed()) {
+    event.preventDefault();
+  }
+});
 // A dropped file must not navigate the window (S2 17.4).
 for (const type of ['dragover', 'drop']) {
   addEventListener(type, (event) => event.preventDefault());

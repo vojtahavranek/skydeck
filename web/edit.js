@@ -57,6 +57,15 @@ function element(tag, className, text) {
 }
 
 /**
+ * A refusal's words.
+ * @param {ResultMessage} result
+ * @returns {string}
+ */
+function errorOf(result) {
+  return result.error ?? (result.lines.join(' ') || 'skydeck could not do that');
+}
+
+/**
  * A button that takes no keyboard on a click (D17).
  * @param {string} className
  * @param {string} text
@@ -160,13 +169,18 @@ export function createEditor(root, deps) {
     say('');
     const result = await deps.act(action);
     if (current !== shown) {
-      return; // closed meanwhile (Esc, Cancel): the answer has no dialog
+      // Closed meanwhile (Esc, Cancel): the answer has no dialog. A refusal must still be seen
+      // (C4, ruled); an `ok` stays silent.
+      if (!result.ok) {
+        deps.toast(`not saved: ${errorOf(result)}`, null);
+      }
+      return;
     }
     shown.waiting = false;
     save.disabled = false;
     field.readOnly = false;
     if (!result.ok) {
-      say(result.error ?? (result.lines.join(' ') || 'skydeck could not do that'));
+      say(errorOf(result));
       return;
     }
     if (shown.what === 'pr') {
