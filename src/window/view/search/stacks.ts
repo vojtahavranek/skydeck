@@ -6,7 +6,9 @@
  * (running sessions never stack), and none at all for a view without `opened` (ruled: a page that
  * cannot draw stacks never has a session hidden in one) or while filtering (S2 12.8: a filter
  * flattens every stack). For those the caller gives every row `stack: null` without calling
- * `stackRows` — the same shape `stackRows` gives a section in which nothing stacks.
+ * `stackRows` — the same shape `stackRows` gives a section in which nothing stacks. Never call it
+ * with `new Set(view.opened)` for a view without `opened`: that is an empty set, so every stack
+ * would be closed on a page that cannot open one.
  */
 
 /** RowPayload.stack (E6; task 96 moves this type into protocol.ts, unchanged). */
@@ -73,8 +75,7 @@ export function stackRows<T extends StackEntry>(
       continue;
     }
     const members = stack.rows.slice(1);
-    const open =
-      opened.has(group) || (selected !== null && members.some((member) => member.id === selected));
+    const open = opened.has(group) || members.some((member) => member.id === selected);
     const payload = (role: StackPayload['role']): StackPayload => ({
       group,
       size: stack.rows.length,

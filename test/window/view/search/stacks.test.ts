@@ -59,9 +59,31 @@ test('stackRows: rows without a group never stack, however many', () => {
   assert.ok(drawn.every(({ stack }) => stack === null));
 });
 
-test('stackRows: groups are compared as the text they are (no case folding)', () => {
-  const drawn = stackRows([entry('a1', 'ORB-1'), entry('a2', 'orb-1')], NONE, null);
-  assert.deepEqual(shape(drawn), ['a1', 'a2']);
+test('stackRows: a group is text, whatever it spells; rows and opened name it exactly', () => {
+  // Names an object's prototype has: a group is no property name.
+  for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
+    const rows = [entry('a1', name), entry('x', null), entry('a2', name)];
+    assert.deepEqual(shape(stackRows(rows, NONE, null)), ['a1^', 'x'], name);
+    assert.deepEqual(shape(stackRows(rows, new Set([name]), null)), ['a1^', 'a2<', 'x'], name);
+    assert.deepEqual(
+      shape(stackRows([entry('a1', name), entry('b1', 'B')], NONE, 'a1')),
+      ['a1', 'b1'],
+      name,
+    );
+  }
+  // Not folded, not trimmed, not normalised: between two rows, and between a row and `opened`.
+  const twins: [string, string][] = [
+    ['ORB-1', 'orb-1'],
+    ['ORB-1', 'ORB-1 '],
+    ['café', 'café'],
+  ];
+  for (const [one, other] of twins) {
+    const why = `${one} / ${other}`;
+    const apart = stackRows([entry('a1', one), entry('a2', other)], NONE, null);
+    assert.deepEqual(shape(apart), ['a1', 'a2'], why);
+    const same = [entry('a1', one), entry('a2', one)];
+    assert.deepEqual(shape(stackRows(same, new Set([other]), null)), ['a1^'], why);
+  }
 });
 
 test('stackRows: three groups interleaved give three heads at their places, the others at theirs', () => {
@@ -85,6 +107,17 @@ test('stackRows: three groups interleaved give three heads at their places, the 
   );
 });
 
+test('stackRows: nothing of the input is changed in place', () => {
+  const rows = Object.freeze(
+    [entry('a1', 'G'), entry('h', 'G', true), entry('a2', 'G'), entry('x', null)].map((row) =>
+      Object.freeze(row),
+    ),
+  );
+  const opened = new Set(['G']);
+  assert.deepEqual(shape(stackRows(rows, opened, 'a2')), ['a1^', 'a2<', 'h', 'x']);
+  assert.deepEqual([...opened], ['G']);
+});
+
 test('stackRows: no rows, nothing to draw', () => {
   assert.deepEqual(stackRows([], new Set(['G']), 'a1'), []);
 });
@@ -100,7 +133,13 @@ test("stackRows: the entries drawn are the caller's own objects", () => {
 
 test('stackRows: a section without a stack is its rows in order, each with stack null', () => {
   // The shape task 96 gives every row of a view without `opened`, and while filtering (E5, E6).
-  const rows = [entry('a1', 'A'), entry('x', null), entry('b1', 'B'), entry('h', 'A', true)];
+  const rows = [
+    entry('a1', 'A'),
+    entry('x', null),
+    entry('h0', null, true),
+    entry('b1', 'B'),
+    entry('h', 'A', true),
+  ];
   assert.deepEqual(
     stackRows(rows, NONE, null),
     rows.map((row) => ({ entry: row, stack: null })),
@@ -153,13 +192,16 @@ test('stackRows: opened naming a group of one row, or one no row has, changes no
 
 test('stackRows: a selected member opens its stack, whatever opened says', () => {
   const rows = [entry('a1', 'G'), entry('a2', 'G'), entry('a3', 'G'), entry('b1', 'H')];
-  for (const opened of [NONE, new Set(['H']), new Set(['G'])]) {
-    const drawn = stackRows(rows, opened, 'a3');
-    assert.deepEqual(shape(drawn), ['a1^', 'a2<', 'a3<', 'b1'], [...opened].join());
-    assert.ok(
-      drawn.slice(0, 3).every(({ stack }) => stack?.open === true),
-      [...opened].join(),
-    );
+  for (const selected of ['a2', 'a3']) {
+    for (const opened of [NONE, new Set(['H']), new Set(['G'])]) {
+      const why = `${selected}, opened ${[...opened].join()}`;
+      const drawn = stackRows(rows, opened, selected);
+      assert.deepEqual(shape(drawn), ['a1^', 'a2<', 'a3<', 'b1'], why);
+      assert.ok(
+        drawn.slice(0, 3).every(({ stack }) => stack?.open === true),
+        why,
+      );
+    }
   }
 });
 
