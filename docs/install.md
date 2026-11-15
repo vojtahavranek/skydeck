@@ -994,9 +994,10 @@ there is none) makes the window the place for every command:
   skydeck to see what started`, exit 1. The exit code is the run's (design.md 7.8): 0; 1 when a
   session failed, timed out or was no longer offered, or the run could not go on (a busy database);
   5 when it was stopped (for memory, after a batch in which no session started while others were
-  left, by Ctrl+C, by the server's stop), and with 5 it ends with `skydeck: restore stopped before it finished; see above`. Ctrl+C stops the run (the
-  window's report says `stopped: the command that asked for it stopped`); the sessions already
-  opened go on starting. `--dry-run` asks the server nothing.
+  left, by the server's stop); with 5 its last line is `skydeck: restore stopped before it
+  finished; see above`. Ctrl+C ends the command at once, and the server then stops the run that it
+  asked for: the window's report says `stopped: the command that asked for it stopped`, and the
+  sessions already opened go on starting. `--dry-run` asks the server nothing.
 - `R` in the interactive list asks the server to resume the session: `opened <short id> in the
   window`, with `; no window is open; run skydeck window` after it when no window is open (`R` opens
   none); a refusal is the message line; a start that failed says `starting <short id> in the window
