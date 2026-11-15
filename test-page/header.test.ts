@@ -1031,6 +1031,129 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
   );
 
   await t.test(
+    "review 2's round 2, S1: with the field holding the keyboard, a press on a line held 2.5 s keeps its text, and the drag that follows selects it and opens nothing; a list during a press fills its new lines; a drag that ends in `dragend` lets the lines count on",
+    async (t) => {
+      const s = await scripted(t, chromium, {
+        sections: {
+          week: [
+            row(
+              S1,
+              prsOf([pr(7, 'draft', { okAtNs: String(NOW_NS - 5n * SEC_NS) }), pr(8, 'merged')]),
+            ),
+          ],
+        },
+      });
+      const { page, w } = s;
+      await page.locator('#cards .header-prs-button').click();
+      await dialogShown(page, true);
+      await eventually(async () => (await prLines(page)).length === 1, 'a line');
+      assert.ok((await dialog(page)).inField, 'the field has the keyboard (D2)');
+      const line = await page.locator('#editor .edit-pr-text').first().boundingBox();
+      assert.ok(line !== null);
+      const y = line.y + line.height / 2;
+      await page.mouse.move(line.x + 30, y);
+      await page.mouse.down();
+      const atPress = (await prLines(page))[0];
+      // Long enough for the age to pass at least one more whole second.
+      await sleep(2500);
+      assert.equal((await prLines(page))[0], atPress, 'not drawn again while the button is down');
+      await page.mouse.move(line.x + line.width - 2, y, { steps: 6 });
+      await page.mouse.up();
+      await sleep(300);
+      assert.match(await page.evaluate(() => getSelection()?.toString() ?? ''), /draft · checked/);
+      assert.deepEqual(
+        w.acts().filter((act) => act['kind'] === 'open-link'),
+        [],
+        'the drag opens nothing',
+      );
+      await page.evaluate(() => getSelection()?.removeAllRanges());
+
+      // A press on the fold (a button) while a list brings another line: the new line is filled.
+      const fold = await page.locator('#editor .edit-pr-fold').boundingBox();
+      assert.ok(fold !== null);
+      await page.mouse.move(fold.x + fold.width / 2, fold.y + fold.height / 2);
+      await page.mouse.down();
+      s.set({
+        sections: {
+          week: [
+            row(
+              S1,
+              prsOf([
+                pr(6, 'draft'),
+                pr(7, 'draft', { okAtNs: String(NOW_NS - 5n * SEC_NS) }),
+                pr(8, 'merged'),
+              ]),
+            ),
+          ],
+        },
+      });
+      await eventually(async () => (await prLines(page)).length === 2, 'two lines');
+      assert.ok(
+        (await prLines(page)).every((text) => text !== ''),
+        `no empty line while the button is down: ${JSON.stringify(await prLines(page))}`,
+      );
+      // A drag and drop ends with `dragend` and no `mouseup`: the lines count on after it.
+      const before = (await prLines(page))[1] ?? '';
+      await page.evaluate(() => dispatchEvent(new DragEvent('dragend')));
+      await eventually(async () => ((await prLines(page))[1] ?? '') !== before, 'counted on');
+      await page.mouse.up();
+    },
+  );
+
+  await t.test(
+    "review 2's round 2, S5 and C3: a × whose line a list no longer holds is forgotten, so the line attached again has a × that acts; a × answered after its dialog closed, or answered and then closed before its list, is forgotten too",
+    async (t) => {
+      const seven = pr(7, 'draft');
+      const eight = pr(8, 'draft');
+      const s = await scripted(t, chromium, {
+        sections: { week: [row(S1, prsOf([seven, eight]))] },
+      });
+      const { page, w } = s;
+      const rms = (): Row[] => w.acts().filter((act) => act['kind'] === 'pr-rm');
+      const withPrs = (prs: Row[]): void => s.set({ sections: { week: [row(S1, prsOf(prs))] } });
+      const removeOf = (n: number): ReturnType<Page['locator']> =>
+        page.locator('#editor .edit-pr', { hasText: `#${n} ·` }).locator('.edit-pr-remove');
+      const open = async (): Promise<void> => {
+        await page.locator('#cards .header-prs-button').click();
+        await dialogShown(page, true);
+      };
+      await open();
+      await eventually(async () => (await prLines(page)).length === 2, 'two lines');
+
+      // S5: × of #7, its ok, the list without it, then a list that holds it again.
+      await removeOf(7).click();
+      await eventually(async () => rms().length === 1, 'pr-rm');
+      w.answer(rms()[0] as Row, { ok: true });
+      withPrs([eight]);
+      await eventually(async () => (await prLines(page)).length === 1, '#7 gone');
+      withPrs([seven, eight]);
+      await eventually(async () => (await prLines(page)).length === 2, '#7 back');
+      assert.equal(await removeOf(7).isDisabled(), false, 'its × acts');
+
+      // C3: × of #7 answered before any list, then Esc; attached again elsewhere (the lists still
+      // hold it): opened again, its × acts.
+      await removeOf(7).click();
+      await eventually(async () => rms().length === 2, 'pr-rm');
+      w.answer(rms()[1] as Row, { ok: true });
+      await eventually(async () => removeOf(7).isDisabled(), 'disabled until its list');
+      await page.keyboard.press('Escape');
+      await dialogShown(page, false);
+      await open();
+      assert.equal(await removeOf(7).isDisabled(), false, 'forgotten at the close');
+
+      // C3: × of #8, Esc before its answer, then ok: opened again, its × acts.
+      await removeOf(8).click();
+      await eventually(async () => rms().length === 3, 'pr-rm');
+      await page.keyboard.press('Escape');
+      await dialogShown(page, false);
+      w.answer(rms()[2] as Row, { ok: true });
+      await eventually(async () => (await toast(page)).text === 'Detached acme/web #8', 'toast');
+      await open();
+      assert.equal(await removeOf(8).isDisabled(), false, 'forgotten at its ok');
+    },
+  );
+
+  await t.test(
     "review 2's S2: Enter held on the header's Note button opens the note dialog and its repeats type nothing into the note; a fresh Enter does (the key that opened a dialog, S2 12.9)",
     async (t) => {
       const s = await scripted(t, chromium, {

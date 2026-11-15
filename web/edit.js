@@ -150,12 +150,15 @@ export function createEditor(root, deps) {
   /** The merged and closed pull requests are shown (the fold is open); folded at every open. */
   let unfolded = false;
   /**
-   * The pull requests whose × was pressed (`<session id> <address>`): its × stays disabled while
-   * the answer waits and, after an `ok`, until a list no longer holds the line (review 2 of task
-   * 38: a slow second click must not send `pr-rm` again for it).
-   * @type {Set<string>}
+   * The pull requests whose × was pressed (`<session id> <address>`), and whether its answer came:
+   * its × stays disabled while the answer waits and, after an `ok`, until a list no longer holds
+   * the line (review 2 of task 38: a slow second click must not send `pr-rm` again for it). One
+   * whose answer came is forgotten when the dialog closes, and an `ok` that finds the dialog
+   * closed is forgotten at once, so that a pull request attached again elsewhere has a × that acts
+   * when the dialog is opened again.
+   * @type {Map<string, 'waiting' | 'answered'>}
    */
-  const removing = new Set();
+  const removing = new Map();
   /** A mouse button is down on the list: no line's text is replaced meanwhile (D17, below). */
   let pressed = false;
   /**
@@ -183,6 +186,11 @@ export function createEditor(root, deps) {
       holder.blur();
     }
     current = null;
+    for (const [key, state] of removing) {
+      if (state === 'answered') {
+        removing.delete(key);
+      }
+    }
     place.replaceChildren();
     for (const lines of [openLines, finishedLines]) {
       lines.replaceChildren();
@@ -229,9 +237,11 @@ export function createEditor(root, deps) {
         // D17: a line is drawn again only while no button is down on the list and no selection
         // touches it, so that an age counting seconds neither ends a drag's selection nor turns
         // the drag's click into an open (review 2 of task 38); it is drawn on the next tick.
+        // A line made just now is filled whatever holds it.
         const held =
-          pressed ||
-          (selection !== null && !selection.isCollapsed && selection.containsNode(text, true));
+          text.textContent !== '' &&
+          (pressed ||
+            (selection !== null && !selection.isCollapsed && selection.containsNode(text, true)));
         if (!held) {
           setText(text, prLineText(pr, now));
         }
@@ -252,7 +262,7 @@ export function createEditor(root, deps) {
     }
     const prs = prsShown();
     const sessionId = current?.row.id;
-    for (const key of removing) {
+    for (const key of removing.keys()) {
       // A × whose line a list no longer holds is done with (its answer may still come).
       if (key.startsWith(`${sessionId} `) && !prs.some((pr) => key === `${sessionId} ${pr.url}`)) {
         removing.delete(key);
@@ -316,12 +326,17 @@ export function createEditor(root, deps) {
     }
     const name = prName(pr);
     keepField();
-    removing.add(key);
+    removing.set(key, 'waiting');
     drawPrs();
     const result = await deps.act({ kind: 'pr-rm', sessionId, url });
-    if (!result.ok) {
+    const shownNow = current !== null && current.what === 'pr' && current.row.id === sessionId;
+    if (!result.ok || !shownNow) {
       removing.delete(key);
-      drawPrs();
+    } else if (removing.has(key)) {
+      removing.set(key, 'answered');
+    }
+    drawPrs();
+    if (!result.ok) {
       refused(sessionId, result);
       return;
     }
@@ -381,7 +396,10 @@ export function createEditor(root, deps) {
   prList.addEventListener('mousedown', () => {
     pressed = true;
   });
-  for (const ended of ['mouseup', 'blur']) {
+  // The press ends with the button's release, a drag and drop's end (which has no `mouseup`), or
+  // the window's own loss of focus — not an element's blur: a press on a line's text moves the
+  // keyboard from the field to the dialog's box while the button is down (review 2 of task 38).
+  for (const ended of ['mouseup', 'dragend']) {
     addEventListener(
       ended,
       () => {
@@ -390,6 +408,11 @@ export function createEditor(root, deps) {
       true,
     );
   }
+  addEventListener('blur', (event) => {
+    if (event.target === window) {
+      pressed = false;
+    }
+  });
   fold.addEventListener('click', () => {
     unfolded = !unfolded;
     drawPrs();

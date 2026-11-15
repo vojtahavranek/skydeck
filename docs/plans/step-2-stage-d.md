@@ -726,10 +726,12 @@ note's first line and ` …` when the note has another line with something on it
 dialog. A refused link through `deps.say`. The pull-request dialog's list as D13, above the field:
 `no pull request attached` while there is none; the fold is closed at every open; × and ↻ send one
 act while it waits, a double click on × is one press, and a × whose `pr-rm` was taken stays disabled
-until a list no longer holds its line (or its Undo attaches it again); a line's text is not drawn
-again while a mouse button is down on the list or a selection touches the line, so that an age
-counting seconds neither ends a selection nor turns a drag into an open; a refused link, × or ↻
-shows under the field, and one whose dialog was closed
+until a list no longer holds its line (or its Undo attaches it again) — forgotten when the dialog
+closes, or at an `ok` that finds it closed, so that a pull request attached again elsewhere has a ×
+that acts; a line's text is not drawn again while a mouse button is down on the list (until its
+release, a drag and drop's end or the window's loss of focus) or a selection touches the line, so
+that an age counting seconds neither ends a selection nor turns a drag into an open, and a line
+made meanwhile is filled at once; a refused link, × or ↻ shows under the field, and one whose dialog was closed
 meanwhile is the toast `not saved: <the error>` (as C4); an error is cut on its line to 120 UTF-16
 units with `…`, never inside a surrogate pair, and its line's tooltip is the pull request's title,
 then the whole error when the line cut it. The list follows every `list` (`editor.update`): a line
@@ -781,8 +783,10 @@ attached with `attachManualPr` and their status saved with `savePrResult`, notes
   stays selected through a list that changes another text; a button's click leaves the keyboard
   where it was; only merged ones attached → `Pull requests`, no hint. The dialog's refusals and
   waits as in Behaviour: a double click on × with the list before the answer and after it, a slow
-  click while the line is still there, a drag held 1.2 s over `checked 5s ago`, ↻ and × from the
-  keyboard; Enter held on Note types nothing into the note, a fresh Enter does (review 2). A hostile title, group, note line, pull
+  click while the line is still there, a drag held 1.2 s over `checked 5s ago`, a press held 2.5 s
+  on it while the field has the keyboard, a list during a press, a `dragend`, ↻ and × from the
+  keyboard, a × forgotten by its list, by the close and by an `ok` after the close; Enter held on
+  Note types nothing into the note, a fresh Enter does (review 2). A hostile title, group, note line, pull
   request's repository, title and error and ticket address appear as text and create no element.
 - `header.test.ts`, the order of `list` and `result` (ruled 06:38Z): on the real server, a quiet
   page (no list for 1.5 s), `d` on a row of This week → the list of the write comes before the
