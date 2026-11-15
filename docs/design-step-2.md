@@ -1999,8 +1999,15 @@ gives them back when its program never started (7.8).
   starting it asks again every 500 ms within those 30 seconds, and a server still starting after
   them started nothing; one that is stopping, or refuses the request's body (a label over 1,024
   bytes, a prompt after `--` over 64 KiB), is reported with `, or use --here` (plan C 2.5). With
-  `"terminal": "window"`, `--tab` means the window too, and so does `R` in the interactive list,
-  whose lines end before `, or use --here`; `R` opens no window.
+  `"terminal": "window"`, no option and `--tab` mean the window too and `--here` this terminal
+  (plan C13; with `"here"` or `"wezterm"` only `--window` goes to the window), and so does `R` in
+  the interactive list, whose lines end before `, or use --here`; `R` opens no window. `R` sends
+  `POST /resume` (nothing is prepared or locked in the list) and shows the answer the way it shows
+  a tab launch's: `opened <short> in the window` and the answer's lines — with `; no window is
+  open; run skydeck window` when no page is connected; when the server's status cannot be read
+  after the answer, nothing more is said —, a refusal (codes 2–4) or a line of plan C 2.5 as the
+  message line, and for a failed launch `starting <short> in the window failed; the details are
+  printed when the list ends`, its lines (sanitised) printed when the list ends.
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
   sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
   after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
@@ -2011,8 +2018,10 @@ gives them back when its program never started (7.8).
   window terminal (11.3), the selected entries in the set's order. Each terminal starts at the area
   the page that had focus last reported (8.2.6), read when that terminal is opened; the
   configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`)
-  is the one the server read at its start. The command prints each report line as it arrives and
-  exits with design 7.8's code for the outcome. **A restore asked for so stops when its command
+  is the one the server read at its start. The command prints each report line on stdout as it
+  arrives (sanitised), heartbeats too, and exits with design 7.8's code for the outcome; with 5
+  (the run was stopped) it adds `skydeck: restore stopped before it finished; see above` on stderr
+  (plan C14). **A restore asked for so stops when its command
   goes**: when the command's connection closes before the outcome (Ctrl+C, as in step 1), the run
   stops at its next step — `stopped: the command that asked for it stopped`, the sessions already
   opened go on starting, the rest are `not started`, then the finished line (to the pages); the
@@ -2864,7 +2873,7 @@ New keys, all optional:
 
 | Key | Default | What it does |
 |---|---|---|
-| `terminal` | `"here"` | Gains the value `"window"` (11.4). |
+| `terminal` | `"here"` | Gains the value `"window"` (11.4): `resume` and `new` without an option or with `--tab`, `restore` and the interactive list's `R` start their sessions in the window, through its server, which `skydeck window` must have started; `--here` still starts one in this terminal (plan C13). Any other value is refused as every key of the file is: `<file>: "terminal" must be "here", "wezterm" or "window"`. `doctor` names it: `ok terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)`. |
 | `window.port` | `47613` | The server's port on `127.0.0.1` (5.2). A whole number from 1 to 65535: 0 ("the system picks") is not a setting; tests give it to the server directly (17). |
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |

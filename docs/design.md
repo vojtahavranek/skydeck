@@ -832,10 +832,11 @@ installation; so `uninstall --purge`, the one command that removes folders, refu
 `SKYDECK_HOME` or an `XDG_*` variable it reads is set but ignored, or `HOME` is set but empty or
 relative (8).
 
-Configuration keys, all optional: `terminal` (`here` or `wezterm`; default `here`), `wezterm.domain`,
-`groupPattern`, `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
-`restoreStartTimeoutSeconds`, `claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4;
-asked for by the user on 2026-11-15). Unknown keys are an error.
+Configuration keys, all optional: `terminal` (`here` or `wezterm`, and since step 2 `window`,
+design-step-2.md 16.4; default `here`), `wezterm.domain`, `groupPattern`, `firstRunDoneAfterDays`,
+`prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`,
+`claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4; asked for by the user on
+2026-11-15). Unknown keys are an error.
 
 ### 9.2 Database
 
