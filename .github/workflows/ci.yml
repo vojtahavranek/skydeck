@@ -10,7 +10,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The event is in the group so that a run started by hand on main has a group of its own:
+  # otherwise the next merge would cancel the full run, and the full run would cancel a push run.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
