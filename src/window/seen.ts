@@ -35,6 +35,7 @@ export interface Seen {
    *  `sessionId`: seen at once — held, when it is the page's selection and the page has focus;
    *  else once, in the next take(). */
   typed(page: object, sessionId: string): void;
+  /** The page ended: its hold goes, and later calls for it change nothing. */
   gone(page: object): void;
   /** The sessions being seen now: held by a focused page for 1.5 s or since a typing, and those
    *  typed into since the last call (given once). */
@@ -62,6 +63,8 @@ export function createSeen(clock: Clock): Seen {
   /** Typed into, not held: given once, by the next take(). */
   const typedOnce = new Set<string>();
   const listeners = new Set<() => void>();
+  /** Pages told gone: a call that comes after its page's end must not start a hold nothing ends. */
+  const ended = new WeakSet<object>();
   let stopped = false;
 
   /** Tells every listener (a copy: one may end its own subscription). */
@@ -79,7 +82,7 @@ export function createSeen(clock: Clock): Seen {
 
   return {
     focus(page, focused, selected) {
-      if (stopped) return;
+      if (stopped || ended.has(page)) return;
       let hold = holds.get(page);
       if (hold !== undefined && hold.focused === focused && hold.selected === selected) return;
       if (hold === undefined) {
@@ -105,7 +108,7 @@ export function createSeen(clock: Clock): Seen {
       }
     },
     typed(page, sessionId) {
-      if (stopped) return;
+      if (stopped || ended.has(page)) return;
       const hold = holds.get(page);
       if (hold !== undefined && hold.focused && hold.selected === sessionId) {
         hold.cancel?.();
@@ -117,6 +120,7 @@ export function createSeen(clock: Clock): Seen {
       tell();
     },
     gone(page) {
+      ended.add(page);
       const hold = holds.get(page);
       if (hold !== undefined) {
         release(hold);

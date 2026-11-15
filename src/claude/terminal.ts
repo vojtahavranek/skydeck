@@ -60,8 +60,9 @@ export function isTurnEnd(before: LookedFile, after: LookedFile): boolean {
 }
 
 /**
- * One look (S2 10.3, B4). `files`: those read at this look; `gone`: the baselines' pids that /proc
- * says have no process, or a process with another start than the baseline's (the caller judges).
+ * One look (S2 10.3, B4). `files`: those read at this look, at most one per pid (`readLiveFiles`
+ * reads `<pid>.json`); `gone`: the baselines' pids that /proc says have no process, or a process
+ * with another start than the baseline's (the caller judges).
  * A pid with no file keeps its baseline unless it is gone; a file is the new baseline of its pid
  * (and is judged against the old one whatever `gone` says: `gone` speaks of pids without a file);
  * `first` (the server's first look) sets baselines only. `ends`: the turn ends of this look, in the

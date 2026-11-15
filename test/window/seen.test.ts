@@ -23,6 +23,8 @@ test('isTyping: keys, a return, a paste and text after a focus report are typing
     ESC, // the Esc key alone
     `${ESC}[A`, // an arrow key
     `${ESC}[<0;10;5`, // not a whole mouse report
+    `${ESC}[<0;10;5xM`, // nor this: only digits and ';' between '<' and the final M
+    `${ESC}[200~${ESC}[201~`, // an empty paste, which the page sends
     'žluťoučký kůň',
   ];
   for (const data of typing) {
@@ -319,4 +321,23 @@ test("a listener that throws out of a completed hold does not throw out of the c
   assert.doesNotThrow(() => clock.advanceMs(1500));
   assert.deepEqual(seen.take(), new Set([S1]), 'the hold completed');
   assert.equal(clock.timers(), 0);
+});
+
+test('a page told gone stays gone: a later focus or typing for it holds nothing', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  let changes = 0;
+  seen.onChange(() => {
+    changes += 1;
+  });
+  const p = page();
+  seen.focus(p, true, S1);
+  seen.gone(p);
+  seen.focus(p, true, S2);
+  seen.typed(p, S2);
+  seen.typed(p, S3);
+  assert.equal(clock.timers(), 0);
+  clock.advanceMs(5000);
+  assert.deepEqual(seen.take(), new Set());
+  assert.equal(changes, 0);
 });

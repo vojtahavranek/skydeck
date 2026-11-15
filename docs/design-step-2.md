@@ -1947,17 +1947,21 @@ any change of either starts the 1.5 s again, so a window that comes back to the 
 1.5 s too, and focus lost ends the hold at once. Several windows each hold their own; a session held
 in any of them is seen. Typing is an `input` that is not `binary` and holds more than focus reports
 (`ESC [ I`, `ESC [ O`) and SGR mouse reports (`ESC [ <` digits and `;`, then `M` or `m`): a program
-that asks for focus reports (Claude Code does, 9.2) gets one at every click, chord and return to the
-window, and a mouse report is no key, so none of them is typing (else every selection would clear
-its mark at once). Typing into the selected session's terminal of a focused window completes the
-hold at once and it holds as long as the selection and the focus do; typing into another terminal
-makes the session it shows seen once. A `seen` is written only when it clears a mark — a hold
-completes, a typing comes, or a mark of a session already being seen becomes known — and always in
-the write of a turn end or window end of that session while the hold lasts; there is **no periodic
-`seen` write**: nothing writes to the store every few seconds because a window has focus. It is
-written only for a session among the list's rows, so that a selection naming no session leaves no
-row. The hold is `src/window/seen.ts` on the server's clock
-(`Clock.after`, which a step of the wall clock does not move).
+that asks for focus reports (9.2; Claude Code is expected to, not yet checked with the real program)
+gets one at every click, chord and return to the window, and a mouse report is no key, so none of
+them is typing (else every selection would clear its mark at once). What the page sends for the
+user's own act on a terminal without a key — the wheel over a program in the alternate screen that
+asked for no mouse reports and an Alt+click, both arrow keys, or an empty paste — is typing: the
+server cannot tell it from keys. Typing into the selected session's terminal of a focused window
+completes the hold at once and it holds as long as the selection and the focus do; typing into
+another terminal, or into the selected one's while the window has no focus, makes the session it
+shows seen once. A `seen` is written only when it clears a mark — a hold completes, a typing comes,
+or a mark of a session already being seen becomes known — and always in the write of a turn end or
+window end of that session while the hold lasts; there is **no periodic `seen` write**: nothing
+writes to the store every few seconds because a window has focus. It is written only for a session
+among the list's rows, so that a selection naming no session leaves no row. The hold is
+`src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall clock does not
+move).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
 then those that ended; then those that finished, oldest first. Pressed again it goes on; after the

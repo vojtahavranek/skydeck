@@ -216,3 +216,17 @@ test("lookAt: several pids' ends in one look, in the files' order; the input is 
   assert.deepEqual(before, copy);
   assert.notEqual(result.baselines, before);
 });
+
+test('lookAt: a file read is the new baseline also when its status did not change', () => {
+  // Another dialog of the same turn: the new detail and time.
+  const asks = looked({ status: 'waiting', waitingFor: 'permission' });
+  const asksAgain = looked({ status: 'waiting', waitingFor: 'a question', sinceNs: T0 + SEC });
+  const dialog = lookAt(baselinesOf(asks), [asksAgain], NONE, false);
+  assert.deepEqual(dialog.ends, []);
+  assert.equal(dialog.baselines.get(100), asksAgain);
+  // A turn shorter than a look: idle before and after, with a later time. No end; the new time.
+  const idleLater = looked({ status: 'idle', sinceNs: T0 + 5n * SEC });
+  const short = lookAt(baselinesOf(looked({ status: 'idle' })), [idleLater], NONE, false);
+  assert.deepEqual(short.ends, []);
+  assert.equal(short.baselines.get(100), idleLater);
+});
