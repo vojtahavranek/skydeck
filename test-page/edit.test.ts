@@ -1044,6 +1044,282 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
     },
   );
 
+  await t.test(
+    'a dialog over a shown terminal: Tab and Shift+Tab never put the keyboard into the page under it, and nothing typed reaches the terminal (review 2, S2)',
+    async (t) => {
+      const d = await deck(t, chromium, {
+        sections: { open: [running(S1, TERM_A, 1)] },
+        terminals: [terminal(TERM_A, S1, 1)],
+      });
+      const { page, w } = d;
+      await page.waitForSelector(`#right-zone[data-pane-term="${TERM_A}"]`, { state: 'attached' });
+      await toZone(page, 'list');
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      const from = w.sent.length;
+      const inPage = (): Promise<boolean> =>
+        page.evaluate(
+          () => document.querySelector('.app')?.contains(document.activeElement) === true,
+        );
+      for (const key of [...Array(8).fill('Shift+Tab'), ...Array(8).fill('Tab')] as string[]) {
+        await page.keyboard.press(key);
+        assert.equal(await inPage(), false, `${key}: the keyboard is not in the page under it`);
+        await page.keyboard.type('q');
+        assert.equal(await inPage(), false, `${key}, q: the keyboard is not in the page under it`);
+      }
+      await sleep(300);
+      assert.deepEqual(inputsAfter(w, from), [], 'nothing reached the terminal');
+    },
+  );
+
+  await t.test(
+    'while a dialog is shown no list key acts, with the keyboard on a button of the dialog or on nothing (text of the help selected): `d`, `j`, `a`, `n`, Enter (review 2, S2)',
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      /** `keys`: on a button, Enter is the button's (it presses it), so it is tried on nothing. */
+      const keys = async (where: string, more: string[] = []): Promise<void> => {
+        const from = w.sent.length;
+        for (const key of ['d', 'j', 'a', 'n', ...more]) await page.keyboard.press(key);
+        await sleep(300);
+        assert.deepEqual(
+          w.sent.slice(from).filter((m) => m['t'] === 'act' || m['t'] === 'view'),
+          [],
+          `${where}: no act and no view`,
+        );
+        assert.equal(await selectedRow(page), S2, `${where}: the selection stays`);
+        assert.equal((await dialog(page)).shown, true, `${where}: the dialog stays`);
+      };
+      await page.keyboard.press('Tab');
+      assert.equal(await page.evaluate(() => document.activeElement?.className), 'edit-cancel');
+      await keys('on Cancel');
+
+      await page.keyboard.press('Control+Shift+H');
+      await page.waitForSelector('#help:not([hidden])', { state: 'attached' });
+      const title = await page.locator('#help .help-title').boundingBox();
+      assert.ok(title !== null);
+      await page.mouse.move(title.x + 2, title.y + title.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(title.x + title.width - 2, title.y + title.height / 2, { steps: 5 });
+      await page.mouse.up();
+      assert.equal(await active(page), 'BODY', 'nothing has the keyboard');
+      assert.notEqual(await page.evaluate(() => getSelection()?.toString() ?? ''), '');
+      await keys('on nothing', ['Enter']);
+    },
+  );
+
+  await t.test(
+    'an answer acts only on the dialog of its own act: one that comes after its dialog was closed and another opened changes nothing there, an `ok` or a refusal (review 2, S2)',
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2), row(S3)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.type('one');
+      await page.keyboard.press('Enter');
+      const first = await w.act(1);
+      await page.keyboard.press('Escape'); // closed while its act waits
+      await dialogShown(page, false);
+      await clickRow(page, S3);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.type('two');
+      w.answer(first, { ok: true });
+      await sleep(500);
+      let shown = await dialog(page);
+      assert.equal(shown.shown, true, "an earlier act's ok does not close another dialog");
+      assert.equal(shown.value, 'two');
+
+      await page.keyboard.press('Enter');
+      const second = await w.act(2);
+      await page.keyboard.press('Escape');
+      await dialogShown(page, false);
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.type('three');
+      w.answer(second, { ok: false, error: 'refused' });
+      await sleep(500);
+      shown = await dialog(page);
+      assert.equal(shown.message, '', "an earlier act's refusal shows nothing here");
+      assert.equal(shown.value, 'three');
+      assert.equal(shown.saveDisabled, false);
+    },
+  );
+
+  await t.test(
+    'held keys act once: `d` held through its answer and a list that still shows the row (done) sends no `undone`; Enter held through a refusal sends its act once (review 2, S2)',
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.down('d');
+      w.answer(await w.act(1), { ok: true });
+      d.set({ sections: { week: [row(S2, { done: true })] } }); // listed with `a`, say
+      await sleep(500);
+      await page.keyboard.down('d'); // held: an auto-repeat
+      await page.keyboard.down('d');
+      await page.keyboard.up('d');
+      await sleep(300);
+      assert.deepEqual(
+        w.acts().map((act) => act['kind']),
+        ['done'],
+      );
+
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.type('x');
+      await page.keyboard.down('Enter');
+      w.answer(await w.act(2), { ok: false, error: 'refused' });
+      await showsText(page, '#editor .edit-message', /^refused$/);
+      await page.keyboard.down('Enter'); // held through the refusal
+      await page.keyboard.down('Enter');
+      await page.keyboard.up('Enter');
+      await sleep(300);
+      assert.equal(w.acts().length, 2, 'the held Enter sent its act once');
+    },
+  );
+
+  await t.test(
+    'the note dialog while its save waits takes no typing; a first Esc warns again after more text; Shift+Enter is a line break in a note opened over a terminal (review 2, S2)',
+    async (t) => {
+      const d = await deck(
+        t,
+        chromium,
+        {
+          sections: { open: [running(S1, TERM_A, 1)], week: [row(S2)] },
+          terminals: [terminal(TERM_A, S1, 1)],
+          selected: { [S1]: { note: 'n' }, [S2]: { note: 'n' } },
+        },
+        { modules: RECORDING },
+      );
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await selectedHasCome(page, S2);
+      await page.keyboard.press('n');
+      await dialogShown(page, true);
+      await page.keyboard.type(' more');
+      await page.keyboard.press('Control+Enter');
+      const act = await w.act(1);
+      await page.keyboard.type('z');
+      assert.equal((await dialog(page)).value, 'n more', 'nothing typed while the save waits');
+      w.answer(act, { ok: false, error: 'refused' });
+      await showsText(page, '#editor .edit-message', /^refused$/);
+
+      await page.keyboard.press('Escape');
+      await showsText(page, '#editor .edit-message', /^Esc again discards your text$/);
+      await page.keyboard.type('!');
+      assert.equal((await dialog(page)).message, '', 'the warning goes with more text');
+      await page.keyboard.press('Escape');
+      assert.equal((await dialog(page)).shown, true, 'the next Esc warns again');
+      assert.equal((await dialog(page)).message, 'Esc again discards your text');
+      await page.keyboard.press('Escape');
+      await dialogShown(page, false);
+
+      // Over a terminal (the cards' `edit`, as the header's Note of task 38).
+      await page.keyboard.press('Control+Shift+1');
+      await page.waitForSelector(`#right-zone[data-pane-term="${TERM_A}"]`, { state: 'attached' });
+      await terminalHasKeyboard(page);
+      await eventually(async () => {
+        const last = (await headerCalls(page)).at(-1);
+        return last?.selected?.['sessionId'] === S1;
+      }, "the list with S1's selected");
+      await page.evaluate(
+        (id) =>
+          (Reflect.get(globalThis, 'cardsDeps') as { edit(what: string, id: string): void }).edit(
+            'note',
+            id,
+          ),
+        S1,
+      );
+      await dialogShown(page, true);
+      const from = w.sent.length;
+      await page.keyboard.press('Shift+Enter');
+      await page.keyboard.type('x');
+      assert.equal((await dialog(page)).value, 'n\nx', 'Shift+Enter is a line break');
+      assert.deepEqual(inputsAfter(w, from), []);
+    },
+  );
+
+  await t.test(
+    "an Enter or Esc that ends an IME composition is the IME's: no save, no close (review 2, C3)",
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      for (const key of ['Enter', 'Escape']) {
+        await page.evaluate((key) => {
+          const field = document.querySelector('#editor .edit-field');
+          if (field === null) throw new Error('no field');
+          field.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key,
+              code: key,
+              isComposing: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        }, key);
+      }
+      await sleep(300);
+      assert.equal(w.acts().length, 0, 'no save');
+      assert.equal((await dialog(page)).shown, true, 'no close');
+      await page.keyboard.press('Enter');
+      await w.act(1);
+    },
+  );
+
+  await t.test(
+    "the toast stays 5 s, timed in the page; a later toast is shown its own 5 s, whatever the earlier one's timer (review 2, S2 and C6)",
+    async (t) => {
+      const d = await deck(t, chromium, {
+        sections: { open: [running(S4, TERM_A, 1)], week: [row(S1)] },
+        terminals: [terminal(TERM_A, S4, 1)],
+      });
+      const { page, w } = d;
+      await page.evaluate(() => {
+        const root = document.getElementById('toast') as HTMLElement;
+        const times: { what: string; at: number }[] = [];
+        Reflect.set(globalThis, 'toastTimes', times);
+        new MutationObserver(() =>
+          times.push({
+            what: root.hidden ? 'hidden' : (root.querySelector('.toast-text')?.textContent ?? ''),
+            at: performance.now(),
+          }),
+        ).observe(root, { attributes: true, childList: true, characterData: true, subtree: true });
+      });
+      await clickRow(page, S1);
+      await page.keyboard.press('d');
+      w.answer(await w.act(1), { ok: true });
+      await eventually(async () => (await toast(page)).text === DONE_WORDS, 'the first toast');
+      await sleep(3000);
+      await clickRow(page, S4);
+      await toZone(page, 'list');
+      await page.keyboard.press('d');
+      w.answer(await w.act(2), { ok: true });
+      await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
+      const times = (await page.evaluate(() => Reflect.get(globalThis, 'toastTimes'))) as {
+        what: string;
+        at: number;
+      }[];
+      const first = times.find((entry) => entry.what === DONE_WORDS);
+      const second = times.find((entry) => entry.what === DONE_RUNNING_WORDS);
+      const hidden = times.filter((entry) => entry.what === 'hidden');
+      assert.ok(first !== undefined && second !== undefined, JSON.stringify(times));
+      assert.equal(hidden.length, 1, `hidden once: ${JSON.stringify(times)}`);
+      const shownFor = (hidden[0]?.at ?? 0) - second.at;
+      assert.ok(shownFor >= 4990, `the second toast shown for ${shownFor} ms`);
+      assert.ok(second.at - first.at >= 2990, 'the second came 3 s after the first');
+    },
+  );
+
   for (const key of ['Enter', 'Escape'] as const) {
     await t.test(
       `a held ${key} that closes a dialog opened over a terminal types nothing into the terminal; the next press does`,
@@ -1096,7 +1372,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
   }
 
   await t.test(
-    "`d` sends `done`; the toast shows D15's words and goes after 5 s; its Undo sends `undone` and takes no keyboard; a running session's words; `d` on a done row sends `undone` and shows no toast",
+    "`d` sends `done`; the toast shows D15's words; its Undo sends `undone` and takes no keyboard; a running session's words; `d` on a done row sends `undone` and shows no toast",
     async (t) => {
       const d = await deck(t, chromium, {
         sections: { open: [running(S4, TERM_A, 1)], week: [row(S1), row(S2), row(S3)] },
@@ -1123,17 +1399,14 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       assert.equal((await toast(page)).text, '', 'the toast goes with its Undo');
       w.answer(undone, { ok: true });
 
-      // A running session's words; the toast goes after 5 s.
+      // A running session's words.
       await clickRow(page, S4);
       await toZone(page, 'list');
       await page.keyboard.press('d');
       const running4 = await w.act(3);
       w.answer(running4, { ok: true });
       await eventually(async () => (await toast(page)).text === DONE_RUNNING_WORDS, 'the toast');
-      const shownAt = performance.now();
-      await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 8000 });
-      const shownFor = performance.now() - shownAt;
-      assert.ok(shownFor > 3500 && shownFor < 7000, `the toast shown for ${shownFor} ms`);
+      await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
 
       // `d` on a done row (shown with `a`): undone, no toast.
       d.set({ sections: { week: [row(S1), row(S2, { done: true }), row(S3)] } });

@@ -1468,6 +1468,9 @@ function dialogKey(event) {
     event.preventDefault();
     return true;
   }
+  if (event.isComposing || event.keyCode === 229) {
+    return false; // a key of an IME composition (its Esc cancels it) is the IME's, never the dialog's
+  }
   if (
     event.key === 'Escape' &&
     !event.ctrlKey &&

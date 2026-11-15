@@ -181,6 +181,9 @@ export function createEditor(root, deps) {
 
   /** @param {KeyboardEvent} event */
   const onFieldKey = (event) => {
+    if (event.isComposing || event.keyCode === 229) {
+      return; // an Enter that ends an IME composition is the IME's (review 2 of task 37)
+    }
     if (event.key !== 'Enter' || event.altKey || event.metaKey || event.shiftKey) {
       return;
     }
