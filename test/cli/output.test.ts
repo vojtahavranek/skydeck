@@ -713,3 +713,59 @@ test('formatShow: a note that is nothing once sanitised leaves no "note:" headin
 test('formatShow: no note, no "note:" line', () => {
   assert.ok(!showText(listRow({ id: S1 })).includes('note:'));
 });
+
+// --- the window's mark (C15, S2 11.4; task 78) -------------------------------------------------
+
+/** S1 held by a scripted run (5555), a holder (4242) and another (5000), latest first. */
+function heldRow(): ListRow {
+  return listRow({
+    id: S1,
+    session: ds({
+      id: S1,
+      holders: [
+        holder(5555, T0 - MIN, 777, true),
+        holder(4242, T0 - 2n * MIN),
+        holder(5000, T0 - 3n * MIN),
+      ],
+    }),
+  });
+}
+
+const holderLines = (text: string): string[] =>
+  text.split('\n').filter((line) => line.startsWith('holder:'));
+
+test('formatShow: a holder in the window says so, after "(scripted run)" when it is both', () => {
+  const text = formatShow(heldRow(), [], T0, null, new Set([5555, 4242]));
+  assert.deepEqual(holderLines(text), [
+    'holder:    pid 5555 since 2026-11-12T08:59:00.000Z (scripted run) (in the skydeck window)',
+    'holder:    pid 4242 since 2026-11-12T08:58:00.000Z (in the skydeck window)',
+    'holder:    pid 5000 since 2026-11-12T08:57:00.000Z',
+  ]);
+});
+
+test('formatShow: without the set, with an empty one or one naming no holder of the row, the text is as before', () => {
+  const before = formatShow(heldRow(), [], T0, null);
+  assert.deepEqual(holderLines(before), [
+    'holder:    pid 5555 since 2026-11-12T08:59:00.000Z (scripted run)',
+    'holder:    pid 4242 since 2026-11-12T08:58:00.000Z',
+    'holder:    pid 5000 since 2026-11-12T08:57:00.000Z',
+  ]);
+  assert.equal(formatShow(heldRow(), [], T0, null, new Set()), before);
+  assert.equal(formatShow(heldRow(), [], T0, null, new Set([9999, 777])), before);
+});
+
+test('formatShow: the mark changes only its holder line, with a ticket line too', () => {
+  const row = { ...heldRow(), group: 'ABC-1' };
+  const ticket = 'https://example.atlassian.net/browse/ABC-1';
+  const before = formatShow(row, [], T0, ticket).split('\n');
+  const after = formatShow(row, [], T0, ticket, new Set([5000])).split('\n');
+  assert.equal(after.length, before.length);
+  const changed = after.flatMap((line, i) => (line === before[i] ? [] : [[before[i], line]]));
+  assert.deepEqual(changed, [
+    [
+      'holder:    pid 5000 since 2026-11-12T08:57:00.000Z',
+      'holder:    pid 5000 since 2026-11-12T08:57:00.000Z (in the skydeck window)',
+    ],
+  ]);
+  assert.ok(after.includes(`ticket:    ${ticket}`), after.join('\n'));
+});

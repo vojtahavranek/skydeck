@@ -4,6 +4,7 @@ import { refreshPrs } from '../../github.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { resolveRef } from '../../sessions/refs.ts';
 import { ticketAddress } from '../../sessions/ticket.ts';
+import { holdersInWindow } from '../../window/in-window.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -65,6 +66,8 @@ export const command: Command = {
               links,
               clock.nowNs(),
               ticketAddress(row.group, groupPattern, ticketUrl),
+              // S2 11.4: which holders run in the window, from the keepers' .pid lines alone.
+              holdersInWindow(deck, row.session.holders),
             ),
       );
       return EXIT.ok;
