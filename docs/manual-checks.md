@@ -1296,8 +1296,8 @@ otherwise leave them out and write down that you left them out (the third part n
    in every terminal. A session ended so is not offered by the banner below, and you resume it
    afterwards as always.
 4. End or let finish the runs of Claude Code that `skydeck ls` does not list: `claude -p` and
-   scripts that use the Agent SDK, Claude Code in VS Code's panel, and anything that runs in a
-   detached `tmux` or `screen`.
+   scripts that use the Agent SDK, probably Claude Code in VS Code's panel, and anything that runs
+   in a detached `tmux` or `screen`.
 
 **Set up:**
 
@@ -1313,9 +1313,10 @@ otherwise leave them out and write down that you left them out (the third part n
    remove only the folders this run made (`rmdir`, as in "Clean up", step 3).
 2. Three throwaway sessions in the window, one in each folder. For each: press Ctrl+Shift+N (in a
    browser tab, the `+ New` button). The right side shows the form for a new session, its first
-   field the directory, which has the keyboard; when it does not show, type nothing and press
-   Ctrl+Shift+N again. The field holds a directory of yours: press Ctrl+A in it to select all of
-   its text, and type the folder's full path over it (`/home/<you>/skydeck-try/w16-a`, then
+   field the directory, with the cursor blinking in it; when the form does not show, or the cursor
+   is not in that field, type nothing: press Ctrl+Shift+N again, or click into the field. The
+   field holds a directory of yours: press Ctrl+A in it to select all of its text, and type the
+   folder's full path over it (`/home/<you>/skydeck-try/w16-a`, then
    `w16-b`, then `w16-c`). Leave the other fields empty. Press Enter only when the field holds
    exactly that path: a session started in one of your projects would be offered by the banner
    below like the three. Wait until Claude Code shows its prompt in the new terminal; then, as the
@@ -1325,14 +1326,15 @@ otherwise leave them out and write down that you left them out (the third part n
    title comes from). In W, `skydeck show <short id>` for each says the same: its `dir:` line is
    the folder.
 4. In W: `skydeck ls --all` (`--all`: also the sessions marked done). Nothing may be `working`,
-   `waiting` or `running` but the three throwaway sessions. `skydeck ls` lists only the sessions
-   you work in: not `claude -p`, Agent SDK runs, Claude Code in VS Code's panel. So then `pgrep -af
-   claude` (it only lists processes; it also prints every other program whose command line holds
-   the word, such as a path with `claude` in it: pass over those). Every line whose program is
-   `claude` must be one of the three: `claude --session-id <id>`, or `claude --resume <id>` once
-   they have been restored, with an id that starts with one of their short ids. Another `claude`
-   (one with another id, or with `-p`) is a run of yours. If anything else runs, end it as in
-   "Prepare", steps 3 and 4, or stop here and do "Clean up" for what you made.
+   `waiting` or `running` but the three throwaway sessions. `skydeck ls` lists only the sessions you
+   work in: not `claude -p` or Agent SDK runs, and probably not Claude Code in VS Code's panel. So
+   then `pgrep -af claude` (it only lists processes; it also prints every other program whose
+   command line holds the word, such as a path with `claude` in it: pass over those). Every line
+   whose program is `claude` must be one of the three: `claude --session-id <id>`, or `claude
+   --resume <id>` once they have been restored, with an id that starts with one of the three short
+   ids you wrote down. Another `claude` (one with another id, or with `-p`) is a run of yours. If
+   anything else runs, end it as in "Prepare", steps 3 and 4, or stop here and do "Clean up" for
+   what you made.
 
 **Steps:**
 
