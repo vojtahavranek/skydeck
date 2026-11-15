@@ -9,6 +9,7 @@ import { buildResumeCommand, unknownFlags } from '../claude/launch.ts';
 import { isSessionId } from '../claude/session-id.ts';
 import type { Deck } from '../sessions/deck.ts';
 import type { ListRow } from '../sessions/list.ts';
+import { ticketAddress } from '../sessions/ticket.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { printableCommand } from '../text/shell.ts';
 import type { SelectedPayload } from './protocol.ts';
@@ -70,6 +71,6 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
     expiring: row.marks.includes('expiring'),
     expired: row.marks.includes('expired'),
     ...noteOf(row.note),
-    ticketUrl: null,
+    ticketUrl: ticketAddress(row.group, deck.config.groupPattern, deck.config.ticketUrl),
   };
 }

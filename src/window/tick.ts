@@ -67,6 +67,11 @@ export interface Tick {
   listed(sessionIds: Iterable<string>): void;
   /** The next refresh loads the rows again, whatever the change marks say (the server wrote). */
   reload(): void;
+  /**
+   * Plan D7: loadRows now and pages.pushList(), so that an edit shows within a second; a failure
+   * is logged by kind and the reload is left to the next refresh. Nothing after stop().
+   */
+  reloadNow(): void;
   /** One second of the tick; resolves when its work is done. start() calls it every second. */
   run(): Promise<void>;
   /** Runs the first tick (and waits for it), then one every second. */
@@ -201,7 +206,10 @@ export function createTick(deps: TickDeps): Tick {
    * S2 7.5, 7.9 for the terminals of now: each one's session (setSession), the sessions running
    * elsewhere, and an ended terminal dropped when its session runs again in another terminal or
    * outside the window (ruled, review of task 13). For a session the mapping could not judge
-   * (`unknown`, ruled in task 21) the previous answer is kept and nothing is decided on it.
+   * (`unknown`, ruled in task 21) the previous answer is kept and nothing is decided on it. A lost
+   * terminal's own program, while it may still run and for less than 60 s after the loss (by
+   * `nowNs`), is that terminal's in the mapping (plan task 57): its session is not "elsewhere" for
+   * it, so the terminal is not dropped for it (S2 7.5, 7.8).
    */
   const map = (): void => {
     const terminals = hub.list();
@@ -345,6 +353,19 @@ export function createTick(deps: TickDeps): Tick {
     },
     reload() {
       reloadOwed = true;
+    },
+    reloadNow() {
+      if (stopped) return;
+      try {
+        rows = loadRows(deck);
+      } catch (error) {
+        reloadOwed = true;
+        log(`tick: the rows were not loaded again (${failureKind(error)})`);
+        return;
+      }
+      loadedAtNs = clock.nowNs();
+      reloadOwed = false;
+      pages.pushList();
     },
     run: once,
     async start() {

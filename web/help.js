@@ -1,5 +1,6 @@
-// The key help (S2 12.9, Ctrl+Shift+H; plan task 29): every key of S2 12.9 and of the list zone,
-// those whose action comes in a later stage marked so (A11), the note for a browser tab and the
+// The key help (S2 12.9, Ctrl+Shift+H; plan task 29): every key of S2 12.9 and of the list zone
+// (stage D's `l`, F2, `g`, `n`, `p`, `d` with plan D task 37), those whose action comes in a later
+// stage marked so (A11), a note on stage D's dialogs, the note for a browser tab and the
 // note on the Claude Code bindings the window shadows. Its interface is contract 2.9's. Every key
 // it names is one web/keys.js handles in that zone, and every key keys.js handles is named here
 // (test-page/cards.test.ts reads the help and checks both against keys.js).
@@ -57,17 +58,18 @@ const SECTIONS = [
         ['F5', 'Shift+F5', 'Ctrl+F5', 'Ctrl+R'],
         'reload the page, once skydeck’s server has proven itself',
       ],
-      [['l', 'F2'], `label: ${LATER}`],
-      [['g'], `group: ${LATER}`],
-      [['n'], `note: ${LATER}`],
-      [['p'], `attach a pull request: ${LATER}`],
-      [['d'], `done: ${LATER}`],
+      [['l', 'F2'], 'label'],
+      [['g'], 'group'],
+      [['n'], 'note'],
+      [['p'], 'pull requests: attach one'],
+      [['d'], 'done, or undone for a done session (an Undo follows a done)'],
     ],
   },
 ];
 
 const NOTES = [
   'Esc in the terminal is Claude Code’s and never leaves the terminal; so are F5, Shift+F5, Ctrl+F5 and Ctrl+R while the terminal has the keyboard (while the page has it — the new form, a card, the find bar — they reload the page, as in the list). Esc in the new form closes it.',
+  'In a dialog (label, group, note, pull requests) Enter saves — Ctrl+Enter in the note, where Enter is a new line — and Esc, Cancel or Close closes it; a changed note needs Esc twice. While a dialog is open the window’s keys do nothing but Ctrl+Shift+H, and the reload keys while no text was changed: close it first (Esc).',
   'In a browser tab (skydeck window --print-url) the browser keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab and their Shift forms for itself: use Ctrl+Shift+O for the previous session and + New in the key bar for a new one.',
   'The window takes Ctrl+Shift with a letter or a digit, and Ctrl+Tab, for itself. A Claude Code binding on one of them (ctrl+shift+<key>, which a terminal with the kitty keyboard protocol could send) never reaches Claude Code; Ctrl+Shift+-, Alt, Ctrl with a letter and the function keys stay Claude Code’s.',
 ];

@@ -33,6 +33,12 @@ function cs(key: string, code: string): KeyLike {
 
 const ZONES: readonly Zone[] = ['list', 'terminal'];
 
+/** The list keys of stage D (S2 12.9, plan D 2.4): `l`, `g`, `n`, `p`, `d` and F2. */
+const STAGE_D_KEYS: readonly KeyLike[] = [
+  ...['l', 'g', 'n', 'p', 'd'].map((c) => ev(c, `Key${c.toUpperCase()}`)),
+  ev('F2', 'F2'),
+];
+
 // What a US and a Czech (QWERTZ) layout type with Shift on the number row: on a US layout the
 // symbols, on a Czech one the digits.
 const US_SHIFTED_DIGITS = ['!', '@', '#', '$', '%', '^', '&', '*', '('];
@@ -276,12 +282,13 @@ describe('listKey (S2 12.9)', () => {
     ['BrowserRefresh', ev('BrowserRefresh', 'BrowserRefresh'), { kind: 'reload' }],
     ['Shift+BrowserRefresh', ev('BrowserRefresh', 'BrowserRefresh', 'shift'), { kind: 'reload' }],
     ['Ctrl+BrowserRefresh', ev('BrowserRefresh', 'BrowserRefresh', 'ctrl'), { kind: 'reload' }],
-    ['l', ev('l', 'KeyL'), { kind: 'later', stage: 'D' }],
-    ['g', ev('g', 'KeyG'), { kind: 'later', stage: 'D' }],
-    ['n', ev('n', 'KeyN'), { kind: 'later', stage: 'D' }],
-    ['p', ev('p', 'KeyP'), { kind: 'later', stage: 'D' }],
-    ['d', ev('d', 'KeyD'), { kind: 'later', stage: 'D' }],
-    ['F2', ev('F2', 'F2'), { kind: 'later', stage: 'D' }],
+    // Stage D (plan D 2.4): the label (also F2), the group, the note, the pull requests, done.
+    ['l', ev('l', 'KeyL'), { kind: 'edit', what: 'label' }],
+    ['F2', ev('F2', 'F2'), { kind: 'edit', what: 'label' }],
+    ['g', ev('g', 'KeyG'), { kind: 'edit', what: 'group' }],
+    ['n', ev('n', 'KeyN'), { kind: 'edit', what: 'note' }],
+    ['p', ev('p', 'KeyP'), { kind: 'edit', what: 'pr' }],
+    ['d', ev('d', 'KeyD'), { kind: 'done' }],
   ];
   for (const [name, e, action] of table) {
     test(name, () => {
@@ -304,6 +311,9 @@ describe('listKey (S2 12.9)', () => {
 
   test('Ctrl, Alt or Meta with a list key is no list key', () => {
     for (const mod of ['ctrl', 'alt', 'meta'] as const) {
+      for (const c of ['l', 'g', 'n', 'p', 'd']) {
+        assert.equal(listKey(ev(c, `Key${c.toUpperCase()}`, mod)), null, `${mod}+${c}`);
+      }
       assert.equal(listKey(ev('j', 'KeyJ', mod)), null);
       assert.equal(listKey(ev('/', 'Slash', mod)), null);
       assert.equal(listKey(ev('ArrowDown', 'ArrowDown', mod)), null);
@@ -447,15 +457,17 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
     }
   });
 
-  test('every later key: Ctrl+Shift+P and Ctrl+Shift+J in both zones, l g n p d F2 in the list zone', () => {
+  test('every later key: Ctrl+Shift+P and Ctrl+Shift+J in both zones', () => {
     for (const zone of ZONES) {
       assert.equal(cancels(cs('P', 'KeyP'), zone, false), true);
       assert.equal(cancels(cs('J', 'KeyJ'), zone, false), true);
     }
-    for (const e of ['l', 'g', 'n', 'p', 'd'].map((c) => ev(c, `Key${c.toUpperCase()}`))) {
+  });
+
+  test('the stage D keys l g n p d F2 are cancelled in the list zone, where the page acts on them', () => {
+    for (const e of STAGE_D_KEYS) {
       assert.equal(cancels(e, 'list', true), true, e.key);
     }
-    assert.equal(cancels(ev('F2', 'F2'), 'list', true), true);
   });
 
   test('every list key the page acted on, in the list zone', () => {
@@ -481,20 +493,16 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
     assert.equal(cancels(ev('v', 'KeyV', 'ctrl'), 'list', false), false); // a paste into it
   });
 
-  test('in the terminal zone the list keys and `later` list keys go to the program', () => {
+  test('in the terminal zone the list keys, the stage D keys too, go to the program', () => {
     for (const e of [ev('l', 'KeyL'), ev('F2', 'F2'), ev('j', 'KeyJ'), ev('Escape', 'Escape')]) {
       assert.notEqual(listKey(e), null);
       assert.equal(cancels(e, 'terminal', false), false, e.key);
     }
   });
 
-  test('the `later` list keys l g n p d F2 are nothing of the window’s or the terminal mapping', () => {
-    const later = [
-      ...['l', 'g', 'n', 'p', 'd'].map((c) => ev(c, `Key${c.toUpperCase()}`)),
-      ev('F2', 'F2'),
-    ];
-    for (const e of later) {
-      assert.deepEqual(listKey(e), { kind: 'later', stage: 'D' }, e.key);
+  test('the stage D keys l g n p d F2 are nothing of the window’s or the terminal mapping', () => {
+    for (const e of STAGE_D_KEYS) {
+      assert.notEqual(listKey(e), null, e.key);
       assert.equal(windowChord(e, 'terminal'), null, e.key);
       assert.equal(terminalKey(e), null, e.key);
       assert.equal(cancels(e, 'terminal', false), false, e.key);
@@ -521,5 +529,58 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
     // For example Enter in the find bar over the terminal.
     assert.equal(cancels(ev('Enter', 'Enter'), 'terminal', true), true);
     assert.equal(cancels(ev('Tab', 'Tab'), 'list', true), true);
+  });
+});
+
+describe('`later` (A11) after stage D', () => {
+  /** Every character and named key a test here can name, with each of the 16 sets of modifiers. */
+  const everyEvent = (): KeyLike[] => {
+    const keys = [
+      ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      ...'`-=[]\\;\',./~!@#$%^&*()_+{}|:"<>? ěščřžýáíéúů',
+      ...['Enter', 'Escape', 'Tab', 'Home', 'End', 'PageUp', 'PageDown', 'BrowserRefresh'],
+      ...['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'],
+      ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
+    ];
+    const events: KeyLike[] = [];
+    for (const key of keys) {
+      const code = /^[a-z]$/i.test(key)
+        ? `Key${key.toUpperCase()}`
+        : /^[0-9]$/.test(key)
+          ? `Digit${key}`
+          : key;
+      for (let bits = 0; bits < 16; bits++) {
+        events.push({
+          key,
+          code,
+          ctrlKey: (bits & 1) !== 0,
+          shiftKey: (bits & 2) !== 0,
+          altKey: (bits & 4) !== 0,
+          metaKey: (bits & 8) !== 0,
+        });
+      }
+    }
+    return events;
+  };
+
+  test('only Ctrl+Shift+J and Ctrl+Shift+P are still `later`; no list key is', () => {
+    const later: string[] = [];
+    for (const e of everyEvent()) {
+      const name = `${e.ctrlKey ? 'Ctrl+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.altKey ? 'Alt+' : ''}${e.metaKey ? 'Meta+' : ''}${e.key}`;
+      assert.notEqual(listKey(e)?.kind, 'later', name);
+      for (const zone of ZONES) {
+        if (windowChord(e, zone)?.kind === 'later') later.push(`${zone}: ${name}`);
+      }
+    }
+    assert.deepEqual(later.sort(), [
+      'list: Ctrl+Shift+J',
+      'list: Ctrl+Shift+P',
+      'list: Ctrl+Shift+j',
+      'list: Ctrl+Shift+p',
+      'terminal: Ctrl+Shift+J',
+      'terminal: Ctrl+Shift+P',
+      'terminal: Ctrl+Shift+j',
+      'terminal: Ctrl+Shift+p',
+    ]);
   });
 });

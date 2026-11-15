@@ -31,9 +31,9 @@ the two test platforms; page tests in headless Chromium through `test-page/helpe
 contracts (its section 2) stay in force where this plan does not change them; this plan's section
 2 gives only the additions.
 
-**Task numbers** are 50–56 (stage D has 34–39, stage C 70 and up), so that branch names,
-pull-request titles and the lead's notes stay unique. The implementer brief names the branch and
-the title.
+**Task numbers** are 50–57 (57 added on 2026-11-15; stage D has 34–39, stage C 70 and up), so
+that branch names, pull-request titles and the lead's notes stay unique. The implementer brief
+names the branch and the title.
 
 **CI stays as it is**: two Node legs, one job each (the user's decision of 2026-11-14). No task
 changes `.github/workflows/`, `package.json` or a dependency.
@@ -67,20 +67,23 @@ Task 0 is `main` at 9c5cbfb (stage A complete) with this plan merged.
 | 53 | The turn-end rule and seen | 0 | 1 | — | ~350 |
 | 52 | Attention on the server: the look, the writes, the notifier | 50, 51, 53 | 2 | — | ~650 |
 | 55 | The page: marks, the title, Ctrl+Shift+J, notifications | 51; D 37 (ruled: 55 is written on top of it) | 2 | `web/app.js`, `keys.js`, `help.js`, `list.js`, `list-text.js`, `list.css`, `index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts` | ~750 |
-| 54 | The server assembly, and attention end to end | 52, 53, 55; D 36 (ruled order) | 3 | `src/window/tick.ts`, `server.ts`, `pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts` | ~650 |
+| 57 | A lost keeper's own program is not "elsewhere" | 0; D 36 (on `main`; ruled 2026-11-15) | 3, merges before 54 | `src/window/tick.ts` (a comment), `test/window/tick.test.ts` | ~350 |
+| 54 | The server assembly, and attention end to end | 52, 53, 55, 57; D 36 (ruled order) | 3 | `src/window/tick.ts`, `server.ts`, `pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts` | ~650 |
 | 56 | Documentation of stage B | all | 4 | `docs/*`, `README.md` | docs only |
 
 ```
 wave 1:  50  51  53
 wave 2:  52  55
-wave 3:  54
+wave 3:  57 → 54   (57 merges first)
 wave 4:  56
 ```
 
 The critical path is store and contracts → the server's attention → the assembly. Task 55 builds
 the page against a scripted stand-in server (as stage A's `actsWorld`), so it does not wait for the
 server; task 54 is the first to drive attention end to end, with the real server and the real page.
-Task 56 may start its reading while 54 is built and merges last.
+Task 56 may start its reading while 54 is built and merges last. Task 57 (added on 2026-11-15,
+found by task 52's review 2) fixes stage A's mapping so that a lost keeper's session can be judged
+`ended` at all (S2 14); it shares `tick.ts` and `tick.test.ts` with 54 and merges before it.
 
 ### 1a. Which tasks can start at once
 
@@ -155,16 +158,18 @@ same as its row here.
 | 53 | `src/window/seen.ts`, `test/window/seen.test.ts` | `src/claude/terminal.ts`; `test/claude/terminal.test.ts`; `docs/design-step-2.md` (10.3, 12.4) |
 | 52 | `src/window/attention.ts`, `src/window/notify.ts`, `test/window/attention.test.ts`, `test/window/notify.test.ts` | `docs/design-step-2.md` (10.3, 12.4, 13) |
 | 55 | `web/attention-text.js`, `web/notify.js`, `web/attention.css`, `test/web/attention-text.test.ts`, `test-page/attention.test.ts`, `test-page/helpers/notification.ts` | `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts`; `docs/design-step-2.md` (12.2, 12.4, 13, 17.4) |
+| 57 | — | `src/window/mapping.ts`, `src/window/tick.ts` (the comment of `map()` only); `test/window/mapping.test.ts`, `test/window/tick.test.ts`; `docs/design-step-2.md` (7.5) |
 | 54 | `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`, `test-page/attention-server.test.ts` | `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.7) |
 | 56 | — | `docs/install.md` (all but task 50's paragraphs), `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (19, and any decision of 1d still missing) |
 
 **Shared source files** (changed by another stage too; never two stage B tasks of one wave):
 `src/store/types.ts` (50; C 70), `src/window/protocol.ts` and `src/window/view/build.ts` (51; D
 34, C, E), `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html` (55; D 37, C 75, E),
-`web/list.js`, `web/list-text.js`, `web/list.css` (55; D 34, C, E), `src/window/tick.ts` and
-`src/window/server.ts` (54; D 36, C 74), `src/window/pages.ts` (54; no other stage known to this
-author). `docs/design-step-2.md`: each task writes after the paragraph its task names (B10 of
-review B), so that two tasks of one wave never append at the same place. `docs/install.md`: 50
+`web/list.js`, `web/list-text.js`, `web/list.css` (55; D 34, C, E), `src/window/tick.ts` (57, a
+comment; 54; D 36, C 74) and `src/window/server.ts` (54; D 36, C 74), `src/window/pages.ts` (54;
+no other stage known to this author). `docs/design-step-2.md`: each task writes after the
+paragraph its task names (B10 of review B), so that two tasks of one wave never append at the same
+place. `docs/install.md`: 50
 ("Updating", in wave 1) and 56; `docs/manual-checks.md`, `README.md`: 56 only.
 
 **The order across stages** (ruled) for the files that tasks of several stages change at the same
@@ -176,7 +181,7 @@ resolving the places named:
 | `test/window/view/build.test.ts` (the case that pins the view's files and imports), S2 8.2.3's `list` row | D 34 → B 51 → C 73 | B 51: the file list keeps `chip.ts` and adds `attention.ts`; the allowed imports keep `windowChip` and `CHIP_ORDER` and add `./attention.ts`; the `list` row keeps D's fields and adds `needYou` after `counts`. C 73 adds its `banner.ts` to the same lines |
 | `src/store/types.ts`, `KvKey` after `window_launching` | B 50 → C 70 | C 70 inserts after `attention_seq` (S2 10.2's order) |
 | `web/app.js` (the import block, `received()`'s `case 'list'`), `web/index.html` (the style-sheet links after `cards.css`), `test/web/keys.test.ts` (the "every later key" case) | D 37 → B 55 → C 75 → E | B 55: its imports after D's, the window title in `case 'list'` beside D's dialog update, `attention.css` after `edit.css`; the "every later key" case keeps only Ctrl+Shift+P |
-| `src/window/server.ts` (`listFor`, the orderly stop), `src/window/tick.ts`, `test/window/tick.test.ts` | D 36 → B 54 → C 74 | B 54: `listFor` passes `attention` beside D's lines; `seen.stop()` in the stop block after D's background fetches; `TickDeps.attention` and the look in `run()` beside `reloadNow`; cases at the end after D's |
+| `src/window/server.ts` (`listFor`, the orderly stop), `src/window/tick.ts`, `test/window/tick.test.ts` | D 36 → B 57 → B 54 → C 74 | B 57: one comment in `map()`, and a block of cases after "ended terminals" with the imports of its end-to-end case, which 54 keeps. B 54: `listFor` passes `attention` beside D's lines; `seen.stop()` in the stop block after D's background fetches; `TickDeps.attention` and the look in `run()` beside `reloadNow`; cases at the end after D's |
 | `docs/install.md`, `docs/manual-checks.md`, `README.md` | B 50 ("Updating" only) first; then D 39 → B 56 → C 79 → E | B 56: "Using the window", the known limits, "Updating while the window runs", the new part at the end of `manual-checks.md` and the window's paragraph of `README.md`, each after D's |
 
 Where a rebase keeps both without thought (different lines): `web/keys.js` (B: the window chords'
@@ -200,7 +205,8 @@ terminals), `src/window/protocol.ts` (B's `AttentionPayload` and `NotifyMessage`
 | `test-page/shell.test.ts` | 55 | in the keys case, the two lines of Ctrl+Shift+J's `comes in a later stage` become `no session needs you` (D 37 changes the lines of the six list keys of the same case) |
 | `test-page/helpers/browser.ts` | 55 | a context helper `newContext(chromium, options?)` that adds B17's init script; `newPage` makes its context with it |
 | `test-page/terminal.test.ts` | 55 | its two contexts of its own (lines 1243 and 1415) are made with `newContext` |
-| `test/window/tick.test.ts` | 54 | new cases at the end (D 36 adds `reloadNow`'s) |
+| `test/window/mapping.test.ts` | 57 | a block of cases before "with real programs"; nothing else |
+| `test/window/tick.test.ts` | 57, 54 | 57: a block of cases after "ended terminals" and the imports of its end-to-end case; 54: new cases at the end (D 36 adds `reloadNow`'s) |
 
 **Not changed by stage B** although the type changes reach them: `test-page/helpers/shell.ts`
 (`scriptedList` and the worlds build plain records, and the page reads a missing `needYou` as
@@ -230,10 +236,10 @@ decision in the design in its own pull request; `—` means it is an implementat
 | B6 | "Finished" needs a holder whose status is `idle`; a session `running` without a readable file is not finished, and neither is one whose idle status began after the recorded turn end (`turn_ended_ns` and the status time both known, the status time later: a turn end of an earlier run; ruled on task 51's review 2). Ctrl+Shift+J's order: those that ask by their status time (unknown last), then those that ended by `window_end_seq`, then those that finished by `turn_ended_seq`; ties by session id. | S2 12.4: "the session is running and idle"; the longest-waiting and oldest first. | 51 (12.4) |
 | B7 | `list` gains `needYou: { count, order }`: `count` the listed rows that need you, whatever the filter (the title bar's count and `(n) skydeck`); `order` the ids of the rows this page shows that need you, in B6's order. A row that needs you is counted there and in none of `counts`. | The page decides no rule (S2 4.3); the title bar's parts add up, as S2 12.1's example does (3 + 3 + 2). | 51 (8.2.3, 12.1) |
 | B8 | `notify` carries `reason` as the kind (`asks`, `ended`, `finished`) and `detail` (the waiting detail, else null); the page writes the words. | As the list's words are the page's (stage A, A18); S2 8.2.3 names no detail. | 51 (8.2.3) |
-| B9 | Seen is held per page from the moment that page is focused with that session selected; any change of either starts the 1.5 s again (a window that comes back to the front sees after 1.5 s too). Typing into a terminal makes the session that terminal shows seen at once; typing is an `input` that is not `binary` and is not a report a terminal sends by itself, told by its shape — focus reports (`ESC [ I`, `ESC [ O`), SGR mouse reports (`ESC [ < … M` or `m`) and the answers to queries (device attributes, cursor position and status reports, mode reports, `CSI t`, the colours of OSC 4 / 10 / 11, DECRQSS; ruled on review 2 of task 53: the page swallows the queries, S2 9.3, but `isTyping` does not rely on it): `isTyping` (2.5) — a program that asks for focus reports (Claude Code is expected to, S2 9.2) gets one at every click, chord and return to the window, and none of them is typing. The user's own acts without a key are typing: the wheel in the alternate screen without a mouse mode and Alt+click (both arrive as arrow keys), an empty paste; a key whose encoding has a report's shape does not count — F3 with any modifier has the bytes of a cursor position report — and the hold's 1.5 s apply (ruled). A typing into a session already being seen calls no `onChange` listener (ruled on review 2 of task 53), so that nothing runs at every key press. A `seen` is written only when a hold completes or a typing comes and it clears a mark, and always in the write of a turn end or window end of that session while the hold lasts; there is no periodic `seen` write (ruled). It is written only for a session among the rows (`rows()`), so that a selection naming no session leaves no row. | S2 12.4 fixes the 1.5 s but not when the hold starts; a `seen` matters only when it clears a mark or goes with an end. Question 4 in section 7. | 53 (12.4) |
-| B10 | A window end is judged at each refresh after it was settled, for a terminal in state `ended` or `lost` (a keeper that died: its exit time is the server's clock) that started its program: recorded when its session's row is not running and marked `ended-unexpectedly`, not recorded when the row runs again or ended deliberately; judged once. It is the same end when the stored `window_end_ns` equals the exit's time, so a server restart, which finds a lingering keeper again, never marks it twice. At the first start of a stage B server the table is empty, so each lingering keeper of an ended-unexpectedly session gets `ended` once (no notification, B12; one sentence in `docs/install.md`, task 56). | S2 12.4 reason 2 says "at the next refresh"; S2 14: a keeper that dies makes its session need you; a restart for an update must not bring back what the user saw. | 52 (12.4) |
-| B11 | A write the store refuses (busy, S2 14) is kept; the next look tries the kept writes again first, in their order, each as an entry of its own (`recordAttention` takes the writes in order), then its own; nothing is folded but two turn ends of one session (the later is kept). The baselines move on, so a turn end is neither lost nor recorded twice. A store migrated under the server stops it (S2 10.1). | A turn end is seen once, at one look; folding a kept `seen` into a later turn end of the same session would make that turn seen (B3's order) although the user had left. | 52 (10.3) |
-| B12 | The server judges "starts to need you" over the rows a page without a filter lists (it builds that list with `buildListMessage`). The first judgement, which records without notifying, is the first check made once a refresh has worked and the marks have been read (`Attention.ready()`, `NotifierDeps.ready`), not simply the first call: a start whose first refresh fails must not notify everything that already needed you at the next one. A session whose reason changes does not start to need you. `Pages.notify` sends only while no page has focus, to the page that had it last. | S2 13; a restart must not notify everything that already needed you. | 52 (13) |
+| B9 | Seen is held per page from the moment that page is focused with that session selected; any change of either starts the 1.5 s again (a window that comes back to the front sees after 1.5 s too). Typing into a terminal makes the session that terminal shows seen at once; typing is an `input` that is not `binary` and is not a report a terminal sends by itself, told by its shape — focus reports (`ESC [ I`, `ESC [ O`), SGR mouse reports (`ESC [ < … M` or `m`) and the answers to queries (device attributes, cursor position and status reports, mode reports, `CSI t`, the colours of OSC 4 / 10 / 11, DECRQSS; ruled on review 2 of task 53: the page swallows the queries, S2 9.3, but `isTyping` does not rely on it): `isTyping` (2.5) — a program that asks for focus reports (Claude Code is expected to, S2 9.2) gets one at every click, chord and return to the window, and none of them is typing. The user's own acts without a key are typing: the wheel in the alternate screen without a mouse mode and Alt+click (both arrive as arrow keys), an empty paste; a key whose encoding has a report's shape does not count — F3 with any modifier has the bytes of a cursor position report — and the hold's 1.5 s apply (ruled). A typing into a session already being seen calls no `onChange` listener (ruled on review 2 of task 53), so that nothing runs at every key press. A `seen` is written only when a hold completes or a typing comes and it clears a mark, or when a mark of a session already being seen becomes known (cleared at the look: a session in `take()` whose marks after that look's write would still hold an unseen end gets a `seen`; ruled for task 52), and always in the write of a turn end or window end of that session while the hold lasts; there is no periodic `seen` write (ruled). It is written on its own only for a session among the rows (`rows()`), so that a selection naming no session leaves no row; a `seen` in the write of that session's own end is kept whatever `rows()` says (the end makes the row; ruled on task 52's review 2). | S2 12.4 fixes the 1.5 s but not when the hold starts; a `seen` matters only when it clears a mark or goes with an end. Question 4 in section 7. | 53 (12.4) |
+| B10 | A window end is judged at each refresh after it was settled, for a terminal in state `ended` or `lost` (a keeper that died: its exit time is the server's clock) that started its program: recorded when its session's row is not running and marked `ended-unexpectedly`, not recorded when the session ended deliberately; judged once, at the first refresh where its row no longer runs and the row's last holder is gone: while the row still runs (a lost keeper's program lives on its SIGHUP for a moment), or while that holder still lives (its end event can be ingested before its exit, and `ended-unexpectedly` needs the holder gone; ruled 2026-11-15 09:47Z; reloading the rows while it waits is task 54's), it is left for the next refresh, and a terminal that leaves the list is forgotten (ruled on task 52's review 2; that the tick's `map()` closes such a lost terminal at once is task 57's). It is the same end when the stored `window_end_ns` equals the exit's time, so a server restart, which finds a lingering keeper again, never marks it twice. At the first start of a stage B server the table is empty, so each lingering keeper of an ended-unexpectedly session gets `ended` once (no notification, B12; one sentence in `docs/install.md`, task 56). | S2 12.4 reason 2 says "at the next refresh"; S2 14: a keeper that dies makes its session need you; a restart for an update must not bring back what the user saw. | 52 (12.4) |
+| B11 | A write the store refuses (busy, S2 14) is kept; the next look tries the kept writes again first, in their order, each as an entry of its own (`recordAttention` takes the writes in order), then its own; nothing is folded but two turn ends of one session (the later is kept). The baselines move on, so a turn end is neither lost nor recorded twice. Kept writes are tried again only at the look: while there are any, `refreshed()` and `seenNow()` put theirs behind them and touch no store (ruled: `seenNow` runs at every key press on some paths, and a busy store's 250 ms must not come per key). A refusal that is not busy (B2's limit; a damaged table) is logged by kind and dropped. The marks are read once, at the first look that can (a busy read: the next look); a read that fails otherwise (one damaged row makes `attention()` throw for every session; so does schema 2 without the table) leaves no marks, logged once by kind, and the look goes on (ruled). A store migrated under the server stops it (S2 10.1). | A turn end is seen once, at one look; folding a kept `seen` into a later turn end of the same session would make that turn seen (B3's order) although the user had left. | 52 (10.3) |
+| B12 | The server judges "starts to need you" over the rows a page without a filter lists (it builds that list with `buildListMessage`). The first judgement, which records without notifying, is the first check made once a refresh has worked, the marks have been read and nothing is kept (`Attention.ready()`, latched, `NotifierDeps.ready`; nothing kept: ruled on task 52's review 2, so that a busy store at the start cannot keep that refresh's window ends out of the first judgement), not simply the first call: a start whose first refresh fails must not notify everything that already needed you at the next one. A session whose reason changes does not start to need you. `Pages.notify` sends only while no page has focus, to the page that had it last. | S2 13; a restart must not notify everything that already needed you. | 52 (13) |
 | B13 | The page's words: a row that needs you has the reason on its second line — `needs you · <detail> · 3m` (`needs you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — also a row that is not running (an ended one), which then has two lines; the title bar starts with the count, whose text is `3 need you` (the dot before it is drawn by the style sheet on the count's element, in the rows' attention colour, not a character; ruled); the window title is `(3) skydeck`, and `skydeck` when none; a notification's body is `asks: <detail>` (`asks`), `finished`, `ended unexpectedly`. The detail is the live file's `waitingFor`, sanitised, trimmed and cut to 120 UTF-16 units with `…` (never inside a surrogate pair) by the view model (ruled; the blank test and the cut apply to the trimmed text, ruled on task 51's review 2); a `waitingFor` that is blank once sanitised (empty, or only white space) gives `detail: null` (ruled on task 51). | S2 12.2's and 13's examples; S2 12.4: "the reason on its second line"; a `waitingFor` has no length limit. Question 2 in section 7. | 51 (the cut, 12.4), 55 (the words, 12.2, 12.4) |
 | B14 | Ctrl+Shift+J selects the next id of `needYou.order` after the selected one, else the first; after the last the first. None: the key bar says `no session needs you`; only the selected one: it stays selected and the key bar says `no other session needs you`. When `needYou.count` is greater than the length of `order`, the key bar also says how many are hidden: `<n> more that need you are hidden by the filter or the fold` (with none shown, `<n> that need you are hidden by the filter or the fold`). While a dialog of stage D is shown (stage D's D2: `app.js` moves the keyboard nowhere and acts on no list key), Ctrl+Shift+J is a window chord like the others: it says `close the edit first (Esc)` and selects nothing. | S2 12.4 "pressed again it goes on"; the title bar's count includes rows the filter or the fold hides; an edit belongs to the session it was opened for. | 55 (12.4) |
 | B15 | The page asks for the permission only from a click on `Turn on notifications`, a button in the title bar shown while `Notification` exists and its permission is `default`. A `notify` is shown only with the permission `granted`, never for the session that is selected while the page has focus, with the session's title (sanitised) as title, B13's body and `tag` the session id. A click goes through the gate of a window chord (the one function of `app.js` through which stage D's task 37 passes every chord, D2): it calls `window.focus()` and selects the session through `select(id, 'chord')`; while a dialog is shown it only brings the window to the front, selects nothing, and the key bar says `close the edit first (Esc)` (ruled). | S2 13; a click must not move the keyboard out of a dialog half typed (stage D's review A, its finding 2). | 55 (13) |
@@ -431,17 +437,26 @@ export interface AttentionDeps {
 }
 export interface Attention {
   /** The one-second look (S2 10.3): readLiveFiles, trust, lookAt, then one recordAttention with the
-   *  writes kept from a refused one first, in their order (B11), and this look's turn ends and B9's
-   *  seen writes (only for ids among rows(); none periodic). The marks are read from the store at
-   *  the first look that can (only the server writes them). True when the facts changed. Never
-   *  throws: a busy store keeps the writes (B11) and logs its kind once until a write works again. */
+   *  writes kept from a refused one first, in their order (B11), and this look's turn ends (their
+   *  time the latest status time among the session's idle baselines after the look: an
+   *  after-file's sinceNs, `ends[].atNs` for a single holder; else the clock; ruled) and B9's seen
+   *  writes for each id of seen.take(): in the write of its end, else on its own, for an id among
+   *  rows(), when the marks after this write would still hold an unseen end (a mark that became
+   *  known while the hold lasts; ruled) — none periodic. The marks are read from the store at the first look that
+   *  can (only the server writes them). True when the facts changed. Never throws: a busy store
+   *  keeps the writes (B11) and logs its kind once until a write works again. */
   look(): boolean;
   /** After a refresh that worked: B10's window ends, with the seen of a session being seen in the
-   *  same write. True when the facts changed. Never throws, as look. */
+   *  same write; nothing is judged before the marks are read. True when the facts changed. Never
+   *  throws, as look. */
   refreshed(): boolean;
-  /** A session began to be seen (Seen.onChange): only B9's seen writes, now. As look. */
+  /** A session began to be seen (Seen.onChange): only B9's seen writes, now; with writes kept they
+   *  join them for the next look and no store is touched. Cheap, never blocking per call: it runs
+   *  at every key press on some paths (ruled). As look. */
   seenNow(): boolean;
-  /** B12: true once the marks have been read and a refresh has worked (refreshed() was called). */
+  /** B12: true once the marks have been read, a refresh has worked since (refreshed() was
+   *  called) and nothing is kept, so that that refresh's window ends are in the first judgement
+   *  also when a busy store kept them (ruled); once true, it stays true. */
   ready(): boolean;
   facts(): AttentionFacts;
 }
@@ -709,22 +724,58 @@ becomes a `LookedFile` (one that throws is not read at this look); `gone`, for t
 without a file: `Proc.stat` null, or a process start other than the baseline's (a throw: not
 gone); `lookAt`; one `recordAttention` with the kept writes first, in their order, each as its own
 entry, then this look's turn ends (their time, else the clock) and B9's seen writes for the ids of
-`seen.take()` that are among `rows()` (B11, B9); the stored rows replace the facts' marks. A
-RangeError of `recordAttention` (B2's limit at 2^53 − 1) is a failure of the write that is not
-"busy": logged by kind, not kept and retried at every look (ruled on task 50's review 1). `refreshed()`: B10 over `hub.list()` and `rows()`; the session a terminal held is
-the one it shows, else the one it was opened for (`sessionId ?? expectedSessionId`). Every log line names a kind or a
-count, never a session's text. `createNotifier`: `check()` diffs `needs()` with the last
-judgement through `startsToNeed` and sends one `NotifyMessage` per new one.
+`seen.take()` that are among `rows()` (B11, B9; a `seen` that rides in the write of that session's
+own end is kept whatever `rows()` says: ruled on task 52's review 2); the stored rows replace the facts' marks. A turn
+end's `turn_ended_ns` is EXACTLY the after-file's `sinceNs` (`ends[].atNs`), the clock only when it
+is null: task 51's `attentionOf` compares it with the status time for equality (ruled); with several
+holders it is the latest status time among that session's idle baselines after the look (ruled on
+review 1 for two holders that end at one look, and on review 2 for one whose idle file a look
+missed), always an after-file's `sinceNs` and never earlier than the time B5 shows. At each look a session in `take()` whose
+marks after this write would still hold an unseen turn end or window end gets a `seen`, a write only
+when there is something to clear (a mark that becomes known while the hold already lasts; ruled).
+Kept writes are tried again only at the look: while there are any, `refreshed()` and `seenNow()`
+put theirs behind them and touch no store, so that `seenNow`, which runs at every key press on the
+path of a terminal that is not the selection of a focused page (measured: 200 keys, 200 calls), is
+cheap and never blocks per call (ruled). A RangeError of `recordAttention` (B2's limit at 2^53 − 1)
+is a failure of the write that is not "busy": logged by kind, not kept and retried at every look
+(ruled on task 50's review 1); so is any other refusal that is not busy (a `seen` that would still
+clear a mark is made anew at the next look or key while the hold lasts, each try refused at once).
+A live file's time past 2^63 − 1 ns is unknown (no INTEGER column holds it; review 2), so that one
+foreign file cannot make every session's write fail. The marks are read once,
+at the first look that can (a busy read: tried again at the next look); a read that fails otherwise
+— one damaged `attention` row makes `attention()` throw for every session, and a `schema_version`
+of 2 without the table makes every call throw `no such table` — is taken as no attention facts,
+logged once by kind, and the look goes on (ruled). `refreshed()`: B10 over `hub.list()` and
+`rows()`, nothing before the marks are read, and a terminal whose row still runs, or whose row's last holder still lives (`lastHolding.alive`; ruled 2026-11-15 09:47Z), not yet (ruled on task 52's review 2);
+`ready()` is latched and also needs that nothing is kept (ruled on task 52's review 2); the session a terminal held is the one it shows, else
+the one it was opened for (`sessionId ?? expectedSessionId`). None of the three throws (ruled: they
+are the tick and Seen's listener, and task 53's `seen` drops a throw out of a completed hold and
+lets one out of `typed` reach the pages' input path): each catches its own failures and logs them
+by kind, once until that work works again. Every log line names a kind or a count, never a
+session's text. `createNotifier`: `check()` diffs `needs()` with the last judgement through
+`startsToNeed` and sends one `NotifyMessage` per new one.
 
 **Tests** (platform: `testPlatform` through `testDeck`; live files written by the test, trusted
-through the fake `/proc`, as `test/helpers/session-files.ts`'s `startRunning`)
+through the fake `/proc`, as `test/helpers/session-files.ts`'s `startRunning`; the one case of a
+keeper this test kills also uses `registrySandbox`, on `realTestPlatform`, A36)
 - A busy file, a look, the same file idle, a look → one row with `turnEndedSeq` and the file's
-  status time; `facts().live` says `idle`; the first look of a new module records nothing for a
-  file that was idle already.
+  status time, exactly; `facts().live` says `idle`, and `attentionOf` over `facts()` says
+  `finished` (ruled: the end-to-end case); `updatedAt` without `statusUpdatedAt`, and neither (the
+  clock) → finished too; the first look of a new module records nothing for a file that was idle
+  already; two holders of one session that end at one look → one turn end with the later time,
+  finished, in either order; a holder whose idle file a look missed, seen ending later with an
+  earlier time → the latest idle time, finished; a holder idle since later whose file this look
+  cannot read still counts (the baselines, not only the files read); a holder still busy lends no
+  time;
+  `statusUpdatedAt` before `updatedAt`; a time past 2^63 − 1 ns → unknown, and the other sessions'
+  turn ends of that look are stored (review 2).
 - While `seen.take()` gives the session, a turn end and its seen are one write (seen = turn + 1);
   a hold that starts on a finished session writes seen at once; a hold over a session without a
   mark writes nothing, at that look and at every later one (no periodic write, ruled); a seen for
-  an id that is no row's writes nothing and creates no row (F6).
+  an id that is no row's writes nothing and creates no row (F6), but a held session that is no row
+  yet and ends a turn gets its seen in that write (ruled); marks read only at a later look
+  (a busy read) while the hold lasts → the seen at that look (ruled); `seenNow` with nothing to
+  clear reads and writes nothing (200 calls).
 - A file that cannot be parsed between the busy and the idle look keeps the baseline: the end is
   recorded; a file removed and its pid gone drops the baseline, and so does its pid taken by a
   process with another start (a dead holder's `waiting` does not stay); `/proc` that throws drops
@@ -735,14 +786,34 @@ through the fake `/proc`, as `test/helpers/session-files.ts`'s `startRunning`)
   with a kind; the next look after the lock is gone writes it once; a second turn end of that
   session meanwhile is folded (the later one stored); a kept `seen` (a hold completed while the
   store was locked), then the user gone and a turn end of that session, then the lock gone →
-  `turn_ended_seq` greater than `seen_seq`, so the session is `finished` (F4); the store migrated by
-  another connection → `storeNewer` once, nothing written, later calls do nothing.
+  `turn_ended_seq` greater than `seen_seq`, so the session is `finished` (F4); a kept turn end with
+  its seen (the user was looking), then the user gone and a later turn end → the fold keeps that
+  seen and the later turn is finished; a kept turn end that lands while `take()` gives the session
+  → seen after it, not finished (ruled); while writes are kept, `seenNow` (200 calls) and
+  `refreshed()` try no write, and theirs come after the kept ones at the next look; the store
+  migrated by another connection → `storeNewer` once, nothing written, later calls do nothing;
+  B2's limit → logged by kind, not kept, not tried again.
+- A damaged store (ruled): one damaged `attention` row, and a `schema_version` of 2 without the
+  table → no marks, the read's failure and the write's logged once each by kind, a session that
+  asks still asks, `ready()` true after a refresh.
 - B10: a terminal `ended` with an exit, its row not running with `ended-unexpectedly` →
   `windowEndSeq` and the exit's time; a `lost` one (its exit's time is the server's clock) → the
-  same; a deliberate end (no mark) → nothing; the row running again → nothing; a second
-  `refreshed` → nothing more; a new module over a store that holds that exit's time (a server
-  restart) → nothing; a `not-started` terminal → nothing.
-- `ready()`: false until the marks are read and `refreshed()` was called; true after.
+  same, also with a keeper this test started and killed by the pid in its record, on the real
+  registry (F7, ruled); a deliberate end (no mark) → nothing; a row that still runs → not judged
+  yet, judged at the first refresh where it no longer runs, then once (ruled); the refresh between
+  the end event and the holder's exit (the row not running, its last holding alive, no mark yet)
+  → nothing, and the next one, with the holder gone and the mark there, → the window end (ruled); a session that is no
+  row → judged at once, to nothing; a new module over a store that holds that exit's time (a
+  server restart) → nothing, another exit time → recorded; a `not-started` terminal, or a `lost`
+  one whose program never started → nothing; before the marks are read → nothing, judged at the
+  first refresh after; two ended terminals of one session at one refresh while it is seen → the
+  seen after both ends.
+- `ready()`: false until the marks are read and `refreshed()` was called; true after (a refresh
+  before the marks are read does not count); a busy store at the start keeps it false until that
+  refresh's window ends are stored, and with a notifier over `facts()` nothing notifies; once true
+  it stays true (ruled).
+- Never throws (ruled): a `take()` that throws, a `hub.list()` that throws, a store that fails every
+  write under Seen's `typed` → each logged once by kind, false, nothing thrown.
 - The notifier: while `ready()` is false nothing is judged; the first check once it is true sends
   nothing — also when `needs()` was empty before and is full then (review B, B1); a session that
   comes to need you after that → one message with its title, reason and detail; it again at the
@@ -821,9 +892,117 @@ Ctrl+Shift+J as a key that acts, and no page test can show a notification; `npm 
 
 ---
 
+### Task 57: A lost keeper's own program is not "elsewhere"
+
+**Depends on:** 0; stage D's task 36 (on `main`) · **Wave:** 3, merges before 54 · **Design:** S2 7.5 (a terminal's program), 7.8 (a lost keeper; "a terminal whose program may still run is never dropped this way"), 7.9, 14 ("A keeper dies") · **Contracts:** none (stage A's `mapTerminals` and `Mapping` keep their signatures) · **Decisions:** none (update S2 7.5, its first bullet) · **Shared files:** `src/window/tick.ts` (a comment), `test/window/tick.test.ts`. Order (1c): D 36 → B 57 → B 54 → C 74. Found by task 52's review 2 on `main` 27d6e0e; added and ruled on 2026-11-15.
+
+**Goal.** S2 14 promises that after a keeper dies its session needs you (12.4's `ended`, which
+task 52 judges, B10). The program gets SIGHUP, runs its `SessionEnd` hooks and ends a moment
+later; the server knows the loss at once (`lose()` makes the exit up at once, S2 7.8) and the
+next refresh comes 0–2 s later. On `main` the mapping counts a terminal's program only while the
+terminal has no exit, so a lost terminal's own living program counts as outside every terminal:
+its session is "running in another terminal" (7.9) and the tick closes the lost terminal as "its
+session runs elsewhere" — after which no terminal is left whose window end could be recorded.
+This task makes S2 7.8's sentence true: a terminal whose program may still run is never dropped
+this way — for a lost terminal, for 60 seconds after the loss (ruled on review 2; 7.8 says so
+too).
+
+**Files**
+- Modify: `src/window/mapping.ts` (the programs of `mapTerminals`; the private `keeperExitApplied`
+  and `lives`), `src/window/tick.ts` (the comment of `map()` only), `docs/design-step-2.md` 7.5
+  (the first bullet), this plan
+- Test: `test/window/mapping.test.ts` (a block before "with real programs"),
+  `test/window/tick.test.ts` (a block after "ended terminals")
+
+**Behaviour.** How a terminal knows its own program once its keeper is gone: from the keeper's own
+report, which the registry keeps — `TerminalInfo.program`, the pid AND the process start of the
+program the keeper sent in `T` or `hello` (S2 7.5, 8.1) — never from a pid alone (a pid is
+reused). A terminal's program counts in the mapping (S2 7.5) while the terminal has no exit (as
+before), and also while it has an exit that is not an applied one its keeper sent — its state is
+neither `ended` nor `not-started`: `lost`, or `lose()`'s made-up exit still on its way through the
+screen side — as long as the program may still run by design 5.5 and the loss is less than 60
+seconds old. The program is gone only when `/proc/<pid>/stat` is gone or names another process
+start than the reported one; what cannot be told — a read that throws, or a stat line without a
+readable start — may still run and counts (ruled on review 2: Proc's contract, "a process that
+could not be read is never taken for one that is gone"; a read that failed once and works a moment
+later in `holderPlace` must not make the session `elsewhere`). It errs only towards keeping:
+`holderPlace` matches a program by pid AND start, so a pid another process took never reaches it.
+The age of the loss is the lost exit's `atNs` (the server's clock when `lose()` made it up)
+against the `nowNs` the tick already passes to `mapTerminals` (the mapping reads no clock): less
+than 60 s → counted; 60 s or more → as on `main` (the program is outside, the session
+`elsewhere`, the tick closes the lost terminal, and 7.9's card names the holder's pid and tty); a
+clock that stepped back since gives a negative age and keeps it (never closed early); a time that
+is no decimal number counts it out (ruled on review 2: a program that never ends after the
+hangup must not leave a row that looks healthy, a refused Resume and a lost terminal on no row
+for ever). An exit the keeper sent
+comes after it reaped the program, so such a terminal's program never counts (the case "an ended
+terminal keeps the session it showed; its old program pid is no one" stays as it is). So while the
+lost program may still run and the loss is less than 60 s old, the terminal shows its session,
+the session is not `elsewhere`, and the tick does not close the terminal; once the program is
+gone the terminal is an ended one as any other —
+its exit stays the lost one, the row is not running and marked `ended-unexpectedly`, and task 52's
+module judges it. A session that really runs elsewhere — in a program outside the window, or in
+another terminal — still closes its ended terminal, as before. A session held by the lost program
+AND by a process outside is not elsewhere until the program is gone or the loss is 60 s old; then
+the terminal is closed (as for a running terminal: one holder in a terminal is enough). `holderPlace` and
+`src/window/in-window.ts` are unchanged, and so is every other decision of the mapping and the
+tick.
+
+**Tests** (unit: `testPlatform`'s fake `/proc`; end to end: `windowDeck`, `realTestPlatform`)
+- `mapping.test.ts`: a lost terminal whose program lives (its stat line names the reported
+  start) → its holder is the terminal's: shown, not elsewhere, not unknown, never `notReported`;
+  the same while the state is still `reconnecting` or `running` with the exit, and for a holder
+  below the program (a wrapper); a session held by the lost program and by a process outside →
+  not elsewhere; the program gone → not counted, its holder gone, a holder outside → elsewhere;
+  its pid another process's now (another start) → never the terminal's, also for the dead
+  program's own holder record (starts 899 and 901: the input on which the start check decides);
+  its stat line unreadable or without a start → counted (the holder being the program: shown, not
+  elsewhere, not unknown; a holder below it: shown, not elsewhere, unknown); a read that fails
+  once (EMFILE) and works a moment later → shown, not elsewhere, not unknown, for both shapes;
+  the loss 0 s, 59 s, 60 s − 1 ns old → counted, 60 s, 61 s, an hour → elsewhere as on `main`; a
+  clock that stepped back an hour → counted; an exit time that is no decimal number → elsewhere,
+  no throw; an exit the keeper sent (`ended`, `not-started`) → the program never counts, even
+  with its pid and start alive.
+- `tick.test.ts`: a lost terminal whose own program lives → not closed, its session not
+  elsewhere, `setSession` with it; once the program is gone → still not closed, its exit the lost
+  one, the row `not-running`; then the session running in a program outside → closed; the fake
+  clock 59 s after the loss → kept, 61 s → closed with the holder's pid in `elsewhere()`; the clock
+  stepped back an hour → kept; lost terminals whose programs live but whose sessions run in
+  another program and in another terminal → both closed (as before).
+- End to end (`tick.test.ts`, a real registry and keeper): `claudeCommand` is a `sh` the test
+  writes, which runs the stand-in as its child and, at SIGHUP, waits for a file the test creates
+  (200 rounds of `sleep 0.1`, and not past the sandbox). At a hangup only the session leader gets SIGHUP, so
+  the stand-in, which holds the session, lives on until the `sh` ends; then the kernel hangs it up
+  too and it ends as at a hangup (`SessionEnd` with reason `other`). The test kills ITS OWN keeper
+  by the pid of that keeper's `.pid` record (`keeperOf`, `signalKeeper`; nothing else is
+  signalled). Once the terminal is `lost`, a refresh while the holder demonstrably lives (no `hup`
+  or `exit` record, the row still running) → the terminal is not closed and the session not
+  elsewhere; then the file, the stand-in's `exit` record, the holder's process gone (the record
+  comes a moment before the exit, and `ended-unexpectedly` needs the last holder gone), refreshes
+  until the row is `not-running` → the terminal is still there, `lost`, its exit `{ code: null, signal: 1 }`, the
+  row marked `ended-unexpectedly`. It fails on `main` 27d6e0e (the terminal is closed at the
+  first refresh after the loss) and passes with the fix. It holds the shape "the holder below the
+  program"; the real `claude` is the program itself, a shape the mapping's cases carry (the
+  states on the way, the holder being the program). An `after` hook registered before
+  `windowDeck`'s releases the `sh`, kills the test's own keeper while it runs and waits for the
+  stand-in's `exit` record, so that a failure half way leaves no process and no sandbox.
+
+**Done when:** a lost terminal whose program still runs is never closed as "its session runs
+elsewhere" within 60 s of the loss, and is as on `main` after; every existing case of `mapping.test.ts`, `tick.test.ts`, `terminals*.test.ts` and
+`server*.test.ts` passes unchanged; `npm run check` passes.
+
+**Not in it:** NAMED LIMIT — a wrapper `claudeCommand` whose program (the wrapper) dies at the
+SIGHUP before its `claude` child: the child is given to init, its chain leaves every terminal, it
+counts as outside, and the lost terminal is closed while the child runs its end, as today (ruled
+2026-11-15). NAMED LIMIT — a program that ends 60 s or more after the loss: the lost terminal was
+closed at 60 s, so that end is not marked in the window (ruled). The attention itself (52) and its wiring (54). The stand-in is not changed (the
+end-to-end case needs no option of it).
+
+---
+
 ### Task 54: The server assembly, and attention end to end
 
-**Depends on:** 52, 53, 55; stage D's task 36 (ruled order) · **Wave:** 3 · **Design:** S2 8.2.7 (several windows), 10.1, 10.3, 12.4, 13, 14, 17.3, 17.4 · **Contracts:** 2.7 · **Decisions:** B20 (update S2 8.2.7, after its paragraph) · **Shared files:** `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`, `test/window/tick.test.ts`, `test/helpers/pages.ts` (`startPages` passes `seen`). Order (1c): D 36 → B 54 → C 74. On top of D 36: `tick.ts` has `reloadNow` and `server.ts` gives the actions `changed`, `fetchPrs` and `refreshPrs`, and its stop waits for their background fetches — B's lines go beside them (`listFor`'s `attention`, `seen.stop()` after D's in the stop), and an edit's `reloadNow` brings the attention facts along through `listFor`.
+**Depends on:** 52, 53, 55, 57 (merges first); stage D's task 36 (ruled order) · **Wave:** 3 · **Design:** S2 8.2.7 (several windows), 10.1, 10.3, 12.4, 13, 14, 17.3, 17.4 · **Contracts:** 2.7 · **Decisions:** B20 (update S2 8.2.7, after its paragraph) · **Shared files:** `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`, `test/window/tick.test.ts`, `test/helpers/pages.ts` (`startPages` passes `seen`). Order (1c): D 36 → B 57 → B 54 → C 74. On top of D 36: `tick.ts` has `reloadNow` and `server.ts` gives the actions `changed`, `fetchPrs` and `refreshPrs`, and its stop waits for their background fetches — B's lines go beside them (`listFor`'s `attention`, `seen.stop()` after D's in the stop), and an edit's `reloadNow` brings the attention facts along through `listFor`.
 
 **Goal.** Wire 52, 53 and 55 into the running server so that a real turn end, a real selection
 and a real typing in a real page do what S2 12.4 and 13 say, in every window.
@@ -962,6 +1141,7 @@ sandbox: `show` and others read the real `~/.claude`, an agent's shell has `CLAU
 | 2 (principle 4: no content in logs) | 52, 54 (the marker case) |
 | 4.3 (`src/claude/terminal.ts`, `src/window/view/`) | 53, 51 |
 | 4.4 (`src/store/`, B) | 50 |
+| 7.5, 7.8, 7.9 (a lost keeper's program while it lives) | 57 |
 | 8.2.3 (`list`'s attention, `notify`) | 51, 54, 55 |
 | 8.2.7 (several windows) | 54 |
 | 10.1 (the one-second look; the guard) | 52, 54; 50 (tests) |
@@ -972,7 +1152,7 @@ sandbox: `show` and others read the real `~/.claude`, an agent's shell has `CLAU
 | 12.4 (reasons, seen, marks, Ctrl+Shift+J) | 51, 52, 53, 55, 54 |
 | 12.9 (Ctrl+Shift+J, the help) | 55 |
 | 13 (notifications) | 52, 54, 55 |
-| 14 (a busy store) | 50, 52, 54 |
+| 14 (a busy store; a keeper dies) | 50, 52, 54; 57 |
 | 16 (install, doctor: unchanged), 16.5 (updating) | B19; 1b, 50 (`install.md`, "Updating"), 56 |
 | 17.3, 17.4 | 52, 53, 54, 55 |
 | 18 (W3's title, W11, W19, W21) | 56 |
