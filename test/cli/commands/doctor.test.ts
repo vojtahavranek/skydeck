@@ -514,3 +514,54 @@ describe('doctor: arguments', () => {
     assert.equal(command.summary, 'Check the installation');
   });
 });
+
+describe('doctor: the terminal line (S2 16.3, 16.4; plan task 77)', () => {
+  const terminalLines = (r: DoctorRun): string[] =>
+    r.lines.filter((line) => /^\S+ +terminal: /.test(line));
+  const wezterm = (r: DoctorRun): string[] =>
+    r.runner.calls
+      .filter((call) => call.command.startsWith('wezterm'))
+      .map((call) => [call.command, ...call.args].join(' '));
+
+  test('"terminal": "window": its ok line; no terminal program is asked', async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(d.places.configPath, '{"terminal":"window"}');
+
+    const r = await doctor(d);
+
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.deepEqual(terminalLines(r), [
+      'ok       terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)',
+    ]);
+    assert.deepEqual(wezterm(r), []);
+  });
+
+  test('"terminal": "here" (and no setting): the line as before', async (t) => {
+    for (const config of ['{"terminal":"here"}', '{}']) {
+      const d = await installedMachine(t);
+      writeFileSync(d.places.configPath, config);
+
+      const r = await doctor(d);
+
+      assert.deepEqual(
+        terminalLines(r),
+        ['ok       terminal: here (sessions start in the terminal skydeck runs in)'],
+        config,
+      );
+      assert.deepEqual(wezterm(r), [], config);
+    }
+  });
+
+  test('"terminal": "wezterm": the lines as before', async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(d.places.configPath, '{"terminal":"wezterm"}');
+    const ok = await doctor(d);
+    assert.deepEqual(terminalLines(ok), ['ok       terminal: wezterm answers']);
+    assert.deepEqual(wezterm(ok), [LIST]);
+
+    const failed = await doctor(d, { answers: { [LIST]: { code: 1 } } });
+    assert.deepEqual(terminalLines(failed), [
+      'problem  terminal: wezterm cli --no-auto-start list failed (exit 1); is a WezTerm window open?',
+    ]);
+  });
+});

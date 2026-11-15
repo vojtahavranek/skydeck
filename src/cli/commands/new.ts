@@ -1,6 +1,7 @@
 // `skydeck new [--label <text>] [--group <text>] [--here | --tab | --window] [-- <claude flags>]`
-// (design 7.7; S2 11.4: `--window` sends the directory, label, group and flags to the window's
-// server, src/cli/window-requests.ts).
+// (design 7.7; S2 11.4: `--window`, or `"terminal": "window"` without `--here`, sends the directory,
+// label, group and flags to the window's server, src/cli/window-requests.ts; plan C13's whereFor
+// decides).
 import { UsageError } from '../../platform/errors.ts';
 import { prepareNew } from '../../sessions/resume.ts';
 import { parseCommandArgs } from '../args.ts';
@@ -8,7 +9,7 @@ import type { ArgSpec, ParsedArgs } from '../args.ts';
 import type { Command } from '../command.ts';
 import { withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
-import { launchWhere } from '../launching.ts';
+import { launchWhere, whereFor } from '../launching.ts';
 import { newInWindow } from '../window-requests.ts';
 
 const SPEC: ArgSpec = {
@@ -62,8 +63,9 @@ export const command: Command = {
       ctx.io.stdout(SPEC.usage);
       return EXIT.ok;
     }
-    const where = whereFrom(parsed, SPEC.usage);
+    const flag = whereFrom(parsed, SPEC.usage);
     return withDeck(ctx, { refresh: true }, async (deck) => {
+      const where = whereFor(deck.config, flag);
       if (where === 'window') {
         // The window's server checks and prepares it as this command would (S2 8.3).
         return newInWindow(ctx, deck, {

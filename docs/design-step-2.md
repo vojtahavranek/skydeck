@@ -2043,9 +2043,20 @@ gives them back when its program never started (7.8).
   server refuses (a label over 1,024 bytes; a prompt after `--` over 64 KiB, which the command
   refuses so before it sends anything) with `; use --here` (plan C 2.5). A connection that fails
   after the request reached the server and before its answer says that the server may have
-  started the session (or the restore), as the 30 seconds do. With
-  `"terminal": "window"`, `--tab` means the window too, and so does `R` in the interactive list,
-  whose lines end before `, or use --here`; `R` opens no window.
+  started the session (or the restore), as the 30 seconds do. With `"terminal": "window"`, no
+  option and `--tab` mean the window too and `--here` this terminal (plan C13; with `"here"` or
+  `"wezterm"` only `--window` goes to the window), and so does `R` in the interactive list, whose
+  lines end before `, or use --here`; `R` opens no window. `R` sends `POST /resume` (nothing is
+  prepared or locked in the list) and shows the answer the way it shows a tab launch's: `opened
+  <short> in the window` and the answer's lines — with `; no window is open; run skydeck window`
+  when no page is connected; when the server's status cannot be read after the answer, nothing
+  more is said —, a refusal (codes 2–4) or a line of plan C 2.5 as the message line, and for a
+  failed launch `starting <short> in the window failed; the details are printed when the list
+  ends`, its lines (sanitised) printed when the list ends; an answer without lines (a server of
+  another build) names its code instead. Named limits (ruled, task 77's review 2): a line longer
+  than the terminal is cut in the list's message line, the advice at its end with it (the command
+  line prints it whole); and the list paints nothing while `R` waits for the answer — up to the
+  30 seconds while the server is starting —, and a key typed meanwhile acts only after it.
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
   sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
   after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
@@ -2056,8 +2067,10 @@ gives them back when its program never started (7.8).
   window terminal (11.3), the selected entries in the set's order. Each terminal starts at the area
   the page that had focus last reported (8.2.6), read when that terminal is opened; the
   configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`)
-  is the one the server read at its start. The command prints each report line as it arrives and
-  exits with design 7.8's code for the outcome. **A restore asked for so stops when its command
+  is the one the server read at its start. The command prints each report line on stdout as it
+  arrives (sanitised), heartbeats too, and exits with design 7.8's code for the outcome; with 5
+  (the run was stopped) it adds `skydeck: restore stopped before it finished; see above` on stderr
+  (plan C14). **A restore asked for so stops when its command
   goes**: when the command's connection closes before the outcome (Ctrl+C, as in step 1), the run
   stops at its next step — `stopped: the command that asked for it stopped`, the sessions already
   opened go on starting, the rest are `not started`, then the finished line (to the pages); the
@@ -3123,7 +3136,7 @@ New keys, all optional:
 
 | Key | Default | What it does |
 |---|---|---|
-| `terminal` | `"here"` | Gains the value `"window"` (11.4). |
+| `terminal` | `"here"` | Gains the value `"window"` (11.4): `resume` and `new` without an option or with `--tab`, `restore` and the interactive list's `R` start their sessions in the window, through its server, which `skydeck window` must have started; `--here` still starts one in this terminal (plan C13). Any other value is refused as every key of the file is: `<file>: "terminal" must be "here", "wezterm" or "window"`. `doctor` names it: `ok terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)`. |
 | `window.port` | `47613` | The server's port on `127.0.0.1` (5.2). A whole number from 1 to 65535: 0 ("the system picks") is not a setting; tests give it to the server directly (17). |
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
@@ -3481,6 +3494,9 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404? Answered for Chromium by the page suite (17.4, plan task 26): no, the worker keeps answering and stays registered; Edge itself is still to be checked here. | A | 15.3 |
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
+| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
+| W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
+| W29 | **Real claude**, on the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
@@ -3530,12 +3546,14 @@ configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` 
 `(in the skydeck window)`. Check W16.
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
-and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3) and the
-pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
+and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3), the header's
+one line for the pull requests and the pull-request dialog that lists each on a line of its own;
+the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
 the group chip and `ticketUrl` (12.5, 16.4; asked for by the user on 2026-11-15, the details
 ruled by the lead that day). Also two parts of 12.5 that no stage named before (plan D's D11): ↻
 in the pull-request dialog, which reads the session's pull requests now (`pr-refresh`, 8.2.3), and
-the header's "opened <time> · last active <age>" with where the title comes from.
+the header's "opened <time> · last active <age>" with where the title comes from. Checks
+W27–W29.
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
 the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The

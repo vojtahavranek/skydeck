@@ -1,5 +1,6 @@
-// `skydeck resume <ref> [--here | --tab | --window]` (design 7.6; S2 11.4: `--window` sends the
-// session id to the window's server, src/cli/window-requests.ts).
+// `skydeck resume <ref> [--here | --tab | --window]` (design 7.6; S2 11.4: `--window`, or
+// `"terminal": "window"` without `--here`, sends the session id to the window's server,
+// src/cli/window-requests.ts; plan C13's whereFor decides).
 import { UsageError } from '../../platform/errors.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { resolveRef } from '../../sessions/refs.ts';
@@ -9,7 +10,7 @@ import type { ArgSpec, ParsedArgs } from '../args.ts';
 import type { Command } from '../command.ts';
 import { withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
-import { launchWhere } from '../launching.ts';
+import { launchWhere, whereFor } from '../launching.ts';
 import { resumeInWindow } from '../window-requests.ts';
 
 const SPEC: ArgSpec = {
@@ -49,10 +50,11 @@ export const command: Command = {
       ctx.io.stdout(SPEC.usage);
       return EXIT.ok;
     }
-    const where = whereFrom(parsed, SPEC.usage);
+    const flag = whereFrom(parsed, SPEC.usage);
     const [ref = ''] = parsed.positionals;
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const row = resolveRef(ref, loadRows(deck));
+      const where = whereFor(deck.config, flag);
       // The window's server prepares the resume itself, through the guard and the lock (S2 8.3).
       if (where === 'window') return resumeInWindow(ctx, deck, row.id);
       // The guard refreshes again by itself and decides on the rows of that refresh, not on these.
