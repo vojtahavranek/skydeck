@@ -396,7 +396,9 @@ export interface Seen {
   /** The sessions being seen now: held by a focused page for 1.5 s or since a typing, and those
    *  typed into since the last call (given once). */
   take(): Set<string>;
-  /** A session began to be seen (a hold completed, a typing). Listeners must not throw. */
+  /** A session began to be seen (a hold completed, a typing). Listeners must not throw; a throw
+   *  out of a completed hold is dropped so that the timer cannot end the server; `typed` throws
+   *  only if a listener throws. */
   onChange(listener: () => void): () => void;
   /** Every timer stopped (the server's stop). */
   stop(): void;

@@ -307,3 +307,16 @@ test('onChange: once per completed hold and once per typing; off() ends it', (t)
   clock.advanceMs(1500);
   assert.deepEqual(calls.slice(6), ['b']);
 });
+
+test("a listener that throws out of a completed hold does not throw out of the clock's timer", (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  seen.onChange(() => {
+    throw new Error('a listener broke its contract');
+  });
+  const p = page();
+  seen.focus(p, true, S1);
+  assert.doesNotThrow(() => clock.advanceMs(1500));
+  assert.deepEqual(seen.take(), new Set([S1]), 'the hold completed');
+  assert.equal(clock.timers(), 0);
+});
