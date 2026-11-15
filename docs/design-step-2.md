@@ -327,7 +327,9 @@ After a WSL restart, a crash of the server or `--stop`, no old server is there t
 but the old window may still be open, and its page connects a few seconds after the new server's
 start is done (6.3). So the server keeps the `kv` entry `window_pages_open` while pages are
 connected (10.2), and a server that finds it at its start **expects a window back**: from the end
-of its start until a page connects or 7 seconds have passed, and says so in `GET /status`
+of its start until a page connects or 7 seconds have passed — counted on a clock that cannot step,
+so that a step of the wall clock neither stretches nor shortens them (ruled by the plan owner, plan
+task 74) —, and says so in `GET /status`
 (`windowExpectedMs`, 8.3). The wait is the server's fact, not each command's guess: unless
 `--new-window`, `--print-url` or `--new-secret` (its old windows are refused, so none comes back),
 step 2 first reads `GET /status`, and while the server is starting with `windowExpectedMs` set, or

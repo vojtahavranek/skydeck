@@ -5,13 +5,20 @@
  * `server.sock`, finds the keepers left running, points the interop link, and starts the tick
  * (tick.ts); `stop` is S2 5.5. The command `skydeck serve` (src/cli/commands/serve.ts) runs it in a process of its own;
  * tests run it in theirs (A19), so nothing here touches the process itself (signals, exit).
+ *
+ * Stage C (plan C task 74) wires in: `server.sock`'s `POST /resume` and `/new` through the one way
+ * the window starts a session (launches.ts), answered as the command would end (C2); the restorer
+ * (restorer.ts) behind `act restore`, `act dismiss-restore` and `POST /restore`, with the banner in
+ * every list (C6–C9, C22); the 503 of those routes while the server starts or stops (C4); and the
+ * pages mark with `GET /status`'s `windowExpectedMs` (page-mark.ts, C20). The server adds no rule
+ * of its own.
  */
 import { join } from 'node:path';
 
 import pkg from '../../package.json' with { type: 'json' };
 import { procStartFromStat } from '../claude/procstat.ts';
 import { SkydeckError } from '../platform/errors.ts';
-import type { HttpListener, Platform } from '../platform/types.ts';
+import type { HttpListener, Ns, Platform } from '../platform/types.ts';
 import { openDeck } from '../sessions/deck.ts';
 import type { LaunchSpec, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
@@ -26,18 +33,23 @@ import type { KeeperHello } from './frames.ts';
 import type { ActionHandler, TerminalHub } from './hub.ts';
 import { createInteropFrom, probeSocket } from './interop.ts';
 import { createKeepAlive } from './keepalive.ts';
+import { createLaunches } from './launches.ts';
+import type { Launched } from './launches.ts';
 import { rotateLog, serverLog } from './log.ts';
+import { createPageMark } from './page-mark.ts';
 import { createPages } from './pages.ts';
 import type { PageState } from './pages.ts';
 import { formatPidLine, parsePidLine } from './pidline.ts';
 import { createPrFetches } from './pr-fetches.ts';
 import type {
   KeepAlivePayload,
+  LaunchAnswer,
   ListMessage,
   NoticeMessage,
   PingAnswer,
   StatusAnswer,
 } from './protocol.ts';
+import { createRestorer } from './restorer.ts';
 import {
   prepareRuntimeDir,
   readServerJson,
@@ -114,6 +126,24 @@ const BUSY_AT_START =
   "the window's server cannot start: skydeck's database is busy (another skydeck holds it); try again";
 /** How long the python3 check at start may take. */
 const PYTHON_CHECK_MS = 5000;
+/** Plan C7, S2 8.2.6: a terminal's first size while no page has reported its area. */
+const DEFAULT_SIZE = { cols: 120, rows: 40 };
+/** Plan C2: a launch of `POST /resume` or `/new` that met a store another process keeps locked. */
+const BUSY_LAUNCH = "skydeck: skydeck's database is busy; try again";
+/** The rows before the first tick: one array, so that the banner's cache holds (task 73). */
+const NO_ROWS: readonly never[] = [];
+
+/**
+ * Plan C2: a launch as `skydeck resume` / `new` would end — its exit code and its stderr lines. A
+ * refusal's message lines (launches.ts: no prefix, sanitised) as `failureText` prints them, with
+ * `skydeck: ` before the first; a launch's lines (launchPrepared's) as they are.
+ */
+function launchAnswer(launched: Launched): LaunchAnswer {
+  const { code, lines, sessionId } = launched;
+  if (!launched.refused) return { code, lines, sessionId };
+  const [first = '', ...rest] = lines;
+  return { code, lines: [`skydeck: ${first}`, ...rest], sessionId: null };
+}
 
 /**
  * S2 6.1, 8.2.3: the notices a keep-alive state change gives the pages. `keepalive-lost` when it
@@ -245,6 +275,18 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     lockTaken = true;
 
     const log = serverLog(platform, join(deck.places.stateDir, 'server.log'), options.foreground);
+    // What the restore run and the launches are handed must never throw (tasks 72, 73: a hook
+    // that throws ends a whole restore, its sessions' locks held for up to 60 s).
+    const quietLog = (line: string): void => {
+      try {
+        log(line);
+      } catch {
+        // Nowhere left to say it.
+      }
+    };
+    // Plan C20: read before the first tick, whose first refresh makes the store agree with this
+    // server's pages, so that a mark a dead server left is seen (and then removed).
+    const pageMark = createPageMark({ store: deck.store, log: quietLog });
     let files: RuntimeFiles;
     try {
       files = runtimeFiles(resolveRuntimeDir(deck, 'take').dir);
@@ -290,8 +332,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     const postponed = new Map<string, KeeperHello>();
     let tick: Tick | null = null;
     /**
-     * S2 7.3: a keeper this server did not just spawn starts its program only when the guard, the
-     * exact lock and the deadline still allow it (task 21); a busy store decides nothing yet.
+     * S2 7.3: a keeper this server did not just spawn starts its program only when the guard, a lock
+     * of its hello's take (plan C19: the lock it was spawned with, or a renewal of it — a restore
+     * renews the locks it waits on) and the deadline still allow it (task 21); a busy store decides
+     * nothing yet.
      */
     const decide = (termId: string, hello: KeeperHello): void => {
       const decision = decideFoundKeeper(deck, hello);
@@ -396,7 +440,67 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log,
       changed: () => tick?.reloadNow(),
       prs: prFetches,
+      // Plan C 2.3: the banner's two actions, through the one restorer.
+      restore: (sessionIds) => {
+        const started = restorer.start({ sessionIds: [...sessionIds], all: false });
+        return started.ok ? { ok: true } : { ok: false, error: started.error };
+      },
+      dismissRestore: (bootId) => restorer.dismiss(bootId),
     });
+    // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
+    // the area the page that had focus last reported, read when the terminal is opened.
+    const firstSize = (): { cols: number; rows: number } =>
+      pages.lastFocused()?.area ?? DEFAULT_SIZE;
+    // Plan C1: `POST /resume`, `/new` and the restorer start sessions through the one way the
+    // window starts them (launches.ts, stateless: one for the routes, one for restore, beside the
+    // actions' own), each with a log of its own prefix that never throws.
+    const sockLaunches = createLaunches({
+      deck,
+      hub: created,
+      terminalFor,
+      log: (line) => {
+        quietLog(`server.sock ${line}`);
+      },
+    });
+    const restoreLaunches = createLaunches({ deck, hub: created, terminalFor, log: quietLog });
+    // Plan C6–C9, C22 (task 73): one restore at a time, whoever asked; its report to every page.
+    const restorer = createRestorer({
+      deck,
+      terminalFor: (size) => restoreLaunches.restoreTerminal(size),
+      refuse: (sessionId) => restoreLaunches.refusal(sessionId),
+      gone: (sessionId) => restoreLaunches.gone(sessionId),
+      size: firstSize,
+      progress: (text) => {
+        pages.notice('restore-progress', text);
+      },
+      changed: () => {
+        tick?.reloadNow(); // the rows again (a run began or ended, a dismissal), and the lists
+      },
+      log: quietLog,
+    });
+    /** Plan C2: a launch of a route answered as the command would end; never rejects. */
+    const launchFor = async (
+      route: 'resume' | 'new',
+      launch: () => Promise<Launched>,
+    ): Promise<LaunchAnswer> => {
+      try {
+        return launchAnswer(await launch());
+      } catch (error) {
+        const kind = failureKind(error);
+        if (isBusy(error)) {
+          quietLog(`server.sock ${route}: the database is busy (${kind})`);
+          return { code: 1, lines: [BUSY_LAUNCH], sessionId: null };
+        }
+        quietLog(`server.sock ${route}: failed (${kind})`);
+        return {
+          code: 1,
+          lines: [`skydeck: the window's server could not start it (${kind})`],
+          sessionId: null,
+        };
+      } finally {
+        tick?.reload(); // a launch refreshes and writes on the server's own connection
+      }
+    };
     const actions: ActionHandler = {
       async act(page, action) {
         try {
@@ -408,7 +512,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     };
 
     const listFor = (page: PageState): ListMessage => {
-      const rows = tick?.rows() ?? [];
+      const rows = tick?.rows() ?? NO_ROWS;
       const { view } = page;
       const row = view.selected === null ? undefined : rows.find((r) => r.id === view.selected);
       const message = buildListMessage({
@@ -422,6 +526,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       tick?.listed(message.sections.flatMap((section) => section.rows.map((r) => r.id)));
       return {
         ...message,
+        // Plan C9: the view model's banner for the tick's rows — the array itself (its cache).
+        banner: restorer.banner(rows),
         terminals: message.terminals.map((term) => ({ ...term, ownsSize: false })),
       };
     };
@@ -431,6 +537,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     // (S2 8.2.1), and the page tries again. (If that tick's refresh failed, the first list comes
     // with the next one; the registry is complete either way.)
     let ready = false;
+    // Plan C4: from the first line of the orderly stop the launch routes answer 503 'stopping'.
+    let stopBegun = false;
+    /** Plan C20: the end of the start on the clock that cannot step (null while it starts). */
+    let startDoneNs: Ns | null = null;
     const pages = createPages({
       platform,
       port: () => boundPort,
@@ -479,7 +589,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       interop,
       keepersLog,
       log,
-      afterRefresh: decidePostponed,
+      afterRefresh: () => {
+        pageMark.update(pages.count()); // plan C20; it never throws
+        decidePostponed();
+      },
       storeNewer: (reason) => {
         log('server: the store was migrated by a newer skydeck; the server stops');
         void stop(reason);
@@ -574,12 +687,29 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
               checkout,
               startedAtNs: String(startedNs),
               envOrigin,
+              windowExpectedMs: pageMark.expectedMs(
+                clock.monotonicNs(),
+                startDoneNs,
+                pages.count(),
+              ),
             }),
             tokens,
             shutdown: () => {
               void stop("skydeck's server was stopped");
             },
             log,
+            // Plan C2–C5, C22: the command line's starts, prepared here, never by the command.
+            launch: {
+              resume: (sessionId) =>
+                launchFor('resume', () => sockLaunches.resume(sessionId, firstSize())),
+              newSession: (request) =>
+                launchFor('new', () => sockLaunches.newSession(request, firstSize())),
+              restore: (request, write, closed) => {
+                const started = restorer.start(request, write, closed);
+                return started.ok ? started.done : Promise.resolve();
+              },
+            },
+            launchState: () => (stopBegun ? 'stopping' : ready ? null : 'starting'),
           }),
         },
       );
@@ -620,7 +750,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
 
     /** S2 5.5. */
     const orderlyStop = async (reason: string): Promise<void> => {
+      stopBegun = true;
       log('server: stopping');
+      // First (plan C8, S2 5.5): a restore ends before anything it uses is closed; the sessions it
+      // opened go on starting, the rest are said to be not started.
+      await restorer.stop();
       stopPrs.abort();
       await startedTick.stop();
       await prFetches.idle(); // aborted: it saves nothing more and starts no other (plan D8)
@@ -646,6 +780,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
 
     await startedTick.start();
     log(`server: ${serverId} listening on 127.0.0.1:${boundPort} (build ${build})`);
+    startDoneNs = clock.monotonicNs();
     ready = true;
     const early = askedBefore();
     if (early !== null) void stop(early); // asked for while it started (review 2)

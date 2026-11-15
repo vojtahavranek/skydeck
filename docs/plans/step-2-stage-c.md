@@ -127,7 +127,7 @@ same as its row here.
 | 73 | `src/window/restorer.ts`, `src/window/view/banner.ts`, `test/window/restorer.test.ts`, `test/window/view/banner.test.ts` | `test/window/view/build.test.ts`; `docs/design-step-2.md` (10.2, 11.3, 11.4, 12.7) |
 | 75 | `web/banner.js`, `web/banner-text.js`, `web/banner.css`, `test/web/banner.test.ts`, `test-page/banner.test.ts` | `web/app.js`, `web/index.html`; `test-page/helpers/shell.ts` |
 | 81 | `src/window/page-mark.ts`, `test/window/page-mark.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/window.test.ts`; `docs/design-step-2.md` (5.1, 8.3, 10.2) |
-| 74 | `test/helpers/window-restore.ts`, `test/window/server-launch.test.ts`, `test/window/server-restore.test.ts` | `src/window/server.ts` |
+| 74 | `test/helpers/window-restore.ts`, `test/window/server-launch.test.ts`, `test/window/server-restore.test.ts` | `src/window/server.ts`; ruled (task 81's review 2, D): `src/platform/types.ts`, `src/platform/real.ts`, `test/helpers/platform.ts`, `test/helpers/window.ts` (one line), `test/platform/real.test.ts`, `test/platform/helpers.test.ts` (`Clock.monotonicNs`); `docs/design-step-2.md` (5.1, one clause) |
 | 76 | `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`, `test/cli/window-requests.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`; `docs/design-step-2.md` (11.4), `docs/design.md` (7.5) |
 | 77 | `test/cli/window-e2e.test.ts`, `test/cli/commands/restore-window.test.ts` | `src/platform/config.ts`, `src/cli/launching.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `src/cli/commands/restore.ts`, `src/cli/commands/doctor.ts`, `src/cli/tui/run.ts`; `test/platform/config.test.ts`, `test/cli/commands/doctor.test.ts`, `test/cli/tui/run.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`, `test/cli/commands/restore.test.ts`; `docs/design-step-2.md` (11.4, 16.4) |
 | 79 | — | `docs/install.md`, `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (18, 19, and any decision of 1a still missing) |
@@ -1254,16 +1254,19 @@ one was opened; the waits add up when a start hangs. The clock the server's coun
 command, `POST /resume` and `/new`; and its stop ends a restore before it closes anything.
 
 **Files**
-- Modify: `src/window/server.ts`: `createLaunches` over the registry and `terminalFor`;
+- Modify: `src/window/server.ts`: `createLaunches` over the registry and `terminalFor` (one for
+  the routes, one for the restorer, each with a log that never throws);
   `createRestorer` with `launches.restoreTerminal`, `.refusal`, `.gone`, `size: () =>
   pages.lastFocused()?.area ?? { cols: 120, rows: 40 }`, `progress: (text) =>
   pages.notice('restore-progress', text)`, `changed: () => { tick?.reload(); pages.pushList(); }`;
   `ActionDeps.restore` and `.dismissRestore` → the restorer (`all` false); `listFor` sets
-  `banner: restorer.banner(tick?.rows() ?? [])`; `controlHandler` gets `launch` (`resume` and
+  `banner: restorer.banner(tick?.rows() ?? [])` (one empty array kept for the start, so that the
+  banner's cache, keyed on the array, holds); `controlHandler` gets `launch` (`resume` and
   `newSession` through `launches` with the same size, mapped to C2's `LaunchAnswer`, a busy store
   and an unexpected error as C2 says; `restore` → `restorer.start(request, write)` and its `done`,
-  with the handler's `closed` signal as the `asker` (C22), a refusal as its line, the finished line
-  and an outcome with code 1) and `launchState` (`starting` until `ready`, `stopping` from the
+  with the handler's `closed` signal as the `asker` (C22); a refused request — one runs, or the
+  stop has begun — its line and an outcome with code 1 and nothing to the pages (C6, ruled F1); a
+  run that cannot begin its line, the finished line and an outcome with code 1) and `launchState` (`starting` until `ready`, `stopping` from the
   first line of the orderly stop); `createPageMark` over the server's store, made at the start
   before the first tick (so that `foundAtStart` reads the mark a dead server left), its
   `update(pages.count())` called in `afterRefresh` beside `decidePostponed`, and `GET /status`'s
@@ -1334,6 +1337,18 @@ two launch routes get `skydeck: ` in front, the launch lines are passed as they 
 **Done when:** a page and a command can restore through the server, the banner follows the store
 and the run, and `POST /resume` and `/new` start sessions with the rules of 2.5; `npm run check`
 passes.
+
+**As built** (ruled on task 81's review 2, D): the page mark's `expectedMs` is given
+`Clock.monotonicNs()` — a reading that cannot step, which this task adds to `Platform`
+(`process.hrtime.bigint()`; the fake clock moves it with `advanceMs` and `sleep`, never with
+`setNs`) — for `nowNs` and for the end of the start, so that a step of the wall clock neither
+stretches nor shortens the 7 s. In the tests a program that must wait is held at a gate the test
+opens (`test/helpers/window-restore.ts`: a `claudeCommand` script that waits for a file, then
+`exec`s the stand-in or exits with the status the test gives), not by a `sleep` before the
+stand-in, so that no case rests on a time; the cases that hold a gate while they look raise
+`restoreStartTimeoutSeconds`, and the C20 cases move the server's monotonic reading themselves.
+The refusal lines of the launch routes are `failureText`'s: `skydeck: ` before the first line
+(every refusal they can meet is one line: what they quote is sanitised).
 
 **At the merge** (after D 36 and B 54; built beside them):
 - If D was merged first: `server.ts` passes D's required `changed` and `prs` to `createActions`
