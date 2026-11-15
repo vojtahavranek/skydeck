@@ -1357,7 +1357,7 @@ the first part).
 2. In P: `wsl --shutdown`. Then open a WSL terminal again (W) and, with the window still
    minimised, run `skydeck window`. Expected: the waiting line; after it a new window may open,
    because Edge wakes a window minimised that long only once a minute, and then the old one comes
-   back within about a minute (a known limit of stage C). Write down whether a second window
+   back later, at its next wake (a known limit of stage C). Write down whether a second window
    opened and how long the old one took to come back; close the new one.
 3. In the window, read the banner's entries as in step 4 of the first part, then click `Not now`.
    Expected: the banner goes.
