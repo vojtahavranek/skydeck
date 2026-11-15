@@ -24,6 +24,8 @@ import type { DerivedSession } from '../sessions/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { isBusy } from './busy.ts';
 import type { KeeperHello } from './frames.ts';
+import type { TerminalInfo } from './hub.ts';
+import { lostProgramMayRun } from './mapping.ts';
 
 /** The keeper's own words for the same case (bin/skydeck-keeper), so that both read alike. */
 const DEADLINE_PASSED = 'the start deadline passed';
@@ -132,11 +134,23 @@ export function decideFoundKeeper(
  * skydeck took over is left alone. Unlike
  * settleFailedLaunch this does not depend on a printed command: the window shows none (S2 11.2,
  * ruled), and the ended terminal offers Resume itself (S2 7.8). Throws what the store throws.
+ *
+ * Plan task 82: an exit the server made up for a lost keeper is not the program's — nobody reaped
+ * it. `terminal` is what the registry listed for the terminal when its exit came (null: not
+ * known, settled as before). While its program may still run by task 57's rule
+ * (`lostProgramMayRun`: alive by design 5.5 or not readable, the loss less than 60 s old by the
+ * server's clock), a resume that reported no start keeps its lock and the exit is left for a later
+ * call: false. Once the program is gone, or 60 s after the loss, it is settled as above. True when
+ * it is settled (also when there was nothing to do).
  */
-export function settleEndedTerminal(deck: Deck, hello: KeeperHello): void {
+export function settleEndedTerminal(
+  deck: Deck,
+  hello: KeeperHello,
+  terminal: Pick<TerminalInfo, 'state' | 'program' | 'exit'> | null = null,
+): boolean {
   ingestSpool(deck);
   const { sessionId, kind } = hello.meta;
-  const { store } = deck;
+  const { store, platform } = deck;
   if (kind === 'new') {
     store.transaction(() => {
       // Only the row prepareNew wrote, untouched since (review 2, principle 6): one the user
@@ -150,14 +164,19 @@ export function settleEndedTerminal(deck: Deck, hello: KeeperHello): void {
         store.deleteMeta(sessionId);
       }
     });
-    return;
+    return true;
   }
   const lock = hello.lock;
   const takenNs = lock === null ? null : lockTakenNs(lock);
   if (lock === null || takenNs === null) {
-    return;
+    return true;
   }
-  if (!resumeStarted(store, sessionId, takenNs, lockEventId(lock))) {
-    releaseLockOfTake(deck, sessionId, lock);
+  if (resumeStarted(store, sessionId, takenNs, lockEventId(lock))) {
+    return true; // the lock stays (design 7.6): the guard sees its holder
   }
+  if (terminal !== null && lostProgramMayRun(terminal, platform.proc, platform.clock.nowNs())) {
+    return false; // its program may yet report its start: the lock is all the command line has
+  }
+  releaseLockOfTake(deck, sessionId, lock);
+  return true;
 }
