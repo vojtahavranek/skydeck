@@ -842,14 +842,13 @@ function switcherClosed() {
   if (broughtTakesKeyboard()) {
     return;
   }
-  // What had it, when it is still there to take it — not the program's holder of a terminal,
-  // which the zone gives to the terminal shown now; else the zone's holder.
+  // A text field that had it (the filter, the New form's, the find bar's) when it is still there;
+  // else the zone's holder — the list, or the terminal shown now —, never a button (S2 12.9).
   if (
     from instanceof HTMLElement &&
-    from !== document.body &&
+    isTextField(from) &&
     from.isConnected &&
-    from.checkVisibility() &&
-    from.closest('.xterm') === null
+    from.checkVisibility()
   ) {
     from.focus();
     return;
@@ -1827,7 +1826,9 @@ function switcherCapture(event) {
  * nothing; the next press acts (review 2 of task 37). Forgotten at the key's release, at a fresh
  * press, and when the window loses focus. Stage B: the same for a key pressed on the title bar's
  * `Turn on notifications`, which hides itself once the permission is answered — at once where a
- * policy answers without asking —, so that a held Enter there is no list `enter` either.
+ * policy answers without asking —, so that a held Enter there is no list `enter` either. Stage
+ * E: the same for a key pressed while the switcher is shown (`modal()`): the Enter of a pick or the
+ * Esc that closes it acts on nothing where the keyboard then goes (E11).
  * @type {Set<string>}
  */
 const pressedInDialog = new Set();
