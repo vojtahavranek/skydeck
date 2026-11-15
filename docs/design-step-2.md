@@ -2948,12 +2948,11 @@ In the browser suite, besides those:
 - CI, on every pull request and every push to `main`, runs the newest leg of the Node matrix
   (Node 24). The oldest leg (Node 24.12) runs only when the workflow is started by hand
   (`workflow_dispatch`: the owner's decision, to save CI minutes), and a run started by hand runs
-  both legs. A leg runs format check, type checks, `npm
-  test` (keeper and server tests included; Ubuntu runners have python3), `python3 -m py_compile
-  bin/skydeck-keeper`, the vendored-files check (16.6: `test/vendor/vendor.test.ts`, a test in
-  `npm test` that needs the packages `npm ci` installed, so it has no step of its own), and
-  `shellcheck` on the shell scripts by
-  name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
+  both legs. A leg runs format check, type checks, `npm test` (keeper and server tests included;
+  Ubuntu runners have python3), `python3 -m py_compile bin/skydeck-keeper`, the vendored-files
+  check (16.6: `test/vendor/vendor.test.ts`, a test in `npm test` that needs the packages `npm ci`
+  installed, so it has no step of its own), and `shellcheck` on the shell scripts by name —
+  `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
   bin/skydeck*` would also match the python keeper. Each is a step of its own: CI does not run
   `npm run check`, which ends with the page suite. Only the newest leg (Node 24) runs the page
   suite, and it runs on Ubuntu 24.04 (the development machine's system) while the other leg runs
