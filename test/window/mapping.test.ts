@@ -15,7 +15,7 @@ import { refresh } from '../../src/sessions/refresh.ts';
 import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import type { Holder } from '../../src/sessions/types.ts';
 import type { TerminalInfo } from '../../src/window/hub.ts';
-import { mapTerminals } from '../../src/window/mapping.ts';
+import { lostProgramMayRun, mapTerminals } from '../../src/window/mapping.ts';
 import { windowTerminal } from '../../src/window/window-terminal.ts';
 import { ds } from '../helpers/derived.ts';
 import { BOOT_A, BOOT_B, S1, S2, S3, SEC, T0, fakeProc, statLine } from '../helpers/platform.ts';
@@ -789,6 +789,59 @@ describe('mapTerminals: a lost keeper’s program while it lives (task 57; S2 7.
       );
       assert.equal(got.shown.get('aaaaaaaaaaaa'), S1, over.state);
       assert.ok(got.elsewhere.has(S2), over.state);
+    }
+  });
+});
+
+describe('lostProgramMayRun: task 57’s rule, shared (task 82: the settlement and the window’s refusal read it too)', () => {
+  const lostExit = { code: null, signal: 1, atNs: String(T0), notStarted: null };
+  const lost = (over: Partial<TerminalInfo> = {}): TerminalInfo =>
+    terminal({ id: 'aaaaaaaaaaaa', state: 'lost', program: PROGRAM, exit: lostExit, ...over });
+  const alive = (): Proc => procOf([[5000, 900, 1]]);
+
+  test('a lost terminal whose program lives, less than 60 s after the loss: it may run', () => {
+    for (const ageNs of [0n, 59n * SEC, 60n * SEC - 1n]) {
+      assert.equal(lostProgramMayRun(lost(), alive(), T0 + ageNs), true, `${ageNs} ns`);
+    }
+    // lose()'s exit still on its way through the screen side: the state not yet lost.
+    for (const state of ['running', 'reconnecting'] as const) {
+      assert.equal(lostProgramMayRun(lost({ state }), alive(), T0), true, state);
+    }
+  });
+
+  test('what cannot be told may run: a stat read that throws, a stat line without a start', () => {
+    const noStart = fakeProc({ bootId: BOOT_A });
+    noStart.setProcess(5000, { stat: '5000 (claude) S 1', cmdline: [] });
+    assert.equal(lostProgramMayRun(lost(), unreadable(alive(), 5000), T0), true, 'unreadable');
+    assert.equal(lostProgramMayRun(lost(), noStart, T0), true, 'no start');
+  });
+
+  test('a clock that stepped back since the loss keeps it (never given up early)', () => {
+    assert.equal(lostProgramMayRun(lost(), alive(), T0 - 3600n * SEC), true);
+  });
+
+  test('not when the program is gone, or its pid has another start (a pid alone is no one)', () => {
+    assert.equal(lostProgramMayRun(lost(), fakeProc({ bootId: BOOT_A }), T0), false, 'gone');
+    for (const start of [899, 901]) {
+      assert.equal(lostProgramMayRun(lost(), procOf([[5000, start, 1]]), T0), false, `${start}`);
+    }
+  });
+
+  test('not 60 s or more after the loss, nor with an exit time that is no decimal number', () => {
+    for (const ageNs of [60n * SEC, 61n * SEC, 3600n * SEC]) {
+      assert.equal(lostProgramMayRun(lost(), alive(), T0 + ageNs), false, `${ageNs} ns`);
+    }
+    assert.equal(
+      lostProgramMayRun(lost({ exit: { ...lostExit, atNs: 'not a time' } }), alive(), T0),
+      false,
+    );
+  });
+
+  test('not without an exit, without a program (lost before T), or with an exit the keeper sent', () => {
+    assert.equal(lostProgramMayRun(lost({ exit: null }), alive(), T0), false, 'no exit');
+    assert.equal(lostProgramMayRun(lost({ program: null }), alive(), T0), false, 'no program');
+    for (const state of ['ended', 'not-started'] as const) {
+      assert.equal(lostProgramMayRun(lost({ state }), alive(), T0), false, state);
     }
   });
 });

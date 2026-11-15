@@ -1,5 +1,5 @@
-// The right side (S2 7.8, 7.9, 12.5, 12.6, 12.9's help, 19; plan task 29): the read-only header,
-// the resume card, the card of a session running elsewhere, the ended bar, the new form and the key
+// The right side (S2 7.8, 7.9, 12.5, 12.6, 12.9's help, 19; plan task 29): the header's facts of
+// stage A (stage D's header, its controls and its one height: header.test.ts), the resume card, the card of a session running elsewhere, the ended bar, the new form and the key
 // help. Scripted cases run against a stand-in server (helpers/shell.ts); the cases of the plan's
 // list run against a real test server with the stand-in program (test/helpers/window.ts).
 import assert from 'node:assert/strict';
@@ -194,7 +194,10 @@ test('the right side', async (t) => {
       assert.deepEqual(await texts(s.page, '.card-header .header-state'), ['not running']);
       assert.deepEqual(await texts(s.page, '.card-header .header-dir'), ['/home/u/a <b>dir</b>']);
       assert.deepEqual(await texts(s.page, '.card-header .header-id'), [S1.slice(0, 8)]);
-      assert.deepEqual(await texts(s.page, '.card-header .header-chip'), ['3 PRs · failing']);
+      // S2 12.5 (plan D task 38): the chip is on the pull requests' line.
+      assert.deepEqual(await texts(s.page, '.card-header .header-prs .header-chip'), [
+        '3 PRs · failing',
+      ]);
       assert.equal(await s.page.evaluate(() => Reflect.get(window, 'hacked')), undefined);
       assert.equal(await s.page.locator('#cards img').count(), 0, 'no markup from a title');
 
@@ -245,7 +248,7 @@ test('the right side', async (t) => {
         [{ level: 'review-required', open: 1, merged: 0 }, 'PR · review'],
         [{ level: 'cant-read', open: 2, merged: 4 }, "2 PRs · can't read +4"],
         // One open failing pull request and 30 merged: the list shows `PR · failing` and a dim
-        // `+30`; the header the same chip's whole text (task 38 rebuilds the header).
+        // `+30`; the header the same chip, the same text.
         [{ level: 'checks-failing', open: 1, merged: 30 }, 'PR · failing +30'],
         [{ level: 'merged', open: 0, merged: 30 }, '30 merged'],
         [{ level: 'closed', open: 0, merged: 0 }, 'closed'],
@@ -593,7 +596,7 @@ test('the right side', async (t) => {
         }),
       );
       await clickRow(s.page, S1);
-      await s.page.focus('#cards button');
+      await s.page.focus('#cards .card button'); // the card's (the header has buttons too)
       await enter(false);
       await showsText(s.page, '#cards .card-lines', /^refused$/);
       assert.equal(acts(), 1);
@@ -655,7 +658,7 @@ test('the right side', async (t) => {
         });
       s.serve(listFor('claude --resume one', '1'));
       await clickRow(s.page, S1);
-      await s.page.focus('#cards button');
+      await s.page.focus('#cards .card button'); // the card's (the header has buttons too)
       s.serve(listFor('claude --resume one', '2')); // a field the card does not show
       await sleep(300);
       assert.equal(await active(s.page), 'BUTTON');
@@ -1599,7 +1602,11 @@ async function realServerCases(
       await showsText(l.page, '#cards .card-command', /--resume/);
       const outside = outsideProgram(l, S2, far, ends);
       await showsText(l.page, '#cards .card', new RegExp(`pid ${outside.pid}\\b`));
-      assert.equal(await l.page.locator('#cards button:visible').count(), 0, 'no stale button');
+      assert.equal(
+        await l.page.locator('#cards .card button:visible').count(),
+        0,
+        'no stale button on the card',
+      );
       assert.match(await shownText(l.page, '#cards .card'), /cannot be shown here/);
 
       await clickRow(l.page, S1);

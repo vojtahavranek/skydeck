@@ -138,9 +138,9 @@ lead's rulings of 2026-11-15).
 | D10 | A note saved in the window removes a note file that a failed editor kept (`<stateDir>/note-<id>.md`), as `note --set` does (design 7.1); `discardKeptNote` and the path rule move from `src/cli/notes.ts` to `src/sessions/meta.ts` so that the server can call them (`src/window/` never imports `src/cli/`). The dialog starts from the stored note, never from a kept file. | Otherwise the next `skydeck note` would open the old kept text over the window's note (ruled as planned). | 36 (12.5) |
 | D11 | Two parts of S2 12.5 that S2 19 names for no stage are built in task 38: `pr-refresh` (S2 8.2.3) as the ↻ of the pull-request dialog, and "opened <time> · last active <age>" with where the title comes from, on the header's second line. | They are the header's facts and its pull-request detail (ruled: in task 38). | 38 (19) |
 | D12 | The header keeps one height for every session and window width (S2 12.5, ruled): stage A's two lines and two more, the pull requests' line and the note's line, each one line cut with an ellipsis, there for every session. The pull requests' line: the window's chip, the open ones side by side (`owner/repo #7 · failing`) as far as they fit, and the button `Pull requests`, never cut; while none is attached, the hint `no pull request` in the dim style and the button `+ PR`. The note's line: its first line, `…` after it when there are more, or the hint `no note` in the dim style while there is none. `area()` and Z1's rule stay as on main: the header is still measured as it is, and it no longer changes with what skydeck knows about a session. | Review A on main's code: a height that follows the content resizes a running program whenever a pull request is attached by itself, merges, or a note is edited, moves the terminal's top edge between sessions, starts New at a wrong size, and has no bound. | — (S2 12.5) |
-| D13 | The pull-request dialog (task 37's, with its list from task 38) lists every attached pull request on a line of its own: a click on the line that selected no text opens it (`act open-link`, S2 9.6), × detaches it (`pr-rm`) and shows the toast `Detached owner/repo #7 · Undo`, whose Undo sends `pr-add` with that address; merged and closed ones fold into `30 merged, 2 closed ▸` (the mockup's words), unfolded with the same controls; ↻ sends `pr-refresh`; the field attaches one, and Attach's `ok` empties the field and keeps the dialog open, so that the new line shows in the list (`not fetched`, then its state), while every other dialog closes on `ok` (ruled on review B's re-check; task 37); its other button is `Close` (D1). Words per state: `can't read · last read 3h ago · <error>` (`never read` without one), `not fetched`, `checks failing`, `changes requested`, `checks pending`, `review required`, `draft`, `approved, green`, then `· checked 4m ago` once read. The pull request's title is the line's tooltip. The list follows every `list` while the dialog is shown (`editor.update`); the field's text never does. | S2 12.5 shows one example of each kind; the rest follows the chip's order. An address the user no longer sees cannot be attached again by hand. | — (S2 12.5) |
+| D13 | The pull-request dialog (task 37's, with its list from task 38) lists every attached pull request on a line of its own: a click on the line that selected no text opens it (`act open-link`, S2 9.6), × detaches it (`pr-rm`) and shows the toast `Detached owner/repo #7 · Undo`, whose Undo sends `pr-add` with that address; merged and closed ones fold into `30 merged, 2 closed ▸` (the mockup's words), unfolded with the same controls; ↻ sends `pr-refresh`; the field attaches one, and Attach's `ok` empties the field and keeps the dialog open, so that the new line shows in the list (`not fetched`, then its state), while every other dialog closes on `ok` (ruled on review B's re-check; task 37); its other button is `Close` (D1). Words per state: `can't read · last read 3h ago · <error>` (`never read` without one), `not fetched`, `checks failing`, `changes requested`, `checks pending`, `review required`, `draft`, `approved, green`, then `· checked 4m ago` once read; `merged` and `closed` with no age (they are never read again, design 7.3); the error cut to 120 units (task 38). The pull request's title is the line's tooltip. The list follows every `list` while the dialog is shown (`editor.update`); the field's text never does. | S2 12.5 shows one example of each kind; the rest follows the chip's order. An address the user no longer sees cannot be attached again by hand. | — (S2 12.5) |
 | D14 | The group chip opens the ticket when there is a link and shows that it is one (an arrow `↗` after the key, underlined); otherwise it is plain text. It never edits: the ✎ beside it and `g` edit the group, with and without a link; while there is no group the dashed `+ group` button sets one. | One element, one meaning (ruled). | — (S2 12.5) |
-| D15 | The Undo toast: the mockup's words (`Marked done: hidden from the list. It comes back on new activity.`, and for a running session `Marked done. Stays under Open while it runs; hidden once it stops.`), one at a time, 5 seconds (the mockup's 4.2, rounded up for the reach to Undo); Undo sends `undone`; like the page's other chrome it takes no keyboard on a click, and it lies over the scrim of a dialog. `d` on a done row (shown with `a`) sends `undone` and shows no toast. `d` and the Done button act at the first keydown or click only (`d`'s auto-repeats are cancelled and do nothing), and not while their own act for that session waits. After this page's own `d` in the list, S2 12.9's exception: once the answer came and the list that holds its result — one that arrived since the act was sent (the real server sends it before the answer, unless a list went to the page within the last second, the once-a-second rule) and shows the write — the row gone from its section or marked done there; one that still shows it as not done is older than the write —, else the next one, which the page asks for with a `view` as after an edit's `ok` (D2); ruled 06:38Z and 08:15Z — no longer has the row, and only while that session is still the selected one (`d` on A, ↑ to Z before the list comes → the selection stays on Z), the row after it in the same section is selected, else the one before it, else none; never a row of Open. The Undo of that `d` selects the session again once it is back in the list, if the selection is still where that `d` left it (the row it selected, or none); moved meanwhile, it stays (both ruled on review A's re-check; task 37). That list decides once: a row it still has moves nothing later either; so a run of `d` marks one row each time, also when its lists come a second apart (review 2's S3, ruled). The Done button leaves the selection to S2 12.9's main rule. | S2 12.5 and 12.10 name the toast, not its words or time. Review A: a held `d` with done sessions shown sends `done`, then `undone`, at every list; a run of `d` needs the next row. | — (S2 12.9) |
+| D15 | The Undo toast: the mockup's words (`Marked done: hidden from the list. It comes back on new activity.`, and for a running session `Marked done. Stays under Open while it runs; hidden once it stops.`), one at a time, 5 seconds (the mockup's 4.2, rounded up for the reach to Undo); Undo sends `undone`; like the page's other chrome it takes no keyboard on a click, and it lies over the scrim of a dialog. `d` on a done row (shown with `a`) sends `undone` and shows no toast. `d` and the Done button act at the first keydown or click only (`d`'s auto-repeats are cancelled and do nothing; the second click of a double click on any button of the header does nothing, task 38), and not while their own act for that session waits. After this page's own `d` in the list, S2 12.9's exception: once the answer came and the list that holds its result — one that arrived since the act was sent (the real server sends it before the answer, unless a list went to the page within the last second, the once-a-second rule) and shows the write — the row gone from its section or marked done there; one that still shows it as not done is older than the write —, else the next one, which the page asks for with a `view` as after an edit's `ok` (D2); ruled 06:38Z and 08:15Z — no longer has the row, and only while that session is still the selected one (`d` on A, ↑ to Z before the list comes → the selection stays on Z), the row after it in the same section is selected, else the one before it, else none; never a row of Open. The Undo of that `d` selects the session again once it is back in the list, if the selection is still where that `d` left it (the row it selected, or none); moved meanwhile, it stays (both ruled on review A's re-check; task 37). That list decides once: a row it still has moves nothing later either; so a run of `d` marks one row each time, also when its lists come a second apart (review 2's S3, ruled). The Done button leaves the selection to S2 12.9's main rule. | S2 12.5 and 12.10 name the toast, not its words or time. Review A: a held `d` with done sessions shown sends `done`, then `undone`, at every list; a run of `d` needs the next row. | — (S2 12.9) |
 | D16 | `skydeck show` prints the ticket address as a `ticket:` line after `group:`; `show --json` is unchanged. | Ruled; one line, no new interface. | — (S2 12.5, design 7.5) |
 | D17 | In the header and the dialogs only buttons (`+ group`, ✎, `Pull requests` / `+ PR`, Note, Done / Undone, ×, ↻, the fold) cancel their mousedown, so that they take no keyboard; every text that acts — the title, the group chip with a link, a pull request's item or line, the note's line — acts on a click that selected no text, and can still be selected and copied by a drag, as on main. In a dialog, a click that selected no text gives the keyboard back to its field, and a drag over its heading or help selects that text and keeps it selected (ruled on task 37's review 1). | Review A: main lets the title, the group and the directory be selected and copied across lists (web/cards.js:11-14). | — |
 | D18 | `linkToOpen` (S2 9.6) moves unchanged from `src/window/windows.ts` to `src/text/link.ts`, which imports nothing; `windows.ts` re-exports it, so that its callers and tests stay as they are. `ticketAddress` (`src/sessions/`) returns what `linkToOpen` gives for the filled address; `src/platform/config.ts`, which imports nothing, checks `ticketUrl` itself with the URL parser as S2 16.4 says. | The import rules of design 11: `src/sessions/` may import `src/text/`, never `src/window/`; `src/platform/` imports nothing. | — |
@@ -700,61 +700,110 @@ pull requests' line, the note's line, the controls that open task 37's dialogs, 
 and Done; and fill the pull-request dialog with every attached pull request.
 
 **Files**
-- Create: `web/header-text.js` (no DOM: a pull request's words in the line and in the dialog, the
-  fold's text, "opened <time> · last active <age>", the title's source in words),
-  `test/web/header-text.test.ts`, `test-page/header.test.ts`
+- Create: `web/header-text.js` (no DOM: a pull request's words in the line and in the dialog and
+  their tooltips, the fold's text, "opened <time> · last active <age>", the title's source in words,
+  the note's line), `test/web/header-text.test.ts`, `test-page/header.test.ts`
 - Modify: `web/cards.js` (the header), `web/cards.css`, `web/edit.js` (the pull-request dialog's
   list, through `update`), `web/edit.css`; `test-page/cards.test.ts` (the existing cases that
-  pinned stage A's header: the chip's place and the height; no new case),
+  pinned stage A's header: the chip's place, and the cases that took the header for buttonless; no
+  new case),
   `test-page/real-modules.test.ts` (only if a case's numbers move with the taller header; no new
   case); `docs/design-step-2.md` (19: D11)
 
-**Behaviour.** The four lines of D12. Line 1: the title (a click that selected no text opens the
-label dialog through `deps.edit`); the group chip as D14 (with `selected.ticketUrl`: `DE-123 ↗`,
-underlined, tooltip the address, a click that selected no text sends `act open-link` with it;
-else plain text, tooltip `(from the title)` when it is), the ✎ (the group dialog), or the dashed
-`+ group` while there is no group; the state pill as stage A's; the buttons Note (the note
-dialog) and Done / Undone (`deps.done`). Line 2: the directory (one line, ellipsis) as stage A's,
-`opened <time>` from `term.openedNs` when the pane shows a terminal, `last active <age>`, the title's
-source (`title: your label`, `Claude Code's name`, `Claude Code's summary`, `start time and
-folder`), the short id (never cut, a click copies, as stage A's). Line 3: the window's chip, the
-open pull requests' items (`owner/repo #7 · failing`; a click that selected no text opens it; the
-tooltip D13's words), `Pull requests` / `+ PR` (the pull-request dialog), never cut. Line 4: the
-note's first line and `…`, or `no note`, a click opening the note dialog. The pull-request
-dialog's list as D13. A refused link through `deps.say`. Buttons and texts as D17. Every age —
-`last active`, `checked`, `last read` — is counted from `now()` and repainted on the module's own
-1 s tick, in the header and in the pull-request dialog's list (`deps.now` of the editor), as the
-list repaints its ages (A18); a text is set only when it changed, so a selection in it stays.
+**Behaviour.** The four lines of D12, each one line of a fixed height whatever it holds, so that
+nothing skydeck knows about a session resizes a shown terminal (ruled). Line 1: the title (a click
+that selected no text opens the label dialog through `deps.edit`); the group chip as D14 (with
+`selected.ticketUrl`: `DE-123 ↗`, underlined, tooltip the address, a click that selected no text
+sends `act open-link` with it; else plain text, tooltip `group (from the title)` when it is), the ✎
+(the group dialog), or the dashed `+ group` while there is no group; the state pill as stage A's;
+the buttons Note (the note dialog) and Done / Undone (`deps.done`). When the line is short of room
+the title, the chip and the state share it, each up to what it needs (the chip's key and the state
+are bounded), so that none is cut away whole and the buttons never are. Line 2: the directory (one
+line, ellipsis, at most half the line) as stage A's, `opened <time>` from `term.openedNs` when the
+pane shows a terminal, `last active <age>`, the title's source (`title: your label`, `title: Claude
+Code's name`, `title: Claude Code's summary`, `title: start time and folder`; the first to give way),
+the short id (never cut, a click copies, as stage A's). Line 3: the window's chip (the list's own
+words and tooltip, `rowText`), the open pull requests' items (`owner/repo #7 · failing`, the chip's
+words; a click that selected no text opens it; the tooltip D13's words with the error whole, then
+the title) as far as they fit — one that does not fit is left out whole, and only a first one wider
+than the line alone ends in an ellipsis —, `Pull requests` / `+ PR`
+(the pull-request dialog), never cut; while none is attached the hint `no pull request`. Line 4: the
+note's first line and ` …` when the note has another line with something on it (the whole note of
+`selected` decides; without it the list's head of the note), or `no note`, a click opening the note
+dialog. A refused link through `deps.say`. The pull-request dialog's list as D13, above the field:
+`no pull request attached` while there is none; the fold is closed at every open; × and ↻ send one
+act while it waits, a double click on × is one press, and a × whose `pr-rm` was taken stays disabled
+until a list no longer holds its line (or its Undo attaches it again) — forgotten when the dialog
+closes, or at an `ok` that finds it closed, so that a pull request attached again elsewhere has a ×
+that acts; a line's text is not drawn again while a mouse button is down on the list (until its
+release, a drag and drop's end or the window's loss of focus) or a selection touches the line, so
+that an age counting seconds neither ends a selection nor turns a drag into an open, and a line
+made meanwhile is filled at once; a refused link, × or ↻ shows under the field, and one whose dialog was closed
+meanwhile is the toast `not saved: <the error>` (as C4); an error is cut on its line to 120 UTF-16
+units with `…`, never inside a surrogate pair, and its line's tooltip is the pull request's title,
+then the whole error when the line cut it. The list follows every `list` (`editor.update`): a line
+comes or goes with the list that holds the write, which the server pushes after it (D7) — usually
+before the act's answer, else within a second (the once-a-second rule), or at its next refresh when
+the store was busy; an address attached already changes nothing, so no list comes for it, and its
+line is there. A dialog's field takes the auto-repeats only of a key whose first press it got, so
+that Enter held on the header's Note opens the dialog and types nothing into it (S2 12.9's held
+key, review 2). Buttons and texts as D17; the second click of a double click on a button of the
+header does nothing, as on × (D15: Done would find the done row its first click made, and send
+`undone`; review 2's S6, ruled). Every age — `last active`, `checked`, `last read` — is
+counted from `now()` and repainted on the module's own 1 s tick, in the header and in the
+pull-request dialog's list (`deps.now` of the editor), as the list repaints its ages (A18); a text is
+set only when it changed, so a selection in it stays.
 
-**Tests** (platform: `realTestPlatform`; a test server with sessions made by step 1's helpers,
-pull requests attached with `attachManualPr` and their status saved with `savePrResult`, notes
-with `setNote`; `+ PR` and ↻ through `test/helpers/gh.ts`; links seen by the Edge stub)
+**Tests** (platform: `realTestPlatform`; the cases of heights, ages, what is drawn and the dialog's
+refusals on a scripted stand-in, `editWorld`, so that a list holds exactly what the case says; the
+cases of the controls on a test server with sessions made by step 1's helpers, pull requests
+attached with `attachManualPr` and their status saved with `savePrResult`, notes with `setNote`;
+`gh` through `test/helpers/gh.ts`; links seen by the Edge stub)
 - `header-text.test.ts`: the words of every level, with and without a last read and an error;
-  `30 merged`, `30 merged, 2 closed`, `1 closed`; ages; a repository or an error with an escape
-  sequence sanitised.
+  `30 merged`, `30 merged, 2 closed`, `1 closed`; ages; the error cut at 120 units (a surrogate pair
+  whole); the tooltips; the note's line (`…` from the whole note); a repository or an error with an
+  escape sequence sanitised.
 - `header.test.ts`, one height: a session without pull requests or a note, one with three open
-  pull requests, thirty merged and a note of five lines, one with a directory of 340 characters,
-  each at 1280 and at 900 px → the same header height, stage A's plus two lines; a pull request
-  attached to the session shown while its terminal runs → the page sends no `resize` for it.
-- `header.test.ts`, ages: `last active 1m` becomes `last active 2m` a minute later (the page's
-  clock moved on, no new `list`), in the header and in an open pull-request dialog's `checked`;
-  a terminal of the window shows `opened <time>` from its `openedNs`, a session not running none.
+  pull requests, thirty merged and a note of five lines, one with a directory of 340 characters, and
+  one with stage D's longest texts — a label of 1,024 bytes, a group of 200 characters, a note whose
+  first line has 1,000 characters, eight open pull requests with long titles, a ticket address of
+  1,900 characters — each at 1280 and at 900 px → the same header height in four lines of one line
+  each, the buttons and the short id whole, no pull request cut by the line's edge (some left out
+  with eight), the title, the chip and the state each at least 40 px wide, and no `resize` while
+  only the content changes (ruled
+  01:53Z); on the real server, a pull request attached and a note set, changed and cleared while the
+  terminal runs → the same height and no `resize`.
+- `header.test.ts`, ages: `last active 1m` becomes `last active 2m` (the page's clock moved on, no new
+  `list`), in the header and in an open pull-request dialog's `checked`; a terminal of the window
+  shows `opened <time>` from its `openedNs`, a session not running none.
 - `header.test.ts`, the controls: an item's click → the stub got its URL; the button → the
-  pull-request dialog, listing every attached one with D13's words, the fold opening and closing;
-  × → detached in the store, the toast `Detached owner/repo #7 · Undo`, Undo → attached again; a
-  URL in the field → attached, its line `not fetched`, then the stand-in's state while the dialog
-  stays open; ↻ → `gh` asked again. The title's click → the label dialog → saved → the new title in
-  the header and the list (end to end through task 36). With `ticketUrl` in the configuration: the
-  chip shows `↗`, its click → the stub got the address; ✎ → the group dialog; a group whose match
-  holds `/` or `?` (pattern `^\S+`) → no link, the chip plain text; without `ticketUrl` the chip is
-  plain text and only ✎ edits; no group → `+ group` opens the dialog. The note's line shows its
-  first line sanitised, a click → the dialog with the whole note. Done → the row done, the toast,
-  Undo → undone; a running session's Done → it stays under Open, marked `done`; Done clicked twice
-  while its answer waits → one act. Dragging over the title selects it and opens nothing; a
-  button's click leaves the keyboard where it was. A hostile title, note line, pull request's title
-  and error appear as text and create no element.
-- `cards.test.ts`: the cases that pinned stage A's header follow it — the chip on the pull
-  requests' line; one height as above.
+  pull-request dialog, listing every attached one with D13's words, the fold opening and closing, a
+  line's click → the stub got its URL; × → detached in the store, the toast `Detached owner/repo #7 ·
+  Undo`, Undo → attached again; a URL in the field → attached, its line `not fetched`, then the
+  stand-in's state while the dialog stays open; ↻ → `gh` asked again. The title's click → the label
+  dialog → saved → the new title in the header and the list (end to end through task 36). With
+  `ticketUrl` in the configuration: the chip shows `↗`, its click → the stub got the address; ✎ →
+  the group dialog; a group whose match holds `/` or `?` (pattern `^\S+`) → no link, the chip plain
+  text; without `ticketUrl` the chip is plain text and only ✎ edits; no group → `+ group` opens the
+  dialog. The note's line shows its first line sanitised, a click → the dialog with the whole note.
+  Done → the row done, the toast, Undo → undone; a running session's Done → it stays under Open,
+  marked `done`; Done clicked twice while its answer waits → one act. Dragging over the title, the
+  ticket link, a pull request or the note's line selects it and opens nothing; a selected title
+  stays selected through a list that changes another text; a button's click leaves the keyboard
+  where it was; only merged ones attached → `Pull requests`, no hint. The dialog's refusals and
+  waits as in Behaviour: a double click on × with the list before the answer and after it, a slow
+  click while the line is still there, a drag held 1.2 s over `checked 5s ago`, a press held 2.5 s
+  on it while the field has the keyboard, a list during a press, a `dragend`, ↻ and × from the
+  keyboard, a × forgotten by its list, by the close and by an `ok` after the close; Enter held on
+  Note types nothing into the note, a fresh Enter does; a double click on Done of a running session
+  whose list and answer come before its second click sends one `done` (review 2). A hostile title, group, note line, pull
+  request's repository, title and error and ticket address appear as text and create no element.
+- `header.test.ts`, the order of `list` and `result` (ruled 06:38Z): on the real server, a quiet
+  page (no list for 1.5 s), `d` on a row of This week → the list of the write comes before the
+  answer, and the next row of This week is selected.
+- `cards.test.ts`: the cases that pinned stage A's header follow it — the chip on the pull requests'
+  line; the three cases that took `#cards button` for the card's own button (the header has buttons
+  now) name the card's; stage A's one-height case holds as it is.
 
 **Done when:** every element of S2 12.5 is in the header or the pull-request dialog and does its
 action; the header has one height for every session and width; the ticket link opens only what

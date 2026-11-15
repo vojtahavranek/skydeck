@@ -39,9 +39,10 @@ the two test platforms, the `SKYDECK_TEST_*` seams only in a marked sandbox). It
 (section 2) stay in force where this plan does not change them; this plan's section 2 gives only
 the changes.
 
-**Task numbers** are 70–81 (stage D has 34–39, stage B 50–56), so that branch names, pull-request
+**Task numbers** are 70–82 (stage D has 34–39, stage B 50–57), so that branch names, pull-request
 titles and the lead's notes stay unique. Tasks 80 and 81 were added after the first version of
-this plan (the lead's guidance); their numbers do not follow their waves.
+this plan (the lead's guidance), and task 82 after a review's measurement (ruled 2026-11-15);
+their numbers do not follow their waves.
 
 **CI stays as it is**: two Node legs, one job each. No task changes `.github/workflows/`,
 `package.json` or a dependency.
@@ -85,6 +86,7 @@ merged at cadb490 and 4437256).
 | 73 | The restorer and the banner's view model | 70, 71 | D 34, B 50, B 51 | 2 | ~650 | `test/window/view/build.test.ts` (the pinned file list); S2 10.2 |
 | 75 | The banner on the page | 70 | D 37, B 55 | 2 | ~650 | `web/app.js`, `web/index.html`, `test-page/helpers/shell.ts` (a function) |
 | 81 | The second window after a cold start: the pages mark | 70 | — | 2 | ~350 | — |
+| 82 | A start is refused while a lost terminal's program may still live | 72; B 57 (on `main`; ruled 2026-11-15) | before 74; beside B 54 | 3 | ~900 | `src/window/tick.ts`, `test/window/tick.test.ts` (B 54) |
 | 74 | The server: launches, restore, the routes and the pages mark wired | 72, 73, 81 | D 36, B 54 | 3 | ~700 | `server.ts` |
 | 76 | The command line's side: the client, `--window` for `resume` and `new` | 70, 81 | — | 3 | ~750 | — |
 | 77 | `"terminal": "window"`: the configuration, `restore`, `R`, `doctor` | 74, 76 | D 35 | 4 | ~650 | `config.ts`, its test |
@@ -93,7 +95,7 @@ merged at cadb490 and 4437256).
 ```
 wave 1:  70  71  78  80
 wave 2:  72  73  75  81
-wave 3:  74  76
+wave 3:  82  74  76      (82 before 74)
 wave 4:  77
 wave 5:  79
 ```
@@ -127,6 +129,7 @@ same as its row here.
 | 73 | `src/window/restorer.ts`, `src/window/view/banner.ts`, `test/window/restorer.test.ts`, `test/window/view/banner.test.ts` | `test/window/view/build.test.ts`; `docs/design-step-2.md` (10.2, 11.3, 11.4, 12.7) |
 | 75 | `web/banner.js`, `web/banner-text.js`, `web/banner.css`, `test/web/banner.test.ts`, `test-page/banner.test.ts` | `web/app.js`, `web/index.html`; `test-page/helpers/shell.ts`; `docs/design-step-2.md` (12.7: the report's end and the heading's clock, ruled on task 75's review 2) |
 | 81 | `src/window/page-mark.ts`, `test/window/page-mark.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/window.test.ts`; `docs/design-step-2.md` (5.1, 8.3, 10.2) |
+| 82 | — | `src/window/mapping.ts`, `src/window/starts.ts`, `src/window/tick.ts`, `src/window/launches.ts`; `test/window/mapping.test.ts`, `test/window/starts.test.ts`, `test/window/tick.test.ts`, `test/window/launches.test.ts`, `test/window/actions.test.ts`; `docs/design-step-2.md` (7.5, 7.8) |
 | 74 | `test/helpers/window-restore.ts`, `test/window/server-launch.test.ts`, `test/window/server-restore.test.ts` | `src/window/server.ts` |
 | 76 | `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`, `test/cli/window-requests.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`; `docs/design-step-2.md` (11.4), `docs/design.md` (7.5) |
 | 77 | `test/cli/window-e2e.test.ts`, `test/cli/commands/restore-window.test.ts` | `src/platform/config.ts`, `src/cli/launching.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `src/cli/commands/restore.ts`, `src/cli/commands/doctor.ts`, `src/cli/tui/run.ts`; `test/platform/config.test.ts`, `test/cli/commands/doctor.test.ts`, `test/cli/tui/run.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`, `test/cli/commands/restore.test.ts`; `docs/design-step-2.md` (11.4, 16.4) |
@@ -156,7 +159,7 @@ one landed, resolving the places named:
 | `test/window/view/build.test.ts` (the case that pins the view's files and imports, about line 1111) | D 34 → B 51 → C 73 | 73 adds `banner.ts` to the file list (`chip.ts` and `attention.ts` kept); the allowed imports stay |
 | `src/cli/output.ts`, `src/cli/commands/show.ts` and their tests | D 35 → C 78 | 78: `inWindow` after D's `ticket` parameter; the mark on the holder line; cases at the end |
 | `web/app.js` (the import block; `received()`'s `case 'list'` and `case 'notice'`), `web/index.html` (the style-sheet links after `cards.css`; the list zone), `test-page/helpers/shell.ts` | C 70's one line (wave 1) first; then D 37 → B 55 → C 75 | 75: its import after B's; `banner.render` in `case 'list'` beside D's dialog update and B's title; the `restore-progress` branch in `case 'notice'` that 70 left out; `banner.css` after `attention.css`; `#banner` before `#list`; `bannerWorld` after `actsWorld` |
-| `src/window/server.ts` (`createActions`' deps, `listFor`, `afterRefresh`, `GET /status`, the orderly stop) | D 36 → B 54 → C 74 | 74: its two deps beside D's; the banner set on `buildListMessage`'s result after B's attention; `pageMark.update` beside `decidePostponed`; `windowExpectedMs` in the status; `restorer.stop()` as the stop's FIRST step, before D's fetch wait and B's `seen.stop()`. C changes nothing in `tick.ts` |
+| `src/window/server.ts` (`createActions`' deps, `listFor`, `afterRefresh`, `GET /status`, the orderly stop) | D 36 → B 54 → C 74 | 74: its two deps beside D's; the banner set on `buildListMessage`'s result after B's attention; `pageMark.update` beside `decidePostponed`; `windowExpectedMs` in the status; `restorer.stop()` as the stop's FIRST step, before D's fetch wait and B's `seen.stop()`. C 74 changes nothing in `tick.ts` (C 82, added later, changes only its settling of ended terminals: `ended`, `settle`, C24) |
 | `src/platform/config.ts`, `test/platform/config.test.ts` | D 35 → C 77 (proposed: different places) | 77: only the `terminal` type, its check and message; cases at the end |
 | `docs/install.md`, `docs/manual-checks.md`, `README.md` | B 50 ("Updating" only); then D 39 → B 56 → C 79 → E 99 | 79: its parts after D's and B's; the README's command table last (the formatter re-pads it whole when a row widens) |
 
@@ -179,7 +182,8 @@ scheduled around it:
 `test-page/real-modules.test.ts` (it loads the real `banner.js` through `app.js`; with a null banner
 and no report it draws nothing, and its cases' "no problem" still holds), `test/web/pane.test.ts`,
 `test-page/list.test.ts` and the shell's pinned modules (the shell tests load the real `banner.js`,
-which draws nothing for their lists). Stage C changes nothing in `src/window/tick.ts`,
+which draws nothing for their lists). Stage C changes nothing in `src/window/tick.ts` but task
+82's settling of ended terminals (`ended`, `settle`; C24, added later), nothing in
 `src/window/view/build.ts`, `sections.ts`, `src/window/selected.ts`, `web/list.js`, `web/keys.js`,
 `web/help.js` or `web/cards.js`, and adds no key (`test/web/keys.test.ts` is untouched).
 
@@ -213,6 +217,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C21 | The banner lies in the list zone, above `#list`, in the list's width; it takes height from the list (the list scrolls under it), never width, so the right side, the header's one height (stage D) and every terminal's area stay as they are: its coming and going sends no `resize`. A restore selects nothing and moves no keyboard, in any page, also while a dialog of stage D is shown: its result carries no `sessionId` (stage A's `act` selects only a resume's or a new session's). | S2 12.7: "at the top of the list"; the size a restored terminal starts with is the last focused page's area (S2 8.2.6), which the banner must not change. | 73 (12.7) |
 | C22 | **A restore asked for by a command stops when its asker goes** (ruled on review A). The asker's connection closing before the outcome was written ends the run through C8's `signal`, with the reason `the command that asked for it stopped`: the server lives, the sessions already opened go on starting, the rest are `not started`, then `restore finished: …` (to the pages). So Ctrl+C in `skydeck restore` stops it, as in step 1. A restore started from the banner has no stop in stage C; `skydeck window --stop` ends it (the opened sessions go on), and `docs/install.md` says so. A Stop control in the banner is a follow-up candidate. | Otherwise Ctrl+C would end the command and the server would go on opening every batch. | 73 (11.4) |
 | C23 | **A batch in which no session started stops the run** in the server: once a batch that opened at least one terminal ends with none of its sessions started **while entries are left**, the restore reports `stopped: no session of this batch started` and the rest `not started`, then `restore finished: …` — a hook of `runRestore` (`stopAfterEmptyBatch`), which the command does not pass, so step 1's restore is unchanged. A restore whose last (or only) batch starts nothing ends as any finished run with failures does: no `stopped:` line, code 1 (C5), not 5 (ruled on review A's re-check). A run that a busy store ended says `stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the rest`. | A `claudeCommand` that cannot start (the server's `PATH` after a boot) would otherwise open every keeper and fill the slots with ended terminals. The server's connection waits 250 ms for the store, not the commands' 5 s. | 71 (11.3), 73 (11.3) |
+| C24 | **A lost terminal's program refuses a start** (task 82; ruled 2026-11-15 10:12Z, the new session's part 11:48Z). The exit the server makes up for a lost keeper is not the program's: while that program may still run by task 57's one rule (`lostProgramMayRun`, `mapping.ts`: the program its keeper reported, alive by design 5.5 or not readable, the loss less than 60 s old by the server's clock), `settleEndedTerminal` settles nothing — a resume keeps its lock, a new session its label and group — and the tick keeps that exit for a later refresh (the terminal as the hub listed it at `ended()`; `settleAll` leaves it to expire); and `Launches.refusal` and `resume` refuse a start of its session with `checkResumable`'s words, `<short> is running (pid <p>)`, code 4, after "already open". Once the program is gone, or 60 s after the loss, all is as before. | Measured by task 72's review 2 (C5): a program that has reported no session start outlives the hangup, and from the first refresh after the loss every way to start the session started a second one. The guard cannot see a program that holds nothing yet, and the lock is all the command line has. Named limits: after the 60 s such a program is no longer seen; a keeper lost when its launch is older than the lock's 60 s leaves the command line open (the window still refuses); closing a lost terminal (and a restart of the server) ends the window's refusal; the lock alone then refuses, until 60 s after the launch (ruled 12:58Z on review 2). | 82 (S2 7.5, 7.8) |
 
 ## 2. Contracts
 
@@ -364,8 +369,11 @@ export interface Launches {
   resume(sessionId: string, size: Size): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
   /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
-   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else null. Never
-   *  throws: a hub that cannot be read gives `the window's terminals could not be read (<kind>)`. */
+   *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else (task 82, C24)
+   *  `<short> is running (pid <p>[, pid <p>…])` while a lost terminal of the session has a program
+   *  that may still run (`lostProgramMayRun`), the terminal opened last first; else null. `resume`
+   *  refuses with the same line, code 4. Never throws: a hub that cannot be read gives `the
+   *  window's terminals could not be read (<kind>)`. */
   refusal(sessionId: string): string | null;
   /** C8: null while a terminal of the session may still run; else why it cannot start any more —
    *  `not started: <reason>` (an exit with notStarted), `its terminal's keeper ended` (lost, once
@@ -482,6 +490,10 @@ export function releaseLockOfTake(deck: Deck, sessionId: string, taken: string):
 // src/window/starts.ts — task 80: decideFoundKeeper compares the stored lock with the hello's by
 // sameTake ("its resume lock was taken over" otherwise); settleEndedTerminal releases with
 // releaseLockOfTake.
+// src/window/starts.ts — task 82 (C24): settleEndedTerminal(deck, hello, terminal?:
+// Pick<TerminalInfo, 'state' | 'program' | 'exit'> | null): boolean — false (nothing settled)
+// while that terminal's lost program may still run (lostProgramMayRun, exported from mapping.ts
+// beside lives).
 
 // src/window/page-mark.ts — task 81 (C20)
 export interface PageMark {
@@ -505,7 +517,10 @@ export function createPageMark(deps: { store: Store; log: (line: string) => void
 ### 2.4 The command line (tasks 76, 77)
 
 ```ts
-// src/window/client.ts — task 76: ControlClient gains
+// src/window/client.ts — task 76: controlClient(net, sockPath, clock?: Clock) (ruled, task 76: the
+// clock the three methods below pause with; optional, so stage A's callers and tests stay as they
+// are; the three methods of a client made without one reject with a TypeError before anything is
+// sent; window-requests.ts always passes platform.clock). ControlClient gains
   /** POST /resume, waiting `answerMs` (30 s); 503 'starting' asked again every 500 ms within it.
    *  'unknown-route' for a 404 whose kind starts with `route`. Rejects with a SkydeckError: no
    *  answer in time (C11's line), 503 'stopping', an answer that cannot be read. */
@@ -530,13 +545,18 @@ export function windowTimes(env: Env): WindowTimes;
  *  old key and so cannot come back — no C20 wait even when the server expects a window; true for
  *  C12's windows. Two booleans side by side: a case of task 81 fails when they are swapped. */
 export function launchWindow(deck: Deck, client: ControlClient, ping: PingAnswer, newWindow: boolean, oldMayReturn: boolean, times: WindowTimes, say: (line: string) => void): Promise<'opened' | 'came-back'>;
+// Also exported (ruled, task 76), for src/cli/commands/window.ts, their only other user (task 81's
+// wait after a restart): POLL_MS (100), START_MS (10,000), the Wait type and deadline(platform, ms).
 
 // src/cli/window-requests.ts — task 76
-export interface WindowServer { client: ControlClient; ping: PingAnswer }
+/** `here` (ruled, task 76): windowServer's argument, so that requestResume, requestNew and
+ *  restoreInWindow end their lines before ", or use --here" / "; use --here" when it is false. */
+export interface WindowServer { client: ControlClient; ping: PingAnswer; here: boolean }
 /** C11: findServer; this checkout's server (any build) or a SkydeckError with 2.5's line. `here`
  *  false (restore, the interactive list) leaves ", or use --here" out of the lines. */
 export function windowServer(deck: Deck, times: WindowTimes, here: boolean): Promise<WindowServer>;
-/** The answer, or a SkydeckError (C11's older-server line for 'unknown-route'). Prints nothing. */
+/** The answer, or a SkydeckError (C11's older-server line for 'unknown-route'; every line of 2.5
+ *  for `server.here`). Prints nothing. */
 export function requestResume(server: WindowServer, sessionId: string, times: WindowTimes): Promise<LaunchAnswer>;
 export function requestNew(server: WindowServer, request: NewRequest, times: WindowTimes): Promise<LaunchAnswer>;
 /** resume / new for a command: windowServer, the request, every line on stderr (sanitised), C12's
@@ -545,8 +565,13 @@ export function requestNew(server: WindowServer, request: NewRequest, times: Win
 export function resumeInWindow(ctx: Context, deck: Deck, sessionId: string): Promise<number>;
 export function newInWindow(ctx: Context, deck: Deck, request: NewRequest): Promise<number>;
 /** C14's request, after C12's window (before the request, when no page is connected; none under
- *  CLAUDECODE): every line on stdout as it arrives; the outcome's code. */
-export function restoreInWindow(ctx: Context, server: WindowServer, request: RestoreRequest, times: WindowTimes): Promise<number>;
+ *  CLAUDECODE): every line on stdout as it arrives; the outcome's code. It owns C14's two lines of
+ *  its own (ruled, task 76), since it alone sees the outcome: the 30 s silence line (the client's
+ *  rejection) and, with code 5, `skydeck: restore stopped before it finished; see above` on
+ *  stderr — task 77's restore.ts prints neither. `deck` (ruled, task 76):
+ *  the window's lock and configuration; task 77's `restore` passes the deck it planned with,
+ *  inside its own withDeck — no second store connection. */
+export function restoreInWindow(ctx: Context, deck: Deck, server: WindowServer, request: RestoreRequest, times: WindowTimes): Promise<number>;
 
 // src/cli/launching.ts — task 77
 /** C13. `flag` is the option given; the answer is where the command goes. */
@@ -569,13 +594,20 @@ Lines of the commands (each printed with `skydeck: `, exit 1 unless said):
 | 404 with a `route` kind | C11's older-server line |
 | 503 'stopping' | `the window's server is stopping; run skydeck window, or use --here` |
 | No answer to `/resume` or `/new` in `answerMs` | `the window's server did not answer within 30 s; it may have started the session: run skydeck to see whether it runs` |
+| 503 `starting` for the whole `answerMs` (task 76) | `the window's server did not finish its start within 30 s; it started nothing: run skydeck window again, or use --here` |
+| 500 for `/resume` or `/new` (task 76) | `the window's server failed while it answered the request (500: failed); it may have started the session: run skydeck to see whether it runs` |
+| 500 for `/restore` before its first line (task 76) | `the window's server failed while it answered the request (500: failed); run skydeck to see what started` |
+| The socket fails after the request reached the server and before its answer, for `/resume` or `/new` (a reset, a broken pipe; ruled, task 76) | `the window's server cannot be asked on <sock> (<code>); it may have started the session: run skydeck to see whether it runs`. Before the request was sent (no socket, refused, a full queue) it stays `the window's server does not run (nothing answers on <sock>)`: nothing started |
+| The same for `/restore` before its first line (ruled, task 76) | `the window's server cannot be asked on <sock> (<code>); it may have started the restore: run skydeck to see what started`; after its first line, and for a stream that ends without an outcome, the `stopped answering` row below |
 | `/restore` silent for `answerMs`, or ended without an outcome | `the window's server stopped answering; run skydeck to see what started` (S2 11.4) |
 | Edge after the answer (C12) | `the window could not be opened: <reason>; run skydeck window` — the exit code stays the answer's |
 | No page connected under `CLAUDECODE` (C12) | `no window is open; run skydeck window in a terminal of your own` — the exit code stays the answer's |
-| 400 or 413 for the body (a label over 1,024 bytes, a prompt after `--` over 64 KiB) | `the window's server refused the request (<kind>); use --here` |
+| The status look after the answer fails (C12; ruled, task 76) | `the window could not be opened: <the failure>; run skydeck window` — under `CLAUDECODE` the advice ends `run skydeck window in a terminal of your own`; the exit code stays the answer's |
+| 400 or 413 for the body (a label over 1,024 bytes, a prompt after `--` over 64 KiB) | `the window's server refused the request (<kind>); use --here` — a body over 64 KiB is refused so by the client before anything is sent, with the server's kind `body: too large` (ruled, task 76) |
 
-For `restore` and the interactive list the lines end before `, or use --here`. No line prints a
-command to run by hand: the command prepared nothing (S2 11.4).
+For `restore` and the interactive list the lines end before `, or use --here` (and the refused
+request's before `; use --here`). The times in the lines are `answerMs`'s seconds (30 s by default).
+No line prints a command to run by hand: the command prepared nothing (S2 11.4).
 
 The rules of the requests that start programs, and the test that holds each:
 
@@ -1271,6 +1303,161 @@ one was opened; the waits add up when a start hangs. The clock the server's coun
 
 ---
 
+### Task 82: A start is refused while a lost terminal's program may still live
+
+**Depends on:** 72; stage B's task 57 (both on `main`) · **Merges before:** 74 · **Design:** S2 7.5 (a lost keeper's program), 7.8 (the settling of an exit; a lost keeper), 11.1 (the window's refusal) · **Contracts:** 2.3 (`Launches.refusal`'s text; `settleEndedTerminal`'s parameter and answer; `lostProgramMayRun` and `lives` exported) · **Decisions:** C24 · **Shared files:** `src/window/tick.ts`, `test/window/tick.test.ts` (stage B's task 54, built at the same time). Found by task 72's review 2 (C5, measured on `main` 27d6e0e and on tasks 57 + 72), added and ruled on 2026-11-15 10:12Z; the part for a new session ruled 11:48Z.
+
+**Goal.** A keeper dies (its terminal goes `lost`), its program outlives the hangup and has
+reported no session start yet (a `claude` before its `SessionStart`). On `main` every way to start
+that session — the page's Resume (`act resume`), `POST /resume`, restore and `skydeck resume <id>`
+— started a SECOND program from the first refresh after the loss while the first one lived: the
+settling of the exit took the exit the server made up for the lost keeper for the program's own
+and gave the lock back ("no start reported"), the window's refusal did not count a `lost`
+terminal, and the guard has no holder to see. A program that has reported its start is refused by
+the guard (`… is running (pid N)`), and stays so. This task makes task 57's rule — the one rule
+for "a lost keeper's program may still run" — hold back the settling of the exit and refuse a start
+of its session through the window.
+
+**Files**
+- Modify: `src/window/mapping.ts` (task 57's rule exported: `lostProgramMayRun`, `lives`; the
+  mapping reads the first), `src/window/starts.ts` (`settleEndedTerminal`), `src/window/tick.ts`
+  (`ended`, the settling), `src/window/launches.ts` (the window's refusal; `gone` reads `lives`),
+  `docs/design-step-2.md` 7.5 and 7.8, this plan (this section, C24, 2.3's lines)
+- Test: `test/window/mapping.test.ts`, `test/window/starts.test.ts`, `test/window/tick.test.ts`
+  (unit cases, and two end-to-end cases after task 57's), `test/window/launches.test.ts`,
+  `test/window/actions.test.ts` (one case at the end)
+
+**Behaviour.**
+- **The one rule** (`lostProgramMayRun(terminal, proc, nowNs)` in `mapping.ts`): the terminal has
+  an exit its keeper did not send (its state is neither `ended` nor `not-started`: `lost`, or
+  `lose()`'s exit still on its way), a program its keeper reported, that program may still run by
+  design 5.5 (`lives`: its stat line names that start, or cannot be read, or has no start), and the
+  loss is less than 60 s before `nowNs` (a clock that stepped back keeps it; a time that is no
+  decimal number does not). `mapTerminals` reads it for a terminal with an exit, so task 57's
+  mapping is unchanged.
+- **The settling waits** (`settleEndedTerminal(deck, hello, terminal)`): `terminal` is the
+  terminal as the registry listed it when its exit came (null: not known — settled as before).
+  While the rule holds for it nothing is settled — ruled: the whole of it, a resume's lock as a new
+  session's label and group (the program may yet report its start) — and the answer is `false`;
+  otherwise it settles as before and answers `true`. The tick's `ended(hello)` keeps the terminal
+  that `hub.list()` gives at that moment (the server calls it inside the registry's exit event, so
+  a lost terminal is listed `lost` with its program; a hub that cannot be read gives none), and the
+  settling of each refresh keeps an exit answered `false` for the next one. A close of the terminal
+  meanwhile changes nothing for the settling (what was kept decides); the window's refusal reads the
+  hub, so it ends with the close (a named limit, below). `settleAll` (the server's stop) leaves
+  such an exit unsettled: its lock expires by itself; a new session's label and group stay for good
+  if its program never reports a start (no session is derived from them alone; step 1 leaves the
+  same after a `new` that timed out). A database failure keeps an exit unsettled as before.
+- **The window refuses** (`Launches.refusal`, and `resume` before anything is built or taken):
+  "this session is already open in the window" while a terminal of the session is in `MAY_START`,
+  as before; else, while a lost terminal of the session has a program for which the rule holds,
+  the guard's own words — `checkResumable`'s, word for word — `<short> is running (pid <p>)`, code
+  4, `refused`, every such program's pid, the terminal opened last first (`, ` between them). So
+  the page's Resume answers that line, `POST /resume` its code and line (task 74), and restore's
+  `refuse` reports `failed <short>: <short> is running (pid <p>)`, as it reports the guard's own
+  refusal. The pid is the program's (what its keeper reported), the guard's the holder's: with a
+  wrapper `claudeCommand` whose `claude` has reported its start, the window names the wrapper for
+  those 60 s, the guard (before, after, and on the command line) the `claude`; the refusal is the
+  same. `MAY_START` (`view/sections.ts`) is unchanged: the page's view model shows the lost
+  terminal as before.
+- `gone` (C8) reads `lives` instead of a copy of it; its answer is unchanged (no 60 s bound there:
+  restore's own time limit ends its wait).
+
+```ts
+// src/window/mapping.ts — task 82: task 57's rule, exported (mapTerminals reads it)
+export function lostProgramMayRun(terminal: Pick<TerminalInfo, 'state' | 'program' | 'exit'>, proc: Proc, nowNs: Ns): boolean;
+export function lives(program: { pid: number; procStart: number }, proc: Proc): boolean;
+// src/window/starts.ts — task 82: true when settled; false while a lost keeper's program may still run
+export function settleEndedTerminal(deck: Deck, hello: KeeperHello, terminal?: Pick<TerminalInfo, 'state' | 'program' | 'exit'> | null): boolean;
+```
+
+**Tests** (unit: `testDeck`'s fake clock and `/proc`; end to end: `windowDeck`, real keepers)
+- `mapping.test.ts`: `lostProgramMayRun` at 0 s, 59 s, 60 s − 1 ns (true), at 60 s, 61 s, an hour
+  (false); `lose()`'s exit on its way (`running`, `reconnecting`) true; a read that throws, a line
+  without a start true; a clock stepped back an hour true; the program gone, its pid with another
+  start (899, 901), an exit time that is no number, no exit, no program, `ended`, `not-started`
+  false. Task 57's cases pass unchanged.
+- `starts.test.ts`: a resume whose program lives → `false`, the lock kept (a second resume meets
+  it), the program gone → `true`, released; a read that throws, a line without a start → kept;
+  another start → released; 59 s and a clock stepped back → kept, 60 s → released; a start
+  reported meanwhile → still `false`, then `true` with the lock kept; an exit the keeper sent, a
+  keeper lost before `T`, no terminal → released as before; a new session (ruled) → its label and
+  group kept while the program lives, kept for good once it reported its start, removed once it is
+  gone without a start and 60 s after the loss.
+- `tick.test.ts`: a lost exit kept at every refresh until its program is gone, then released,
+  nothing logged; a lost new session's label kept, removed at the refresh after its program is gone;
+  the terminal closed after `ended()` still keeps the lock; `settleAll` leaves it; a hub whose
+  `list()` throws at `ended()` → settled as before. Review 2: the lost terminal listed after a
+  running one → still held (`ended()` keeps the hello's terminal, not the first listed); a held exit
+  and an exit the keeper sent listed after it → the second is settled at the same refresh (a held
+  exit holds back no other). Each fails with its mutant (`find` of the first, `break`).
+- `launches.test.ts`: refused with code 4 and the guard's words (compared with what the guard says
+  for a holder with that pid), nothing built, closed, taken or logged; a read that throws, a line
+  without a start → refused; the program gone or its pid another start → no refusal, the resume
+  closes the lost terminal and opens; 59 s and a clock stepped back → refused, 60 s → not; several
+  lost programs → every pid, opened last first; `MAY_START` first ("already open"); a lost
+  terminal of another session refuses only that one; an exit the keeper sent refuses nothing. Every
+  case of task 72 passes unchanged.
+- `actions.test.ts`: `act resume` answers the line; nothing built or taken; once the program is
+  gone the resume goes through and closes the lost terminal.
+- End to end (`tick.test.ts`): program B of the measurement — a `claudeCommand` `sh` that ignores
+  SIGHUP, reports nothing and waits for a file the test writes (900 rounds of `sleep 0.1`, and not
+  past the sandbox) — started through the window terminal; the test kills ITS OWN keeper (`keeperOf`,
+  `signalKeeper`) and tells the tick of the exit once the registry reported it lost, as the server
+  does. (1) Before the first refresh after the loss and after it: `launches.resume` → `4: <short> is
+  running (pid <program>)`, `act resume` the same line, `skydeck resume <id> --here` → exit 4, `is
+  being resumed`, no handoff; `refusal()` the line; the lock the launch took kept; no second keeper.
+  The program released and gone → the next refresh gives the lock back, `refusal()` is null, and
+  `launches.resume` starts it (code 0, one new keeper, the lost terminal closed). (2) The lock as the
+  store holds it once the launch is older than its 60 s (written stale, its event id kept), the loss
+  less than 60 s old: the window's two ways and `refusal()` still refuse; `skydeck resume` hands off
+  (the named limit). (3) The named limit of a Close (ruled): with the lock stale, Resume refused,
+  the registry's `close` → `ok`, `refusal()` null, the next Resume starts a second program (code 0,
+  a second keeper beside program B). (1) and (2) fail on `main` 2a08836 (the window resumes or
+  answers `is being resumed`) and pass with the fix; each waits on facts (the program's mark that
+  it ignores the hangup, the registry's exit event, the program gone), not on times. An `after` hook registered before
+  `windowDeck`'s releases the program and kills the test's own keeper while it runs.
+
+**As built** (the rulings):
+- RULED 2026-11-15 11:48Z (asked by the implementer): a lost new session's exit waits as a
+  resume's does — the whole settling, not only the lock. No double start exists for a new session
+  (it has no row to resume before its start); a program that reports its start within the 60 s
+  keeps the label and group it was started with.
+- The refusal's text is the guard's own (`checkResumable`), so no new text was needed (told to the
+  lead, nothing to rule).
+- The terminal the settling reads is the one the hub listed at the exit, kept with the hello: the
+  server's `exited` handler (`server.ts`, task 74's file) is unchanged.
+- RULED 12:58Z on review 2's SHOULD FIX 1: the user's Close of a lost terminal (and a restart of
+  the server) ends the window's refusal; it is a NAMED LIMIT with case (3), no state in `launches`
+  and no new member of contract 2.3 (two `Launches` instances would not share it). With a program
+  that reports its start within seconds, the lock is still fresh after the Close and refuses until
+  60 s after the launch; with a program that never reports a start the lock can be stale already
+  while the loss is less than 60 s old, and then a Close opens the window at once (case 3). A
+  Close refused while the program may run is a candidate for a task of its own.
+- `settleEndedTerminal`'s third parameter stays optional (default null, "not known": settled as
+  before): a required one would change six calls in `test/window/window-terminal.test.ts`, which is
+  not this task's file; the tick, the only caller in the product, always passes it (accepted on
+  review 2).
+
+**At the merge** (beside B 54, which also changes `tick.ts` and `tick.test.ts`): whoever lands
+second merges `origin/main` and keeps both sides. In `tick.ts` this task changes only the
+settling of ended terminals — the `unsettled` map's entries (the hello and the terminal),
+`settle()`, `ended()` and the doc comments of `ended` and `settleAll`; in `tick.test.ts` it adds
+cases to the block "ended terminals" and one block after task 57's (its imports at the top).
+
+**Not in it:** NAMED LIMITS (S2 7.5, 7.8): a program that still runs 60 s after the loss and never
+reported a start is no longer seen — the exit is settled (the lock given back) and every way starts
+a second program; a keeper lost when its launch is older than the lock's 60 s has no lock left to
+keep — the window still refuses for 60 s after the loss (case 2), but `skydeck resume` starts a
+second program, since its guard sees no holder and no lock; closing a lost terminal (and a
+restart of the server) ends the window's refusal; the lock alone then refuses, until 60 s after
+the launch (ruled; case 3) — the kept exits are the server's memory too, so a restart settles nothing for them
+(as before), and a new session's label and group stay for good if a stop came while its exit was
+held and its program never reports a start. The wiring of `refusal` into the server's restore and
+routes (74).
+
+---
+
 ### Task 74: The server — launches, restore and the routes wired
 
 **Depends on:** 72, 73, 81 · **Merges after:** D 36, B 54 · **Wave:** 3 · **Design:** S2 8.3, 11.3, 11.4, 12.7, 8.2.6 (first size), 5.5 (the stop), 7.3, 7.8, 14 · **Contracts:** 2.3, 2.5 · **Decisions:** C2, C4, C6, C7, C9, C19, C20, C22 · **Shared files:** `src/window/server.ts`
@@ -1386,31 +1573,38 @@ out of `window.ts` is a commit of its own in it ("moved unchanged"), so that a r
 - Create: `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`,
   `test/cli/window-requests.test.ts`
 - Modify: `src/window/client.ts` (the three methods and their readers: an answer of another shape
-  cannot be read; 400 and 413 give 2.5's refused-request line); `src/cli/commands/window.ts`
+  cannot be read; 400 and 413 give 2.5's refused-request line; the optional `clock` of
+  `controlClient`, ruled); `src/cli/commands/window.ts`
   (imports `windowTimes` and `launchWindow` instead of its private `timesOf` and `launch`, which
   move unchanged, task 81's wait with them; `launchWindow` gets the `say` of 2.4);
   `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` (`--window`; `whereFrom` refuses two of
   `--here`, `--tab`, `--window`; with `--window`, `resume` resolves `<ref>` as today and calls
   `resumeInWindow` with the id — no `prepareResumeById` here —, `new` calls `newInWindow` with
   `platform.cwd`, the label, the group and `parsed.rest`); `test/fixtures/fake-serve/fake-serve.ts`
-  (C3's routes: without `FAKE_SERVE_LAUNCH` no `launch`, as today; `FAKE_SERVE_LAUNCH=answer:
-  <LaunchAnswer JSON>` answers it to `/resume` and `/new`; `silent` never answers them; `status:
-  <code>` answers that HTTP status with `{ error: 'body: too long' }`; `FAKE_SERVE_RESTORE=<JSON
-  array of RestoreStreamLine>` writes them 100 ms apart, `silent-after:<n>` writes `n` lines and
-  then nothing; `FAKE_SERVE_REQUESTS=<path>` appends each launch request's JSON;
-  `FAKE_SERVE_STATE` `starting` or `stopping` for `launchState`; task 81's knobs stay)
+  (C3's routes: without `FAKE_SERVE_LAUNCH` and `FAKE_SERVE_RESTORE` no `launch`, as today;
+  `FAKE_SERVE_LAUNCH=answer:<LaunchAnswer JSON>` answers it to `/resume` and `/new`; `silent` never
+  answers them; `status:<code>` answers that HTTP status with `{ error: 'body: too long' }`;
+  `FAKE_SERVE_RESTORE=<JSON array of RestoreStreamLine>` writes them 100 ms apart,
+  `silent-after:<n>` writes `n` lines and then nothing; `FAKE_SERVE_RESTORE` alone installs
+  `launch` too, and then `/resume` and `/new` answer 500 (the real server never has one without the
+  others; ruled, task 76); `FAKE_SERVE_REQUESTS=<path>` appends each launch request's route and
+  JSON (`{ route, ...body }`); `FAKE_SERVE_STATE` `starting` or `stopping` for `launchState`, or
+  `starting:<n>` for the first n requests (ruled, task 76); a malformed value ends the fake with
+  exit 2; task 81's knobs stay)
 - Test: `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`,
   `test/cli/commands/window.test.ts` (unchanged: the move's check); `docs/design-step-2.md` (C11,
   C12: 11.4), `docs/design.md` (7.5: the options)
 
 **Behaviour.** As 2.4 and 2.5. `windowServer`: `findServer(deck, appRoot, computeBuild(...))` —
-`ours` and `other-build` are used, the rest refused. `resumeInWindow` / `newInWindow`: the
-request; every answer line on stderr through the sanitiser; then, unless the code is 2 or 3,
-`client.status()`, and with 0 pages `launchWindow(deck, client, ping, false, true, times, say)` — a
-SkydeckError there is C12's line —, or under `CLAUDECODE` no window and C12's `no window is open;
-run skydeck window in a terminal of your own`. `restoreInWindow`: with 0 pages the same window
-first (not under `CLAUDECODE`), then the request, every line on stdout. The usage texts name
-`--window` (`Without --here, --tab or --window, the configured "terminal" decides.`).
+`ours` and `other-build` are used, the rest refused; the client it returns has `platform.clock`,
+and `here` is its argument (ruled). `resumeInWindow` / `newInWindow`: the request; every answer
+line on stderr through the sanitiser; then, unless the code is 2 or 3, `client.status()`, and with
+0 pages `launchWindow(deck, client, ping, false, true, times, say)` — a SkydeckError there is C12's
+line —, or under `CLAUDECODE` no window and C12's `no window is open; run skydeck window in a
+terminal of your own`. `restoreInWindow(ctx, deck, …)` (the deck ruled): with 0 pages the same
+window first (not under `CLAUDECODE`, which says C12's line), then the request, every line on
+stdout. The usage texts name `--window` (`Without --here, --tab or --window, the configured
+"terminal" decides.`).
 
 **Tests** (platform: `realTestPlatform`; `windowMachine` and `startFakeServe` of
 `test/helpers/window-machine.ts`. The fake serve listens on no port and the fake Edge refuses
@@ -1468,7 +1662,8 @@ end to end through the real server, the window terminal and the stand-in.
   "here", "wezterm" or "window"`); `src/cli/launching.ts` (`whereFor`; `chooseTerminal` with
   `"window"` takes `here` only); `src/cli/commands/resume.ts`, `src/cli/commands/new.ts` (`whereFor`
   decides; `window` → task 76's functions); `src/cli/commands/restore.ts` (C14; its usage text
-  says that with `"terminal": "window"` the sessions start in the window); `src/cli/tui/run.ts`
+  says that with `"terminal": "window"` the sessions start in the window; it prints neither of
+  C14's own lines — task 76's `restoreInWindow` prints both, ruled); `src/cli/tui/run.ts`
   (`R` with `"terminal": "window"`: `windowServer(…, false)` and `requestResume`, no local
   `prepareResumeById`; `opened <short> in the window` — with `; no window is open; run skydeck
   window` when no page is connected — or, for a failed launch, `starting <short> in the window
@@ -1505,8 +1700,8 @@ user who never sets the key sees only the new option in `--help`.
 - `restore-window.test.ts`, against the fake serve: no server → the not-running line and no
   prompt (stdin a terminal: the prompt never shown); `--dry-run` → no request (the fake's request
   file empty), the list printed; the chosen ids and `--all` in the request; `silent-after:1` →
-  11.4's line, exit 1; an outcome with code 5 → the line of C14, exit 5; an older server → C11's
-  line.
+  11.4's line ONCE, exit 1; an outcome with code 5 → the line of C14 ONCE, exit 5 (both lines are
+  `restoreInWindow`'s; ruled, task 76); an older server → C11's line.
 - `doctor` with `"terminal": "window"` → its `ok` line; the `wezterm` and `here` lines unchanged.
 - Every existing case of the commands, the list and `doctor` passes unchanged.
 
@@ -1659,7 +1854,8 @@ as they are; in `src/window/actions.ts` it moves stage A's resume and new into `
 adds its two cases beside D's; in `src/window/server.ts` it adds the launches, the restorer, the
 banner in `listFor`, the pages mark after each refresh and the restorer's stop as the stop's first
 step; in `web/app.js` it adds the banner and one notice kind, and no key; in `web/index.html` one
-element and one stylesheet. It changes nothing in `tick.ts`, `src/window/view/build.ts`,
+element and one stylesheet. It changes nothing in `tick.ts` but task 82's settling of ended
+terminals (C24), nothing in `src/window/view/build.ts`,
 `sections.ts`, `web/list.js`, `web/keys.js`, `web/help.js` or `web/cards.js`. Two store keys, no
 migration. The banner changes neither the header's one height (stage D) nor a terminal's area
 (C21).
