@@ -514,7 +514,10 @@ test('stage C: the restore banner on the page', async (t) => {
         await until(page, (now) => now.notNow, 'Not now again');
         await clickRow(page, which === 'another row' ? other : under);
         const selected = await selectedRow(page);
+        // The filter's field has the keyboard: a mousedown on a row would give it to the list.
+        await page.focus('#list .list-filter');
         const keyboard = await active(page);
+        assert.equal(keyboard, 'INPUT');
 
         await page.mouse.click(x, y); // the double click's first click: Not now
         w.answer(await w.act(1), { ok: true });
@@ -545,6 +548,13 @@ test('stage C: the restore banner on the page', async (t) => {
           ['dismiss-restore'],
           'a single click selects and resumes nothing',
         );
+        // A double click of its own, begun on the row, is the list's again: it resumes the row
+        // (review 2's T6: the banner's mark is taken back by the next first click elsewhere).
+        await page.mouse.click(x, y);
+        await page.mouse.down({ clickCount: 2 });
+        await page.mouse.up({ clickCount: 2 });
+        const resume = await w.act(2);
+        assert.deepEqual([resume['kind'], resume['sessionId']], ['resume', under]);
       },
     );
   }

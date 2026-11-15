@@ -1190,7 +1190,8 @@ with no list coming; it writes only a changed text.
   under a banner that never said one runs, each unfinished report ends at the next list. N1: a
   double click on Not now whose second click lands on a row that moved under the pointer —
   the row last single-clicked, and another — sends nothing but the dismissal and moves neither
-  the selection nor the keyboard; a click of its own then selects the row.
+  the selection nor the keyboard (on the filter's field); a click of its own then selects the row,
+  and a double click of its own resumes it.
 - C10, C21: 30 entries and 200 report lines → the filter's field and at least one row of the list
   stay visible, the banner scrolls inside; with a terminal shown, a banner that comes and goes
   (lists with and without it) sends no `resize` and leaves the terminal's box and the header's
