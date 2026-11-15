@@ -37,6 +37,8 @@ const OTHER_BOOT = '9a8b7c6d-5e4f-4321-8fed-cba987654321';
  *  (helpers/browser.ts), the same on any day after 2024. */
 const LAST_NS = String(BigInt(Date.UTC(2024, 2, 12, 18, 2)) * 1_000_000n);
 const RUNNING_ALREADY = 'a restore is already running; wait until it has finished';
+/** The line that ends a report whose finished line never came (ruled on review 2, S1). */
+const NOT_ARRIVED = 'the end of this report did not arrive; the list shows what started';
 
 /** The n-th made-up session id (for the long banners). */
 function sessionN(n: number): string {
@@ -441,6 +443,36 @@ test('stage C: the restore banner on the page', async (t) => {
     },
   );
 
+  await t.test(
+    "the heading's `today` becomes `yesterday` at midnight with no list coming (the banner's own timer; ruled on review 2, S2), and a tick that changes nothing keeps a selection of it",
+    async (t) => {
+      const page = await newPage(t, chromium);
+      // The page's clock (Playwright's, flowing from here): 23:58 UTC, the page's zone.
+      await page.clock.install({ time: new Date('2026-11-15T23:58:00Z') });
+      const today = String(BigInt(Date.UTC(2026, 10, 15, 18, 2)) * 1_000_000n);
+      await bannerWorld(t, page, listOf(three({ lastActivityNs: today })));
+      const heading = 'Before the restart (last activity today at 18:02) 3 sessions were open';
+      await until(page, (now) => now.heading === heading, 'today');
+      const selected = (): Promise<string> => page.evaluate(() => getSelection()?.toString() ?? '');
+      await page.evaluate(() => {
+        const element = document.querySelector('#banner .banner-heading') as HTMLElement;
+        getSelection()?.selectAllChildren(element);
+      });
+      assert.equal(await selected(), heading);
+      await page.clock.fastForward('00:40'); // a tick, still before midnight
+      assert.equal((await shown(page)).heading, heading);
+      assert.equal(await selected(), heading, 'an unchanged heading keeps its selection');
+      await page.clock.fastForward('05:00'); // past midnight, no list
+      await until(
+        page,
+        (now) =>
+          now.heading ===
+          'Before the restart (last activity yesterday at 18:02) 3 sessions were open',
+        'yesterday',
+      );
+    },
+  );
+
   await t.test('`shown: false` or a null banner: no offer is shown', async (t) => {
     const [page, w] = await world(t, chromium, listOf(three()));
     await until(page, (now) => now.offer, 'the offer is shown');
@@ -554,6 +586,77 @@ test('stage C: the restore banner on the page', async (t) => {
   );
 
   await t.test(
+    'a report whose finished line never came ends at the first list that says no restore runs (a null banner): one last line, its ×; the next run starts a new report (ruled on review 2, S1)',
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three({ running: true })));
+      await until(page, (now) => now.running !== null, 'running');
+      w.progress('started 0b5f3c1e one');
+      w.progress('timed out 1c6a4d2f two');
+      await until(page, (now) => now.report.length === 2, 'two lines');
+      w.list(listOf(null)); // the server restarted, or the run's end was lost
+      const ended = await until(page, (now) => now.close, 'the ×');
+      assert.deepEqual(ended.report, [
+        'started 0b5f3c1e one',
+        'timed out 1c6a4d2f two',
+        NOT_ARRIVED,
+      ]);
+      w.list(listOf(null, [{ id: S2, terminal: null, slot: null }])); // another list: nothing more
+      await settle();
+      assert.deepEqual((await shown(page)).report, ended.report, 'it ends once');
+      w.progress('started 2d7b5e3a three');
+      const next = await until(page, (now) => now.report.length === 1, 'a new report');
+      assert.deepEqual(next.report, ['started 2d7b5e3a three']);
+      assert.equal(next.close, false);
+    },
+  );
+
+  await t.test(
+    'lists that say a restore runs never end a report (shown or not, with or without an offer); the first that says none runs does, with the offer shown again',
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three()));
+      await until(page, (now) => now.offer, 'the offer is shown');
+      w.progress('started 0b5f3c1e one'); // the run's first line before its list
+      await until(page, (now) => now.report.length === 1, 'the line');
+      for (const banner of [
+        three({ running: true }),
+        three({ shown: false, running: true }),
+        RUNNING_ONLY,
+      ]) {
+        w.list(listOf(banner));
+        await settle();
+        const now = await shown(page);
+        assert.deepEqual(now.report, ['started 0b5f3c1e one'], JSON.stringify(banner));
+        assert.equal(now.close, false);
+      }
+      w.list(listOf(three()));
+      const ended = await until(page, (now) => now.close, 'the ×');
+      assert.deepEqual(ended.report, ['started 0b5f3c1e one', NOT_ARRIVED]);
+      assert.equal(ended.restore?.text, 'Restore 2', 'the offer is back');
+    },
+  );
+
+  await t.test(
+    'a report that has its finished line, and an empty one, are left as they are by a list that says no restore runs',
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three({ running: true })));
+      await until(page, (now) => now.running !== null, 'running');
+      w.list(listOf(three()));
+      await settle();
+      assert.deepEqual((await shown(page)).report, [], 'no line for an empty report');
+      w.progress('started 0b5f3c1e one');
+      w.progress('restore finished: 1 started');
+      await until(page, (now) => now.close, 'the ×');
+      w.list(listOf(null));
+      w.list(listOf(three({ bootId: OTHER_BOOT })));
+      await settle();
+      assert.deepEqual((await shown(page)).report, [
+        'started 0b5f3c1e one',
+        'restore finished: 1 started',
+      ]);
+    },
+  );
+
+  await t.test(
     'a refusal is shown in the banner as its line (`a restore is already running; …`, Not now refused); one that comes once the offer is gone, in the key bar',
     async (t) => {
       const [page, w] = await world(t, chromium, listOf(three()));
@@ -580,6 +683,52 @@ test('stage C: the restore banner on the page', async (t) => {
       await until(page, (now) => !now.banner, 'the offer is gone');
       w.answer(late, { ok: false, error: 'this offer to restore is no longer shown' });
       await showsText(page, '#key-message', /^this offer to restore is no longer shown$/);
+    },
+  );
+
+  await t.test(
+    "the refusal's line stays through lists that change neither the boot nor whether a restore runs, and goes at Restore's next act, when a run begins or ends, and for another boot",
+    async (t) => {
+      const [page, w] = await world(t, chromium, listOf(three()));
+      await until(page, (now) => now.offer, 'the offer is shown');
+      /** Restore, refused with `error`, its line shown. */
+      const refuse = async (n: number, error: string): Promise<void> => {
+        await page.click('#banner .banner-restore');
+        w.answer(await w.act(n), { ok: false, error });
+        await until(page, (now) => now.message === error, `refusal ${n}`);
+      };
+
+      await refuse(1, 'first');
+      w.list(listOf(three(), [{ id: S1, terminal: null, slot: null }])); // other rows, same banner
+      w.list(listOf(three({ entries: [entryOf(S1), entryOf(S2)] }))); // the same boot, fewer
+      await settle();
+      assert.equal((await shown(page)).message, 'first', 'the line stays');
+
+      await page.click('#banner .banner-restore');
+      const second = await w.act(2);
+      await until(page, (now) => now.message === null, "Restore's act clears the line");
+      w.answer(second, { ok: false, error: RUNNING_ALREADY });
+      await until(page, (now) => now.message === RUNNING_ALREADY, 'refusal 2');
+      w.list(listOf(three({ running: true })));
+      const begun = await until(page, (now) => now.running !== null, 'a run began');
+      assert.equal(begun.message, null, 'a run that begins clears the line');
+
+      // A refusal that comes while a run goes on, then the run's end.
+      w.list(listOf(three()));
+      await until(page, (now) => now.restore !== null, 'the run ended');
+      await page.click('#banner .banner-restore');
+      const third = await w.act(3);
+      w.list(listOf(three({ running: true })));
+      await until(page, (now) => now.running !== null, 'running again');
+      w.answer(third, { ok: false, error: RUNNING_ALREADY });
+      await until(page, (now) => now.message === RUNNING_ALREADY, 'refusal 3, while it runs');
+      w.list(listOf(three()));
+      const over = await until(page, (now) => now.restore !== null, 'the run ended');
+      assert.equal(over.message, null, 'a run that ends clears the line');
+
+      await refuse(4, 'fourth');
+      w.list(listOf(three({ bootId: OTHER_BOOT })));
+      await until(page, (now) => now.message === null, 'another boot clears the line');
     },
   );
 
@@ -630,10 +779,21 @@ test('stage C: the restore banner on the page', async (t) => {
         );
         const body = document.querySelector('#list .list-body')?.getBoundingClientRect() ?? zone;
         const f = filter.getBoundingClientRect();
+        // Scrolled to its end, the banner shows its last line inside its own box: it scrolls,
+        // it does not paint over the list.
+        banner.scrollTop = banner.scrollHeight;
+        const box = banner.getBoundingClientRect();
+        const last = [...banner.querySelectorAll('.banner-report-line')]
+          .at(-1)
+          ?.getBoundingClientRect();
         return {
           zone: zone.height,
-          banner: banner.getBoundingClientRect().height,
-          scrolls: banner.scrollHeight > banner.clientHeight,
+          banner: box.height,
+          scrolls:
+            banner.scrollTop > 0 &&
+            last !== undefined &&
+            last.bottom <= box.bottom + 1 &&
+            last.top >= box.top,
           filter: f.height > 0 && f.top >= zone.top && f.bottom <= zone.bottom,
           rowShown: rows.some(
             (row) => row.height > 0 && row.top < body.bottom && row.bottom > body.top,

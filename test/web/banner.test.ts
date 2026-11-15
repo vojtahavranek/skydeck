@@ -92,6 +92,38 @@ describe('activityTime (C18)', () => {
     });
   }
 
+  // Each kind of time at 00:05 and at 23:59, in both zones (review 1): `now` late on 15 Nov 2026
+  // in each zone, so that both ends of today lie before it. Prague is UTC+1 on these dates but
+  // 1 Jul (UTC+2).
+  const LATE_UTC = ms('2026-11-15T23:59:30Z');
+  const LATE_PRAGUE = ms('2026-11-15T22:59:30Z'); // 23:59:30 in Prague
+  const matrix: ReadonlyArray<readonly [at: string, zone: string, now: number, expected: string]> =
+    [
+      ['2026-11-15T00:05:00Z', 'UTC', LATE_UTC, 'today at 00:05'],
+      ['2026-11-15T23:59:00Z', 'UTC', LATE_UTC, 'today at 23:59'],
+      ['2026-11-14T00:05:00Z', 'UTC', LATE_UTC, 'yesterday at 00:05'],
+      ['2026-11-14T23:59:00Z', 'UTC', LATE_UTC, 'yesterday at 23:59'],
+      ['2026-03-12T00:05:00Z', 'UTC', LATE_UTC, 'on 12 Mar at 00:05'],
+      ['2026-03-12T23:59:00Z', 'UTC', LATE_UTC, 'on 12 Mar at 23:59'],
+      ['2025-11-12T00:05:00Z', 'UTC', LATE_UTC, 'on 12 Nov 2025 at 00:05'],
+      ['2025-11-12T23:59:00Z', 'UTC', LATE_UTC, 'on 12 Nov 2025 at 23:59'],
+      ['2026-11-14T23:05:00Z', PRAGUE, LATE_PRAGUE, 'today at 00:05'],
+      ['2026-11-15T22:59:00Z', PRAGUE, LATE_PRAGUE, 'today at 23:59'],
+      ['2026-11-13T23:05:00Z', PRAGUE, LATE_PRAGUE, 'yesterday at 00:05'],
+      ['2026-11-14T22:59:00Z', PRAGUE, LATE_PRAGUE, 'yesterday at 23:59'],
+      ['2026-03-11T23:05:00Z', PRAGUE, LATE_PRAGUE, 'on 12 Mar at 00:05'],
+      ['2026-03-12T22:59:00Z', PRAGUE, LATE_PRAGUE, 'on 12 Mar at 23:59'],
+      ['2026-06-30T22:05:00Z', PRAGUE, LATE_PRAGUE, 'on 1 Jul at 00:05'],
+      ['2026-07-01T21:59:00Z', PRAGUE, LATE_PRAGUE, 'on 1 Jul at 23:59'],
+      ['2025-11-11T23:05:00Z', PRAGUE, LATE_PRAGUE, 'on 12 Nov 2025 at 00:05'],
+      ['2025-11-12T22:59:00Z', PRAGUE, LATE_PRAGUE, 'on 12 Nov 2025 at 23:59'],
+    ];
+  for (const [at, zone, now, expected] of matrix) {
+    test(`${zone}: ${at} seen late on 15 Nov 2026 → ${expected}`, () => {
+      assert.equal(activityTime(ns(at), now, zone), expected);
+    });
+  }
+
   test('the same instant reads differently in the two zones (the parameter decides, not the machine)', () => {
     const at = ns('2026-11-14T23:05:00Z');
     assert.equal(activityTime(at, NOW, 'UTC'), 'yesterday at 23:05');

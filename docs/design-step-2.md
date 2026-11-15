@@ -2337,12 +2337,18 @@ control: `skydeck window --stop` ends a restore started from it (the sessions it
 Stop in the banner is a follow-up candidate.
 
 The page keeps the report lines it receives (`notice restore-progress`), as text, at most the last
-200, in a report under the banner's place. A line that comes after a `restore finished:` line starts
-a new report; no other line is a boundary (11.3: every run ends with exactly one). The report is
-drawn while it holds lines, whatever the banner says — none, or not shown: a restore asked for by a
-command, or from the switcher after "Not now", shows its report too — and after its finished line
-it has a × that removes it. A page that connects during a run sees that one runs and the lines from
-then on (a named limit). The banner and the report together take at most 40 % of the list zone's
+200, in a report under the banner's place. A report ends at its `restore finished:` line (11.3:
+every run ends with exactly one); when that line never reaches the page — the connection dropped,
+the server stopped, WSL restarted during the run — it ends at the first `list` that says no restore
+runs, with one last line of the page's own, `the end of this report did not arrive; the list shows
+what started` (ruled on review 2 of plan C task 75). A `list` that says a restore runs never ends a
+report, and no other line is a boundary; the line after an ended report starts a new one. The
+report is drawn while it holds lines, whatever the banner says — none, or not shown: a restore
+asked for by a command, or from the switcher after "Not now", shows its report too — and once it
+has ended it has a × that removes it. A page that connects during a run sees that one runs and the
+lines from then on (a named limit). The heading's `today` and `yesterday` are the page's clock's,
+also when no list comes: the page draws the heading again while it is shown (ruled on review 2 of
+plan C task 75). The banner and the report together take at most 40 % of the list zone's
 height and scroll inside it, so that the filter and the list keep their room. Their controls take
 no keyboard on a mouse click, as the page's other controls; "Restore" and "Not now" act once — not
 while their own `act` waits, not on a key's auto-repeat.

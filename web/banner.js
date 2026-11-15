@@ -17,8 +17,13 @@
 //   refused result is the banner's line (the key bar's when the offer is not drawn); a new act,
 //   another boot, or a run that begins or ends clears it.
 // - The report (C10): the `restore-progress` lines as they come, the last 200, drawn while it
-//   holds lines whatever the banner says; a line after a `restore finished:` line starts a new
-//   report; after that line it has a × that removes it.
+//   holds lines whatever the banner says. It ends at its `restore finished:` line, or — when that
+//   line never came (the connection dropped, the server stopped, WSL restarted) — at the first
+//   `list` that says no restore runs, with one last line of its own (ruled on review 2, S1); a
+//   `list` that says a restore runs never ends it. An ended report has a × that removes it, and
+//   the next line starts a new one.
+// - The heading's `today` and `yesterday` follow the page's clock: a timer draws the heading again
+//   while it is shown, writing only when its text changed (ruled on review 2, S2).
 //
 // Keyboard (S2 12.9): this module never calls focus(). Its controls take no keyboard on a mouse
 // click (their mousedown's default is prevented), so the keyboard stays with the list or the
@@ -42,6 +47,10 @@ const REPORT_LINES = 200;
 /** The line that ends every run (plan C6): the report's only boundary. */
 const FINISHED = 'restore finished:';
 const RUNNING = 'A restore is running.';
+/** The last line of a report whose `restore finished:` line never came (ruled on review 2, S1). */
+const NOT_ARRIVED = 'the end of this report did not arrive; the list shows what started';
+/** How often the heading is drawn again, for its `today` and `yesterday` (S2). */
+const HEADING_TICK_MS = 30_000;
 
 /**
  * @param {string} tag
@@ -331,6 +340,31 @@ export function createBanner(root, deps) {
     draw();
   });
 
+  /**
+   * A line at the report's end; the report's first when the last one has ended.
+   * @param {string} text
+   */
+  function append(text) {
+    if (finished) {
+      lines = [];
+      finished = false;
+      reportLines.replaceChildren();
+    }
+    lines.push(text);
+    reportLines.append(element('div', 'banner-report-line', text));
+    while (lines.length > REPORT_LINES) {
+      lines.shift();
+      reportLines.firstElementChild?.remove();
+    }
+  }
+
+  // S2: the heading's day words follow the clock while it is shown, also when no list comes.
+  setInterval(() => {
+    if (offered() && banner !== null && banner.entries.length > 0) {
+      setText(heading, bannerHeading(banner, Date.now(), deps.timeZone()));
+    }
+  }, HEADING_TICK_MS);
+
   return {
     /**
      * The banner of a `list` (S2 8.2.3, plan C9): null while nothing is offered and no restore
@@ -346,6 +380,11 @@ export function createBanner(root, deps) {
         refusal = ''; // a run began or ended, or another boot is offered: the line no longer holds
       }
       banner = next;
+      if (lines.length > 0 && !finished && banner?.running !== true) {
+        // S1: no restore runs, and this report's finished line never came; it ends here.
+        append(NOT_ARRIVED);
+        finished = true;
+      }
       if (banner !== null && banner.bootId !== null) {
         const previous = tickedBoot === banner.bootId ? ticks : new Map();
         ticks = new Map(
@@ -367,17 +406,7 @@ export function createBanner(root, deps) {
       if (typeof text !== 'string') {
         return;
       }
-      if (finished) {
-        lines = [];
-        finished = false;
-        reportLines.replaceChildren();
-      }
-      lines.push(text);
-      reportLines.append(element('div', 'banner-report-line', text));
-      while (lines.length > REPORT_LINES) {
-        lines.shift();
-        reportLines.firstElementChild?.remove();
-      }
+      append(text);
       finished = text.startsWith(FINISHED);
       draw();
     },
