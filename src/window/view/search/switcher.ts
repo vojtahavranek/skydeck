@@ -50,16 +50,24 @@ export const MAX_ITEMS = 50;
 
 /** The one command of the switcher's command form (E12). */
 const RESTORE = 'restore';
-/** What starts the command form (E12): the text's first character. */
+/** What starts the command form (E12, ruled): the text's first character, nothing trimmed
+ *  before it. */
 const COMMAND = '>';
+
+/** E12 (ruled): a text whose first character is `>` is a command, whatever follows; it lists no
+ *  session. Any other text searches sessions only. */
+function isCommand(query: string): boolean {
+  return query.startsWith(COMMAND);
+}
 
 /**
  * E12, over stage C's banner payload (structurally: only these fields are read): an offer when
- * the text is in command form and names the restore — its first character is `>` and what
- * follows, trimmed and lower-cased, is a start of `restore` of at least one letter (`>r`,
- * `> rest`, `>restore`, `> RESTORE`) — the banner is not null, `shown` and `running` are false
- * and at least one entry is preselected; else null. A text without `>` searches sessions only, so
- * that a session's name never brings the offer; never for an empty text.
+ * the text is in command form and names the restore — its first character is `>` (nothing
+ * trimmed before it) and what follows, trimmed and lower-cased with `toLowerCase()`, is a start
+ * of `restore` of at least one letter (`>r`, `> rest`, `>Restore`, `> RESTORE`) — the banner is
+ * not null, `shown` and `running` are false and at least one entry is preselected; else null.
+ * `>` alone and `> foo` give none. A text without `>` as its first character searches sessions
+ * only, so that a session's name never brings the offer; never for an empty text.
  */
 export function restoreOffer(
   query: string,
@@ -70,11 +78,11 @@ export function restoreOffer(
     readonly running: boolean;
   } | null,
 ): RestoreOffer | null {
-  if (!query.startsWith(COMMAND)) {
+  if (!isCommand(query)) {
     return null;
   }
   const command = query.slice(COMMAND.length).trim();
-  if (command === '' || command.length > RESTORE.length) {
+  if (command === '') {
     return null;
   }
   if (!RESTORE.startsWith(command.toLowerCase())) {
@@ -147,13 +155,18 @@ function inNeedOrder(
  * whose row matches every word of searchWords(query) — all of them for none — ranked: `need`
  * (in needOrder's order, then any that needOrder lacks in the candidates' order), `open`,
  * `not-running` (not open, not done), `done` (not open, done); inside each rank in the
- * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null.
+ * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null. A text in command
+ * form (its first character `>`, E12, ruled) lists no session: `items` [] and `more` 0, whatever
+ * follows the `>`.
  */
 export function switcherPayload(
   query: string,
   candidates: readonly SwitchCandidate[],
   needOrder: readonly string[],
 ): SwitcherPayload {
+  if (isCommand(query)) {
+    return { query, items: [], more: 0, restore: null };
+  }
   const words = searchWords(query);
   const byRank: Record<SwitchRank, SwitchCandidate[]> = {
     need: [],

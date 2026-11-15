@@ -254,6 +254,58 @@ test('switcherPayload: only the first 16 words of the text count (searchWords)',
   ]);
 });
 
+// --- the command form (E12, ruled) ---------------------------------------------------------------
+
+/** Sessions that a search for the words of the command form's texts would find. */
+function commandLike(): SwitchCandidate[] {
+  return [
+    candidate({ id: 'a', title: '> restore >r >restore' }),
+    candidate({ id: 'b', title: '>foo foo > rest', need: true }),
+    candidate({ id: 'c', title: '>', open: true }),
+    candidate({ id: 'd', title: 'restore old', done: true }),
+  ];
+}
+
+test('switcherPayload: a text whose first character is `>` lists no session, whatever follows', () => {
+  const candidates = commandLike();
+  for (const text of [
+    '>restore',
+    '>r',
+    '> rest',
+    '>Restore',
+    '> RESTORE',
+    '>',
+    '> ',
+    '> foo',
+    '>foo',
+    '>>',
+  ]) {
+    assert.deepEqual(
+      switcherPayload(text, candidates, ['b']),
+      { query: text, items: [], more: 0, restore: null },
+      JSON.stringify(text),
+    );
+  }
+});
+
+test('switcherPayload: a text that has `>` after its first character searches sessions', () => {
+  const candidates = commandLike();
+  // A leading space: the word `>restore`.
+  assert.deepEqual(ranked(switcherPayload(' >restore', candidates, [])), ['a:not-running']);
+  assert.deepEqual(ranked(switcherPayload('\t>r', candidates, [])), ['a:not-running']);
+  // `>` as a later word.
+  assert.deepEqual(ranked(switcherPayload('foo >', candidates, [])), ['b:need']);
+});
+
+test('switcherPayload: a text without `>` searches sessions only: `restore` finds the sessions that hold it', () => {
+  const candidates = commandLike();
+  assert.deepEqual(ranked(switcherPayload('restore', candidates, [])), ['a:not-running', 'd:done']);
+  assert.deepEqual(ranked(switcherPayload('RESTORE old', candidates, [])), ['d:done']);
+  for (const text of ['restore', 'RESTORE', 'restore old', 'x restore2']) {
+    assert.equal(switcherPayload(text, candidates, []).restore, null, text);
+  }
+});
+
 // --- the bound -----------------------------------------------------------------------------------
 
 /** `n` candidates `k0`, `k1`, … that are not running, each titled `common <its id>`. */
@@ -466,7 +518,7 @@ test('restoreOffer: `>` and a start of `restore` of at least one letter give the
 });
 
 test('restoreOffer: the command is taken whatever its case', () => {
-  for (const text of ['> RESTORE', '>R', '>Rest', '> rEsToRe']) {
+  for (const text of ['> RESTORE', '>Restore', '>R', '>Rest', '> rEsToRe']) {
     assert.deepEqual(restoreOffer(text, banner()), OFFER, JSON.stringify(text));
   }
 });
@@ -497,6 +549,7 @@ test('restoreOffer: an empty text, `>` alone, and `>` with what is no start of `
     '>restore old',
     '> re store',
     '>x',
+    '> foo',
     '>>restore',
     '> >restore',
     '>estore',
