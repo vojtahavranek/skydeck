@@ -854,10 +854,21 @@ program the keeper sent in `T` or `hello` (S2 7.5, 8.1) — never from a pid alo
 reused). A terminal's program counts in the mapping (S2 7.5) while the terminal has no exit (as
 before), and also while it has an exit that is not an applied one its keeper sent — its state is
 neither `ended` nor `not-started`: `lost`, or `lose()`'s made-up exit still on its way through the
-screen side — as long as the program lives by design 5.5: `/proc/<pid>/stat` exists and its
-process start equals the reported one. A read that throws, or a stat line without a readable
-start, does not count it: the holder's own walk (`holderPlace`) meets the same read and its
-session is `unknown`, so nothing is decided on it (stage A's task 21). An exit the keeper sent
+screen side — as long as the program may still run by design 5.5 and the loss is less than 60
+seconds old. The program is gone only when `/proc/<pid>/stat` is gone or names another process
+start than the reported one; what cannot be told — a read that throws, or a stat line without a
+readable start — may still run and counts (ruled on review 2: Proc's contract, "a process that
+could not be read is never taken for one that is gone"; a read that failed once and works a moment
+later in `holderPlace` must not make the session `elsewhere`). It errs only towards keeping:
+`holderPlace` matches a program by pid AND start, so a pid another process took never reaches it.
+The age of the loss is the lost exit's `atNs` (the server's clock when `lose()` made it up)
+against the `nowNs` the tick already passes to `mapTerminals` (the mapping reads no clock): less
+than 60 s → counted; 60 s or more → as on `main` (the program is outside, the session
+`elsewhere`, the tick closes the lost terminal, and 7.9's card names the holder's pid and tty); a
+clock that stepped back since gives a negative age and keeps it (never closed early); a time that
+is no decimal number counts it out (ruled on review 2: a program that never ends after the
+hangup must not leave a row that looks healthy, a refused Resume and a lost terminal on no row
+for ever). An exit the keeper sent
 comes after it reaped the program, so such a terminal's program never counts (the case "an ended
 terminal keeps the session it showed; its old program pid is no one" stays as it is). So while the
 lost program lives, the terminal shows its session, the session is not `elsewhere`, and the tick
@@ -876,17 +887,24 @@ tick.
   the same while the state is still `reconnecting` or `running` with the exit, and for a holder
   below the program (a wrapper); a session held by the lost program and by a process outside →
   not elsewhere; the program gone → not counted, its holder gone, a holder outside → elsewhere;
-  its pid another process's now (another start) → never the terminal's; its stat line unreadable
-  or without a start → not counted, the session unknown; an exit the keeper sent (`ended`,
-  `not-started`) → the program never counts, even with its pid and start alive.
+  its pid another process's now (another start) → never the terminal's, also for the dead
+  program's own holder record (starts 899 and 901: the input on which the start check decides);
+  its stat line unreadable or without a start → counted (the holder being the program: shown, not
+  elsewhere, not unknown; a holder below it: shown, not elsewhere, unknown); a read that fails
+  once (EMFILE) and works a moment later → shown, not elsewhere, not unknown, for both shapes;
+  the loss 0 s, 59 s, 60 s − 1 ns old → counted, 60 s, 61 s, an hour → elsewhere as on `main`; a
+  clock that stepped back an hour → counted; an exit time that is no decimal number → elsewhere,
+  no throw; an exit the keeper sent (`ended`, `not-started`) → the program never counts, even
+  with its pid and start alive.
 - `tick.test.ts`: a lost terminal whose own program lives → not closed, its session not
   elsewhere, `setSession` with it; once the program is gone → still not closed, its exit the lost
-  one, the row `not-running`; then the session running in a program outside → closed; lost
-  terminals whose programs live but whose sessions run in another program and in another terminal
-  → both closed (as before).
+  one, the row `not-running`; then the session running in a program outside → closed; the fake
+  clock 59 s after the loss → kept, 61 s → closed with the holder's pid in `elsewhere()`; the clock
+  stepped back an hour → kept; lost terminals whose programs live but whose sessions run in
+  another program and in another terminal → both closed (as before).
 - End to end (`tick.test.ts`, a real registry and keeper): `claudeCommand` is a `sh` the test
   writes, which runs the stand-in as its child and, at SIGHUP, waits for a file the test creates
-  (at most 20 s, and not past the sandbox). At a hangup only the session leader gets SIGHUP, so
+  (200 rounds of `sleep 0.1`, and not past the sandbox). At a hangup only the session leader gets SIGHUP, so
   the stand-in, which holds the session, lives on until the `sh` ends; then the kernel hangs it up
   too and it ends as at a hangup (`SessionEnd` with reason `other`). The test kills ITS OWN keeper
   by the pid of that keeper's `.pid` record (`keeperOf`, `signalKeeper`; nothing else is
@@ -902,13 +920,14 @@ tick.
   stand-in's `exit` record, so that a failure half way leaves no process and no sandbox.
 
 **Done when:** a lost terminal whose program still runs is never closed as "its session runs
-elsewhere"; every existing case of `mapping.test.ts`, `tick.test.ts`, `terminals*.test.ts` and
+elsewhere" within 60 s of the loss, and is as on `main` after; every existing case of `mapping.test.ts`, `tick.test.ts`, `terminals*.test.ts` and
 `server*.test.ts` passes unchanged; `npm run check` passes.
 
 **Not in it:** NAMED LIMIT — a wrapper `claudeCommand` whose program (the wrapper) dies at the
 SIGHUP before its `claude` child: the child is given to init, its chain leaves every terminal, it
 counts as outside, and the lost terminal is closed while the child runs its end, as today (ruled
-2026-11-15). The attention itself (52) and its wiring (54). The stand-in is not changed (the
+2026-11-15). NAMED LIMIT — a program that ends 60 s or more after the loss: the lost terminal was
+closed at 60 s, so that end is not marked in the window (ruled). The attention itself (52) and its wiring (54). The stand-in is not changed (the
 end-to-end case needs no option of it).
 
 ---

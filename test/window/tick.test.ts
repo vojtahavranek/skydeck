@@ -674,6 +674,47 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
     assert.deepEqual(f.closed, ['eeeeeeeeeeee']);
   });
 
+  test('for 60 s after the loss only (ruled): kept at 59 s, closed as on main at 61 s, with the holder’s pid elsewhere', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    startRunning(d, S1, PID);
+    const lost = terminal({
+      id: 'eeeeeeeeeeee',
+      state: 'lost',
+      sessionId: S1,
+      program: { pid: PID, procStart: START },
+      exit: { ...lostExit, atNs: String(d.clock.nowNs()) },
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    await ticks(f, 1);
+    d.clock.setNs(T0 + 59n * SEC);
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, [], 'kept at 59 s');
+    d.clock.setNs(T0 + 61n * SEC);
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, ['eeeeeeeeeeee'], 'closed at 61 s');
+    assert.equal(f.tick.elsewhere().get(S1)?.pid, PID);
+  });
+
+  test('a clock that steps back after the loss keeps the lost terminal (it never closes early)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    startRunning(d, S1, PID);
+    const lost = terminal({
+      id: 'eeeeeeeeeeee',
+      state: 'lost',
+      sessionId: S1,
+      program: { pid: PID, procStart: START },
+      exit: { ...lostExit, atNs: String(d.clock.nowNs()) },
+    });
+    const f = fixture(t, { d, terminals: [lost] });
+    await ticks(f, 1);
+    d.clock.setNs(T0 - 3600n * SEC);
+    await ticks(f, 2);
+    assert.deepEqual(f.closed, []);
+    assert.equal(f.tick.elsewhere().has(S1), false);
+  });
+
   test('a lost terminal whose program lives is still closed when its session runs in another program or another terminal (as today)', async (t) => {
     const d = testDeck(t);
     writeTranscript(d, S1);
