@@ -863,10 +863,11 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
   Then add one line, on a line of its own right after the opening `{`, as its first key:
   `"ticketUrl": "https://<your site>.atlassian.net/browse/{key}",` (for Jira; else your ticket
   system's address, with `{key}` where the key goes). In a file written on one line
-  (`{ "terminal": "wezterm" }`), put the key right after `{` on that line instead. When the file
-  already holds a `"ticketUrl"` line (yours, or one left by an earlier W27 that did not finish),
-  add nothing: the check uses it, and the file is the same at the end. If you do not want that
-  link, remove the line by hand afterwards.
+  (`{ "terminal": "wezterm" }`), put the key right after `{` on that line instead. In a file
+  that holds no key yet (`{ }`), add it without the trailing comma. When the file already holds
+  a `"ticketUrl"` line (yours, or one left by an earlier W27 that did not finish), add nothing:
+  the check uses it, and the file is the same at the end. If you do not want that link, remove
+  the line by hand afterwards.
 - **Both are missing** (`No such file or directory` twice): you have none. Create the file with
   only this key (put your site's address; the command writes nothing when the file exists):
 
