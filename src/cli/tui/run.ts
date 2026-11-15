@@ -371,8 +371,9 @@ class TerminalList {
    * which prepares the resume itself; nothing is prepared or locked here. Its answer is shown as a
    * tab launch's: `opened <short> in the window` and its lines — with C12's words when no page is
    * connected, since the list opens no window —, a refusal (codes 2–4) and a line of plan 2.5 as
-   * the message, a failed launch's lines kept for the end. The server's lines are sanitised before
-   * they are printed (it may be of another build); the message line is sanitised by `render`.
+   * the message, a failed launch's lines kept for the end; an answer without lines (a server of
+   * another build) is named by its code. The server's lines are sanitised before they are
+   * printed (it may be of another build); the message line is sanitised by `render`.
    */
   async #resumeInWindow(id: string): Promise<void> {
     const short = id.slice(0, SHORT_ID_LENGTH);
@@ -385,6 +386,12 @@ class TerminalList {
         const opened = `opened ${short} in the window`;
         const shown = (await this.#pageConnected(server)) ? opened : `${opened}; ${NO_WINDOW}`;
         message = messageOf([shown, ...lines]);
+      } else if (messageOf(lines) === '') {
+        // An answer that says nothing (a server of another build): its code, and no promise.
+        message =
+          code >= 2 && code <= 4
+            ? `the window's server refused to resume ${short} (code ${code})`
+            : `starting ${short} in the window failed (code ${code})`;
       } else if (code >= 2 && code <= 4) {
         message = messageOf(lines);
       } else {

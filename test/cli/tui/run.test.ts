@@ -1853,8 +1853,9 @@ test('the notice of a session that left while the editor ran follows the outcome
 // server's own handler — prepares, locks and starts nothing itself, and shows the answer as it
 // shows a tab launch's. It opens no window. On realTestPlatform (A36).
 
-/** The waits of these cases (A31): a short ping wait and answer time. */
-const WINDOW_TIMES = 'pingMs=1000,pageMs=300,reuseMs=100,answerMs=2000';
+/** The waits of these cases (A31): ping and answer waits no load runs out (no case expects one
+ *  to), as in resume.test.ts. */
+const WINDOW_TIMES = 'pingMs=5000,pageMs=300,reuseMs=100,answerMs=20000';
 const FLAGS = 'original flags unknown; resuming with defaults';
 
 interface WindowList {
@@ -2073,4 +2074,22 @@ test('R with "terminal": "window" when the status look after the answer fails: "
   );
   assert.ok(r.asked.includes('GET /status'), JSON.stringify(r.asked));
   assert.deepEqual(w.edgeCalls(), []);
+});
+
+test('R with "terminal": "window", an answer without lines (a server of another build): the message names the code, and promises nothing for the end', async (t) => {
+  for (const [code, expected] of [
+    [4, `the window's server refused to resume ${short(S1)} (code 4)`],
+    [2, `the window's server refused to resume ${short(S1)} (code 2)`],
+    [1, `starting ${short(S1)} in the window failed (code 1)`],
+    [77, `starting ${short(S1)} in the window failed (code 77)`],
+  ] as const) {
+    const w = windowList(t);
+    await servingList(t, w, { code, lines: [], sessionId: null });
+
+    const r = await w.run(['R', 'q']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(messages(r.stdout).includes(expected), messages(r.stdout).join('\n'));
+    assert.equal(r.stderr, '', `code ${code}: nothing printed at the end`);
+  }
 });

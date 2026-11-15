@@ -21,8 +21,10 @@ import { startFakeServe, windowMachine } from '../../helpers/window-machine.ts';
 import type { WindowMachine } from '../../helpers/window-machine.ts';
 import { writeWindowConfig } from '../../helpers/window-config.ts';
 
-/** The waits of these cases (A31): a short ping wait, page wait and answer time. */
-const WINDOW_TIMES = 'pingMs=1000,pageMs=300,reuseMs=100,answerMs=1000';
+/** The waits of these cases (A31): ping and answer waits no load runs out where a case expects
+ *  none to (as in resume.test.ts); SHORT_ANSWER for the case that waits for the silence. */
+const WINDOW_TIMES = 'pingMs=5000,pageMs=300,reuseMs=100,answerMs=20000';
+const SHORT_ANSWER = 'pingMs=5000,pageMs=300,reuseMs=100,answerMs=1000';
 const PROMPT = 'Toggle numbers, Enter to start, q to cancel: ';
 const STOPPED_ANSWERING =
   "skydeck: the window's server stopped answering; run skydeck to see what started\n";
@@ -53,12 +55,16 @@ interface RestoreCase {
  * A window machine with `"terminal": "window"` and sessions 1–3 of an earlier boot (BOOT_C), each
  * with a transcript in a directory that exists and a start event of a process of that boot; 1 and
  * 2 have no end (preselected), 3 ended with the reason `other` (offered, not preselected).
+ * `sessions` false: none. `times`: SKYDECK_TEST_WINDOW_TIMES (default WINDOW_TIMES).
  */
-function restoreCase(t: TestContext, options: { sessions?: boolean } = {}): RestoreCase {
+function restoreCase(
+  t: TestContext,
+  options: { sessions?: boolean; times?: string } = {},
+): RestoreCase {
   const m = windowMachine(t, {
     env: (s) => ({
       SKYDECK_HANDOFF: join(s.root, 'handoff'),
-      SKYDECK_TEST_WINDOW_TIMES: WINDOW_TIMES,
+      SKYDECK_TEST_WINDOW_TIMES: options.times ?? WINDOW_TIMES,
     }),
   });
   const stub = writeWindowConfig(m.s, {});
@@ -247,7 +253,7 @@ describe('restore with "terminal": "window" (S2 11.4; plan C14)', () => {
   });
 
   test('silent-after:1: the line that came, then 11.4’s line ONCE on stderr; exit 1', async (t) => {
-    const r = restoreCase(t);
+    const r = restoreCase(t, { times: SHORT_ANSWER });
     await serving(t, r, 'silent-after:1');
 
     const run = await r.run(['restore', '--yes']);
