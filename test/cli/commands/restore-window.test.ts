@@ -208,9 +208,7 @@ describe('restore with "terminal": "window" (S2 11.4; plan C14)', () => {
     const run = await r.run(['restore', '--all'], { lines: ['3 1', ''] });
 
     assert.equal(run.code, 0, run.stderr);
-    assert.deepEqual(r.requests(), [
-      { route: 'restore', sessionIds: [sid(2), sid(3)], all: true },
-    ]);
+    assert.deepEqual(r.requests(), [{ route: 'restore', sessionIds: [sid(2), sid(3)], all: true }]);
     assert.deepEqual(run.prompts, [PROMPT, PROMPT]);
     const run1 = `started ${short(1)} one\nstarted ${short(2)} two\nrestore finished: 2 started\n`;
     assert.ok(run.stdout.endsWith(run1), run.stdout);
