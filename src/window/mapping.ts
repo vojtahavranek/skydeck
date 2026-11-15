@@ -116,9 +116,12 @@ export function holderPlace(
  * S2 7.5 and 7.9 for every terminal and every running session:
  *
  * - A terminal's program is the process its keeper reported (`program`), while the terminal has no
- *   exit; a holder of the current boot belongs to the terminal whose program it is or descends from
- *   (`holderPlace`). A holder of another boot is no live holder and is left out. Without a boot id no
- *   holder can be judged: each is unknown.
+ *   exit, and also while it has a lost keeper's (any exit but an applied one the keeper sent:
+ *   `keeperExitApplied`) as long as that program lives by design 5.5 (`lives`; plan task 57, S2 7.8:
+ *   the program runs its end for a moment after the SIGHUP and is not "elsewhere" meanwhile). A
+ *   holder of the current boot belongs to the terminal whose program it is or descends from
+ *   (`holderPlace`). A holder of another boot is no live holder and is left out. Without a boot id
+ *   no holder can be judged: each is unknown.
  * - `shown`: of the holders that belong to a terminal, the one nearest its program decides (a
  *   scripted run that the program started does not move it), then the latest event, then the
  *   session id. A terminal none of whose holders belongs to it keeps the session it showed
@@ -144,11 +147,12 @@ export function mapTerminals(input: {
   const { terminals, sessions, proc, bootId, nowNs, startTimeoutNs } = input;
   const programs = new Map<number, { procStart: number; termId: string }>();
   for (const terminal of terminals) {
-    if (terminal.program !== null && terminal.exit === null) {
-      programs.set(terminal.program.pid, {
-        procStart: terminal.program.procStart,
-        termId: terminal.id,
-      });
+    const { program } = terminal;
+    if (
+      program !== null &&
+      (terminal.exit === null || (!keeperExitApplied(terminal) && lives(program, proc)))
+    ) {
+      programs.set(program.pid, { procStart: program.procStart, termId: terminal.id });
     }
   }
 
@@ -204,6 +208,32 @@ export function mapTerminals(input: {
     }
   }
   return { shown, notReported, elsewhere, unknown };
+}
+
+/**
+ * Whether the terminal's exit is one its keeper sent, applied (`ended`, `not-started`): the keeper
+ * reaped the program before it sent it (S2 7.8), so the program is over whatever /proc says. Any
+ * other exit is a lost keeper's, made up at once (`lost`), or one still on its way through the
+ * screen side (the state not over yet); its program counts while it lives (plan task 57) — which a
+ * sent exit's reaped program does not.
+ */
+function keeperExitApplied(terminal: TerminalInfo): boolean {
+  return terminal.state === 'ended' || terminal.state === 'not-started';
+}
+
+/**
+ * Design 5.5's rule on the program a keeper reported (pid AND process start; never the pid alone,
+ * which another process may have taken): its stat line exists and names that start. A read that
+ * throws, or a stat line without a readable start, is not alive here — the holder's own walk meets
+ * the same read and makes its session unknown (plan task 57).
+ */
+function lives(program: { pid: number; procStart: number }, proc: Proc): boolean {
+  try {
+    const stat = proc.stat(program.pid);
+    return stat !== null && procStartFromStat(stat) === program.procStart;
+  } catch {
+    return false;
+  }
 }
 
 /** Nearer the program first, then the later event, then the lower session id. */

@@ -206,7 +206,9 @@ export function createTick(deps: TickDeps): Tick {
    * S2 7.5, 7.9 for the terminals of now: each one's session (setSession), the sessions running
    * elsewhere, and an ended terminal dropped when its session runs again in another terminal or
    * outside the window (ruled, review of task 13). For a session the mapping could not judge
-   * (`unknown`, ruled in task 21) the previous answer is kept and nothing is decided on it.
+   * (`unknown`, ruled in task 21) the previous answer is kept and nothing is decided on it. A lost
+   * terminal's own program, while it lives, is that terminal's in the mapping (plan task 57): its
+   * session is not "elsewhere" for it, so the terminal is not dropped for it (S2 7.8).
    */
   const map = (): void => {
     const terminals = hub.list();
