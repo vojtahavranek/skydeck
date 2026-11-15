@@ -640,7 +640,9 @@ file means, and when a session is being seen.
 **Files**
 - Modify: `src/claude/terminal.ts` (`LookedFile`, `isTurnEnd`, `lookAt`), `docs/design-step-2.md`
   10.3 (B4, after the paragraph "`busy` to `waiting` is not a turn end…"), 12.4 (B9, after the
-  paragraph "Seen is a **condition that holds**…")
+  paragraph "Seen is a **condition that holds**…"; that paragraph's own sentence "at every tick —
+  written at most once per 5 seconds per session" is rewritten to the ruled rule, no periodic
+  `seen` write, so that task 52 does not read two rules: ruled on review A's re-check)
 - Create: `src/window/seen.ts` (`isTyping`, `createSeen`), `test/window/seen.test.ts`
 - Test: `test/claude/terminal.test.ts`
 
