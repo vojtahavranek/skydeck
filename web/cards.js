@@ -1,24 +1,42 @@
-// The right side's header and cards (S2 7.8, 7.9, 12.5, 12.6; plan task 29): the read-only header
-// of stage A (S2 19: title, group, state, directory, short id, design 7.3's chip), the resume
-// card, the card of a session running in another terminal, the ended bar and the new form. Its
-// interface is contract 2.9's. Every server string reaches the DOM through textContent.
+// The right side's header and cards (S2 7.8, 7.9, 12.5, 12.6; plan task 29, plan D task 38): the
+// header of stage D (S2 12.5, D11–D15, D17) in four lines of one line each, so that it has one
+// height for every session and window width (D12) — the title, the group chip, its ✎ or `+ group`,
+// the state, Note and Done; the directory, "opened <time> · last active <age>", where the title
+// comes from and the short id; the window's chip (S2 12.3), the open pull requests and the button of
+// the pull-request dialog; the note's first line —, the resume card, the card of a session running
+// in another terminal, the ended bar and the new form. Its interface is contract 2.9's with plan D
+// 2.4's changes. Every server string reaches the DOM through textContent or a tooltip.
 //
 // How app.js calls it: on a change of what the right side shows, `hide()` (every card and the
-// header), then `header(row, selected, term, now)` (plan D 2.4) and at most one card. `act` is app.js's: it adds `t` and `id`, and
-// for `resume` and `new` the size of the terminal area; a successful resume or new selects its
-// session there and gives its terminal the keyboard (S2 11.3).
+// header), then `header(row, selected, term, now)` (plan D 2.4) and at most one card. `act` is
+// app.js's: it adds `t` and `id`, and for `resume` and `new` the size of the terminal area; a
+// successful resume or new selects its session there and gives its terminal the keyboard (S2 11.3).
+// The header's controls open task 37's dialogs through `edit` and mark done through `done`; a link
+// of the header (a pull request, the ticket) is `act open-link`, and a refusal is a line in the key
+// bar (`say`). Its ages count from `now()` and are drawn again on the header's own 1 s tick (A18).
 //
-// Keyboard and selection (S2 12.9, contract 2.9): this module never calls focus(). The header and
-// a card are filled in place while they show the same session or terminal, and a text is set only
-// when it changed, so that text the user selected to copy stays selected when a list changes
+// Keyboard and selection (S2 12.9, contract 2.9, D17): this module never calls focus(). The header
+// and a card are filled in place while they show the same session or terminal, and a text is set
+// only when it changed, so that text the user selected to copy stays selected when a list changes
 // something else, and a render between the mousedown and the mouseup on a button loses no click.
-// A card whose facts changed while one of its buttons had the keyboard gives the keyboard up: an
-// Enter must not press a button for what the user has not seen (nothing resumes but on purpose);
-// app.js gives it to the zone after the call. The short id's copy takes no keyboard on a click.
+// Only buttons cancel their mousedown, so that they take no keyboard; a text that acts (the title,
+// the ticket link, a pull request, the note's line) acts on a click that selected no text, and can
+// be selected and copied by a drag. A card whose facts changed while one of its buttons had the
+// keyboard gives the keyboard up: an Enter must not press a button for what the user has not seen
+// (nothing resumes but on purpose); app.js gives it to the zone after the call. The short id's copy
+// takes no keyboard on a click.
 
 /** @import { ElsewherePayload, ExitMessage, ResultMessage, RowPayload, SelectedPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
-import { chipText } from './list-text.js';
+import {
+  noteLine,
+  prItemText,
+  prItemTip,
+  splitPrs,
+  timesText,
+  titleSourceText,
+} from './header-text.js';
+import { rowText } from './list-text.js';
 
 /**
  * @typedef {object} CardsDeps
@@ -33,6 +51,8 @@ import { chipText } from './list-text.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const COPIED_MS = 2000;
+/** How often the header's ages are drawn again (A18, as the list's). */
+const AGE_TICK_MS = 1000;
 
 /**
  * @param {string} tag
@@ -141,7 +161,7 @@ function exitTimeOf(ns) {
 }
 
 /**
- * The state of the header (S2 19: states only in stage A): "starting…", "running in another
+ * The header's state pill (S2 19: states only until stage B): "starting…", "running in another
  * terminal", or the row's state with its detail in brackets (design 7.4).
  * @param {RowPayload} row
  */
@@ -226,26 +246,187 @@ function actionButton(text, className, run) {
 }
 
 /**
+ * Sets the tooltip only when it differs.
+ * @param {HTMLElement} target
+ * @param {string} tip
+ */
+function setTip(target, tip) {
+  if (target.title !== tip) {
+    target.title = tip;
+  }
+}
+
+/**
+ * Sets a data attribute only when it differs.
+ * @param {HTMLElement} target
+ * @param {string} name
+ * @param {string} value
+ */
+function setData(target, name, value) {
+  if (target.dataset[name] !== value) {
+    target.dataset[name] = value;
+  }
+}
+
+/**
+ * Whether the page holds selected text: a click that ends a drag over a text that acts acts on
+ * nothing, so that the text can be copied (D17).
+ */
+function textSelected() {
+  const selection = getSelection();
+  return selection !== null && !selection.isCollapsed && selection.toString() !== '';
+}
+
+/**
+ * A button of the header (D17): it cancels its mousedown, so that a click on it takes no keyboard
+ * and leaves it where it was; a held Enter on it acts once, and so does a double click (D15: the
+ * second click would find what the first one changed — Done a done row, and send `undone`; review 2
+ * of task 38). A press from the keyboard has no click count.
+ * @param {string} className
+ * @param {string} text
+ * @param {string} tip
+ * @param {() => void} run
+ * @returns {HTMLButtonElement}
+ */
+function headerButton(className, text, tip, run) {
+  const button = /** @type {HTMLButtonElement} */ (element('button', `header-button ${className}`));
+  button.type = 'button';
+  button.textContent = text;
+  button.title = tip;
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('keydown', refuseHeldEnter);
+  button.addEventListener('click', (event) => {
+    if (event.detail <= 1) {
+      run();
+    }
+  });
+  return button;
+}
+
+/**
  * @param {HTMLElement} root
  * @param {CardsDeps} deps
  */
 export function createCards(root, deps) {
-  // --- the header (S2 12.5, read-only in stage A) -------------------------------------------
+  // --- the header (S2 12.5, plan D task 38): four lines, one height (D12) ---------------------
   const head = element('div', 'card-header');
-  const title = element('span', 'header-title');
-  const group = element('span', 'header-group');
-  const state = element('span', 'header-state');
-  const chip = element('span', 'header-chip');
-  const dir = element('span', 'header-dir');
-  const shortId = element('span', 'header-id');
-  const copied = element('span', 'header-copied');
-  const top = element('div', 'header-top');
-  top.append(title, group, state, chip);
-  const sub = element('div', 'header-sub');
-  sub.append(dir, shortId, copied);
-  head.append(top, sub);
+  /**
+   * The session the header shows, its terminal and `now`, for the age tick.
+   * @type {{ row: RowPayload, term: TerminalPayload | null, now: () => string } | null}
+   */
+  let shownHead = null;
   /** The whole id the short id copies. */
   let headId = '';
+  /**
+   * The ticket address the group chip opens, null while it is plain text (D14).
+   * @type {string | null}
+   */
+  let ticket = null;
+  /** @param {EditWhat} what */
+  const editHere = (what) => {
+    if (headId !== '') {
+      deps.edit(what, headId);
+    }
+  };
+  /**
+   * S2 9.6's `open-link` (the server checks the address again); a refusal in the key bar.
+   * @param {string} url
+   */
+  const openLink = (url) => {
+    void deps.act({ kind: 'open-link', url }).then((result) => {
+      if (!result.ok) {
+        deps.say(result.error ?? 'skydeck could not open the link');
+      }
+    });
+  };
+
+  // Line 1: the title (a click edits the label), the group chip (D14: it opens the ticket when it
+  // is a link, else it is plain text; it never edits), ✎ or `+ group`, the state, Note and Done.
+  const title = element('span', 'header-title');
+  title.title = 'the label (l)';
+  const group = element('span', 'header-group');
+  const groupKey = element('span', 'header-group-key');
+  const groupArrow = element('span', 'header-group-arrow');
+  group.append(groupKey, groupArrow);
+  const groupEdit = headerButton('header-group-edit', '✎', 'edit the group (g)', () =>
+    editHere('group'),
+  );
+  const groupAdd = headerButton('header-group-add', '+ group', 'set a group (g)', () =>
+    editHere('group'),
+  );
+  const state = element('span', 'header-state');
+  const stateText = element('span', 'header-state-text');
+  state.append(stateText);
+  const noteButton = headerButton('header-note-button', 'Note', 'the note (n)', () =>
+    editHere('note'),
+  );
+  // D15: done, or undone for a done row; one act per session at a time is app.js's.
+  const doneButton = headerButton('header-done', 'Done', 'mark it done (d)', () => {
+    if (headId !== '') {
+      deps.done(headId);
+    }
+  });
+  const actions = element('span', 'header-actions');
+  actions.append(noteButton, doneButton);
+  const top = element('div', 'header-top');
+  top.append(title, group, groupEdit, groupAdd, state, actions);
+  title.addEventListener('click', () => {
+    if (!textSelected()) {
+      editHere('label');
+    }
+  });
+  group.addEventListener('click', () => {
+    if (ticket !== null && !textSelected()) {
+      openLink(ticket);
+    }
+  });
+
+  // Line 2: the directory (one line, cut with an ellipsis, whole in its tooltip), "opened <time> ·
+  // last active <age>", where the title comes from, the short id (never cut; a click copies).
+  const dir = element('span', 'header-dir');
+  const times = element('span', 'header-times');
+  const source = element('span', 'header-source');
+  const shortId = element('span', 'header-id');
+  const copied = element('span', 'header-copied');
+  const sub = element('div', 'header-sub');
+  sub.append(dir, times, source, shortId, copied);
+
+  // Line 3: the window's chip (S2 12.3), the open pull requests side by side as far as they fit
+  // (a click opens one), and the button of the pull-request dialog, never cut; while none is
+  // attached, the hint `no pull request` and `+ PR`.
+  const chip = element('span', 'header-chip');
+  const chipWords = element('span', 'header-chip-text');
+  const chipMerged = element('span', 'header-chip-merged');
+  chip.append(chipWords, chipMerged);
+  const items = element('span', 'header-pr-items');
+  const prsNone = element('span', 'header-prs-none', 'no pull request');
+  const prsButton = headerButton('header-prs-button', '+ PR', 'the pull requests (p)', () =>
+    editHere('pr'),
+  );
+  const prsLine = element('div', 'header-prs');
+  prsLine.append(chip, prsNone, items, prsButton);
+  /** The addresses of the items drawn, in order: they are made again only when these change. */
+  let itemsKey = '';
+  items.addEventListener('click', (event) => {
+    const item = event.target instanceof Element ? event.target.closest('.header-pr') : null;
+    const url = item instanceof HTMLElement ? item.dataset['url'] : undefined;
+    if (url !== undefined && !textSelected()) {
+      openLink(url);
+    }
+  });
+
+  // Line 4: the note's first line (a click edits the note), or the hint `no note`.
+  const noteText = element('span', 'header-note-text');
+  noteText.title = 'the note (n)';
+  const noteLineOf = element('div', 'header-note');
+  noteLineOf.append(noteText);
+  noteText.addEventListener('click', () => {
+    if (!textSelected()) {
+      editHere('note');
+    }
+  });
+
+  head.append(top, sub, prsLine, noteLineOf);
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null;
   // A click copies; it takes no keyboard, so that the terminal or the list keeps it.
@@ -274,6 +455,38 @@ export function createCards(root, deps) {
       () => say('could not copy the id'),
     );
   });
+
+  /**
+   * What of the header counts from the server's now — the times, the chip's tooltip, the items'
+   * tooltips —, for the time now: at every `header()` and on the age tick.
+   */
+  const paintAges = () => {
+    if (shownHead === null) {
+      return;
+    }
+    const { row, term, now } = shownHead;
+    const nowNs = now();
+    setText(
+      times,
+      timesText(term === null ? '' : momentOf(term.openedNs), row.lastActivityNs, nowNs),
+    );
+    // The list's own chip of the row (S2 12.3: one implementation of its words and tooltip).
+    const shown = rowText(row, nowNs, term).chip;
+    setHidden(chip, shown === null);
+    setText(chipWords, shown?.text ?? '');
+    setText(chipMerged, shown === null || shown.merged === '' ? '' : ` ${shown.merged}`);
+    setTip(chip, shown?.tip ?? '');
+    setData(chip, 'level', row.chip?.level ?? '');
+    setData(chip, 'dim', String(shown?.dim ?? false));
+    const open = splitPrs(Array.isArray(row.prs) ? row.prs : []).open;
+    open.forEach((pr, at) => {
+      const item = items.children[at];
+      if (item instanceof HTMLElement) {
+        setTip(item, prItemTip(pr, nowNs));
+      }
+    });
+  };
+  setInterval(paintAges, AGE_TICK_MS);
 
   const card = element('div', 'card');
   root.replaceChildren(head, card);
@@ -508,7 +721,7 @@ export function createCards(root, deps) {
   return {
     /**
      * Plan D 2.4: app.js passes `selected` (list.selected when it is the row's session), the
-     * pane's terminal and the server's now for every pane; task 38's header uses them.
+     * pane's terminal (its `openedNs` is "opened <time>") and the server's now for every pane.
      * @param {RowPayload | null} row
      * @param {SelectedPayload | null} selected
      * @param {TerminalPayload | null} term
@@ -517,6 +730,7 @@ export function createCards(root, deps) {
     header(row, selected, term, now) {
       if (row === null) {
         setHidden(head, true);
+        shownHead = null;
         return;
       }
       if (row.id !== headId) {
@@ -526,20 +740,51 @@ export function createCards(root, deps) {
         setText(copied, '');
       }
       headId = row.id;
+      shownHead = { row, term, now };
       setText(title, row.title);
-      setText(group, row.group ?? '');
-      setHidden(group, row.group === null);
-      group.title = row.groupSource === 'title' ? 'group (from the title)' : 'group';
-      setText(state, stateOf(row));
-      // Design 7.3's chip in S2 12.3's words — the list's own text of it (task 27).
-      setText(chip, row.chip === null ? '' : chipText(row.chip));
-      setHidden(chip, row.chip === null);
-      chip.dataset['level'] = row.chip?.level ?? '';
+      // D14: with a group, the chip and ✎; with a ticket address (the server's, S2 12.5) the chip is
+      // a link — the key, `↗`, the address as its tooltip —, else plain text.
+      const hasGroup = row.group !== null;
+      // The server sends an address only for a group that holds a ticket key (task 35).
+      const address = typeof selected?.ticketUrl === 'string' ? selected.ticketUrl : null;
+      ticket = address;
+      setHidden(group, !hasGroup);
+      setHidden(groupEdit, !hasGroup);
+      setHidden(groupAdd, hasGroup);
+      setText(groupKey, row.group ?? '');
+      setText(groupArrow, address === null ? '' : ' ↗');
+      setData(group, 'link', String(address !== null));
+      setTip(group, address ?? (row.groupSource === 'title' ? 'group (from the title)' : 'group'));
+      setText(stateText, stateOf(row));
+      setText(doneButton, row.done ? 'Undone' : 'Done');
+      setTip(doneButton, row.done ? 'show it again (d)' : 'mark it done (d)');
       setText(dir, row.dir ?? 'directory not known');
       // One line, cut with an ellipsis (a fixed height; ruled): the whole path in the tooltip.
-      dir.title = row.dir ?? '';
+      setTip(dir, row.dir ?? '');
+      setText(source, titleSourceText(row.titleSource));
       setText(shortId, row.shortId);
-      shortId.title = `session ${row.id}; a click copies it`;
+      setTip(shortId, `session ${row.id}; a click copies it`);
+      // Line 3: none attached exactly when there is no chip (S2 12.3).
+      const none = row.chip === null;
+      setHidden(prsNone, !none);
+      setText(prsButton, none ? '+ PR' : 'Pull requests');
+      const open = splitPrs(Array.isArray(row.prs) ? row.prs : []).open;
+      const key = open.map((pr) => pr.url).join('\n');
+      if (key !== itemsKey) {
+        itemsKey = key;
+        items.replaceChildren(...open.map(() => element('span', 'header-pr')));
+      }
+      open.forEach((pr, at) => {
+        const item = items.children[at];
+        if (item instanceof HTMLElement) {
+          setData(item, 'url', pr.url);
+          setText(item, prItemText(pr));
+        }
+      });
+      const note = noteLine(row, selected);
+      setText(noteText, note.text);
+      setData(noteText, 'empty', String(note.empty));
+      paintAges();
       setHidden(head, false);
     },
     /**

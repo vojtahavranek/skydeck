@@ -583,12 +583,12 @@ const WELL_FORMED: Check = (value, where) => {
   return value.isWellFormed() ? null : `${where}: wrong value`;
 };
 
-/** An array of 1 (`nonEmpty`) or 0 up to LIST_LIMIT items, each passing `item`; `distinct`: no
- *  item twice. */
-function list(item: Check, nonEmpty: boolean, distinct: boolean): Check {
+/** An array of 1 (`nonEmpty`) or 0 up to `max` items, each passing `item`; `distinct`: no item
+ *  twice. */
+function list(item: Check, nonEmpty: boolean, distinct: boolean, max = LIST_LIMIT): Check {
   return (value, where) => {
     if (!Array.isArray(value)) return `${where}: wrong type`;
-    if (value.length > LIST_LIMIT) return `${where}: too long`;
+    if (value.length > max) return `${where}: too long`;
     if (nonEmpty && value.length === 0) return `${where}: wrong value`;
     const seen = new Set<unknown>();
     for (const one of value as unknown[]) {
@@ -669,27 +669,12 @@ const UNFOLDED: Check = (value, where) => {
  *  them: this module imports nothing of the view model). */
 const CHIPS: Readonly<Record<SearchChip, true>> = { running: true, 'open-pr': true, note: true };
 
-/** An array of distinct items, at most `max`, each passing `item`. */
-function distinct(item: Check, max: number): Check {
-  return (value, where) => {
-    if (!Array.isArray(value)) return `${where}: wrong type`;
-    if (value.length > max) return `${where}: too long`;
-    const seen = new Set<unknown>();
-    for (const one of value as unknown[]) {
-      const problem = item(one, where);
-      if (problem !== null) return problem;
-      if (seen.has(one)) return `${where}: wrong value`;
-      seen.add(one);
-    }
-    return null;
-  };
-}
 const CHIP: Check = (value, where) => {
   if (typeof value !== 'string') return `${where}: wrong type`;
   return Object.hasOwn(CHIPS, value) ? null : `${where}: wrong value`;
 };
-const VIEW_CHIPS = distinct(CHIP, Object.keys(CHIPS).length);
-const OPENED = distinct(TEXT, MAX_OPENED);
+const VIEW_CHIPS = list(CHIP, false, true, Object.keys(CHIPS).length);
+const OPENED = list(TEXT, false, true, MAX_OPENED);
 
 const AREA = object({ cols: SIZE, rows: SIZE });
 

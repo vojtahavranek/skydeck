@@ -12,9 +12,6 @@
  */
 import type { StackPayload } from '../../protocol.ts';
 
-/** RowPayload.stack (E6): the message type lives in protocol.ts (task 96). */
-export type { StackPayload };
-
 export interface StackEntry {
   readonly id: string;
   readonly group: string | null;

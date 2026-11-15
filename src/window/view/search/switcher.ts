@@ -24,8 +24,6 @@ import type {
 import { foundIn, matchesWords, searchWords } from './filter.ts';
 import type { Searchable } from './filter.ts';
 
-// The message types live in protocol.ts (task 96).
-export type { HiddenBy, RestoreOffer, SwitchItem, SwitchRank, SwitcherPayload };
 export const MAX_ITEMS = 50;
 
 /** The one command of the switcher's command form (E12). */

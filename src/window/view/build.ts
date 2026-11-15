@@ -383,9 +383,10 @@ export function buildListMessage(
       doneHidden += 1; // not filtering, so it is done and the view hides done ones
     }
     if (switching) {
-      const foldedNow = !filtering && name === 'earlier' && earlierFolded;
+      // While filtering, a row the words and chips match is shown, done or in Earlier: nothing
+      // hides it. Otherwise each part names what hides it now or once the filter is cleared.
       const hiddenBy: HiddenBy[] = [];
-      if (!inSection || foldedNow) {
+      if (!filtering || !matches) {
         if (!matches) hiddenBy.push('filter');
         if (!listed) hiddenBy.push('done');
         if (name === 'earlier' && earlierFolded) hiddenBy.push('folded');
