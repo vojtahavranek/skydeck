@@ -957,8 +957,9 @@ count counts every session in it, those of a closed stack too.
   leaves the keyboard where it was, but a click on `×4` that closes the stack while one of its
   members is selected selects the head first. A double click on either acts once.
 - In the list (`Focus: list`): → on a closed head opens the stack, ← on an open head closes it,
-  and ← on a member selects the head and closes the stack. On a session in no stack ← and → fold
-  and unfold Earlier as before.
+  and ← on a member selects the head and closes the stack. Otherwise ← and → fold and unfold
+  Earlier as before: on a session in no stack, and also ← on a closed head and → on an open head
+  or on a member.
 - A stack whose member becomes the selected session opens, however that happens (the switcher,
   or a newer session of its group that makes the selected one a member), and stays open when the
   selection leaves, until you close it. Ctrl+Tab skips a member of a stack you closed, as
@@ -989,7 +990,8 @@ holds it. When the list shows the session again (the filter cleared), it is sele
 
 #### The icon (stage E)
 
-The page has an icon of its own, a white stack of cards with a `>_` prompt on a blue square, for
+The page has an icon of its own, a deck of three session cards on a blue rounded square, the front
+card white with a prompt (`>_`) on it, for
 the window's taskbar button and its title bar; manual check W3 says whether Edge shows it there.
 The page also has a manifest, for the icon: Edge's menu may offer to install the page as an app.
 Do not: the window is opened by `skydeck window`, and the page is built not to be installable (its
@@ -1111,7 +1113,8 @@ manifest names no start address).
 
 - **How far search reads.** A word counts in its first 64 characters, and only the first 16 words
   of a text count. Each field is searched in its first 16,384 characters (a long note in the first
-  16,384 characters of its text).
+  16,384 characters of its text). Characters are counted as JavaScript counts them, in UTF-16
+  units: most emoji count as two.
 - **A character you cannot see**, a zero-width space or a control character pasted into the field,
   is part of a word: a filter that looks empty, or like a plain word, can then list nothing. Clear
   the field (Esc) and type it again.
@@ -1124,7 +1127,9 @@ manifest names no start address).
 - **Stacks the window cannot remember.** A group over 1,024 bytes (of UTF-8) opens its stack only
   while one of its members is selected. A window remembers at most 64 open stacks: opening
   another closes the one opened first.
-- **The automatic pull-request refresh** (design.md 7.3) leaves out the sessions inside a closed
+- **The automatic pull-request refresh** (design.md 7.3) follows the sessions the list's
+  sections show, and a selected session the list does not show while a terminal of the window
+  holds it (its header shows its pull requests). So it leaves out the sessions inside a closed
   stack, as it leaves out those of a folded Earlier: open the stack, or use `↻` in the session's
   pull-request dialog.
 - **A session that ended before its first prompt** has no transcript, so the list does not list
