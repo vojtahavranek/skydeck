@@ -204,9 +204,22 @@ export function createActions(deps: ActionDeps): ActionHandler {
     throw new RefError(`no session matches '${sanitize(sessionId)}'`, []);
   }
 
-  /** A write on the server's own connection: every window's list follows now (D7). */
-  function wrote(): Answer {
-    deps.changed();
+  /**
+   * After a write on the server's own connection: every window's list follows now (D7). The write
+   * is committed, so a `changed()` that throws is logged by kind and the answer stays `ok` (ruled
+   * on #90, review 2).
+   */
+  function tell(kind: EditAction['kind']): void {
+    try {
+      deps.changed();
+    } catch (error) {
+      log(`act ${kind}: the lists were not told (${failureKind(error)})`);
+    }
+  }
+
+  /** The answer to an edit that wrote: `ok` once the lists were told (`tell`). */
+  function wrote(kind: EditAction['kind']): Answer {
+    tell(kind);
     return DONE;
   }
 
@@ -228,7 +241,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
     if (outcome === 'changed') return refusal(NOTE_CHANGED);
     if (outcome === 'stored') return DONE;
     discardKeptNote(deck, sessionId);
-    return wrote();
+    return wrote('note');
   }
 
   /**
@@ -246,30 +259,34 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'label': {
         const text = orNone(action.text);
         setLabel(deck, sessionId, text === null ? null : cleanLabel(text));
-        return wrote();
+        return wrote(action.kind);
       }
       case 'group': {
         const text = orNone(action.text);
         setGroup(deck, sessionId, text === null ? null : cleanGroup(text));
-        return wrote();
+        return wrote(action.kind);
       }
       case 'note':
         return saveNote(action);
       case 'done':
         markDone(deck, sessionId);
-        return wrote();
+        return wrote(action.kind);
       case 'undone':
         markUndone(deck, sessionId);
-        return wrote();
+        return wrote(action.kind);
       case 'pr-add': {
         const key = attachManualPr(deck, sessionId, action.url);
-        deps.changed();
-        deps.prs.fetch([key.url]);
+        tell(action.kind);
+        try {
+          deps.prs.fetch([key.url]);
+        } catch (error) {
+          log(`act pr-add: the fetch was not asked for (${failureKind(error)})`);
+        }
         return { ok: true, lines: [`attached ${key.url}`], error: null, sessionId: null };
       }
       case 'pr-rm':
         detachSessionPr(deck, sessionId, action.url);
-        return wrote();
+        return wrote(action.kind);
       case 'pr-refresh':
         deps.prs.refresh(sessionId);
         return DONE;
