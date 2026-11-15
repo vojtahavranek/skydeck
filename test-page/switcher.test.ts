@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -58,6 +58,7 @@ import {
   untilScreen,
   untilTerminalOf,
 } from './helpers/terminal.ts';
+import { activityTime } from '../web/banner-text.js';
 
 type Row = Record<string, unknown>;
 
@@ -74,9 +75,6 @@ const CHORD = 'Control+Shift+P';
 const FIELD = 'the switcher field';
 const CLOSE_FIRST = /^close the switcher first \(Esc\)$/;
 const NOT_CONNECTED = "skydeck's server is not connected";
-
-/** Tasks 74 and 75 (stage C: the banner, `activityTime`) are not merged until this file is there. */
-const STAGE_C = existsSync(new URL('../web/banner-text.js', import.meta.url));
 
 // ---------------------------------------------------------------------------------------------
 // Sessions as step 1 sees them, and a page of a real server with everything it sends recorded
@@ -2036,96 +2034,87 @@ async function modalCases(t: TestContext, chromium: Browser): Promise<void> {
 // The restore offer (E12): stage C's, so that it runs once stage C is merged
 
 async function offerCases(t: TestContext, chromium: Browser): Promise<void> {
-  await t.test(
-    'the restore offer (stage C)',
-    {
-      skip: STAGE_C
-        ? false
-        : 'stage C (tasks 74, 75) is not merged: web/banner-text.js is not there',
-    },
-    async (t) => {
-      await t.test(
-        'a list whose `switcher.restore` holds two ids → the first entry `Restore 2 sessions from <activityTime>`, Enter → `act restore` with the two ids and a refusal in the key bar; one id → `1 session`; a list without it → no entry',
-        async (t) => {
-          const banner = (await import(new URL('../web/banner-text.js', import.meta.url).href)) as {
-            activityTime(ns: string, nowMs: number, timeZone: string): string;
-          };
-          const lastActivityNs = String(BigInt(Date.now() - 3 * 3_600_000) * 1_000_000n);
-          let restore: Row | null = { count: 2, lastActivityNs, sessionIds: [S1, S2] };
-          const d = await world(t, chromium, {
-            ...ORB_WORLD,
-            payload: (text) =>
-              text.startsWith('>')
-                ? commandPayload(text, restore)
-                : payloadFor(text, ORB_WORLD.entries ?? []),
-          });
-          const { page, w } = d;
-          await openSwitcher(page);
-          await page.keyboard.type('>rest');
-          const nowMs = await page.evaluate(() => Date.now());
-          let view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
-          assert.equal(
-            view.offer?.text,
-            `Restore 2 sessions from ${banner.activityTime(lastActivityNs, nowMs, 'UTC')}`,
-          );
-          assert.equal(view.offer?.active, true, 'the first entry is highlighted');
-          assert.deepEqual(view.items, [], 'no session listed');
-          assert.equal(view.keys, '↑ ↓ move · Enter restore · Esc close');
+  await t.test('the restore offer (stage C)', async (t) => {
+    await t.test(
+      'a list whose `switcher.restore` holds two ids → the first entry `Restore 2 sessions from <activityTime>`, Enter → `act restore` with the two ids and a refusal in the key bar; one id → `1 session`; a list without it → no entry',
+      async (t) => {
+        const lastActivityNs = String(BigInt(Date.now() - 3 * 3_600_000) * 1_000_000n);
+        let restore: Row | null = { count: 2, lastActivityNs, sessionIds: [S1, S2] };
+        const d = await world(t, chromium, {
+          ...ORB_WORLD,
+          payload: (text) =>
+            text.startsWith('>')
+              ? commandPayload(text, restore)
+              : payloadFor(text, ORB_WORLD.entries ?? []),
+        });
+        const { page, w } = d;
+        await openSwitcher(page);
+        await page.keyboard.type('>rest');
+        const nowMs = await page.evaluate(() => Date.now());
+        const zone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+        let view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
+        // Stage C's words for the time, on the page's clock and in its time zone (E12).
+        assert.equal(
+          view.offer?.text,
+          `Restore 2 sessions from ${activityTime(lastActivityNs, nowMs, zone)}`,
+        );
+        assert.equal(view.offer?.active, true, 'the first entry is highlighted');
+        assert.deepEqual(view.items, [], 'no session listed');
+        assert.equal(view.keys, '↑ ↓ move · Enter restore · Esc close');
 
-          await page.keyboard.press('Enter');
-          const act = await w.act(1);
-          assert.deepEqual([act['kind'], act['sessionIds']], ['restore', [S1, S2]]);
-          w.answer(act, { ok: false, error: 'a restore is already running' });
-          await showsText(page, '#key-message', /^a restore is already running$/);
+        await page.keyboard.press('Enter');
+        const act = await w.act(1);
+        assert.deepEqual([act['kind'], act['sessionIds']], ['restore', [S1, S2]]);
+        w.answer(act, { ok: false, error: 'a restore is already running' });
+        await showsText(page, '#key-message', /^a restore is already running$/);
 
-          restore = { count: 1, lastActivityNs, sessionIds: [S1] };
-          await openSwitcher(page);
-          await clearField(page);
-          await page.keyboard.type('>restore');
-          view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer of one session');
-          assert.match(view.offer?.text ?? '', /^Restore 1 session from /);
+        restore = { count: 1, lastActivityNs, sessionIds: [S1] };
+        await openSwitcher(page);
+        await clearField(page);
+        await page.keyboard.type('>restore');
+        view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer of one session');
+        assert.match(view.offer?.text ?? '', /^Restore 1 session from /);
 
-          restore = null;
-          d.set({});
-          view = await untilSwitcher(page, (v) => v.offer === null, 'no offer');
-          assert.notEqual(view.empty, '', 'a line of its own instead');
-        },
-      );
+        restore = null;
+        d.set({});
+        view = await untilSwitcher(page, (v) => v.offer === null, 'no offer');
+        assert.notEqual(view.empty, '', 'a line of its own instead');
+      },
+    );
 
-      await t.test(
-        'a real server with the banner dismissed: Ctrl+Shift+P, then Enter, with an offer, sends no `act restore`',
-        async (t) => {
-          const l = await launchedSent(t, chromium);
-          const { page, d } = l;
-          earlierBoot(d, [S1, S2, S3]);
-          await page.waitForSelector('#banner:not([hidden])', {
-            state: 'attached',
-            timeout: PAGE_WAIT_MS,
-          });
-          await page.locator('#banner button', { hasText: 'Not now' }).click();
-          await page.waitForSelector('#banner[hidden]', {
-            state: 'attached',
-            timeout: PAGE_WAIT_MS,
-          });
-          await openSwitcher(page);
-          await page.keyboard.type('>restore');
-          const view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
-          assert.match(view.offer?.text ?? '', /^Restore \d+ sessions? from /);
-          await clearField(page);
-          await untilSwitcher(page, (v) => v.items.length > 0 && v.offer === null, 'the sessions');
-          await page.keyboard.press('Enter');
-          await switcherShown(page, false);
-          await sleep(800);
-          assert.deepEqual(
-            (await actsOf(page)).filter((act) => act['kind'] === 'restore'),
-            [],
-            'no restore sent',
-          );
-          await healthy(l);
-        },
-      );
-    },
-  );
+    await t.test(
+      'a real server with the banner dismissed: Ctrl+Shift+P, then Enter, with an offer, sends no `act restore`',
+      async (t) => {
+        const l = await launchedSent(t, chromium);
+        const { page, d } = l;
+        earlierBoot(d, [S1, S2, S3]);
+        await page.waitForSelector('#banner:not([hidden])', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        await page.locator('#banner button', { hasText: 'Not now' }).click();
+        await page.waitForSelector('#banner[hidden]', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        await openSwitcher(page);
+        await page.keyboard.type('>restore');
+        const view = await untilSwitcher(page, (v) => v.offer !== null, 'the offer');
+        assert.match(view.offer?.text ?? '', /^Restore \d+ sessions? from /);
+        await clearField(page);
+        await untilSwitcher(page, (v) => v.items.length > 0 && v.offer === null, 'the sessions');
+        await page.keyboard.press('Enter');
+        await switcherShown(page, false);
+        await sleep(800);
+        assert.deepEqual(
+          (await actsOf(page)).filter((act) => act['kind'] === 'restore'),
+          [],
+          'no restore sent',
+        );
+        await healthy(l);
+      },
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------------------------

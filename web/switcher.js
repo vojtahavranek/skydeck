@@ -24,6 +24,7 @@
 // list arriving between a mousedown and its mouseup never loses the click.
 
 /** @import { ListMessage, RestoreOffer, RowPayload, SwitchItem, SwitchRank, SwitcherPayload, TerminalPayload } from '../src/window/protocol.ts' */
+import { activityTime } from './banner-text.js';
 import { ageBetween } from './format.js';
 import { switcherKey } from './keys.js';
 import { rowText, sanitize } from './list-text.js';
@@ -363,7 +364,9 @@ export function createSwitcher(root, deps) {
       const nowNs = deps.now();
       const offer = payload.restore ?? null;
       if (offer !== null) {
-        setText(offerLine, offerText(offer, ''));
+        // E12: the time as stage C's banner says it, on the page's own clock and time zone.
+        const time = activityTime(offer.lastActivityNs, Date.now(), deps.timeZone());
+        setText(offerLine, offerText(offer, time));
         next.push({ key: 'offer', element: offerLine, offer, item: null });
         children.push(offerLine);
       }

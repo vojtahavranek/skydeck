@@ -78,6 +78,7 @@ import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
 import type { Tick } from './tick.ts';
 import { buildListMessage } from './view/build.ts';
+import { restoreOffer } from './view/search/switcher.ts';
 import { windowTerminal } from './window-terminal.ts';
 import { loadXterm } from './xterm.ts';
 
@@ -646,12 +647,17 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         ...message.sections.flatMap((section) => section.rows.map((r) => r.id)),
         ...(message.selectedRow?.terminal == null ? [] : [message.selectedRow.id]),
       ]);
-      return {
+      const list: ListMessage = {
         ...message,
         // Plan C9: the view model's banner for the tick's rows — the array itself (its cache).
         banner: restorer.banner(rows),
         terminals: message.terminals.map((term) => ({ ...term, ownsSize: false })),
       };
+      // Plan E12 (task 98): stage C's offer in the switcher, from the banner just put on the list.
+      if (list.switcher && typeof view.switcher === 'string') {
+        list.switcher.restore = restoreOffer(view.switcher, list.banner);
+      }
+      return list;
     };
     // Ruled (review 2): no page is served before the keepers are found and the first tick has run
     // — the hub would list no terminal, so a page could resume a session whose terminal is about
