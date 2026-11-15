@@ -160,6 +160,13 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
       `${words(15).join(' ')} w16😀`,
     ],
     ['a surrogate pair right after the cut', `${words(16).join(' ')} 😀`, words(16).join(' ')],
+    // The server cuts a long word itself (its first 64 units): the page keeps it whole, also in
+    // a text it cuts.
+    [
+      'words of 100 units among the first 16, and a 17th',
+      `${'x'.repeat(100)} ${words(14).join(' ')} ${'İ'.repeat(50)} w17`,
+      `${'x'.repeat(100)} ${words(14).join(' ')} ${'İ'.repeat(50)}`,
+    ],
     ['a lone surrogate', `a\ud800 b \udc00c`, `a\ud800 b \udc00c`],
   ];
   for (const [name, text, expected] of texts) {
@@ -376,12 +383,13 @@ describe('highlightParts (E9: a title with its found parts)', () => {
     assert.deepEqual(assertJoins('abcdefghij', [[-5, -1]]), [{ text: 'abcdefghij', found: false }]);
   });
 
-  test('a range that is not two whole numbers is dropped', () => {
+  test('a range that is not a pair of whole numbers (three of them too) is dropped', () => {
     assert.deepEqual(
       assertJoins('abcdefghij', [
         [Number.NaN, 3],
         [1, Number.POSITIVE_INFINITY],
         [1.5, 4],
+        [0, 2, 9] as unknown as [number, number],
         [6, 8],
       ]),
       [
@@ -510,9 +518,13 @@ describe('web/search-text.js is pure page code (plan 2.1, ruled for task 93)', (
     assert.doesNotMatch(code, /\b(?:document|window|innerHTML|outerHTML|insertAdjacentHTML)\b/);
   });
 
-  test('it imports sanitize of web/list-text.js and nothing else', () => {
-    const imports = [...code.matchAll(/^\s*import\b[^;]*;/gm)].map((found) => found[0].trim());
-    assert.deepEqual(imports, ["import { sanitize } from './list-text.js';"]);
+  test('it imports sanitize of web/list-text.js and nothing else, nor passes a module on', () => {
+    // Every statement that names a module: an import (a bare one too) or an export … from.
+    const statements = [...code.matchAll(/^\s*(?:import\b|export\b[^;]*\bfrom\b)[^;]*;/gm)];
+    assert.deepEqual(
+      statements.map((found) => found[0].trim()),
+      ["import { sanitize } from './list-text.js';"],
+    );
     assert.doesNotMatch(code, /\bimport\s*\(/);
   });
 });

@@ -776,10 +776,10 @@ highlight is given as parts, not as HTML. Nothing in the module builds a pattern
 `RegExp`, no `.match(` / `.matchAll(` / `.search(` but with a literal), and nothing is logged.
 `highlightParts` takes the ranges in their order, each clamped to the text and to start no earlier
 than where the last one ended, its ends moved inwards off the middle of a surrogate pair; one that
-is then empty, or that is not two whole numbers, is dropped; neighbouring parts marked alike are
-one part and no part is empty (`[]` for an empty text). `rankHeading` of a rank it does not know
-gives that rank's text sanitised and trimmed (as `sectionText` does for a section), of anything
-that is not a string `''`.
+is then empty, or that is not a pair of whole numbers, is dropped; neighbouring parts marked alike
+are one part and no part is empty (`[]` for an empty text). `rankHeading` of a rank it does not
+know gives that rank's text sanitised and trimmed (as `sectionText` does for a section), of
+anything that is not a string `''`.
 
 **Tests** (platform: none; the test imports `filter.ts`, the page's module does not)
 - Parity: for a table of texts (white space of every kind of E2 — a space, a tab, a line break,
@@ -796,10 +796,10 @@ that is not a string `''`.
 - `stackBadge(4)` → `×4`; `moreText(4, 'ORB-2107')` → `+3 more in ORB-2107`; a group holding an
   escape sequence, a control or a line break → sanitised; a group holding markup → as it is.
 - `highlightParts`: two ranges → five parts that join to the text; ranges out of order,
-  overlapping, touching, empty, reversed, past the end, negative, not whole numbers, not pairs →
-  clamped or dropped, the parts still join to the text and none is empty; a range never splits a
-  surrogate pair; markup in a title stays text; no range → one part; the ranges of task 90's
-  `foundIn` mark the words of a search text.
+  overlapping, touching, empty, reversed, past the end, negative, not whole numbers, not pairs
+  (`[0, 2, 9]` too) → clamped or dropped, the parts still join to the text and none is empty; a
+  range never splits a surrogate pair; markup in a title stays text; no range → one part; the
+  ranges of task 90's `foundIn` mark the words of a search text.
 - `rankHeading` of each rank, of one it does not know and of no string; `switcherFooter` for each
   action, with and without `more`.
 - The module's source (comments left out): no `RegExp`, no `.match(` / `.matchAll(` / `.search(`

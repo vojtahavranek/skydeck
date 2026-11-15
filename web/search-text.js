@@ -102,9 +102,9 @@ function append(parts, text, found) {
  * E9: the parts of `text` with `found`'s ranges ([start, end) in UTF-16 units, as the server's
  * `foundIn` gives them) marked, in order. A wrong range marks less, never more: the ranges are
  * taken in their order, each clamped to the text and to start where the last one ended, its ends
- * moved off the middle of a surrogate pair (inwards); one that is then empty, or that is not two
- * whole numbers, is dropped. Neighbouring parts marked alike are one part and no part is empty, so
- * that the parts always join to `text` ([] for an empty text).
+ * moved off the middle of a surrogate pair (inwards); one that is then empty, or that is not a
+ * pair of whole numbers, is dropped. Neighbouring parts marked alike are one part and no part is
+ * empty, so that the parts always join to `text` ([] for an empty text).
  * @param {string} text
  * @param {readonly (readonly [number, number])[]} found
  * @returns {HighlightPart[]}
@@ -114,7 +114,7 @@ export function highlightParts(text, found) {
   const parts = [];
   let at = 0;
   for (const range of Array.isArray(found) ? found : []) {
-    if (!Array.isArray(range)) {
+    if (!Array.isArray(range) || range.length !== 2) {
       continue;
     }
     const [from, to] = range;
