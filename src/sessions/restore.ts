@@ -258,7 +258,7 @@ interface Run {
   deck: Deck;
   terminal: Terminal;
   report: (line: string, outcome?: ReportOutcome) => void;
-  /** The caller's hooks, called on the object it passed. */
+  /** The caller's hooks (RestoreHooks). */
   hooks: RestoreHooks;
   outcome: RestoreOutcome;
 }

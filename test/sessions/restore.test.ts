@@ -373,6 +373,18 @@ test('latestEarlierBoot: none when only the current boot held a session, or ther
   assert.equal(latestEarlierBoot([], BOOT_B), null);
 });
 
+test('latestEarlierBoot: of two earlier boots whose last events tie, the first by its id', (t) => {
+  const d = restoreDeck(t);
+  // BOOT_C's start is stored first: the choice does not follow the order of the events.
+  addSession(d, sid(5), { boot: BOOT_C, pid: 105, startNs: T0 });
+  addSession(d, sid(1), { boot: BOOT_A, pid: 101, startNs: T0 });
+  assert.ok(BOOT_A < BOOT_C);
+  assert.deepEqual(latestEarlierBoot(d.deck.store.events(), BOOT_B), {
+    bootId: BOOT_A,
+    lastEventNs: T0,
+  });
+});
+
 test('restorePlan: planRestore’s entries over the rows in list order, and the earlier boot', (t) => {
   const d = restartedMachine(t);
   for (const all of [false, true]) {
@@ -410,6 +422,32 @@ test('restorePlan takes the rows it is given and puts them in list order itself'
   for (const entry of plan.entries) {
     assert.ok(rows.includes(entry.row), 'the entries hold the rows given');
   }
+});
+
+test('restorePlan orders the entries as ls --all lists them: a done row can make its group the newest', (t) => {
+  const d = restoreDeck(t);
+  addSession(d, sid(1), {
+    boot: BOOT_A,
+    pid: 101,
+    startNs: T0 - HOUR,
+    activityNs: T0 - 10n * MINUTE,
+  });
+  addSession(d, sid(2), { boot: BOOT_A, pid: 102, startNs: T0 - HOUR, activityNs: T0 - MINUTE });
+  addSession(d, sid(3), {
+    boot: BOOT_A,
+    pid: 103,
+    startNs: T0 - HOUR,
+    activityNs: T0 - 5n * MINUTE,
+  });
+  d.deck.store.updateMeta(sid(1), { group: 'g1' }, T0);
+  d.deck.store.updateMeta(sid(2), { group: 'g1', doneAtNs: T0 }, T0); // done: not offered
+  d.deck.store.updateMeta(sid(3), { group: 'g2' }, T0);
+  refresh(d.deck);
+  // g1's newest row is the done sid(2), newer than g2's sid(3): g1 comes first, as in ls --all.
+  assert.deepEqual(
+    restorePlan(d.deck, false).entries.map((entry) => entry.row.id),
+    [sid(1), sid(3)],
+  );
 });
 
 test('restorePlan refreshes nothing: a start in the spool since the last refresh is not seen yet', (t) => {
@@ -1504,6 +1542,28 @@ test('the stop line’s reason is sanitised', async (t) => {
     signal: AbortSignal.abort('stop \x1b[31mred\nline two'),
   });
   assert.deepEqual(lines, ['stopped: stop red line two', notStartedLine(entries, 1)]);
+});
+
+test('gone for a session whose lock another skydeck took over: failed, that lock left alone', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 1) {
+      d.deck.store.setKv(lockKey(sid(1)), 'taken over');
+    }
+  };
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome, lines } = await run(d, tabs.terminal, entries.slice(0, 1), {
+    gone: () => (sleeps.length >= 2 ? 'its terminal was closed' : null),
+  });
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    failed: [{ id: sid(1), reason: 'its terminal was closed' }],
+  });
+  assert.deepEqual(lines, ['failed 00000001: its terminal was closed']);
+  assert.deepEqual(sleeps, [1000, 1000]);
+  assert.equal(d.deck.store.getKv(lockKey(sid(1))), 'taken over');
 });
 
 test('signal aborted before the run: nothing opened, the stopped line, every entry not started', async (t) => {
