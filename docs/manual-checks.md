@@ -1291,6 +1291,9 @@ happens. A restart of the PC ends all of this and everything else.
 3. End every real `claude` session yourself, with `/exit` once its turn is over, in the window and
    in every terminal. A session ended so is not offered by the banner below, and you resume it
    afterwards as always.
+4. End or let finish the runs of Claude Code that `skydeck ls` does not list: `claude -p` and
+   scripts that use the Agent SDK, Claude Code in VS Code's panel, and anything that runs in a
+   detached `tmux` or `screen`.
 
 **Set up:**
 
@@ -1302,23 +1305,33 @@ happens. A restart of the PC ends all of this and everything else.
    ```
 
    When `mkdir` says `File exists` for one of them: if you made it in an earlier W16 that you did
-   not finish, use it as it is; otherwise it is not W16's — stop here, and change nothing in it.
+   not finish, use it as it is; otherwise it is not W16's — stop here, change nothing in it, and
+   remove only the folders this run made (`rmdir`, as in "Clean up", step 3).
 2. Three throwaway sessions in the window, one in each folder. For each: press Ctrl+Shift+N (in a
    browser tab, the `+ New` button). The right side shows the form for a new session, its first
-   field the directory; when it does not, type nothing and press Ctrl+Shift+N again. Replace the
-   text of the directory field with the folder's full path (`/home/<you>/skydeck-try/w16-a`, then
-   `w16-b`, then `w16-c`), leave the other fields empty, and press Enter. Wait until Claude Code shows its prompt in the new terminal; then, as the
+   field the directory, which has the keyboard; when it does not show, type nothing and press
+   Ctrl+Shift+N again. The field holds a directory of yours: press Ctrl+A in it to select all of
+   its text, and type the folder's full path over it (`/home/<you>/skydeck-try/w16-a`, then
+   `w16-b`, then `w16-c`). Leave the other fields empty. Press Enter only when the field holds
+   exactly that path: a session started in one of your projects would be offered by the banner
+   below like the three. Wait until Claude Code shows its prompt in the new terminal; then, as the
    setup says, send it `say hello in one word`.
-3. Write down the three short ids, each with its folder: a session's header shows its own (on its
-   second line, after the directory, the times and where the title comes from), and `skydeck ls`
-   in W prints them as the last column.
+3. Write down the three short ids, each with its folder: a session's header shows its directory
+   and its short id (on its second line, the short id after the directory, the times and where the
+   title comes from). In W, `skydeck show <short id>` for each says the same: its `dir:` line is
+   the folder.
 4. In W: `skydeck ls`. Nothing may be `working`, `waiting` or `running` but the three throwaway
-   sessions. If anything else is, end it as in "Prepare", step 3, or stop here.
+   sessions. Then `pgrep -af claude` (it only lists processes): every line that runs `claude` must
+   be one of the three, `claude --session-id <id>` with an id that starts with one of their short
+   ids; another `claude` (one with another id, or with `-p`) is a run of yours that `skydeck ls`
+   does not list. If anything else runs, end it as in "Prepare", steps 3 and 4, or stop here and
+   do "Clean up" for what you made.
 
 **Steps:**
 
-1. In the window, the three are under Open, in slots 1–3. Click the row of the session of `w16-c`
-   and send it the story prompt, as the setup says. Its row says `working`.
+1. In the window, the three are under Open, each with its slot number. Click the row of the
+   session of `w16-c` (the header names its folder) and send it the story prompt, as the setup
+   says. Its row says `working`.
 2. While it does, in P: `wsl --shutdown`. (When its row says `waiting`, or the story is done
    before you are there, send the prompt again first.) Expected: within a few seconds the window
    shows the bar `skydeck's server is not answering (since <time>). …`. Write down how long it
@@ -1334,8 +1347,8 @@ happens. A restart of the PC ends all of this and everything else.
    no exit recorded`, the one of `w16-c` with `· was working` after it). The three short ids you
    wrote down must be there, ticked. An entry whose short id is not one of the three is a session
    of yours: untick it (a click on its checkbox) until only the three are ticked and the button
-   says `Restore 3`; when you are not sure, click `Not now` and stop here (`skydeck restore` still
-   offers your sessions). Write down the banner's words.
+   says `Restore 3`; when you are not sure, click `Not now`, stop here and do "Clean up"
+   (`skydeck restore` still offers your sessions). Write down the banner's words.
 5. Click `Restore 3`. Expected: the banner says `A restore is running.`; the three are under Open
    as `starting…`, then running, in slots 1–3; the report under the banner says `started <short
    id> <title>` for each and last `restore finished: 3 started`; then the banner goes (nothing is
@@ -1353,11 +1366,12 @@ prepare as above ("Prepare", and step 4 of "Set up"; the three throwaway session
 the first part).
 
 1. Minimise the skydeck window and leave it so for more than 5 minutes.
-2. In P: `wsl --shutdown`. Then open a WSL terminal again (W) and, with the window still
-   minimised, run `skydeck window`. Expected: the waiting line; after it a new window may open,
-   because Edge wakes a window minimised that long only once a minute, and then the old one comes
-   back later, at its next wake (a known limit of stage C). Write down whether a second window
-   opened and how long the old one took to come back; close the new one.
+2. Right before it, in W: step 4 of "Set up" again (`skydeck ls`, `pgrep -af claude`); a session
+   resumed meanwhile is ended first. Then in P: `wsl --shutdown`. Open a WSL terminal again (W) and,
+   with the window still minimised, run `skydeck window`. Expected: the waiting line; after it a new
+   window may open, because Edge wakes a window minimised that long only once a minute, and then the
+   old one comes back later, at its next wake (a known limit of stage C). Write down whether a
+   second window opened and how long the old one took to come back; close the new one.
 3. In the window, read the banner's entries as in step 4 of the first part, then click `Not now`.
    Expected: the banner goes.
 4. In W: `skydeck window --restart`. Expected: the window connects again, and the banner does not
@@ -1380,16 +1394,18 @@ the first part).
 habits): leave the skydeck window open when you restart the PC. Afterwards, in W, `skydeck window`.
 Does it say `skydeck: waiting up to 7 s for the open window to come back; …` before it opens the
 window? Write it down; when it does after every restart, say so: there is a follow-up for it. The
-banner then offers what was open before the restart, your own sessions: restore them or not, as you
-like.
+banner then offers what was open before the restart, your own sessions: read its entries first
+(`Restore` starts every ticked session in the window, each with the flags it was started with),
+and restore them or not, as you like.
 
 **Clean up**, after the parts you ran:
 
 1. End each throwaway session that runs: click its row and, as the setup says, type `/exit` and
    press Enter; then `Close` on its ended bar.
-2. In W, with the short ids you wrote down: `skydeck done <short id>` for each of the three (it
-   prints `<short id> done`), so that they leave the list. A wrong id is taken back with `skydeck
-   undone <short id>`.
+2. In W, with the short ids you wrote down: `skydeck show <short id>` (its `dir:` line must be one
+   of the three folders), then `skydeck done <short id>` for each of the three (it prints `<short
+   id> done`), so that they leave the list and no later restore offers them. A wrong id is taken
+   back with `skydeck undone <short id>`.
 3. In W: `rmdir ~/skydeck-try/w16-a ~/skydeck-try/w16-b ~/skydeck-try/w16-c`. `rmdir` removes only
    an empty folder: when it says `Directory not empty` for one, leave that folder as it is and
    write down what is in it (`ls -A <folder>`).
