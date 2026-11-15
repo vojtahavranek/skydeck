@@ -428,6 +428,16 @@ function holdWriteLock(t: TestContext, d: ServerSandbox): { held: Promise<void>;
   };
 }
 
+/** `GET /status`'s page count as the server sends it. */
+async function pagesOf(d: ServerSandbox): Promise<unknown> {
+  const answer = await d.platform.net.requestUnix(d.files.serverSock, {
+    method: 'GET',
+    path: '/status',
+    timeoutMs: 10_000,
+  });
+  return (answer.body as { pages?: unknown }).pages;
+}
+
 /** `GET /status`'s `windowExpectedMs` as the server sends it (C20; absent reads as undefined). */
 async function expectedMs(d: ServerSandbox): Promise<unknown> {
   const answer = await d.platform.net.requestUnix(d.files.serverSock, {
@@ -492,16 +502,6 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
       writeFileSync(path, 'not a spool file\n');
       await until(() => !existsSync(path), `refresh ${markers} of the server`, WAIT_MS);
     };
-    const pagesOf = async (): Promise<unknown> =>
-      (
-        (
-          await d.platform.net.requestUnix(d.files.serverSock, {
-            method: 'GET',
-            path: '/status',
-            timeoutMs: 10_000,
-          })
-        ).body as { pages?: unknown }
-      ).pages;
 
     await refreshed();
     assert.equal(mark(), null, 'no page, no mark');
@@ -511,7 +511,7 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
     assert.equal(mark(), '1', 'written by the first refresh after the page started');
     await one.close();
     const deadline = performance.now() + WAIT_MS;
-    while ((await pagesOf()) !== 0) {
+    while ((await pagesOf(d)) !== 0) {
       assert.ok(performance.now() < deadline, 'the server saw the page go');
       await sleep(50);
     }
@@ -523,6 +523,68 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
     assert.equal(mark(), '1', 'written again');
     await test.server.stop('the test stops it');
     assert.equal(mark(), '1', 'the stop leaves it: a window may come back');
+  });
+
+  test('an orderly stop writes the mark once more as its pages are (ruled 13:28Z): a page that connected after the last refresh is recorded, a page that went since is not', async (t) => {
+    const d = serverSandbox(t);
+    // The tick's one-second timer is the test's: no refresh runs but those the test lets run.
+    const ticks: (() => void)[] = [];
+    const server = async () =>
+      d.start({
+        platform: (p) => ({
+          ...p,
+          clock: {
+            ...p.clock,
+            every: (ms, callback) => {
+              if (ms !== 1000) return p.clock.every(ms, callback);
+              ticks.push(callback);
+              return () => {};
+            },
+          },
+        }),
+      });
+    const mark = (): string | null => d.deck.store.getKv('window_pages_open');
+    const { spoolDir } = d.deck.places;
+    mkdirSync(spoolDir, { recursive: true });
+    let markers = 0;
+    /** Ticks until one refresh has run whole: its ingest moved a file no hook writes to spool/bad. */
+    const refreshed = async (): Promise<void> => {
+      markers += 1;
+      const path = join(spoolDir, `0-0-${markers}-task74-stop.ev`);
+      writeFileSync(path, 'not a spool file\n');
+      await until(
+        () => {
+          for (const tick of ticks) tick();
+          return !existsSync(path);
+        },
+        `refresh ${markers}`,
+        WAIT_MS,
+      );
+    };
+
+    // A page that connected after the last refresh: no refresh has seen it; the stop records it.
+    const first = await server();
+    const page = await connectTestPage(t, d, first.server);
+    await page.next('list', 'the first list: the server has the page');
+    assert.equal(mark(), null, 'no refresh has seen the page');
+    await first.server.stop('the test stops it');
+    assert.equal(mark(), '1', 'written by the stop');
+
+    // The last page gone just before the stop: recorded by a refresh, not any more by the stop.
+    const second = await server();
+    const again = await connectTestPage(t, d, second.server);
+    await again.next('list', "the second server's first list");
+    await refreshed();
+    assert.equal(mark(), '1', 'a refresh recorded the page');
+    await again.close();
+    const deadline = performance.now() + WAIT_MS;
+    while ((await pagesOf(d)) !== 0) {
+      assert.ok(performance.now() < deadline, 'the server saw the page go');
+      await sleep(50);
+    }
+    assert.equal(mark(), '1', 'no refresh since the page went');
+    await second.server.stop('the test stops it');
+    assert.equal(mark(), null, 'removed by the stop');
   });
 
   test("a dead server's mark: the next server removes it at its first refresh without a page, and expects a window from the end of its start for 7 s on a clock that cannot step", async (t) => {

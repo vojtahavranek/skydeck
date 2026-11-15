@@ -464,23 +464,20 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     const restoreLaunches = createLaunches({ deck, hub: created, terminalFor, log: quietLog });
     // Plan C6–C9, C22 (task 73): one restore at a time, whoever asked; its report to every page.
-    // A run refreshes, ingests and writes on the server's own connection — `prepare()` before each
-    // session, the spool at every look of its wait —, which the tick's change marks do not show:
-    // each hook it calls after such a step tells the tick to load the rows again (review 2).
+    // A run's wait ingests the spool on the server's own connection at every look, which the
+    // tick's change marks do not show: `gone`, called at every look after its ingest, tells the
+    // tick to load the rows again (review 2), so that what a look took is in the lists within a
+    // refresh.
     const restorer = createRestorer({
       deck,
       terminalFor: (size) => restoreLaunches.restoreTerminal(size),
-      refuse: (sessionId) => {
-        tick?.reload();
-        return restoreLaunches.refusal(sessionId);
-      },
+      refuse: (sessionId) => restoreLaunches.refusal(sessionId),
       gone: (sessionId) => {
-        tick?.reload(); // called at every look, after its ingest
+        tick?.reload();
         return restoreLaunches.gone(sessionId);
       },
       size: firstSize,
       progress: (text) => {
-        tick?.reload(); // after each line's step (a start seen, a lock given back)
         pages.notice('restore-progress', text);
       },
       changed: () => {
@@ -762,7 +759,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     const orderlyStop = async (reason: string): Promise<void> => {
       stopBegun = true;
       log('server: stopping');
-      // First (plan C8, S2 5.5): a restore ends before anything it uses is closed; the sessions it
+      // Plan C20 (ruled 13:28Z): the mark once more as the pages are, before they are told bye —
+      // a page that connected since the last refresh is recorded, one that went is not; a write
+      // that fails is logged by kind. A server that dies leaves it as its last refresh did.
+      pageMark.update(pages.count());
+      // Then (plan C8, S2 5.5): a restore ends before anything it uses is closed; the sessions it
       // opened go on starting, the rest are said to be not started.
       await restorer.stop();
       stopPrs.abort();
