@@ -713,6 +713,24 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
     // does its child, the stand-in that holds the session: at a hangup only the session leader
     // gets SIGHUP; the kernel sends it to the child's process group when the leader ends.
     let release = '';
+    let record = '';
+    /** Kills this test's keeper while it runs; null once the case has killed it. */
+    let killOwnKeeper: (() => void) | null = null;
+    // Registered before windowDeck's cleanup, so it runs first (t.after: first in, first out):
+    // also when the case failed half way, the keeper is gone, the `sh` released and the holder's
+    // last hook written before the keepers' box waits for the program and the sandbox goes.
+    t.after(async () => {
+      if (release === '') return;
+      writeFileSync(release, '');
+      try {
+        killOwnKeeper?.();
+      } catch {
+        // It no longer runs.
+      }
+      if (record !== '') {
+        await waitForRecord(record, (entry) => entry.ev === 'exit', 10_000).catch(() => {});
+      }
+    });
     const w = await windowDeck(t, {
       claudeCommand: (s) => {
         const standin = standinCommand(s);
@@ -725,7 +743,7 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
             '#!/bin/sh',
             `release=${shellWord(release)}`,
             `root=${shellWord(s.root)}`,
-            // At most 20 s, and not past the sandbox: nothing outlives a test that failed.
+            // At most 20 s, and not past the sandbox (the hook above releases it at the end).
             'trap \'n=0; while [ ! -e "$release" ] && [ -d "$root" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n + 1)); done; exit 129\' HUP',
             'exec 3<&0',
             `${shellWord(standin)} "$@" <&3 3<&- &`,
@@ -739,14 +757,18 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
     });
     w.resumable(S1);
     const r = w.registry();
-    const { deps, record } = w.deps(r);
+    const made = w.deps(r);
+    record = made.record;
     const outcome = await launchPrepared(
       w.deck,
       prepareResumeById(w.deck, S1),
-      windowTerminal(deps, { cols: 80, rows: 24 }),
+      windowTerminal(made.deps, { cols: 80, rows: 24 }),
     );
     assert.equal(outcome.code, 0);
     const id = r.registry.list()[0]?.id ?? '';
+    killOwnKeeper = () => {
+      w.signalKeeper(w.keeperOf(id), 'SIGKILL');
+    };
     await w.prompt(r, id, S1);
     const holder = readRecords(record).find((entry) => entry.ev === 'start')?.pid;
     const program = info(r.registry, id).program?.pid;
@@ -786,6 +808,7 @@ describe('a lost keeper’s program while it lives (task 57; S2 7.8)', () => {
 
     // Only the keeper this test started, by the pid of its own record.
     w.signalKeeper(w.keeperOf(id), 'SIGKILL');
+    killOwnKeeper = null;
     await until(() => info(r.registry, id).state === 'lost', 'the terminal is lost', 15_000);
     await refreshNow();
     assert.deepEqual(

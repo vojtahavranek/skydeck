@@ -655,6 +655,23 @@ describe('mapTerminals: a lost keeper’s program while it lives (task 57; S2 7.
     assert.deepEqual(got.elsewhere.get(S2), { pid: 5000, tty: null });
   });
 
+  test('its pid is another process now, and the dead program’s own holder record is still in the rows: that holder is gone, not the terminal’s', () => {
+    // The one input on which the start check of `lives` decides: the holder record has the
+    // program's own pid and start, so holderPlace would match it with the program at once.
+    for (const start of [899, 901]) {
+      const got = map(
+        [lost()],
+        [ds({ id: S1, state: 'running', holders: [holder(5000, 900), holder(8000, 800)] })],
+        procOf([
+          [5000, start, 1],
+          [8000, 800, 1],
+        ]),
+      );
+      assert.deepEqual(got.elsewhere.get(S1), { pid: 8000, tty: null }, `start ${start}`);
+      assert.deepEqual([...got.unknown], [], `start ${start}`);
+    }
+  });
+
   test('its stat line cannot be read, or names no process start: not counted, and the session it holds is unknown', () => {
     const readable = procOf([[5000, 900, 1]]);
     const noStart = procOf([]);
