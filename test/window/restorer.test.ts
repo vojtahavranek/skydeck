@@ -236,6 +236,15 @@ test('start returns at once: the run has not opened anything when it returns', a
   assert.equal(w.specs.length, 2);
 });
 
+test('the set is taken on freshly refreshed rows: a session seen since the last refresh is offered', async (t) => {
+  const d = restarted(t, 1);
+  // Its transcript and events are there, but no refresh has scanned them yet (C7).
+  addSession(d, sid(4), { boot: BOOT_A, pid: 104, startNs: T0 - HOUR, activityNs: T0 - MINUTE });
+  const w = world(d);
+  const { lines, outcome } = await restore(w, [sid(4)]);
+  assert.deepEqual(outcome, { code: 0, ...ZERO, started: 1 }, lines.join('\n'));
+});
+
 test('the selected ids are kept in the set’s order, and only those are opened', async (t) => {
   const d = restarted(t, 3);
   const w = world(d);
@@ -262,6 +271,105 @@ test('a run without write (a page’s act) reports to progress alone and ends th
 });
 
 // --- every run ends with exactly one `restore finished:` line (C6) --------------------------------
+
+/** What one kind of run gives: its progress and its stream. */
+async function runOf(
+  t: TestContext,
+  kind: string,
+): Promise<{ progress: string[]; lines: string[]; outcome: RestoreOutcomeLine | undefined }> {
+  const waits = { config: { ...CONFIG, restoreStartTimeoutSeconds: 30 } };
+  switch (kind) {
+    case 'all started': {
+      const w = world(restarted(t, 2));
+      return { progress: w.progress, ...(await restore(w, [sid(1), sid(2)])) };
+    }
+    case 'a failure': {
+      const w = world(restarted(t, 2), {
+        result: (id) =>
+          id === sid(2) ? { ok: false, error: 'no tab', timedOut: false } : { ok: true },
+      });
+      return { progress: w.progress, ...(await restore(w, [sid(1), sid(2)])) };
+    }
+    case 'the memory stop': {
+      const w = world(restarted(t, 2, { memAvailableMb: 3000 }));
+      return { progress: w.progress, ...(await restore(w, [sid(1), sid(2)])) };
+    }
+    case 'the server’s stop': {
+      const d = restarted(t, 3, waits);
+      const w = world(d, { starts: () => false });
+      atFirstSleep(d, () => void w.restorer.stop());
+      return { progress: w.progress, ...(await restore(w, [1, 2, 3].map(sid))) };
+    }
+    case 'the asker’s going': {
+      const d = restarted(t, 3, waits);
+      const w = world(d, { starts: () => false });
+      const asker = new AbortController();
+      atFirstSleep(d, () => asker.abort());
+      return { progress: w.progress, ...(await restore(w, [1, 2, 3].map(sid), asker.signal)) };
+    }
+    case 'an empty batch with entries left': {
+      const w = world(restarted(t, 3), { starts: () => false });
+      return { progress: w.progress, ...(await restore(w, [1, 2, 3].map(sid))) };
+    }
+    case 'an empty last batch': {
+      const w = world(restarted(t, 2), { starts: () => false });
+      return { progress: w.progress, ...(await restore(w, [sid(1), sid(2)])) };
+    }
+    case 'a busy store in the run': {
+      const d = restarted(t, 2);
+      const deck = deckWith(d.deck, {
+        store: {
+          hasProcessStartSince: () => {
+            throw BUSY();
+          },
+        },
+      });
+      const w = world(d, { deck });
+      return { progress: w.progress, ...(await restore(w, [sid(1), sid(2)])) };
+    }
+    case 'a run that fails': {
+      const w = world(restarted(t, 2), {
+        gone: () => {
+          throw new TypeError('x');
+        },
+        starts: () => false,
+      });
+      return { progress: w.progress, ...(await restore(w, [sid(1), sid(2)])) };
+    }
+    case 'a run that cannot begin': {
+      const d = restarted(t, 2);
+      d.proc.setBootId(null);
+      const w = world(d);
+      const written: RestoreStreamLine[] = [];
+      w.restorer.start({ sessionIds: [sid(1)], all: false }, (line) => written.push(line));
+      return { progress: w.progress, ...stream(written) };
+    }
+  }
+  throw new Error(kind);
+}
+
+test('every run ends with exactly one `restore finished:` line', async (t) => {
+  const runs: [string, string, 0 | 1 | 5][] = [
+    ['all started', 'restore finished: 2 started', 0],
+    ['a failure', 'restore finished: 1 started, 1 failed', 1],
+    ['the memory stop', 'restore finished: 2 not started', 5],
+    ['the server’s stop', 'restore finished: 2 timed out, 1 not started', 5],
+    ['the asker’s going', 'restore finished: 2 timed out, 1 not started', 5],
+    ['an empty batch with entries left', 'restore finished: 2 timed out, 1 not started', 5],
+    ['an empty last batch', 'restore finished: 2 timed out', 1],
+    ['a busy store in the run', 'restore finished: nothing was started', 1],
+    ['a run that fails', 'restore finished: nothing was started', 1],
+    ['a run that cannot begin', 'restore finished: nothing was started', 1],
+  ];
+  for (const [kind, finished, code] of runs) {
+    const { progress, lines, outcome } = await runOf(t, kind);
+    endsOnce(progress);
+    assert.equal(progress.at(-1), finished, kind);
+    // The asker hears the same run, its outcome after the finished line.
+    assert.deepEqual(lines, progress, kind);
+    assert.equal(outcome?.code, code, kind);
+  }
+});
 
 test('a run with a failure: the failed line, the finished line with both counts, code 1', async (t) => {
   const d = restarted(t, 3);

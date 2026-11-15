@@ -982,6 +982,8 @@ terminal that opens what the test says, a `gone` the test scripts)
   1), a run that cannot begin (no boot id, a busy store, another failure): each `progress`
   sequence holds the finished line once, as its last.
 - An `asker` that fires after the outcome was written does nothing.
+- The set on freshly refreshed rows (C7): a session the last refresh has not seen is offered and
+  started.
 - An id not in the set → `failed <short>: no longer offered for restore` first, code 1; a session
   `refuse` names → its line, never opened; `gone` → `failed`, the run goes on, code 1.
 - A second `start` while running → `a restore is already running; wait until it has finished`,
