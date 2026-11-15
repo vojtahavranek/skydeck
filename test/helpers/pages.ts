@@ -397,6 +397,7 @@ export function defaultList(
       cols: info.cols,
       rows: info.rows,
       ownsSize: true, // pages replaces it
+      openedNs: String(info.openedNs),
     })),
     selected: null,
     dirs: [...dirs, `filter:${page.view.filter}`],
