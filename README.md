@@ -8,9 +8,12 @@ It is a command line tool for the terminal (step 1) and, since step 2, a window:
 opens an Edge app window with the session list on the left and the real terminal of the selected
 session on the right, where sessions are resumed, started and switched between. A session's label,
 group, note and done mark are edited there too, its pull requests attached and detached, and with
-`ticketUrl` in `config.json` its group chip opens the session's ticket. The window's sessions run in
-terminals of skydeck's own inside WSL, so they keep running when the window or its server is closed
-or restarted ([docs/install.md](docs/install.md), "The window (step 2)"; design in
+`ticketUrl` in `config.json` its group chip opens the session's ticket. A session that needs you
+(it asks, its turn finished while you were not looking, or its terminal ended unexpectedly) is
+marked in the list and counted in the title bar and on the taskbar, Ctrl+Shift+J goes to the next
+one, and a desktop notification says so while no skydeck window has the focus. The window's
+sessions run in terminals of skydeck's own inside WSL, so they keep running when the window or its
+server is closed or restarted ([docs/install.md](docs/install.md), "The window (step 2)"; design in
 [docs/design-step-2.md](docs/design-step-2.md)).
 
 ```

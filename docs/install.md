@@ -452,12 +452,12 @@ running when the window or skydeck's server is closed or restarted: each termina
 python3 process of its own, its **keeper**. A session ends only when you end it inside `claude`; the
 window has no action that stops one.
 
-This is stages A and D of step 2 ([design-step-2.md](design-step-2.md), section 19): the list, the
-terminals, resume and new (A), and editing in the window — the label, group, note, done mark and
-pull requests, and the ticket link (D). Attention marks and notifications, restoring into the
-window, and the search beyond one text come in later stages. The commands of step 1 stay as they
-are, also while the window runs: `skydeck resume`, `new` and `restore` start `claude` in the
-terminal you type them in, not in the window.
+This is stages A, D and B of step 2 ([design-step-2.md](design-step-2.md), section 19): the list,
+the terminals, resume and new (A); editing in the window — the label, group, note, done mark and
+pull requests, and the ticket link (D); and which sessions need you, with desktop notifications
+(B). Restoring into the window, and the search beyond one text, come in later stages. The commands
+of step 1 stay as they are, also while the window runs: `skydeck resume`, `new` and `restore`
+start `claude` in the terminal you type them in, not in the window.
 
 ### Before you rely on it
 
@@ -812,6 +812,76 @@ group:     ABC-123
 ticket:    https://example.atlassian.net/browse/ABC-123
 ```
 
+#### Which sessions need you (stage B)
+
+A session **needs you** for one of three reasons. Its row then has a coloured bar at its left, a
+bold title and the reason on its second line, in the reason's colour, with how long ago it began;
+an ended row that is not running has the two lines too:
+
+| The second line | Why | It goes |
+|---|---|---|
+| `needs you · <detail> · 3m` (`needs you · 3m` without a detail), in the waiting colour | Claude Code asks: a permission prompt or a question is open in the session. The detail is what Claude Code says it waits for, cut at 120 characters with `…`. | when the prompt or the question is closed, wherever you answer it |
+| `finished · not seen · 2m`, in green | its turn ended while you were not looking at it, and it is idle | when you have seen it (below), when its next turn starts, or when it stops running |
+| `ended unexpectedly · not seen · 2m`, in the crash colour | the program of its terminal in the window ended, but not the normal way (as `/exit` ends it): `claude` crashed or was killed, or the terminal's keeper died | when you have seen it |
+
+The age is left out while skydeck does not know when the reason began.
+
+**Seen.** You have seen a session once it has been the selected one for 1.5 seconds in a skydeck
+window that has the focus (in front: the one you work in), or at once when you type into its
+terminal. Selecting it is enough, also for a session that runs in another terminal (its card
+shows). A turn that ends while you look at its session never shows `finished`. Selecting another
+session, or the window losing the focus, ends the looking; when the window comes back to the
+front, the session selected in it is seen 1.5 seconds later.
+
+Asks and finished turns come from the files Claude Code itself keeps for every running session,
+so they show for the sessions that run in another terminal too; `ended unexpectedly` is only for
+the window's own terminals.
+
+**The title bar** starts with the count, `3 need you` (`1 needs you`), after a dot in the waiting
+colour, before the counts per state: `3 need you · 2 working · 1 waiting · 14 not running`. A
+session that needs you is counted there and in no other count. The count takes in every session
+the list lists, also those the filter or the folded Earlier hides; a done session that has stopped
+is counted only while done sessions are shown (`show`, `a`). The window's title, which the taskbar
+button shows, is `(3) skydeck`, and `skydeck` while none needs you.
+
+**Ctrl+Shift+J** selects the next session that needs you: first those that ask, the one that has
+waited longest first; then those that ended unexpectedly; then those that finished, the oldest
+first. Pressed again it goes on, and after the last it starts over. As with Ctrl+Shift+1…9, the
+session's terminal takes the keyboard, or the list when it has none. The key bar says
+`no session needs you` when none does, and `no other session needs you` when only the selected one
+does (it stays selected). It goes only through the rows the list shows: when the filter or the
+folded Earlier hides some, the key bar says how many, `2 more that need you are hidden by the
+filter or the fold` (`1 more that needs you is hidden by the filter or the fold`), or with none
+shown `2 that need you are hidden by the filter or the fold`; clear the filter (Esc) or unfold
+Earlier. While a dialog is open it says `close the edit first (Esc)` and selects nothing.
+
+**Desktop notifications.** At the right of the title bar, `Turn on notifications` shows until Edge
+has your answer. Click it once: Edge asks whether the page may show notifications (its own
+prompt). Allow, or Block: either way the button goes, and it comes back only when that answer is
+reset in Edge's settings for the site. Edge keeps the answer for the window's address and profile
+folder (after a change of `window.port` the button shows again). Closed without an answer, the
+prompt leaves the button there. When Edge or the company's policy refuses (the button is not there
+at all, or it goes at once without a prompt), or you chose Block, nothing else changes: the count
+in the title bar and `(3) skydeck` on the taskbar still show what needs you.
+
+With notifications allowed, a session that **starts** to need you while no skydeck window has the
+focus shows one desktop notification: its title is the session's title, its text `asks: <detail>`
+(`asks` without a detail), `finished` or `ended unexpectedly`. It goes to one window, the one that
+had the focus last. None comes while you work in a skydeck window (the marks and the count say it
+there), none when its reason only changes (it asked, then finished), and none for what already
+needed you when the window's server started. A newer notification of a session replaces the older
+one, and the page closes a session's notification once that session no longer needs you. A click
+on one brings the window to the front and selects the session. While a dialog is open it only
+brings the window to the front, and the key bar says `close the edit first (Esc)`. A session the
+list does not show (the filter, the folded Earlier) and that has no terminal in the window is not
+selected: the key bar says `that session is hidden by the filter or the fold`. Whether a
+notification pops up is also Windows' own business (its Do not disturb, its settings for Edge),
+which skydeck does not touch.
+
+Nothing is installed for any of this: turn ends are read from Claude Code's own files, so the hook
+entries stay as they were, `skydeck install` is not run again, and `skydeck doctor` says what it
+said before.
+
 ### Known limits of stage A
 
 - **The keep-alive is not verified** (above; W14).
@@ -896,6 +966,32 @@ ticket:    https://example.atlassian.net/browse/ABC-123
   start from the text before the save; a note saved from there is refused as changed elsewhere.
   Close the dialog and open it again.
 
+### Known limits of stage B
+
+- **Turns while no server runs.** A turn that ends while the window's server is not running, and
+  every turn that ended before the update to stage B, is not recorded and never shows `finished`;
+  neither does a turn so short that it starts and ends between two of the server's looks at Claude
+  Code's files (it looks once a second).
+- **Seen needs the window in front.** A session selected in a window that does not have the focus
+  (behind another window, or on a second screen while you work elsewhere) is not seen, however long
+  it shows there.
+- **One notification, to one window**, the one that had the focus last, and only while no skydeck
+  window has the focus. With no window open none comes, and none comes later for what happened
+  meanwhile: the marks and the count are there when you open one.
+- **A notification keeps its first words** when its session's reason changes (it asked, then
+  finished): only a start notifies. One that was shown before the page reloaded (after an update,
+  or F5) is not closed by the new page; a session the filter or the folded Earlier hides keeps its
+  notification until the list shows its row. What Windows does with a notification the page closes
+  is manual check W11's.
+- **What a notification shows**: the session's title and, for an ask, its detail, which may name a
+  command or a path (W19). On a shared screen others can read it; judge for yourself whether to
+  allow notifications there.
+- **The first start of a stage B server.** A terminal of the window whose program ended
+  unexpectedly while no server ran (its keeper waits up to 10 minutes for one) is marked `ended
+  unexpectedly · not seen` by the next server, without a notification. At the first start of a
+  server of stage B, which has no marks yet, that can be a session that ended before the update:
+  it shows `ended` once; select it, and it goes.
+
 ### What `doctor` says about the window
 
 After the lines of step 1, `skydeck doctor` prints the window's. It starts no program for them but
@@ -947,6 +1043,12 @@ server still runs makes that server stop by itself (its windows say that it is n
 the `skydeck window` that follows can open a second window beside the old one. From outside you
 cannot tell whether an update upgrades the database (the one that brings stage B does); when in
 doubt, close them first: it costs nothing, the sessions keep running in their keepers.
+
+The update that brings stage B is one of them: close every skydeck window and tab, then `git
+pull`, then `skydeck window` ("Updating" below). Nothing is to be installed again: stage B adds no
+hook entry (turn ends are read from the files Claude Code keeps), so `skydeck install` is not run
+again and `skydeck doctor` says what it said before. It resizes no terminal: the header keeps its
+height. Then click `Turn on notifications` once ("Which sessions need you (stage B)" above).
 
 ## Checking: `skydeck doctor`
 

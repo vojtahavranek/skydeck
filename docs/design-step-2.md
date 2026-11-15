@@ -3361,7 +3361,8 @@ sessions and to switch between their real terminals.
 
 **Stage B — attention and notifications.** Migration 2 (10.2), turn ends (10.3), seen, the three
 reasons and their marks (12.4), Ctrl+Shift+J, the title bar's `needs you` count and `(n) skydeck`,
-desktop notifications (13). Checks W11, W19, W21.
+desktop notifications (13). Checks W11, W19, W21, and W3's title `(n) skydeck` on the taskbar
+button.
 
 **Stage C — restore in the window.** The restore banner (12.7); the commands' `--window`,
 configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` (11.4); `show`'s
