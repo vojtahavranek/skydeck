@@ -735,9 +735,9 @@ look at it before you save.
   saved, each of these on that session only says so: `l` `the label is not here yet; press l
   again`, F2 `the label is not here yet; press F2 again`, `g` `the group is not here yet; press g
   again`, `n` `the note is not here yet; press n again`; the header's controls say the same with
-  the list's key (`press l again`, …). `p` never waits. Right after you select a session, `n` can also say `the note is not here yet;
-  press n again`. A refusal that comes after you closed its dialog shows in the toast as `not
-  saved: <why>`.
+  the list's key (`press l again`, …). `p` never waits. Right after you select a session, `n`
+  can also say `the note is not here yet; press n again`. A refusal that comes after you closed
+  its dialog shows in the toast as `not saved: <why>`.
 
 **Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
 `Marked done: hidden from the list. It comes back on new activity.`, or for a session under Open
