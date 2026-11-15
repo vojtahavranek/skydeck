@@ -1956,6 +1956,21 @@ refused with the same message; a note is edited in a text box instead of `$VISUA
 began ("the note was changed elsewhere while you edited it; your text is still in the box"); `+ PR`
 attaches with origin `manual` and fetches at once (design 7.3). Done shows an Undo toast.
 
+**The ticket link** (decided by the user on 2026-11-15). The group stays only a group (design
+7.1), and nothing in the core depends on one ticket system (design 1): with `ticketUrl` set
+(16.4), the group chip also opens the session's ticket. When the group holds a ticket key — the
+text `groupPattern` matches in it — the address is `ticketUrl` with `{key}` replaced by exactly
+that text, and a click on the chip opens it in the user's own Edge profile, as any link (9.6:
+`act open-link`, which the server checks again); the chip's tooltip is the address, and the group
+is edited with `g` or the ✎ beside the chip. The key is put in only when it is made of letters,
+digits, `-`, `_` and `.` and starts with a letter or a digit (the default pattern matches nothing
+else); otherwise, and while `ticketUrl` is `null`, the chip is as before, without a link. So
+nothing a program wrote into a title can add a host, a path or a query: the key holds no `/`, `?`,
+`#`, `@`, `:`, `%` or white space, and `{key}` stands after the host. The address reaches the page
+as a string of `list` and is shown only as text; it never becomes markup. skydeck reads nothing
+from the ticket system: no API, no login. `skydeck show` prints the address as `ticket:` after
+`group:`.
+
 ### 12.6 The right side
 
 - **A session open in the window**: its terminal. The page attaches to the terminal it shows and
@@ -2420,6 +2435,7 @@ New keys, all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
+| `ticketUrl` | `null` | Decided by the user on 2026-11-15. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only as an `http` or `https` address with `{key}` once, after its host (a `/`, `?` or `#` comes between `://` and `{key}`), without white space, a control character, `"` or a backslash, and that 9.6 would open with a key in it (at most 2,048 characters); anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
@@ -2809,7 +2825,8 @@ configuration `"terminal": "window"`, and `POST /resume`, `/new` and `/restore` 
 
 **Stage D — header editing and pull-request detail.** Label, group, note, done and undone, `+ PR`
 and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3) and the
-pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2.
+pull-request lines of the header; the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
+the group chip and `ticketUrl` (12.5, 16.4; decided by the user on 2026-11-15).
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
 the chips, the quick switcher Ctrl+Shift+P, stacks in This week and Earlier (12.2, 12.8). The
