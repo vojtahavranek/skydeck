@@ -1050,11 +1050,13 @@ Setup:
   that of one of the two throwaway sessions, the one the step names. No step presses Enter on a
   row whose short id you have not looked at.
 - **A prompt is typed only into a terminal that has the keyboard**: the key bar says `Focus:
-  terminal` (else Ctrl+Shift+L until it does), and the header's short id is the throwaway
-  session's. When that session's terminal has ended (its last screen is dimmed under a bar with
-  Resume and Close), click `Resume` on the bar first and wait until it runs. Type nothing
-  otherwise: text typed while the list has the keyboard is list keys — `k` moves to the row
-  above, which may be a real session, `n` opens its note, `l` its label, `d` marks it done.
+  terminal` (else Ctrl+Shift+L until it does), and the header's short id is the throwaway session's.
+  When that session's terminal has ended (its last screen is dimmed under a bar with Resume and
+  Close), click `Resume` on the bar first and wait until it runs; when it has no terminal in the
+  window at all (after a restart of the PC or of WSL), its resume card shows instead: click `Resume
+  here` on the card and wait until it runs. Type nothing otherwise: text typed while the list has
+  the keyboard is list keys — `k` moves to the row above, which may be a real session, `n` opens its
+  note, `l` its label, `d` marks it done.
 - **The other throwaway session**, in a terminal of your own: open one more WSL terminal, **T**, and
   in it `cd ~/skydeck-try && claude`; send it one prompt (`say hello in one word`). In the window
   its row is under Open and says `running in another terminal`; once its answer is written, its
