@@ -2484,7 +2484,10 @@ E7), → on a closed head opens it, ← on an open head closes it, and ← on a 
 and closes the stack, as folding Earlier first selects the row above it; on any other row ← and →
 fold and unfold Earlier. Ctrl+Shift+1–9 are unchanged: the rows with a slot never stack. Ctrl+Tab
 skips a member of a closed stack (ruled: the page never knows a closed stack's members), as it
-skips a row a filter or a folded Earlier hides. The selection is never on a row the
+skips a row a filter or a folded Earlier hides. While filtering (a word or a chip, 12.8)
+nothing folds and no stack is formed, so ← and → do nothing. The chips under the filter field
+(12.8) take no keyboard on a click: the keyboard stays where it was (in the field, on the list, in
+the terminal). The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
