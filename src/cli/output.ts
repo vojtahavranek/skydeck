@@ -218,9 +218,15 @@ function doneField(row: ListRow): string[] {
 
 /**
  * One session in full (design 7.5): its title, then one line per field. Nothing is left to a
- * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4.
+ * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4. `ticket` is the
+ * session's ticket address (`ticketAddress`, S2 12.5), printed after the group when there is one.
  */
-export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): string {
+export function formatShow(
+  row: ListRow,
+  links: readonly LinkRow[],
+  nowNs: Ns,
+  ticket: string | null = null,
+): string {
   const launch =
     row.session.launch === null || row.session.launch.length === 0 ? null : row.session.launch;
   const lines = [
@@ -234,6 +240,7 @@ export function formatShow(row: ListRow, links: readonly LinkRow[], nowNs: Ns): 
     field('marks:', row.marks.length === 0 ? '-' : row.marks.join(',')),
     field('label:', row.label ?? '-'),
     field('group:', row.group ?? '-'),
+    ...(ticket === null ? [] : [field('ticket:', sanitize(ticket))]),
     field('dir:', row.dir === null || row.dir === '' ? '-' : row.dir),
     // A recorded word can hold anything a process was started with: sanitised before it is quoted.
     field('launch:', launch === null ? 'unknown' : shellJoin(launch.map(sanitize))),

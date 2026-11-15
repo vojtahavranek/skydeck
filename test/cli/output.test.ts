@@ -417,6 +417,26 @@ test('formatShow starts with the title, then one line per field, the label padde
   assert.equal(lines.length, 9, 'the text ends with one newline');
 });
 
+test('formatShow: the ticket address is a "ticket:" line right after "group:" (D16)', () => {
+  const row = listRow({ id: S1, group: 'ABC-123', dir: '/home/dev/projects/api' });
+  const lines = formatShow(row, [], T0, 'https://example.atlassian.net/browse/ABC-123').split('\n');
+  assert.equal(lines[5], 'group:     ABC-123');
+  assert.equal(lines[6], 'ticket:    https://example.atlassian.net/browse/ABC-123');
+  assert.equal(lines[7], 'dir:       /home/dev/projects/api');
+});
+
+test('formatShow: the ticket address is sanitised', () => {
+  const text = formatShow(listRow({ id: S1, group: 'A-1' }), [], T0, 'https://x/\x1b[31mA-1\u009b');
+  assert.match(text, /^ticket: {4}https:\/\/x\/A-1$/m);
+  assert.doesNotMatch(text, /[\x1b\u009b]/);
+});
+
+test('formatShow: no ticket address, no "ticket:" line, given as null or not given', () => {
+  const row = listRow({ id: S1, group: 'ABC-123' });
+  assert.doesNotMatch(formatShow(row, [], T0, null), /ticket:/);
+  assert.equal(formatShow(row, [], T0, null), formatShow(row, [], T0));
+});
+
 test('formatShow: the state detail is shown in brackets after the state', () => {
   const row = listRow({ id: S1, state: 'waiting', stateDetail: 'a permission' });
   assert.match(
