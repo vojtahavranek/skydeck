@@ -25,11 +25,15 @@ import type { RefreshResult } from '../../sessions/refresh.ts';
 import { prepareResumeById } from '../../sessions/resume-by-id.ts';
 import type { PreparedLaunch } from '../../sessions/resume.ts';
 import { terminalFor } from '../../terminals/index.ts';
+import { sanitize } from '../../text/sanitize.ts';
 import type { Context } from '../context.ts';
 import { refreshWithProgress, withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
-import { launchWhere } from '../launching.ts';
+import { launchWhere, whereFor } from '../launching.ts';
 import { editNote } from '../notes.ts';
+import { windowTimes } from '../window-open.ts';
+import { requestResume, windowServer } from '../window-requests.ts';
+import type { WindowServer } from '../window-requests.ts';
 import { decodeKeys } from './keys.ts';
 import { initModel, reduce, visibleRows, withMessage, withRows } from './model.ts';
 import type { TuiEffect, TuiModel } from './model.ts';
@@ -47,6 +51,8 @@ const CLEAR = '\x1b[H\x1b[2J';
 const SAVED = 'saved';
 const REFRESHING = 'refreshing pull requests…';
 const OWN_PREFIX = 'skydeck: ';
+/** Plan C12: `R` opens no window; the user is told when none is open. */
+const NO_WINDOW = 'no window is open; run skydeck window';
 /** How often the list refreshes by itself while it is on screen (design 7.4). */
 const BACKGROUND_REFRESH_MS = 5000;
 /**
@@ -322,9 +328,14 @@ class TerminalList {
    * `R`. The guard refreshes and loads the rows by itself (design 7.6), so the decision is made on
    * what is on disk now, not on the row this list shows. A refusal is the message. With an adapter
    * that opens tabs the session opens in one and the list stays; otherwise the list ends and the
-   * launcher starts the session in this terminal.
+   * launcher starts the session in this terminal. With `"terminal": "window"` the window's server
+   * decides and starts it, and the list stays (#resumeInWindow).
    */
   async #resume(id: string): Promise<number | null> {
+    if (whereFor(this.#deck.config, null) === 'window') {
+      await this.#resumeInWindow(id);
+      return null;
+    }
     let prepared: PreparedLaunch;
     try {
       prepared = prepareResumeById(this.#deck, id);
@@ -355,9 +366,65 @@ class TerminalList {
     return code;
   }
 
+  /**
+   * `R` with `"terminal": "window"` (S2 11.4, plan C13): `POST /resume` to the window's server,
+   * which prepares the resume itself; nothing is prepared or locked here. Its answer is shown as a
+   * tab launch's: `opened <short> in the window` and its lines — with C12's words when no page is
+   * connected, since the list opens no window —, a refusal (codes 2–4) and a line of plan 2.5 as
+   * the message, a failed launch's lines kept for the end; an answer without lines (a server of
+   * another build) is named by its code. The server's lines are sanitised before they are
+   * printed (it may be of another build); the message line is sanitised by `render`.
+   */
+  async #resumeInWindow(id: string): Promise<void> {
+    const short = id.slice(0, SHORT_ID_LENGTH);
+    let message: string;
+    try {
+      const times = windowTimes(this.#deck.platform.env);
+      const server = await windowServer(this.#deck, times, false);
+      const { code, lines } = await requestResume(server, id, times);
+      if (code === EXIT.ok) {
+        const opened = `opened ${short} in the window`;
+        const shown = (await this.#pageConnected(server)) ? opened : `${opened}; ${NO_WINDOW}`;
+        message = messageOf([shown, ...lines]);
+      } else if (messageOf(lines) === '') {
+        // An answer that says nothing (a server of another build): its code, and no promise.
+        message =
+          code >= 2 && code <= 4
+            ? `the window's server refused to resume ${short} (code ${code})`
+            : `starting ${short} in the window failed (code ${code})`;
+      } else if (code >= 2 && code <= 4) {
+        message = messageOf(lines);
+      } else {
+        // What the server said does not fit one line: it goes to the scrollback.
+        this.#atExit.push(...lines.map(sanitize));
+        message = messageOf([
+          `starting ${short} in the window failed; the details are printed when the list ends`,
+          ...lines,
+        ]);
+      }
+    } catch (error) {
+      message = failureMessage(error);
+    }
+    this.#reload(false);
+    this.#setModel(withMessage(this.#model, message));
+  }
+
+  /**
+   * Whether a page of the window is connected; true when the server's status cannot be read, so
+   * that nothing is said that is not known.
+   */
+  async #pageConnected(server: WindowServer): Promise<boolean> {
+    try {
+      return (await server.client.status()).pages > 0;
+    } catch (error) {
+      if (!(error instanceof SkydeckError)) throw error;
+      return true;
+    }
+  }
+
   #opensTabs(): boolean {
     const { config, platform } = this.#deck;
-    return terminalFor(config.terminal, platform, config).opensTabs;
+    return config.terminal !== 'window' && terminalFor(config.terminal, platform, config).opensTabs;
   }
 
   /**

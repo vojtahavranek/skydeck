@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -385,5 +385,52 @@ describe('new --window (S2 11.4; plan C3)', () => {
       assert.deepEqual(r.asked, [], other);
     }
     assert.deepEqual(w.requests(), []);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// "terminal": "window" (S2 11.4, 16.4; plan C13; task 77): no option and --tab go to the window's
+// server, --here stays here.
+
+/** config.json of `m` with `"terminal": terminal`, its other keys kept. */
+function withTerminal(m: WindowMachine, terminal: string): void {
+  const path = m.deck.places.configPath;
+  const config = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  writeFileSync(path, `${JSON.stringify({ ...config, terminal }, null, 2)}\n`);
+}
+
+describe('new with "terminal": "window" (S2 11.4; plan C13)', () => {
+  for (const option of [[], ['--tab']]) {
+    test(`${option.length === 0 ? 'no option' : option.join(' ')}: the request to the window's server, its lines and code; nothing prepared here`, async (t) => {
+      const w = await windowNew(t);
+      withTerminal(w.m, 'window');
+
+      const r = await w.run(['new', ...option, '--label', 'x', '--', '--model', 'opus']);
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.stderr, 'skydeck: started a new session\n');
+      assert.deepEqual(w.requests(), [
+        { route: 'new', dir: w.project, label: 'x', group: null, flags: ['--model', 'opus'] },
+      ]);
+      assert.equal(existsSync(join(w.m.s.root, 'handoff')), false, 'no handoff file');
+      assert.deepEqual(w.m.deck.store.allMeta(), [], 'no label stored here');
+    });
+  }
+
+  test('--here: the handoff file as in step 1; the server is not asked', async (t) => {
+    const w = await windowNew(t);
+    withTerminal(w.m, 'window');
+
+    const r = await w.run(['new', '--here', '--', '--model', 'opus']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.asked, []);
+    assert.deepEqual(w.requests(), []);
+    assert.match(
+      readFileSync(join(w.m.s.root, 'handoff'), 'utf8'),
+      new RegExp(
+        `^cd -- ${shellQuote(w.project)} \\|\\| exit 1\nexec claude --session-id [0-9a-f-]{36} --model opus\n$`,
+      ),
+    );
   });
 });

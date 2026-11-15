@@ -846,17 +846,23 @@ knows which checks only they can make.
   before each key or click the user checks that the header's short id, or the dialog's heading, is
   the throwaway session's (`l` and Enter on a real row replace its label for good). After `d` the
   selection moves to the next row, which may be a real session: press Undo before the next key.
-  W27 first copies `config.json` when it exists (`cp ~/.config/skydeck/config.json
-  ~/.config/skydeck/config.json.before-w27`) and ends by putting the copy back or removing the key
-  (and `skydeck window --restart`); it says that a mistake in the file makes every command name the
-  key and exit 1, and nothing else. W28 attaches a pull request of the user's own and detaches it
-  at the end. No step marks a real session done, edits a real note or closes a window.
+  W27 first copies `config.json` aside when it exists (`cp -p -n ~/.config/skydeck/config.json
+  ~/.config/skydeck/config.json.before-w27`) and ends by copying it back and removing the copy,
+  or, when there was none, by removing the file it created (and `skydeck window --restart`); it
+  never just removes the user's configuration (ruled 14:38Z on review 1), and copies nothing back
+  over a file that changed since but for the check's own line: a `diff` first, else the user mends
+  the file by hand (review 2); it removes no file for what it holds: a file that already holds a
+  `ticketUrl` is used as it is and is the same at the end (ruled on review 2's re-check); it says
+  that a mistake in the file makes every command name the key and exit 1, and nothing else. W28
+  attaches a pull request of the user's own and detaches it at the end. Each check sets what it
+  needs at its start and clears what it set at its end (ruled 14:38Z). No step marks a real
+  session done, edits a real note or closes a window.
 
 | # | Check | Stage | Decides |
 |---|---|---|---|
-| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. | D | 12.5, 9.6 |
+| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
 | W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
-| W29 | On the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of D2 does not hold in Edge for it). | D | 12.5, 12.9 |
+| W29 | **Real claude**, on the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
 
 **Steps**
 - [ ] Check the new text against the code and the tests, never by running it: `show`'s lines are

@@ -377,3 +377,17 @@ test('restore opens every batch though the first started nothing: the command pa
   );
   assert.equal(d.stderr(), '');
 });
+
+test('restore --help says that with "terminal": "window" the sessions start in the window (task 77)', async () => {
+  const c = testContext();
+  assert.equal(await main(['restore', '--help'], c.ctx), 0);
+  assert.ok(
+    c
+      .stdout()
+      .replaceAll('\n', ' ')
+      .includes(
+        'With "terminal": "window" in the configuration they start in the skydeck window instead (skydeck window must be running).',
+      ),
+    c.stdout(),
+  );
+});

@@ -360,6 +360,7 @@ ignored.
 | `restoreStartTimeoutSeconds` | `120` | How long `restore` waits for the sessions of a batch to report their start. |
 | `claudeHome` | `null` | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
 | `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
+| `ticketUrl` | `null` | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line. `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
 | `window` | see the window's section | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
 
 The numbers must be positive integers. An example that uses WezTerm tabs and a lower-case ticket key:
@@ -451,11 +452,12 @@ running when the window or skydeck's server is closed or restarted: each termina
 python3 process of its own, its **keeper**. A session ends only when you end it inside `claude`; the
 window has no action that stops one.
 
-This is stage A of step 2 ([design-step-2.md](design-step-2.md), section 19): the list, the
-terminals, resume and new. Attention marks and notifications, restoring into the window, editing
-the label, group, note and done mark in the window, and the search beyond one text come in later
-stages. The commands of step 1 stay as they are, also while the window runs: `skydeck resume`,
-`new` and `restore` start `claude` in the terminal you type them in, not in the window.
+This is stages A and D of step 2 ([design-step-2.md](design-step-2.md), section 19): the list, the
+terminals, resume and new (A), and editing in the window — the label, group, note, done mark and
+pull requests, and the ticket link (D). Attention marks and notifications, restoring into the
+window, and the search beyond one text come in later stages. The commands of step 1 stay as they
+are, also while the window runs: `skydeck resume`, `new` and `restore` start `claude` in the
+terminal you type them in, not in the window.
 
 ### Before you rely on it
 
@@ -669,6 +671,153 @@ effect.
   pastes text). The key bar at the bottom says where the keyboard is (`Focus: list`,
   `Focus: terminal`).
 
+#### Editing a session (stage D)
+
+The label, group, note, done mark and pull requests of the selected session are edited in the
+window, by step 1's rules: what `skydeck label`, `group`, `note`, `done` and `pr add` refuse is
+refused with the same message, and every open window shows the change within a second. Each edit
+has a key in the list (while the list has the keyboard: `Focus: list`) and a control in the
+header:
+
+| Edit | In the list | In the header |
+|---|---|---|
+| the label | `l` or F2 | a click on the title |
+| the group | `g` | ✎ beside the group chip, or `+ group` while there is none |
+| the note | `n` | `Note`, or a click on the note's line |
+| the pull requests | `p` | `Pull requests` (`+ PR` while none is attached) |
+| done, undone | `d` | `Done` (`Undone` for a session marked done) |
+
+With no session selected, a key says `no session selected`.
+
+**The header** has four lines, the same height for every session and every window width; each
+is one line, cut with an ellipsis when it is long:
+
+1. the title, the group chip with its ✎ (or `+ group`), the state, `Note` and `Done`;
+2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
+   the window shows the session's terminal), where the title comes from (`title: your label`,
+   `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
+   folder`), and the short id, which a click copies whole (`id copied`);
+3. the pull requests: the window's chip (below), the open ones side by side as far as they fit
+   (`acme/web #7 · failing`; a click opens one in your own Edge), and `Pull requests`; while none
+   is attached, `no pull request` and `+ PR`;
+4. the note's first line, with ` …` after it when there is more, or `no note`.
+
+The title, the group chip, a pull request and the note's line act on a click that selected no
+text: a drag over them selects their text to copy, as anywhere in the header. A click on a button
+leaves the keyboard where it was.
+
+**The dialogs** lie over the page, which takes no click and no key while one is open. Their
+heading names the session (`Label — <title>`, `Group — …`, `Note — …`, `Pull requests — …`):
+look at it before you save.
+
+- The label's field holds your label; it is empty, with the title as its hint, while you have set
+  none. An empty label clears yours. The label is also the session's name for Claude
+  Code at its next start or resume.
+- The group's field holds the group you set; it is empty, with the title's ticket key as its
+  hint, while the group comes from the title. An empty group gives the session the ticket key at
+  the start of its title again.
+- The note's box holds the whole note. An empty note removes it.
+- **Enter** saves (`Save`); in the note Enter is a line break and **Ctrl+Enter** saves. A refused
+  save keeps the dialog open with your text and says why under the field: for a label that
+  `skydeck label` refuses, the same line; for a note that another window or `skydeck note`
+  changed since the dialog opened, `the note was changed elsewhere while you edited it; your text
+  is still in the box`; for a session started in the window that has not started yet, `this
+  session has not started yet; edit it once it runs`.
+- **Esc** or `Cancel` closes without saving. A note whose text you changed takes Esc twice: the
+  first says `Esc again discards your text`.
+- While a dialog is open, every window chord but Ctrl+Shift+H says `close the edit first (Esc)`
+  in the key bar and does nothing else. The reload keys (F5, Ctrl+R, …) reload as anywhere while
+  you have changed nothing, and say `save or cancel the edit first` once you have. Closing the
+  window, or Edge's own reload, with changed text asks first (Edge's own prompt). Ctrl+V and
+  Ctrl+Shift+V paste into the field.
+- Right after this window saved a label, group or note of a session, its dialogs wait for the
+  list that holds the new text (within a second). Until it has come, whichever of the three was
+  saved, each of these on that session only says so: `l` `the label is not here yet; press l
+  again`, F2 `the label is not here yet; press F2 again`, `g` `the group is not here yet; press g
+  again`, `n` `the note is not here yet; press n again`; the header's controls say the same with
+  the list's key (`press l again`, …). `p` never waits. Right after you select a session, `n`
+  can also say `the note is not here yet; press n again`. A refusal that comes after you closed
+  its dialog shows in the toast as `not saved: <why>`.
+
+**Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
+`Marked done: hidden from the list. It comes back on new activity.`, or for a session under Open
+(it runs) `Marked done. Stays under Open while it runs; hidden once it stops.` — such a row stays
+under Open with a `done` mark until the session stops. `Undo` marks it undone again: a click
+presses it, or Tab until it has the keyboard and then Enter.
+After `d` in the list, once the row is gone, the row after it in the same section is selected,
+else the one before it, else none; never a row of Open. That row is another session, and the
+next key acts on it: to take the `d` back, click `Undo` first. `Undo` selects the session again,
+unless you moved the selection meanwhile. `Done` in the header selects nothing in its place.
+`d` on a session marked done (shown with `a`), and `Undone`, mark it undone, without a toast. A
+held `d` acts once, and so does a double click on a button of the header.
+
+**The pull-request dialog** (`p`, `Pull requests` or `+ PR`) lists every attached pull request on
+a line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`, `changes
+requested`, `checks pending`, `review required`, `draft`; `not fetched` until it is first read),
+and one that cannot be read with when it was last read and its error, `acme/web #7 · can't read ·
+last read 3h ago · gh: HTTP 502` (`never read` when it never was; a long error is cut, and the
+line's tooltip has it whole, after the pull request's title). The merged and closed ones are
+folded into `30 merged, 2 closed ▸`; a click unfolds them (they show no age: they are never read
+again). On a line:
+
+- a click that selected no text opens the pull request in your own Edge;
+- `×` detaches it and shows the toast `Detached acme/web #7` with `Undo`, which attaches it again.
+
+`↻`, under the open ones, reads the status of the session's pull requests that are not merged or
+closed from GitHub now, in the background; the lines follow. The field takes a pull request's
+address (`https://github.com/owner/repo/pull/123`): Enter or `Attach` attaches it, as `skydeck pr
+add` does, empties the field and keeps the dialog open, where the new line shows `not fetched`
+(or its last state, when skydeck has read that pull request before), then within seconds its
+state read now, through your `gh`; an address that is not a pull request's is
+refused (`not a GitHub pull-request URL: <the text>`). `Close` or Esc closes the dialog. With
+none attached it says `no pull request attached`. Pull requests a session touched are still
+attached by themselves (design.md 7.3).
+
+**The window's chip**, in the list and on the header's third line, counts the open pull requests
+and the merged ones apart: `PR · failing` for one open pull request, `3 PRs · failing` for three,
+named by the one that most needs you (in this order: `can't read`, `not fetched`, `failing`,
+`changes`, `pending`, `review`, `draft`, `approved`), with a dim `+30` after it for 30 merged ones;
+with none open, a dim `3 merged`, or `closed`. It is dotted while it says `can't read`, and its
+tooltip lists each open one with its state. `skydeck ls` and the interactive list keep the command
+line's chip (design.md 7.3).
+
+#### The ticket link
+
+With `ticketUrl` in `config.json` ("Configuration" above), the group chip opens the session's
+ticket. For Jira, a file with only this key (in a file with others, add the key beside them):
+
+```json
+{
+  "ticketUrl": "https://example.atlassian.net/browse/{key}"
+}
+```
+
+When the session's group holds a ticket key — the text `groupPattern` matches in it, made of
+letters, digits, `-`, `_` and `.` and starting with a letter or a digit; with the default pattern
+a key such as `ABC-123` at its start — the chip shows the group with `↗` after it (`ABC-123 ↗`,
+`ABC-123 cleanup ↗`), underlined, with the ticket's address as its tooltip, and a click on it that
+selected no text opens the ticket in your own Edge. Without such a key, or without `ticketUrl`,
+the chip is plain text. The chip never edits: ✎ and `g` edit the group. skydeck reads nothing
+from the ticket system.
+
+`ticketUrl` must be an `http` or `https` address with `{key}` exactly once, after its host, with
+no user name or password, no white space, control character, `"` or backslash, no `%` (or `%` and
+one hex digit) right before `{key}`, and at most 2,048 characters. Anything else is a mistake in
+the file, as for every key: every command fails with exit 1 and
+
+```
+skydeck: /home/you/.config/skydeck/config.json: "ticketUrl" must be null or an http or https address with {key} once, after its host
+```
+
+The window's server reads the file when it starts: after you set or change `ticketUrl`, run
+`skydeck window --restart`. `skydeck show <ref>` reads it at once and prints the address after the
+group (`--json` is unchanged):
+
+```
+group:     ABC-123
+ticket:    https://example.atlassian.net/browse/ABC-123
+```
+
 ### Known limits of stage A
 
 - **The keep-alive is not verified** (above; W14).
@@ -710,9 +859,7 @@ effect.
   filter field it is two Escs to the terminal. The ended bar of a selected session that the filter
   hides offers no Resume, and Close only once the end is known: clear the filter. A resume card's
   warnings about flags (`original flags unknown; resuming with defaults`, flags not passed on)
-  show until the terminal replaces the card, not after a successful resume. The pull-request chip
-  is the command line's (design.md 7.3): `3 PRs · …` counts the merged ones too; a chip that counts
-  open and merged pull requests apart comes in a later stage. In one rare case
+  show until the terminal replaces the card, not after a successful resume. In one rare case
   (a click outside the list and, within a double click's time, a click on a row a list update has
   just moved under the pointer) that row is resumed as by a double click.
 - **A flood of output.** When a program writes faster than skydeck can show (megabytes at once), a
@@ -729,6 +876,33 @@ effect.
   window (or run `skydeck restore` in a terminal, which brings them back there). A `skydeck resume`
   of a session whose window terminal still shows `starting…` is not refused because of it: wait
   until it runs.
+
+### Known limits of stage D
+
+- **A session the filter hides has no header**, and so is not edited: its keys say `no session
+  selected`. Clear the filter first (Esc).
+- **Two windows.** Label, group and done are last-write-wins between two windows, and between a
+  window and a command, as between two commands. Only the note is guarded: a save over a note that
+  changed meanwhile is refused, with your text kept in the box.
+- **The toast's Undo has no key of its own.** It is a button: a click presses it, or Tab until
+  it has the keyboard and then Enter. The toast is shown for 5 seconds, and the next toast
+  replaces it. Once it is gone: `a` shows done sessions, then `d` on the session.
+- **A long note** (over 64 KiB, 65,536 bytes of UTF-8) is edited with `skydeck note <short id>`
+  only: its dialog says `this note is longer than the window edits; use skydeck note <short id>`.
+  A label or group over 1,024 bytes is refused before it is sent (`the label is longer than skydeck
+  takes: at most 1,024 bytes of UTF-8`).
+- **Line breaks.** A note whose line breaks are CR or CRLF (another program wrote it) is saved
+  with LF ones after an edit in the window.
+- **Text in a dialog and a reload.** While a dialog holds changed text, closing the window, Edge's
+  reload and the page's own reload when it reconnects to a server of another build (after an
+  update) ask first, with Edge's own prompt; leaving loses the text. Staying after an update keeps
+  the dialog and its text, but the page stays not connected (a save says `skydeck's server is not
+  connected; try again`): copy the text, close the dialog (Esc; twice for a changed note), then
+  press F5. Text typed between an F5 on an unchanged
+  dialog and the reload is held back only by that prompt.
+- **A busy database.** When the database was busy right after a save, a dialog opened then can
+  start from the text before the save; a note saved from there is refused as changed elsewhere.
+  Close the dialog and open it again.
 
 ### What `doctor` says about the window
 
@@ -768,6 +942,12 @@ with until `skydeck window` finds that it is of another build and restarts it, w
 limits"), and the open windows reload themselves for the new page and connect again: the command
 waits up to 7 seconds for them, so it opens no second window. Keepers that run keep the code they
 started with; new terminals get the new keeper. No `npm ci`, no `skydeck install`.
+
+The update that brings stage D resizes every terminal of the window once, when a window first
+shows it after the update: the header is two lines taller than stage A's (one for the pull
+requests, one for the note), so the terminal under it gets a little less room, and Claude Code
+redraws its screen, as at any resize. From then on the header has one height for every session,
+and editing never resizes a terminal.
 
 An update that upgrades the database is different: follow "Updating" below and close every
 skydeck window and tab first. A command of the new code that upgrades the database while the old

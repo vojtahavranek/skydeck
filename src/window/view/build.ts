@@ -293,6 +293,10 @@ function stacked(
  *   every row listed with done ones shown (Open's in Open's order, then the others most recent
  *   first), each with what hides it from this page's list; else null. Its `restore` is null here.
  * - `selected` is the resume card given only when it is the card of the view's selected session.
+ * - `selectedRow` (S2 12.9, plan E13) is the payload of the row of the view's selected session as
+ *   the sections would carry it, its `stack` null, also when they leave it out (a filter, the
+ *   chips, done hidden, a folded Earlier); null when nothing is selected or the session is not
+ *   listed even with done ones shown.
  * - Attention (S2 12.4, plan B7): a row's `attention` is `attentionOf` over `input.attention`.
  *   `needYou.count` counts the rows listed without the filter that need you, whatever the filter
  *   or the fold, and such a row is in no field of `counts` (the title bar's parts add up);
@@ -331,6 +335,8 @@ export function buildListMessage(
   const shown = new Map<SectionName, Entry[]>(SECTIONS.map((name) => [name, []]));
   const switchable: SwitchEntry[] = [];
   let doneHidden = 0;
+  // E13: the selected session's payload, whether the sections show it or not.
+  let selectedRow: RowPayload | null = null;
   for (const row of candidates) {
     const claimed = bySession.get(row.id) ?? null;
     // A terminal whose program is gone stays with a session that is not running (the ended bar,
@@ -352,6 +358,9 @@ export function buildListMessage(
       ...rowPayload(row, { terminal, elsewhere }),
       attention: attentionOf(row, facts),
     };
+    if (row.id === view.selected) {
+      selectedRow = payload;
+    }
     const open = payload.starting || row.state !== 'not-running';
     // Listed without the filter (stage A's rule with the view's showDone): the counts' rows.
     const listed =
@@ -438,6 +447,7 @@ export function buildListMessage(
     dirs: projectDirs(input.rows),
     filtering,
     switcher: typeof view.switcher === 'string' ? switcher(view.switcher, switchable, facts) : null,
+    selectedRow,
   };
 }
 

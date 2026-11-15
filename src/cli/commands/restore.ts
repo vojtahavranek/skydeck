@@ -1,5 +1,7 @@
 // `skydeck restore [--all] [--dry-run] [--yes]` (design 7.8): bring back what was open before the
-// machine went down.
+// machine went down. With `"terminal": "window"` the window's server runs it (S2 11.4, plan C14):
+// this command plans, shows and asks as always, then sends the chosen ids to the server and prints
+// its lines (src/cli/window-requests.ts).
 import { buildResumeCommand } from '../../claude/launch.ts';
 import { RestoreStoppedError, UsageError } from '../../platform/errors.ts';
 import { isoFromNs } from '../../platform/time.ts';
@@ -7,14 +9,19 @@ import type { Deck } from '../../sessions/deck.ts';
 import { restorePlan, runRestore } from '../../sessions/restore.ts';
 import type { RestoreEntry } from '../../sessions/restore.ts';
 import { terminalFor } from '../../terminals/index.ts';
+import type { Terminal } from '../../terminals/index.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { printableCommand } from '../../text/shell.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
-import { withDeck } from '../deck.ts';
+import { refreshWithProgress, withDeck } from '../deck.ts';
 import { EXIT } from '../exit.ts';
+import { windowTimes } from '../window-open.ts';
+import type { WindowTimes } from '../window-open.ts';
+import { restoreInWindow, windowServer } from '../window-requests.ts';
+import type { WindowServer } from '../window-requests.ts';
 
 const SPEC: ArgSpec = {
   usage: `skydeck restore [--all] [--dry-run] [--yes]
@@ -22,8 +29,9 @@ const SPEC: ArgSpec = {
 Resumes the sessions that ended unexpectedly in the last boot before this one (a restart, or a
 WSL shutdown), a few at a time in new tabs; without a terminal that opens tabs, the first one here
 and, for each of the others, a "skydeck resume <id> --here" line printed to run in another
-terminal. Preselected are the sessions that were still open when that boot ended; at a terminal
-you can change the selection before anything starts.
+terminal. With "terminal": "window" in the configuration they start in the skydeck window
+instead (skydeck window must be running). Preselected are the sessions that were still open when
+that boot ended; at a terminal you can change the selection before anything starts.
 
   --all      also offer what ended unexpectedly in older boots and in this one
   --dry-run  print the sessions and their commands, start nothing
@@ -57,13 +65,18 @@ export const command: Command = {
         `stdin is not a terminal: pass --yes to take the preselection\n${SPEC.usage}`,
       );
     }
-    return withDeck(ctx, { refresh: true }, async (deck) => {
+    return withDeck(ctx, { refresh: false }, async (deck) => {
+      // Where the sessions start; none for --dry-run, which starts nothing and asks the window's
+      // server nothing (S2 11.4). Plan C14: the window's server is looked for first, so that "the
+      // window is not running" comes before the list and the prompt.
+      const where = dryRun ? null : await whereTo(deck);
+      refreshWithProgress(ctx, deck);
       const { entries } = restorePlan(deck, all);
       if (entries.length === 0) {
         ctx.io.stdout('nothing to restore\n');
         return EXIT.ok;
       }
-      if (dryRun) {
+      if (where === null) {
         printPlan(ctx, deck, entries);
         return EXIT.ok;
       }
@@ -74,10 +87,16 @@ export const command: Command = {
         ctx.io.stdout('nothing selected\n');
         return EXIT.ok;
       }
+      if ('server' in where) {
+        // The server runs the restore (S2 11.4); restoreInWindow prints its lines and both of
+        // C14's own (ruled, task 76).
+        const sessionIds = chosen.map((entry) => entry.row.id);
+        return restoreInWindow(ctx, deck, where.server, { sessionIds, all }, where.times);
+      }
       const outcome = await runRestore(
         {
           deck,
-          terminal: terminalFor(deck.config.terminal, deck.platform, deck.config),
+          terminal: where.terminal,
           report: (line) => ctx.io.stdout(`${line}\n`),
         },
         chosen,
@@ -99,6 +118,19 @@ export const command: Command = {
     });
   },
 };
+
+/**
+ * Where a restore starts its sessions: the window's server (C11's lookup; its lines without
+ * `, or use --here`) with `"terminal": "window"`, else the configured terminal.
+ */
+async function whereTo(
+  deck: Deck,
+): Promise<{ server: WindowServer; times: WindowTimes } | { terminal: Terminal }> {
+  const { terminal } = deck.config;
+  if (terminal !== 'window') return { terminal: terminalFor(terminal, deck.platform, deck.config) };
+  const times = windowTimes(deck.platform.env);
+  return { server: await windowServer(deck, times, false), times };
+}
 
 /** "<n>. [x| ] <short>  <title>  <how it ended>[  was working]" */
 function entryLine(entry: RestoreEntry, index: number, selected: boolean): string {

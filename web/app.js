@@ -15,6 +15,11 @@
 // walks `needYou.order` as the server sends it (B14), a `notify` shows a desktop notification
 // (B15), and a click on one passes `windowChordGate` as a window chord does.
 //
+// Stage C (plan C task 75): the restore banner of web/banner.js at the top of the list zone, drawn
+// from each `list`'s `banner`, with the report of every restore run (`notice restore-progress`). A
+// restore selects nothing and moves no keyboard (C21); a key held on one of its controls acts on
+// nothing once the control is gone, as a key held in a dialog (`heldFromDialog`).
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
@@ -24,6 +29,7 @@
 /** @import { Pane } from './pane.js' */
 import { nextNeeding, windowTitle } from './attention-text.js';
 import { decodeKey, loadKey, takeToken } from './auth.js';
+import { createBanner } from './banner.js';
 import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
@@ -32,7 +38,7 @@ import { createHelp } from './help.js';
 import { cancels, listKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { createNotifications } from './notify.js';
-import { paneFor } from './pane.js';
+import { paneFor, sessionRow } from './pane.js';
 import { createTerminalView } from './terminal-view.js';
 import { createToast } from './toast.js';
 
@@ -72,6 +78,7 @@ const dom = {
   keepAlive: byId('keepalive'),
   tick: byId('tick'),
   listZone: byId('list-zone'),
+  banner: byId('banner'),
   list: byId('list'),
   rightZone: byId('right-zone'),
   cards: byId('cards'),
@@ -249,6 +256,39 @@ const notifications = createNotifications(dom.notifyOn, {
 // The item hides itself once the permission is answered: pressed from the keyboard, it takes the
 // keyboard with it, and the zone's holder takes it back (S2 12.9), as for the notice's ×.
 dom.notifyOn.addEventListener('blur', () => setTimeout(keepKeyboard, 0));
+// Stage C (plan C task 75): the restore banner; its times in the page's own time zone (C18).
+const banner = createBanner(dom.banner, {
+  act: (action) => act(action),
+  say: (text) => say(text),
+  timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+});
+// A control of the banner pressed from the keyboard can take itself away (the report's ×): the
+// zone's holder takes the keyboard back once the click is done, as for the notice's ×.
+dom.banner.addEventListener('click', () => setTimeout(keepKeyboard, 0));
+// A click sequence that began on the banner acts on nothing outside it (ruled on review 2 of task
+// 75, N1): its first click can take its control away (Not now, the report's ×), the list then
+// moves up under the pointer, and the later clicks of a double click would select — and its
+// dblclick resume — the row that came to lie there. They are swallowed before the list, the
+// header or the pane see them, and move no keyboard; a sequence that begins elsewhere is not.
+let clicksFromBanner = false;
+for (const type of ['mousedown', 'mouseup', 'click', 'dblclick']) {
+  addEventListener(
+    type,
+    (event) => {
+      if (!(event instanceof MouseEvent)) {
+        return;
+      }
+      const inBanner = event.target instanceof Node && dom.banner.contains(event.target);
+      if (type === 'mousedown' && event.detail <= 1) {
+        clicksFromBanner = inBanner;
+      } else if (event.detail > 1 && clicksFromBanner && !inBanner) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    true,
+  );
+}
 
 /** Whether a dialog is shown (D2: then the page is modal). */
 function modal() {
@@ -462,6 +502,10 @@ function focusChanged() {
 const TEXT_BYTES = 1024;
 const PATH_BYTES = 4096;
 const NOTE_BYTES = 65536;
+/** At most this many sessions in one `restore`, and the form of the boot "Not now" names: what
+ *  S2 8.2.3 takes (plan C 2.2), the server closing the connection for anything else. */
+const RESTORE_IDS = 1000;
+const BOOT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const utf8 = new TextEncoder();
 
 /**
@@ -536,6 +580,15 @@ const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
  * @returns {string | null}
  */
 function overLimit(action) {
+  // Stage C (plan C 2.2): a restore's count of sessions, the form of the boot "Not now" names.
+  const ids = action['sessionIds'];
+  if (action.kind === 'restore' && Array.isArray(ids) && ids.length > RESTORE_IDS) {
+    return `skydeck restores at most ${RESTORE_IDS.toLocaleString('en-US')} sessions at once; untick some`;
+  }
+  const bootId = action['bootId'];
+  if (action.kind === 'dismiss-restore' && !(typeof bootId === 'string' && BOOT_ID.test(bootId))) {
+    return "this offer's boot id is not one skydeck takes; it cannot be dismissed";
+  }
   for (const [field, name, bytes] of LIMITED[action.kind] ?? []) {
     const value = action[field];
     if (typeof value !== 'string') {
@@ -670,14 +723,17 @@ function listNow() {
   return state.list === null ? '' : serverNow(state.list.nowNs, performance.now() - state.listAt);
 }
 
-/** The selected session's row, when the list shows it (S2 12.9: else none is selected). */
+/** The selected session's row, when the list shows it (S2 12.9: else none is selected). The list
+ *  keys take it from here: they act on no session the list does not show (E13, ruled); the right
+ *  side and the header's controls take `sessionRow`'s. */
 function selectedRow() {
   return state.selected === null ? undefined : rowOf(state.selected);
 }
 
 /**
  * Opens the dialog `what` for `sessionId` (D1–D3): the list keys on the selected row, and the
- * header's controls (task 38) through the cards' `edit`. The note's dialog needs the list's
+ * header's controls (task 38) through the cards' `edit` — the session's row from `sessionRow`, so
+ * also one the list does not show (E13). The note's dialog needs the list's
  * `selected` of that session, which holds the whole note (D3); a label, group or note that this
  * page's own act just changed waits for the list that holds it (C1). `key` is the key that opened
  * it ('' from the cards), `code` its physical key.
@@ -690,8 +746,8 @@ function edit(what, sessionId, key, code) {
   if (modal()) {
     return;
   }
-  const row = rowOf(sessionId);
-  if (row === undefined) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
     say('no session selected');
     return;
   }
@@ -746,13 +802,14 @@ function placeOf(sessionId) {
  * D15: `d` and the header's Done mark the session done, or undone for a done row; one act per
  * session at a time, and none while its own act waits. A `done` that the server took shows the
  * Undo toast. `fromList`: this page's `d` in the list, after which S2 12.9's exception moves the
- * selection (`leaveDone`); the Done button leaves it to the main rule.
+ * selection (`leaveDone`); the Done button leaves it to the main rule. The row is `sessionRow`'s:
+ * the header's Done also marks a session the list does not show (E13).
  * @param {string} sessionId
  * @param {boolean} fromList
  */
 function markDone(sessionId, fromList) {
-  const row = rowOf(sessionId);
-  if (row === undefined) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
     say('no session selected');
     return;
   }
@@ -778,7 +835,11 @@ function markDone(sessionId, fromList) {
     if (kind === 'undone') {
       return;
     }
-    toast.show(place?.section === 'open' ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
+    // A row with no section (`selectedRow`'s, E13) says whether it runs by itself: the server's
+    // rule of Open (`open` in src/window/view/build.ts; ruled 13:05Z).
+    const running =
+      place !== null ? place.section === 'open' : row.starting || row.state !== 'not-running';
+    toast.show(running ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
     if (state.leaving?.sessionId === sessionId) {
       state.leaving.answered = true;
       if (state.leaving.listed) {
@@ -996,6 +1057,9 @@ function received(message) {
       }
       followDone();
       followUndo();
+      // Stage C: before the render, whose keepKeyboard gives the zone the keyboard when a control
+      // of the banner that had it went away (a restore began: Restore is gone).
+      banner.render(message.banner ?? null);
       render();
       if (modal()) {
         editor.update(message); // the dialog's session's row (task 38's list)
@@ -1046,7 +1110,12 @@ function received(message) {
         // A7: shown until the next list.
         dom.tick.textContent = message.text;
         dom.tick.hidden = false;
-      } else if (message.kind !== 'restore-progress' && message.term !== null) {
+      } else if (message.kind === 'restore-progress') {
+        // Stage C (C10): one report line of a restore, whoever asked for it; it moves no keyboard
+        // (C21), but a new report takes the last one's × away.
+        banner.progress(message.text);
+        keepKeyboard();
+      } else if (message.term !== null) {
         terminalView.notice(message.term, message.kind, message.text);
         keepKeyboard();
       }
@@ -1065,7 +1134,13 @@ function received(message) {
 /** Renders the list and the right side for the current state. */
 function render() {
   list.render(state.list, state.selected, state.zone);
-  const pane = paneFor(state.selected, rows(), state.list?.terminals ?? [], state.newOpen);
+  const pane = paneFor(
+    state.selected,
+    rows(),
+    state.list?.terminals ?? [],
+    state.newOpen,
+    sessionRow(state.list, state.selected), // E13: also a session the list does not show
+  );
   const exit = pane.kind === 'terminal' ? (state.exits.get(pane.term.id) ?? null) : null;
   // `list.selected` when it is the pane's session, for every pane (plan D 2.4, ruled on review B).
   const paneRow = pane.kind === 'new' || pane.kind === 'none' ? null : pane.row;
@@ -1101,7 +1176,14 @@ function render() {
       cards.resumeCard(pane.row, selected, lines);
       break;
     case 'new': {
-      const row = state.selected === null ? undefined : rowOf(state.selected);
+      // The selected session's directory (S2 12.6): a hidden selection's too while a terminal of
+      // the window shows it (E13; review 2, ruled), since its header was what the user saw.
+      const selectedOne = sessionRow(state.list, state.selected);
+      const row =
+        selectedOne !== null &&
+        (selectedOne.terminal !== null || rowOf(selectedOne.id) !== undefined)
+          ? selectedOne
+          : undefined;
       const dirs = state.list?.dirs ?? [];
       cards.header(null, null, null, listNow);
       cards.newForm({ dir: row?.dir ?? dirs[0] ?? '', dirs });
@@ -1610,15 +1692,18 @@ function dialogKey(event) {
  * nothing; the next press acts (review 2 of task 37). Forgotten at the key's release, at a fresh
  * press, and when the window loses focus. Stage B: the same for a key pressed on the title bar's
  * `Turn on notifications`, which hides itself once the permission is answered — at once where a
- * policy answers without asking —, so that a held Enter there is no list `enter` either.
+ * policy answers without asking —, so that a held Enter there is no list `enter` either. Stage C:
+ * the same for Enter pressed on a control of the restore banner, which can go away
+ * under it — Restore once a restore runs, Not now once the offer is dismissed, the report's × —;
+ * a held Tab there walks on (review 2 of task 75, C4).
  * @type {Set<string>}
  */
 const pressedInDialog = new Set();
 
 /**
  * Keeps `pressedInDialog` and swallows an auto-repeat of a key held since a dialog was shown (or
- * on `Turn on notifications`), once the dialog (or the item) no longer has it. True when it
- * swallowed the event.
+ * on `Turn on notifications`, or on a control of the banner), once the dialog (or the item, or
+ * the control) no longer has it. True when it swallowed the event.
  * @param {KeyboardEvent} event
  * @returns {boolean}
  */
@@ -1626,7 +1711,11 @@ function heldFromDialog(event) {
   if (MODIFIER_KEYS.has(event.key)) {
     return false;
   }
-  if (modal() || document.activeElement === dom.notifyOn) {
+  if (
+    modal() ||
+    document.activeElement === dom.notifyOn ||
+    (dom.banner.contains(document.activeElement) && event.key === 'Enter')
+  ) {
     if (!event.repeat) {
       pressedInDialog.add(event.code);
     }

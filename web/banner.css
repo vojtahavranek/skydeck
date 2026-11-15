@@ -1,0 +1,107 @@
+/* The restore banner (S2 12.7; plan C task 75, C10, C21): in the list zone above the list, in its
+   width. With its report it takes at most 40 % of the zone's height and scrolls inside, so that
+   the filter and the list keep their room; it takes height from the list, never width (a long
+   title wraps), so the right side and every terminal's area stay as they are. Colours are
+   style.css's. */
+
+.banner {
+  flex: none;
+  max-height: 40%;
+  min-width: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  background: var(--sel);
+  border-bottom: 1px solid var(--line2);
+  scrollbar-width: thin;
+}
+.banner-heading {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.banner-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.banner-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+.banner-check {
+  flex: none;
+  margin: 2px 0 0;
+}
+.banner-entry-text {
+  min-width: 0;
+  /* `<short>  <title>`: the two spaces, as the command line shows them. */
+  white-space: pre-wrap;
+}
+.banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.banner-button {
+  border: 1px solid var(--line2);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.banner-button:hover {
+  border-color: var(--selline);
+}
+.banner-button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+.banner-button[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+.banner-running {
+  color: var(--dim);
+  font-style: italic;
+}
+.banner-message {
+  margin-top: 6px;
+  color: var(--crash);
+}
+.banner-report {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line2);
+  font:
+    12px 'Cascadia Mono',
+    Consolas,
+    monospace;
+  color: var(--dim);
+}
+.banner-offer[hidden] + .banner-report {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.banner-report-lines {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+.banner-report-close {
+  flex: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
