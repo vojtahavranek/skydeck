@@ -45,10 +45,11 @@ the server a runner that answers `gh` (`test/helpers/gh.ts`, task 36). Links the
 the recording Edge stub of every test server (A32), which is how a test sees them. No task runs
 `bin/skydeck` outside the test suite (task 39 included).
 
-**Known flakes** (not stage D's to fix): `LEFT-TO-YOU.md` section 4, "Tests", lists them (the
-input-full page case under load, `test/platform/real.test.ts:1005` and its streamed-answer case,
-the stand-in's record order, `test/window/mapping.test.ts:623`). A run that fails only with one of
-them is run once more, and the pull request names both runs.
+**Known flakes** (not stage D's to fix): `test-page/terminal.test.ts` "input-full (the program
+stalled, a large paste)" under load; `test/platform/real.test.ts:1005` (the wall clock) and its
+case "a streamed answer that keeps coming…"; `test/standin/standin.test.ts`, records in the wrong
+order now and then; `test/window/mapping.test.ts:623`, ENOTEMPTY at the sandbox's clean-up. A run
+that fails only with one of them is run once more, and the pull request names both runs.
 
 ## 1. Tasks and waves
 
@@ -80,20 +81,41 @@ task's row is not that task's to touch.
 
 | Task | Creates | Modifies |
 |---|---|---|
-| 34 | `src/window/view/chip.ts`, `test/window/view/chip.test.ts` | `src/window/protocol.ts`, `src/window/view/sections.ts`, `src/window/selected.ts`, `src/window/actions.ts`, `web/list-text.js`, `web/list.js`, `web/list.css`; `test/window/protocol.test.ts`, `test/window/view/sections.test.ts`, `test/window/view/build.test.ts`, `test/window/selected.test.ts`, `test/window/actions.test.ts`, `test/web/list.test.ts`, `test/web/pane.test.ts`, `test-page/list.test.ts`, `test-page/cards.test.ts`, `test-page/helpers/shell.ts`; `docs/design-step-2.md` (4.3, 8.2.3) |
-| 35 | `src/sessions/ticket.ts`, `src/text/link.ts`, `test/sessions/ticket.test.ts` | `src/platform/config.ts`, `src/window/windows.ts`, `src/cli/output.ts`, `src/cli/commands/show.ts`; `test/platform/config.test.ts`, `test/cli/commands/show.test.ts` |
-| 36 | `src/window/pr-fetches.ts`, `test/window/pr-fetches.test.ts`, `test/helpers/gh.ts`, `test/window/server-edits.test.ts` | `src/window/actions.ts`, `src/window/server.ts`, `src/window/tick.ts`, `src/window/selected.ts`, `src/sessions/meta.ts`, `src/cli/notes.ts`; `test/window/actions.test.ts`, `test/window/tick.test.ts`, `test/window/selected.test.ts`, `test/sessions/meta.test.ts`; `docs/design-step-2.md` (10.1; 12.5's paragraph "Editing (stage D)") |
-| 37 | `web/edit.js`, `web/edit.css`, `web/toast.js`, `test-page/edit.test.ts` | `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`, `web/cards.js` (only `header`'s second parameter and the three deps of 2.4, unused); `test/web/keys.test.ts`, `test-page/shell.test.ts`, `test-page/helpers/shell.ts` (a new function `editWorld` only); `docs/design-step-2.md` (12.9) |
-| 38 | `web/header-text.js`, `test/web/header-text.test.ts`, `test-page/header.test.ts` | `web/cards.js`, `web/cards.css`, `web/edit.js` (the pull-request dialog's list), `web/edit.css`; `test-page/cards.test.ts` (the cases that pinned stage A's header: the chip's place and the height); `docs/design-step-2.md` (19) |
+| 34 | `src/window/view/chip.ts`, `test/window/view/chip.test.ts` | `src/window/protocol.ts`, `src/window/view/sections.ts`, `src/window/view/build.ts`, `src/window/selected.ts`, `src/window/actions.ts`, `web/list-text.js`, `web/list.js`, `web/list.css`, `web/format.js`; `test/window/protocol.test.ts`, `test/window/view/sections.test.ts`, `test/window/view/build.test.ts`, `test/window/selected.test.ts`, `test/window/actions.test.ts`, `test/helpers/pages.ts`, `test/web/list.test.ts`, `test/web/pane.test.ts`, `test/web/format.test.ts`, `test-page/list.test.ts`, `test-page/cards.test.ts`, `test-page/helpers/shell.ts`; `docs/design-step-2.md` (4.3, 8.2.3) |
+| 35 | `src/sessions/ticket.ts`, `src/text/link.ts`, `test/sessions/ticket.test.ts` | `src/platform/config.ts`, `src/window/windows.ts`, `src/cli/output.ts`, `src/cli/commands/show.ts`; `test/platform/config.test.ts`, `test/cli/output.test.ts`, `test/cli/commands/show.test.ts` |
+| 36 | `src/window/pr-fetches.ts`, `test/window/pr-fetches.test.ts`, `test/helpers/gh.ts`, `test/window/server-edits.test.ts` | `src/window/actions.ts`, `src/window/server.ts`, `src/window/tick.ts`, `src/window/selected.ts`, `src/sessions/meta.ts`, `src/cli/notes.ts` (it imports the two moved functions and re-exports `discardKeptNote`, so that `src/cli/commands/note.ts` is unchanged); `test/window/actions.test.ts`, `test/window/tick.test.ts`, `test/window/selected.test.ts`, `test/sessions/meta.test.ts`; `docs/design-step-2.md` (10.1; 12.5's paragraph "Editing (stage D)") |
+| 37 | `web/edit.js`, `web/edit.css`, `web/toast.js`, `test-page/edit.test.ts`, `test-page/fixtures/recording-cards.js` | `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`, `web/cards.js` (only `header`'s new parameters and the three deps of 2.4, unused); `test/web/keys.test.ts`, `test-page/shell.test.ts`, `test-page/helpers/shell.ts`; `docs/design-step-2.md` (12.9) |
+| 38 | `web/header-text.js`, `test/web/header-text.test.ts`, `test-page/header.test.ts` | `web/cards.js`, `web/cards.css`, `web/edit.js` (the pull-request dialog's list), `web/edit.css`; `test-page/cards.test.ts`, `test-page/real-modules.test.ts` (only if a case's numbers move with the taller header); `docs/design-step-2.md` (19) |
 | 39 | — | `docs/install.md`, `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (18, 19) |
 
 The files of 34's type change were found by applying 2.2's types and running both type checks:
-every test file in its row is one `tsc` names or one whose case reads the chip's old shape at run
-time (`test-page/cards.test.ts`). Files more than one task edits, never two of one wave:
-`src/window/selected.ts`, `src/window/actions.ts` and their tests (34, 36); `test-page/helpers/shell.ts`
-(34, 37); `test-page/cards.test.ts` (34, 38); `web/cards.js`, `web/edit.js`, `web/edit.css` (37,
-38); `docs/design-step-2.md` (34, 36, 37, 38, 39, each in its own sections, disjoint within a
-wave; a conflict is rebased keeping both edits).
+every test file in its row is one `tsc` names, one whose case reads the chip's old shape at run
+time (`test-page/cards.test.ts`), or one whose case pins the view's files and imports
+(`test/window/view/build.test.ts`). Files more than one task edits, never two of one wave:
+`src/window/selected.ts`, `src/window/actions.ts` and their tests (34, 36);
+`test-page/helpers/shell.ts` (34, 37); `test-page/cards.test.ts` (34, 38); `web/cards.js`,
+`web/edit.js`, `web/edit.css` (37, 38).
+
+**The design, section by section.** Each task records its own decisions (1a) in its own pull
+request: 34 writes S2 4.3 and 8.2.3; 36 writes S2 10.1 and the paragraph "Editing (stage D)" of
+S2 12.5; 37 writes S2 12.9 (the dialogs' focus rule, beside the exception this plan's pull request
+added); 38 writes S2 19; 39 writes S2 18 and 19. No two tasks of one wave write the same section
+(review B found 36 and 37 both in S2 12.5 at 1f9e85c; 37 now writes only S2 12.9). Should a
+conflict come anyway, the second to merge rebases and keeps both edits.
+
+**The shared test files**, for scheduling stages B and C beside these tasks:
+- `test-page/helpers/shell.ts` — 34 adds fields inside two existing fixtures (`scriptedList`'s
+  terminals gain `openedNs`; `actsWorld`'s `selected` gains `note`, `noteTooLong`, `ticketUrl`);
+  37 adds one new function, `editWorld`, at the end; nothing else changes.
+- `test/helpers/pages.ts` — 34 adds `openedNs` to `defaultList`'s terminals; nothing else.
+- `test-page/cards.test.ts` — 34 changes the chip fixtures inside existing cases (`count` becomes
+  `open` and `merged`); 38 changes the existing cases that pinned stage A's header (the chip's
+  place, the height) and adds no case (its cases are in `test-page/header.test.ts`).
+- `test-page/real-modules.test.ts` — 38 only, and only if a case's numbers move with the taller
+  header (its cases compare the size an act asks for with the size shown, so they should hold);
+  no new case.
+- Also: `test-page/shell.test.ts` — 37 changes one existing case (the six stage D keys);
+  `test/web/pane.test.ts` and `test-page/list.test.ts` — 34 adds the new fields to their fixtures.
 
 ## 1a. Decisions this plan makes where the design is silent
 
@@ -105,11 +127,11 @@ lead's rulings of 2026-11-15).
 | # | Decision | Why | Design update |
 |---|---|---|---|
 | D1 | Label, group, note and the pull requests are edited in dialogs over the page (`web/edit.js`), as the mockup shows: a heading that names the session, the field (a text box for the note), a line of help, Cancel and Save (Attach in the pull-request dialog). | The mockup the user approved (S2 12) has these dialogs; the header keeps one height (D12), so nothing is edited inside it. | — (S2 12.5) |
-| D2 | A dialog is modal. A scrim covers the window and takes clicks without acting. While a dialog is shown, `app.js` moves the keyboard nowhere — no `setZone`, `giveKeyboard`, `keepKeyboard` or `terminalView.focus` for a result, a `list` or a render — and acts on no list key; every window chord but Ctrl+Shift+H says `close the edit first (Esc)` and does nothing else (Ctrl+Shift+V in a field stays the browser's paste, Z1). A terminal that this page's resume or new brought meanwhile takes the keyboard when the dialog closes (`state.bringing` is kept until then); else the zone's holder gets it (`giveKeyboard`). Enter saves (Ctrl+Enter in the note, where Enter is a line break); Esc and Cancel close, except that a note whose text was changed needs a second Esc (`Esc again discards your text`); the reload keys (F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R, BrowserRefresh) while it holds changed text say `save or cancel the edit first` and do not reload. | An edit belongs to the session it was opened for; review A showed a resume's result taking the keyboard out of the note's box and the rest of the note reaching Claude Code. One key must not lose typed text. | 37 (12.9) |
+| D2 | A dialog is modal. A scrim covers the window and takes clicks without acting. While a dialog is shown, `app.js` moves the keyboard nowhere — no `setZone`, `giveKeyboard`, `keepKeyboard` or `terminalView.focus` for a result, a `list` or a render — and acts on no list key; every window chord but Ctrl+Shift+H says `close the edit first (Esc)` and does nothing else (Ctrl+Shift+V in a field stays the browser's paste, Z1). The dialog tells `app.js` when it closes, whatever closed it (`deps.closed()`, 2.4); then a terminal that this page's resume or new brought meanwhile takes the keyboard (`state.bringing` is kept until then), else the zone's holder gets it (`giveKeyboard`), without waiting for a `list`. Enter saves (Ctrl+Enter in the note, where Enter is a line break); Esc and Cancel close, except that a note whose text was changed needs a second Esc (`Esc again discards your text`); the reload keys (F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R, BrowserRefresh) while it holds changed text say `save or cancel the edit first` and do not reload. | An edit belongs to the session it was opened for; review A showed a resume's result taking the keyboard out of the note's box and the rest of the note reaching Claude Code. One key must not lose typed text. | 37 (12.9) |
 | D3 | What a dialog starts from: the label field holds the title when its source is the label, else nothing (the title as placeholder); the group field the group when the user set it (`groupSource` `meta`), else nothing (the title's key as placeholder); the note's text box the stored note. The note's `base` is the string `selected.note ?? ''` exactly as that `list` carried it when the dialog opened — never the text box's value, which normalises line breaks — and a later `list` never changes it. `n` acts only once a `list` carries the selected session's `selected`; before, the key bar says `the note is not here yet; press n again`. A note stored with CR line breaks is saved with LF ones after an edit in the window: a named limit. | S2 12.5: a save is refused when the stored note changed since the edit began; the page has the whole note only in `selected`. | — |
 | D4 | The window's chip (S2 12.3) is the pure function `windowChip` in `src/window/view/chip.ts`; `RowPayload.chip` becomes `{ level, open, merged }` (2.2). `src/window/view/` may import `CHIP_ORDER` of `src/github.ts`, design 7.3's order, beside A8's two functions. `ls` and the interactive list keep design 7.3's chip. | One order of the pull-request states in one place; the rule is the view model's (S2 4.3). | 34 (4.3, 8.2.3) |
 | D5 | A note's `text` and `base` hold at most 65,536 bytes of UTF-8 each, as `input.data`; S2 8.2.3's 1,024 bytes would refuse most notes. The largest note `act`, every character escaped by JSON, stays under the WebSocket's message limit (1 MiB). `selected.note` is null for a longer stored note, with `noteTooLong`; the window then does not edit it and says `this note is longer than the window edits; use skydeck note <short id>`. The page refuses a longer text before sending it (the server would close the connection for it). | A note is free text of any length (design 7.1); the list is sent whole on every change. | 34 (8.2.3) |
-| D6 | `list` carries what the header and the dialogs need: `selected.note`, `selected.noteTooLong`, `selected.ticketUrl`; each pull request's `okAtNs`; each row's `openedNs`, when the window opened the row's terminal (2.2). On the row, so that the header gets it with the row and task 38 needs no `web/app.js`. | S2 12.5 shows "checked 4m ago", "last read 3h ago", "opened <time>"; the page decides no rule (S2 4.3). | 34 (8.2.3) |
+| D6 | `list` carries what the header and the dialogs need: `selected.note`, `selected.noteTooLong`, `selected.ticketUrl`; each pull request's `okAtNs`; each terminal's `openedNs` (2.2). The header gets them through `header(row, selected, term, now)` (2.4, ruled on review B): `selected` for every pane, the pane's terminal, and the list's estimate of the server's now (`serverNow`, moved from `web/list.js` into `web/format.js`); the header and the pull-request dialog repaint their ages on their own age tick, as the list does. `app.js` (task 37) passes all four, so that task 38 needs no `web/app.js`. | S2 12.5 shows "checked 4m ago", "last read 3h ago", "opened <time>", and a running session's chip needs `ticketUrl`; the page decides no rule (S2 4.3); ages are the page's (A18). | 34 (8.2.3) |
 | D7 | An edit shows within a second: after an action that wrote to the store, the server loads the rows again and pushes the lists at once (`ActionDeps.changed`, `Tick.reloadNow`), within the pages' once-a-second rule; it does not wait for the next refresh. | The tick reloads after a write only at its next refresh, up to two seconds later; a dialog that closed should not show the old text that long. | 36 (10.1) |
 | D8 | `pr-add` answers as soon as the pull request is attached; its fetch (design 7.3: at once, the 10-second timeout) and `pr-refresh`'s explicit refresh run in the background on the server (`src/window/pr-fetches.ts`), ended by the server's stop. One such fetch runs at a time per server: a request whose pull requests the one running already covers joins it; any other waits and runs, together with every request that came meanwhile, when it ends. The lists follow when a fetch saved something; a failed one is logged by kind. A failed fetch shows on the pull request as `can't read`, as `pr add` leaves it. | The dialog must not wait up to 10 seconds; a ↻ pressed three times must not start three `gh` runs beside the tick's own (which runs one at a time). | 36 (12.5) |
 | D9 | Refusals and conflicts are section 2.5's. An edit acts only on a session the store knows (`loadRows`; the id is whole, so nothing is resolved and no refresh runs first). A note whose stored text already equals the `text` sent is `ok` with nothing written, whatever `base` says (a save sent again after a lost answer). Between two windows, label, group and done are last-write-wins, as two commands are; a note is refused by its `base`. | S2 12.5 names the note's conflict only; the rest is step 1's behaviour. | 36 (12.5) |
@@ -166,7 +188,7 @@ export interface ChipPayload {
   merged: number;
 }
 // RowPayload: chip becomes  ChipPayload | null   (stage A: { level, count } | null)
-// RowPayload gains          openedNs: NsText | null   (when the window opened the row's terminal; null without one)
+// TerminalPayload gains     openedNs: NsText   (when the window opened it; the header's "opened")
 export interface SelectedPayload {
   /* stage A's: sessionId, command, flagsKnown, unknownFlags, ended, expiring, expired */
   /** The note exactly as stored — not sanitised: the page puts it only into a text box's value
@@ -251,10 +273,17 @@ export function createPrFetches(deps: {
 //   { kind: 'done' }                                           (`d`: done, or undone for a done row)
 // The `later` kind keeps only windowChord's stages B and E. cancels() is unchanged in rule.
 
+// web/format.js — task 34; pure, no DOM (moved from web/list.js, which then uses it)
+/** The server's time now as the page estimates it: a list's `nowNs` counted on by the
+ *  milliseconds since that list came; `listNowNs` itself when it is not a whole number. */
+export function serverNow(listNowNs, elapsedMs) {} // → string
+
 // web/edit.js — task 37 (task 38 adds the pull-request dialog's list)
 /** @param {HTMLElement} root  #editor
  *  @param {{ act(action: Record<string, unknown> & { kind: string }): Promise<ResultMessage>,
- *            toast(text: string, undo: (() => void) | null): void }} deps */
+ *            toast(text: string, undo: (() => void) | null): void,
+ *            closed(): void,     // called once whenever a dialog closes, whatever closed it (D2)
+ *            now(): string }} deps  // the server's now (serverNow); its ages repaint on its own 1 s tick */
 export function createEditor(root, deps) {}
 // → { open(what: 'label' | 'group' | 'note' | 'pr', row: RowPayload, selected: SelectedPayload | null): void,
 //     update(list: ListMessage): void, // every list while shown: the dialog's session's row, for what
@@ -268,25 +297,32 @@ export function createEditor(root, deps) {}
 /** @param {HTMLElement} root  #toast */
 export function createToast(root) {} // → { show(text: string, undo: (() => void) | null): void, hide(): void }
 
-// web/cards.js — task 38; task 37 adds the parameter and the deps, unused until 38
+// web/cards.js — task 38; task 37 adds the parameters and the deps, unused until 38
 // createCards(root, deps): deps gains
 //   edit(what: 'label' | 'group' | 'note' | 'pr', sessionId: string): void,
 //   done(sessionId: string): void,     // done, or undone for a done row; D15's rules; the toast is app.js's
 //   say(text: string): void            // a line in the key bar (a refused open-link of the chip or an item)
-// header(row: RowPayload | null, selected: SelectedPayload | null)
-//   selected: list.selected when it is that row's session, else null
+// header(row: RowPayload | null, selected: SelectedPayload | null, term: TerminalPayload | null,
+//        now: () => string)
+//   selected: list.selected when it is that row's session, else null — for EVERY pane (terminal,
+//     elsewhere, resume), and part of app.js's render key (ruled on review B)
+//   term: the pane's terminal (the terminal pane's), else null — its openedNs is "opened <time>"
+//   now: serverNow of the list shown; the header repaints its ages on its own 1 s tick through it
 // The header keeps stage A's hooks (`#cards .card-header`, `.header-title`, `.header-sub`,
 // `.header-dir`, `.header-id`, `.header-chip`), so that app.js's `area()` and the shared helpers
 // work unchanged.
 ```
 
 `web/app.js` (task 37) owns: the new list keys on the selected row (`no session selected` when
-there is none); `edit`, `done` and `say` given to the cards; `editor.update(list)` at every list
-while a dialog is shown; D2's rules (Esc to `editor.escape()` in the capture phase, the chords,
-the keyboard moved nowhere, the reload guard); D15's rules for `d` and Done (first keydown, one
-act per session at a time, the toast, the selection after `d`); `overLimit`'s entries for the new
-kinds (label and group text 1,024 bytes, note text and base 65,536, URL 4,096), so that the page
-never sends what the server's parser refuses. `index.html` gains `#editor` and `#toast` at the
+there is none); `edit`, `done` and `say` given to the cards; `header(row, selected, term, now)`
+for every pane, with `selected` in the render key; `closed` and `now` given to the editor;
+`editor.update(list)` at every list while a dialog is shown; D2's rules (Esc to `editor.escape()`
+in the capture phase, the chords, the keyboard moved nowhere, `closed()` giving it back, the
+reload guard); D15's rules for `d` and Done (first keydown, one act per session at a time, the
+toast, the selection after `d`); `overLimit`'s entries for the new kinds (label and group text
+1,024 bytes, note text and base 65,536, URL 4,096), and its sentence, which today knows only
+1,024 and 4,096, names 65,536 too — so that the page never sends what the server's parser
+refuses. `index.html` gains `#editor` and `#toast` at the
 body's level, beside `#help`, and the stylesheet `edit.css`.
 
 ### 2.5 What the server refuses, and how the page shows it
@@ -324,19 +360,23 @@ yet.
 **Files**
 - Create: `src/window/view/chip.ts`, `test/window/view/chip.test.ts`
 - Modify: `src/window/protocol.ts` (2.2); `src/window/view/sections.ts` (`rowPayload`: the chip
-  from `windowChip`, each pull request's `okAtNs`, the row's `openedNs`); `src/window/selected.ts`
-  (`note`, `noteTooLong`; `ticketUrl` null); `src/window/actions.ts` (one case: every stage D kind
-  answers `skydeck cannot do that action yet`, nothing done, until task 36); `web/list-text.js`
-  (`chipText` of a `ChipPayload`, the row's chip with its merged part apart, the tooltip);
-  `web/list.js`, `web/list.css` (the `+30` dim, a `3 merged` or `closed` chip dim, `can't read`
-  dotted as before); `docs/design-step-2.md` (4.3: D4's import; 8.2.3: the limits of D5 and the
-  fields of D6)
+  from `windowChip`, each pull request's `okAtNs`); `src/window/view/build.ts` (each terminal's
+  `openedNs`); `src/window/selected.ts` (`note`, `noteTooLong`; `ticketUrl` null);
+  `src/window/actions.ts` (one case: every stage D kind answers `skydeck cannot do that action
+  yet`, nothing done, until task 36); `web/list-text.js` (`chipText` of a `ChipPayload`, the row's
+  chip with its merged part apart, the tooltip); `web/list.js`, `web/list.css` (the `+30` dim, a
+  `3 merged` or `closed` chip dim, `can't read` dotted as before; the list's own estimate of the
+  server's now replaced by `serverNow`); `web/format.js` (`serverNow`, 2.4);
+  `docs/design-step-2.md` (4.3: D4's import; 8.2.3: the limits of D5 and the fields of D6)
 - Modify (tests and fixtures): `test/window/protocol.test.ts`, `test/window/view/sections.test.ts`,
-  `test/window/view/build.test.ts`, `test/window/selected.test.ts`, `test/window/actions.test.ts`,
-  `test/web/list.test.ts`, `test/web/pane.test.ts`, `test-page/list.test.ts`,
-  `test-page/cards.test.ts` (its chip fixtures: `count` becomes `open`), `test-page/helpers/shell.ts`
-  (`scriptedList`'s rows carry `openedNs: null`; `actsWorld`'s `selected` carries `note`,
-  `noteTooLong` and `ticketUrl`)
+  `test/window/view/build.test.ts` (its fixtures, and its case that pins the view's files and
+  value imports: `chip.ts` joins `build.ts` and `sections.ts`, and `CHIP_ORDER` of
+  `../../github.ts` joins the allowed imports, D4), `test/window/selected.test.ts`,
+  `test/window/actions.test.ts`, `test/helpers/pages.ts` (`defaultList`'s terminals gain
+  `openedNs`), `test/web/list.test.ts`, `test/web/pane.test.ts`, `test/web/format.test.ts`
+  (`serverNow`), `test-page/list.test.ts`, `test-page/cards.test.ts` (its chip fixtures: `count`
+  becomes `open` and `merged`), `test-page/helpers/shell.ts` (`scriptedList`'s terminals carry
+  `openedNs`; `actsWorld`'s `selected` carries `note`, `noteTooLong` and `ticketUrl`)
 
 **Behaviour.** The parser takes the new kinds with 2.2's limits. `windowChip` is S2 12.3's rule
 over the levels step 1 computes (`prLevel`): a level other than `merged` and `closed` is open.
@@ -353,8 +393,10 @@ closed`. Stage A's header keeps showing `chipText`'s whole text until task 38 re
   U+0001 (six bytes each in JSON) is under `MAX_MESSAGE` as JSON.
 - `windowChip`: every row of S2 12.3's table; none attached → null; only never-fetched ones; a
   can't-read one with merged ones.
-- `rowPayload`: the chip, `okAtNs`, and `openedNs` for a row with a terminal of the window and null
-  without one.
+- `rowPayload`: the chip and `okAtNs`; the list's terminals carry `openedNs`. The view's pinned
+  files and imports are `build.ts`, `chip.ts`, `sections.ts` and A8's and D4's names, no more.
+- `serverNow`: a list's time plus the elapsed milliseconds, as `web/list.js` counted before; a
+  time that is not a whole number given back as it is; the list's ages unchanged (its cases pass).
 - `selectedPayload`: the note exactly as stored (an escape character and CRLF kept); null without
   one; a note of 65,536 bytes of UTF-8 sent, one of 65,537 (a multi-byte character across the
   limit) null with `noteTooLong`; `ticketUrl` null.
@@ -383,7 +425,8 @@ ticket's address, and `show`'s line. The window's chip uses it from task 36 on (
 - Create: `src/sessions/ticket.ts`, `src/text/link.ts`, `test/sessions/ticket.test.ts`
 - Modify: `src/platform/config.ts`; `src/window/windows.ts` (`linkToOpen` moved out, re-exported);
   `src/cli/output.ts` (`formatShow` gains a last parameter `ticket: string | null = null`);
-  `src/cli/commands/show.ts`; `test/platform/config.test.ts`, `test/cli/commands/show.test.ts`
+  `src/cli/commands/show.ts`; `test/platform/config.test.ts`, `test/cli/output.test.ts`
+  (`formatShow`'s new parameter), `test/cli/commands/show.test.ts`
 
 **Behaviour.** The check of S2 16.4, decided by the URL parser: `ticketUrl` is null, or a string of
 at most 2,048 characters with `{key}` exactly once and no white space, control character (S2 2:
@@ -411,7 +454,10 @@ prints `ticket: <address>` after `group:` when there is one; `--json` is unchang
   of `evil.com/x`, `a?b=1`, `a#b`, `u@h`, `a:b`, `..`, `.x`, `-x`, `%2e%2e`, `ÄBC-1` → null. An
   address that would be over 2,048 characters → null. A group taken from the title that a
   look-ahead in `groupPattern` no longer matches on its own → null (no link; safe).
-- `show`: with `ticketUrl` set and a ticket-key group the `ticket:` line; without either, none.
+- `formatShow` (`test/cli/output.test.ts`): the `ticket:` line after `group:`, sanitised, and none
+  for `null`. `show` (`test/cli/commands/show.test.ts`, the sandbox): with `ticketUrl` set and a
+  ticket-key group the `ticket:` line; without either, none. These cases are what holds the line;
+  nobody runs `show` by hand (task 39).
 
 **Done when:** a wrong `ticketUrl` fails every command with that one line (exit 1), as every key
 of the file; `show` prints the line; `npm run check` passes.
@@ -429,15 +475,18 @@ lists, and shows in every window within a second.
 
 **Files**
 - Create: `src/window/pr-fetches.ts`, `test/window/pr-fetches.test.ts`, `test/helpers/gh.ts` (a
-  runner that answers `gh` with a canned `gh api graphql` answer of the test's choice, can hold an
-  answer until the test lets it go, counts the runs, and passes every other command to the runner
-  it wraps; never a real `gh`), `test/window/server-edits.test.ts`
+  runner that answers `gh` with a canned `gh api graphql` answer of the test's choice — at once,
+  held until the test lets it go, or held until the run's own abort signal fires (then it ends as
+  an aborted run does) —, counts the runs, and passes every other command to the runner it wraps;
+  never a real `gh`), `test/window/server-edits.test.ts`
 - Modify: `src/window/actions.ts` (the cases, replacing task 34's interim one);
   `src/window/server.ts` (`createPrFetches` with the server's stop signal; `changed` →
   `tick.reloadNow()`; the stop waits for `idle()` after the abort, as for the tick's fetch);
   `src/window/tick.ts` (`reloadNow`); `src/window/selected.ts` (`ticketUrl` from
   `ticketAddress(row.group, config.groupPattern, config.ticketUrl)`); `src/sessions/meta.ts`
-  (`keptNotePath`, `discardKeptNote`); `src/cli/notes.ts` (imports them; nothing else changes);
+  (`keptNotePath`, `discardKeptNote`); `src/cli/notes.ts` (imports them and re-exports
+  `discardKeptNote`, so that `src/cli/commands/note.ts`, which imports it from there, is
+  unchanged; nothing else changes);
   `test/window/actions.test.ts`, `test/window/tick.test.ts`, `test/window/selected.test.ts`,
   `test/sessions/meta.test.ts`; `docs/design-step-2.md` (10.1: D7; 12.5's paragraph "Editing
   (stage D)": D8, D9, D10 in a sentence each)
@@ -460,8 +509,9 @@ kind.
 **Tests** (platform: `testPlatform` through `testDeck` for the actions, the fetches and the tick;
 `realTestPlatform` through `startTestServer` for `server-edits.test.ts`)
 - For every refusal of design 7.1 (a line break, a control character, a label starting with `-`, a
-  group with a tab) the window's message is exactly what `skydeck label` / `group` print for the
-  same text (the test runs the command on the same deck), and nothing is written; an empty and a
+  group with a tab) the window's message is the same message `skydeck label` / `group` print for
+  the same text, without the command's `skydeck: ` prefix (the test runs the command on the same
+  deck), and nothing is written; an empty and a
   white-space text clear; the stored label is the trimmed text.
 - Note: `base` equal → stored exactly as typed (CRLF, trailing spaces, 65,536 bytes); empty →
   none; the stored note changed between the dialog's start and the save (`setNote` in between) →
@@ -489,7 +539,8 @@ kind.
   in the store; a note saved from A, then from B with the old `base` → B refused with 2.5's
   message, the store holds A's; `pr-add` with `test/helpers/gh.ts` answering open, approved, checks
   passing → a list with the pull request `unfetched`, then one with `approved-green` and its
-  `okAtNs`; the server stopped while a fetch waits → the stop does not wait the 10 seconds; a
+  `okAtNs`; the server stopped while a fetch waits (the stand-in holding its answer until the run's
+  signal fires) → the stop does not wait the 10 seconds; a
   running session marked `done` stays in Open with its `done` mark; with `ticketUrl` in the
   sandbox's configuration and a label `ABC-12 try`, `selected.ticketUrl` is the address; a label
   holding an escape sequence → a refusal whose lines hold no control character.
@@ -510,14 +561,16 @@ the selection after `d`, and the key help without the stage D keys marked as com
 header's controls come with task 38 and call the same dialogs.
 
 **Files**
-- Create: `web/edit.js`, `web/edit.css`, `web/toast.js`, `test-page/edit.test.ts`
+- Create: `web/edit.js`, `web/edit.css`, `web/toast.js`, `test-page/edit.test.ts`,
+  `test-page/fixtures/recording-cards.js` (a cards module for `launched`'s `modules` option that
+  records every `header(…)` call's arguments on the page, so that a test sees what `app.js` passes)
 - Modify: `web/app.js`, `web/keys.js`, `web/help.js` (the stage D lines: `l` and F2 label, `g`
   group, `n` note, `p` pull requests, `d` done or undone), `web/index.html` (`#editor`, `#toast`,
-  `edit.css`), `web/cards.js` (only `header`'s second parameter and the three deps of 2.4, unused);
+  `edit.css`), `web/cards.js` (only `header`'s new parameters and the three deps of 2.4, unused);
   `test/web/keys.test.ts` (the stage D cases), `test-page/shell.test.ts` (the one case that pinned
   `<key>: comes in a later stage` for these six keys), `test-page/helpers/shell.ts` (a new function
-  `editWorld` — a scripted stand-in, as `actsWorld`, that answers each `act` as the test says,
-  when the test says, and sends the lists it is given); `docs/design-step-2.md` (12.9: D2)
+  `editWorld` at the end — a scripted stand-in, as `actsWorld`, that answers each `act` as the test
+  says, when the test says, and sends the lists it is given); `docs/design-step-2.md` (12.9: D2)
 
 **Behaviour.** The dialogs as D1–D3: the heading `Label — <title>`, `Group — <title>`, `Note —
 <title>`, `Pull requests — <title>`; the mockup's help lines (`Shown as the title, and passed to
@@ -525,13 +578,22 @@ Claude Code as the session name on the next start or resume. Empty clears it.`, 
 ticket key at the start of the title is used.`, `Ctrl+Enter saves. Plain text, kept on this
 machine.`, `Pull requests a session touched are attached by themselves.`). The pull-request
 dialog of this task holds the field and Attach (task 38 adds the list above it). Save sends the
-`act` and is disabled while it waits; `ok` closes the dialog; a refusal stays in it (2.5). D2's
-modal rules and reload guard; D15's toast, its first-keydown and one-at-a-time rules for `d`, and
-the selection after `d`; D17 for the dialogs' buttons.
+`act` and is disabled while it waits; `ok` closes the dialog; a refusal stays in it (2.5). Every
+close calls `deps.closed()`. D2's modal rules and reload guard; D15's toast, its first-keydown and
+one-at-a-time rules for `d`, and the selection after `d`; D17 for the dialogs' buttons. The cards'
+side of 2.4 as `app.js` sees it: `header(row, selected, term, now)` for every pane, `selected` in
+the render key, `now` from `serverNow` with the time the shown list came; `overLimit` names
+65,536 bytes in its sentence for the note.
 
 **Tests** (platform: `realTestPlatform` for the page; the scripted stand-in through `editWorld`)
 - `keys.test.ts`: `l`, F2, `g`, `n`, `p`, `d` give 2.4's kinds; with Ctrl, Alt or Meta, nothing;
   `cancels` true for them in the list zone; `later` only for Ctrl+Shift+J and Ctrl+Shift+P.
+- `edit.test.ts`, what the header gets (the recording cards, `editWorld`): a running row selected
+  → `header` gets its row, the list's `selected` for it, its terminal and a `now` that counts on;
+  a `list` that changes only `selected` (its `ticketUrl`) → `header` called again with it; the
+  resume and elsewhere panes get `selected` too and `term` null.
+- `edit.test.ts`, the keyboard after a close: `ok` → the keyboard on the list at once, before any
+  further `list` comes (`deps.closed`).
 - `edit.test.ts`, the dialogs: `l` on the selected row opens the label dialog with its label, the
   keyboard in the field; Enter sends `act label` with the text; `ok` closes, the keyboard back on
   the list; a refusal (`a label cannot start with '-' …`) shows under the field, the text and the
@@ -583,8 +645,10 @@ and Done; and fill the pull-request dialog with every attached pull request.
   fold's text, "opened <time> · last active <age>", the title's source in words),
   `test/web/header-text.test.ts`, `test-page/header.test.ts`
 - Modify: `web/cards.js` (the header), `web/cards.css`, `web/edit.js` (the pull-request dialog's
-  list, through `update`), `web/edit.css`; `test-page/cards.test.ts` (the cases that pinned stage
-  A's header: the chip's place and the height); `docs/design-step-2.md` (19: D11)
+  list, through `update`), `web/edit.css`; `test-page/cards.test.ts` (the existing cases that
+  pinned stage A's header: the chip's place and the height; no new case),
+  `test-page/real-modules.test.ts` (only if a case's numbers move with the taller header; no new
+  case); `docs/design-step-2.md` (19: D11)
 
 **Behaviour.** The four lines of D12. Line 1: the title (a click that selected no text opens the
 label dialog through `deps.edit`); the group chip as D14 (with `selected.ticketUrl`: `DE-123 ↗`,
@@ -592,13 +656,16 @@ underlined, tooltip the address, a click that selected no text sends `act open-l
 else plain text, tooltip `(from the title)` when it is), the ✎ (the group dialog), or the dashed
 `+ group` while there is no group; the state pill as stage A's; the buttons Note (the note
 dialog) and Done / Undone (`deps.done`). Line 2: the directory (one line, ellipsis) as stage A's,
-`opened <time>` from the row's `openedNs` when it has one, `last active <age>`, the title's
+`opened <time>` from `term.openedNs` when the pane shows a terminal, `last active <age>`, the title's
 source (`title: your label`, `Claude Code's name`, `Claude Code's summary`, `start time and
 folder`), the short id (never cut, a click copies, as stage A's). Line 3: the window's chip, the
 open pull requests' items (`owner/repo #7 · failing`; a click that selected no text opens it; the
 tooltip D13's words), `Pull requests` / `+ PR` (the pull-request dialog), never cut. Line 4: the
 note's first line and `…`, or `no note`, a click opening the note dialog. The pull-request
-dialog's list as D13. A refused link through `deps.say`. Buttons and texts as D17.
+dialog's list as D13. A refused link through `deps.say`. Buttons and texts as D17. Every age —
+`last active`, `checked`, `last read` — is counted from `now()` and repainted on the module's own
+1 s tick, in the header and in the pull-request dialog's list (`deps.now` of the editor), as the
+list repaints its ages (A18); a text is set only when it changed, so a selection in it stays.
 
 **Tests** (platform: `realTestPlatform`; a test server with sessions made by step 1's helpers,
 pull requests attached with `attachManualPr` and their status saved with `savePrResult`, notes
@@ -610,6 +677,9 @@ with `setNote`; `+ PR` and ↻ through `test/helpers/gh.ts`; links seen by the E
   pull requests, thirty merged and a note of five lines, one with a directory of 340 characters,
   each at 1280 and at 900 px → the same header height, stage A's plus two lines; a pull request
   attached to the session shown while its terminal runs → the page sends no `resize` for it.
+- `header.test.ts`, ages: `last active 1m` becomes `last active 2m` a minute later (the page's
+  clock moved on, no new `list`), in the header and in an open pull-request dialog's `checked`;
+  a terminal of the window shows `opened <time>` from its `openedNs`, a session not running none.
 - `header.test.ts`, the controls: an item's click → the stub got its URL; the button → the
   pull-request dialog, listing every attached one with D13's words, the fold opening and closing;
   × → detached in the store, the toast `Detached owner/repo #7 · Undo`, Undo → attached again; a
@@ -678,7 +748,7 @@ knows which checks only they can make.
 |---|---|---|---|
 | W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. | D | 12.5, 9.6 |
 | W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
-| W29 | On the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck ls` in a WSL terminal shows the same label, group and note. | D | 12.5, 12.9 |
+| W29 | On the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of D2 does not hold in Edge for it). | D | 12.5, 12.9 |
 
 **Steps**
 - [ ] Check the new text against the code and the tests, never by running it: `show`'s lines are
@@ -688,6 +758,8 @@ knows which checks only they can make.
 
 **Done when:** the user can use stage D from `docs/install.md` alone, and W27–W29 are in
 `docs/manual-checks.md` and S2 18.
+
+**Not in it:** code and tests; running any `skydeck` command; the checks of stages B, C and E.
 
 ## 4. Design coverage
 
@@ -722,7 +794,7 @@ show; in the list it changes only the chip, where B adds attention and E stacks 
 new store key. Section 1's table lists every file of every task, for the lead's check against
 stages B and C.
 
-**Two follow-ups on stage D's path** (`LEFT-TO-YOU.md` 3g and 4):
+**Two follow-ups on stage D's path** (from the lead's list of what stage A left):
 - *The chip that counts merged pull requests* — **settled** by task 34 for the window: S2 12.3
   counts the open ones and shows the merged ones only as a dim `+30`. `ls` and the interactive
   list keep design 7.3's chip, as S2 12.3 says.
@@ -779,8 +851,18 @@ findings, all taken), and the plan above follows the rulings.
 6. **`pr-refresh` and the header's facts.** Ruled: in task 38 (D11).
 
 Also ruled from review A: the `ticketUrl` check is the URL parser's (S2 16.4, task 35, D18); the
-dialogs move the keyboard nowhere (D2); `openedNs` is on the row (D6); one explicit fetch at a time
-(D8); a save sent twice is `ok` (D9); the safety tests of task 36; `d` and Done act once (D15);
-× has an Undo (D13); only buttons cancel their mousedown (D17); the design says "asked for by the
-user on 2026-11-15; the details ruled by the lead that day"; task 39 runs no command outside the
-suite; W27–W29 check the short id first and Undo after `d`.
+dialogs move the keyboard nowhere (D2); one explicit fetch at a time (D8); a save sent twice is
+`ok` (D9); the safety tests of task 36; `d` and Done act once (D15); × has an Undo (D13); only
+buttons cancel their mousedown (D17); the design says "asked for by the user on 2026-11-15; the
+details ruled by the lead that day"; task 39 runs no command outside the suite; W27–W29 check the
+short id first and Undo after `d`.
+
+Ruled from review B (01:11Z, all taken): `header(row, selected, term, now)` with `selected` for
+every pane and in the render key, the terminal's `openedNs`, `serverNow` shared and the ages
+repainted on a tick (D6, 2.4; this settles review A's open choice for "opened"); the editor's
+`closed()` (D2, 2.4); section 1 names every file of every task, the design's sections per task
+and what each task does to the shared test files; task 39 runs no command (its `ticket:` line is
+held by task 35's tests); task 36's message comparison drops the `skydeck: ` prefix and its `gh`
+stand-in can hold an answer until the run's signal fires; W29 uses `skydeck show` and checks the
+reload keys with changed text; `overLimit` names 65,536; task 39 has its "Not in it"; task 37
+stays whole; the plan names no file outside the repository.
