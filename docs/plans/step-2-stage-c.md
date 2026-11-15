@@ -1386,8 +1386,9 @@ export function settleEndedTerminal(deck: Deck, hello: KeeperHello, terminal?: P
   the server) ends the window's refusal; it is a NAMED LIMIT with case (3), no state in `launches`
   and no new member of contract 2.3 (two `Launches` instances would not share it). With a program
   that reports its start within seconds, the lock is still fresh after the Close and refuses until
-  60 s after the launch; a program that never reports a start is the 60 s limit already. A Close
-  refused while the program may run is a candidate for a task of its own.
+  60 s after the launch; with a program that never reports a start the lock can be stale already
+  while the loss is less than 60 s old, and then a Close opens the window at once (case 3). A
+  Close refused while the program may run is a candidate for a task of its own.
 - `settleEndedTerminal`'s third parameter stays optional (default null, "not known": settled as
   before): a required one would change six calls in `test/window/window-terminal.test.ts`, which is
   not this task's file; the tick, the only caller in the product, always passes it (accepted on
