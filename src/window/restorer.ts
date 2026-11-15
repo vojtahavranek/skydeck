@@ -7,11 +7,13 @@
 // What a restore can cost the user, and what bounds it (design 7.8, S2 11.3): at most
 // `restoreBatch` sessions start at once, a batch only while `restoreMinFreeMb` is free, each
 // through the guard and its lock; a session that does not start within
-// `restoreStartTimeoutSeconds` is reported `timed out` and keeps its lock (its terminal may still
-// start it, nothing else does); one whose terminal ended is `failed` at once and its lock given
-// back; a batch in which none started stops the run while entries are left (C23); the server's
-// stop or the asking command's going stops it at its next step (C22). Whatever ends a run, the
-// sessions it opened go on starting and the rest are said to be not started.
+// `restoreStartTimeoutSeconds` is reported `timed out` and keeps its lock, renewed last (its
+// terminal may still start it; no other resume does while the lock holds, 60 s from that renewal,
+// and none from the window while its terminal may still run, `refuse`); one whose terminal ended
+// is `failed` at once and its lock given back; a batch in which none started stops the run while
+// entries are left (C23); the server's stop or the asking command's going stops it at its next
+// step (C22). Whatever ends a run, the sessions it opened go on starting and the rest are said to
+// be not started.
 import { SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { SHORT_ID_LENGTH } from '../sessions/list.ts';
@@ -56,10 +58,10 @@ export interface Restorer {
    * filtered, runRestore with the hooks (stopAfterEmptyBatch on) and its signal — and returns at
    * once. `write` gets every line, the heartbeats, and the outcome last; `done` resolves when the
    * run is over. `asker` (C22, a command's connection): when it fires before the outcome, the run
-   * stops with the reason `the command that asked for it stopped`. Every run, also one that
-   * cannot begin or is stopped, ends with exactly one `restore finished: …` line to `progress`
-   * (C6). A refused request is no run (ruled): its asker alone gets its line and the outcome,
-   * nothing goes to `progress`.
+   * stops with the reason `the command that asked for it stopped`; after it, it changes nothing.
+   * Every run, also one that cannot begin or is stopped, ends with exactly one `restore finished:
+   * …` line to `progress` (C6). A refused request is no run (ruled): its asker alone gets its line
+   * and the outcome, nothing goes to `progress`.
    */
   start(
     request: RestoreRequest,

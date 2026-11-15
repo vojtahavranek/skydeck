@@ -7,6 +7,7 @@ import type { ListRow } from '../../../src/sessions/list.ts';
 import { refresh } from '../../../src/sessions/refresh.ts';
 import { restorePlan } from '../../../src/sessions/restore.ts';
 import type { RestoreEntry, RestorePlan } from '../../../src/sessions/restore.ts';
+import { parsePageMessage } from '../../../src/window/protocol.ts';
 import { bannerPayload } from '../../../src/window/view/banner.ts';
 import { ds, meta, rowOf } from '../../helpers/derived.ts';
 import { BOOT_A, BOOT_B, SEC, T0 } from '../../helpers/platform.ts';
@@ -153,6 +154,27 @@ test('an earlier boot whose id is not a lower-case UUID is offered nothing: dism
       { bootId: null, lastActivityNs: null, entries: [], shown: true, running: true },
       JSON.stringify(bootId),
     );
+  }
+});
+
+test('an offer is made for exactly the boot ids that dismiss-restore takes', () => {
+  for (const bootId of [
+    BOOT_A,
+    BOOT_C,
+    '00000000-0000-0000-0000-000000000000',
+    BOOT_A.toUpperCase(),
+    BOOT_A.slice(1),
+    `${BOOT_A}0`,
+    BOOT_A.replace('-', '_'),
+    BOOT_A.replace(/^./, 'g'),
+    `{${BOOT_A}}`,
+    'boot',
+  ]) {
+    const takes = parsePageMessage(
+      JSON.stringify({ t: 'act', id: 1, kind: 'dismiss-restore', bootId }),
+    ).ok;
+    const offered = bannerPayload({ plan: planOf([entry(1, { bootId })], bootId), ...QUIET });
+    assert.equal(offered !== null, takes, bootId);
   }
 });
 

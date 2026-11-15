@@ -412,8 +412,10 @@ test('stop() while a batch waits: timed out, the server’s stop, not started, c
   const w = world(d, { starts: () => false });
   let doneSeen = false;
   const stops: string[] = [];
+  let during: ReturnType<Restorer['start']> | undefined;
   atFirstSleep(d, () => {
     void w.restorer.stop().then(() => stops.push(doneSeen ? 'after done' : 'before done'));
+    during = w.restorer.start({ sessionIds: [sid(3)], all: false });
   });
   const written: RestoreStreamLine[] = [];
   const started = w.restorer.start({ sessionIds: [1, 2, 3].map(sid), all: false }, (line) =>
@@ -426,6 +428,8 @@ test('stop() while a batch waits: timed out, the server’s stop, not started, c
   await started.done;
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(stops, ['after done']);
+  // A start while the stopped run is still ending is the server's stop, not "already running".
+  assert.deepEqual(during, { ok: false, error: "the window's server is stopping" });
   assert.deepEqual(w.progress, [
     about(d, 'timed out', 1),
     about(d, 'timed out', 2),
@@ -613,6 +617,8 @@ test('a run that cannot begin (no boot id): its line and the finished line to ev
   assert.deepEqual(outcome, { code: 1, ...ZERO });
   assert.deepEqual(w.changed, []);
   assert.deepEqual(w.specs, []);
+  // The user's own refusal: said, not logged.
+  assert.deepEqual(w.logs, []);
 });
 
 test('a run that cannot begin (a busy store at planning): the busy line, finished, code 1', (t) => {
@@ -677,6 +683,7 @@ test('a run that cannot begin says a message that quotes foreign text only sanit
   assert.deepEqual(started, { ok: false, error: shown });
   assert.deepEqual(w.progress, [shown, 'restore finished: nothing was started']);
   assert.deepEqual(stream(written).lines, w.progress);
+  assert.deepEqual(w.logs, []); // a message is never logged
 });
 
 // --- one at a time; a refused request is no run (C6, ruled F1) ----------------------------------
@@ -839,6 +846,20 @@ test('heartbeat: n counts the sessions without an outcome yet; one is one sessio
   ]);
 });
 
+test('heartbeat: n counts only the sessions of the run, not the ids no longer offered', async (t) => {
+  const d = restarted(t, 2, { config: { ...CONFIG, restoreStartTimeoutSeconds: 15 } });
+  const w = world(d, { starts: () => false });
+  const { lines } = await restore(w, [sid(1), sid(2), sid(41), sid(42)]);
+  assert.deepEqual(lines, [
+    'failed 00000041: no longer offered for restore',
+    'failed 00000042: no longer offered for restore',
+    'waiting for 2 sessions',
+    about(d, 'timed out', 1),
+    about(d, 'timed out', 2),
+    'restore finished: 2 timed out, 2 failed',
+  ]);
+});
+
 test('heartbeat: with heartbeatMs 1000, every second without a line', async (t) => {
   const d = restarted(t, 2);
   const w = world(d, { heartbeatMs: 1000, starts: () => false });
@@ -900,6 +921,27 @@ test('dismiss of another boot, or before any banner: no longer shown, nothing st
   assert.deepEqual(w.restorer.dismiss(BOOT_C), refused);
   assert.equal(d.deck.store.getKv('window_restore_dismissed'), null);
   assert.deepEqual(w.changed, []);
+});
+
+test('dismiss while the banner only says a restore runs: refused, nothing stored', async (t) => {
+  const d = restarted(t, 0);
+  const w = world(d);
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  assert.deepEqual(w.restorer.banner(loadRows(d.deck)), {
+    bootId: null,
+    lastActivityNs: null,
+    entries: [],
+    shown: true,
+    running: true,
+  });
+  // A page that still shows an older offer sends its boot.
+  assert.deepEqual(w.restorer.dismiss(BOOT_A), {
+    ok: false,
+    error: 'this offer to restore is no longer shown',
+  });
+  assert.equal(d.deck.store.getKv('window_restore_dismissed'), null);
+  await started.done;
 });
 
 test('a dismissal stored by an earlier server hides the banner of that boot', (t) => {
@@ -1029,10 +1071,16 @@ test('a progress, write or changed that throws is logged by kind; the run ends, 
   assert.ok(started.ok);
   await started.done;
   assert.deepEqual(stream(written).outcome, { code: 0, ...ZERO, started: 2 });
-  assert.ok(logs.length > 0);
-  for (const line of logs) {
-    assert.match(line, /^restore: .* \((RangeError|TypeError|SyntaxError)\)$/, line);
-  }
+  // Each failure by what failed and its kind, never its text.
+  const sent = 'restore: a report line was not sent (RangeError)';
+  const notWritten = 'restore: a line was not written (SyntaxError)';
+  const notTold = 'restore: the lists were not told (TypeError)';
+  assert.deepEqual(logs, [
+    notTold, // the run began
+    ...[1, 2, 3].flatMap(() => [sent, notWritten]), // two started lines, the finished line
+    notWritten, // the outcome
+    notTold, // the run is over
+  ]);
   const next = restorer.start({ sessionIds: [sid(3)], all: false });
   assert.ok(next.ok);
   await next.done;

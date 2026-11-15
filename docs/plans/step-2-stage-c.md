@@ -964,8 +964,8 @@ terminal that opens what the test says, a `gone` the test scripts)
   and `lastActivityNs` from `earlier`; `dismissedBootId` equal → `shown` false; another boot →
   shown; running with no entries (or no plan) → `{ bootId: null, lastActivityNs: null, entries:
   [], running: true, shown: true }`; each session once, at its first place; an earlier boot whose
-  id is not a lower-case UUID → no offer; a hostile title → sanitised; only the earlier boot's
-  entries.
+  id is not a lower-case UUID → no offer (an offer exactly for the ids `parsePageMessage` takes
+  in `dismiss-restore`); a hostile title → sanitised; only the earlier boot's entries.
 - A run of three over a batch of two: `progress` gets `started …` three times and `restore
   finished: 3 started`; `write` the same lines and `{ outcome: { code: 0, started: 3, … } }`; each
   terminal opened with the size `deps.size()` gave at that moment (it changes between the two
@@ -988,17 +988,20 @@ terminal that opens what the test says, a `gone` the test scripts)
   `refuse` names → its line, never opened; `gone` → `failed`, the run goes on, code 1.
 - A second `start` while running → `a restore is already running; wait until it has finished`,
   nothing planned; its `write` gets that line and an outcome with code 1, `progress` nothing (the
-  running run's report ends once); after `done` → accepted. After `stop()` → `the window's server
-  is stopping`.
+  running run's report ends once); after `done` → accepted. After `stop()`, also while the stopped
+  run still ends → `the window's server is stopping`.
 - Heartbeat: 10 s (the fake clock) without a line → `waiting for 2 sessions` to `write`, not to
-  `progress`; `waiting for 1 session`; with `heartbeatMs` 1000 every second; a line re-arms it.
+  `progress`; `waiting for 1 session`; the ids no longer offered are not counted; with
+  `heartbeatMs` 1000 every second; a line re-arms it.
 - `dismiss(bootId)` of the banner's boot → stored, the next `banner(rows)` has `shown` false;
   another id → `this offer to restore is no longer shown`, nothing stored. `banner` called twice
   with the same rows reads the events once (a counting store wrapper), again for new rows, a
-  dismissal and a run; a store that fails keeps the last banner.
+  dismissal and a run; a store that fails keeps the last banner. `dismiss` while the banner only
+  says a restore runs → refused, nothing stored.
 - A title holding an escape sequence → no control character in any `progress` or `write` line.
-- A `progress`, `write` and `changed` that throw → logged by kind, the run ends, the next `start`
-  is accepted.
+- A `progress`, `write` and `changed` that throw → logged by what failed and its kind (never a
+  message: nor a SkydeckError's, which is said, not logged), the run ends, the next `start` is
+  accepted.
 
 **Done when:** a restore can be run, refused, watched, stopped and its banner decided by the
 restorer alone; `npm run check` passes.
