@@ -217,10 +217,44 @@ test('selectedPayload: an empty stored note is a note (the empty text, not null)
   assert.equal(selectedPayload(d.deck, noted('')).note, '');
 });
 
-test('selectedPayload: ticketUrl is null (task 36 fills it)', (t) => {
+test("selectedPayload: ticketUrl is ticketAddress of the row's group with the configuration's groupPattern and ticketUrl", (t) => {
+  const d = testDeck(t, {
+    config: { ticketUrl: 'https://example.atlassian.net/browse/{key}' },
+  });
+  const cases: [Partial<ListRow>, string | null][] = [
+    [{ group: 'ORB-2107', groupSource: 'meta' }, 'https://example.atlassian.net/browse/ORB-2107'],
+    [{ group: 'ABC-12', groupSource: 'title' }, 'https://example.atlassian.net/browse/ABC-12'],
+    [
+      { group: 'ABC-12 cleanup', groupSource: 'meta' },
+      'https://example.atlassian.net/browse/ABC-12',
+    ],
+    [{ group: 'no key here', groupSource: 'meta' }, null],
+    [{ group: null, groupSource: null }, null],
+  ];
+  for (const [over, address] of cases) {
+    assert.equal(selectedPayload(d.deck, row({}, over)).ticketUrl, address, JSON.stringify(over));
+  }
+});
+
+test('selectedPayload: ticketUrl is null without ticketUrl in the configuration', (t) => {
   const d = testDeck(t);
   assert.equal(
     selectedPayload(d.deck, row({}, { group: 'ORB-2107', groupSource: 'meta' })).ticketUrl,
+    null,
+  );
+});
+
+test("selectedPayload: ticketUrl uses the configuration's own groupPattern", (t) => {
+  const d = testDeck(t, {
+    config: { ticketUrl: 'https://tickets.example.net/t/{key}', groupPattern: '#[0-9]+|[0-9]+$' },
+  });
+  // The key is the text the pattern matches, and only when it is a key: `#7` is not one.
+  assert.equal(
+    selectedPayload(d.deck, row({}, { group: 'ticket 4711', groupSource: 'meta' })).ticketUrl,
+    'https://tickets.example.net/t/4711',
+  );
+  assert.equal(
+    selectedPayload(d.deck, row({}, { group: 'see #7', groupSource: 'meta' })).ticketUrl,
     null,
   );
 });

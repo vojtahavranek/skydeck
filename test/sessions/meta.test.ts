@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -11,6 +11,8 @@ import { loadRows } from '../../src/sessions/load.ts';
 import {
   attachManualPr,
   detachSessionPr,
+  discardKeptNote,
+  keptNotePath,
   markDone,
   markUndone,
   requirePrKey,
@@ -19,7 +21,7 @@ import {
   setNote,
 } from '../../src/sessions/meta.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
-import { testDeck } from '../helpers/deck.ts';
+import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { S1, S2, SEC, T0 } from '../helpers/platform.ts';
 import { startRunning, twoSessions, writeTranscript } from '../helpers/session-files.ts';
@@ -157,6 +159,38 @@ describe('markDone, markUndone', () => {
     assert.notEqual(d.proc.stat(4242), null, 'its process is still there');
     assert.deepEqual(d.runner.calls, []);
     assert.deepEqual(d.runner.interactiveCalls, []);
+  });
+});
+
+describe('keptNotePath, discardKeptNote (plan D10)', () => {
+  test("keptNotePath is <stateDir>/note-<id>.md, the file skydeck note's editor works on", (t) => {
+    const d = testDeck(t);
+    assert.equal(keptNotePath(d.deck, S1), join(d.deck.places.stateDir, `note-${S1}.md`));
+  });
+
+  test("discardKeptNote removes that session's kept file and no other", (t) => {
+    const d = testDeck(t);
+    mkdirSync(d.deck.places.stateDir, { recursive: true });
+    const kept = keptNotePath(d.deck, S1);
+    const other = keptNotePath(d.deck, S2);
+    writeFileSync(kept, 'typed, never stored');
+    writeFileSync(other, 'another session');
+    discardKeptNote(d.deck, S1);
+    assert.equal(existsSync(kept), false);
+    assert.equal(readFileSync(other, 'utf8'), 'another session');
+  });
+
+  test('discardKeptNote without a kept file, or one that cannot be removed, does not throw', (t) => {
+    const d = testDeck(t);
+    discardKeptNote(d.deck, S1);
+    const failing = deckWith(d.deck, {
+      files: {
+        remove: () => {
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        },
+      },
+    });
+    discardKeptNote(failing, S1);
   });
 });
 

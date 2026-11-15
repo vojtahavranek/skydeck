@@ -1,11 +1,9 @@
 // Editing a session's note in the user's editor (design 7.1). Shared by `skydeck note` and the
 // interactive list.
-import { join } from 'node:path';
-
 import { SkydeckError, UsageError } from '../platform/errors.ts';
 import type { Env, Files } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
-import { setNote } from '../sessions/meta.ts';
+import { keptNotePath, setNote } from '../sessions/meta.ts';
 import { describeError } from '../sessions/problems.ts';
 import { sanitize } from '../text/sanitize.ts';
 import type { Context } from './context.ts';
@@ -21,18 +19,8 @@ function editorCommand(env: Env): string[] {
   return ['vi'];
 }
 
-/** The file the editor works on: `<stateDir>/note-<sessionId>.md`. */
-function notePath(deck: Deck, sessionId: string): string {
-  return join(deck.places.stateDir, `note-${sessionId}.md`);
-}
-
-/**
- * Removes the note file a failed edit of this session kept: the user has now set the note
- * another way (`note --set`), so that unsaved text is not wanted any more.
- */
-export function discardKeptNote(deck: Deck, sessionId: string): void {
-  discard(deck.platform.files, notePath(deck, sessionId));
-}
+// `skydeck note --set` imports it from here; the window's server, from src/sessions/ (plan D10).
+export { discardKeptNote } from '../sessions/meta.ts';
 
 /** Removes the temporary note file; failing to is not worth ending the command for. */
 function discard(files: Files, path: string): void {
@@ -93,7 +81,7 @@ export async function editNote(ctx: Context, deck: Deck, sessionId: string): Pro
   if (program === undefined) {
     throw new Error('editorCommand returned no program');
   }
-  const path = notePath(deck, sessionId);
+  const path = keptNotePath(deck, sessionId);
   const left = files.readText(path); // the text of an earlier edit, null when there is none
   const made = left === null;
   const atStart = left ?? deck.store.meta(sessionId)?.note ?? '';

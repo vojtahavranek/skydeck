@@ -1,17 +1,31 @@
 /**
- * What a page can ask the server to do in stage A (S2 8.2.3 `act`): resume a session, start a new
- * one, close an ended terminal, open a link. Every field of an action is the page's — any page
- * that passed the handshake — so each one is checked here again and goes through step 1's own
+ * What a page can ask the server to do (S2 8.2.3 `act`): in stage A resume a session, start a new
+ * one, close an ended terminal, open a link; from stage D edit a session (S2 12.5): its label,
+ * group and note, done and undone, its pull requests. Every field of an action is the page's — any
+ * page that passed the handshake — so each one is checked here again and goes through step 1's own
  * rules: a resume names a session and nothing more (the guard, the lock and the command builder
  * decide the rest, S2 11.1), a new session's directory, label, group and flags are checked as
  * `skydeck new` checks them (design 7.7), a terminal is closed only once its program has ended
- * (principle 6), and a link is opened only when S2 9.6 allows it. No action carries a program or
- * an argument list (S2 8.3).
+ * (principle 6), a link is opened only when S2 9.6 allows it, and an edit is made by step 1's own
+ * functions (design 7.1, 7.3) on a session the store knows. No action carries a program or an
+ * argument list (S2 8.3).
  */
-import { SkydeckError } from '../platform/errors.ts';
+import { RefError, SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
+import { cleanGroup, cleanLabel } from '../sessions/labels.ts';
 import { launchPrepared } from '../sessions/launch.ts';
 import type { LaunchOutcome } from '../sessions/launch.ts';
+import { loadRows } from '../sessions/load.ts';
+import {
+  attachManualPr,
+  detachSessionPr,
+  discardKeptNote,
+  markDone,
+  markUndone,
+  setGroup,
+  setLabel,
+  setNote,
+} from '../sessions/meta.ts';
 import { prepareNew, readLock, releaseLock } from '../sessions/resume.ts';
 import type { PreparedLaunch } from '../sessions/resume.ts';
 import { prepareResumeById } from '../sessions/resume-by-id.ts';
@@ -21,6 +35,7 @@ import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
 import { splitFlags } from './flags.ts';
 import type { ActionHandler, TerminalHub, TerminalInfo } from './hub.ts';
+import type { PrFetches } from './pr-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
 import type { ActMessage, ResultMessage } from './protocol.ts';
 import { MAY_START } from './view/sections.ts';
@@ -39,10 +54,20 @@ export interface ActionDeps {
   /** Task 19's openLink, bound to the configuration and the interop link. */
   openLink(url: string): Promise<boolean>;
   log: (line: string) => void;
+  /** The store was written on the server's own connection: rows again and lists now (D7). */
+  changed(): void;
+  /** task 36's PrFetches (the server passes one). */
+  prs: Pick<PrFetches, 'fetch' | 'refresh'>;
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
 type Answer = Omit<ResultMessage, 't' | 'id'>;
+
+/** Stage D's actions (S2 12.5): each names a session the store knows. */
+type EditAction = Extract<
+  ActMessage,
+  { kind: 'label' | 'group' | 'note' | 'done' | 'undone' | 'pr-refresh' | 'pr-add' | 'pr-rm' }
+>;
 
 const DONE: Answer = { ok: true, lines: [], error: null, sessionId: null };
 
@@ -52,8 +77,11 @@ const NO_TERMINAL = 'this terminal is no longer there';
 const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 characters';
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
-/** Stage D's actions are parsed (plan D 2.2) and acted on from task 36 on. */
-const NOT_YET = 'skydeck cannot do that action yet';
+/** Plan D 2.5: the row of a `new` terminal whose session the store does not know yet (A28). */
+const NOT_STARTED = 'this session has not started yet; edit it once it runs';
+/** S2 12.5: a note's save whose `base` is no longer the stored note. */
+const NOTE_CHANGED =
+  'the note was changed elsewhere while you edited it; your text is still in the box';
 const ALREADY_OPEN = 'this session is already open in the window';
 const BUSY = "skydeck's database is busy; try again";
 
@@ -107,7 +135,8 @@ function checked(
 }
 
 /** A label or group left empty, or holding only white space, is none (ruled, review 1 of task 32;
- *  S2 12.6): a form field the user may leave blank, where step 1's cleanLabel would refuse it. */
+ *  S2 12.6): a form field the user may leave blank, where step 1's cleanLabel would refuse it —
+ *  the expression of `skydeck label` and `group`, and setNote's rule for a note that clears. */
 function orNone(text: string): string | null {
   return text.trim() === '' ? null : text;
 }
@@ -119,8 +148,8 @@ function orNone(text: string): string | null {
  * outcome's lines (`ok` when it started, with the session's id); a SkydeckError (the guard, the
  * lock, RefError, prepareNew's refusals) answers its message. `close-terminal` → `hub.close`;
  * `open-link` → `linkToOpen`, then `openLink`. Stage D's kinds (label, group, note, done, undone,
- * pr-refresh, pr-add, pr-rm) are refused with `skydeck cannot do that action yet`, nothing done,
- * until task 36 acts on them. A resume is refused while the window has a terminal
+ * pr-refresh, pr-add, pr-rm) → `edit` on a session the store knows (`requireKnown`); every write
+ * calls `changed()` once, a refusal never. A resume is refused while the window has a terminal
  * of the session whose program may still run (ruled, review 2 of task 32), and before it opens its
  * terminal it closes the session's terminals that are over (ended, lost, not started): an ended
  * terminal is dropped when its session runs again (ruled, review of task 13).
@@ -194,6 +223,93 @@ export function createActions(deps: ActionDeps): ActionHandler {
     }
   }
 
+  /**
+   * Plan D9: an edit acts only on a session the store knows, a row of loadRows — the id is whole,
+   * so nothing is resolved and no refresh runs first. The row of a `new` terminal whose session
+   * the store does not know yet (A28) is refused as not started (2.5); any other id is RefError's,
+   * as for `act resume`.
+   */
+  function requireKnown(sessionId: string): void {
+    if (loadRows(deck).some((row) => row.id === sessionId)) return;
+    const waits = hub
+      .list()
+      .some((terminal) => terminal.kind === 'new' && terminal.expectedSessionId === sessionId);
+    if (waits) throw new SkydeckError(NOT_STARTED);
+    throw new RefError(`no session matches '${sanitize(sessionId)}'`, []);
+  }
+
+  /** A write on the server's own connection: every window's list follows now (D7). */
+  function wrote(): Answer {
+    deps.changed();
+    return DONE;
+  }
+
+  /**
+   * S2 12.5, plan D9, D10: in one store transaction the stored note ('' for none) is read; when it
+   * is already the text sent (a save sent again after its answer was lost, also one that cleared
+   * the note) nothing is written; when it is not `base`, the note changed since the edit began and
+   * the save is refused; else setNote. After a write, the note file a failed editor kept goes.
+   */
+  function saveNote(action: Extract<EditAction, { kind: 'note' }>): Answer {
+    const { sessionId, text, base } = action;
+    const outcome = deck.store.transaction(() => {
+      const stored = deck.store.meta(sessionId)?.note ?? '';
+      if (stored === text || (stored === '' && orNone(text) === null)) return 'stored';
+      if (stored !== base) return 'changed';
+      setNote(deck, sessionId, text);
+      return 'saved';
+    });
+    if (outcome === 'changed') return refusal(NOTE_CHANGED);
+    if (outcome === 'stored') return DONE;
+    discardKeptNote(deck, sessionId);
+    return wrote();
+  }
+
+  /**
+   * Stage D's edits (S2 12.5) through step 1's functions, as the commands make them: `label` and
+   * `group` are none when blank, else cleanLabel / cleanGroup (their refusals are the commands'),
+   * then setLabel / setGroup; `note` saveNote; `done`, `undone` markDone, markUndone; `pr-add`
+   * attachManualPr (origin manual, an earlier detach cleared), then the fetch in the background
+   * (D8), answered `attached <url>` without waiting for it; `pr-rm` detachSessionPr; `pr-refresh`
+   * the explicit refresh in the background, `ok` at once.
+   */
+  function edit(action: EditAction): Answer {
+    const { sessionId } = action;
+    requireKnown(sessionId);
+    switch (action.kind) {
+      case 'label': {
+        const text = orNone(action.text);
+        setLabel(deck, sessionId, text === null ? null : cleanLabel(text));
+        return wrote();
+      }
+      case 'group': {
+        const text = orNone(action.text);
+        setGroup(deck, sessionId, text === null ? null : cleanGroup(text));
+        return wrote();
+      }
+      case 'note':
+        return saveNote(action);
+      case 'done':
+        markDone(deck, sessionId);
+        return wrote();
+      case 'undone':
+        markUndone(deck, sessionId);
+        return wrote();
+      case 'pr-add': {
+        const key = attachManualPr(deck, sessionId, action.url);
+        deps.changed();
+        deps.prs.fetch([key.url]);
+        return { ok: true, lines: [`attached ${key.url}`], error: null, sessionId: null };
+      }
+      case 'pr-rm':
+        detachSessionPr(deck, sessionId, action.url);
+        return wrote();
+      case 'pr-refresh':
+        deps.prs.refresh(sessionId);
+        return DONE;
+    }
+  }
+
   async function run(action: ActMessage): Promise<Answer> {
     switch (action.kind) {
       case 'resume': {
@@ -256,8 +372,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'pr-refresh':
       case 'pr-add':
       case 'pr-rm':
-        // Stage D's editing (plan D, task 36): nothing is done before then.
-        return refusal(NOT_YET);
+        return edit(action);
     }
   }
 
