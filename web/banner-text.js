@@ -2,8 +2,9 @@
 // Restore button's label, and the page's own form of a time — `today at 18:02`, `yesterday at
 // 18:02`, `on 12 Nov at 18:02`, `on 12 Nov 2025 at 18:02` (a year other than this one) —, 24-hour,
 // in the time zone the caller passes (the page passes its own, an IANA name or `UTC`), read through
-// Intl.DateTimeFormat. Pure: no DOM, no clock — the caller gives its `now` in milliseconds. Never
-// throws: what is no time of the protocol gives an empty text, a zone Intl does not know is UTC.
+// Intl.DateTimeFormat. Pure: no DOM, no clock — the caller gives its `now` in milliseconds (a time
+// a Date holds, as `Date.now()` is). What is no time of the protocol gives an empty text, and a
+// zone Intl does not know is UTC: neither throws.
 
 /** @import { BannerEntryPayload, BannerPayload } from '../src/window/protocol.ts' */
 
@@ -112,7 +113,7 @@ function daysBetween(a, b) {
  */
 export function activityTime(ns, nowMs, timeZone) {
   const ms = msOf(ns);
-  if (ms === null || !Number.isFinite(new Date(nowMs).getTime())) {
+  if (ms === null || !Number.isFinite(nowMs)) {
     return '';
   }
   const at = partsOf(ms, timeZone);
