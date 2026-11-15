@@ -532,10 +532,11 @@ RefError. After every write `deps.changed()`; the result is `ok` with no lines (
 `attached <url>`), also when `changed()` or `prs.fetch` throws: the write is committed, and the
 throw is logged by kind (ruled on #90, review 2). `label`:
 `text.trim() === '' ? null : cleanLabel(text)`, then `setLabel` — the expression of
-`skydeck label`; `group` likewise with `cleanGroup` and `setGroup`. `note`: in one store transaction the stored note (`''` for none) is
-read — equal to `text`, or `''` while `text` stores nothing (empty or white space; ruled on #90,
-review 1), `ok` and nothing written; different from `base`, the refusal of 2.5 and no write; else
-`setNote(text)` (empty or white space clears) — and after the commit `discardKeptNote` (D10).
+`skydeck label`; `group` likewise with `cleanGroup` and `setGroup`. `note`: in one store
+transaction the stored note (`''` for none) is read — equal to `text`, or `''` while `text` stores
+nothing (empty or white space; ruled on #90, review 1), `ok` and nothing written; different from
+`base`, the refusal of 2.5 and no write; else `setNote(text)` (empty or white space clears) — and
+after the commit `discardKeptNote` (D10).
 `done`, `undone`: `markDone`, `markUndone`. `pr-add`: `attachManualPr` (origin `manual`; an earlier
 detach cleared), `changed()`, then `deps.prs.fetch([key.url])` (D8). `pr-rm`: `detachSessionPr`.
 `pr-refresh`: `deps.prs.refresh(sessionId)`, `ok` at once. `createPrFetches`: D8's one-at-a-time
