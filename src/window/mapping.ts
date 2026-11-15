@@ -5,6 +5,7 @@
  * hands the result to `registry.setSession` and the view model.
  */
 import { parentPidFromStat, procStartFromStat } from '../claude/procstat.ts';
+import { NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns, Proc } from '../platform/types.ts';
 import type { DerivedSession, Holder } from '../sessions/types.ts';
 import type { TerminalInfo } from './hub.ts';
@@ -31,6 +32,12 @@ export interface Mapping {
 
 /** S2 7.5: a holder belongs to a terminal when the program is at most this many parents above it. */
 const MAX_STEPS = 8;
+
+/**
+ * S2 7.5 (plan task 57, ruled): a lost keeper's program counts as its terminal's for less than this
+ * after the loss; from then on it counts as outside every terminal, as any ended terminal's does.
+ */
+const LOST_PROGRAM_NS: Ns = 60n * NS_PER_SECOND;
 
 /**
  * Where a holder is: in a terminal (its program `steps` parents up, 0 being the holder itself),
@@ -116,9 +123,12 @@ export function holderPlace(
  * S2 7.5 and 7.9 for every terminal and every running session:
  *
  * - A terminal's program is the process its keeper reported (`program`), while the terminal has no
- *   exit; a holder of the current boot belongs to the terminal whose program it is or descends from
- *   (`holderPlace`). A holder of another boot is no live holder and is left out. Without a boot id no
- *   holder can be judged: each is unknown.
+ *   exit, and also while it has a lost keeper's (any exit but an applied one the keeper sent:
+ *   `keeperExitApplied`) as long as that program may still run (`lives`) and the loss is less than
+ *   60 s before `nowNs` (`lostLately`; plan task 57, S2 7.5 and 7.8: the program runs its end for a
+ *   moment after the SIGHUP and is not "elsewhere" meanwhile). A holder of the current boot belongs
+ *   to the terminal whose program it is or descends from (`holderPlace`). A holder of another boot
+ *   is no live holder and is left out. Without a boot id no holder can be judged: each is unknown.
  * - `shown`: of the holders that belong to a terminal, the one nearest its program decides (a
  *   scripted run that the program started does not move it), then the latest event, then the
  *   session id. A terminal none of whose holders belongs to it keeps the session it showed
@@ -144,11 +154,15 @@ export function mapTerminals(input: {
   const { terminals, sessions, proc, bootId, nowNs, startTimeoutNs } = input;
   const programs = new Map<number, { procStart: number; termId: string }>();
   for (const terminal of terminals) {
-    if (terminal.program !== null && terminal.exit === null) {
-      programs.set(terminal.program.pid, {
-        procStart: terminal.program.procStart,
-        termId: terminal.id,
-      });
+    const { program } = terminal;
+    if (
+      program !== null &&
+      (terminal.exit === null ||
+        (!keeperExitApplied(terminal) &&
+          lostLately(terminal.exit.atNs, nowNs) &&
+          lives(program, proc)))
+    ) {
+      programs.set(program.pid, { procStart: program.procStart, termId: terminal.id });
     }
   }
 
@@ -204,6 +218,48 @@ export function mapTerminals(input: {
     }
   }
   return { shown, notReported, elsewhere, unknown };
+}
+
+/**
+ * Whether the terminal's exit is one its keeper sent, applied (`ended`, `not-started`): the keeper
+ * reaped the program before it sent it (S2 7.8), so the program is over whatever /proc says. Any
+ * other exit is a lost keeper's, made up at once (`lost`), or one still on its way through the
+ * screen side (the state not over yet); its program counts while it may still run and the loss is
+ * less than 60 s old (plan task 57) — which a sent exit's reaped program never does.
+ */
+function keeperExitApplied(terminal: TerminalInfo): boolean {
+  return terminal.state === 'ended' || terminal.state === 'not-started';
+}
+
+/**
+ * Whether the loss at `atNs` (the server's clock when it made the exit up) is less than 60 s before
+ * `nowNs`. A clock that stepped back since gives a negative age: still lately, so that the terminal
+ * is never given up early (ruled). A time that is no decimal number (never made by the server) is
+ * not lately: the program counts out, as for any ended terminal.
+ */
+function lostLately(atNs: string, nowNs: Ns): boolean {
+  if (!/^[0-9]{1,20}$/.test(atNs)) return false;
+  return nowNs - BigInt(atNs) < LOST_PROGRAM_NS;
+}
+
+/**
+ * Design 5.5's rule on the program a keeper reported (pid AND process start; never the pid alone,
+ * which another process may have taken): gone only when its stat line is gone or names another
+ * start. What cannot be told — a read that throws, a stat line without a readable start — may still
+ * run and counts (ruled on task 57's review 2; Proc's contract: a process that could not be read is
+ * never taken for one that is gone). It errs only towards keeping: `holderPlace` matches a program
+ * by pid AND start, so a pid another process took never reaches it.
+ */
+function lives(program: { pid: number; procStart: number }, proc: Proc): boolean {
+  let stat: string | null;
+  try {
+    stat = proc.stat(program.pid);
+  } catch {
+    return true;
+  }
+  if (stat === null) return false;
+  const start = procStartFromStat(stat);
+  return start === null || start === program.procStart;
 }
 
 /** Nearer the program first, then the later event, then the lower session id. */

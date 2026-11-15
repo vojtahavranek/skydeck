@@ -981,7 +981,20 @@ both in memory: the **expected session**. Which session it shows is decided agai
 
 - the terminal's program is the process the keeper reported in `T` or `hello` (8.1): pid and
   process start, on the current boot. A terminal whose keeper has not reported a start has no
-  program yet;
+  program yet. A terminal whose keeper sent `exit` has none any more (the keeper reaped it, 7.8).
+  A **lost** keeper's program (7.8) stays its terminal's while it may still run — its stat line
+  names that pid and start, or cannot be read (design 5.5: what cannot be read is not taken for
+  gone) — and for less than 60 seconds after the loss (the exit's time, on the server's wall
+  clock: a clock that stepped back keeps it longer, one that stepped forward, as after a sleep of
+  the host, ends it early):
+  the server knows the loss at once, while the program, given SIGHUP, runs its end for a moment,
+  so its session is not "running in another terminal" (7.9) meanwhile and the lost terminal is not
+  dropped for it (7.8; stage B's plan, task 57). The pid alone never counts: it may be another
+  process's by then. Known limits: a program that has not ended 60 seconds after the loss counts
+  as running in another terminal, as 7.9 shows it, and the lost terminal is dropped, so its later
+  end is not marked in the window; a wrapper `claudeCommand` that ends at the SIGHUP before its
+  `claude` child leaves that child outside every terminal, so the lost terminal is dropped while
+  the child runs its end;
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
   terminal's program or a descendant of it (parent pids read from `/proc/<pid>/stat`, at most 8
   steps up, each judged alive by design 5.5's rule). The descendant rule covers a `claudeCommand`
@@ -1039,7 +1052,8 @@ The server, on `exit`:
   session's terminals whose program is over (ended, lost, not started) once the guard and the
   lock have let it through and before it opens the new one (a refused resume leaves them), and
   the tick closes an ended terminal whose session is seen running anywhere else. A terminal whose
-  program may still run is never dropped this way;
+  program may still run is never dropped this way — for a lost terminal, for 60 seconds after the
+  loss (7.5);
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
   and the session's lock is still of the take this launch made (the lock it took, or a renewal of
@@ -3054,12 +3068,11 @@ grants a permission through Playwright.
 - CI, on every pull request and every push to `main`, runs the newest leg of the Node matrix
   (Node 24). The oldest leg (Node 24.12) runs only when the workflow is started by hand
   (`workflow_dispatch`: the owner's decision, to save CI minutes), and a run started by hand runs
-  both legs. A leg runs format check, type checks, `npm
-  test` (keeper and server tests included; Ubuntu runners have python3), `python3 -m py_compile
-  bin/skydeck-keeper`, the vendored-files check (16.6: `test/vendor/vendor.test.ts`, a test in
-  `npm test` that needs the packages `npm ci` installed, so it has no step of its own), and
-  `shellcheck` on the shell scripts by
-  name — `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
+  both legs. A leg runs format check, type checks, `npm test` (keeper and server tests included;
+  Ubuntu runners have python3), `python3 -m py_compile bin/skydeck-keeper`, the vendored-files
+  check (16.6: `test/vendor/vendor.test.ts`, a test in `npm test` that needs the packages `npm ci`
+  installed, so it has no step of its own), and `shellcheck` on the shell scripts by name —
+  `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
   bin/skydeck*` would also match the python keeper. Each is a step of its own: CI does not run
   `npm run check`, which ends with the page suite. Only the newest leg (Node 24) runs the page
   suite, and it runs on Ubuntu 24.04 (the development machine's system) while the other leg runs
