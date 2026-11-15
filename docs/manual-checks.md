@@ -846,9 +846,14 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 - **`config.json.before-w27` is listed**: an earlier W27 did not finish. Do its step 4 first,
   then start again.
 - **Only `config.json` is listed, and `cat ~/.config/skydeck/config.json` prints exactly the one
-  line this check writes** below, `{ "ticketUrl": "https://<your site>.atlassian.net/browse/{key}" }`
-  with your site in it: it is left over from an earlier W27 that started with no file and did not
-  finish. Remove it (`rm ~/.config/skydeck/config.json`) and go on as when both are missing.
+  line this check writes** below, with your site in it:
+
+  ```
+  { "ticketUrl": "https://<your site>.atlassian.net/browse/{key}" }
+  ```
+
+  It is left over from an earlier W27 that started with no file and did not finish. Remove it
+  (`rm ~/.config/skydeck/config.json`) and go on as when both are missing.
 - **Only `config.json` is listed** (anything else in it): you have a configuration. Copy it aside,
   as it is:
 
@@ -960,23 +965,24 @@ press … again` for up to a second: press it again then.
 5. `p`: the pull-request dialog. Esc closes it.
 6. In W: `skydeck show <short id>`. Expected: its `label:`, `group:` and `note:` lines are what you
    typed in steps 1 to 3.
-7. Back in the window, Ctrl+Shift+L until the key bar says `Focus: list`, then `d`. Expected: the toast `Marked done.
-   Stays under Open while it runs; hidden once it stops.` with `Undo`; the row stays under Open
-   with a `done` mark, and stays selected. Click `Undo` within 5 seconds: the mark goes.
+7. Back in the window, Ctrl+Shift+L until the key bar says `Focus: list`, then `d`. Expected:
+   the toast `Marked done. Stays under Open while it runs; hidden once it stops.` with `Undo`;
+   the row stays under Open with a `done` mark, and stays selected. Click `Undo` within 5
+   seconds: the mark goes.
 8. End the throwaway session: Ctrl+Shift+L to its terminal, look at the short id (`/exit` ends
    the session it is typed into), `/exit`, then `Close` on its ended bar. Its row moves to This
    week. Click it (it no longer runs, so the list gets the keyboard: the key bar says `Focus:
-   list`; look at the short id) and press `d`. Expected: the row disappears, the toast says `Marked done: hidden from the list.
-   It comes back on new activity.`, and the row after it in This week is selected (the one before
-   it when it was the last; none when it was alone) — another session: **click `Undo` now, before
-   any key**. Expected: the throwaway session is back in This week and selected again. (When the
-   toast went before you clicked: `a` shows the done sessions; click the throwaway session's row,
-   look at its short id, press `d`, then `a` again.)
+   list`; look at the short id) and press `d`. Expected: the row disappears, the toast says
+   `Marked done: hidden from the list. It comes back on new activity.`, and the row after it in
+   This week is selected (the one before it when it was the last; none when it was alone) —
+   another session: **click `Undo` now, before any key**. Expected: the throwaway session is back
+   in This week and selected again. (When the toast went before you clicked: `a` shows the done
+   sessions; click the throwaway session's row, look at its short id, press `d`, then `a` again.)
 9. Clear what this check set, with the throwaway session selected (look at the short id) and the
    key bar saying `Focus: list` (Ctrl+Shift+L until it does): `l`, Backspace (the field holds the
-   label, selected), Enter; `g`, Backspace, Enter; `n`, Ctrl+A, Backspace, Ctrl+Enter. Expected: the header shows the title it had before step 1, `+ group`
-   and `no note`; `skydeck show <short id>` in W prints `label:     -` and `group:     -`, and no
-   `note:`.
+   label, selected), Enter; `g`, Backspace, Enter; `n`, Ctrl+A, Backspace, Ctrl+Enter. Expected:
+   the header shows the title it had before step 1, `+ group` and `no note`; `skydeck show <short
+   id>` in W prints `label:     -` and `group:     -`, and no `note:`.
 
 Write down, per layout: every key that did something else than described here, or nothing; in
 step 4, whether a reload key reloaded the window with changed text, and which.
