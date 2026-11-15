@@ -279,7 +279,9 @@ function textSelected() {
 
 /**
  * A button of the header (D17): it cancels its mousedown, so that a click on it takes no keyboard
- * and leaves it where it was; a held Enter on it acts once.
+ * and leaves it where it was; a held Enter on it acts once, and so does a double click (D15: the
+ * second click would find what the first one changed — Done a done row, and send `undone`; review 2
+ * of task 38). A press from the keyboard has no click count.
  * @param {string} className
  * @param {string} text
  * @param {string} tip
@@ -293,7 +295,11 @@ function headerButton(className, text, tip, run) {
   button.title = tip;
   button.addEventListener('mousedown', (event) => event.preventDefault());
   button.addEventListener('keydown', refuseHeldEnter);
-  button.addEventListener('click', run);
+  button.addEventListener('click', (event) => {
+    if (event.detail <= 1) {
+      run();
+    }
+  });
   return button;
 }
 

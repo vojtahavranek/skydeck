@@ -2414,7 +2414,9 @@ The Undo of that `d` selects the session again once it is back in the list, if t
 still where that `d` left it (the row it selected, or none); if the user moved it meanwhile, it
 stays (ruled for plan D task 37). That list decides once: a row it still has (running, under
 Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
-of plan D task 37). The header's Done leaves the selection to the main rule. A held
+of plan D task 37). The header's Done leaves the selection to the main rule. The second click of
+a double click on a button of the header, or on a pull request's × in its dialog, does nothing
+(ruled for plan D task 38). A held
 `d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is

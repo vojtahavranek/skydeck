@@ -1154,6 +1154,47 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
   );
 
   await t.test(
+    "review 2's S6: a double click on the header's Done of a running session marks it done once, also when the list with `done` and the answer come before its second click (D15: the first click only)",
+    async (t) => {
+      const shown = running(S1, TERM_A, 1);
+      const s = await scripted(t, chromium, {
+        sections: { open: [shown] },
+        terminals: [terminal(TERM_A, S1, 1)],
+      });
+      const { page, w } = s;
+      const marks = (): Row[] =>
+        w.acts().filter((act) => act['kind'] === 'done' || act['kind'] === 'undone');
+      await showsText(page, '#cards .header-done', /^Done$/);
+      const done = await page.locator('#cards .header-done').boundingBox();
+      assert.ok(done !== null);
+      await page.mouse.move(done.x + done.width / 2, done.y + done.height / 2);
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await eventually(async () => marks().length === 1, 'done sent');
+      // The real server's order: the list that shows the write, then the answer — both before the
+      // second click of the double click, which then finds a done row.
+      s.set({ sections: { open: [{ ...shown, done: true }] } });
+      await showsText(page, '#cards .header-done', /^Undone$/);
+      w.answer(marks()[0] as Row, { ok: true });
+      await eventually(async () => (await toast(page)).text === DONE_RUNNING_WORDS, 'the toast');
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.up({ clickCount: 2 });
+      await sleep(300);
+      assert.deepEqual(
+        marks().map((act) => act['kind']),
+        ['done'],
+        'the second click of the double click sends nothing',
+      );
+      assert.deepEqual(await texts(page, '#cards .header-done'), ['Undone']);
+      // A fresh click acts: Undone.
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await eventually(async () => marks().length === 2, 'undone sent');
+      assert.equal(marks()[1]?.['kind'], 'undone');
+    },
+  );
+
+  await t.test(
     "review 2's S2: Enter held on the header's Note button opens the note dialog and its repeats type nothing into the note; a fresh Enter does (the key that opened a dialog, S2 12.9)",
     async (t) => {
       const s = await scripted(t, chromium, {
