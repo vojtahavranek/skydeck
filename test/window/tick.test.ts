@@ -1300,6 +1300,25 @@ describe('a start is refused while a lost terminal’s program may still live (t
     assert.match(said.command, /^0: /);
     assert.equal(said.handoff, true);
   });
+
+  test('the named limit (ruled): closing the lost terminal ends the window’s refusal — with the lock stale, the next Resume starts a second program', async (t) => {
+    // S2 7.8: the window refuses only while it lists the lost terminal; after a Close (or a
+    // restart of the server) the lock alone refuses, until 60 s after the launch.
+    const l = await lostWithProgram(t);
+    const running = `${S1.slice(0, 8)} is running (pid ${l.program.pid})`;
+    await l.refreshNow();
+    const nowMs = l.w.deck.platform.clock.nowNs() / 1_000_000n;
+    const stale = `${(nowMs - 61_000n) * 1_000_000n}${l.lock.slice(l.lock.indexOf(':'))}`;
+    l.w.deck.store.setKv(lockKey(S1), stale);
+    const spawned = l.r.spawned.length;
+    assert.deepEqual((await l.launches.resume(S1, SIZE)).lines, [running]);
+    assert.equal(l.r.registry.close(l.id), 'ok', 'the bar’s Close (close-terminal)');
+    assert.ok(stillRuns(l.program.pid, l.program.procStart), 'program B lives');
+    assert.equal(l.launches.refusal(S1), null);
+    const again = await l.launches.resume(S1, SIZE);
+    assert.equal(again.code, 0, JSON.stringify(again));
+    assert.equal(l.r.spawned.length, spawned + 1, 'a second keeper beside program B');
+  });
 });
 
 describe('the mapping (S2 7.5, 7.9; plan task 21)', () => {

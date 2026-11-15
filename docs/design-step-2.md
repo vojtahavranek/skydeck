@@ -1018,14 +1018,14 @@ both in memory: the **expected session**. Which session it shows is decided agai
   so its session is not "running in another terminal" (7.9) meanwhile and the lost terminal is not
   dropped for it (7.8; stage B's plan, task 57). The same one rule holds back the settling of the
   lost exit and refuses a start of the session through the window while it holds (7.8; stage C's
-  plan, task 82). The pid alone never counts: it may be another
-  process's by then. Known limits: a program that has not ended 60 seconds after the loss counts
-  as running in another terminal, as 7.9 shows it, and the lost terminal is dropped, so its later
-  end is not marked in the window; one that has not reported its session start by then is not
-  seen at all any more, so a start of its session is no longer refused (7.8);
-  a wrapper `claudeCommand` that ends at the SIGHUP before its
-  `claude` child leaves that child outside every terminal, so the lost terminal is dropped while
-  the child runs its end;
+  plan, task 82). The pid alone never counts: it may be another process's by then. Known limits:
+  a program that has not ended 60 seconds after the loss counts as running in another terminal, as
+  7.9 shows it, and the lost terminal is dropped, so its later end is not marked in the window;
+  one that has not reported its session start by then is not seen at all any more, so a start of
+  its session is no longer refused, and closing the lost terminal or restarting the server ends
+  that refusal too (7.8); a wrapper `claudeCommand` that ends at the SIGHUP before its `claude`
+  child leaves that child outside every terminal, so the lost terminal is dropped while the child
+  runs its end;
 - a holder of a session (design 6.1) **belongs to** a terminal when the holder's pid is the
   terminal's program or a descendant of it (parent pids read from `/proc/<pid>/stat`, at most 8
   steps up, each judged alive by design 5.5's rule). The descendant rule covers a `claudeCommand`
@@ -1110,12 +1110,17 @@ The server, on `exit`:
   C's plan, task 82, for both kinds), and the window refuses every start of the session — the
   page's Resume, `POST /resume`, restore's own check (11.1) — with the guard's words,
   `<short> is running (pid <p>)`, `<p>` being that program (with a wrapper `claudeCommand` the
-  guard names its `claude` instead, once that has reported its start). Once that program is gone, or 60 seconds after the loss, the exit
-  is settled as above. Known limits: a program that still runs 60 seconds after the loss and never
-  reported a start is no longer seen — its lock is given back and a start of its session starts a
-  second one; and a keeper lost when its launch is older than the lock's 60 seconds has no lock
-  left to keep — the window still refuses for 60 seconds after the loss, but `skydeck resume`
-  starts a second program, since its guard sees no holder and no lock.
+  guard names its `claude` instead, once that has reported its start). Once that program is gone,
+  or 60 seconds after the loss, the exit is settled as above. Known limits: a program that still
+  runs 60 seconds after the loss and never reported a start is no longer seen — its lock is given
+  back and a start of its session starts a second one; a keeper lost when its launch is older than
+  the lock's 60 seconds has no lock left to keep — the window still refuses for 60 seconds after
+  the loss, but `skydeck resume` starts a second program, since its guard sees no holder and no
+  lock; and closing a lost terminal (and a restart of the server) ends the window's refusal; the
+  lock alone then refuses, until 60 seconds after the launch (ruled on the review of stage C's
+  task 82). A server that stops while it holds such an exit back settles nothing more for it: the
+  lock expires by itself, and a new session's label and group stay if its program never reports a
+  start.
 
 A keeper whose connection ends without `exit` is **lost** only when its process is dead by design
 5.5's rule (its `.pid` line) or its socket refuses connections: then its program got SIGHUP
