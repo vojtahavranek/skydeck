@@ -1,9 +1,10 @@
 /**
  * The messages between the page and the server (S2 8.2.2, 8.2.3) and the requests on
- * `server.sock` (S2 8.3), stage A: the TypeScript types every side codes against (the page reads
- * them through JSDoc `@import`), strict validators for what arrives from a page or a command, and
- * the binary output frame. Later stages add their messages and `act` kinds here: stage D's are
- * label, group, note, done, undone, pr-refresh, pr-add and pr-rm (plan D 2.2).
+ * `server.sock` (S2 8.3): the TypeScript types every side codes against (the page reads them
+ * through JSDoc `@import`), strict validators for what arrives from a page or a command, and the
+ * binary output frame. Later stages add their messages and `act` kinds here: stage D's are label,
+ * group, note, done, undone, pr-refresh, pr-add and pr-rm (plan D 2.2); stage C's are restore and
+ * dismiss-restore, the banner, and `POST /resume`, `/new` and `/restore` (plan C 2.2).
  *
  * The validators read foreign input: they never throw and return `{ ok: false, kind }` with a fixed
  * kind that never quotes the input (plan A22), so a caller can log the kind. This module imports
@@ -33,7 +34,7 @@ export interface KeepAlivePayload {
 // Limits (the validator refuses more): sizes (`cols`, `rows`) are whole numbers 1–65535; strings
 // are measured in UTF-8 bytes — paths and URLs at most 4096, other text 1024, `input.data` 64 KiB,
 // a note's `text` and `base` 64 KiB each (plan D5); every string must be well formed (no lone
-// surrogate).
+// surrogate). A restore names 1–1,000 distinct session ids (plan C 2.2).
 
 /** The page's first message (S2 8.2.2). Any `protocol` number is read; the server closes with 4426
  *  for one it does not speak. `nonce`, `proof`: base64url, checked by the server's authentication. */
@@ -108,7 +109,11 @@ export interface ResizeMessage {
  *  1,024 bytes; empty clears it); `note` sets its note (`text` as typed) when the stored note is
  *  still `base`, the note the edit started from (each at most 65,536 bytes, D5); `done`, `undone`
  *  and `pr-refresh` name only the session; `pr-add` and `pr-rm` attach or detach the pull request
- *  `url` (the URL limit, 4,096 bytes). `sessionId` is a session id (isSessionId). */
+ *  `url` (the URL limit, 4,096 bytes). `sessionId` is a session id (isSessionId).
+ *
+ *  Stage C (plan C 2.2): `restore` restores the sessions `sessionIds` names (1–1,000 distinct
+ *  session ids) of the banner's offer (S2 12.7); `dismiss-restore` is "Not now" for the earlier
+ *  boot `bootId` (a lower-case UUID, the form of /proc/sys/kernel/random/boot_id). */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -127,7 +132,9 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'label' | 'group'; sessionId: string; text: string }
   | { t: 'act'; id: number; kind: 'note'; sessionId: string; text: string; base: string }
   | { t: 'act'; id: number; kind: 'done' | 'undone' | 'pr-refresh'; sessionId: string }
-  | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string };
+  | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
+  | { t: 'act'; id: number; kind: 'restore'; sessionIds: string[] }
+  | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string };
 export type PageMessage =
   | HelloMessage
   | StartMessage
@@ -280,11 +287,37 @@ export interface ListMessage {
   needYou: { count: number; order: string[] };
   sections: SectionPayload[];
   doneHidden: number;
-  banner: null;
+  /** S2 12.7, the view model's (plan C9): null while nothing is offered and no restore runs. */
+  banner: BannerPayload | null;
   terminals: TerminalPayload[];
   selected: SelectedPayload | null;
   /** Known project directories, most recent first (S2 12.6, the new form). */
   dirs: string[];
+}
+/** One session the banner offers (design 7.8's entry). */
+export interface BannerEntryPayload {
+  sessionId: string;
+  shortId: string;
+  title: string;
+  /** null: no exit recorded. */
+  endedAtNs: NsText | null;
+  wasWorking: boolean;
+  preselected: boolean;
+}
+/** S2 12.7, made by bannerPayload (plan C 2.3). */
+export interface BannerPayload {
+  /** The latest earlier boot (design 7.8) whose sessions are offered: what `dismiss-restore`
+   *  names. null only while a restore runs and nothing is offered. */
+  bootId: string | null;
+  /** That boot's last event: "last activity" (S2 11.1). null with `bootId`. */
+  lastActivityNs: NsText | null;
+  /** The default set, in list order; [] while a restore runs and nothing is left to offer. */
+  entries: BannerEntryPayload[];
+  /** The view model's decision (plan C9): false after "Not now" for this boot; the page shows
+   *  nothing. */
+  shown: boolean;
+  /** A restore runs in the server, from any page or command: nothing more can be started. */
+  running: boolean;
 }
 /** S2 12.4's three reasons, in their order. */
 export type AttentionReason = 'asks' | 'ended' | 'finished';
@@ -333,10 +366,19 @@ export interface ResultMessage {
   error: string | null;
   sessionId: string | null;
 }
-/** `term`: the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the keep-alive and tick notices. */
+/** `term`: the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the
+ *  keep-alive, tick and restore notices. `restore-progress` (plan C6): `text` is one report line of
+ *  a restore, whoever asked for it, sanitised. */
 export interface NoticeMessage {
   t: 'notice';
-  kind: 'keepalive-lost' | 'keepalive-back' | 'gap' | 'newer-keeper' | 'input-full' | 'tick-failed';
+  kind:
+    | 'keepalive-lost'
+    | 'keepalive-back'
+    | 'gap'
+    | 'newer-keeper'
+    | 'input-full'
+    | 'tick-failed'
+    | 'restore-progress';
   term: string | null;
   text: string;
 }
@@ -394,8 +436,12 @@ const DATA_LIMIT = 64 * 1024;
  *  bytes), stays under the WebSocket's message limit of 1 MiB. */
 const NOTE_LIMIT = 64 * 1024;
 const SIZE_MAX = 0xffff;
+/** At most this many session ids in a restore, and flags in a new session (plan C 2.2, C3). */
+const LIST_LIMIT = 1000;
 const TERMINAL_ID = /^[0-9a-f]{12}$/;
 const WINDOW_ID = /^[0-9a-f]{16}$/;
+/** The form of /proc/sys/kernel/random/boot_id (plan C 2.2). */
+const BOOT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SECTIONS: ReadonlySet<string> = new Set(['open', 'week', 'earlier']);
 
 function isObject(value: unknown): value is Fields {
@@ -454,6 +500,39 @@ const SESSION: Check = (value, where) => {
 };
 const TERM = matching(TERMINAL_ID);
 const WINDOW = matching(WINDOW_ID);
+const BOOT = matching(BOOT_ID);
+
+/** Text that becomes part of a launch holds no NUL (plan C3: `dir` and each flag). */
+function noNul(check: Check): Check {
+  return (value, where) =>
+    check(value, where) ?? ((value as string).includes('\0') ? `${where}: wrong value` : null);
+}
+/** A well-formed string of any length: the body's 64 KiB bounds it. */
+const WELL_FORMED: Check = (value, where) => {
+  if (typeof value !== 'string') return `${where}: wrong type`;
+  return value.isWellFormed() ? null : `${where}: wrong value`;
+};
+
+/** An array of 1 (`nonEmpty`) or 0 up to LIST_LIMIT items, each passing `item`; `distinct`: no
+ *  item twice. */
+function list(item: Check, nonEmpty: boolean, distinct: boolean): Check {
+  return (value, where) => {
+    if (!Array.isArray(value)) return `${where}: wrong type`;
+    if (value.length > LIST_LIMIT) return `${where}: too long`;
+    if (nonEmpty && value.length === 0) return `${where}: wrong value`;
+    const seen = new Set<unknown>();
+    for (const one of value as unknown[]) {
+      const problem = item(one, where);
+      if (problem !== null) return problem;
+      if (distinct) {
+        if (seen.has(one)) return `${where}: wrong value`;
+        seen.add(one);
+      }
+    }
+    return null;
+  };
+}
+const SESSION_IDS = list(SESSION, true, true);
 
 function oneOf(...values: string[]): Check {
   return (value, where) => {
@@ -542,6 +621,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   'pr-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-add': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
   'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
+  // Stage C (plan C 2.2).
+  restore: object({ t: ANY, id: COUNT, kind: ANY, sessionIds: SESSION_IDS }),
+  'dismiss-restore': object({ t: ANY, id: COUNT, kind: ANY, bootId: BOOT }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);
@@ -623,7 +705,7 @@ export function parsePageMessage(
 }
 
 // ---------------------------------------------------------------------------------------------
-// server.sock (S2 8.3), stage A
+// server.sock (S2 8.3): stage A's routes, and stage C's below
 
 /** `checkout`: the checkout the server runs from (plan A26; S2 5.1 compares it). */
 export interface PingAnswer {
@@ -655,6 +737,9 @@ export interface StatusAnswer {
   checkout: string;
   startedAtNs: NsText;
   envOrigin: { dir: string; atNs: NsText };
+  /** Plan C20: the milliseconds left while the server expects a window back; absent (a server of
+   *  an older build) and null mean that it expects none. */
+  windowExpectedMs?: number | null;
 }
 export interface TokenAnswer {
   id: string;
@@ -662,13 +747,49 @@ export interface TokenAnswer {
   expiresAtNs: NsText;
 }
 export type TokenState = 'waiting' | 'used' | 'reused' | 'expired' | 'dropped';
+
+// server.sock, stage C (plan C 2.2): the requests that start sessions in the window. No field is a
+// program, an argument list or a path that is run (S2 8.3).
+
+/** `POST /new` (plan C3): `label` and `group` null when the option was not given; `flags` the
+ *  words after `--`, as given (no splitting). */
+export interface NewRequest {
+  dir: string;
+  label: string | null;
+  group: string | null;
+  flags: string[];
+}
+/** `POST /restore` (plan C3): 1–1,000 distinct session ids; `all` as `restore --all`. */
+export interface RestoreRequest {
+  sessionIds: string[];
+  all: boolean;
+}
 export type ControlRequest =
   | { route: 'ping' }
   | { route: 'status' }
   | { route: 'shutdown' }
   | { route: 'token'; seconds: 30 | 600 }
   | { route: 'token-state'; id: string }
-  | { route: 'token-drop'; id: string };
+  | { route: 'token-drop'; id: string }
+  | { route: 'resume'; sessionId: string }
+  | ({ route: 'new' } & NewRequest)
+  | ({ route: 'restore' } & RestoreRequest);
+/** POST /resume and POST /new (plan C2): the exit code and the lines the command prints on stderr,
+ *  each as printed (`skydeck: …`); `sessionId`: the session it started, null when none. */
+export interface LaunchAnswer {
+  code: number;
+  lines: string[];
+  sessionId: string | null;
+}
+export interface RestoreOutcomeLine {
+  code: 0 | 1 | 5;
+  started: number;
+  timedOut: number;
+  failed: number;
+  notStarted: number;
+}
+/** POST /restore (plan C5): one JSON object per line, the outcome last. */
+export type RestoreStreamLine = { line: string } | { outcome: RestoreOutcomeLine };
 
 type ControlResult = { ok: true; value: ControlRequest } | { ok: false; kind: string };
 
@@ -704,6 +825,15 @@ function jsonBody(
 
 const SHUTDOWN_JSON = jsonBody({}, () => ({ route: 'shutdown' }));
 
+/** `POST /new`'s fields (plan C3): the directory a path without NUL, the label and the group text
+ *  or null, at most LIST_LIMIT flags, each well formed without NUL. */
+const NEW_FIELDS: Record<string, Check> = {
+  dir: noNul(PATH),
+  label: nullable(TEXT),
+  group: nullable(TEXT),
+  flags: list(noNul(WELL_FORMED), false, false),
+};
+
 const ROUTES: Readonly<Record<string, Readonly<Record<string, (body: string) => ControlResult>>>> =
   {
     '/ping': { GET: noBody({ route: 'ping' }) },
@@ -724,14 +854,36 @@ const ROUTES: Readonly<Record<string, Readonly<Record<string, (body: string) => 
         id: body['id'] as string,
       })),
     },
+    // Stage C (plan C3).
+    '/resume': {
+      POST: jsonBody({ sessionId: SESSION }, (body) => ({
+        route: 'resume',
+        sessionId: body['sessionId'] as string,
+      })),
+    },
+    '/new': {
+      POST: jsonBody(NEW_FIELDS, (body) => ({
+        route: 'new',
+        dir: body['dir'] as string,
+        label: body['label'] as string | null,
+        group: body['group'] as string | null,
+        flags: body['flags'] as string[],
+      })),
+    },
+    '/restore': {
+      POST: jsonBody({ sessionIds: SESSION_IDS, all: BOOLEAN }, (body) => ({
+        route: 'restore',
+        sessionIds: body['sessionIds'] as string[],
+        all: body['all'] as boolean,
+      })),
+    },
   };
 
 /**
  * Method, path and JSON body to a request; an unknown field or route is { ok: false, kind }.
- * A kind that starts with `route` means that no route matches the method and path (stage C's
- * `/resume`, `/new` and `/restore` included); one that starts with `body` means a bad body. A
- * request without a body (`GET`, and `POST /shutdown`, which also takes `{}`) has the empty body.
- * Never throws.
+ * A kind that starts with `route` means that no route matches the method and path; one that
+ * starts with `body` means a bad body (stage C's bodies with plan C3's limits). A request without a
+ * body (`GET`, and `POST /shutdown`, which also takes `{}`) has the empty body. Never throws.
  */
 export function parseControlRequest(
   method: string,

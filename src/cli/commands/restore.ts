@@ -1,12 +1,10 @@
 // `skydeck restore [--all] [--dry-run] [--yes]` (design 7.8): bring back what was open before the
 // machine went down.
 import { buildResumeCommand } from '../../claude/launch.ts';
-import { RestoreStoppedError, SkydeckError, UsageError } from '../../platform/errors.ts';
+import { RestoreStoppedError, UsageError } from '../../platform/errors.ts';
 import { isoFromNs } from '../../platform/time.ts';
 import type { Deck } from '../../sessions/deck.ts';
-import { buildList, flatRows } from '../../sessions/list.ts';
-import { loadRows } from '../../sessions/load.ts';
-import { planRestore, runRestore } from '../../sessions/restore.ts';
+import { restorePlan, runRestore } from '../../sessions/restore.ts';
 import type { RestoreEntry } from '../../sessions/restore.ts';
 import { terminalFor } from '../../terminals/index.ts';
 import { sanitize } from '../../text/sanitize.ts';
@@ -60,7 +58,7 @@ export const command: Command = {
       );
     }
     return withDeck(ctx, { refresh: true }, async (deck) => {
-      const entries = plan(deck, all);
+      const { entries } = restorePlan(deck, all);
       if (entries.length === 0) {
         ctx.io.stdout('nothing to restore\n');
         return EXIT.ok;
@@ -101,31 +99,6 @@ export const command: Command = {
     });
   },
 };
-
-/**
- * The entries planRestore gives for the rows in list order (`ls --all`), with the boot id the rows
- * were derived with as the current one: never a second read, so a read that failed for the rows and
- * one that worked are not mixed (design 7.6). No rows: nothing to restore.
- */
-function plan(deck: Deck, all: boolean): RestoreEntry[] {
-  const loaded = loadRows(deck);
-  const [first] = loaded;
-  if (first === undefined) {
-    return [];
-  }
-  const { bootId } = first.session;
-  if (bootId === null) {
-    // Without it every process looks dead: this boot's running sessions would be offered, and the
-    // guard could not see that they run (principle 7).
-    throw new SkydeckError(
-      'cannot read the boot id (/proc/sys/kernel/random/boot_id): restore cannot tell which sessions are still running',
-    );
-  }
-  const rows = flatRows(
-    buildList(loaded, { showAll: true, filter: '', nowNs: deck.platform.clock.nowNs() }),
-  );
-  return planRestore(rows, deck.store.events(), bootId, all);
-}
 
 /** "<n>. [x| ] <short>  <title>  <how it ended>[  was working]" */
 function entryLine(entry: RestoreEntry, index: number, selected: boolean): string {

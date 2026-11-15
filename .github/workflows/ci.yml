@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,14 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # The oldest Node the launcher accepts, on the newest Ubuntu.
-          - node: '24.12'
-            os: ubuntu-latest
-          # The newest 24.x, with the page suite, on Ubuntu 24.04 (the development machine's):
-          # Playwright 1.60.0 has no Chromium for 26.04. Drop the pin when Playwright is upgraded.
-          - node: '24'
-            os: ubuntu-24.04
+        # Two legs, but a pull request and a push to main run only the second. The first, the
+        # oldest-Node leg, runs only when the workflow is started by hand (workflow_dispatch), and a
+        # run started by hand runs both. That is the owner's decision, to save CI minutes: the
+        # oldest-Node leg is run on main at checkpoints and when the work is done
+        # (`gh workflow run CI --ref main`).
+        # - node '24.12': the oldest Node the launcher accepts, on the newest Ubuntu.
+        # - node '24': the newest 24.x, with the page suite, on Ubuntu 24.04 (the development
+        #   machine's): Playwright 1.60.0 has no Chromium for 26.04. Drop the pin when Playwright is
+        #   upgraded.
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"node":"24.12","os":"ubuntu-latest"},{"node":"24","os":"ubuntu-24.04"}]' || '[{"node":"24","os":"ubuntu-24.04"}]') }}
     name: check (node ${{ matrix.node }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

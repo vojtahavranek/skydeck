@@ -77,6 +77,8 @@ const NO_TERMINAL = 'this terminal is no longer there';
 const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 characters';
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
+/** Stage C's restore and dismiss-restore are parsed (plan C 2.2) and acted on from task 72 on. */
+const NOT_YET = 'skydeck cannot do that action yet';
 /** Plan D 2.5: the row of a `new` terminal whose session the store does not know yet (A28). */
 const NOT_STARTED = 'this session has not started yet; edit it once it runs';
 /** S2 12.5: a note's save whose `base` is no longer the stored note. */
@@ -152,7 +154,9 @@ function orNone(text: string): string | null {
  * calls `changed()` once, a refusal never. A resume is refused while the window has a terminal
  * of the session whose program may still run (ruled, review 2 of task 32), and before it opens its
  * terminal it closes the session's terminals that are over (ended, lost, not started): an ended
- * terminal is dropped when its session runs again (ruled, review of task 13).
+ * terminal is dropped when its session runs again (ruled, review of task 13). Stage C's kinds
+ * (restore, dismiss-restore) are refused with `skydeck cannot do that action yet`, nothing done,
+ * until task 72 acts on them.
  *
  * Never rejects (2.5): an action that is not well formed is refused with one log line (the
  * parser's kind), and an unexpected error is answered `ok: false` and logged by kind (failureKind)
@@ -373,6 +377,10 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'pr-add':
       case 'pr-rm':
         return edit(action);
+      case 'restore':
+      case 'dismiss-restore':
+        // Stage C's restore (plan C, task 72): nothing is done before then.
+        return refusal(NOT_YET);
     }
   }
 

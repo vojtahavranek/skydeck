@@ -150,6 +150,8 @@ export type KvKey =
   | 'window_alarm' // when a used launch token was presented a second time (S2 8.2.2)
   | 'window_launching' // the lock of the one command that starts Edge (S2 5.1)
   | 'attention_seq' // S2 10.2's counter, decimal
+  | 'window_restore_dismissed' // the earlier boot whose restore offer the user dismissed (S2 12.7, plan C9)
+  | 'window_pages_open' // "1" while the server has pages connected (plan C20)
   // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
   // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
   // version wrote); one per session id.
