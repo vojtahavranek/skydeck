@@ -9,10 +9,11 @@
  * FIELD_UNITS; nothing bounds how many pull requests a row has.
  *
  * Imports (plan 2.1): values only from this directory and `text`'s `sanitize`; types from
- * `sessions`.
+ * `sessions` and `protocol.ts`.
  */
 import type { ListRow } from '../../../sessions/list.ts';
 import { sanitize } from '../../../text/sanitize.ts';
+import type { SearchChip } from '../../protocol.ts';
 
 /** E3. */
 export const MAX_WORDS = 16;
@@ -25,8 +26,8 @@ export const ID_PREFIX_MIN = 4;
 /** E9: the most ranges foundIn gives. */
 export const MAX_FOUND = 32;
 
-/** E4 (task 96 moves this type into protocol.ts, unchanged, and imports it from there). */
-export type SearchChip = 'running' | 'open-pr' | 'note';
+/** E4: the chips' values (the type is protocol.ts's); the protocol's parser takes the same three
+ *  (a case of the protocol's tests ties them). */
 export const SEARCH_CHIPS: readonly SearchChip[] = Object.freeze(['running', 'open-pr', 'note']);
 
 /** The first `units` UTF-16 units of `text`, one fewer when the cut would split a surrogate pair. */
