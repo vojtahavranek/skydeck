@@ -81,6 +81,17 @@ CREATE TABLE session_prs (
 );
 
 CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // Migration 2: the SQL of design-step-2.md 10.2, character for character. It only adds a table,
+  // so a reader of schema 1 (an old server until its next write, an old interactive list) still
+  // reads correctly (stage B's plan, B1).
+  `CREATE TABLE attention (
+  session_id      TEXT PRIMARY KEY,
+  turn_ended_seq  INTEGER,  -- order of the latest turn end the server saw (10.3)
+  turn_ended_ns   INTEGER,  -- its time, for display only
+  seen_seq        INTEGER,  -- order of the latest moment the user saw the session (12.4)
+  window_end_seq  INTEGER,  -- order of the latest end of a window terminal holding it, the
+  window_end_ns   INTEGER   -- session then being marked ended-unexpectedly (12.4); its time
+);`,
 ];
 
 export const SCHEMA_VERSION: number = MIGRATIONS.length;

@@ -16,8 +16,9 @@ import {
   lockEventId,
   lockTakenNs,
   readLock,
-  releaseLock,
+  releaseLockOfTake,
   resumeStarted,
+  sameTake,
 } from '../sessions/resume.ts';
 import type { DerivedSession } from '../sessions/types.ts';
 import { sanitize } from '../text/sanitize.ts';
@@ -40,11 +41,9 @@ function runningText(session: DerivedSession): string {
 /**
  * A resume (S2 7.3): the hello's lock must be one skydeck writes; then, on freshly refreshed rows
  * (prepareResumeById's refresh and lookup), checkResumable (it throws its refusal), and the
- * session's lock in the store must still be exactly the hello's — no other skydeck has taken it
- * over, and no refresh has swept it as stale. Ruled by the plan owner (task 21, review 2): the exact
- * value, also against a renewal — a renewal and a take-over of a stale lock with no new event have
- * the same shape. Restore, the one renewer, does not reach a window terminal in stage A (S2 7.3's
- * limit for the stage that brings it).
+ * session's lock in the store must still be of the hello's take (sameTake, C19): the hello's own
+ * value or a renewal of it (restore renews while it waits) — not one another skydeck took over, and
+ * not gone (no refresh has swept it as stale).
  */
 function resumeRefusal(deck: Deck, hello: KeeperHello): string | null {
   const { sessionId } = hello.meta;
@@ -57,8 +56,9 @@ function resumeRefusal(deck: Deck, hello: KeeperHello): string | null {
     throw new RefError(`no session matches '${sanitize(sessionId)}'`, []);
   }
   checkResumable(row, deck.platform.files);
-  if (readLock(deck, sessionId) !== hello.lock) {
-    return `${short(sessionId)}: its resume lock was renewed or taken over`;
+  const stored = readLock(deck, sessionId);
+  if (stored === null || !sameTake(hello.lock, stored)) {
+    return `${short(sessionId)}: its resume lock was taken over`;
   }
   return null;
 }
@@ -80,8 +80,9 @@ function newRefusal(deck: Deck, hello: KeeperHello): string | null {
 
 /**
  * S2 7.3: for a keeper found with started false — refresh, then the guard (checkResumable on the
- * refreshed row; for `new`, no live process holds the id) and the lock (still exactly the hello's
- * `lock`), and the deadline (the clock before `startBy`, as the keeper itself checks it).
+ * refreshed row; for `new`, no live process holds the id) and the lock (still of the take of the
+ * hello's `lock`: that value or a renewal of it, C19), and the deadline (the clock before
+ * `startBy`, as the keeper itself checks it).
  *
  * Never throws: a refusal of the guard is the reason (its message); a failure while checking (the
  * store, /proc) is "cannot check whether <short> may start (<the failure>)" — nothing is started
@@ -121,13 +122,14 @@ export function decideFoundKeeper(
 /**
  * S2 7.8: after an exit, when the session never reported a start for this launch (ingestSpool
  * first, then resumeStarted with the lock's time and event id; for `new`, no event of the id):
- * release the lock when it is still the hello's, and for `new` delete the meta row prepareNew wrote
- * (only while it is unchanged since: its update time is still its creation time).
+ * release the lock when it is still of the hello's take (releaseLockOfTake: the hello's value or a
+ * renewal of it, C19), and for `new` delete the meta row prepareNew wrote (only while it is
+ * unchanged since: its update time is still its creation time).
  *
  * For every exit of a terminal, started or not (ruled by the plan owner, task 21, review 2: what
  * the exit and the store say decide, not `hello.started`, which a hello from before T has false).
- * A resume whose hello carries no lock skydeck wrote took none: nothing is released; a lock that is
- * no longer exactly the hello's (taken over, or renewed: S2 7.8's limit) is left alone. Unlike
+ * A resume whose hello carries no lock skydeck wrote took none: nothing is released; a lock another
+ * skydeck took over is left alone. Unlike
  * settleFailedLaunch this does not depend on a printed command: the window shows none (S2 11.2,
  * ruled), and the ended terminal offers Resume itself (S2 7.8). Throws what the store throws.
  */
@@ -156,6 +158,6 @@ export function settleEndedTerminal(deck: Deck, hello: KeeperHello): void {
     return;
   }
   if (!resumeStarted(store, sessionId, takenNs, lockEventId(lock))) {
-    releaseLock(deck, sessionId, lock);
+    releaseLockOfTake(deck, sessionId, lock);
   }
 }
