@@ -13,7 +13,7 @@ import {
 import type { FoundFlag } from '../claude/launch.ts';
 import { isSessionId } from '../claude/live.ts';
 import { ResumeRefusedError, UsageError } from '../platform/errors.ts';
-import { NS_PER_SECOND } from '../platform/time.ts';
+import { NS_PER_MS, NS_PER_SECOND } from '../platform/time.ts';
 import type { Files, Ns } from '../platform/types.ts';
 import type { Store } from '../store/store.ts';
 import type { KvKey } from '../store/types.ts';
@@ -107,6 +107,7 @@ const STATE_CHANGED = "the session's state changed while preparing; run the comm
  * What a lock's kv value holds: the time it was taken, and the session's latest event id at that
  * moment (`<time>:<id>`; id 0 when the session had no event, which every event id exceeds). The time
  * alone is a lock an earlier skydeck wrote: it keeps the rule of that version (no id, exact time).
+ * The last six digits of a renewed lock's time are its take's mark, not time (C19, lockMark).
  */
 interface LockValue {
   takenNs: Ns;
@@ -116,6 +117,18 @@ interface LockValue {
 
 function lockValue({ takenNs, afterEventId }: LockValue): string {
   return afterEventId === null ? `${takenNs}` : `${takenNs}:${afterEventId}`;
+}
+
+/**
+ * How many marks there are (C19): 1 to 999,999, the sub-millisecond part of a lock's time, which
+ * skydeck's clock (milliseconds) leaves 0 in every lock acquireLock writes.
+ */
+const MARKS = 999_999n;
+
+/** The mark of a lock's time (lockMark). */
+function markOf(takenNs: Ns): Ns {
+  const digits = takenNs % NS_PER_MS;
+  return digits !== 0n ? digits : 1n + ((takenNs / NS_PER_MS) % MARKS);
 }
 
 /** The lock a kv value holds; null when it is not one skydeck writes. */
@@ -129,6 +142,15 @@ function parseLock(value: string): LockValue | null {
 }
 
 /**
+ * A lock's time read to the millisecond (ruled for C19): without its last six digits, which are a
+ * renewal's mark and not time. Every age, deadline and start check counts from it, so a renewal's
+ * mark moves none of them (an age from the whole value would be up to 1 ms short).
+ */
+function msOf(takenNs: Ns): Ns {
+  return takenNs - (takenNs % NS_PER_MS);
+}
+
+/**
  * The event id the lock value records (the session's latest event when the lock was taken; 0 when
  * the session had none): only a start event with a greater id, recorded after the lock, can release
  * it. Null for a lock an earlier skydeck wrote (the time alone) and for a value that is not a lock.
@@ -137,9 +159,13 @@ export function lockEventId(value: string): number | null {
   return parseLock(value)?.afterEventId ?? null;
 }
 
-/** The time the lock value records (when it was taken or last renewed); null for a value that is not a lock. */
+/**
+ * The time the lock value records (when it was taken or last renewed), to the millisecond: a
+ * renewal's mark (lockMark) is not time. Null for a value that is not a lock.
+ */
 export function lockTakenNs(value: string): Ns | null {
-  return parseLock(value)?.takenNs ?? null;
+  const lock = parseLock(value);
+  return lock === null ? null : msOf(lock.takenNs);
 }
 
 /**
@@ -166,14 +192,15 @@ function freshAge(store: Store, sessionId: string, value: string, nowNs: Ns): Ns
   if (lock === null) {
     return null; // skydeck never wrote it
   }
-  const ageNs = nowNs - lock.takenNs;
+  const takenNs = msOf(lock.takenNs); // a renewal's mark is not time
+  const ageNs = nowNs - takenNs;
   // A lock from far in the future cannot be from this clock: it would block for as long. A start
   // releases the lock only when it was stored after the lock was taken: one stored before it, but
   // dated after it because the clock was ahead then, is not the resume's own (resumeStarted).
   if (
     ageNs >= LOCK_TTL_NS ||
     -ageNs >= LOCK_TTL_NS ||
-    resumeStarted(store, sessionId, lock.takenNs, lock.afterEventId)
+    resumeStarted(store, sessionId, takenNs, lock.afterEventId)
   ) {
     return null;
   }
@@ -266,11 +293,12 @@ export function readLock(deck: Deck, sessionId: string): string | null {
 
 /**
  * In one store transaction: when the session's lock still holds `ours` (the value this process
- * wrote), sets its time to the clock's, keeping the event id it records (only a start stored after
- * the lock was first taken releases it), and returns the new value; otherwise — another skydeck
- * took the lock over after it went stale, or it is gone — changes nothing and returns null. A
- * caller that waits longer than LOCK_TTL_NS for the session to start renews its lock while it
- * waits.
+ * wrote), sets its time to the clock's, to the millisecond, plus the mark of `ours` in its last six
+ * digits (C19: the renewal is of the same take, sameTake), keeping the event id it records (only a
+ * start stored after the lock was first taken releases it), and returns the new value; otherwise —
+ * another skydeck took the lock over after it went stale, or it is gone — changes nothing and
+ * returns null. A caller that waits longer than LOCK_TTL_NS for the session to start renews its lock
+ * while it waits. An older skydeck reads the value as a lock renewed less than 1 ms later.
  */
 export function renewLock(deck: Deck, sessionId: string, ours: string): string | null {
   const key = lockKey(sessionId);
@@ -280,7 +308,10 @@ export function renewLock(deck: Deck, sessionId: string, ours: string): string |
     if (lock === null || store.getKv(key) !== ours) {
       return null;
     }
-    const value = lockValue({ ...lock, takenNs: platform.clock.nowNs() });
+    const value = lockValue({
+      ...lock,
+      takenNs: msOf(platform.clock.nowNs()) + markOf(lock.takenNs),
+    });
     store.setKv(key, value);
     return value;
   });
@@ -296,6 +327,61 @@ export function releaseLock(deck: Deck, sessionId: string, ours: string): boolea
   const { store } = deck;
   return store.transaction(() => {
     if (store.getKv(key) !== ours) {
+      return false;
+    }
+    store.deleteKv(key);
+    return true;
+  });
+}
+
+/**
+ * The take a lock value belongs to (C19): its last six digits when they are not 0 (a renewal keeps
+ * the mark there), else 1 + (its milliseconds mod 999,999) — every lock acquireLock writes, whose
+ * clock is skydeck's (milliseconds) and leaves those digits 0. Always 1 to 999,999. Null for a value
+ * that is not a lock skydeck writes.
+ */
+export function lockMark(value: string): number | null {
+  const lock = parseLock(value);
+  return lock === null ? null : Number(markOf(lock.takenNs));
+}
+
+/**
+ * Whether two lock values are of one take (C19): both record an event id, the same one, and the
+ * same mark — a lock and its renewals are; a take-over (a new acquireLock, a new millisecond) is
+ * another take. Two different values whose last six digits are both 0 are two takes whatever their
+ * marks (ruled): only acquireLock writes such a time, renewLock never does — so a take-over at a
+ * millisecond ≡ the take's (mod 999,999) is told apart too; a renewal of that one is not (C19's
+ * named limit). A value without an event id (an earlier skydeck's) is of one take only with itself,
+ * and a value that is not a lock skydeck writes is of none.
+ */
+export function sameTake(a: string, b: string): boolean {
+  const first = parseLock(a);
+  const second = parseLock(b);
+  if (first === null || second === null) {
+    return false;
+  }
+  if (first.afterEventId === null || second.afterEventId === null) {
+    return a === b;
+  }
+  if (a !== b && first.takenNs % NS_PER_MS === 0n && second.takenNs % NS_PER_MS === 0n) {
+    return false; // two values acquireLock wrote: two takes
+  }
+  return (
+    first.afterEventId === second.afterEventId && markOf(first.takenNs) === markOf(second.takenNs)
+  );
+}
+
+/**
+ * In one store transaction: removes the session's lock when it is of the take of `taken`
+ * (sameTake); whether it did. For a holder of an older value of that take (a keeper's spec): the
+ * lock it took, or a renewal of it that restore wrote since — never one another skydeck took over.
+ */
+export function releaseLockOfTake(deck: Deck, sessionId: string, taken: string): boolean {
+  const key = lockKey(sessionId);
+  const { store } = deck;
+  return store.transaction(() => {
+    const value = store.getKv(key);
+    if (value === null || !sameTake(taken, value)) {
       return false;
     }
     store.deleteKv(key);

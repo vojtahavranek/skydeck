@@ -226,7 +226,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/platform/` | New interfaces: detached processes with a given environment, signals, TCP and unix sockets, a one-shot timer, random bytes, a process's parent pid (4.3). `paths.ts`: the runtime directory (4.2). `config.ts`: the `window` keys (16.4) in A; the value `"window"` of `terminal` in C. | A, C |
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value, the start deadline and the label; the `Terminal` names gain `window` (11.1, 11.2). | A |
-| `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). | A |
+| `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). In C, a renewal of a resume lock keeps the mark of its take in the last six digits of the lock's time, which are then not time (a lock's time is read to the millisecond); `sameTake` and `releaseLockOfTake` tell a renewal from a take-over (design 7.6; 7.3, 7.8). | A, C |
 | `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). | C |
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
@@ -886,14 +886,15 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   it has just run the guard and taken the lock (11.2). A server that **finds** such a keeper —
   after a restart, in `<runtimeDir>/terms/` — has not: before `G` it runs the guard again on
   freshly refreshed rows (`prepareResumeById`'s refresh and `checkResumable`, design 7.6) and
-  checks that the session's resume lock in the store is still exactly the spec's `lock` (no other
-  skydeck has taken it over); for a new session, that no live process holds the session id. When
-  all holds and the deadline has not passed, it sends `G`; otherwise `N` with the reason, which the
-  window shows on the terminal ("not started: <reason>"). The lock is compared exactly: a renewal and
-  a take-over of a stale lock with no new event look alike. Known limit, for the stage that brings
-  restore into the window: restore renews its locks, so a restored keeper whose hello comes late, or
-  after a reconnect, is refused ("its resume lock was renewed or taken over"; ruled by the plan
-  owner, stage A's plan task 21).
+  checks that the session's resume lock in the store is still of the take of the spec's `lock` —
+  that value, or a renewal of it (restore renews its locks while it waits) — and not one another
+  skydeck has taken over (design 7.6's mark of a take: same event id, same mark, and never two
+  different values a take wrote); for a new session, that no live process holds the session id.
+  When all holds and the deadline has not passed, it sends `G`; otherwise `N` with the reason, which
+  the window shows on the terminal ("not started: <reason>"; for the lock, "its resume lock was
+  taken over"). So a restored keeper whose hello comes late, or after a reconnect, is started. A
+  renewal an older skydeck wrote carries no mark and is refused as taken over, the cautious side
+  (stage C's plan, C19, task 80; it replaces stage A's exact comparison, ruled in its task 21).
 - **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
   passed with output since the last park, and for every terminal when it stops (5.5). A park names
   the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
@@ -1041,17 +1042,19 @@ The server, on `exit`:
   program may still run is never dropped this way;
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
-  and the session's lock is still the one this launch took, releases that lock, and for a new
+  and the session's lock is still of the take this launch made (the lock it took, or a renewal of
+  it by restore: design 7.6's mark), releases that lock, and for a new
   session removes the label and group it stored (design 7.6, 7.7): nothing runs, and the bar's
   Resume must not be refused for a minute. This differs **on purpose** from `settleFailedLaunch`,
   which releases only when no command could be printed (a printed command may yet be run by hand):
   the window prints nothing for the user to run (11.2), and the bar offers Resume itself. It is done
   for every exit, also of a terminal whose program was never started (an `X` with `notStarted`, a
   keeper lost before `T`); a new session's label and group are removed only while they are as
-  `prepareNew` stored them (principle 6). Known limit, for the stage that brings restore into the
-  window: restore renews its locks, so the store's lock is then no longer exactly the one the
-  terminal took, and such a lock is not given back (it expires; 7.3 has the other half). Lock values
-  then need a mark that a renewal keeps and a take-over changes.
+  `prepareNew` stored them (principle 6). A lock another skydeck took over is left alone (stage C's
+  plan, C19, task 80; 7.3 has the other half). Known limit (design 7.6): a take-over at a
+  millisecond congruent to the take's (mod 999,999, about one in a million) by a restore that then
+  renews it reads as a renewal of this launch's take; if this terminal ends while that restore
+  waits, the restore's lock is given back and its next renewal finds it gone.
 
 A keeper whose connection ends without `exit` is **lost** only when its process is dead by design
 5.5's rule (its `.pid` line) or its socket refuses connections: then its program got SIGHUP
@@ -1386,12 +1389,12 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null). |
-| `notify` | `sessionId`, `title`, `reason` (13). |
+| `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. |
 | `bye` | `reason` (5.5). |
 
@@ -1662,7 +1665,18 @@ decided by the `*_seq` columns, never by times: `statusUpdatedAt` is Claude Code
 `seen` would be the server's, and the wall clock of a WSL machine steps back (about 1.8 s every
 32 s, design 7.6), so a short turn that ended right after a look could seem to have ended before
 it. Each write takes the next value of the `kv` counter `attention_seq` in the same transaction.
-The times are kept only to show ("finished 2m ago").
+The times are kept to show ("finished 2m ago") and for one test of identity: `turn_ended_ns` is
+also compared with the time the session's idle status began, and a turn end older than that status
+belongs to an earlier run (12.4). Within one run the two are the same value, so no order is ever
+read from two clocks.
+
+**The next value** (stage B's plan, B2) is one more than the larger of `attention_seq` and every
+`*_seq` stored in `attention`: a counter that is missing, or whose value is not a canonical decimal
+whole number below 2^53 (`abc`, `09`, ` 9 `, `1e3`), counts as 0, and after the write it holds the
+last value given. So a counter that was deleted, damaged or set back can never make a later
+observation look earlier than a `seen`. One write is one transaction, and inside it each session's
+observations take their values in the order turn end, window end, seen (B3): a turn that ends while
+the user looks at the session is seen after it ended, never "finished".
 
 These are skydeck's own observations, not the user's data (design principle 6); a row is written
 the first time one of them is known and never removed.
@@ -1682,17 +1696,30 @@ the first time one of them is known and never removed.
 ### 10.3 When a turn ends
 
 A turn ends when a holder's live-session file changes its `status` from `busy` or `waiting` to
-`idle`, the file still naming the same session and the same process (pid and process start).
-The server sees that at its one-second look and records, for that session, the next
-`attention_seq` as `turn_ended_seq` and the file's `statusUpdatedAt` (else the time it saw the
-change) as `turn_ended_ns`. When the session is being seen at that moment (12.4), the same write
-sets `seen_seq` to a later value, so a turn that ends in front of the user is never "finished".
+`idle`, the file still naming the same session and the same process (pid and process start). The
+server sees that at its one-second look and records, for that session, the next `attention_seq` as
+`turn_ended_seq` and, as `turn_ended_ns`, the idle file's status time: its `statusUpdatedAt`, else
+its `updatedAt`, else the time the server saw the change. When the file has one of the two, that is
+exactly the time the look keeps for the file (stage B's plan, contract 2.5's `sinceNs`), so that it
+can be compared for equality with the status time the session shows (12.4), never across two clocks.
+When the session is being seen at that moment (12.4), the same write sets `seen_seq` to a later
+value, so a turn that ends in front of the user is never "finished".
 
 `busy` to `waiting` is not a turn end (a dialog opened inside the turn). A file that names another
 session than at the last look (`/clear`) starts over. A look that cannot read a file (it is being
 rewritten, or the read fails) keeps the last status seen as the baseline; only a file read whole
 and parsed moves it. The first look after the server starts only sets the baseline: a turn that
 ended while no server was running is not recorded (a known limit; 12.4).
+
+The look keeps one **baseline per pid** (stage B's plan, B4): the last file of that pid read whole,
+parsed and trusted (design 5.5: its `pid` and `procStart` are a running process). A file not read at
+a look — being rewritten, unreadable, untrusted, or `/proc` could not be read — keeps its baseline;
+a file read is the new one. A baseline is dropped when its pid is gone and no file of it was read at
+that look: `/proc` says the pid has no process, or a process with another start (a pid taken by
+another program, whose baseline would otherwise keep a dead holder's `waiting`, so that the session
+would ask until that program ends). The statuses attention reads (12.4) are the baselines', so a
+file being rewritten does not make a mark blink. The rule is pure, `isTurnEnd` and `lookAt` of
+`src/claude/terminal.ts` (4.3); the server reads the files and asks `/proc`.
 
 **Decided against: a `Stop` hook** (design 16 had planned turn hooks for step 2). The live-session
 file already says when a turn ends, for every session, including those running outside the window,
@@ -1868,6 +1895,12 @@ switcher search done ones too (12.8).
 The title bar shows the counts, e.g. `● 3 need you · 3 working · 2 idle`, and the window title is
 `(3) skydeck` while 3 sessions need you, so the taskbar shows it.
 
+The `need you` count is every listed session that needs you (12.4), whatever the filter or the
+fold; a session that needs you is counted there and in no other count, so that the parts add up
+(3 + 3 + 2 above). The window title's `(3)` is the same count. Which rows need you, and in which
+order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
+rule (4.3; stage B, plan B7).
+
 ### 12.2 Rows
 
 - A running session has two lines: the first as below, the second its state line (`working 4m`,
@@ -1929,13 +1962,65 @@ A session **needs you** for one of three reasons, in this order:
 3. **finished**: `turn_ended_seq` is greater than `seen_seq`, and the session is running and idle.
    It ends when seen or when the next turn starts.
 
+How the view model judges them (stage B, plan B5, B6, B13). "Running" is the row's state: anything
+but not running (an ask and a finished turn need it; an end of the window does not). A session with
+several holders (a duplicate) has one status: `waiting` when any holder waits, else `busy` when any
+is busy, else `idle` when any is idle, else the first holder's; of several holders with that status,
+the first one's detail and time. A session running without a readable live file is not finished; nor
+is a turn end of an earlier run: "finished" also needs that the idle status the row shows did not
+begin after the recorded turn end (`turn_ended_ns` and the status time both known, the status time
+later). Within one run the look records the file's status time as `turn_ended_ns` and keeps that
+file, so the two are the same value while the session stays idle; a session resumed elsewhere days
+after a turn end nobody saw is therefore not `finished · not seen · 3d`, and nothing notifies. Its
+limits: a live file with `updatedAt` but no `statusUpdatedAt`, rewritten while idle, loses its
+"finished"; a turn that starts and ends between two looks is not recorded, and its later status time
+drops the older mark (as the next turn's start does); and, not closed, `/resume X` inside a process
+that has been idle since before X's last turn end keeps its status time, so X is still "finished".
+An end counts while its `*_seq` is greater than `seen_seq`, or no `seen_seq` is stored; an equal
+value is not later. The detail of an ask is the `waitingFor` sanitised (design 7.4), trimmed, and
+cut to 120 UTF-16 units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit,
+and the list is sent whole); one that is blank once sanitised (empty, or only white space) is no
+detail. The time a row shows is the file's `statusUpdatedAt` (else `updatedAt`) for an ask,
+`window_end_ns` for an end of the window, `turn_ended_ns` for a finished turn. Ctrl+Shift+J's order,
+in full: those that ask by that time, the longest-waiting first and an unknown time last; then those
+that ended by `window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties
+by session id.
+
 Seen is a **condition that holds**, not a moment: a session **is being seen** while it is the
 selected one in a window that has focus, from 1.5 seconds after it was selected; typing into its
 terminal makes it seen at once. While it holds, the server sets `seen_seq` to the next counter
-value (10.2) at every tick — written at most once per 5 seconds per session, and always in the
-same write as a turn end that happens meanwhile (10.3) — so a turn that ends in front of the user
-never shows "finished". Order is by the counter, never by clock times (10.2). A turn that ended
-while no server ran is not recorded (10.3), so it shows no "finished".
+value (10.2) when that clears a mark, and always in the same write as a turn end that happens
+meanwhile (10.3) — so a turn that ends in front of the user never shows "finished". Order is by
+the counter, never by clock times (10.2). A turn that ended while no server ran is not recorded
+(10.3), so it shows no "finished".
+
+**When the hold starts, what typing is, when `seen` is written** (stage B's plan, B9; ruled by the
+plan owner). A page holds a session from the moment that page has focus with that session selected;
+any change of either starts the 1.5 s again, so a window that comes back to the front sees after
+1.5 s too, and focus lost ends the hold at once. Several windows each hold their own; a session held
+in any of them is seen. Typing is an `input` that is not `binary` and is not a report a terminal
+sends by itself, told by its shape: focus reports (`ESC [ I`, `ESC [ O`), SGR mouse reports (`ESC [ <`
+digits and `;`, then `M` or `m`) and the answers to queries (device attributes, cursor position and
+status reports, mode reports, `CSI t`, the colours of OSC 4, 10 and 11, DECRQSS). A program that
+asks for focus reports (9.2; Claude Code is expected to, not yet checked with the real program) gets
+one at every click, chord and return to the window, and a mouse report is no key, so none of them is
+typing (else every selection would clear its mark at once). The page swallows the queries (9.3), so
+no answer arrives today; were one to come, it is still not typing (a false "typing" clears a mark
+unread, a false "not typing" costs the user 1.5 s), and a key whose encoding has a report's shape,
+such as Shift+F3 (F3 with any modifier has the bytes of a cursor position report), does not count as
+typing either: the hold's 1.5 s apply. An OSC or DCS answer counts only when it is whole in one
+message, and a paste holds no ESC (9.1) but its two brackets. The user's own acts on a terminal
+without a key are typing: the wheel over a program in the alternate screen that asked for no mouse
+reports and an Alt+click, both arrow keys, and an empty paste. Typing into the selected session's
+terminal of a focused window completes the hold at once and it holds as long as the selection and
+the focus do; typing into another terminal, or into the selected one's while the window has no
+focus, makes the session it shows seen once. A `seen` is written only when it clears a mark — a hold
+completes, a typing comes, or a mark of a session already being seen becomes known — and always in
+the write of a turn end or window end of that session while the hold lasts; there is **no periodic
+`seen` write**: nothing writes to the store every few seconds because a window has focus. It is
+written only for a session among the list's rows, so that a selection naming no session leaves no
+row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
+clock does not move).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
 then those that ended; then those that finished, oldest first. Pressed again it goes on; after the
@@ -1975,21 +2060,23 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 
 **The ticket link** (asked for by the user on 2026-11-15; the details ruled by the lead that day).
 The group stays only a group (design 7.1), and nothing in the core depends on one ticket system
-(design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the
-group holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`,
-`_` and `.` and starting with a letter or a digit (the default pattern matches nothing else) —
-the address is `ticketUrl` with `{key}` replaced by exactly that text, as 9.6's rule
-re-serialises it, and only while its scheme, user name, password and host are those of
-`ticketUrl` itself. The chip then shows that it is a link (an arrow after the key, underlined),
-its tooltip is the address, and a click on it that selected no text opens it in the user's own
-Edge profile, as any link (9.6: `act open-link`, which the server checks again). Without a link
-the chip is plain text. The chip never edits: the ✎ beside it and `g` edit the group, with and
-without a link, and while there is no group the dashed `+ group` sets one. So nothing a program
-wrote into a title can add a host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`,
-`%` or white space, and the URL parser, not the text, decides that `{key}` stands after the host
-(16.4). The address reaches the page as a string of `list` and is shown only as text; it never
-becomes markup. skydeck reads nothing from the ticket system: no API, no login. `skydeck show`
-prints the address as `ticket:` after `group:` (its `--json` is unchanged).
+(design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the group
+holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`, `_` and
+`.` and starting with a letter or a digit (the default pattern matches nothing else) — the address
+is `ticketUrl` with `{key}` replaced by exactly that text, as 9.6's rule re-serialises it, and only
+while it has no user name or password and its host is the one the parser reads in `ticketUrl` with a
+stand-in for `{key}`, and while `ticketUrl` holds no white space or control character and leaves no
+percent-escape unfinished right before `{key}` (a key would finish it: `…/%2{key}` with `e.` makes
+`..`). The chip then shows that it is a link (an arrow after the key, underlined), its tooltip is
+the address, and a click on it that selected no text opens it in the user's own Edge profile, as any
+link (9.6: `act open-link`, which the server checks again). Without a link the chip is plain text.
+The chip never edits: the ✎ beside it and `g` edit the group, with and without a link, and while
+there is no group the dashed `+ group` sets one. So nothing a program wrote into a title can add a
+host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`, `%` or white space, and the URL
+parser, not the text, decides that `{key}` stands after the host (16.4). The address reaches the
+page as a string of `list` and is shown only as text; it never becomes markup. skydeck reads nothing
+from the ticket system: no API, no login. `skydeck show` prints the address as `ticket:` after
+`group:` (its `--json` is unchanged).
 
 ### 12.6 The right side
 
@@ -2459,7 +2546,7 @@ New keys, all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
-| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` with the same scheme, user name, password and host, none of which holds the key: the parser decides where the key stands, not the text (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
+| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
 

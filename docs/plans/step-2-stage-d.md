@@ -221,15 +221,19 @@ export function linkToOpen(url: string): string | null;
 // src/sessions/ticket.ts — task 35; pure
 /** S2 12.5's ticket link. The key is the text `groupPattern` matches in `group`, only when it
  *  matches /^[A-Za-z0-9][A-Za-z0-9._-]*$/. The address is linkToOpen of `ticketUrl` with its one
- *  `{key}` replaced by the key, and only when the scheme, user name, password and host the parser
- *  reads in it are those of `ticketUrl` read with a sample key. Null when `ticketUrl` or `group`
- *  is null, nothing matches, the match is not such a key, linkToOpen refuses, or those parts
- *  differ. */
+ *  `{key}` replaced by the key, and only when `ticketUrl` holds no white space or control
+ *  character and no `%`, or `%` and one hex digit, right before `{key}`, and the parser reads
+ *  `ticketUrl` with a stand-in that no key can be (`_key_`) in place of `{key}` without a user
+ *  name or password and with the address's host. Null when `ticketUrl` or `group` is null,
+ *  nothing matches, the match is not such a key, linkToOpen refuses, or one of those does not
+ *  hold (ruled on #77, review 2). */
 export function ticketAddress(group: string | null, groupPattern: string, ticketUrl: string | null): string | null;
 
 // src/platform/config.ts — task 35
-// Config gains   ticketUrl: string | null   (DEFAULT_CONFIG: null), checked as S2 16.4 says: the
-// URL parser decides, with two different sample keys, never a test of the text.
+// Config gains   ticketUrl: string | null   (DEFAULT_CONFIG: null), checked as S2 16.4 says: where
+// the key stands among the address's parts is decided by the URL parser, with two different sample
+// keys, never by the text (ruled on #77: the text's rules are its length, its characters, `{key}`
+// once, and no escape left unfinished right before it).
 
 // src/sessions/meta.ts — task 36; moved from src/cli/notes.ts, behaviour unchanged (D10)
 export function keptNotePath(deck: Deck, sessionId: string): string; // <stateDir>/note-<id>.md
@@ -432,34 +436,62 @@ ticket's address, and `show`'s line. The window's chip uses it from task 36 on (
 
 **Behaviour.** The check of S2 16.4, decided by the URL parser: `ticketUrl` is null, or a string of
 at most 2,048 characters with `{key}` exactly once and no white space, control character (S2 2:
-U+0000–U+001F, U+007F, U+0080–U+009F), `"` or backslash, that parses (`URL.parse`) with `KEY-1`
-and with `OTHER-2` in place of `{key}` into `http:` or `https:` with the same protocol, user name,
-password and host both times, none of which holds the sample key (compared in lower case: the
-parser lowercases a host). Anything else is the one message `<file>: "ticketUrl" must be null or
-an http or https address with {key} once, after its host`. `ticketAddress` as 2.3 says. `show`
-prints `ticket: <address>` after `group:` when there is one; `--json` is unchanged (D16).
+U+0000–U+001F, U+007F, U+0080–U+009F), `"` or backslash, with no `%`, or `%` and one hex digit,
+right before `{key}` (a key would finish that escape: `%2{key}` with `e.` makes `..`, with `6x` an
+escaped `&`; ruled on #77, review 2), that parses (`URL.parse`) with `KEY-1` and with `OTHER-2` in
+place of `{key}` into `http:` or `https:` without a user name or password and with the same host
+both times: a host the key went into would differ. (Ruled on #77: the second condition of review A's
+F1, "none of which holds the sample key", is dropped — a fuzz of 28 million different patterns in
+Node 24's parser found nothing it refuses that the first accepts but a pattern whose own host holds
+a sample key's text, `https://key-1.example.net/{key}`, a false refusal; a user name or password is
+refused, as `show` would print it and Edge's command line carry it, which leaves the host as the one
+part compared.) Anything else is the one message `<file>: "ticketUrl" must be null or an http or
+https address with {key} once, after its host`. `ticketAddress` as 2.3 says: it holds the rules of
+the text by itself, and gives no link for a `ticketUrl` with white space or a control character,
+since the parser drops tabs and line breaks before it reads (`%2<tab>{key}`). `show` prints `ticket:
+<address>` after `group:` when there is one; `--json` is unchanged (D16).
 `test/window/windows.test.ts` keeps testing `linkToOpen` through the re-export, unchanged.
 
 **Tests** (platform: `testPlatform`)
 - Accepted: null; `https://example.atlassian.net/browse/{key}`; `http://host:8080/t?id={key}`;
-  `https://host/#/{key}`; `https://Example.net:443/{key}`.
-- Refused with the message, each a named case: `https:///{key}/x`, `https:////{key}`,
+  `https://host/#/{key}`; `https://Example.net:443/{key}`; a host of the pattern's own that holds
+  a sample key's text, `https://key-1.example.net/{key}` (ruled on #77).
+- Refused with the message, each a named case (also `%{key}`, `%2{key}`, `%a{key}`, `%A{key}`,
+  `?id=%2{key}`, `#%2{key}`, while `?jql=key%3D{key}` and `%25{key}` are accepted; ruled on #77):
+  `https:///{key}/x`, `https:////{key}`,
   `https:/{key}/x`, `https:{key}`, `https:///{key}@h/x` (review A's five: the parser reads the key
   as the host or the user name); `https://{key}.example.net/`; `https://user@{key}/`;
   `https://host{key}/`; `https://{key}@host/x`; `javascript:{key}`; `file:///{key}`;
   `ftp://host/{key}`; no `{key}`; two; a `"`, a backslash, a space, a tab, an escape character;
-  2,049 characters; a number.
+  2,049 characters; a number; a user name, a password, both (ruled on #77).
 - `ticketAddress`: the default pattern on the group of a title `ABC-12 fix` →
   `https://example.atlassian.net/browse/ABC-12`; a group set by the user `ABC-12` and `ABC-12
   cleanup`; `https://Example.net:443/{key}` → `https://example.net/ABC-12` (what `linkToOpen`
   gives); no match, `ticketUrl` null, `group` null → null. With the pattern `^\S+` a group of each
   of `evil.com/x`, `a?b=1`, `a#b`, `u@h`, `a:b`, `..`, `.x`, `-x`, `%2e%2e`, `ÄBC-1` → null. An
   address that would be over 2,048 characters → null. A group taken from the title that a
-  look-ahead in `groupPattern` no longer matches on its own → null (no link; safe).
+  look-ahead in `groupPattern` no longer matches on its own → null (no link; safe). `ABC-12`, the
+  default pattern and each of review A's five refused patterns above (`https:///{key}/x`, …) →
+  null: `ticketAddress` holds the host by itself, whatever `ticketUrl` it is given (ruled on
+  review A's re-check of a03677a); also with the keys `KEY-1`, `OTHER-2`, `abc-12`, `evil.com`,
+  `x`, `a`, `e`, `s`, `1`, `0`, `8443`, `a_b` under `^\S+`, and for `https://host:{key}/x`,
+  `https://[::{key}]/x`, `http{key}://host/x` (no key can be the stand-in). A `ticketUrl` with a
+  user name or password of its own → null. An escape left unfinished right before `{key}` (ruled
+  on #77, review 2): `…/browse/%2{key}` with a title `e. retry the upload` under `^\S+`;
+  `%2{key}` with `e`, `E`, `e.`, `FOO-1`; `%{key}` with `2e`, `2E`, `2e.`, `41`; `.%2{key}`,
+  `.%{key}`, `%2e%{key}`, `?id=%2{key}` with `6x`, `#%2{key}`, `%a{key}`, `%A{key}` → null;
+  `%3D{key}`, `%25{key}`, `%7E{key}` → the link. A key `.` or `..` in a path → null; `ABC-12` in a
+  path, a query and a fragment, and beside a `_key_` of the pattern's own text → the link. White
+  space or a control character anywhere in `ticketUrl` (a tab or line break inside `%2{key}`, a
+  space, a leading space, a trailing line break, ESC, DEL, U+009B, U+00A0, a tab in the host) →
+  null.
+- The key's allow-list: every printable ASCII character outside `[A-Za-z0-9._-]`, `ä`, U+00A0 and
+  U+2028 inside a key → null (ruled on #77, review 2).
 - `formatShow` (`test/cli/output.test.ts`): the `ticket:` line after `group:`, sanitised, and none
   for `null`. `show` (`test/cli/commands/show.test.ts`, the sandbox): with `ticketUrl` set and a
-  ticket-key group the `ticket:` line; without either, none. These cases are what holds the line;
-  nobody runs `show` by hand (task 39).
+  ticket-key group the `ticket:` line; without either, none; with a `groupPattern` of the
+  configuration's own, the key it finds (ruled on #77, review 2). These cases are what holds the
+  line; nobody runs `show` by hand (task 39).
 
 **Done when:** a wrong `ticketUrl` fails every command with that one line (exit 1), as every key
 of the file; `show` prints the line; `npm run check` passes.

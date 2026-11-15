@@ -19,6 +19,7 @@ import type {
   KeepAlivePayload,
   ListMessage,
   NoticeMessage,
+  NotifyMessage,
   PageMessage,
   PingAnswer,
   PongMessage,
@@ -570,6 +571,7 @@ describe('types (checked by npm run typecheck)', () => {
     t: 'list',
     nowNs: '1700000000000000000',
     counts: { working: 0, waiting: 0, running: 1, starting: 0, elsewhere: 0, notRunning: 1 },
+    needYou: { count: 0, order: [] },
     sections: [
       { name: 'open', folded: false, firstNs: null, lastNs: null, count: 0, rows: [] },
       { name: 'week', folded: false, firstNs: '1', lastNs: '2', count: 1, rows: [ROW] },
@@ -647,6 +649,13 @@ describe('types (checked by npm run typecheck)', () => {
         text: 'skydeck could not refresh the list',
       } satisfies NoticeMessage,
       { t: 'bye', reason: 'stopped' } satisfies ByeMessage,
+      {
+        t: 'notify',
+        sessionId: S1,
+        title: 'ORB-2107 fix',
+        reason: 'asks',
+        detail: 'permission · Bash',
+      } satisfies NotifyMessage,
     ];
     assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);
     assert.deepEqual(
@@ -662,6 +671,7 @@ describe('types (checked by npm run typecheck)', () => {
         'result',
         'notice',
         'bye',
+        'notify',
       ]),
     );
   });

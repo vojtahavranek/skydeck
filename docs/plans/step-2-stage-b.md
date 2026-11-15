@@ -62,8 +62,8 @@ Task 0 is `main` at 9c5cbfb (stage A complete) with this plan merged.
 
 | # | Task | Depends on | Wave | Shared files (section 1c) | Size (code + tests) |
 |---|---|---|---|---|---|
-| 50 | Migration 2 and the store's attention | 0 | 1 | `src/store/types.ts` (one line); `docs/install.md` ("Updating") | ~450 |
-| 51 | Contracts and the view model of attention | 0 (D 34 merged in before its last push) | 1 | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts` | ~500 |
+| 50 | Migration 2 and the store's attention | 0 | 1 | `src/store/types.ts` (one `KvKey` line, two types, and the comment of `schema_version`); `docs/install.md` ("Updating") | ~450 |
+| 51 | Contracts and the view model of attention | 0 (D 34 merged in before its last push) | 1 | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`, `test/window/pages-stream.test.ts` (one line, ruled) | ~500 |
 | 53 | The turn-end rule and seen | 0 | 1 | — | ~350 |
 | 52 | Attention on the server: the look, the writes, the notifier | 50, 51, 53 | 2 | — | ~650 |
 | 55 | The page: marks, the title, Ctrl+Shift+J, notifications | 51; D 37 (ruled: 55 is written on top of it) | 2 | `web/app.js`, `keys.js`, `help.js`, `list.js`, `list-text.js`, `list.css`, `index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts` | ~750 |
@@ -123,8 +123,9 @@ happens at the update, from S2 10.1, 10.2, 16.5 and step 1's `migrate` (`src/sto
   back a moment later, is a second window (stage A's known limit). Even `skydeck window` run first
   is not certain: it migrates when it opens the store, and the old server's next write can fall
   into the moment before the command asks it for its windows. **The order that is certain**
-  (ruled): close the skydeck window, then `git pull`, then `skydeck window` — the sessions live in
-  their keepers and keep running. Migration 2 reaches the user at the first `git pull` after task
+  (ruled): close every skydeck window and tab (also those of `--new-window` and `--print-url`:
+  one page left open is the same race; ruled on review A's re-check), then `git pull`, then
+  `skydeck window` — the sessions live in their keepers and keep running. Migration 2 reaches the user at the first `git pull` after task
   50 is merged, long before stage B is done, so **task 50** writes that order into
   `docs/install.md`, "Updating", in its own pull request (ruled); section 6 and task 56 give the
   same order.
@@ -149,8 +150,8 @@ same as its row here.
 
 | # | Creates | Changes |
 |---|---|---|
-| 50 | `test/helpers/schema1.ts`, `test/store/migration-2.test.ts` | `src/store/migrations.ts`, `src/store/store.ts`, `src/store/types.ts`; `test/store/store.test.ts`; `docs/design-step-2.md` (10.2), `docs/install.md` ("Updating", and the last paragraph of "Updating while the window runs") |
-| 51 | `src/window/view/attention.ts`, `test/window/view/attention.test.ts` | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.3, 12.1, 12.4) |
+| 50 | `test/helpers/schema1.ts`, `test/store/migration-2.test.ts` | `src/store/migrations.ts`, `src/store/store.ts`, `src/store/types.ts` (also the comment of `schema_version`, which says `"1"`: a comment must not state a value this task makes false; ruled on task 50's review 1); `test/store/store.test.ts`; `docs/design-step-2.md` (10.2), `docs/install.md` ("Updating", the last paragraph of "Updating while the window runs", and the second-window sentence of "Known limits of stage A", ruled on task 50's review 2) |
+| 51 | `src/window/view/attention.ts`, `test/window/view/attention.test.ts` | `src/window/protocol.ts`, `src/window/view/build.ts`; `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`, `test/window/pages-stream.test.ts` (one line, ruled); `docs/design-step-2.md` (8.2.3, 12.1, 12.4) |
 | 53 | `src/window/seen.ts`, `test/window/seen.test.ts` | `src/claude/terminal.ts`; `test/claude/terminal.test.ts`; `docs/design-step-2.md` (10.3, 12.4) |
 | 52 | `src/window/attention.ts`, `src/window/notify.ts`, `test/window/attention.test.ts`, `test/window/notify.test.ts` | `docs/design-step-2.md` (10.3, 12.4, 13) |
 | 55 | `web/attention-text.js`, `web/notify.js`, `web/attention.css`, `test/web/attention-text.test.ts`, `test-page/attention.test.ts`, `test-page/helpers/notification.ts` | `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts`; `docs/design-step-2.md` (12.2, 12.4, 13, 17.4) |
@@ -192,7 +193,7 @@ terminals), `src/window/protocol.ts` (B's `AttentionPayload` and `NotifyMessage`
 |---|---|---|
 | `test/store/store.test.ts` | 50 | the migration count becomes 2; the table list of a new database gains `attention`; the schema version's literals (the title at line 152, `'1'` at 163 and 232, and the one `'2'` that means "newer than this build", which becomes `SCHEMA_VERSION + 1`); new cases at the end |
 | `test/window/protocol.test.ts` | 51 | the `LIST` fixture gains `needYou: { count: 0, order: [] }`; the case "an object of each ServerMessage type" gains a `NotifyMessage`; nothing else (D 34 changes the same file's `ROW`) |
-| `test/window/view/build.test.ts` | 51 | new cases at the end; the case that pins the view's files and imports gains `attention.ts` in its file list and `./attention.ts` among the allowed imports (D 34 adds `chip.ts` and `CHIP_ORDER` there: keep both) |
+| `test/window/view/build.test.ts` | 51 | new cases at the end; the case that pins the view's files and imports gains `attention.ts` in its file list and `./attention.ts` among the allowed imports (D 34 adds `chip.ts`, `windowChip` and `CHIP_ORDER` there: keep both) |
 | `test/helpers/pages.ts` | 51, 54 | 51: `defaultList` gains `needYou: { count: 0, order: [] }` (D 34 adds `openedNs` in the same object); 54: `startPages` takes an optional `seen` and passes it on |
 | `test/web/keys.test.ts` | 55 | Ctrl+Shift+J's two rows give `next-attention` instead of `later` B; the "every later key" case (after D 37 only Ctrl+Shift+P and J) keeps only Ctrl+Shift+P |
 | `test/web/list.test.ts` | 55 | new cases at the end (D 34 changes the chip's cases) |
@@ -222,18 +223,18 @@ decision in the design in its own pull request; `—` means it is an implementat
 | # | Decision | Why | Design update |
 |---|---|---|---|
 | B1 | Migration 2 is S2 10.2's SQL character for character, pinned by a test as migration 1 is pinned to design 9.2. It only adds a table. | Readers of schema 1 (stage A's server until its next write, an old interactive list) keep reading correctly (1b). | — |
-| B2 | The counter: each value is one more than the larger of `kv` `attention_seq` (a value that is not a canonical decimal whole number counts as 0) and every `*_seq` of `attention`; `attention_seq` is left at the last value given. | A damaged or deleted counter must never make a later observation look earlier than a `seen`. | 50 (10.2) |
-| B3 | One write (`recordAttention`) is one transaction; inside it each session's observations take their values in the order turn end, window end, seen. | S2 10.3: a turn that ends in front of the user is never "finished" — its seen must be later. | — |
+| B2 | The counter: each value is one more than the larger of `kv` `attention_seq` (a value that is not a canonical decimal whole number counts as 0, and so does one above 2^53 − 1: a damaged counter that numbers could not count on from) and every `*_seq` of `attention`; `attention_seq` is left at the last value given. `recordAttention` throws a RangeError, writing nothing, when the next value would pass 2^53 − 1 (reachable only through a damaged `attention` row or a counter set to exactly 2^53 − 1, ruled on task 50's review 2: a refusal that shows is better than an order silently lost); task 52 treats that throw as any failure of the write that is not "busy" — logged by kind, not kept and retried at every look (ruled on task 50's review 1). | A damaged or deleted counter must never make a later observation look earlier than a `seen`. | 50 (10.2) |
+| B3 | One write (`recordAttention`) is one transaction; inside it each session's observations take their values in the order turn end, window end, seen. | S2 10.3: a turn that ends in front of the user is never "finished" — its seen must be later. | 50 (10.2; ruled on task 50's review 1) |
 | B4 | The look keeps a baseline per pid: the last file read whole, parsed and trusted (`isLiveFileTrusted`). A file not read at a look (rewritten, unreadable, untrusted, or `/proc` cannot be read) keeps its baseline; a baseline is dropped when its pid is gone: `/proc` says it has no process, or a process with another start (a pid taken by another program, whose baseline would otherwise keep a dead holder's `waiting`). The statuses the view reads are the baselines', so a file being rewritten does not make a mark blink. | S2 10.3: "a look that cannot read a file keeps the last status seen"; the baselines must not grow for ever. | 53 (10.3) |
 | B5 | A session with several holders (a duplicate) has one status: `waiting` when any holder waits, else `busy` when any is busy, else `idle` when any is idle, else the first one's. | S2 12.4 speaks of "a holder's live-session file". | 51 (12.4) |
-| B6 | "Finished" needs a holder whose status is `idle`; a session `running` without a readable file is not finished. Ctrl+Shift+J's order: those that ask by their status time (unknown last), then those that ended by `window_end_seq`, then those that finished by `turn_ended_seq`; ties by session id. | S2 12.4: "the session is running and idle"; the longest-waiting and oldest first. | 51 (12.4) |
+| B6 | "Finished" needs a holder whose status is `idle`; a session `running` without a readable file is not finished, and neither is one whose idle status began after the recorded turn end (`turn_ended_ns` and the status time both known, the status time later: a turn end of an earlier run; ruled on task 51's review 2). Ctrl+Shift+J's order: those that ask by their status time (unknown last), then those that ended by `window_end_seq`, then those that finished by `turn_ended_seq`; ties by session id. | S2 12.4: "the session is running and idle"; the longest-waiting and oldest first. | 51 (12.4) |
 | B7 | `list` gains `needYou: { count, order }`: `count` the listed rows that need you, whatever the filter (the title bar's count and `(n) skydeck`); `order` the ids of the rows this page shows that need you, in B6's order. A row that needs you is counted there and in none of `counts`. | The page decides no rule (S2 4.3); the title bar's parts add up, as S2 12.1's example does (3 + 3 + 2). | 51 (8.2.3, 12.1) |
 | B8 | `notify` carries `reason` as the kind (`asks`, `ended`, `finished`) and `detail` (the waiting detail, else null); the page writes the words. | As the list's words are the page's (stage A, A18); S2 8.2.3 names no detail. | 51 (8.2.3) |
-| B9 | Seen is held per page from the moment that page is focused with that session selected; any change of either starts the 1.5 s again (a window that comes back to the front sees after 1.5 s too). Typing into a terminal makes the session that terminal shows seen at once; typing is an `input` that is not `binary` and holds more than focus reports (`ESC [ I`, `ESC [ O`) and SGR mouse reports (`ESC [ < … M` or `m`): `isTyping` (2.5) — a program that asks for focus reports (Claude Code does, S2 9.2) gets one at every click, chord and return to the window, and none of them is typing. A `seen` is written only when a hold completes or a typing comes and it clears a mark, and always in the write of a turn end or window end of that session while the hold lasts; there is no periodic `seen` write (ruled). It is written only for a session among the rows (`rows()`), so that a selection naming no session leaves no row. | S2 12.4 fixes the 1.5 s but not when the hold starts; a `seen` matters only when it clears a mark or goes with an end. Question 4 in section 7. | 53 (12.4) |
+| B9 | Seen is held per page from the moment that page is focused with that session selected; any change of either starts the 1.5 s again (a window that comes back to the front sees after 1.5 s too). Typing into a terminal makes the session that terminal shows seen at once; typing is an `input` that is not `binary` and is not a report a terminal sends by itself, told by its shape — focus reports (`ESC [ I`, `ESC [ O`), SGR mouse reports (`ESC [ < … M` or `m`) and the answers to queries (device attributes, cursor position and status reports, mode reports, `CSI t`, the colours of OSC 4 / 10 / 11, DECRQSS; ruled on review 2 of task 53: the page swallows the queries, S2 9.3, but `isTyping` does not rely on it): `isTyping` (2.5) — a program that asks for focus reports (Claude Code is expected to, S2 9.2) gets one at every click, chord and return to the window, and none of them is typing. The user's own acts without a key are typing: the wheel in the alternate screen without a mouse mode and Alt+click (both arrive as arrow keys), an empty paste; a key whose encoding has a report's shape does not count — F3 with any modifier has the bytes of a cursor position report — and the hold's 1.5 s apply (ruled). A typing into a session already being seen calls no `onChange` listener (ruled on review 2 of task 53), so that nothing runs at every key press. A `seen` is written only when a hold completes or a typing comes and it clears a mark, and always in the write of a turn end or window end of that session while the hold lasts; there is no periodic `seen` write (ruled). It is written only for a session among the rows (`rows()`), so that a selection naming no session leaves no row. | S2 12.4 fixes the 1.5 s but not when the hold starts; a `seen` matters only when it clears a mark or goes with an end. Question 4 in section 7. | 53 (12.4) |
 | B10 | A window end is judged at each refresh after it was settled, for a terminal in state `ended` or `lost` (a keeper that died: its exit time is the server's clock) that started its program: recorded when its session's row is not running and marked `ended-unexpectedly`, not recorded when the row runs again or ended deliberately; judged once. It is the same end when the stored `window_end_ns` equals the exit's time, so a server restart, which finds a lingering keeper again, never marks it twice. At the first start of a stage B server the table is empty, so each lingering keeper of an ended-unexpectedly session gets `ended` once (no notification, B12; one sentence in `docs/install.md`, task 56). | S2 12.4 reason 2 says "at the next refresh"; S2 14: a keeper that dies makes its session need you; a restart for an update must not bring back what the user saw. | 52 (12.4) |
 | B11 | A write the store refuses (busy, S2 14) is kept; the next look tries the kept writes again first, in their order, each as an entry of its own (`recordAttention` takes the writes in order), then its own; nothing is folded but two turn ends of one session (the later is kept). The baselines move on, so a turn end is neither lost nor recorded twice. A store migrated under the server stops it (S2 10.1). | A turn end is seen once, at one look; folding a kept `seen` into a later turn end of the same session would make that turn seen (B3's order) although the user had left. | 52 (10.3) |
 | B12 | The server judges "starts to need you" over the rows a page without a filter lists (it builds that list with `buildListMessage`). The first judgement, which records without notifying, is the first check made once a refresh has worked and the marks have been read (`Attention.ready()`, `NotifierDeps.ready`), not simply the first call: a start whose first refresh fails must not notify everything that already needed you at the next one. A session whose reason changes does not start to need you. `Pages.notify` sends only while no page has focus, to the page that had it last. | S2 13; a restart must not notify everything that already needed you. | 52 (13) |
-| B13 | The page's words: a row that needs you has the reason on its second line — `needs you · <detail> · 3m` (`needs you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — also a row that is not running (an ended one), which then has two lines; the title bar starts with the count, whose text is `3 need you` (the dot before it is drawn by the style sheet on the count's element, in the rows' attention colour, not a character; ruled); the window title is `(3) skydeck`, and `skydeck` when none; a notification's body is `asks: <detail>` (`asks`), `finished`, `ended unexpectedly`. The detail is the live file's `waitingFor`, sanitised and cut to 120 UTF-16 units with `…` (never inside a surrogate pair) by the view model (ruled). | S2 12.2's and 13's examples; S2 12.4: "the reason on its second line"; a `waitingFor` has no length limit. Question 2 in section 7. | 51 (the cut, 12.4), 55 (the words, 12.2, 12.4) |
+| B13 | The page's words: a row that needs you has the reason on its second line — `needs you · <detail> · 3m` (`needs you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — also a row that is not running (an ended one), which then has two lines; the title bar starts with the count, whose text is `3 need you` (the dot before it is drawn by the style sheet on the count's element, in the rows' attention colour, not a character; ruled); the window title is `(3) skydeck`, and `skydeck` when none; a notification's body is `asks: <detail>` (`asks`), `finished`, `ended unexpectedly`. The detail is the live file's `waitingFor`, sanitised, trimmed and cut to 120 UTF-16 units with `…` (never inside a surrogate pair) by the view model (ruled; the blank test and the cut apply to the trimmed text, ruled on task 51's review 2); a `waitingFor` that is blank once sanitised (empty, or only white space) gives `detail: null` (ruled on task 51). | S2 12.2's and 13's examples; S2 12.4: "the reason on its second line"; a `waitingFor` has no length limit. Question 2 in section 7. | 51 (the cut, 12.4), 55 (the words, 12.2, 12.4) |
 | B14 | Ctrl+Shift+J selects the next id of `needYou.order` after the selected one, else the first; after the last the first. None: the key bar says `no session needs you`; only the selected one: it stays selected and the key bar says `no other session needs you`. When `needYou.count` is greater than the length of `order`, the key bar also says how many are hidden: `<n> more that need you are hidden by the filter or the fold` (with none shown, `<n> that need you are hidden by the filter or the fold`). While a dialog of stage D is shown (stage D's D2: `app.js` moves the keyboard nowhere and acts on no list key), Ctrl+Shift+J is a window chord like the others: it says `close the edit first (Esc)` and selects nothing. | S2 12.4 "pressed again it goes on"; the title bar's count includes rows the filter or the fold hides; an edit belongs to the session it was opened for. | 55 (12.4) |
 | B15 | The page asks for the permission only from a click on `Turn on notifications`, a button in the title bar shown while `Notification` exists and its permission is `default`. A `notify` is shown only with the permission `granted`, never for the session that is selected while the page has focus, with the session's title (sanitised) as title, B13's body and `tag` the session id. A click goes through the gate of a window chord (the one function of `app.js` through which stage D's task 37 passes every chord, D2): it calls `window.focus()` and selects the session through `select(id, 'chord')`; while a dialog is shown it only brings the window to the front, selects nothing, and the key bar says `close the edit first (Esc)` (ruled). | S2 13; a click must not move the keyboard out of a dialog half typed (stage D's review A, its finding 2). | 55 (13) |
 | B16 | The page closes a session's notification when that session no longer needs you (the next `list` without its attention; best effort: W11 writes down what Windows does with it); what a notification shows — the session's title and `asks: <detail>` — is the user's to judge for a shared screen (ruled; told to the user). | Not in S2 13; a toast left in Windows' notification centre would hold a title and a detail that are no longer true. | 55 (13) |
@@ -291,7 +292,8 @@ attention(): AttentionRow[];
 /** S2 10.2 in ONE transaction (the guarded connection refuses it whole: StoreNewerError): for each
  *  write in order, each observation takes the next value (B2) in B3's order; a row is created when
  *  absent and never removed. Returns the rows it wrote, as stored. An empty list writes nothing; a
- *  write with no observation is a RangeError and nothing is written. */
+ *  write with no observation is a RangeError and nothing is written; so is a write whose next
+ *  value would pass 2^53 − 1 (B2; ruled on task 50's review 1). */
 recordAttention(writes: readonly AttentionWrite[]): AttentionRow[];
 ```
 
@@ -317,10 +319,10 @@ export type AttentionReason = 'asks' | 'ended' | 'finished';
 // Placement (so that rebases onto stage D stay clean): the two types beside ListMessage and
 // ByeMessage, not in front of RowPayload (where stage D's ChipPayload goes); `needYou` right after
 // `counts` in ListMessage, in build.ts's return, in defaultList and in protocol.test.ts's LIST.
-/** S2 12.4: why a row needs you. `detail`: for `asks` the live file's waitingFor, sanitised and cut
- *  to 120 UTF-16 units with `…` (B13; null without one); else null. `sinceNs`: asks — the file's
- *  statusUpdatedAt, else updatedAt; ended — window_end_ns; finished — turn_ended_ns; null when not
- *  known. Display only (S2 10.2). */
+/** S2 12.4: why a row needs you. `detail`: for `asks` the live file's waitingFor, sanitised,
+ *  trimmed and cut to 120 UTF-16 units with `…` (B13; null without one, or when it is blank once
+ *  sanitised); else null. `sinceNs`: asks — the file's statusUpdatedAt, else updatedAt;
+ *  ended — window_end_ns; finished — turn_ended_ns; null when not known. Display only (S2 10.2). */
 export interface AttentionPayload { reason: AttentionReason; detail: string | null; sinceNs: NsText | null }
 // RowPayload.attention: AttentionPayload | null    (stage A: null)
 // ListMessage gains   needYou: { count: number; order: string[] }   (B7), right after `counts`
@@ -345,7 +347,8 @@ export function liveStatuses(files: Iterable<{ sessionId: string; status: string
  *  asks — the row is running and its LiveStatus is `waiting` (detail: its waitingFor, cut, B13);
  *  ended — windowEndSeq is not null and greater than seenSeq (or seenSeq is null), running or not;
  *  finished — turnEndedSeq is greater than seenSeq (or seenSeq is null), the row is running and its
- *  LiveStatus is `idle` (B6). */
+ *  LiveStatus is `idle` (B6), and that idle status did not begin after the recorded turn end (not
+ *  turnEndedNs and the LiveStatus's sinceNs both known and sinceNs the later; ruled). */
 export function attentionOf(row: ListRow, facts: AttentionFacts): AttentionPayload | null;
 /** B6's order of rows that need you, by id. */
 export function attentionOrder(entries: readonly { id: string; attention: AttentionPayload }[], facts: AttentionFacts): string[];
@@ -369,7 +372,8 @@ export interface LookedFile { pid: number; procStart: number; sessionId: string;
  *  `waiting` to `idle`. `busy` → `waiting` is not; another session (/clear) or another process
  *  start is not (it starts over). */
 export function isTurnEnd(before: LookedFile, after: LookedFile): boolean;
-/** One look (S2 10.3, B4). `files`: those read at this look; `gone`: the baselines' pids that /proc
+/** One look (S2 10.3, B4). `files`: those read at this look, at most one per pid (`readLiveFiles`
+ *  reads `<pid>.json`); `gone`: the baselines' pids that /proc
  *  says have no process, or a process with another start than the baseline's (the caller judges).
  *  A pid with no file keeps its baseline unless it is gone; a file is the new baseline of
  *  its pid; `first` (the server's first look) sets baselines only. `ends`: the turn ends of this
@@ -380,9 +384,11 @@ export function lookAt(baselines: ReadonlyMap<number, LookedFile>, files: readon
 ```ts
 // src/window/seen.ts — S2 12.4 "seen", the condition that holds; B9
 export const SEEN_AFTER_MS = 1500;
-/** B9: whether an `input` message is typing: not `binary`, and something is left once every focus
- *  report (`ESC [ I`, `ESC [ O`) and every SGR mouse report (`ESC [ <` digits and `;` then `M` or
- *  `m`) is taken out. Pure. */
+/** B9: whether an `input` message is typing: not `binary`, and something is left once every report
+ *  a terminal sends by itself, told by its shape, is taken out: focus reports (`ESC [ I`,
+ *  `ESC [ O`), SGR mouse reports (`ESC [ <` digits and `;` then `M` or `m`), and the answers to
+ *  queries (device attributes, cursor position and status reports, mode reports, `CSI t`, the
+ *  colours of OSC 4 / 10 / 11, DECRQSS; ruled on review 2). Pure. */
 export function isTyping(data: string, binary: boolean): boolean;
 export interface Seen {
   /** A page's focus and selection now (its `start`: selected null; its `focus`). A change of
@@ -396,7 +402,10 @@ export interface Seen {
   /** The sessions being seen now: held by a focused page for 1.5 s or since a typing, and those
    *  typed into since the last call (given once). */
   take(): Set<string>;
-  /** A session began to be seen (a hold completed, a typing). Listeners must not throw. */
+  /** A session began to be seen: a hold completed, or a typing when it was not yet seen (a key
+   *  into a session already being seen calls no listener). Listeners must not throw; a throw out
+   *  of a completed hold is dropped so that the timer cannot end the server; `typed` throws only
+   *  if a listener throws. */
   onChange(listener: () => void): () => void;
   /** Every timer stopped (the server's stop). */
   stop(): void;
@@ -526,7 +535,7 @@ scripted list of stage A's helpers): no count, no mark.
 
 ### Task 50: Migration 2 and the store's attention
 
-**Depends on:** 0 · **Wave:** 1 · **Design:** S2 10.2, 4.4 (`src/store/`, B), 16.5; design 9.2 · **Contracts:** 2.2 · **Decisions:** B1, B2, B3 · **Shared files:** `src/store/types.ts` (a `KvKey` line and two types), `docs/install.md` ("Updating"). Order (1c): B 50 before C 70 (its `KvKey` goes after `attention_seq`) and before D 39 and B 56 (`docs/install.md`): this task resolves nothing; stage D adds no migration and no key.
+**Depends on:** 0 · **Wave:** 1 · **Design:** S2 10.2, 4.4 (`src/store/`, B), 16.5; design 9.2 · **Contracts:** 2.2 · **Decisions:** B1, B2, B3 · **Shared files:** `src/store/types.ts` (a `KvKey` line, two types and the comment of `schema_version`), `docs/install.md` ("Updating"). Order (1c): B 50 before C 70 (its `KvKey` goes after `attention_seq`) and before D 39 and B 56 (`docs/install.md`): this task resolves nothing; stage D adds no migration and no key.
 
 **Goal.** The store at schema 2, its attention rows read and written by the server's rules, and
 the proof that a database in use since step 1 migrates without loss (section 1b).
@@ -535,7 +544,9 @@ the proof that a database in use since step 1 migrates without loss (section 1b)
 - Modify: `src/store/migrations.ts` (migration 2), `src/store/store.ts` (`attention`,
   `recordAttention`), `src/store/types.ts`, `docs/design-step-2.md` 10.2 (B2, after the paragraph
   "**Order is a counter, not a clock.**"; the SQL block stays as it is), `docs/install.md`
-  ("Updating", and the last paragraph of "Updating while the window runs"; F5 of review A)
+  ("Updating", and the last paragraph of "Updating while the window runs"; F5 of review A; and
+  the second-window sentence of "Known limits of stage A", false for this update from its merge
+  on, ruled on task 50's review 2)
 - Create: `test/helpers/schema1.ts`, `test/store/migration-2.test.ts`
 - Test: `test/store/store.test.ts` (the migration count, the table list of a new database, the
   schema version's literals at lines 152, 163 and 232, the attention methods; every place that
@@ -547,8 +558,8 @@ that the guard and `prepareRead` hold (stage A's contract 2.6, `openStore`); the
 same transaction (B2). Integer `*_seq` columns are numbers, `*_ns` bigints (design 9.2).
 
 **`docs/install.md` (ruled: migration 2 reaches the user at the first `git pull` after this task
-is merged).** "Updating": with the window in use, the order that is certain — close the skydeck
-window, then `git pull`, then `skydeck window` (the sessions live in their keepers and keep
+is merged).** "Updating": with the window in use, the order that is certain — close every skydeck
+window and tab (ruled on review A's re-check), then `git pull`, then `skydeck window` (the sessions live in their keepers and keep
 running; `skydeck doctor` after it if wanted) — and that from this update on a checkout from
 before it refuses the database (`the database … was written by a newer skydeck …`), so the way
 back is forward. "Updating while the window runs", its last paragraph (a command of the new code
@@ -557,7 +568,9 @@ of "Updating". The task runs no `skydeck` command: the refusal's line is held by
 `test/store/store.test.ts` ("a database written by a newer skydeck is refused"), `skydeck window`'s
 behaviour by stage A's `test/cli/commands/window.test.ts`.
 
-**Tests** (platform: none — the store on a sandbox path)
+**Tests** (platform: none — the store on a sandbox path; the server's-own-open cases use
+`testPlatform`, with `schema1Database` written at its `places.dbPath`, ruled on review B's
+re-check)
 - `MIGRATIONS` has two entries and `SCHEMA_VERSION` is 2; `MIGRATIONS[1]` equals the SQL block
   under "**Migration 2**" of S2 10.2 character for character (read from the design, as migration 1
   is from design.md 9.2).
@@ -589,7 +602,7 @@ new table; `attention` and `recordAttention` keep B2 and B3; `npm run check` pas
 
 ### Task 51: Contracts and the view model of attention
 
-**Depends on:** 0 (stage D's task 34 merged in before the last push) · **Wave:** 1 · **Design:** S2 4.3, 8.2.3 (`list`, `notify`), 12.1 (the counts), 12.4 · **Contracts:** 2.3, 2.4 · **Decisions:** B5, B6, B7, B8, B13's cut (update S2 8.2.3, 12.1, 12.4) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`. Order (1c): D 34 → B 51 → C 73. Built beside D 34; once 34 is on `main` this task merges `origin/main` and resolves: the pinned view case of `build.test.ts` (keep `chip.ts`, `windowChip`, `CHIP_ORDER`; add `attention.ts`, `./attention.ts`), S2 8.2.3's `list` row (keep D's fields, add `needYou` after `counts`), and where `RowPayload.chip` is D's `ChipPayload`, `PrPayload` has `okAtNs`, the terminals carry `openedNs`, `SelectedPayload` the note's fields, `defaultList` D's additions — B's lines go beside them, placed as 2.3 says.
+**Depends on:** 0 (stage D's task 34 merged in before the last push) · **Wave:** 1 · **Design:** S2 4.3, 8.2.3 (`list`, `notify`), 12.1 (the counts), 12.4 · **Contracts:** 2.3, 2.4 · **Decisions:** B5, B6, B7, B8, B13's cut (update S2 8.2.3, 12.1, 12.4) · **Shared files:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts`, `test/window/view/build.test.ts`, `test/helpers/pages.ts`, `test/window/pages-stream.test.ts` (one line, ruled). Order (1c): D 34 → B 51 → C 73. Built beside D 34; once 34 is on `main` this task merges `origin/main` and resolves: the pinned view case of `build.test.ts` (keep `chip.ts`, `windowChip`, `CHIP_ORDER`; add `attention.ts`, `./attention.ts`), S2 8.2.3's `list` row (keep D's fields, add `needYou` after `counts`), and where `RowPayload.chip` is D's `ChipPayload`, `PrPayload` has `okAtNs`, the terminals carry `openedNs`, `SelectedPayload` the note's fields, `defaultList` D's additions — B's lines go beside them, placed as 2.3 says.
 
 **Goal.** Fix as code every message and view-model function the other stage B tasks meet at, and
 the one rule of S2 4.3 that judges attention.
@@ -602,7 +615,9 @@ the one rule of S2 4.3 that judges attention.
   `test/window/view/build.test.ts` (the cases below at the end; the case that pins the view's files
   and imports gains `attention.ts` and the import `./attention.ts`), `test/helpers/pages.ts`
   (`defaultList` gains `needYou: { count: 0, order: [] }` right after `counts`),
-  `docs/design-step-2.md`: 8.2.3 (the `list` row gains `needYou`; the `notify` row gains `detail`
+  `test/window/pages-stream.test.ts` (ruled: the one line `needYou: { count: 0, order: [] },`
+  after `counts` in the `listFor` literal of "a page with no terminal whose lists pile up…",
+  which builds a `ListMessage`; nothing else in the file), `docs/design-step-2.md`: 8.2.3 (the `list` row gains `needYou`; the `notify` row gains `detail`
   and the kind of `reason`), 12.1 (after the paragraph "The title bar shows the counts…"), 12.4
   (after the numbered list of the three reasons: B5, B6, B13's cut)
 
@@ -640,7 +655,9 @@ file means, and when a session is being seen.
 **Files**
 - Modify: `src/claude/terminal.ts` (`LookedFile`, `isTurnEnd`, `lookAt`), `docs/design-step-2.md`
   10.3 (B4, after the paragraph "`busy` to `waiting` is not a turn end…"), 12.4 (B9, after the
-  paragraph "Seen is a **condition that holds**…")
+  paragraph "Seen is a **condition that holds**…"; that paragraph's own sentence "at every tick —
+  written at most once per 5 seconds per session" is rewritten to the ruled rule, no periodic
+  `seen` write, so that task 52 does not read two rules: ruled on review A's re-check)
 - Create: `src/window/seen.ts` (`isTyping`, `createSeen`), `test/window/seen.test.ts`
 - Test: `test/claude/terminal.test.ts`
 
@@ -654,12 +671,17 @@ file means, and when a session is being seen.
   end.
 - `isTyping` (F1 of review A): `a`, `\r`, a bracketed paste, text after a focus report → true; `ESC [ I`,
   `ESC [ O`, `ESC [ < 0 ; 10 ; 5 M`, `ESC [ < 0 ; 10 ; 5 m`, several of them in one message, the
-  empty string, and anything `binary` → false.
+  empty string, and anything `binary` → false. Review 2 (C1, ruled): keys and pastes as xterm.js
+  gives them, an empty paste among them → true; the answers to queries (DA1, DA2, DA3, cursor
+  position reports, DSR, DECRQM, `CSI t`, OSC 4 / 10 / 11, DECRQSS, XTVERSION), alone and several
+  in one message → false; F3 with any modifier → false (ruled); every other key xterm.js sends with
+  a modifier → true.
 - `seen.ts`: focused with S selected → S in `take()` from 1,500 ms on, not at 1,499; unfocused
   first, or the selection changed at 1,000 ms → the 1.5 s starts again; focus lost → S out at once;
   `typed` for the selected session of a focused page → in `take()` at once and held; `typed` for
   another session → in the next `take()` only; two pages → the union; `gone` and `stop` → nothing
-  more, no timer left; `onChange` once per completed hold and per typing.
+  more, no timer left; `onChange` once per completed hold and per typing that begins a seen (C4 of
+  review 2, ruled: 200 keys into a session → one call); a page told `gone` stays gone.
 
 **Done when:** S2 10.3's rule and S2 12.4's condition are code with their edge cases tested;
 `npm run check` passes.
@@ -687,7 +709,9 @@ becomes a `LookedFile` (one that throws is not read at this look); `gone`, for t
 without a file: `Proc.stat` null, or a process start other than the baseline's (a throw: not
 gone); `lookAt`; one `recordAttention` with the kept writes first, in their order, each as its own
 entry, then this look's turn ends (their time, else the clock) and B9's seen writes for the ids of
-`seen.take()` that are among `rows()` (B11, B9); the stored rows replace the facts' marks. `refreshed()`: B10 over `hub.list()` and `rows()`; the session a terminal held is
+`seen.take()` that are among `rows()` (B11, B9); the stored rows replace the facts' marks. A
+RangeError of `recordAttention` (B2's limit at 2^53 − 1) is a failure of the write that is not
+"busy": logged by kind, not kept and retried at every look (ruled on task 50's review 1). `refreshed()`: B10 over `hub.list()` and `rows()`; the session a terminal held is
 the one it shows, else the one it was opened for (`sessionId ?? expectedSessionId`). Every log line names a kind or a
 count, never a session's text. `createNotifier`: `check()` diffs `needs()` with the last
 judgement through `startsToNeed` and sends one `NotifyMessage` per new one.
@@ -881,8 +905,8 @@ order that is certain, and knows which checks only they can make.
   title still show it). "Known limits of stage B": a turn that ends while no server runs is not
   recorded; a notification goes to one window; seen needs the window in front; at the first start
   of a stage B server each terminal that still shows an unexpected end gets `ended` once (B10).
-  "Updating while the window runs": task 50's order stays (close the window, `git pull`,
-  `skydeck window`); nothing to install again (B19).
+  "Updating while the window runs": task 50's order stays (close every skydeck window and tab,
+  `git pull`, `skydeck window`); nothing to install again (B19).
 - `README.md`: one sentence in the window's paragraph — what needs you, and notifications.
 - `docs/manual-checks.md`: a part "The window (step 2, stage B)" with W11, W19 and W21, and W3
   gains the title `(n) skydeck` on its taskbar button. Each says what to set up, what to type, what
@@ -972,8 +996,8 @@ a server while an old window is still open. Migration 2 is the first update afte
 server stops by itself when a command other than `skydeck window` runs first, and even
 `skydeck window` first is not certain (1b). **Not carried** (ruled): the fix (a mark in the store
 while pages are connected) changes stage A's start of the window; the order that is certain —
-close the window, `git pull`, `skydeck window` — is in `docs/install.md` from task 50 on, and in
-task 56 and section 6. Question 5 in section 7.
+close every skydeck window and tab, `git pull`, `skydeck window` — is in `docs/install.md` from
+task 50 on, and in task 56 and section 6. Question 5 in section 7.
 
 ## 6. Stage B is ready to try
 
@@ -981,8 +1005,8 @@ When task 56 is merged. (The database is upgraded already at the first `git pull
 `docs/install.md`, "Updating", says the same order from then on, and the lead tells the user when
 50 is merged.)
 
-First close the skydeck window (its ×, or Alt+F4 while it is in front): your sessions keep
-running in their keepers. Then, in a WSL terminal of your own (not a `!` command inside Claude
+First close every skydeck window and tab (its ×, or Alt+F4 while it is in front; also a window
+of `--new-window` and a tab of `--print-url`): your sessions keep running in their keepers. Then, in a WSL terminal of your own (not a `!` command inside Claude
 Code):
 
 ```sh
@@ -1029,8 +1053,8 @@ the plan above follows the rulings.
 4. **When the 1.5 s starts** (B9). Ruled: as planned — from the moment the window has focus with
    that session selected; it holds because typing no longer includes focus and mouse reports (F1).
 5. **The second window at the update.** Ruled: not carried by stage B; the order that is certain
-   (close the window, `git pull`, `skydeck window`) goes into task 50's `install.md` text, task 56
-   and section 6.
+   (close every skydeck window and tab, `git pull`, `skydeck window`) goes into task 50's
+   `install.md` text, task 56 and section 6.
 6. **Idle in the middle of a turn.** Ruled: no debounce; W21 checks it.
 7. **The header's state pill** (B18). Ruled: unchanged.
 

@@ -675,7 +675,9 @@ effect.
 - **A second window** can open when `skydeck window` starts a server while an old window is still
   open: after the server died or was stopped (`--stop`), or after a WSL restart. The command sees no
   page and starts Edge, and the old window connects again a moment later. Close one of them. (After
-  `--restart` or an update the command waits for the open windows, so none opens then.)
+  `--restart`, or an update that does not upgrade the database, the command waits for the open
+  windows, so none opens then. An update that upgrades the database can open one: close every
+  skydeck window and tab before it, as "Updating" says.)
 - **Ctrl+C on a waiting `skydeck window`** leaves its launch address usable until its 30 seconds
   are over.
 - **Another program on skydeck's port.** A program that listens on `127.0.0.1:<port>` on the Windows
@@ -767,8 +769,12 @@ limits"), and the open windows reload themselves for the new page and connect ag
 waits up to 7 seconds for them, so it opens no second window. Keepers that run keep the code they
 started with; new terminals get the new keeper. No `npm ci`, no `skydeck install`.
 
-When a command of the new code upgrades the database while the old server still runs, that server
-stops by itself (its windows say that it is not answering): run `skydeck window`.
+An update that upgrades the database is different: follow "Updating" below and close every
+skydeck window and tab first. A command of the new code that upgrades the database while the old
+server still runs makes that server stop by itself (its windows say that it is not answering), and
+the `skydeck window` that follows can open a second window beside the old one. From outside you
+cannot tell whether an update upgrades the database (the one that brings stage B does); when in
+doubt, close them first: it costs nothing, the sessions keep running in their keepers.
 
 ## Checking: `skydeck doctor`
 
@@ -793,19 +799,51 @@ installation.
 
 ## Updating
 
-```sh
-cd ~/skydeck
-git pull
+When you use the window, update in this order. It is the one that is certain:
+
+1. Close every skydeck window (its ×, or Alt+F4 while it is in front), also those opened with
+   `--new-window`, and every browser tab of a `--print-url` address: one page left open is enough
+   for the second window below. Your sessions keep running in their keepers.
+2. In a WSL terminal of your own (not a `!` command inside Claude Code):
+
+   ```sh
+   cd ~/skydeck
+   git pull
+   skydeck window
+   ```
+
+   `skydeck window` upgrades the database when the new code brings a new version of it, restarts
+   the window's server for the new code and opens the window again: every session is there. Then
+   `skydeck doctor`, if you want.
+
+Without the window, `git pull` is all. The links point into the checkout, so the command and the
+hook are the new code at once, and the database upgrades itself the next time a command runs.
+`npm ci` is needed only for development (`npm run check`); skip it otherwise. Then `skydeck doctor`.
+
+Why the windows are closed first: an update can upgrade the database (the one that brings stage B
+does: it adds a table), and the first command of the new code that opens it upgrades it — `skydeck
+ls` or `doctor` as much as `skydeck window`. The window's server, still the old code, then stops by
+itself at its next write, and the next `skydeck window` finds no server: it starts one and a new
+window, and an old window or tab that is still open connects to the new server a moment later. Two
+windows (close one). Even `skydeck window` run first is not certain: the old server can stop before
+the command has asked it about its open windows. With every page closed there is none to come back.
+
+**There is no way back to an older checkout.** A database that a newer skydeck has upgraded is not
+opened by an older one: every command of an older checkout — a second clone, or this one moved back
+with `git checkout` — refuses it with exit 1 and changes nothing:
+
+```
+skydeck: the database /home/you/.local/share/skydeck/skydeck.db was written by a newer skydeck (schema version 2, this one knows 1); update skydeck
 ```
 
-That is all. The links point into the checkout, so the command and the hook are the new code at
-once, and the database upgrades itself the next time a command runs. `npm ci` is needed only for
-development (`npm run check`); skip it otherwise. Then `skydeck doctor`. When you use the window,
-run `skydeck window` too: it restarts the window's server for the new code ("Updating while the
-window runs").
+and its `doctor` shows the same as a `problem` line of its report (`database … cannot be opened
+(the database … was written by a newer skydeck …); the checks that need it are skipped`).
 
-A database written by a newer skydeck is not opened by an older one: the command stops with
-`the database ... was written by a newer skydeck ...; update skydeck`.
+From the update that brings stage B's database (schema version 2) on, this is what every checkout
+from before it says. The way back is forward: `git pull`. skydeck keeps no copy of the database
+from before an upgrade: putting one back would drop everything recorded since, and a copy of the
+file taken while the window's server has it open may not be whole. An upgrade only adds to the
+database; it changes nothing that is in it.
 
 ## When the checkout or Node.js changes
 

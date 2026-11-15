@@ -208,7 +208,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C16 | `src/cli/` may import `src/window/` also for `resume`, `new`, `restore`, `show` and the interactive list (stage A's 2.1 named `window`, `serve`, `doctor`, `uninstall`). | They talk to the server or read its files. | — |
 | C17 | `SKYDECK_TEST_WINDOW_TIMES` (A31) gains `answerMs` (30 s: the wait for an answer to `POST /resume` and `/new`, and the silence that ends a `POST /restore`), honoured only with `SKYDECK_TEST_NO_WINDOWS=1`. The restorer's heartbeat interval is an option of `createRestorer` (10 s by default), set only by tests. | A31's rule: no test waits 30 s. | — |
 | C18 | The times the banner shows are the page's (`web/banner-text.js`): `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02`, `on 12 Nov 2025 at 18:02` (a year other than this one), in the page's time zone, 24-hour. | S2 12.7's "yesterday at 18:02"; the server sends nanoseconds (S2 8.2.3). | — |
-| C19 | **The resume lock's take mark** (S2 7.3's and 7.8's named limit, closed; ruled on review A). A renewal writes the lock's time with a mark in its last six digits, the sub-millisecond part that skydeck's clock (milliseconds, `Date.now()` × 10⁶) leaves 0: the mark of a value whose last six digits are 0 — every lock `acquireLock` writes, as today — is `1 + (its milliseconds mod 999,999)`; any other value's mark is those six digits; `renewLock` writes the time of now, to the millisecond, plus the mark of the value it renews. **Those six digits of a renewed lock are a mark, not time** (design 7.6 says so). Two values are **of one take** when both record an event id, the same one, and the same mark (`sameTake`); a value without an event id (an older skydeck's) is of one take only with itself. The window's found-keeper decision accepts a lock of the hello's take (a renewal), and the settlement of an ended terminal gives back a lock of its take (`releaseLockOfTake`); a take-over (a new `acquireLock`, a new millisecond) is another take. `acquireLock`, `releaseLock` and every value stage A writes or compares are unchanged. | A renewal and a take-over of a stale lock with no new event looked alike, so a keeper of a restore whose hello comes after the 5 s of `open()` was refused (restore renews in the same turn), an exit after restore stopped waiting kept the lock a minute, and a keeper found by a restarted server was refused. Old code reads a renewed value as a time less than 1 ms later, so a server of an older build that runs between `git pull` and `skydeck window` neither sweeps it nor takes it over (a third field would be "not a lock skydeck writes": swept as stale within 2 s). A take-over whose millisecond is congruent to the first take's modulo 999,999 (about one in a million) would look like a renewal, but a take-over comes 60 s or more after the take, past the keeper's own 55 s deadline, so it starts nothing; a settlement that races a waiting restore makes `renewLock` return null. | 80 (design 7.6; S2 4.4, 7.3, 7.8) |
+| C19 | **The resume lock's take mark** (S2 7.3's and 7.8's named limit, closed; ruled on review A). A renewal writes the lock's time with a mark in its last six digits, the sub-millisecond part that skydeck's clock (milliseconds, `Date.now()` × 10⁶) leaves 0: the mark of a value whose last six digits are 0 — every lock `acquireLock` writes, as today — is `1 + (its milliseconds mod 999,999)`; any other value's mark is those six digits; `renewLock` writes the time of now, to the millisecond, plus the mark of the value it renews. **Those six digits of a renewed lock are a mark, not time** (design 7.6 says so). Two values are **of one take** when both record an event id, the same one, and the same mark (`sameTake`), and they are not two different values whose last six digits are both 0 (ruled, task 80: only `acquireLock` writes such a time, `renewLock` never does, so they are always two takes); a value without an event id (an older skydeck's) is of one take only with itself. **A lock's time is read to the millisecond** (ruled, task 80): `lockTakenNs` and `freshAge` drop its last six digits before they compute an age, a wait or a deadline, so a renewal's mark moves none of them. The window's found-keeper decision accepts a lock of the hello's take (a renewal), and the settlement of an ended terminal gives back a lock of its take (`releaseLockOfTake`); a take-over (a new `acquireLock`, a new millisecond) is another take. `acquireLock`, `releaseLock` and every value stage A writes or compares are unchanged. | A renewal and a take-over of a stale lock with no new event looked alike, so a keeper of a restore whose hello comes after the 5 s of `open()` was refused (restore renews in the same turn), an exit after restore stopped waiting kept the lock a minute, and a keeper found by a restarted server was refused. Old code reads a renewed value as a time less than 1 ms later, so a server of an older build that runs between `git pull` and `skydeck window` neither sweeps it nor takes it over (a third field would be "not a lock skydeck writes": swept as stale within 2 s). A take-over whose millisecond is congruent to the first take's modulo 999,999 (about one in a million) has the take's mark, but it is a value `acquireLock` wrote and so another take (ruled, task 80: otherwise a settlement would give the taker's lock back before its program reported a start, and a third resume could start the session twice). What stays, the named limit: a restore's renewal of such a take-over reads as of the first take; a found keeper of the first take is past its 55 s deadline and starts nothing, and a settlement while that restore waits gives its lock back, so the restore's next `renewLock` returns null. | 80 (design 7.6; S2 4.4, 7.3, 7.8) |
 | C20 | **The second window after a cold start** (stage A's follow-up "a second window opens when `skydeck window` starts a server while an old window is still open", carried; ruled on review A). The server keeps `kv` `window_pages_open` while pages are connected: each refresh that works makes the store agree with its page count (`createPageMark(…).update`: the key while pages > 0, none at 0 — its FIRST call writes or removes whatever the store holds, so a mark a dead server left is removed by the next server's first refresh without a page); it leaves the key as it is when it stops or dies. **The wait is the server's fact**: a server that finds the key at its start expects a window back from the end of its start until a page connects or 7 s have passed, and says so in `GET /status` (`windowExpectedMs`, the ms left; 2.2). Every command that would open a window — `skydeck window`, a second `skydeck window` meanwhile, C12's window — waits for that same deadline when no page is connected, with one line on stderr: `waiting up to 7 s for the open window to come back; --new-window opens one now`; a page that comes back is "a window is already open". `--new-window`, `--print-url` and `--new-secret` do not wait. | It is W16's case: after `wsl --shutdown` the old window reconnects a few seconds after `skydeck window` started a server (the page tries every 5 s at most, S2 6.3). The cost: after a PC restart or shutdown with the window left open the mark may still be there (WSL can end before the server's next refresh sees the page go), and the first `skydeck window` then waits 7 s for a window that cannot come; W16 and "what only you can check" ask whether it does. The remedy if it does every day — the mark holds the boot id, and in another boot the wait asks whether Edge still runs on the profile — is a follow-up. The first update from a stage A server, which writes no mark, may still open a second window once (stage B's "Updating" order avoids it). | 81 (5.1, 8.3, 10.2) |
 | C21 | The banner lies in the list zone, above `#list`, in the list's width; it takes height from the list (the list scrolls under it), never width, so the right side, the header's one height (stage D) and every terminal's area stay as they are: its coming and going sends no `resize`. A restore selects nothing and moves no keyboard, in any page, also while a dialog of stage D is shown: its result carries no `sessionId` (stage A's `act` selects only a resume's or a new session's). | S2 12.7: "at the top of the list"; the size a restored terminal starts with is the last focused page's area (S2 8.2.6), which the banner must not change. | 73 (12.7) |
 | C22 | **A restore asked for by a command stops when its asker goes** (ruled on review A). The asker's connection closing before the outcome was written ends the run through C8's `signal`, with the reason `the command that asked for it stopped`: the server lives, the sessions already opened go on starting, the rest are `not started`, then `restore finished: …` (to the pages). So Ctrl+C in `skydeck restore` stops it, as in step 1. A restore started from the banner has no stop in stage C; `skydeck window --stop` ends it (the opened sessions go on), and `docs/install.md` says so. A Stop control in the banner is a follow-up candidate. | Otherwise Ctrl+C would end the command and the server would go on opening every batch. | 73 (11.4) |
@@ -453,13 +453,16 @@ export function holdersInWindow(deck: Deck, holders: readonly Holder[]): Readonl
 /** The take a lock value belongs to: its last six digits when they are not 0, else 1 + (its
  *  milliseconds mod 999,999); null for a value that is not a lock skydeck writes. */
 export function lockMark(value: string): number | null;
-/** Both values record the same event id and the same mark; a value without an event id is of
- *  one take only with itself (exact equality). */
+/** Both values record the same event id and the same mark, and they are not two different
+ *  values whose last six digits are both 0 (two takes: only acquireLock writes those; ruled, task
+ *  80); a value without an event id is of one take only with itself (exact equality); a value that
+ *  is not a lock skydeck writes is of none. */
 export function sameTake(a: string, b: string): boolean;
 /** In one store transaction: removes the session's lock when it is of the take of `taken`
  *  (sameTake); whether it did. For a holder of an older value of that take (a keeper's spec). */
 export function releaseLockOfTake(deck: Deck, sessionId: string, taken: string): boolean;
 // renewLock(deck, sessionId, ours): unchanged signature; the value it writes keeps ours' mark.
+// lockTakenNs(value) and freshAge: the lock's time to the millisecond (its last six digits dropped).
 // src/window/starts.ts — task 80: decideFoundKeeper compares the stored lock with the hello's by
 // sameTake ("its resume lock was taken over" otherwise); settleEndedTerminal releases with
 // releaseLockOfTake.
@@ -752,8 +755,8 @@ an exit before the start gives its lock back, whatever restore renewed meanwhile
 
 **Files**
 - Modify: `src/sessions/resume.ts` (`lockMark`, `sameTake`, `releaseLockOfTake`; `renewLock` writes
-  the mark; `parseLock`'s pattern, `acquireLock`, `releaseLock`, `sweepLocks` and `freshAge`
-  unchanged); `src/window/starts.ts` (`resumeRefusal` by `sameTake`, its words `its resume lock
+  the mark; `lockTakenNs` and `freshAge` read a lock's time to the millisecond (ruled); `parseLock`'s
+  pattern, `acquireLock`, `releaseLock` and `sweepLocks` unchanged); `src/window/starts.ts` (`resumeRefusal` by `sameTake`, its words `its resume lock
   was taken over`; `settleEndedTerminal` by `releaseLockOfTake`; the comment "Restore, the one
   renewer, does not reach a window terminal in stage A" goes)
 - Test: `test/sessions/resume.test.ts`, `test/window/starts.test.ts`, `test/window/server.test.ts`
@@ -763,18 +766,30 @@ an exit before the start gives its lock back, whatever restore renewed meanwhile
   `src/sessions/`; 7.3's and 7.8's known limits replaced by the rule)
 
 **Behaviour.** As C19. The value's form stays `<time>:<event id>`, the one stage A's pattern
-reads; only a renewal's time gets non-zero last six digits. `lockTakenNs` of a renewed value is
-its time with the mark (less than 1 ms late), which `startDeadline`, `freshAge` and the age in a
-refusal take as they are.
+reads; only a renewal's time gets non-zero last six digits. Ruled by the plan owner (review B of
+the plan, re-check): **a lock's time is read to the millisecond** — `lockTakenNs` and `freshAge`
+drop a value's last six digits before they compute an age, a wait or a deadline (the start check
+of `freshAge` included), so `startDeadline`, the age and the wait in a refusal and every sweep stay
+as before: an age from the whole value would be up to 1 ms short, and a floored "N s ago" one
+second less (`test/sessions/restore.test.ts:752`, task 71's file, keeps `(10 s ago)` unchanged).
+No test outside this task's files changes. Ruled by the plan owner (task 80): `sameTake` is also
+false for two different values whose last six digits are both 0 (C19).
 
 **Tests** (platform: `testPlatform` through `testDeck`)
 - `lockMark`: a value `acquireLock` wrote at T0 → `1 + (T0 in ms mod 999,999)`; its renewal at T0 +
   50 s → the same mark, the time T0 + 50 s plus the mark; a renewal of that renewal → the same;
   a value that is not a lock → null.
+- Named (ruled): "a lock's time is read to the millisecond": `lockTakenNs` of a renewal at T0 + 50 s
+  is T0 + 50 s; 10 s later the refusal reads `(10 s ago); try again in 50 s`; exactly 60 s after
+  the renewal the lock is stale. A renewed lock without an event id is released by a start dated
+  at the renewal's millisecond. `renewLock` on a clock finer than milliseconds writes the
+  millisecond plus the mark.
 - `sameTake`: a value and its renewals → true; a take-over at T0 + 61 s with no new event (the
   case of stage A's "acquireLock replaces a lock older than 60 s") → false; two values of
   different event ids → false; an older skydeck's value without an event id → true with itself
-  only; over every take-over millisecond from T0 + 60 s to T0 + 61 s → false.
+  only; over every take-over millisecond from T0 + 60 s to T0 + 61 s → false; a renewal an older
+  skydeck wrote (now, no mark) → false. Ruled: a take-over at T0 + 999,999 ms (the take's mark, the
+  same event id) → false; its renewal by a restore → true (the named limit, pinned).
 - An older skydeck reads it: stage A's pattern (copied into the test) parses a renewed value, and
   its time is within 1 ms of the renewal's clock; `isLockHeld` and `sweepLocks` treat it as fresh
   until 60 s after the renewal.
@@ -782,10 +797,17 @@ refusal take as they are.
   one of another event id, in one transaction.
 - `renewLock`'s two cases that pin the renewed value (lines 805–823) now expect the mark; every
   other case of the file passes unchanged.
-- `decideFoundKeeper`: a resume whose stored lock is a renewal of the hello's → started; taken
-  over → refused with `its resume lock was taken over`. `settleEndedTerminal`: an exit before the
-  start releases a renewed lock of its take, not a taken-over one. Every other case of
-  `starts.test.ts` passes unchanged.
+- `decideFoundKeeper`: a resume whose stored lock is a renewal of the hello's → started (also after
+  a chain of renewals) — the case `test/window/starts.test.ts:179` ("a renewed lock is not the
+  hello's either", stage A's rule) is the one this task turns around; taken over → refused with
+  `its resume lock was taken over` (also after renewals; also a take-over its taker renewed, which
+  only the mark tells apart; also an older skydeck's renewal; also the congruent take-over); the
+  congruent take-over's renewal → `the start deadline passed`. `settleEndedTerminal`: an exit
+  before the start releases a renewed lock of its take, not a taken-over one, nor one its taker
+  renewed; a start counts from the hello's take, not from a later renewal; a congruent take-over
+  stays, before and after its program's start; its
+  renewal by a restore is given back (the named limit). Every other case of `starts.test.ts`
+  passes unchanged but for the refusal's words (the case "the lock replaced by another value").
 
 **Done when:** a renewal keeps the take and a take-over changes it, for the window's found keepers
 and settlements, and every value stage A writes reads as before; `npm run check` passes.
