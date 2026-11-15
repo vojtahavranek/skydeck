@@ -13,7 +13,6 @@ import {
   PAGE_WAIT_MS,
   after,
   connection,
-  keyMessage,
   launched,
   logOf,
   mark,
@@ -60,7 +59,7 @@ test('keys in the terminal view', async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    'Shift+Enter → 0a; Ctrl+Shift+V → 16; Ctrl+V with text on the clipboard → a bracketed paste and never 16; Ctrl+Shift+P → nothing',
+    'Shift+Enter → 0a; Ctrl+Shift+V → 16; Ctrl+V with text on the clipboard → a bracketed paste and never 16; Ctrl+Shift+P → nothing, the switcher shown; Esc → nothing, the switcher hidden',
     async (t) => {
       const l = await launched(t, chromium);
       const { page, d } = l;
@@ -86,8 +85,12 @@ test('keys in the terminal view', async (t) => {
       await press('Control+Shift+V', '16');
       await clipboard(page, 'pasted text');
       await press('Control+V', bracketed('pasted text'));
+      // Stage E (plan E task 98): Ctrl+Shift+P opens the switcher and sends the program nothing;
+      // Esc closes it, and that Esc is the switcher's, not the program's.
       await press('Control+Shift+P', '');
-      assert.match(await keyMessage(page), /^Ctrl\+Shift\+P: comes in a later stage$/);
+      await page.waitForSelector('#switcher:not([hidden])', { state: 'attached' });
+      await press('Escape', '');
+      await page.waitForSelector('#switcher[hidden]', { state: 'attached' });
       // One raw Ctrl+V in all of it: Ctrl+Shift+V's (Ctrl+V pasted, and no key was sent twice).
       const bytes = Buffer.from(inputOf(d.record, S1), 'hex');
       assert.equal(bytes.filter((byte) => byte === 0x16).length, 1);

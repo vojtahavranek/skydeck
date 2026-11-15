@@ -4,12 +4,16 @@
      6.3 and 8.2.2, the list zone (task 27), the right side — header and cards (task 29), the
      terminal (task 28) —, the key bar, the key help (task 29); stage D's dialogs (`#editor`) and
      Undo toast (`#toast`) over the page (plan D task 37); stage B's `Turn on notifications` in the
-     title bar (`#notify-on`, plan B task 55). -->
+     title bar (`#notify-on`, plan B task 55); stage C's restore banner (`#banner`) at the top of
+     the list zone (plan C task 75); stage E's style sheet of search and the page's own icon and
+     manifest (S2 12.12, plan E task 97), and its quick switcher (`#switcher`), the title bar's
+     `Switch…` and the key bar's hint (S2 12.8, plan E task 98). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>skydeck</title>
-    <link rel="icon" href="data:," />
+    <link rel="icon" href="/assets/__VERSION__/web/icons/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/assets/__VERSION__/vendor/xterm/xterm/css/xterm.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/style.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/list.css" />
@@ -17,6 +21,8 @@
     <link rel="stylesheet" href="/assets/__VERSION__/web/cards.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/edit.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/attention.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/banner.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/search.css" />
     <script type="module" src="/assets/__VERSION__/web/app.js"></script>
   </head>
   <body>
@@ -28,6 +34,9 @@
         <span class="title-notice" id="tick" hidden></span>
         <span class="title-notice warning" id="keepalive" hidden>WSL is not kept running</span>
         <button class="notify-on" id="notify-on" type="button" hidden>Turn on notifications</button>
+        <button class="switch-button" id="switch-button" type="button">
+          ⌕ Switch… <kbd>Ctrl+Shift+P</kbd>
+        </button>
       </header>
       <div class="bar gone" id="gone" role="alert" hidden>
         <span id="gone-text"></span>
@@ -39,6 +48,7 @@
       </div>
       <main class="main">
         <section class="zone list-zone" id="list-zone">
+          <div class="banner" id="banner" hidden></div>
           <div class="list" id="list" tabindex="0"></div>
         </section>
         <section class="zone right-zone" id="right-zone" tabindex="-1">
@@ -50,6 +60,7 @@
         <span class="focus-zone" id="focus-zone">Focus: terminal</span>
         <span class="key-message" id="key-message"></span>
         <span class="spacer"></span>
+        <span class="hint"><kbd>Ctrl+Shift+P</kbd> switch</span>
         <span class="hint"><kbd>Ctrl+Shift+1…9</kbd> slot</span>
         <span class="hint app-only"><kbd>Ctrl+Tab</kbd> previous</span>
         <span class="hint tab-only"><kbd>Ctrl+Shift+O</kbd> previous</span>
@@ -62,6 +73,7 @@
     <div class="editor" id="editor" hidden></div>
     <div class="help" id="help" hidden></div>
     <div class="toast" id="toast" role="status" hidden></div>
+    <div class="switcher" id="switcher" hidden></div>
     <span class="cell-measure" id="cell-measure" aria-hidden="true">WWWWWWWWWWWWWWWWWWWW</span>
   </body>
 </html>

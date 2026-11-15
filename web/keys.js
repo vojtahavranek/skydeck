@@ -1,9 +1,10 @@
 // The page's key policy (S2 9.1, S2 12.9, A11): which keys are the window's, what the terminal's
 // key handler does with the keys it maps, the list keys, and which keys the page cancels.
 // Pure: functions of a KeyboardEvent-like object, no DOM, no state. Tested by
-// test/web/keys.test.ts on a US and a Czech layout. Stage D's list keys (`l`, F2, `g`, `n`, `p`,
-// `d`) are no longer `later` (plan D 2.4), nor is stage B's Ctrl+Shift+J (`next-attention`, plan
-// B 2.8); only windowChord's Ctrl+Shift+P is.
+// test/web/keys.test.ts on a US and a Czech layout. Stage A's `later` kind (A11) is gone: stage D
+// took the list keys (`l`, F2, `g`, `n`, `p`, `d`; plan D 2.4), stage B Ctrl+Shift+J
+// (`next-attention`, plan B 2.8), and stage E Ctrl+Shift+P (`switcher`, plan E task 98), whose
+// field's own keys are `switcherKey`'s (E11).
 //
 // Matching (S2 12.9): a letter is matched by the character the key types (`key`), never by the
 // physical key, as Claude Code does. A digit is matched by the character typed when that is a
@@ -21,9 +22,13 @@
  * @typedef {{ kind: 'slot', slot: number } | { kind: 'previous' } | { kind: 'toggle-zone' }
  *   | { kind: 'new' } | { kind: 'find' } | { kind: 'copy' } | { kind: 'paste-raw' }
  *   | { kind: 'help' } | { kind: 'reload' } | { kind: 'next-attention' }
- *   | { kind: 'later', stage: 'E' }} WindowChord
+ *   | { kind: 'switcher' }} WindowChord
  */
 /** @typedef {{ send: string } | 'browser' | null} TerminalMapping */
+/**
+ * @typedef {{ kind: 'move', by: 1 | -1 | 'page-up' | 'page-down' } | { kind: 'pick' }
+ *   | { kind: 'close' } | { kind: 'stay' }} SwitcherKey
+ */
 /** @typedef {'label' | 'group' | 'note' | 'pr'} EditWhat */
 /**
  * @typedef {{ kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' }
@@ -34,8 +39,9 @@
 
 /**
  * The window's own chord (S2 12.9, stage A): Ctrl+Shift with a letter or a digit of the table,
- * and Ctrl+Tab. The keys of later stages are the window's from stage A on (A11): Ctrl+Shift+P
- * (E) gives `later`; Ctrl+Shift+J gives stage B's `next-attention` (S2 12.4, plan B14). Every
+ * and Ctrl+Tab. The keys of later stages were the window's from stage A on (A11): Ctrl+Shift+J
+ * gives stage B's `next-attention` (S2 12.4, plan B14), Ctrl+Shift+P stage E's `switcher` (S2
+ * 12.8, plan E task 98). Every
  * chord is the window's in both zones, so the result does not depend on `zone`. Ctrl+Shift+R and
  * the BrowserRefresh key (alone, with Shift, with Ctrl; xterm.js sends nothing for it) are the
  * page's reload in both (S2 12.9, 15.3).
@@ -59,7 +65,7 @@ export function windowChord(e, zone) {
   }
   switch (typed) {
     case 'p':
-      return { kind: 'later', stage: 'E' };
+      return { kind: 'switcher' };
     case 'j':
       return { kind: 'next-attention' };
     case 'o':
@@ -178,10 +184,42 @@ export function listKey(e) {
 }
 
 /**
+ * The keys of the switcher's field (E11), while the switcher is shown: ↑ ↓ move the highlight,
+ * PgUp PgDn by a page, Enter picks, Esc closes, Tab and Shift+Tab stay in the field (they do
+ * nothing); every other key is text (null). Only without Ctrl, Alt and Meta, and with Shift only
+ * for Tab: Shift+↑ selects text in the field, and a window chord is windowChord's.
+ * @param {KeyLike} e
+ * @returns {SwitcherKey | null}
+ */
+export function switcherKey(e) {
+  if (e.key === 'Tab' && (hasOnly(e) || hasOnly(e, 'shift'))) {
+    return { kind: 'stay' };
+  }
+  if (!hasOnly(e)) {
+    return null;
+  }
+  switch (e.key) {
+    case 'ArrowDown':
+      return { kind: 'move', by: 1 };
+    case 'ArrowUp':
+      return { kind: 'move', by: -1 };
+    case 'PageUp':
+      return { kind: 'move', by: 'page-up' };
+    case 'PageDown':
+      return { kind: 'move', by: 'page-down' };
+    case 'Enter':
+      return { kind: 'pick' };
+    case 'Escape':
+      return { kind: 'close' };
+  }
+  return null;
+}
+
+/**
  * Whether the page cancels the key (preventDefault) — S2 12.9: exactly the keys it handles, and
  * Alt+F4 never.
  * - Never: Alt+F4, in either zone; Ctrl+V in the terminal zone (the browser pastes).
- * - Always, whatever `handled` says: every window chord (`later` ones included, A11) in both
+ * - Always, whatever `handled` says: every window chord in both
  *   zones; the reload keys in the list zone (so that Edge never reloads the page by itself,
  *   15.3); in the terminal zone the keys the page sends itself (`terminalKey` gives `{ send }`).
  * - Every other key: exactly when `handled` — the page acted on it. That covers the list keys

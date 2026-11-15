@@ -6,9 +6,13 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import type { Context } from '../../../src/cli/context.ts';
+import { launchWhere, whereFor } from '../../../src/cli/launching.ts';
 import { main } from '../../../src/cli/main.ts';
+import { DEFAULT_CONFIG } from '../../../src/platform/config.ts';
+import type { Config } from '../../../src/platform/config.ts';
 import { isoFromNs } from '../../../src/platform/time.ts';
 import { lockKey } from '../../../src/sessions/resume.ts';
+import { prepareResumeById } from '../../../src/sessions/resume-by-id.ts';
 import type { Net, RunResult } from '../../../src/platform/types.ts';
 import type { LaunchAnswer } from '../../../src/window/protocol.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
@@ -907,5 +911,124 @@ describe('resume --window: the lines of plan 2.5 (exit 1, no window, no command 
       "the window's server did not answer within 2 s; it may have started the session: run skydeck to see whether it runs",
       { SKYDECK_TEST_WINDOW_TIMES: SHORT_TIMES },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// "terminal": "window" (S2 11.4, 16.4; plan C13; task 77): whereFor decides where a command goes;
+// with "window" no option and --tab go to the window's server, --here stays here.
+
+describe('whereFor (plan C13)', () => {
+  const cases: [Config['terminal'], 'here' | 'tab' | 'window' | null, 'here' | 'tab' | 'window'][] =
+    [
+      ['window', null, 'window'],
+      ['window', 'tab', 'window'],
+      ['window', 'window', 'window'],
+      ['window', 'here', 'here'],
+      ['here', null, 'here'],
+      ['here', 'tab', 'tab'],
+      ['here', 'window', 'window'],
+      ['here', 'here', 'here'],
+      ['wezterm', null, 'tab'],
+      ['wezterm', 'tab', 'tab'],
+      ['wezterm', 'window', 'window'],
+      ['wezterm', 'here', 'here'],
+    ];
+  for (const [terminal, flag, where] of cases) {
+    test(`"terminal": "${terminal}" with ${flag === null ? 'no option' : `--${flag}`} goes ${where}`, () => {
+      assert.equal(whereFor({ ...DEFAULT_CONFIG, terminal }, flag), where);
+    });
+  }
+});
+
+describe('launchWhere with "terminal": "window" takes here only (contract 2.4)', () => {
+  test('a tab, or the configured terminal, is a RangeError: the window’s launches go through the server', async (t) => {
+    for (const where of ['tab', null] as const) {
+      const d = deck(t, { config: { terminal: 'window' } });
+      session(d, { argv: ['claude'] });
+      await assert.rejects(
+        async () => launchWhere(d.deck, prepareResumeById(d.deck, S1), where),
+        RangeError,
+      );
+      assert.equal(existsSync(handoffPath(d)), false, 'nothing started');
+    }
+  });
+
+  test('here: the handoff file as with "terminal": "here"', async (t) => {
+    const d = deck(t, { config: { terminal: 'window' } });
+    const dir = session(d, { argv: ['claude'] });
+
+    const outcome = await launchWhere(d.deck, prepareResumeById(d.deck, S1), 'here');
+
+    assert.equal(outcome.code, 0, outcome.lines.join('\n'));
+    assert.equal(handoff(d), handoffScript({ cwd: dir, argv: ['claude', '--resume', S1] }));
+  });
+});
+
+/** config.json of `m` with `"terminal": terminal`, its other keys kept. */
+function withTerminal(m: WindowMachine, terminal: string): void {
+  const path = m.deck.places.configPath;
+  const config = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  writeFileSync(path, `${JSON.stringify({ ...config, terminal }, null, 2)}\n`);
+}
+
+describe('resume with "terminal": "window" (S2 11.4; plan C13)', () => {
+  for (const option of [[], ['--tab']]) {
+    test(`${option.length === 0 ? 'no option' : option.join(' ')}: the session id sent to the window's server, the answer's lines and code; no handoff, no lock`, async (t) => {
+      const w = windowCase(t);
+      withTerminal(w.m, 'window');
+      await serving(t, w, STARTED, { FAKE_SERVE_PAGES: '1' });
+
+      const r = await w.run(['resume', '0b5f', ...option]);
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.stderr, `${FLAGS_LINE}\n`);
+      assert.deepEqual(w.requests(), [{ route: 'resume', sessionId: S1 }]);
+      assert.equal(existsSync(w.handoff), false, 'no handoff file');
+      assert.deepEqual(w.m.deck.store.kvEntries('resume_lock:'), [], 'the command took no lock');
+    });
+  }
+
+  test('--here: the handoff file as in step 1; the server is not asked', async (t) => {
+    const w = windowCase(t);
+    withTerminal(w.m, 'window');
+    await serving(t, w, STARTED, { FAKE_SERVE_PAGES: '1' });
+
+    const r = await w.run(['resume', '0b5f', '--here']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.asked, []);
+    assert.deepEqual(w.requests(), []);
+    assert.equal(
+      readFileSync(w.handoff, 'utf8'),
+      handoffScript({ cwd: w.m.s.home, argv: ['claude', '--resume', S1] }),
+    );
+  });
+
+  test('no server: the not-running line with ", or use --here", exit 1', async (t) => {
+    const w = windowCase(t);
+    withTerminal(w.m, 'window');
+
+    const r = await w.run(['resume', '0b5f']);
+
+    assert.equal(r.code, 1, r.stderr);
+    assert.equal(
+      r.stderr,
+      'skydeck: the window is not running; run skydeck window first, or use --here\n',
+    );
+    assert.equal(existsSync(w.handoff), false);
+  });
+
+  test('--tab --window and --here --tab are still usage errors (exit 2)', async (t) => {
+    const w = windowCase(t);
+    withTerminal(w.m, 'window');
+    for (const options of [
+      ['--tab', '--window'],
+      ['--here', '--tab'],
+    ]) {
+      const r = await w.run(['resume', '0b5f', ...options]);
+      assert.equal(r.code, 2, r.stderr);
+      assert.deepEqual(r.asked, []);
+    }
   });
 });

@@ -328,7 +328,9 @@ After a WSL restart, a crash of the server or `--stop`, no old server is there t
 but the old window may still be open, and its page connects a few seconds after the new server's
 start is done (6.3). So the server keeps the `kv` entry `window_pages_open` while pages are
 connected (10.2), and a server that finds it at its start **expects a window back**: from the end
-of its start until a page connects or 7 seconds have passed, and says so in `GET /status`
+of its start until a page connects or 7 seconds have passed — counted on the server's monotonic
+reading (`Clock.monotonicNs`), a clock that cannot step, so that a step of the wall clock neither
+stretches nor shortens them (ruled by the plan owner, plan task 74) —, and says so in `GET /status`
 (`windowExpectedMs`, 8.3). The wait is the server's fact, not each command's guess: unless
 `--new-window`, `--print-url` or `--new-secret` (its old windows are refused, so none comes back),
 step 2 first reads `GET /status`, and while the server is starting with `windowExpectedMs` set, or
@@ -349,7 +351,11 @@ nothing and the command opens a second window — no worse than before; the 7 se
 that tries again at least every 5 seconds, but Chromium wakes a window hidden for more than 5
 minutes only once a minute (6.3), so such a window can come back after the command has opened a
 new one; and the waits add up when a start hangs: 10 and 17 seconds on a cold start, 10, 7 and 17
-seconds after a restart with a page.
+seconds after a restart with a page. At an orderly stop the server writes the entry once more as
+its pages are; when it dies the entry stays as its last refresh left it. A fourth named limit
+(ruled by the plan owner, plan task 74): the entry follows the server's refresh, one every 2
+seconds, not the page's connect, so a server that dies within about 2 seconds of its first page's
+connect has not written it, and the next server expects no window.
 
 When a page is already connected it starts nothing on Windows and says
 `skydeck window: a window is already open`; `--new-window` opens another one anyway (several
@@ -1192,14 +1198,14 @@ for its default port (and the upgrade's `Origin` is then `http://127.0.0.1`).
 |---|---|
 | `GET /` | `web/index.html`, with the asset version put into its asset URLs by the server when it reads the file at start (there is no build step). No secret needed: the page holds no secret of its own. |
 | `GET /assets/<asset version>/web/<path>`, `GET /assets/<asset version>/vendor/xterm/<path>` | A file of `web/` or `vendor/xterm/`; the layout mirrors the checkout, so `web/`'s modules import `../vendor/xterm/…` by relative URLs. Only files of a fixed list are served (no path is taken from the request beyond that list): every file of `web/` but `web/tsconfig.json` and `web/index.html` (served as `/` only), and the vendored `.mjs` and `.css` files of `vendor/MANIFEST.json`. `Cache-Control: max-age=31536000, immutable` under the versioned path. |
-| `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12). |
+| `GET /manifest.webmanifest`, `GET /favicon.ico` | The page's manifest and icon (12.12): `web/manifest.webmanifest` with the asset version put into its icons' URLs as into `index.html`'s, `application/manifest+json`; and `web/icons/favicon.ico`'s bytes, `image/x-icon` (the same file is also served under the versioned path, which is the one `index.html` names). |
 | `GET /ws` with `Upgrade: websocket` | 8.2.2. |
 | `OPTIONS` | 403. |
 | any other method but `GET` (`HEAD` included) | 405 with `Allow: GET`. |
 | any other `GET` | 404. |
 
-A query string is ignored and never used: `/?x` is `/`. Every path outside `/assets/` (`/`, and
-later the icon and the manifest) and every refusal (404, 405, 421, 403) carry
+A query string is ignored and never used: `/?x` is `/`. Every path outside `/assets/` (`/`, the
+manifest and the icon) and every refusal (404, 405, 421, 403) carry
 `Cache-Control: no-store`, so that a page reloading after a server restart always gets the new
 asset version.
 
@@ -1459,7 +1465,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing) and `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the stack the row is drawn in, 12.2: `group`, `size` — its rows, the head included —, `open`, `role` — `head` or `member` — and `head`, the head's session id). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the stack the row is drawn in, 12.2: `group`, `size` — its rows, the head included —, `open`, `role` — `head` or `member` — and `head`, the head's session id). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1798,7 +1804,7 @@ the first time one of them is known and never removed.
 | `window_launching` | The lock of the one command that starts Edge (5.1). |
 | `attention_seq` | The counter above. |
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
-| `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; the server leaves it as it is when it stops or dies, so that the next server knows that a window may come back. |
+| `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 
 ### 10.3 When a turn ends
 
@@ -2038,9 +2044,20 @@ gives them back when its program never started (7.8).
   server refuses (a label over 1,024 bytes; a prompt after `--` over 64 KiB, which the command
   refuses so before it sends anything) with `; use --here` (plan C 2.5). A connection that fails
   after the request reached the server and before its answer says that the server may have
-  started the session (or the restore), as the 30 seconds do. With
-  `"terminal": "window"`, `--tab` means the window too, and so does `R` in the interactive list,
-  whose lines end before `, or use --here`; `R` opens no window.
+  started the session (or the restore), as the 30 seconds do. With `"terminal": "window"`, no
+  option and `--tab` mean the window too and `--here` this terminal (plan C13; with `"here"` or
+  `"wezterm"` only `--window` goes to the window), and so does `R` in the interactive list, whose
+  lines end before `, or use --here`; `R` opens no window. `R` sends `POST /resume` (nothing is
+  prepared or locked in the list) and shows the answer the way it shows a tab launch's: `opened
+  <short> in the window` and the answer's lines — with `; no window is open; run skydeck window`
+  when no page is connected; when the server's status cannot be read after the answer, nothing
+  more is said —, a refusal (codes 2–4) or a line of plan C 2.5 as the message line, and for a
+  failed launch `starting <short> in the window failed; the details are printed when the list
+  ends`, its lines (sanitised) printed when the list ends; an answer without lines (a server of
+  another build) names its code instead. Named limits (ruled, task 77's review 2): a line longer
+  than the terminal is cut in the list's message line, the advice at its end with it (the command
+  line prints it whole); and the list paints nothing while `R` waits for the answer — up to the
+  30 seconds while the server is starting —, and a key typed meanwhile acts only after it.
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
   sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
   after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
@@ -2052,8 +2069,10 @@ gives them back when its program never started (7.8).
   window terminal (11.3), the selected entries in the set's order. Each terminal starts at the area
   the page that had focus last reported (8.2.6), read when that terminal is opened; the
   configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`)
-  is the one the server read at its start. The command prints each report line as it arrives and
-  exits with design 7.8's code for the outcome. **A restore asked for so stops when its command
+  is the one the server read at its start. The command prints each report line on stdout as it
+  arrives (sanitised), heartbeats too, and exits with design 7.8's code for the outcome; with 5
+  (the run was stopped) it adds `skydeck: restore stopped before it finished; see above` on stderr
+  (plan C14). **A restore asked for so stops when its command
   goes**: when the command's connection closes before the outcome (Ctrl+C, as in step 1), the run
   stops at its next step — `stopped: the command that asked for it stopped`, the sessions already
   opened go on starting, the rest are `not started`, then the finished line (to the pages); the
@@ -2137,6 +2156,21 @@ selection is never on a row hidden in a stack, however it got there. A section's
 span are all its rows', a closed stack's members included. A page that sends no `opened` (one
 from before stage E's list) gets no stacks at all, so that no session is ever hidden in a stack
 it cannot draw (ruled).
+
+How a stack looks and is used (stage E, plan E7). The head shows `×4` after its ticket key (or
+its group); a closed stack is followed by the line `+3 more in ORB-2107`, which is no row: it is
+never selected, and ↑ ↓ pass over it and the members it hides; an open stack's members follow the
+head, indented. A click on `×4` or on the `+3 more` line opens or closes the stack; it selects
+nothing and leaves the keyboard where it was, but a click on `×4` that closes the stack while
+one of its members is selected selects the head first, as ← does (12.9; else the page would add
+the group again at the next list). The keys are 12.9's. The page sends `opened` in every view
+(`[]` at least), at most 64 groups, the oldest dropped; a group the server would refuse — not
+well formed, or over 1,024 bytes (8.2.3) — is never sent, so its stack opens only while one of
+its members is selected (a named limit). `d` on a closed stack's head marks that session only:
+the next member becomes the head (or the last one stands alone), and stage D's selection after
+`d` (12.9) takes the row after it of those the list drew when `d` was pressed — for a closed
+stack's head, the row after the stack, whose members were not drawn (ruled). While filtering
+every row stands alone (12.8).
 
 ### 12.3 The pull-request chip in the window
 
@@ -2374,13 +2408,18 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   (a resume costs a process, and history is easy to misclick). Enter, a double click or "Resume
   here" resumes (11.3). Refusals and launch failures show their lines on the card.
 - **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close). Until
-  the page has the terminal's exit the bar says `claude is not running in this terminal`. Known
-  limit of stage A: when the selected session's row is not in the list (a filter excludes it)
-  while the window shows its ended terminal, the bar has no Resume, and Close only once the page
+  the page has the terminal's exit the bar says `claude is not running in this terminal`. A
+  selected session the list does not show (a filter, the chips, done sessions hidden, a folded
+  Earlier; 12.9) has its row in the list's `selectedRow` (8.2.3, stage E): its terminal of the
+  window is shown with its header and, once ended, under this bar with Resume and Close, as for a
+  listed row. Known limit, narrowed by stage E: a session the view model does not list even with
+  done ones shown (an ended terminal of a session without a transcript) has no `selectedRow`, so
+  while the window shows its ended terminal the bar has no Resume, and Close only once the page
   has the terminal's exit — the bar is drawn from the row, not from the terminal (stage A's plan,
   contract 2.9 `endedBar(row, exit)`; accepted by the plan owner, review 2 of plan task 29).
 - **New** (Ctrl+Shift+N or `+ New`): a form with the directory (a list of the known project
-  directories, most recent first, defaulting to the selected session's, or a typed absolute path),
+  directories, most recent first, defaulting to the selected session's — from stage E also one
+  the list does not show while a terminal of the window shows it (12.9) —, or a typed absolute path),
   the label, the group and extra flags. A label or group left empty, or holding only white space,
   is none (ruled by the plan owner, review of plan task 32: `skydeck new --label ' '` is refused,
   a blank form field is not). A label that starts with a ticket key gives the group
@@ -2418,21 +2457,46 @@ control: `skydeck window --stop` ends a restore started from it (the sessions it
 Stop in the banner is a follow-up candidate.
 
 The page keeps the report lines it receives (`notice restore-progress`), as text, at most the last
-200, in a report under the banner's place. A line that comes after a `restore finished:` line starts
-a new report; no other line is a boundary (11.3: every run ends with exactly one). The report is
-drawn while it holds lines, whatever the banner says — none, or not shown: a restore asked for by a
-command, or from the switcher after "Not now", shows its report too — and after its finished line
-it has a × that removes it. A page that connects during a run sees that one runs and the lines from
-then on (a named limit). The banner and the report together take at most 40 % of the list zone's
+200, in a report under the banner's place. A report ends at its `restore finished:` line (11.3:
+every run ends with exactly one); when that line never reaches the page — the connection dropped,
+the server stopped, WSL restarted during the run — it ends at the first `list` that says no restore
+runs, with one last line of the page's own, `the end of this report did not arrive; the list shows
+what started` (ruled on review 2 of plan C task 75). A `list` that says a restore runs never ends a
+report, and no other line is a boundary; the line after an ended report starts a new one. The
+report is drawn while it holds lines, whatever the banner says — none, or not shown: a restore
+asked for by a command, or from the switcher after "Not now", shows its report too — and once it
+has ended it has a × that removes it. A page that connects during a run sees that one runs and the
+lines from then on (a named limit). The heading's `today` and `yesterday` are the page's clock's,
+also when no list comes: the page draws the heading again while it is shown (ruled on review 2 of
+plan C task 75). The banner and the report together take at most 40 % of the list zone's
 height and scroll inside it, so that the filter and the list keep their room. Their controls take
 no keyboard on a mouse click, as the page's other controls; "Restore" and "Not now" act once — not
-while their own `act` waits, not on a key's auto-repeat.
+while their own `act` waits, not on a key's auto-repeat, not on the second click of a double click.
+A click sequence that began on the banner acts on nothing outside it: when its first click takes
+the offer or the report away and the list moves up under the pointer, the later clicks of a double
+click select nothing there and resume nothing (ruled on review 2 of plan C task 75).
 
 The banner lies in the list zone above the list, in the list's width: it takes height from the list
 (the list scrolls under it), never width, so the right side, the header's one height and every
 terminal's area stay as they are — its coming and going sends no `resize`. A restore selects
 nothing and moves no keyboard, in any page, also while a dialog is shown: its sessions are listed
 under Open, and a command's restore does not move the window's selection either.
+
+**The offer in the switcher** (stage E, plan E12; ruled by the lead on 2026-11-15). A restore
+starts a process per session, so it is never one Enter away: the switcher lists the offer only in
+command form — a text whose first character is `>` (nothing trimmed before it) lists commands, never
+a session, and the offer when what follows the `>`, trimmed and lower-cased, is a start of
+`restore` of at least one letter (`>r`, `> rest`, `>Restore`); `>` alone and `> foo` list neither,
+and any other text searches sessions only (`restore drill` never brings the offer, ` >restore` with
+a space first searches sessions for the word `>restore`). It is listed only while the banner is not
+shown (after "Not now"), holds preselected entries and no restore runs; whether it is, is the
+server's answer (`list.switcher.restore`, 8.2.3), so no tick of the banner can disagree with its
+sessions. Listed, it is the switcher's first entry, `Restore 3 sessions from yesterday at 18:02`
+(`1 session`; the time as the banner says it, on the page's own clock and in its time zone), and
+Enter on it — Enter only: a click on it does nothing (ruled by the lead on 2026-11-15) — sends `act
+restore` with the preselected sessions in the banner's order; a refusal shows in the key bar, and
+the run's report where the banner's report is (it is drawn while it holds lines). A command that names no offer says so in the switcher, with the one command
+written without quote marks (`> restore`).
 
 ### 12.8 Search
 
@@ -2484,6 +2548,41 @@ One rule matches for the filter and for the switcher:
   occurrence, overlapping ones merged, at most 32) and what this page's list would have to change
   to show it: the filter cleared, done sessions shown, Earlier unfolded. A text whose first
   character is `>` is a command and lists no session (12.7).
+- **The switcher on the page** (stage E, plan E10, E11). Ctrl+Shift+P, or the title bar's
+  `Switch…`, shows a panel over the page with an empty field, the items under the headings
+  `Needs you`, `Open`, `Not running` and `Done`, and a footer that names its keys
+  (`↑ ↓ move · Enter switch · Esc close`; `Enter resume here` on a session Enter would resume,
+  `Enter restore` on the offer, then `3 more: type to narrow` when items were left out). An item
+  shows the state icon, the group dim before the title when the title does not start with it, the
+  title with the words found in it marked, a second line (a running session's state line, else
+  `not running · 3d`) with the directory, and at the right the chip, the slot and the short id.
+  `No session matches.` when nothing does. The page cuts the field's text as it cuts the filter's
+  (1,024 bytes, then 16 words) and the footer says `only the first 16 words are searched`, or `only
+  the first 1,024 bytes are searched` when the cut of the bytes came first (ruled by the lead on
+  2026-11-15); the filter's cut after 16 words is said in the key bar (`the filter is cut to its
+  first 16 words`).
+  The highlight starts on the first entry, follows ↑ ↓ (at each repeat of a held key) and PgUp
+  PgDn, is scrolled into view, and stays on its session while a list keeps it.
+- **A pick** (Enter on the highlighted item, or a click on one; plan E10). It acts only while the
+  list drawn answers the text the page last sent: an Enter pressed before waits for that list and
+  then acts on its highlighted item, and a click on an item of an older list does nothing (ruled:
+  a fast `orb`, Enter never picks an item of the list for `or`). The waiting Enter is dropped when
+  the text changes, the switcher closes or the connection is lost, and while the page is not
+  connected — the panel then says `skydeck's server is not connected` in place of its items —
+  Enter does nothing (ruled by the lead on 2026-11-15). A held Enter picks once. The switcher
+  closes; when this page's list does not show the picked row, the page first changes its view so
+  that it does, as the item says — the filter and the chips cleared (the key bar says `the filter
+  was cleared to show 1a2b3c4d`), done sessions shown, Earlier unfolded; then it selects the row
+  and does what Enter on that row in the list does (12.6): a session with a terminal of the window
+  shows it (an open one with the keyboard, an ended one under its bar), a session elsewhere shows
+  its card, one that is not running is resumed into the window (11.3), and a refusal shows on its
+  card (an expired one too), or in the key bar for a session the list does not show (one that went
+  away). Enter resumes exactly the sessions with no terminal of the window that do not run
+  elsewhere, and the footer's `Enter resume here` says so for the highlighted one: one rule for
+  both (ruled by the lead on 2026-11-15). A member of a closed stack needs nothing more: the server opens the
+  stack of the selected session (12.2), so the switcher is the way to a member Ctrl+Tab skips. The
+  second click of a double click on an item acts on nothing — neither the item nor what lay under
+  it once the switcher closed —, and one on `Switch…` opens the switcher once.
 - Each window has its own filter, chips, opened stacks, folded Earlier, done shown, selection and
   switcher; what it shows of each session is the same in every window (8.2.7).
 
@@ -2494,8 +2593,10 @@ A done session that needs you and that a filter lists shows its mark and Ctrl+Sh
 but the `need you` count leaves it out (it is not listed without the filter), so the key bar's
 count of those hidden by the filter (12.4) is then one too low for each such row. The switcher
 marks no match in a title whose length lower-casing changes. The server's automatic refresh of
-pull requests (design 7.3) follows the rows the sections carry, so the members of a closed stack
-and the switcher's items are not refreshed by it, as a folded Earlier's rows never were.
+pull requests (design 7.3) follows the rows the sections carry, and a selected session the list
+does not show while a terminal of the window holds it (its header shows its pull requests, 12.9),
+so the members of a closed stack and the switcher's items are not refreshed by it, as a folded
+Earlier's rows never were.
 
 ### 12.9 Keys and focus
 
@@ -2558,11 +2659,35 @@ back to the terminal). `/` gives the keyboard to the filter's field, where every
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
 clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
 plan task 27). Folding Earlier (← or a click on its header) with the selection inside it first
-selects the row above it; while a filter is set nothing folds. The selection is never on a row the
+selects the row above it; while a filter is set nothing folds. On a stack (12.2; stage E, plan
+E7), → on a closed head opens it, ← on an open head closes it, and ← on a member selects the head
+and closes the stack, as folding Earlier first selects the row above it; on any other row ← and →
+fold and unfold Earlier. Ctrl+Shift+1–9 are unchanged: the rows with a slot never stack. Ctrl+Tab
+skips a member of a closed stack (ruled: the page never knows a closed stack's members), as it
+skips a row a filter or a folded Earlier hides. While filtering (a word or a chip, 12.8)
+nothing folds and no stack is formed, so ← and → do nothing. The chips under the filter field
+(12.8) take no keyboard on a click: the keyboard stays where it was (in the field, on the list, in
+the terminal). They are buttons: Tab from the filter field reaches them, Enter or Space presses
+one, and while one has the keyboard no list key acts, as on any button of the list zone. The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
-that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
-(ruled by the plan owner, plan task 27). One exception, ruled by the lead on 2026-11-15 (the user
+of the window that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the
+first row shown (ruled by the plan owner, plan task 27); when the list shows the row again, it is
+selected again. From stage E the right side takes such a session's row from the list's
+`selectedRow` (8.2.3): its terminal is shown with its header (stage D's, so that the header's
+controls and their dialogs edit that session) and its ended bar with Resume and Close (12.6); a
+session without a terminal of the window shows nothing, never its card. The header's Done on such
+a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
+while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
+the lead on 2026-11-15). The list keys (`l`, F2,
+`g`, `n`, `p`, `d`) act only on a row the list shows: on a hidden selection they say `no session
+selected` and send nothing. A named limit: when Ctrl+Tab, a slot chord or a click on its
+notification selects a session the list does not show that runs again in another terminal while an
+ended terminal of the window still names it, the right side first shows that ended terminal as
+stage A did (no header, no Resume), until the list that answers the new selection comes —
+a few milliseconds —, then nothing, the focus zone still the terminal's: the server gives an ended
+terminal to no session that runs again elsewhere, and such a session gets no card here (a
+notification's session then counts as seen after 1.5 s, 12.4, though nothing of it was shown). One exception, ruled by the lead on 2026-11-15 (the user
 may change it): when this page's own `d` in the list has marked the selected session done — its
 answer came, and the list that holds its result (one that arrived since the act was sent — the
 server sends it before the answer, unless a list went to the page within the last second — and no
@@ -2576,7 +2701,9 @@ stays (ruled for plan D task 37). That list decides once: a row it still has (ru
 Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
 of plan D task 37). The header's Done leaves the selection to the main rule. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
-(ruled for plan D task 38). A held
+(ruled for plan D task 38), nor does it on a stack's `+n more` line or `×n`, wherever the list
+has moved under it: such a double click opens or closes the stack once, and its second click
+selects no row, takes no keyboard and resumes nothing (ruled for plan E task 97). A held
 `d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
@@ -2645,6 +2772,28 @@ unchanged dialog and the server's proof, and the page's own reload on another bu
 back as the reload keys are: with changed text, only that prompt stands between the reload and the
 text.
 
+**The quick switcher** (12.8; stage E, plan E11) is modal by the dialogs' rule: a scrim covers the
+window, the page under it takes no keyboard, and while the switcher is shown the page moves the
+keyboard nowhere by itself (not for a resume's answer, a list or a render) and acts on no list key
+(`j`, `d` or `/` typed are text in its field). Ctrl+Shift+P closes it; every other window chord,
+Ctrl+Shift+H too, says `close the switcher first (Esc)` and does nothing else (its footer names its
+keys, and the help never covers its items); the reload keys reload as usual, since nothing typed
+there is worth keeping. Opening it hides the help. Stage D's toast lies under its panel and over
+its scrim, so that it never covers the items and its Undo can still be clicked. In its field ↑ ↓
+move the highlight, PgUp PgDn by a page, Enter picks, Esc closes, Tab and Shift+Tab stay in the
+field and do nothing; every other key is text. A mousedown in the panel anywhere but in the field
+is cancelled, so that the keyboard never leaves the field, and when nothing has the keyboard (a
+click on the toast) the next key gives it back to the field first. A click outside the panel
+closes it. When it closes without a pick the keyboard goes back where it was (the terminal, the
+list, the filter's field), and a terminal this page's resume brought meanwhile takes it then, as
+after a dialog; after a pick: the session's terminal (also one this page's resume of it brings),
+else the list — whatever the switcher was opened from, the filter's field too (ruled by the lead on
+2026-11-15). A held Esc or Enter that closes it over a
+terminal sends the program nothing (a key pressed off the program's holder); Esc while the New
+form is open closes the switcher only. Ctrl+Shift+P, and a click on the title bar's `Switch…`
+(which passes the same gate as a window chord), while a dialog is shown say `close the edit first
+(Esc)` and open nothing. The switcher opens while the page is not connected and says so.
+
 ### 12.10 Done
 
 A session marked done disappears as in design 7.1, except that a running session marked done
@@ -2678,6 +2827,22 @@ the PNGs are made once from the SVG and committed). `index.html` names the favic
 (`<link rel="icon">`) and the manifest (`<link rel="manifest">`), whose `name` and `short_name`
 are `skydeck`, `display` `standalone`, and `icons` the PNGs. Whether Edge's app window and its
 taskbar button show it is check W3. Low priority: stage E (19).
+
+As built (stage E, plan E14): `web/icons/skydeck.svg` is the source — a drawing of shapes, no
+script, nothing it loads —; `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and
+`icon-512.png` on a transparent background, `icon-192-maskable.png` and `icon-512-maskable.png`
+(the drawing inside the maskable safe zone, the middle 80 %, on a full background), and
+`favicon.ico` (the 16, 32 and 48 pixel PNGs in one ICO) were drawn once from it by
+`scripts/icons.ts` with the page suite's pinned Chromium, headless, and committed; no test and no
+CI step runs the script. `web/manifest.webmanifest` holds `name`, `short_name`, `display` and the
+seven PNGs, each `src` under the versioned path; it is served at `/manifest.webmanifest` with the
+build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html` names the favicon by its
+versioned path (`/assets/<build>/web/icons/favicon.ico`, `sizes="16x16 32x32 48x48"`) and the
+manifest by `/manifest.webmanifest`; the policy's `img-src 'self'` and `manifest-src 'self'` let
+the page load both, and nothing is fetched from outside, at build time or at run time. The
+manifest has no `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not meant to be
+installed as an app — Chromium counts it as not installable without `start_url`, and an
+installed app's shortcut would hold no launch token (5.1).
 
 ## 13. Notifications
 
@@ -2975,7 +3140,7 @@ New keys, all optional:
 
 | Key | Default | What it does |
 |---|---|---|
-| `terminal` | `"here"` | Gains the value `"window"` (11.4). |
+| `terminal` | `"here"` | Gains the value `"window"` (11.4): `resume` and `new` without an option or with `--tab`, `restore` and the interactive list's `R` start their sessions in the window, through its server, which `skydeck window` must have started; `--here` still starts one in this terminal (plan C13). Any other value is refused as every key of the file is: `<file>: "terminal" must be "here", "wezterm" or "window"`. `doctor` names it: `ok terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)`. |
 | `window.port` | `47613` | The server's port on `127.0.0.1` (5.2). A whole number from 1 to 65535: 0 ("the system picks") is not a setting; tests give it to the server directly (17). |
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |

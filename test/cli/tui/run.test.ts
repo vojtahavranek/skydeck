@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -8,12 +16,14 @@ import type { Context, Io } from '../../../src/cli/context.ts';
 import { main } from '../../../src/cli/main.ts';
 import { formatChip } from '../../../src/cli/row.ts';
 import { initModel, visibleRows } from '../../../src/cli/tui/model.ts';
-import type { Ns, RunResult } from '../../../src/platform/types.ts';
+import { isoFromNs } from '../../../src/platform/time.ts';
+import type { Net, Ns, RunResult } from '../../../src/platform/types.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
 import { attachManualPr, markDone, setLabel } from '../../../src/sessions/meta.ts';
 import { refresh } from '../../../src/sessions/refresh.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
 import { shellQuote } from '../../../src/text/shell.ts';
+import { testContextOn } from '../../helpers/context.ts';
 import { testDeck } from '../../helpers/deck.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
 import { S1, S2, S3, SEC, T0, fakeRunner, runResult, statLine } from '../../helpers/platform.ts';
@@ -25,6 +35,9 @@ import {
   writeTranscript,
 } from '../../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../../helpers/spool.ts';
+import { startFakeServe, windowMachine } from '../../helpers/window-machine.ts';
+import type { WindowMachine } from '../../helpers/window-machine.ts';
+import { writeWindowConfig } from '../../helpers/window-config.ts';
 
 /** The alternate screen, the cursor hidden, autowrap off (a row wider than the terminal is cut, not wrapped). */
 const ENTER = '\x1b[?1049h\x1b[?25l\x1b[?7l';
@@ -1832,4 +1845,251 @@ test('the notice of a session that left while the editor ran follows the outcome
   assert.equal(lastLines(d).at(-1), `saved  session ${short(S2)} left the list`);
   assert.equal(selectedIn(frames(d).at(-1) ?? []), short(S1));
   assert.equal(d.deck.store.meta(S2)?.note, 'x');
+});
+
+// ---------------------------------------------------------------------------------------------
+// R with "terminal": "window" (S2 4.4, 11.4; plan C13, C12; task 77): the list sends `POST
+// /resume` to the window's server — the fake serve of test/fixtures/fake-serve, answering with the
+// server's own handler — prepares, locks and starts nothing itself, and shows the answer as it
+// shows a tab launch's. It opens no window. On realTestPlatform (A36).
+
+/** The waits of these cases (A31): ping and answer waits no load runs out (no case expects one
+ *  to), as in resume.test.ts. */
+const WINDOW_TIMES = 'pingMs=5000,pageMs=300,reuseMs=100,answerMs=20000';
+const FLAGS = 'original flags unknown; resuming with defaults';
+
+interface WindowList {
+  m: WindowMachine;
+  /** What reached the fake serve's launch (FAKE_SERVE_REQUESTS). */
+  requests(): unknown[];
+  edgeCalls(): string[][];
+  /** The list with `keys`, on the machine's platform: its exit code, output, control requests. */
+  run(keys: Keys): Promise<{ code: number; stdout: string; stderr: string; asked: string[] }>;
+}
+
+/** A window machine with `"terminal": "window"` and S1 (a transcript only: not running). */
+function windowList(t: TestContext): WindowList {
+  const m = windowMachine(t, {
+    env: (s) => ({
+      SKYDECK_HANDOFF: join(s.root, 'handoff'),
+      SKYDECK_TEST_WINDOW_TIMES: WINDOW_TIMES,
+    }),
+  });
+  const stub = writeWindowConfig(m.s, {});
+  const configPath = m.deck.places.configPath;
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  writeFileSync(configPath, `${JSON.stringify({ ...config, terminal: 'window' }, null, 2)}\n`);
+  const folder = join(m.deck.places.claudeHome, 'projects', 'demo');
+  mkdirSync(folder, { recursive: true });
+  const record = {
+    type: 'user',
+    sessionId: S1,
+    timestamp: isoFromNs(m.platform.clock.nowNs() - 60n * SEC),
+    cwd: m.s.home,
+    entrypoint: 'cli',
+  };
+  writeFileSync(join(folder, `${S1}.jsonl`), `${JSON.stringify(record)}\n`);
+  const requests = join(m.s.root, 'requests.jsonl');
+  return {
+    m,
+    requests: () =>
+      existsSync(requests)
+        ? readFileSync(requests, 'utf8')
+            .split('\n')
+            .filter((line) => line !== '')
+            .map((line) => JSON.parse(line) as unknown)
+        : [],
+    edgeCalls: () => stub.edgeCalls(),
+    async run(keys) {
+      const asked: string[] = [];
+      const net: Net = {
+        ...m.platform.net,
+        requestUnix(path, request) {
+          asked.push(`${request.method} ${request.path}`);
+          return m.platform.net.requestUnix(path, request);
+        },
+      };
+      const c = testContextOn(
+        { platform: { ...m.platform, net } },
+        { stdinTTY: true, stdoutTTY: true, keys, size: { columns: 160, rows: 24 } },
+      );
+      const code = await main([], c.ctx);
+      return { code, stdout: c.stdout(), stderr: c.stderr(), asked };
+    },
+  };
+}
+
+/** The fake serve of `w`, recording the launch requests, answering `answer` to /resume. */
+async function servingList(
+  t: TestContext,
+  w: WindowList,
+  answer: unknown,
+  env: Record<string, string> = {},
+): Promise<void> {
+  await startFakeServe(t, w.m, {
+    FAKE_SERVE_REQUESTS: join(w.m.s.root, 'requests.jsonl'),
+    FAKE_SERVE_LAUNCH: `answer:${JSON.stringify(answer)}`,
+    FAKE_SERVE_PAGES: '1',
+    ...env,
+  });
+}
+
+/** The message line of every frame painted on `stdout`. */
+function messages(stdout: string): string[] {
+  return stdout
+    .split(CLEAR)
+    .slice(1)
+    .map((part) => (part.split('\x1b')[0] ?? '').split('\r\n').at(-1) ?? '');
+}
+
+test('R with "terminal": "window": POST /resume with the session id; "opened <short> in the window" and the answer’s lines; the list stays; nothing prepared here', async (t) => {
+  const w = windowList(t);
+  await servingList(t, w, { code: 0, lines: [`skydeck: ${FLAGS}`], sessionId: S1 });
+
+  const r = await w.run(['R', 'q']);
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(
+    messages(r.stdout).includes(`opened ${short(S1)} in the window  ${FLAGS}`),
+    messages(r.stdout).join('\n'),
+  );
+  assert.deepEqual(w.requests(), [{ route: 'resume', sessionId: S1 }]);
+  assert.deepEqual(w.m.deck.store.kvEntries('resume_lock:'), [], 'the list took no lock');
+  assert.equal(existsSync(join(w.m.s.root, 'handoff')), false, 'no handoff file');
+  assert.ok(!r.asked.includes('POST /token'), JSON.stringify(r.asked));
+  assert.deepEqual(w.edgeCalls(), []);
+  assert.equal(r.stderr, '');
+  assert.ok(r.stdout.endsWith(LEAVE));
+});
+
+test('R with "terminal": "window" and no page connected: the message adds C12’s words; no window is opened', async (t) => {
+  const w = windowList(t);
+  await servingList(t, w, { code: 0, lines: [], sessionId: S1 }, { FAKE_SERVE_PAGES: '0' });
+
+  const r = await w.run(['R', 'q']);
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(
+    messages(r.stdout).includes(
+      `opened ${short(S1)} in the window; no window is open; run skydeck window`,
+    ),
+    messages(r.stdout).join('\n'),
+  );
+  assert.ok(!r.asked.includes('POST /token'), JSON.stringify(r.asked));
+  assert.deepEqual(w.edgeCalls(), []);
+  assert.equal(r.stderr, '');
+});
+
+test('R with "terminal": "window", a refusal (codes 2–4): the refusal is the message line, as today', async (t) => {
+  for (const code of [2, 3, 4]) {
+    const w = windowList(t);
+    await servingList(t, w, {
+      code,
+      lines: [`skydeck: ${short(S1)} is running (pid 4242)`],
+      sessionId: null,
+    });
+
+    const r = await w.run(['R', 'q']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(
+      messages(r.stdout).includes(`${short(S1)} is running (pid 4242)`),
+      messages(r.stdout).join('\n'),
+    );
+    assert.equal(r.stderr, '', `code ${code}: nothing kept for the end`);
+  }
+});
+
+test('R with "terminal": "window", a failed launch: the message says so first; its lines are printed (sanitised) when the list ends', async (t) => {
+  const w = windowList(t);
+  const lines = ['skydeck: claude could not be started', 'skydeck: \u001b[31mred\u001b[0m\rover'];
+  await servingList(t, w, { code: 1, lines, sessionId: null });
+  let stderrWhileListed: string | null = null;
+  const keys: Keys = [
+    'R',
+    () => {
+      stderrWhileListed = '';
+      return 'j';
+    },
+    'q',
+  ];
+
+  const r = await w.run(keys);
+
+  assert.equal(r.code, 0, r.stderr);
+  const message = messages(r.stdout).find((line) => line.startsWith('starting')) ?? '';
+  assert.ok(
+    message.startsWith(
+      `starting ${short(S1)} in the window failed; the details are printed when the list ends`,
+    ),
+    messages(r.stdout).join('\n'),
+  );
+  assert.equal(stderrWhileListed, '');
+  assert.equal(r.stderr, 'skydeck: claude could not be started\nskydeck: red over\n');
+});
+
+test('R with "terminal": "window" and no server: plan 2.5’s line, without "--here", is the message', async (t) => {
+  const w = windowList(t);
+
+  const r = await w.run(['R', 'q']);
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(
+    messages(r.stdout).includes('the window is not running; run skydeck window first'),
+    messages(r.stdout).join('\n'),
+  );
+  assert.equal(r.stderr, '');
+});
+
+test('R with "terminal": "window" and an older server: C11’s line, without "--here", is the message', async (t) => {
+  const w = windowList(t);
+  await startFakeServe(t, w.m, { FAKE_SERVE_PAGES: '1' });
+
+  const r = await w.run(['R', 'q']);
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(
+    messages(r.stdout).includes(
+      "the window's server is older than this command and cannot start sessions for it; run skydeck window to restart it",
+    ),
+    messages(r.stdout).join('\n'),
+  );
+});
+
+test('R with "terminal": "window" when the status look after the answer fails: "opened <short> in the window" alone (nothing is said that is not known)', async (t) => {
+  const w = windowList(t);
+  await servingList(
+    t,
+    w,
+    { code: 0, lines: [], sessionId: S1 },
+    { FAKE_SERVE_PAGES: '0', FAKE_SERVE_STATUS: 'pages-only' },
+  );
+
+  const r = await w.run(['R', 'q']);
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(
+    messages(r.stdout).find((line) => line.startsWith('opened')),
+    `opened ${short(S1)} in the window`,
+  );
+  assert.ok(r.asked.includes('GET /status'), JSON.stringify(r.asked));
+  assert.deepEqual(w.edgeCalls(), []);
+});
+
+test('R with "terminal": "window", an answer without lines (a server of another build): the message names the code, and promises nothing for the end', async (t) => {
+  for (const [code, expected] of [
+    [4, `the window's server refused to resume ${short(S1)} (code 4)`],
+    [2, `the window's server refused to resume ${short(S1)} (code 2)`],
+    [1, `starting ${short(S1)} in the window failed (code 1)`],
+    [77, `starting ${short(S1)} in the window failed (code 77)`],
+  ] as const) {
+    const w = windowList(t);
+    await servingList(t, w, { code, lines: [], sessionId: null });
+
+    const r = await w.run(['R', 'q']);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(messages(r.stdout).includes(expected), messages(r.stdout).join('\n'));
+    assert.equal(r.stderr, '', `code ${code}: nothing printed at the end`);
+  }
 });

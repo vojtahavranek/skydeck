@@ -1365,3 +1365,81 @@ test('counts: a row running elsewhere or starting that needs you is in none of c
   assert.equal(message.counts.starting, 0);
   assert.deepEqual(message.needYou, { count: 2, order: [S1, S2] });
 });
+
+// --- selectedRow (stage E, plan E13, task 95) --------------------------------------------------
+
+test('selectedRow: a selected session the filter hides — the payload the sections carry once the filter is cleared, its window terminal included', () => {
+  const list = rows([
+    running(S1, { transcript: { aiTitle: 'alpha in the window' } }),
+    ds({ id: S2, transcript: { aiTitle: 'beta' } }),
+  ]);
+  const terminals = [term(1, { expectedSessionId: S1, slot: 1 })];
+  const hidden = buildListMessage(
+    input({ rows: list, terminals, view: { filter: 'beta', selected: S1 } }),
+  );
+  assert.deepEqual(ids(hidden, 'open'), []);
+  const cleared = buildListMessage(input({ rows: list, terminals, view: { selected: S1 } }));
+  assert.ok(hidden.selectedRow);
+  assert.deepEqual(hidden.selectedRow, rowIn(cleared, S1));
+  assert.equal(hidden.selectedRow.terminal, termId(1));
+  assert.equal(hidden.selectedRow.slot, 1);
+});
+
+test('selectedRow: a selected done session while done ones are hidden — its row with its done mark', () => {
+  const list = rows([
+    ds({ id: S1, hidden: true, doneAtNs: T0, transcript: { aiTitle: 'finished' } }),
+    ds({ id: S2 }),
+  ]);
+  const hidden = buildListMessage(input({ rows: list, view: { selected: S1 } }));
+  assert.deepEqual(ids(hidden, 'week'), [S2]);
+  assert.equal(hidden.doneHidden, 1);
+  const shown = buildListMessage(input({ rows: list, view: { selected: S1, showDone: true } }));
+  assert.ok(hidden.selectedRow);
+  assert.deepEqual(hidden.selectedRow, rowIn(shown, S1));
+  assert.equal(hidden.selectedRow.done, true);
+});
+
+test('selectedRow: a selected session in a folded Earlier — the row Earlier carries once unfolded', () => {
+  const list = rows([
+    ds({ id: S1, lastActivityNs: NOW - 30n * DAY, transcript: { aiTitle: 'old work' } }),
+    ds({ id: S2 }),
+  ]);
+  const folded = buildListMessage(input({ rows: list, view: { selected: S1 } }));
+  assert.deepEqual(section(folded, 'earlier').rows, []);
+  const unfolded = buildListMessage(
+    input({ rows: list, view: { selected: S1, unfolded: ['earlier'] } }),
+  );
+  assert.ok(folded.selectedRow);
+  assert.deepEqual(folded.selectedRow, rowIn(unfolded, S1));
+});
+
+test('selectedRow: for a session the sections show, the same row (its stack null)', () => {
+  const list = rows([
+    running(S1, { transcript: { aiTitle: 'open one' } }),
+    ds({ id: S2, transcript: { aiTitle: 'ORB-1 fix one' }, lastActivityNs: NOW - SEC }),
+    ds({ id: S3, transcript: { aiTitle: 'ORB-1 fix two' }, lastActivityNs: NOW - 2n * SEC }),
+  ]);
+  const open = buildListMessage(input({ rows: list, view: { selected: S1 } }));
+  assert.deepEqual(open.selectedRow, rowIn(open, S1));
+  // The head of a closed stack: the sections carry it with its stack, selectedRow without.
+  const head = buildListMessage(input({ rows: list, view: { selected: S2, opened: [] } }));
+  assert.equal(rowIn(head, S2).stack?.role, 'head');
+  assert.ok(head.selectedRow);
+  assert.equal(head.selectedRow.stack, null);
+  assert.deepEqual(head.selectedRow, { ...rowIn(head, S2), stack: null });
+});
+
+test('selectedRow: null with nothing selected, for an id no row has, and for a session not listed even with done ones shown', () => {
+  const list = rows([ds({ id: S1 }), ds({ id: S2, transcript: null }), ds({ id: S3 })]);
+  assert.equal(buildListMessage(input({ rows: list })).selectedRow, null);
+  assert.equal(buildListMessage(input({ rows: list, view: { selected: S4 } })).selectedRow, null);
+  // S2 has no transcript: step 1 does not list it, so neither do the sections nor selectedRow —
+  // also while an ended terminal of the window holds it.
+  const ended = term(1, { expectedSessionId: S2, state: 'ended', program: null });
+  for (const terminals of [[], [ended]]) {
+    const message = buildListMessage(
+      input({ rows: list, terminals, view: { selected: S2, showDone: true } }),
+    );
+    assert.equal(message.selectedRow, null);
+  }
+});

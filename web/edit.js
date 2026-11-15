@@ -26,6 +26,7 @@
 /** @import { ListMessage, PrPayload, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
 import { foldText, prLineText, prLineTip, prName, splitPrs } from './header-text.js';
+import { sessionRow } from './pane.js';
 
 /**
  * @typedef {object} EditorDeps
@@ -656,11 +657,10 @@ export function createEditor(root, deps) {
         return;
       }
       // The dialog's session's row, for what the pull-request dialog lists — never a field's text
-      // or the note's base (D3). A row the list no longer has keeps its last lines.
-      const row = list.sections
-        .flatMap((section) => section.rows)
-        .find((candidate) => candidate.id === shown.row.id);
-      if (row !== undefined) {
+      // or the note's base (D3); also while the list does not show it (E13: `sessionRow` takes its
+      // `selectedRow`). A row the list no longer has at all keeps its last lines.
+      const row = sessionRow(list, shown.row.id);
+      if (row !== null) {
         shown.row = row;
       }
       drawPrs();

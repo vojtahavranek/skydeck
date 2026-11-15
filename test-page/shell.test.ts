@@ -159,7 +159,7 @@ test('the page shell', async (t) => {
   );
 
   await t.test(
-    'keys: the page cancels exactly the keys it handles; Alt+F4 and keys no zone uses are not cancelled; the keys of later stages say so; the stage D keys with no row selected say so',
+    'keys: the page cancels exactly the keys it handles; Alt+F4 and keys no zone uses are not cancelled; Ctrl+Shift+P opens the switcher and Esc closes it; the stage D keys with no row selected say so',
     async (t) => {
       const standin = await standinServer(t);
       const page = await newPage(t, chromium);
@@ -200,6 +200,7 @@ test('the page shell', async (t) => {
       assert.match(await zone(page), /^Focus: terminal$/);
       const terminalZone: [string, boolean][] = [
         ['Control+Shift+P', true],
+        ['Escape', true],
         ['Control+Shift+J', true],
         ['Control+Shift+F', true],
         ['Control+Shift+C', true],
@@ -217,9 +218,13 @@ test('the page shell', async (t) => {
       for (const [key, cancelled] of terminalZone) {
         assert.equal(await pressed(key), cancelled, `${key} in the terminal zone`);
       }
-      // Every key through pressed(), so that each reads its own entry.
+      // Every key through pressed(), so that each reads its own entry. Stage E's switcher (plan E
+      // task 98) opens on a page that is not connected and says so; Esc closes it.
       assert.equal(await pressed('Control+Shift+P'), true);
-      await showsText(page, '#key-message', /^Ctrl\+Shift\+P: comes in a later stage$/);
+      await page.waitForSelector('#switcher:not([hidden])', { state: 'attached' });
+      await showsText(page, '#switcher .switcher-empty', /^skydeck's server is not connected$/);
+      assert.equal(await pressed('Escape'), true);
+      await page.waitForSelector('#switcher[hidden]', { state: 'attached' });
       // Stage B's Ctrl+Shift+J acts (plan B task 55): this page has no list, so none needs you.
       assert.equal(await pressed('Control+Shift+J'), true);
       await showsText(page, '#key-message', /^no session needs you$/);
@@ -246,6 +251,7 @@ test('the page shell', async (t) => {
         ['Control+Shift+Minus', false],
         ['x', false],
         ['Control+Shift+P', true],
+        ['Escape', true],
       ];
       for (const [key, cancelled] of listZone) {
         assert.equal(await pressed(key), cancelled, `${key} in the list zone`);

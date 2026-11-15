@@ -128,6 +128,9 @@ function realClock(): Clock {
       }
       return lastNs;
     },
+    monotonicNs(): Ns {
+      return process.hrtime.bigint();
+    },
     sleep(ms: number): Promise<void> {
       return new Promise((resolve) => {
         setTimeout(resolve, ms);
