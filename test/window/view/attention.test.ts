@@ -127,6 +127,13 @@ test('attentionOf: the cut is measured on the sanitised text', () => {
   assert.equal(detailOf(text), 'q'.repeat(120));
 });
 
+test('attentionOf: the detail is trimmed once sanitised, and the cut is measured on the trimmed text', () => {
+  assert.equal(detailOf('  permission · Bash \n'), 'permission · Bash');
+  assert.equal(detailOf(`${' '.repeat(130)}text`), 'text');
+  assert.equal(detailOf(`\t\n${' '.repeat(10)}${'x'.repeat(120)}  `), 'x'.repeat(120));
+  assert.equal(detailOf(`${' '.repeat(5)}${'y'.repeat(200)}`), `${'y'.repeat(119)}…`);
+});
+
 test('attentionOf: no ask for a row that is not running, whatever its last status', () => {
   const payload = attentionOf(
     stoppedRow(S1),

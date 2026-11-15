@@ -83,15 +83,16 @@ export function liveStatuses(
   return statuses;
 }
 
-/** B13: a waitingFor sanitised, then cut to DETAIL_MAX units with the cut marked by '…', never
- *  inside a surrogate pair; null when there is none or it is blank once sanitised (empty, or only
- *  white space: the page would write `needs you ·  · 3m`; ruled). */
+/** B13: a waitingFor sanitised and trimmed, then cut to DETAIL_MAX units with the cut marked by
+ *  '…', never inside a surrogate pair; null when there is none or it is blank once sanitised
+ *  (empty, or only white space: the page would write `needs you ·  · 3m`; ruled). Trimmed (ruled
+ *  on review 2), so that leading white space can neither show nor fill the cut. */
 function detailOf(waitingFor: string | null): string | null {
   if (waitingFor === null) {
     return null;
   }
-  const clean = sanitize(waitingFor);
-  if (clean.trim() === '') {
+  const clean = sanitize(waitingFor).trim();
+  if (clean === '') {
     return null;
   }
   if (clean.length <= DETAIL_MAX) {
