@@ -1,0 +1,134 @@
+/* The dialogs of stage D (web/edit.js; plan D1, D2) and the Undo toast (web/toast.js; D15), over
+   the page as the mockup's: a scrim over the whole window, the dialog above it, the toast above
+   both. xterm.js stacks its own layers up to z-index 11 in the page's root stacking context, so
+   these sit above that. The key help (style.css) is shown over a dialog too, since Ctrl+Shift+H
+   works while one is shown (D2); the toast lies over the help. */
+.edit-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(10, 14, 20, 0.28);
+}
+.edit-dialog {
+  position: fixed;
+  left: 50%;
+  top: 110px;
+  z-index: 101;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  padding: 16px 18px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line2);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(20, 30, 50, 0.18);
+  outline: none;
+}
+.edit-heading {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.edit-field {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  font:
+    13px 'Segoe UI Variable Text',
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+  outline: none;
+}
+.edit-field:focus {
+  border-color: var(--selline);
+}
+textarea.edit-field {
+  min-height: 160px;
+  resize: vertical;
+  font-family: var(--term-font);
+  font-size: 12.5px;
+}
+.edit-help {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.edit-message {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--crash);
+  overflow-wrap: anywhere;
+}
+.edit-message:empty {
+  display: none;
+}
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.edit-actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.edit-actions .edit-save {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.edit-actions button[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.help {
+  z-index: 102;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  z-index: 103;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 7px 14px;
+  background: var(--text);
+  color: var(--panel);
+  border-radius: 8px;
+  font-size: 12.5px;
+  box-shadow: 0 12px 40px rgba(20, 30, 50, 0.18);
+}
+.toast:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.toast-undo {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  filter: brightness(1.4);
+  cursor: pointer;
+}
+.toast-undo[hidden] {
+  display: none;
+}

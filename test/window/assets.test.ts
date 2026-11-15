@@ -63,6 +63,31 @@ const OTHERS: Record<string, string> = {
   'docs/design.md': '# design\n',
 };
 
+/** The icon's files of a checkout of stage E (S2 12.12), for the fixtures that have them. */
+const ICON_PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
+/** Bytes that are not UTF-8, so that a body passed through a text decoding would differ. */
+const FAVICON = Uint8Array.from([0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0xff, 0xfe, 0x80, 0x0a]);
+const WEB_MANIFEST = `${JSON.stringify(
+  {
+    name: 'skydeck',
+    icons: [
+      { src: '/assets/__VERSION__/web/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/assets/__VERSION__/web/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+  },
+  null,
+  2,
+)}\n`;
+const ICONS: Record<string, string | Uint8Array> = {
+  'web/manifest.webmanifest': WEB_MANIFEST,
+  'web/icons/favicon.ico': FAVICON,
+  'web/icons/icon-192.png': ICON_PNG,
+  'web/icons/icon-512.png': Uint8Array.from([...ICON_PNG, 0x01]),
+};
+const MANIFEST_TYPE = 'application/manifest+json';
+const ICO = 'image/x-icon';
+const PNG = 'image/png';
+
 const sha256 = (bytes: Uint8Array | string): string =>
   createHash('sha256').update(bytes).digest('hex');
 
@@ -87,17 +112,31 @@ interface Fixture {
   root: string;
 }
 
-/** An app root in the sandbox: a few files under bin/, src/, web/, vendor/ and docs/. */
-function fixture(t: TestContext, options: { skip?: readonly string[] } = {}): Fixture {
+/**
+ * An app root in the sandbox: a few files under bin/, src/, web/, vendor/ and docs/; with `icons`
+ * also the icon's files of stage E (ICONS), which a checkout of stage A does not have.
+ */
+function fixture(
+  t: TestContext,
+  options: { skip?: readonly string[]; icons?: boolean } = {},
+): Fixture {
   const { platform, sandbox } = testPlatform(t);
   const root = join(sandbox.root, 'app');
   const skip = new Set(options.skip ?? []);
-  for (const [path, content] of Object.entries({ ...VENDORED, ...OTHERS })) {
+  const all = { ...VENDORED, ...OTHERS, ...(options.icons === true ? ICONS : {}) };
+  for (const [path, content] of Object.entries(all)) {
     if (!skip.has(path)) {
       put(root, path, content);
     }
   }
   writeManifest(root, Object.keys(VENDORED));
+  return { platform, root };
+}
+
+/** An app root whose vendor/ and web/ are copies of the checkout's. */
+function withRealWeb(t: TestContext): Fixture {
+  const { platform, root } = withRealVendor(t);
+  cpSync(join(checkout, 'web'), join(root, 'web'), { recursive: true });
   return { platform, root };
 }
 
@@ -219,6 +258,72 @@ describe('loadAssets', () => {
     ]) {
       assert.equal(assets.get(path), null, path);
     }
+  });
+
+  test("with the icon's files: '/manifest.webmanifest' with the build put in, '/favicon.ico' as it is", (t) => {
+    const { platform, root } = fixture(t, { icons: true });
+
+    const assets = loadAssets(platform.files, root);
+    const manifest = assets.get('/manifest.webmanifest');
+    const favicon = assets.get('/favicon.ico');
+
+    assert.ok(manifest);
+    assert.equal(manifest.type, MANIFEST_TYPE);
+    assert.equal(
+      text(manifest.body),
+      WEB_MANIFEST.replaceAll('/assets/__VERSION__/', `/assets/${assets.build}/`),
+    );
+    assert.doesNotMatch(text(manifest.body), /__VERSION__/);
+    assert.ok(favicon);
+    assert.equal(favicon.type, ICO);
+    assert.deepEqual(Buffer.from(favicon.body), Buffer.from(FAVICON));
+  });
+
+  test("with the icon's files: the icons under the build by their type; the manifest only as its own path", (t) => {
+    const { platform, root } = fixture(t, { icons: true });
+
+    const assets = loadAssets(platform.files, root);
+    const at = (path: string) => assets.get(`/assets/${assets.build}/${path}`);
+
+    assert.equal(at('web/manifest.webmanifest'), null);
+    assert.equal(at('web/icons/favicon.ico')?.type, ICO);
+    assert.deepEqual(Buffer.from(at('web/icons/favicon.ico')?.body ?? []), Buffer.from(FAVICON));
+    for (const path of ['web/icons/icon-192.png', 'web/icons/icon-512.png']) {
+      assert.equal(at(path)?.type, PNG, path);
+      assert.deepEqual(Buffer.from(at(path)?.body ?? []), Buffer.from(ICONS[path] ?? ''), path);
+    }
+    for (const path of ['/icons/favicon.ico', '/web/icons/favicon.ico', '/manifest.json']) {
+      assert.equal(assets.get(path), null, path);
+    }
+  });
+
+  test("the build changes when an icon's bytes or the manifest change", (t) => {
+    const { platform, root } = fixture(t, { icons: true });
+    const before = loadAssets(platform.files, root).build;
+
+    put(root, 'web/icons/icon-192.png', Uint8Array.from([...ICON_PNG, 0x02]));
+    const afterIcon = loadAssets(platform.files, root).build;
+    put(root, 'web/manifest.webmanifest', WEB_MANIFEST.replace('skydeck', 'skydeck2'));
+    const afterManifest = loadAssets(platform.files, root).build;
+
+    assert.notEqual(afterIcon, before);
+    assert.notEqual(afterManifest, afterIcon);
+  });
+
+  test("the checkout's own manifest: every icon it names is served under the build as a PNG", (t) => {
+    const { platform, root } = withRealWeb(t);
+
+    const assets = loadAssets(platform.files, root);
+    const manifest = assets.get('/manifest.webmanifest');
+
+    assert.ok(manifest);
+    const icons = (JSON.parse(text(manifest.body)) as { icons: Array<{ src: string }> }).icons;
+    assert.equal(icons.length, 7);
+    for (const { src } of icons) {
+      assert.ok(src.startsWith(`/assets/${assets.build}/web/icons/`), src);
+      assert.equal(assets.get(src)?.type, PNG, src);
+    }
+    assert.equal(assets.get('/favicon.ico')?.type, ICO);
   });
 
   test("the checkout's own manifest: every .mjs and .css is served, nothing else of vendor/", (t) => {
@@ -389,6 +494,7 @@ interface Answer {
   status: number;
   headers: IncomingHttpHeaders;
   body: string;
+  bytes: Buffer;
 }
 
 /** One request with exactly this request target and Host header (default: the right one). */
@@ -412,10 +518,12 @@ function send(
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('error', reject);
         res.on('end', () => {
+          const bytes = Buffer.concat(chunks);
           resolve({
             status: res.statusCode ?? 0,
             headers: res.headers,
-            body: Buffer.concat(chunks).toString('utf8'),
+            body: bytes.toString('utf8'),
+            bytes,
           });
         });
       },
@@ -437,8 +545,11 @@ async function serve(t: TestContext, platform: Platform, assets: Assets): Promis
   return bound;
 }
 
-async function served(t: TestContext): Promise<{ root: string; port: number; build: string }> {
-  const { platform, root } = fixture(t);
+async function served(
+  t: TestContext,
+  options: { icons?: boolean } = {},
+): Promise<{ root: string; port: number; build: string }> {
+  const { platform, root } = fixture(t, options);
   const assets = loadAssets(platform.files, root);
   return { root, port: await serve(t, platform, assets), build: assets.build };
 }
@@ -550,6 +661,67 @@ describe('httpHandler', () => {
     assert.equal(app.body, OTHERS['web/app.js']);
     assert.match(index.body, /^<!doctype html>/);
     assert.equal(xterm.body, VENDORED['vendor/xterm/xterm/lib/xterm.mjs']);
+  });
+
+  test('GET /manifest.webmanifest → the manifest with the build, its type, not cached', async (t) => {
+    const { port, build } = await served(t, { icons: true });
+
+    const answer = await send(port, '/manifest.webmanifest');
+
+    assert.equal(answer.status, 200);
+    assert.equal(answer.headers['content-type'], MANIFEST_TYPE);
+    assert.equal(answer.headers['cache-control'], 'no-store');
+    assert.equal(answer.body, WEB_MANIFEST.replaceAll('/assets/__VERSION__/', `/assets/${build}/`));
+    assert.doesNotMatch(answer.body, /__VERSION__/);
+    assertSecurityHeaders(answer, port);
+  });
+
+  test('every icon the served manifest names → a PNG under the build, immutable', async (t) => {
+    const { port, build } = await served(t, { icons: true });
+
+    const manifest = await send(port, '/manifest.webmanifest');
+    const icons = (JSON.parse(manifest.body) as { icons: Array<{ src: string }> }).icons;
+
+    assert.equal(icons.length, 2);
+    for (const { src } of icons) {
+      assert.ok(src.startsWith(`/assets/${build}/web/icons/`), src);
+      const answer = await send(port, src);
+      assert.equal(answer.status, 200, src);
+      assert.equal(answer.headers['content-type'], PNG, src);
+      assert.equal(answer.headers['cache-control'], IMMUTABLE, src);
+    }
+  });
+
+  test("GET /favicon.ico → the ICO's bytes, its type, not cached", async (t) => {
+    const { port } = await served(t, { icons: true });
+
+    const answer = await send(port, '/favicon.ico');
+
+    assert.equal(answer.status, 200);
+    assert.equal(answer.headers['content-type'], ICO);
+    assert.equal(answer.headers['cache-control'], 'no-store');
+    assert.deepEqual(answer.bytes, Buffer.from(FAVICON));
+    assertSecurityHeaders(answer, port);
+  });
+
+  test("with the icon's files: the manifest under the build → 404; the paths of the icon under /assets/ need the build", async (t) => {
+    const { port, build } = await served(t, { icons: true });
+
+    for (const path of [
+      `/assets/${build}/web/manifest.webmanifest`,
+      `/assets/__VERSION__/web/icons/icon-192.png`,
+      `/assets/0000000000000000/web/icons/favicon.ico`,
+      '/web/icons/favicon.ico',
+      '/icons/favicon.ico',
+      '/manifest.json',
+    ]) {
+      const answer = await send(port, path);
+      assert.equal(answer.status, 404, path);
+      assert.equal(answer.headers['cache-control'], 'no-store', path);
+    }
+    const query = await send(port, '/favicon.ico?v=1');
+    assert.equal(query.status, 200);
+    assert.equal(query.headers['cache-control'], 'no-store');
   });
 
   test('a query string is not part of the path, nor of the cache rule', async (t) => {
