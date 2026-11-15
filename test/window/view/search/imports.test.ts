@@ -21,9 +21,11 @@ const TYPE_SOURCES = new Set(['../../protocol.ts', '../../hub.ts', '../sections.
 
 /** `import … from '…'` and `export … from '…'`, over several lines too. An `export` counts only
  *  before `*` or `{` (a re-export), so that a `from '…'` in an exported declaration's comment or
- *  string is no import; the clause stays `[^;]*?`, so that whatever it holds is judged. */
+ *  string is no import. The clause takes a block or a line comment or a string whole, and
+ *  anything else but `;`, `/` and quotes: a `;` or a `from '…'` inside a comment or a string of
+ *  the clause neither ends it nor names its source, so whatever the clause holds is judged. */
 const STATEMENT =
-  /^(?:import|export(?=\s+(?:type\s+)?[*{]))\s+(type\s+)?([^;]*?)\s*from\s+'([^']+)'/gms;
+  /^(?:import|export(?=\s+(?:type\s+)?[*{]))\s+(type\s+)?((?:\/\*(?:(?!\*\/).)*\*\/|\/\/[^\n]*|'[^'\n]*'|"[^"\n]*"|[^;\/'"])*?)\s*from\s+'([^']+)'/gms;
 /** `import '…';`: a value import, for its effects. */
 const BARE_IMPORT = /^import\s+'([^']+)'/gm;
 /** `import('…')`: in a type position or at run time; either way it names a module. */
@@ -161,6 +163,22 @@ test('the check itself: what it refuses', () => {
     ],
     ["export * as fs from 'node:fs';", "import from 'node:fs'"],
     ["export { isListed } from '../../../sessions/list.ts';", 'value import isListed'],
+    // A comment in the clause is taken whole: a `;` in it ends nothing, a `from '…'` in it names
+    // no source (review 2 of #97).
+    [
+      "import {\n  isListed, // 7.2; the listing rule\n} from '../../../sessions/list.ts';",
+      'value import isListed',
+    ],
+    [
+      "import { readFileSync /* moved from './filter.ts' */ } from 'node:fs';",
+      "import from 'node:fs'",
+    ],
+    ["import { readFileSync /* sync; blocks */ } from 'node:fs';", "import from 'node:fs'"],
+    [
+      "import {\n  // was taken from './filter.ts'\n  isListed,\n} from '../../../sessions/list.ts';",
+      'value import',
+    ],
+    ["export { /* all; */ readFileSync } from 'node:fs';", "import from 'node:fs'"],
   ];
   for (const [source, expected] of cases) {
     const found = violations(source);
