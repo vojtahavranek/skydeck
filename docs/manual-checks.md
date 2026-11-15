@@ -864,10 +864,10 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
   `"ticketUrl": "https://<your site>.atlassian.net/browse/{key}",` (for Jira; else your ticket
   system's address, with `{key}` where the key goes). In a file written on one line
   (`{ "terminal": "wezterm" }`), put the key right after `{` on that line instead. In a file
-  that holds no key yet (`{ }`), add it without the trailing comma. When the file already holds
-  a `"ticketUrl"` line (yours, or one left by an earlier W27 that did not finish), add nothing:
-  the check uses it, and the file is the same at the end. If you do not want that link, remove
-  the line by hand afterwards.
+  that holds no key yet (`{}`, `{ }`, or `{` and `}` on two lines), add it without the trailing
+  comma. When the file already holds a `"ticketUrl"` line (yours, or one left by an earlier W27
+  that did not finish), add nothing: the check uses it, and the file is the same at the end. If
+  you do not want that link, remove the line by hand afterwards.
 - **Both are missing** (`No such file or directory` twice): you have none. Create the file with
   only this key (put your site's address; the command writes nothing when the file exists):
 
@@ -878,8 +878,9 @@ ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w27
 
 A mistake in the file makes every skydeck command print one line that names the file and the key
 and exit 1, and do nothing else (`skydeck doctor` shows it as a problem line); correct the line, or
-go on with step 4. Then, in W (the server reads the file when it starts; the window stays and
-connects again):
+go on with step 4. To see that the file is valid: `skydeck ls > /dev/null` prints nothing; a line
+that names `config.json` says what is wrong. Then, in W (the server reads the file when it starts;
+the window stays and connects again):
 
 ```sh
 skydeck window --restart
