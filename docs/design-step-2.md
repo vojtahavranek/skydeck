@@ -193,7 +193,7 @@ Added to design 11:
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses. | platform, text, store, claude, sessions, terminals, github |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
-| `src/window/view/` | The page's view model as pure functions: sections, rows, stacks, attention, the switcher's ranking, the filter (12). | sessions (types, and the pure `isListed` and `matchesFilter` of `src/sessions/list.ts`: stage A's filter is design 7.4's, with one implementation), text |
+| `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), stacks, attention, the switcher's ranking, the filter (12). | sessions (types, and the pure `isListed` and `matchesFilter` of `src/sessions/list.ts`: stage A's filter is design 7.4's, with one implementation), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4) |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS. No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
@@ -1333,7 +1333,9 @@ TypeScript types of `src/window/protocol.ts` (4.3), and pinned by the protocol t
 tables below name them. Times are nanoseconds as decimal strings. Every string the
 server sends that comes from a transcript, a live-session file, GitHub, the user or the store has
 passed the sanitiser (design 7.4), except a note's text (multi-line, sanitised line by line by the
-page's renderer, which writes it as text, never as markup).
+page's renderer, which writes it as text, never as markup) and, from stage D, `selected.note`: the
+note exactly as stored, so that an edit starts from it and its save names it as `base` (12.5); the
+page puts it only into a text box's value, never into markup.
 
 Page → server (after `hello` and `start`, 8.2.2):
 
@@ -1363,8 +1365,14 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `dismiss-restore` | `bootId` | 12.7. |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
-URLs 4,096, `input.data` 64 KiB, other text 1,024; the action of 9.6 then opens a URL only up to
-2,048 characters) or a size that is not a whole number from 1 to 65,535. No action carries a program or an argument list to run (8.3):
+URLs 4,096, `input.data` 64 KiB, a note's `text` and `base` 64 KiB each, other text 1,024; the
+action of 9.6 then opens a URL only up to 2,048 characters) or a size that is not a whole number
+from 1 to 65,535. A note may be any length (design 7.1), so 1,024 bytes would refuse most notes;
+at 65,536 bytes each the largest note `act`, every character escaped by JSON (six bytes for one),
+stays under the 1 MiB a page's message may hold (8.2.1). A stored note longer than that is not
+sent (`selected.note` null, `noteTooLong`) and the window does not edit it: it says `this note is
+longer than the window edits; use skydeck note <short id>`; the page refuses a longer text before
+sending it, since the server would close the connection for the message (stage D, plan D5). No action carries a program or an argument list to run (8.3):
 `resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
 fields that become part of a launch, checked as `skydeck new` checks them. The actions check every
 action again where they act on it, with the same parser — its kind, the types and limits of its
@@ -1378,7 +1386,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions) when it changed, at most once a second: `counts`; `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests, chip) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, or null); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1895,8 +1903,9 @@ interactive list: open and finished pull requests are counted apart.
   none is attached.
 - A chip whose state is `can't read` is drawn dotted.
 - **The tooltip** lists each open pull request with its own state (`repo #n · failing`, or `can't
-  read · last read 3h ago`), then the merged and closed counts. The header (12.5) shows each open
-  one on a line of its own.
+  read · last read 3h ago`), then the merged and closed counts. The header (12.5) shows the open
+  ones side by side on its one line for pull requests, as far as they fit, and the pull-request
+  dialog each attached one on a line of its own.
 
 | Attached | Chip |
 |---|---|
@@ -1966,21 +1975,23 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 
 **The ticket link** (asked for by the user on 2026-11-15; the details ruled by the lead that day).
 The group stays only a group (design 7.1), and nothing in the core depends on one ticket system
-(design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the
-group holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`,
-`_` and `.` and starting with a letter or a digit (the default pattern matches nothing else) —
-the address is `ticketUrl` with `{key}` replaced by exactly that text, as 9.6's rule
-re-serialises it, and only while its scheme, user name, password and host are those of
-`ticketUrl` itself. The chip then shows that it is a link (an arrow after the key, underlined),
-its tooltip is the address, and a click on it that selected no text opens it in the user's own
-Edge profile, as any link (9.6: `act open-link`, which the server checks again). Without a link
-the chip is plain text. The chip never edits: the ✎ beside it and `g` edit the group, with and
-without a link, and while there is no group the dashed `+ group` sets one. So nothing a program
-wrote into a title can add a host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`,
-`%` or white space, and the URL parser, not the text, decides that `{key}` stands after the host
-(16.4). The address reaches the page as a string of `list` and is shown only as text; it never
-becomes markup. skydeck reads nothing from the ticket system: no API, no login. `skydeck show`
-prints the address as `ticket:` after `group:` (its `--json` is unchanged).
+(design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the group
+holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`, `_` and
+`.` and starting with a letter or a digit (the default pattern matches nothing else) — the address
+is `ticketUrl` with `{key}` replaced by exactly that text, as 9.6's rule re-serialises it, and only
+while it has no user name or password and its host is the one the parser reads in `ticketUrl` with a
+stand-in for `{key}`, and while `ticketUrl` holds no white space or control character and leaves no
+percent-escape unfinished right before `{key}` (a key would finish it: `…/%2{key}` with `e.` makes
+`..`). The chip then shows that it is a link (an arrow after the key, underlined), its tooltip is
+the address, and a click on it that selected no text opens it in the user's own Edge profile, as any
+link (9.6: `act open-link`, which the server checks again). Without a link the chip is plain text.
+The chip never edits: the ✎ beside it and `g` edit the group, with and without a link, and while
+there is no group the dashed `+ group` sets one. So nothing a program wrote into a title can add a
+host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`, `%` or white space, and the URL
+parser, not the text, decides that `{key}` stands after the host (16.4). The address reaches the
+page as a string of `list` and is shown only as text; it never becomes markup. skydeck reads nothing
+from the ticket system: no API, no login. `skydeck show` prints the address as `ticket:` after
+`group:` (its `--json` is unchanged).
 
 ### 12.6 The right side
 
@@ -2450,7 +2461,7 @@ New keys, all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
-| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` with the same scheme, user name, password and host, none of which holds the key: the parser decides where the key stands, not the text (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
+| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
@@ -2750,7 +2761,7 @@ In the browser suite, besides those:
   Playwright's version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
   `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
-  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 20
+  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 30
   minutes.
 
 ## 18. Manual checks for step 2

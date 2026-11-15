@@ -1028,7 +1028,7 @@ test('counts: every listed row counts once, folded Earlier included, hidden done
 
 // --- terminals ---------------------------------------------------------------------------------
 
-test('terminals: each carries its id, slot, session, state, notReported and size, no ownsSize', () => {
+test('terminals: each carries its id, slot, session, state, notReported, size and when it was opened, no ownsSize', () => {
   const message = buildListMessage(
     input({
       rows: rows([running(S1), ds({ id: S2 })]),
@@ -1053,6 +1053,7 @@ test('terminals: each carries its id, slot, session, state, notReported and size
       notReported: false,
       cols: 120,
       rows: 40,
+      openedNs: String(T0 - DAY + SEC),
     },
     {
       id: termId(2),
@@ -1062,8 +1063,24 @@ test('terminals: each carries its id, slot, session, state, notReported and size
       notReported: true,
       cols: 80,
       rows: 24,
+      openedNs: String(T0 - DAY + 2n * SEC),
     },
   ]);
+});
+
+test("rows: a row's chip is the window's (S2 12.3) and each pull request carries its last read", () => {
+  const failing = prRow('acme/web', 7, { checks: 'failing' });
+  const merged = prRow('acme/api', 30, { state: 'merged' });
+  const prs = [failing, merged];
+  const message = buildListMessage(
+    input({ rows: rows([ds({ id: S1 })], { prs, sessionPrs: prs.map((pr) => attached(S1, pr)) }) }),
+  );
+  const row = rowIn(message, S1);
+  assert.deepEqual(row.chip, { level: 'checks-failing', open: 1, merged: 1 });
+  assert.deepEqual(
+    row.prs.map((pr) => pr.okAtNs),
+    [String(T0), String(T0)],
+  );
 });
 
 // --- selected and dirs -------------------------------------------------------------------------
@@ -1076,6 +1093,9 @@ const CARD: SelectedPayload = {
   ended: 'exited',
   expiring: false,
   expired: false,
+  note: 'a note\r\nas stored',
+  noteTooLong: false,
+  ticketUrl: null,
 };
 
 test("selected: the resume card of the view's selected session", () => {
@@ -1105,10 +1125,10 @@ test('dirs: the known project directories, as projectDirs gives them', () => {
 
 // --- needs nothing but its input ---------------------------------------------------------------
 
-test('src/window/view/ imports values only from text and the two list functions of A8', () => {
+test("src/window/view/ imports values only from text, the two list functions of A8, D4's CHIP_ORDER and windowChip", () => {
   const dir = join(import.meta.dirname, '../../../src/window/view');
   const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
-  assert.deepEqual(files.sort(), ['build.ts', 'sections.ts']);
+  assert.deepEqual(files.sort(), ['build.ts', 'chip.ts', 'sections.ts']);
   for (const name of files) {
     const source = readFileSync(join(dir, name), 'utf8');
     const imports = [...source.matchAll(/^import\s+(type\s+)?([^;]*?)\s+from\s+'([^']+)';/gms)];
@@ -1116,14 +1136,14 @@ test('src/window/view/ imports values only from text and the two list functions 
       if (isType !== undefined) {
         continue;
       }
+      const names = (what ?? '').replace(/[{}\s]/g, '').split(',');
       const allowed =
         from === './sections.ts' ||
+        (from === './chip.ts' && names.every((n) => n === 'windowChip')) ||
         from === '../../text/sanitize.ts' ||
         (from === '../../sessions/list.ts' &&
-          (what ?? '')
-            .replace(/[{}\s]/g, '')
-            .split(',')
-            .every((n) => n === 'isListed' || n === 'matchesFilter'));
+          names.every((n) => n === 'isListed' || n === 'matchesFilter')) ||
+        (from === '../../github.ts' && names.every((n) => n === 'CHIP_ORDER'));
       assert.ok(allowed, `${name}: import ${what ?? ''} from '${from ?? ''}'`);
     }
   }

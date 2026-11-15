@@ -45,6 +45,7 @@ const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 
 const SEC = 1_000_000_000n;
 const MIN = 60n * SEC;
+const HOUR = 60n * MIN;
 const DAY = 86_400n * SEC;
 
 // ---------------------------------------------------------------------------------------------
@@ -286,6 +287,25 @@ function fullTerminal(id: string, over: Partial<TerminalPayload> = {}): Terminal
     cols: 80,
     rows: 24,
     ownsSize: true,
+    openedNs: ago(HOUR),
+    ...over,
+  };
+}
+
+/** A fetched pull request `o/r #<number>` of `level`, last read 4 minutes ago. */
+function fullPr(
+  number: number,
+  level: string,
+  over: Partial<RowPayload['prs'][number]> = {},
+): RowPayload['prs'][number] {
+  return {
+    url: `https://github.com/o/r/pull/${number}`,
+    repo: 'o/r',
+    number,
+    title: null,
+    level,
+    error: null,
+    okAtNs: ago(4n * MIN),
     ...over,
   };
 }
@@ -694,24 +714,10 @@ test('the list', async (t) => {
               hasNote: true,
               noteHead: note,
               prs: [
-                {
-                  url: 'https://github.com/o/r/pull/7',
-                  repo: 'o/r',
-                  number: 7,
-                  title: null,
-                  level: 'cant-read',
-                  error: 'gh: HTTP 502',
-                },
-                {
-                  url: 'https://github.com/o/r/pull/8',
-                  repo: 'o/r',
-                  number: 8,
-                  title: null,
-                  level: 'merged',
-                  error: null,
-                },
+                fullPr(7, 'cant-read', { error: 'gh: HTTP 502', okAtNs: ago(3n * HOUR) }),
+                fullPr(8, 'merged'),
               ],
-              chip: { level: 'cant-read', count: 2 },
+              chip: { level: 'cant-read', open: 1, merged: 1 },
             }),
           ],
         },
@@ -766,12 +772,15 @@ test('the list', async (t) => {
         group: 'infra',
         title: 'tidy the logs',
         marks: ['crashed mid-turn', 'expires soon'],
-        chip: "2 PRs · can't read",
+        chip: "PR · can't read +1",
         age: '3d',
         state: '',
       });
       assert.equal(rows[3]?.dotted, true);
-      assert.equal(rows[3]?.chipTip, "o/r #7 · can't read · gh: HTTP 502\no/r #8 · merged");
+      assert.equal(
+        rows[3]?.chipTip,
+        "o/r #7 · can't read · last read 3h ago · gh: HTTP 502\n1 merged",
+      );
       assert.equal(rows[3]?.note, true);
       assert.equal(rows[3]?.noteTip, 'call Bob first', "the note's first line, sanitised");
       await showsText(
@@ -1003,6 +1012,124 @@ test('the list', async (t) => {
   );
 
   await t.test(
+    "S2 12.3's chip: one open failing pull request and 30 merged show `PR · failing` and a dim `+30`; a chip with none open is dim, an unreadable one dotted; a row without pull requests has no chip; hostile text in a chip stays text",
+    async (t) => {
+      const merged = Array.from({ length: 30 }, (_, at) => fullPr(100 + at, 'merged'));
+      const hostile = '<img src=x onerror="window.pwned=1"><b>x</b>';
+      const S5 = '5a0e8b6d-3c7f-4ebf-8b8c-7d6e5f4a3b2c';
+      const S6 = '6b1f9c7e-4d8a-4fca-9c9d-8e7f6a5b4c3d';
+      const list = fullList({
+        week: [
+          fullRow(S1, {
+            prs: [fullPr(7, 'checks-failing'), ...merged],
+            chip: { level: 'checks-failing', open: 1, merged: 30 },
+          }),
+          fullRow(S2, {
+            prs: [...merged.slice(0, 3), fullPr(9, 'closed')],
+            chip: { level: 'merged', open: 0, merged: 3 },
+          }),
+          fullRow(S3, {
+            prs: [fullPr(9, 'closed')],
+            chip: { level: 'closed', open: 0, merged: 0 },
+          }),
+          fullRow(S4, {
+            prs: [fullPr(5, 'cant-read', { okAtNs: null, error: 'gh: HTTP 502' })],
+            chip: { level: 'cant-read', open: 1, merged: 0 },
+          }),
+          // Markup in the chip's level, a repository and an error reaches the page as text.
+          fullRow(S5, {
+            prs: [
+              fullPr(7, hostile, { repo: hostile }),
+              fullPr(8, 'cant-read', { repo: hostile, error: hostile, okAtNs: null }),
+            ],
+            chip: { level: hostile, open: 2, merged: 0 },
+          }),
+          fullRow(S6),
+        ],
+      });
+      const s = await scripted(t, chromium, () => list, 44);
+      const rows = await untilDrawn(s.page, (rows) => rows.length === 6, 'six rows');
+      assert.deepEqual(
+        rows.map((row) => [row.chip, row.chipTip, row.dotted]),
+        [
+          ['PR · failing +30', 'o/r #7 · failing\n30 merged', false],
+          ['3 merged', '3 merged · 1 closed', false],
+          ['closed', '1 closed', false],
+          ["PR · can't read", "o/r #5 · can't read · never read · gh: HTTP 502", true],
+          [
+            `2 PRs · ${hostile}`,
+            `${hostile} #7 · ${hostile}\n${hostile} #8 · can't read · never read · ${hostile}`,
+            false,
+          ],
+          ['', '', false],
+        ],
+      );
+      const markup = await readPage(
+        s.page,
+        () => ({
+          elements: document.querySelectorAll('#list img, #list b').length,
+          pwned: Reflect.get(window, 'pwned') as unknown,
+          errors: Reflect.get(globalThis, 'pageErrors') as string[],
+        }),
+        null,
+      );
+      assert.deepEqual(markup, { elements: 0, pwned: undefined, errors: [] });
+      /** Whether the row's chip element is drawn at all (an empty one would be a bordered box). */
+      const chipShown = (id: string): Promise<boolean> =>
+        readPage(
+          s.page,
+          (id) => {
+            const chip = document.querySelector(`#list [data-id="${id}"] .row-chip`);
+            return chip instanceof HTMLElement && chip.checkVisibility();
+          },
+          id,
+        );
+      assert.equal(await chipShown(S1), true);
+      assert.equal(await chipShown(S6), false, 'a row without pull requests draws no chip');
+      const looks = await readPage(
+        s.page,
+        (ids) => {
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--faint)';
+          document.body.append(probe);
+          const faint = getComputedStyle(probe).color;
+          probe.remove();
+          const colour = (id: string, part: string): string => {
+            const found = document.querySelector(`#list [data-id="${id}"] ${part}`);
+            return found instanceof HTMLElement && found.checkVisibility()
+              ? getComputedStyle(found).color
+              : 'not shown';
+          };
+          return {
+            faint,
+            failing: colour(ids[0] ?? '', '.row-chip-text'),
+            failingText: document.querySelector(`#list [data-id="${ids[0]}"] .row-chip-text`)
+              ?.textContent,
+            plus: colour(ids[0] ?? '', '.row-chip-merged'),
+            plusText: document.querySelector(`#list [data-id="${ids[0]}"] .row-chip-merged`)
+              ?.textContent,
+            merged: colour(ids[1] ?? '', '.row-chip-text'),
+            mergedPlus: colour(ids[1] ?? '', '.row-chip-merged'),
+            closed: colour(ids[2] ?? '', '.row-chip-text'),
+          };
+        },
+        [S1, S2, S3],
+      );
+      assert.equal(looks.failingText, 'PR · failing');
+      assert.equal(looks.plusText, ' +30');
+      assert.equal(looks.plus, looks.faint, 'the +30 is dim');
+      assert.notEqual(looks.failing, looks.faint, 'the open part is not');
+      assert.equal(looks.merged, looks.faint, '3 merged is dim');
+      assert.equal(looks.mergedPlus, 'not shown', 'no +n with none open');
+      assert.equal(looks.closed, looks.faint, 'closed is dim');
+      // The same row without pull requests: no chip at all.
+      s.send(fullList({ week: [fullRow(S1)] }));
+      await untilDrawn(s.page, (rows) => rows.length === 1 && rows[0]?.chip === '', 'no chip');
+      assert.equal(await chipShown(S1), false, 'the chip is gone once its pull requests are');
+    },
+  );
+
+  await t.test(
     'a list that changes a row between the mousedown and the mouseup on its title loses no click',
     async (t) => {
       const quiet = fullList({ week: [fullRow(S1), fullRow(S2, { title: 'the second' })] });
@@ -1025,7 +1152,7 @@ test('the list', async (t) => {
               marks: ['ended-unexpectedly'],
               hasNote: true,
               noteHead: ['n'],
-              chip: { level: 'draft', count: 1 },
+              chip: { level: 'draft', open: 1, merged: 0 },
             }),
           ],
         }),
@@ -1058,6 +1185,21 @@ test('the list', async (t) => {
         views,
         'no new view, so no new list',
       );
+
+      // A later list is counted from when IT came, not from the page's load nor the first list:
+      // seconds after both (3 s at least), a row 10 s in its state reads 10 s — 12 s at most
+      // under load; counted from the load or the first list it would read 13 s or more.
+      const uptime = await readPage(s.page, () => performance.now(), null);
+      if (uptime < 3000) await sleep(3000 - uptime);
+      const later = NOW + 600n * SEC;
+      s.send(
+        fullList(
+          { open: [fullRow(S1, { state: 'working', sinceNs: String(later - 10n * SEC) })] },
+          [],
+          { nowNs: String(later) },
+        ),
+      );
+      await untilDrawn(s.page, (rows) => /^working 1[0-2]s$/.test(rows[0]?.state ?? ''), '10 s');
     },
   );
 

@@ -7,7 +7,10 @@ import {
   parseControlRequest,
   parsePageMessage,
 } from '../../src/window/protocol.ts';
+import { MAX_MESSAGE } from '../../src/window/websocket.ts';
 import type {
+  ActMessage,
+  ChipPayload,
   ByeMessage,
   ChallengeMessage,
   ControlRequest,
@@ -99,7 +102,48 @@ const VALID: Record<string, PageMessage> = {
   },
   'act close-terminal': { t: 'act', id: 3, kind: 'close-terminal', term: TERM },
   'act open-link': { t: 'act', id: 0, kind: 'open-link', url: 'https://github.com/a/b/pull/1' },
+  // Stage D (plan D 2.2).
+  'act label': { t: 'act', id: 4, kind: 'label', sessionId: S1, text: 'ORB-2107 fix the login' },
+  'act label, empty (clears it)': { t: 'act', id: 5, kind: 'label', sessionId: S1, text: '' },
+  'act group': { t: 'act', id: 6, kind: 'group', sessionId: S1, text: 'ORB-2107' },
+  'act note': {
+    t: 'act',
+    id: 7,
+    kind: 'note',
+    sessionId: S1,
+    text: 'first line\nsecond\r\nthird',
+    base: 'first line',
+  },
+  'act done': { t: 'act', id: 8, kind: 'done', sessionId: S1 },
+  'act undone': { t: 'act', id: 9, kind: 'undone', sessionId: S1 },
+  'act pr-refresh': { t: 'act', id: 10, kind: 'pr-refresh', sessionId: S1 },
+  'act pr-add': {
+    t: 'act',
+    id: 11,
+    kind: 'pr-add',
+    sessionId: S1,
+    url: 'https://github.com/a/b/pull/7',
+  },
+  'act pr-rm': {
+    t: 'act',
+    id: 12,
+    kind: 'pr-rm',
+    sessionId: S1,
+    url: 'https://github.com/a/b/pull/7',
+  },
 };
+
+/** The stage D act kinds that name a session (plan D 2.2), one valid message of each. */
+const STAGE_D_ACTS = [
+  'act label',
+  'act group',
+  'act note',
+  'act done',
+  'act undone',
+  'act pr-refresh',
+  'act pr-add',
+  'act pr-rm',
+] as const;
 
 /** A value of another JSON type than `value`. */
 function wrongType(value: unknown): unknown {
@@ -111,7 +155,7 @@ function wrongType(value: unknown): unknown {
   return ['x'];
 }
 
-describe('parsePageMessage: every page message of stage A', () => {
+describe('parsePageMessage: every page message of stages A and D', () => {
   for (const [name, message] of Object.entries(VALID)) {
     test(`${name} → ok and equal`, () => {
       assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
@@ -155,11 +199,49 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ t: 'welcome' }));
   });
 
-  test("act kinds of later stages and kinds it does not know (A's are resume, new, close-terminal, open-link)", () => {
-    for (const kind of ['label', 'restore', 'group', 'note', 'done', 'pr-add', MARKER]) {
+  test('act kinds of later stages and kinds it does not know (stage D adds label, group, note, done, undone, pr-add, pr-rm and pr-refresh)', () => {
+    for (const kind of ['restore', 'dismiss-restore', 'Label', MARKER]) {
       refused(page({ t: 'act', id: 1, kind, sessionId: S1, text: 'x' }));
+      refused(page({ t: 'act', id: 1, kind, sessionId: S1 }));
     }
     refused(page({ t: 'act', id: 1, sessionId: S1, cols: 120, rows: 40 }));
+  });
+
+  test("a stage D act with another kind's fields: done carries no text, label no base, note needs its base", () => {
+    refused(page({ ...VALID['act done'], text: 'x' }));
+    refused(page({ ...VALID['act pr-refresh'], url: 'https://github.com/a/b/pull/7' }));
+    refused(page({ ...VALID['act label'], base: '' }));
+    refused(page({ ...VALID['act group'], url: 'https://github.com/a/b/pull/7' }));
+    refused(page({ t: 'act', id: 1, kind: 'note', sessionId: S1, text: 'x' }));
+    refused(page({ ...VALID['act pr-add'], text: 'https://github.com/a/b/pull/7' }));
+    refused(page({ t: 'act', id: 1, kind: 'pr-rm', sessionId: S1 }));
+  });
+
+  test('every stage D act names a session by isSessionId exactly', () => {
+    for (const name of STAGE_D_ACTS) {
+      for (const sessionId of [BOOT.toUpperCase(), S1.slice(1), `${S1}\n`, `{${S1}}`, MARKER, '']) {
+        refused(page({ ...VALID[name], sessionId }));
+      }
+      assert.equal(page({ ...VALID[name], sessionId: BOOT }).ok, true, name);
+    }
+  });
+
+  test("a stage D act's text that is not well formed (a lone surrogate) is refused", () => {
+    const lone = (field: string, name: string): string => {
+      const message: Record<string, unknown> = { ...VALID[name], [field]: 'LONE' };
+      return JSON.stringify(message).replace('"LONE"', '"a\\ud800b"');
+    };
+    for (const [name, field] of [
+      ['act label', 'text'],
+      ['act group', 'text'],
+      ['act note', 'text'],
+      ['act note', 'base'],
+      ['act pr-add', 'url'],
+      ['act pr-rm', 'url'],
+    ] as const) {
+      refused(parsePageMessage(lone(field, name)));
+      assert.equal(parsePageMessage(lone(field, name).replace('\\ud800', 'x')).ok, true);
+    }
   });
 
   test("stage A's view has no chips", () => {
@@ -255,6 +337,17 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ ...VALID['act open-link'], id: -1 }));
   });
 
+  test("every act's id is a whole number from 0 (stage A's and stage D's kinds alike)", () => {
+    const acts = Object.entries(VALID).filter(([, message]) => message.t === 'act');
+    assert.equal(acts.length, 13);
+    for (const [name, message] of acts) {
+      for (const id of [-1, 1.5, 2 ** 53]) {
+        refused(page({ ...message, id }));
+      }
+      assert.equal(page({ ...message, id: Number.MAX_SAFE_INTEGER }).ok, true, name);
+    }
+  });
+
   test('unfolded holds section names, each once', () => {
     assert.equal(page({ ...VALID['view'], unfolded: ['open', 'week', 'earlier'] }).ok, true);
     refused(page({ ...VALID['view'], unfolded: [MARKER] }));
@@ -284,6 +377,12 @@ describe('parsePageMessage: string limits, in UTF-8 bytes', () => {
       'url',
       4096,
     ],
+    ['act label.text', VALID['act label'] as PageMessage, 'text', 1024],
+    ['act group.text', VALID['act group'] as PageMessage, 'text', 1024],
+    ['act note.text (plan D5)', VALID['act note'] as PageMessage, 'text', 65536],
+    ['act note.base (plan D5)', VALID['act note'] as PageMessage, 'base', 65536],
+    ['act pr-add.url (a URL)', VALID['act pr-add'] as PageMessage, 'url', 4096],
+    ['act pr-rm.url (a URL)', VALID['act pr-rm'] as PageMessage, 'url', 4096],
   ];
   for (const [name, message, field, limit] of cases) {
     test(`${name}: ${limit} bytes ok, one more refused`, () => {
@@ -303,6 +402,15 @@ describe('parsePageMessage: string limits, in UTF-8 bytes', () => {
       refused(page({ ...message, [field]: `${'🙂'.repeat(limit / 4)}a` }));
     });
   }
+
+  test('a note act with text and base both at their limit, every character escaped by JSON (U+0001: six bytes), is under the WebSocket message limit (plan D5)', () => {
+    const full = '\u0001'.repeat(65536);
+    const message = { ...VALID['act note'], text: full, base: full };
+    const json = JSON.stringify(message);
+    assert.ok(Buffer.byteLength(json, 'utf8') >= 2 * 6 * 65536, 'JSON escapes U+0001 in six bytes');
+    assert.ok(Buffer.byteLength(json, 'utf8') <= MAX_MESSAGE, `${Buffer.byteLength(json)} bytes`);
+    assert.deepEqual(parsePageMessage(json), { ok: true, value: message });
+  });
 
   test('theme colours are text fields', () => {
     const start = VALID['start'] as PageMessage & { t: 'start' };
@@ -447,9 +555,10 @@ describe('types (checked by npm run typecheck)', () => {
         title: 'Fix',
         level: 'green',
         error: null,
+        okAtNs: '1700000000000000000',
       },
     ],
-    chip: { level: 'green', count: 1 },
+    chip: { level: 'green', open: 1, merged: 0 },
     terminal: null,
     slot: null,
     elsewhere: null,
@@ -477,6 +586,7 @@ describe('types (checked by npm run typecheck)', () => {
         cols: 120,
         rows: 40,
         ownsSize: true,
+        openedNs: '1700000000000000000',
       },
     ],
     selected: {
@@ -487,6 +597,9 @@ describe('types (checked by npm run typecheck)', () => {
       ended: 'exited',
       expiring: false,
       expired: false,
+      note: 'first line\nsecond',
+      noteTooLong: false,
+      ticketUrl: null,
     },
     dirs: ['/home/u/project'],
   };
@@ -580,8 +693,40 @@ describe('types (checked by npm run typecheck)', () => {
         // @ts-expect-error stage A's view has no chips
         chips: [],
       } satisfies ViewMessage,
+      {
+        level: 'checks-failing',
+        open: 1,
+        merged: 30,
+        // @ts-expect-error stage A's chip had a count; stage D's counts open and merged apart
+        count: 31,
+      } satisfies ChipPayload,
+      {
+        t: 'act',
+        id: 1,
+        kind: 'note',
+        sessionId: S1,
+        text: 'x',
+        // @ts-expect-error a note act's base is `base`
+        baseText: '',
+      } satisfies ActMessage,
     ];
-    assert.equal(misspelt.length, 3);
+    assert.equal(misspelt.length, 5);
+  });
+
+  test("stage D's act kinds compile with exactly plan D 2.2's fields", () => {
+    const acts: ActMessage[] = [
+      { t: 'act', id: 1, kind: 'label', sessionId: S1, text: 'x' },
+      { t: 'act', id: 2, kind: 'group', sessionId: S1, text: '' },
+      { t: 'act', id: 3, kind: 'note', sessionId: S1, text: 'new', base: 'old' },
+      { t: 'act', id: 4, kind: 'done', sessionId: S1 },
+      { t: 'act', id: 5, kind: 'undone', sessionId: S1 },
+      { t: 'act', id: 6, kind: 'pr-refresh', sessionId: S1 },
+      { t: 'act', id: 7, kind: 'pr-add', sessionId: S1, url: 'https://github.com/a/b/pull/1' },
+      { t: 'act', id: 8, kind: 'pr-rm', sessionId: S1, url: 'https://github.com/a/b/pull/1' },
+    ];
+    for (const act of acts) {
+      assert.deepEqual(parsePageMessage(JSON.stringify(act)), { ok: true, value: act });
+    }
   });
 
   test('the answers of server.sock compile', () => {

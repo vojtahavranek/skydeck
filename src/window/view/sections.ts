@@ -3,7 +3,7 @@
  * row as the page receives it, and the project directories the new form offers. Pure.
  *
  * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed`, the window's message and hub
- * types, and `text`.
+ * types, `text`, and the window's chip (`./chip.ts`, plan D4).
  */
 import type { Ns } from '../../platform/types.ts';
 import { isListed } from '../../sessions/list.ts';
@@ -11,6 +11,7 @@ import type { ListRow } from '../../sessions/list.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import type { TerminalInfo, TerminalState } from '../hub.ts';
 import type { RowPayload } from '../protocol.ts';
+import { windowChip } from './chip.ts';
 
 /** S2 12.1: This week holds what was last active at most 7 days ago. */
 const WEEK_NS: Ns = 7n * 86_400n * 1_000_000_000n;
@@ -92,14 +93,24 @@ function noteHead(note: string | null): string[] {
  * window's own: `terminal` and `slot` from the terminal the row is shown with, `elsewhere` with the
  * holder's pid, its terminal device (sanitised: it is read from /proc) and the row's directory
  * (S2 7.9), and `starting` when that terminal's program
- * holds no session yet and may still come to (S2 7.5) while the session is not running. Stage A has
- * no attention and no stacks.
+ * holds no session yet and may still come to (S2 7.5) while the session is not running. Each pull
+ * request carries its level and its last successful read (`okAtNs`); the chip is the window's
+ * (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
  */
 export function rowPayload(
   row: ListRow,
   extra: { terminal: TerminalInfo | null; elsewhere: { pid: number; tty: string | null } | null },
 ): RowPayload {
   const { terminal, elsewhere } = extra;
+  const prs = row.prs.map((pr) => ({
+    url: pr.url,
+    repo: pr.repo,
+    number: pr.number,
+    title: pr.title,
+    level: pr.level,
+    error: pr.error,
+    okAtNs: pr.okAtNs === null ? null : String(pr.okAtNs),
+  }));
   return {
     id: row.id,
     shortId: row.shortId,
@@ -116,15 +127,8 @@ export function rowPayload(
     hasNote: row.hasNote,
     noteHead: noteHead(row.note),
     done: row.done,
-    prs: row.prs.map((pr) => ({
-      url: pr.url,
-      repo: pr.repo,
-      number: pr.number,
-      title: pr.title,
-      level: pr.level,
-      error: pr.error,
-    })),
-    chip: row.chip === null ? null : { level: row.chip.level, count: row.chip.count },
+    prs,
+    chip: windowChip(prs),
     terminal: terminal?.id ?? null,
     slot: terminal?.slot ?? null,
     elsewhere:
