@@ -1327,8 +1327,10 @@ otherwise leave them out and write down that you left them out (the third part n
 4. In W: `skydeck ls --all` (`--all`: also the sessions marked done). Nothing may be `working`,
    `waiting` or `running` but the three throwaway sessions. `skydeck ls` lists only the sessions
    you work in: not `claude -p`, Agent SDK runs, Claude Code in VS Code's panel. So then `pgrep -af
-   claude` (it only lists processes): every line that runs `claude` must be one of the three,
-   `claude --session-id <id>` with an id that starts with one of their short ids; another `claude`
+   claude` (it only lists processes; it also prints every other program whose command line holds
+   the word, such as a path with `claude` in it: pass over those). Every line whose program is
+   `claude` must be one of the three: `claude --session-id <id>`, or `claude --resume <id>` once
+   they have been restored, with an id that starts with one of their short ids. Another `claude`
    (one with another id, or with `-p`) is a run of yours. If anything else runs, end it as in
    "Prepare", steps 3 and 4, or stop here and do "Clean up" for what you made.
 
