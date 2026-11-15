@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
 import type { TerminalInfo } from '../../../src/window/hub.ts';
 import type { RowPayload } from '../../../src/window/protocol.ts';
-import { attentionOf } from '../../../src/window/view/attention.ts';
 import { windowChip } from '../../../src/window/view/chip.ts';
 import { projectDirs, rowPayload, sectionOf } from '../../../src/window/view/sections.ts';
 import { attached, ds, meta, prRow, rowOf, rows } from '../../helpers/derived.ts';
@@ -175,38 +174,6 @@ test('rowPayload: the cap counts what is left once a line is sanitised', () => {
   const note = `${'\x1b[31m'.repeat(400)}${'z'.repeat(1000)}`;
   const row = rowOf(ds({ id: S1 }), { metas: [meta(S1, { note })] });
   assert.deepEqual(rowPayload(row, NONE).noteHead, ['z'.repeat(1000)]);
-});
-
-/** The payload of a waiting row whose state detail is `detail`. */
-function waitingPayload(detail: string): RowPayload {
-  return rowPayload(rowOf(ds({ id: S1, state: 'waiting', stateDetail: detail })), NONE);
-}
-
-test('rowPayload: a state detail longer than 120 UTF-16 units is cut, the cut marked with … (B13)', () => {
-  const cut = waitingPayload('p'.repeat(5000)).stateDetail;
-  assert.equal(cut, `${'p'.repeat(119)}\u2026`);
-  assert.equal(cut?.length, 120);
-  const exact = 'q'.repeat(120);
-  assert.equal(waitingPayload(exact).stateDetail, exact);
-});
-
-test('rowPayload: a cut state detail never splits a surrogate pair', () => {
-  // 118 units, then an emoji (two units) that would straddle the cut at 119.
-  const detail = waitingPayload(`${'a'.repeat(118)}\u{1F600}\u{1F600}`).stateDetail;
-  assert.equal(detail, `${'a'.repeat(118)}\u2026`);
-  assert.equal(detail?.isWellFormed(), true);
-});
-
-test("rowPayload: a row's state detail is cut as its ask's detail is: one function for both", () => {
-  for (const length of [119, 120, 121, 500]) {
-    for (const tail of ['', '\u{1F600}']) {
-      const waitingFor = `${'w'.repeat(length - tail.length - 1)}${tail}w`;
-      const row = rowOf(ds({ id: S1, state: 'waiting', stateDetail: waitingFor }));
-      const live = new Map([[S1, { status: 'waiting', waitingFor, sinceNs: null }]]);
-      const ask = attentionOf(row, { marks: new Map(), live });
-      assert.equal(rowPayload(row, NONE).stateDetail, ask?.detail, `${length} ${tail}`);
-    }
-  }
 });
 
 test('rowPayload: a note of one line gives one line; no note gives none', () => {

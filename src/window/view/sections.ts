@@ -23,11 +23,6 @@ const NOTE_HEAD_LINES = 3;
  *  note can be any length, and the list message is sent whole on every change. */
 const NOTE_LINE_MAX = 1024;
 
-/** The longest detail a row and a notification carry, in UTF-16 units, the ellipsis included
- *  (plan B13, ruled): an ask's detail (`attention.ts`) and a row's state detail, both a
- *  `waitingFor`, which has no length limit; the list is sent whole. */
-export const DETAIL_MAX = 120;
-
 /** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was lost or
  *  never started has no program that could. Shared inside the view model (ruled, #45): `rowPayload`'s
  *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. */
@@ -50,14 +45,12 @@ export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'w
   return nowNs - row.lastActivityNs <= WEEK_NS ? 'week' : 'earlier';
 }
 
-/** `line` cut to `max` UTF-16 units with the cut marked by '…' (counted), never inside a surrogate
- *  pair. The one cut of the view model: a note line (NOTE_LINE_MAX), a row's state detail and an
- *  ask's detail (DETAIL_MAX). */
-export function capLine(line: string, max: number): string {
-  if (line.length <= max) {
+/** `line` cut to NOTE_LINE_MAX units with the cut marked by '…', never inside a surrogate pair. */
+function capLine(line: string): string {
+  if (line.length <= NOTE_LINE_MAX) {
     return line;
   }
-  let cut = max - 1;
+  let cut = NOTE_LINE_MAX - 1;
   const last = line.charCodeAt(cut - 1);
   if (last >= 0xd800 && last <= 0xdbff) {
     cut -= 1;
@@ -82,7 +75,7 @@ function noteHead(note: string | null): string[] {
         head.push('');
       }
     } else {
-      head.push(capLine(clean, NOTE_LINE_MAX));
+      head.push(capLine(clean));
     }
     if (head.length === NOTE_HEAD_LINES) {
       break;
@@ -96,14 +89,13 @@ function noteHead(note: string | null): string[] {
 
 /**
  * One row as the page receives it (S2 8.2.3): the list row's display fields (its strings were
- * sanitised when the list model was built; the note is sanitised here, line by line; the state
- * detail is cut to DETAIL_MAX as an ask's detail is, B13), and the window's own: `terminal` and
- * `slot` from the terminal the row is shown with, `elsewhere` with the holder's pid, its terminal
- * device (sanitised: it is read from /proc) and the row's directory (S2 7.9), and `starting` when
- * that terminal's program holds no session yet and may still come to (S2 7.5) while the session is
- * not running. Each pull request carries its level and its last successful read (`okAtNs`); the
- * chip is the window's (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention
- * and no stacks.
+ * sanitised when the list model was built; the note is sanitised here, line by line), and the
+ * window's own: `terminal` and `slot` from the terminal the row is shown with, `elsewhere` with the
+ * holder's pid, its terminal device (sanitised: it is read from /proc) and the row's directory
+ * (S2 7.9), and `starting` when that terminal's program
+ * holds no session yet and may still come to (S2 7.5) while the session is not running. Each pull
+ * request carries its level and its last successful read (`okAtNs`); the chip is the window's
+ * (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
  */
 export function rowPayload(
   row: ListRow,
@@ -127,7 +119,7 @@ export function rowPayload(
     group: row.group,
     groupSource: row.groupSource,
     state: row.state,
-    stateDetail: row.stateDetail === null ? null : capLine(row.stateDetail, DETAIL_MAX),
+    stateDetail: row.stateDetail,
     sinceNs: String(row.sinceNs),
     lastActivityNs: String(row.lastActivityNs),
     dir: row.dir,

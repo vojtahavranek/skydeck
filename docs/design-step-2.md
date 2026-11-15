@@ -1988,9 +1988,7 @@ An end counts while its `*_seq` is greater than `seen_seq`, or no `seen_seq` is 
 value is not later. The detail of an ask is the `waitingFor` sanitised (design 7.4), trimmed, and
 cut to 120 UTF-16 units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit,
 and the list is sent whole); one that is blank once sanitised (empty, or only white space) is no
-detail. A row's state detail (stage A's: the same `waitingFor` while the session waits) is cut the
-same way, by the same function; it is sanitised but not trimmed. The time a row shows is the
-file's `statusUpdatedAt` (else `updatedAt`) for an ask,
+detail. The time a row shows is the file's `statusUpdatedAt` (else `updatedAt`) for an ask,
 `window_end_ns` for an end of the window, `turn_ended_ns` for a finished turn. Ctrl+Shift+J's order,
 in full: those that ask by that time, the longest-waiting first and an unknown time last; then those
 that ended by `window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties
