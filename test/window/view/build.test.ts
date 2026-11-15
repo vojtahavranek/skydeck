@@ -8,6 +8,12 @@ import type { Ns } from '../../../src/platform/types.ts';
 import type { DerivedSession, Holder } from '../../../src/sessions/types.ts';
 import type { TerminalInfo } from '../../../src/window/hub.ts';
 import type { RowPayload, SectionPayload, SelectedPayload } from '../../../src/window/protocol.ts';
+import { attentionOf, NO_ATTENTION } from '../../../src/window/view/attention.ts';
+import type {
+  AttentionFacts,
+  AttentionMarks,
+  LiveStatus,
+} from '../../../src/window/view/attention.ts';
 import { buildListMessage } from '../../../src/window/view/build.ts';
 import type { ViewInput } from '../../../src/window/view/build.ts';
 import { projectDirs } from '../../../src/window/view/sections.ts';
@@ -1125,10 +1131,10 @@ test('dirs: the known project directories, as projectDirs gives them', () => {
 
 // --- needs nothing but its input ---------------------------------------------------------------
 
-test("src/window/view/ imports values only from text, the two list functions of A8, D4's CHIP_ORDER and windowChip", () => {
+test("src/window/view/ imports values only from text, the two list functions of A8, D4's CHIP_ORDER and windowChip, and B's attention", () => {
   const dir = join(import.meta.dirname, '../../../src/window/view');
   const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
-  assert.deepEqual(files.sort(), ['build.ts', 'chip.ts', 'sections.ts']);
+  assert.deepEqual(files.sort(), ['attention.ts', 'build.ts', 'chip.ts', 'sections.ts']);
   for (const name of files) {
     const source = readFileSync(join(dir, name), 'utf8');
     const imports = [...source.matchAll(/^import\s+(type\s+)?([^;]*?)\s+from\s+'([^']+)';/gms)];
@@ -1139,6 +1145,7 @@ test("src/window/view/ imports values only from text, the two list functions of 
       const names = (what ?? '').replace(/[{}\s]/g, '').split(',');
       const allowed =
         from === './sections.ts' ||
+        from === './attention.ts' ||
         (from === './chip.ts' && names.every((n) => n === 'windowChip')) ||
         from === '../../text/sanitize.ts' ||
         (from === '../../sessions/list.ts' &&
@@ -1147,4 +1154,183 @@ test("src/window/view/ imports values only from text, the two list functions of 
       assert.ok(allowed, `${name}: import ${what ?? ''} from '${from ?? ''}'`);
     }
   }
+});
+
+// --- attention (stage B, S2 12.4, plan B7) -----------------------------------------------------
+
+function marksOf(over: Partial<AttentionMarks>): AttentionMarks {
+  return {
+    turnEndedSeq: null,
+    turnEndedNs: null,
+    seenSeq: null,
+    windowEndSeq: null,
+    windowEndNs: null,
+    ...over,
+  };
+}
+
+function liveOf(status: string, over: Partial<LiveStatus> = {}): LiveStatus {
+  return { status, waitingFor: null, sinceNs: null, ...over };
+}
+
+/**
+ * S1 asks (running, waiting since T0 - 10 s); S2 ended (not running, window end 3); S3 finished
+ * (running, idle, turn end 5); S4 running, idle, needs nothing; S5 in Earlier, ended (window end
+ * 2); S6 done and hidden, ended (window end 1).
+ */
+function attentionWorld(): { list: ReturnType<typeof rows>; facts: AttentionFacts } {
+  const list = rows([
+    running(S1, { state: 'waiting', pid: 9001, procStart: 501, transcript: { aiTitle: 'alpha' } }),
+    ds({ id: S2, transcript: { aiTitle: 'beta' } }),
+    running(S3, { state: 'running', pid: 9003, procStart: 503, transcript: { aiTitle: 'gamma' } }),
+    running(S4, { state: 'running', pid: 9004, procStart: 504, transcript: { aiTitle: 'delta' } }),
+    ds({ id: S5, lastActivityNs: NOW - 30n * DAY, transcript: { aiTitle: 'epsilon' } }),
+    ds({ id: S6, hidden: true, doneAtNs: T0, transcript: { aiTitle: 'zeta' } }),
+  ]);
+  const facts: AttentionFacts = {
+    marks: new Map([
+      [S2, marksOf({ windowEndSeq: 3, windowEndNs: NOW - 5n * SEC })],
+      [S3, marksOf({ turnEndedSeq: 5, turnEndedNs: NOW - 2n * SEC, seenSeq: 4 })],
+      [S4, marksOf({ turnEndedSeq: 6, turnEndedNs: NOW - SEC, seenSeq: 7 })],
+      [S5, marksOf({ windowEndSeq: 2, windowEndNs: NOW - 30n * DAY })],
+      [S6, marksOf({ windowEndSeq: 1, windowEndNs: NOW - DAY })],
+    ]),
+    live: new Map([
+      [S1, liveOf('waiting', { waitingFor: 'permission · Bash', sinceNs: NOW - 10n * SEC })],
+      [S3, liveOf('idle')],
+      [S4, liveOf('idle')],
+    ]),
+  };
+  return { list, facts };
+}
+
+test('attention: without ViewInput.attention no row needs you and needYou is empty', () => {
+  const { list } = attentionWorld();
+  const message = buildListMessage(input({ rows: list, view: { unfolded: ['earlier'] } }));
+  for (const row of message.sections.flatMap((s) => s.rows)) {
+    assert.equal(row.attention, null, row.id);
+  }
+  assert.deepEqual(message.needYou, { count: 0, order: [] });
+  assert.deepEqual(
+    buildListMessage(
+      input({ rows: list, view: { unfolded: ['earlier'] }, attention: NO_ATTENTION }),
+    ),
+    message,
+  );
+});
+
+test("attention: each row's attention is attentionOf over the facts", () => {
+  const { list, facts } = attentionWorld();
+  const message = buildListMessage(
+    input({ rows: list, attention: facts, view: { unfolded: ['earlier'] } }),
+  );
+  for (const row of list.filter((r) => !r.done)) {
+    assert.deepEqual(rowIn(message, row.id).attention, attentionOf(row, facts), row.id);
+  }
+  assert.deepEqual(rowIn(message, S1).attention, {
+    reason: 'asks',
+    detail: 'permission · Bash',
+    sinceNs: String(NOW - 10n * SEC),
+  });
+  assert.equal(rowIn(message, S2).attention?.reason, 'ended');
+  assert.equal(rowIn(message, S3).attention?.reason, 'finished');
+  assert.equal(rowIn(message, S4).attention, null);
+  assert.equal(rowIn(message, S5).attention?.reason, 'ended');
+});
+
+test("attention: a `new` terminal's own row needs you when its marks say so", () => {
+  const facts: AttentionFacts = {
+    marks: new Map([[NEW, marksOf({ windowEndSeq: 1, windowEndNs: NOW })]]),
+    live: new Map(),
+  };
+  const message = buildListMessage(
+    input({
+      terminals: [
+        term(1, { expectedSessionId: NEW, sessionId: null, kind: 'new', state: 'ended' }),
+      ],
+      attention: facts,
+    }),
+  );
+  assert.equal(rowIn(message, NEW).attention?.reason, 'ended');
+  assert.deepEqual(message.needYou, { count: 1, order: [NEW] });
+});
+
+test('needYou.count: every listed row that needs you, whatever the filter or the fold', () => {
+  const { list, facts } = attentionWorld();
+  const plain = buildListMessage(input({ rows: list, attention: facts }));
+  assert.equal(plain.needYou.count, 4); // S1, S2, S3 and S5 in the folded Earlier; not the done S6
+  const filtered = buildListMessage(
+    input({ rows: list, attention: facts, view: { filter: 'delta' } }),
+  );
+  assert.equal(filtered.needYou.count, 4);
+  assert.deepEqual(filtered.needYou.order, []);
+  const withDone = buildListMessage(
+    input({ rows: list, attention: facts, view: { showDone: true } }),
+  );
+  assert.equal(withDone.needYou.count, 5);
+});
+
+test("needYou.order: the rows this page shows that need you, in B6's order", () => {
+  const { list, facts } = attentionWorld();
+  // Earlier is folded: S5 is not shown.
+  const folded = buildListMessage(input({ rows: list, attention: facts }));
+  assert.deepEqual(folded.needYou.order, [S1, S2, S3]);
+  const unfolded = buildListMessage(
+    input({ rows: list, attention: facts, view: { unfolded: ['earlier'] } }),
+  );
+  assert.deepEqual(unfolded.needYou.order, [S1, S5, S2, S3]);
+  // A filter leaves out what it does not match, and unfolds Earlier (S2 12.8).
+  const beta = buildListMessage(input({ rows: list, attention: facts, view: { filter: 'beta' } }));
+  assert.deepEqual(beta.needYou.order, [S2]);
+  const epsilon = buildListMessage(
+    input({ rows: list, attention: facts, view: { filter: 'epsilon' } }),
+  );
+  assert.deepEqual(epsilon.needYou.order, [S5]);
+});
+
+test('counts: a row that needs you is counted in needYou.count and in no field of counts', () => {
+  const { list, facts } = attentionWorld();
+  const without = buildListMessage(input({ rows: list }));
+  const withFacts = buildListMessage(input({ rows: list, attention: facts }));
+  assert.deepEqual(without.counts, {
+    working: 0,
+    waiting: 1,
+    running: 2,
+    starting: 0,
+    elsewhere: 0,
+    notRunning: 2,
+  });
+  assert.deepEqual(withFacts.counts, {
+    working: 0,
+    waiting: 0,
+    running: 1,
+    starting: 0,
+    elsewhere: 0,
+    notRunning: 0,
+  });
+  const total = (counts: typeof without.counts) =>
+    Object.values(counts).reduce((sum, n) => sum + n, 0);
+  assert.equal(total(withFacts.counts) + withFacts.needYou.count, total(without.counts));
+});
+
+test('counts: a row running elsewhere or starting that needs you is in none of counts either', () => {
+  const list = rows([running(S1), ds({ id: S2, lastActivityNs: NOW - 20n * DAY })]);
+  const facts: AttentionFacts = {
+    marks: new Map([
+      [S1, marksOf({ windowEndSeq: 1 })],
+      [S2, marksOf({ windowEndSeq: 2 })],
+    ]),
+    live: new Map(),
+  };
+  const message = buildListMessage(
+    input({
+      rows: list,
+      terminals: [term(1, { expectedSessionId: S2, sessionId: null, state: 'starting', slot: 1 })],
+      elsewhere: new Map([[S1, { pid: 9000, tty: null }]]),
+      attention: facts,
+    }),
+  );
+  assert.equal(message.counts.elsewhere, 0);
+  assert.equal(message.counts.starting, 0);
+  assert.deepEqual(message.needYou, { count: 2, order: [S1, S2] });
 });

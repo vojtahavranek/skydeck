@@ -3,6 +3,7 @@
 import { refreshPrs } from '../../github.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { resolveRef } from '../../sessions/refs.ts';
+import { ticketAddress } from '../../sessions/ticket.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -14,9 +15,10 @@ import { formatShow, showJson } from '../output.ts';
 const SPEC: ArgSpec = {
   usage: `skydeck show <ref> [--json] [--refresh]
 
-Prints one session: its state and marks, label and group, project directory, launch command (and
-the flags in it that skydeck does not know, which a resume does not pass on), the sessions it
-continues, the processes that hold it, its pull requests and its note.
+Prints one session: its state and marks, label and group, the ticket address when ticketUrl gives
+one, project directory, launch command (and the flags in it that skydeck does not know, which a
+resume does not pass on), the sessions it continues, the processes that hold it, its pull requests
+and its note.
 
   --json      print it as JSON instead of text
   --refresh   first read the status of this session's pull requests that are not merged or closed
@@ -54,10 +56,16 @@ export const command: Command = {
         row = loadRows(deck).find((candidate) => candidate.id === id) ?? row;
       }
       const links = deck.store.links();
+      const { groupPattern, ticketUrl } = deck.config;
       ctx.io.stdout(
         parsed.flags['json'] === true
           ? jsonText(showJson(row, links))
-          : formatShow(row, links, clock.nowNs()),
+          : formatShow(
+              row,
+              links,
+              clock.nowNs(),
+              ticketAddress(row.group, groupPattern, ticketUrl),
+            ),
       );
       return EXIT.ok;
     });
