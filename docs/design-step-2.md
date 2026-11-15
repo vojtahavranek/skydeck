@@ -1767,7 +1767,9 @@ Five changes to step 1's code make that possible, with no change of behaviour fo
   asked for it going, 11.4): no further entry is prepared or opened, the wait ends at its next
   look, the sessions still waited for are reported `timed out` (their locks stay: their terminals
   may still start them), then one line `stopped: <reason>`, then the rest `not started`. The
-  fourth hook, a stop after a batch in which no session started, is 11.3's. Each report line also
+  signal stops the run only when it is seen while the stop changes something — a session the wait
+  would still wait for, or an entry not opened; otherwise (every session started, or the wait's
+  time ran out at that look, with no entry left) the run ends as it would have. The fourth hook, a stop after a batch in which no session started, is 11.3's. Each report line also
   names the session it ends and how (started, timed out, failed, not started, handed off,
   printed), and the outcome says whether a hook stopped the run.
 

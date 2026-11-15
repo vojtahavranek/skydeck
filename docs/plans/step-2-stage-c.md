@@ -322,9 +322,11 @@ export interface RestoreHooks {
   /** Once aborted: no further entry is prepared or opened, the wait ends at its next look; the
    *  sessions still waited for are reported `timed out <short> <title>` (their locks stay, renewed
    *  last), then one line `stopped: <String(signal.reason)>`, then `not started <short> <title>`
-   *  for the sessions not opened; outcome.stopped is true. A run that sees the abort with nothing
-   *  left (no session still waited for, no entry to open) ends as it would have (ruled on task
-   *  71's review 1). */
+   *  for the sessions not opened; outcome.stopped is true. But the signal stops the run only
+   *  when it is seen while the stop changes something — a session the wait would still wait
+   *  for, or an entry not opened; otherwise (every session started, or the wait's time ran out
+   *  at that look, with no entry left) the run ends as it would have (ruled on task 71's
+   *  reviews). */
   signal?: AbortSignal;
   /** C23: after a batch that opened at least one terminal and saw none of its sessions start, when
    *  entries are left, the run stops as for the signal, with the reason `no session of this batch
@@ -663,9 +665,11 @@ before `prepareResumeById` (so also for `runHere`, which the window never reache
 `signal` is looked at before each batch, before each entry is prepared, and after each look of the
 wait; at an abort the sessions still waited for are reported `timed out …` first (as at the wait's
 end), then the `stopped:` line, then the `not started …` lines. `runHere` looks at it before its
-memory check and before each entry: the hooks are `runRestore`'s as a whole. A run that sees the
-abort with nothing left (no session still waited for, no entry to open) ends as it would have: no
-`stopped:` line, `outcome.stopped` false (both ruled on task 71's review 1). `stopAfterEmptyBatch`: a batch that
+memory check and before each entry: the hooks are `runRestore`'s as a whole. The signal stops the
+run only when it is seen while the stop changes something — a session the wait would still wait
+for, or an entry not opened; otherwise (every session started, or the wait's time ran out at that
+look, with no entry left) the run ends as it would have: no `stopped:` line, `outcome.stopped`
+false (ruled on task 71's reviews 1 and 2). `stopAfterEmptyBatch`: a batch that
 opened at least one terminal and saw none of its sessions start stops the run the same way, with
 the reason `no session of this batch started`, when entries are left; a last (or only) batch that
 starts nothing ends the run as any run with failures, with no `stopped:` line (C23). `report`'s second argument for every line that ends a session's part: `started`, `timed out`,

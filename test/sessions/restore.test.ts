@@ -1683,6 +1683,25 @@ test('signal aborted while the last batch waits: the stopped line only when a se
   }
 });
 
+test('signal first seen at the look that ends the last batch’s wait by its time: the run ends as it would have', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const controller = new AbortController();
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 3) {
+      controller.abort('stop'); // the wait's 3 s are over at the next look
+    }
+  };
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome, lines } = await run(d, tabs.terminal, entries.slice(0, 2), {
+    signal: controller.signal,
+  });
+  assert.deepEqual(sleeps, [1000, 1000, 1000]);
+  assert.deepEqual(outcome, { ...NOTHING, timedOut: [sid(1), sid(2)] });
+  assert.deepEqual(lines, [timedOutLine(entries, 1), timedOutLine(entries, 2)]);
+});
+
 test('without tabs a signal aborted before the run hands nothing off', async (t) => {
   const { d, entries } = fiveToRestore(t);
   const { outcome, lines } = await run(d, here(d), entries.slice(0, 3), {

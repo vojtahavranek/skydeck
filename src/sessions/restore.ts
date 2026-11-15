@@ -210,9 +210,10 @@ export interface RestoreHooks {
    * Once aborted, no further entry is prepared or opened and the wait ends at its next look; the
    * sessions still waited for are reported `timed out <short> <title>` (their locks stay, renewed
    * last: their terminals may still start them), then one line `stopped: <String(signal.reason)>`,
-   * then `not started <short> <title>` for the entries not opened; outcome.stopped is true. A run
-   * that sees the abort with nothing left — no session still waited for, no entry to open — ends
-   * as it would have.
+   * then `not started <short> <title>` for the entries not opened; outcome.stopped is true. But
+   * the signal stops the run only when it is seen while the stop changes something — a session the
+   * wait would still wait for, or an entry not opened; otherwise (every session started, or the
+   * wait's time ran out at that look, with no entry left) the run ends as it would have.
    */
   signal?: AbortSignal;
   /**
