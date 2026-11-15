@@ -3,9 +3,12 @@
 // which answers them with the server's own handler and parser (FAKE_SERVE_LAUNCH, _RESTORE,
 // _STATE; FAKE_SERVE_REQUESTS records what reached `launch`). The platform is realTestPlatform.
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { SkydeckError } from '../../src/platform/errors.ts';
 import type { Net } from '../../src/platform/types.ts';
@@ -394,5 +397,40 @@ describe('controlClient: POST /restore (plan C5, C14)', () => {
       "the window's server failed while it answered the request (500: failed); run skydeck to see what started",
     );
     assert.deepEqual(seen, []);
+  });
+});
+
+describe('the fake serve’s stage C options', () => {
+  test('a value of another form ends the fake with exit 2, so that a typo cannot pass as another answer', async (t) => {
+    const m = windowMachine(t);
+    const fake = fileURLToPath(new URL('../fixtures/fake-serve/bin/skydeck', import.meta.url));
+    for (const [name, value] of [
+      ['FAKE_SERVE_LAUNCH', 'answer:{'],
+      ['FAKE_SERVE_LAUNCH', 'silently'],
+      ['FAKE_SERVE_LAUNCH', 'status:4130'],
+      ['FAKE_SERVE_RESTORE', '[{"line":'],
+      ['FAKE_SERVE_RESTORE', 'silent-after:x'],
+      ['FAKE_SERVE_STATE', 'starting:-1'],
+      ['FAKE_SERVE_STATE', 'stopped'],
+      ['FAKE_SERVE_REQUESTS', 'requests.jsonl'],
+    ] as const) {
+      const child = spawn(fake, ['serve'], {
+        env: m.s.env({ SKYDECK_NODE: process.execPath, [name]: value }),
+        cwd: '/',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      t.after(() => {
+        child.kill('SIGKILL');
+      });
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+      child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+      const [code] = (await once(child, 'close')) as [number | null];
+
+      assert.equal(code, 2, `${name}=${value}: ${err}`);
+      assert.match(err, new RegExp(`fake-serve: ${name} is not `), `${name}=${value}`);
+      assert.ok(!out.split('\n').includes('ready'), `${name}=${value}: never ready`);
+    }
   });
 });
