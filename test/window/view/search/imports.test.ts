@@ -19,8 +19,11 @@ const SANITIZE = '../../../text/sanitize.ts';
 const SESSIONS = /^\.\.\/\.\.\/\.\.\/sessions\/[\w-]+\.ts$/;
 const TYPE_SOURCES = new Set(['../../protocol.ts', '../../hub.ts', '../sections.ts']);
 
-/** `import … from '…'` and `export … from '…'`, over several lines too. */
-const STATEMENT = /^(?:import|export)\s+(type\s+)?([^;]*?)\s*from\s+'([^']+)'/gms;
+/** `import … from '…'` and `export … from '…'`, over several lines too. An `export` counts only
+ *  before `*` or `{` (a re-export), so that a `from '…'` in an exported declaration's comment or
+ *  string is no import; the clause stays `[^;]*?`, so that whatever it holds is judged. */
+const STATEMENT =
+  /^(?:import|export(?=\s+(?:type\s+)?[*{]))\s+(type\s+)?([^;]*?)\s*from\s+'([^']+)'/gms;
 /** `import '…';`: a value import, for its effects. */
 const BARE_IMPORT = /^import\s+'([^']+)'/gm;
 /** `import('…')`: in a type position or at run time; either way it names a module. */
@@ -109,6 +112,9 @@ test('the check itself: what it lets through', () => {
     'const hit = query.match(\n  /^>\\s*(?:r|re|res)$/iu,\n);',
     'const at = title.search( /x/);',
     'const all = [...text.matchAll(/x/g)];',
+    // `export` that re-exports nothing: a `from '…'` in its comment or string is no import.
+    "export function f(): number {\n  // taken from 'the plan'\n  return 1;\n}",
+    'export const s = "x from \'y\'";',
   ].join('\n');
   assert.deepEqual(violations(source), []);
 });
@@ -138,6 +144,23 @@ test('the check itself: what it refuses', () => {
     ["const hit = title.match(new String('x'));", 'a pattern built from a string'],
     ['const at = title.search(word);', 'a pattern built from a string'],
     ['const all = title.matchAll(word);', 'a pattern built from a string'],
+    // A clause that is not names only is still judged: a comment, a string name, a letter
+    // outside ASCII.
+    ["import { isListed /* 7.2 */ } from '../../../sessions/list.ts';", 'value import isListed'],
+    ["import {\n  isListed, // 7.2\n} from '../../../sessions/list.ts';", 'value import isListed'],
+    [
+      'import { "isListed" as isListed } from \'../../../sessions/list.ts\';',
+      'value import "isListed"',
+    ],
+    ["import { caf\u00e9 } from '../../../sessions/list.ts';", 'value import caf\u00e9'],
+    // A re-export is still an import, with `type` and with `* as`.
+    ["export { readFileSync } from 'node:fs';", "import from 'node:fs'"],
+    [
+      "export type { Ns } from '../../../platform/types.ts';",
+      "import from '../../../platform/types.ts'",
+    ],
+    ["export * as fs from 'node:fs';", "import from 'node:fs'"],
+    ["export { isListed } from '../../../sessions/list.ts';", 'value import isListed'],
   ];
   for (const [source, expected] of cases) {
     const found = violations(source);
