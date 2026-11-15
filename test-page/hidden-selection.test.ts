@@ -294,6 +294,13 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
 
       await mark(page, 'keys');
       for (const key of ['d', 'l', 'F2', 'g', 'n', 'p']) {
+        // The key bar's line stays 5 s: emptied first, so that each key must say it again (the
+        // page's own timer only empties it).
+        await page.evaluate(() => {
+          const line = document.getElementById('key-message');
+          if (line !== null) line.textContent = '';
+        });
+        assert.equal(await keyMessage(page), '', `emptied before ${key}`);
         await page.keyboard.press(key);
         await showsText(page, '#key-message', /^no session selected$/);
         assert.equal(await keyMessage(page), 'no session selected', key);
