@@ -666,6 +666,43 @@ describe('Windows programs (A32)', () => {
     assert.equal(rundll32.calls.length, 1);
     assert.deepEqual(d.edgeCalls(), []);
   });
+
+  test('open-link with window.links "default" and no stand-in for rundll32.exe: the A32 guard refuses the real one, so the link is refused (D5) and nothing is started', async (t) => {
+    // The net under every test of links: a stand-in that is forgotten or falls through reaches
+    // the real processes, which refuse rundll32.exe by its path before any process exists.
+    const d = serverSandbox(t, { window: { links: 'default' } });
+    const outcomes: { command: string; code: unknown }[] = [];
+    const watching = (p: Platform): Platform => ({
+      ...p,
+      processes: {
+        ...p.processes,
+        async startDetached(command, args, options) {
+          try {
+            const child = await p.processes.startDetached(command, args, options);
+            outcomes.push({ command, code: null });
+            return child;
+          } catch (error) {
+            outcomes.push({ command, code: (error as { code?: unknown }).code });
+            throw error;
+          }
+        },
+      },
+    });
+    const test = await d.start({ platform: watching });
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'open-link', url: 'https://github.com/acme/web/pull/7' });
+    assert.equal(result.ok, false);
+    assert.equal(
+      result.error,
+      'the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)',
+    );
+    assert.deepEqual(
+      outcomes.filter((outcome) => outcome.command === RUNDLL32_EXE),
+      [{ command: RUNDLL32_EXE, code: 'EWINDOWS' }],
+    );
+    await sleep(200);
+    assert.deepEqual(d.edgeCalls(), []);
+  });
 });
 
 describe('places (S2 4.2, 17.3)', () => {

@@ -426,17 +426,17 @@ const HOSTILE_CHARACTERS: readonly string[] = [
   '\x7f',
   '\x85', // NEL
   '\x9b', // CSI
-  ' ', // no-break space
-  ' ', // Ogham space mark
-  ' ', // en space
-  ' ', // hair space
-  '​', // zero width space
-  ' ', // line separator
-  ' ', // paragraph separator
-  ' ', // narrow no-break space
-  ' ', // medium mathematical space
-  '　', // ideographic space
-  '﻿', // byte order mark
+  '\u00a0', // no-break space
+  '\u1680', // Ogham space mark
+  '\u2002', // en space
+  '\u200a', // hair space
+  '\u200b', // zero width space
+  '\u2028', // line separator
+  '\u2029', // paragraph separator
+  '\u202f', // narrow no-break space
+  '\u205f', // medium mathematical space
+  '\u3000', // ideographic space
+  '\ufeff', // byte order mark
 ];
 const HOSTILE_PLACES: readonly ((c: string) => string)[] = [
   (c) => `${c}https://example.com/a${c}`,
@@ -488,17 +488,17 @@ test('the parser percent-encodes white space and controls in the user info, path
   const cases: [url: string, opened: string | null][] = [
     ['https://example.com/a b', 'https://example.com/a%20b'],
     ['https://example.com/a\tb\nc\rd', 'https://example.com/abcd'],
-    ['https://example.com/?q=a b　c', 'https://example.com/?q=a%20b%E3%80%80c'],
+    ['https://example.com/?q=a b\u3000c', 'https://example.com/?q=a%20b%E3%80%80c'],
     ['https://example.com/#a\x1bb\x7fc\x85d', 'https://example.com/#a%1Bb%7Fc%C2%85d'],
-    ['https://a b:c d@example.com/', 'https://a%20b:c%C2%A0d@example.com/'],
+    ['https://a b:c\u00a0d@example.com/', 'https://a%20b:c%C2%A0d@example.com/'],
     ['  https://example.com/\x00\x1f ', 'https://example.com/'],
     ['https://exa\tmple.com/', 'https://example.com/'],
     ['https://exa mple.com/', null],
-    ['https://exa mple.com/', null], // IDNA maps it to a space
-    ['https://exa mple.com/', null],
+    ['https://exa\u00a0mple.com/', null], // IDNA maps it to a space
+    ['https://exa\u2028mple.com/', null],
     ['https://exa\x1fmple.com/', null],
     ['https://example.com:4 43/', null],
-    ['https://example.com:4　/', null],
+    ['https://example.com:4\u3000/', null],
   ];
   for (const [url, address] of cases) {
     const before = processes.calls.length;

@@ -1124,12 +1124,13 @@ describe('realTestPlatform (A36)', () => {
 });
 
 describe('writeWindowConfig (A32)', () => {
-  test('a key given as undefined is left out: the stub and keepAlive off stay', (t) => {
+  test('a key given as undefined is left out: the stub, keepAlive off and links edge stay', (t) => {
     const s = sandbox(t);
 
     const { edgeStub } = writeWindowConfig(s, {
       edge: undefined,
       keepAlive: undefined,
+      links: undefined,
       port: 47001,
     });
     const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
@@ -1139,10 +1140,11 @@ describe('writeWindowConfig (A32)', () => {
       edge: edgeStub,
       profileDir: null,
       keepAlive: 'off',
+      links: 'edge',
     });
   });
 
-  test('writes a config.json that parses, with the Edge stub and the keep-alive off', (t) => {
+  test('writes a config.json that parses, with the Edge stub, the keep-alive off and links to the stub', (t) => {
     const s = sandbox(t);
 
     const { edgeStub } = writeWindowConfig(s);
@@ -1153,6 +1155,7 @@ describe('writeWindowConfig (A32)', () => {
       edge: edgeStub,
       profileDir: null,
       keepAlive: 'off',
+      links: 'edge',
     });
     assert.ok(edgeStub.startsWith(`${s.root}/`), edgeStub);
     assert.ok(!/\.exe$/i.test(edgeStub) && !edgeStub.startsWith('/mnt/'), edgeStub);
@@ -1161,7 +1164,7 @@ describe('writeWindowConfig (A32)', () => {
   test('what the test passes is merged over it', (t) => {
     const s = sandbox(t);
 
-    const { edgeStub } = writeWindowConfig(s, { keepAlive: 'wsl', port: 47000 });
+    const { edgeStub } = writeWindowConfig(s, { keepAlive: 'wsl', links: 'default', port: 47000 });
     const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
 
     assert.deepEqual(config.window, {
@@ -1169,6 +1172,7 @@ describe('writeWindowConfig (A32)', () => {
       edge: edgeStub,
       profileDir: null,
       keepAlive: 'wsl',
+      links: 'default',
     });
   });
 
@@ -1186,6 +1190,7 @@ describe('writeWindowConfig (A32)', () => {
     assert.equal(config.claudeCommand, '/x/standin');
     assert.equal(config.window.port, 1);
     assert.equal(config.window.keepAlive, 'off');
+    assert.equal(config.window.links, 'edge');
   });
 
   test('a key the configuration does not know is written as given, so a test can see it refused', (t) => {

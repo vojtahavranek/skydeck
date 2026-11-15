@@ -57,6 +57,8 @@ const PR8 = 'https://github.com/acme/web/pull/8';
 const PR9 = 'https://github.com/acme/web/pull/9';
 const PR10 = 'https://github.com/acme/web/pull/10';
 const TICKETS = 'https://tickets.example/browse/{key}';
+/** S2 9.6: what opens a link in the Windows default browser (window.links "default"). */
+const RUNDLL32_EXE = '/mnt/c/Windows/System32/rundll32.exe';
 
 // --- the scripted world -----------------------------------------------------------------------
 
@@ -1291,6 +1293,49 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       await l.page.locator('#toast .toast-undo').click();
       await eventually(async () => attached(deck, S1, PR7), 'attached again');
       await eventually(async () => (await prLines(l.page)).length === 2, 'its line is back');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the real server with window.links "default": a click on the header’s pull-request link starts rundll32.exe with url.dll,FileProtocolHandler and its address; the Edge stub is not run',
+    async (t) => {
+      // rundll32.exe is answered here and never passed on (it would open a browser on the
+      // desktop); were it passed on, the A32 guard would refuse it.
+      const rundll32: { args: readonly string[]; cwd: string }[] = [];
+      const others: string[] = [];
+      const l = await launched(t, chromium, {
+        window: { links: 'default' },
+        server: {
+          platform: (platform) => ({
+            ...platform,
+            runner: ghRunner(platform.runner, { hold: 'held' }),
+            processes: {
+              ...platform.processes,
+              startDetached(command, args, options) {
+                if (command === RUNDLL32_EXE) {
+                  rundll32.push({ args, cwd: options.cwd });
+                  return Promise.resolve({ pid: 4_000_001, exited: new Promise(() => {}) });
+                }
+                others.push(command);
+                return platform.processes.startDetached(command, args, options);
+              },
+            },
+          }),
+        },
+      });
+      const deck = l.d.deck;
+      assert.equal(deck.config.window.links, 'default');
+      l.d.resumable(S1);
+      attach(deck, S1, PR7, read(deck, 'open', null, 'failing'));
+      await clickRow(l.page, S1);
+      await showsAll(l.page, '#cards .header-pr', ['acme/web #7 · failing']);
+      await l.page.locator('#cards .header-pr').first().click();
+      await eventually(async () => rundll32.length > 0, 'rundll32.exe started');
+      assert.deepEqual(rundll32, [{ args: ['url.dll,FileProtocolHandler', PR7], cwd: l.d.cDrive }]);
+      assert.ok(!others.includes(deck.config.window.edge), 'the Edge stub was not started');
+      await sleep(500);
+      assert.deepEqual(l.d.edgeCalls(), []);
       assert.deepEqual(l.problems, []);
     },
   );
