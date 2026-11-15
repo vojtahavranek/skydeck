@@ -210,6 +210,18 @@ test('attentionOf: not finished when busy, without a status or a LiveStatus, or 
   assert.equal(attentionOf(stoppedRow(S1), turnEnded('idle')), null);
 });
 
+test('attentionOf: a finished row has no detail although its idle file still holds a waitingFor', () => {
+  const f = facts({
+    marks: [[S1, marks({ turnEndedSeq: 4, turnEndedNs: T0 })]],
+    live: [[S1, live('idle', { waitingFor: 'left over', sinceNs: T0 })]],
+  });
+  assert.deepEqual(attentionOf(runningRow(S1), f), {
+    reason: 'finished',
+    detail: null,
+    sinceNs: String(T0),
+  });
+});
+
 test('attentionOf: a waiting row whose turn ended asks instead of finishing', () => {
   assert.equal(attentionOf(runningRow(S1), turnEnded('waiting'))?.reason, 'asks');
 });
@@ -281,6 +293,14 @@ test('liveStatuses: B5 — a holder that waits wins over one that is idle, in ei
   const expected = { status: 'waiting', waitingFor: 'permission', sinceNs: T0 - SEC };
   assert.deepEqual(liveStatuses([idle, waiting]).get(S1), expected);
   assert.deepEqual(liveStatuses([waiting, idle]).get(S1), expected);
+});
+
+test('liveStatuses: B5 — a holder that waits wins over one that is busy, in either order', () => {
+  const waiting = file(S1, 'waiting', { waitingFor: 'permission', sinceNs: T0 - SEC });
+  const busy = file(S1, 'busy', { sinceNs: T0 });
+  const expected = { status: 'waiting', waitingFor: 'permission', sinceNs: T0 - SEC };
+  assert.deepEqual(liveStatuses([busy, waiting]).get(S1), expected);
+  assert.deepEqual(liveStatuses([waiting, busy]).get(S1), expected);
 });
 
 test('liveStatuses: B5 — busy wins over idle; idle over any other status', () => {
@@ -366,6 +386,33 @@ test('attentionOrder: ties by session id, unknown times too', () => {
     return { id, attention };
   });
   assert.deepEqual(attentionOrder(entries, f), [S1, S2, S5, S6, S3, S4]);
+});
+
+test('attentionOrder: each reason is ordered by its own counter when the marks hold both', () => {
+  const f = facts({
+    marks: [
+      // finished at turns 20 and 10; their window ends, seen, say the opposite order
+      [S1, marks({ turnEndedSeq: 20, seenSeq: 5, windowEndSeq: 1 })],
+      [S2, marks({ turnEndedSeq: 10, seenSeq: 5, windowEndSeq: 2 })],
+      // ended at window ends 40 and 30; their turn ends say the opposite order
+      [S3, marks({ windowEndSeq: 40, turnEndedSeq: 6 })],
+      [S4, marks({ windowEndSeq: 30, turnEndedSeq: 7 })],
+    ],
+    live: [
+      [S1, live('idle')],
+      [S2, live('idle')],
+    ],
+  });
+  const entries = [S1, S2, S3, S4].map((id) => {
+    const attention = attentionOf(runningRow(id), f);
+    assert.ok(attention, id);
+    return { id, attention };
+  });
+  assert.deepEqual(
+    entries.map((e) => e.attention.reason),
+    ['finished', 'finished', 'ended', 'ended'],
+  );
+  assert.deepEqual(attentionOrder(entries, f), [S4, S3, S2, S1]);
 });
 
 test('attentionOrder: empty in, empty out; the input is not changed', () => {
