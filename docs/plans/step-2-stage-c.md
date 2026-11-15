@@ -937,7 +937,8 @@ deps.terminalFor(deps.size())` built for each opening (wrap it: `open(spec)` bui
 the size of that moment and opens), `refuse`, `gone`, `stopAfterEmptyBatch`, the signal (aborted
 by `stop()` or by `asker`), and `report` sending each line to `deps.progress` and `write`. A
 heartbeat timer (`deck.platform.clock.after`) writes `waiting for <n> sessions` to `write` only,
-`n` the sessions without an outcome yet, re-armed by every line (none without `write`). The
+`n` the sessions without an outcome yet, re-armed by every line (none without `write`;
+`heartbeatMs` a whole number from 1 to 2^31 − 1 ms, else `createRestorer` throws a RangeError). The
 asker's `closed` (task 70) can also fire after the outcome was written while the promise is still
 pending: the run has no step left then and nothing changes. The run's end, whatever ended it:
 exactly one `restore finished: …` line (C6) to `progress` and `write`, then the outcome to `write`

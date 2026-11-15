@@ -929,3 +929,11 @@ test('a progress, write or changed that throws is logged by kind; the run ends, 
   assert.ok(next.ok);
   await next.done;
 });
+
+test('heartbeatMs must be a whole number of milliseconds a timer can wait, at least 1', (t) => {
+  const d = restarted(t, 0);
+  for (const heartbeatMs of [0, -1, 1.5, Number.NaN, 2 ** 31]) {
+    assert.throws(() => world(d, { heartbeatMs }), RangeError, String(heartbeatMs));
+  }
+  assert.ok(world(d, { heartbeatMs: 2 ** 31 - 1 }).restorer);
+});

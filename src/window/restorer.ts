@@ -85,6 +85,8 @@ const BUSY = "skydeck's database is busy; try again";
 const BUSY_STOP =
   "stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the rest";
 const HEARTBEAT_MS = 10_000;
+/** The longest a timer of the clock waits (Clock.after). */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 interface Counts {
   started: number;
@@ -125,10 +127,7 @@ function count(counts: Counts, ended: ReportOutcome): void {
     case 'not-started':
       counts.notStarted += 1;
       break;
-    case 'handed-off':
-    case 'printed':
-      // Only a terminal that opens no tabs hands off or prints; the window's opens tabs.
-      break;
+    // `handed-off` and `printed` come only from a terminal that opens no tabs; the window's does.
   }
 }
 
@@ -149,6 +148,10 @@ export function createRestorer(deps: RestorerDeps): Restorer {
   const { deck, log } = deps;
   const { clock } = deck.platform;
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
+  // A heartbeat of 0 would re-arm itself at once, for ever: refused here, not in a run.
+  if (!Number.isSafeInteger(heartbeatMs) || heartbeatMs < 1 || heartbeatMs > MAX_TIMER_MS) {
+    throw new RangeError(`not a heartbeat a timer can wait: ${heartbeatMs} ms`);
+  }
   let current: Run | null = null;
   let stopping = false;
   let made: Made | null = null;
