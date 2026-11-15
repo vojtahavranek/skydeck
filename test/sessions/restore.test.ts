@@ -1481,6 +1481,31 @@ test('gone: at a look of the wait the session is failed, its renewed lock given 
   assert.equal(d.deck.store.getKv(lockKey(sid(1))), null);
 });
 
+test('the signal is looked at before the memory check, with tabs and without: its stop is the one said', async (t) => {
+  for (const tabs of [true, false]) {
+    const what = `tabs: ${tabs}`;
+    const { d, entries } = fiveToRestore(t, { memAvailableMb: 3000 });
+    const terminal = tabs ? fakeTabs(d).terminal : here(d);
+    const { outcome, lines } = await run(d, terminal, entries.slice(0, 2), {
+      signal: AbortSignal.abort('stop'),
+    });
+    assert.deepEqual(outcome, { ...NOTHING, notStarted: [sid(1), sid(2)], stopped: true }, what);
+    assert.deepEqual(
+      lines,
+      ['stopped: stop', notStartedLine(entries, 1), notStartedLine(entries, 2)],
+      what,
+    );
+  }
+});
+
+test('the stop line’s reason is sanitised', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const { lines } = await run(d, fakeTabs(d).terminal, entries.slice(0, 1), {
+    signal: AbortSignal.abort('stop \x1b[31mred\nline two'),
+  });
+  assert.deepEqual(lines, ['stopped: stop red line two', notStartedLine(entries, 1)]);
+});
+
 test('signal aborted before the run: nothing opened, the stopped line, every entry not started', async (t) => {
   const { d, entries } = fiveToRestore(t);
   const tabs = fakeTabs(d);
@@ -1655,6 +1680,61 @@ test('stopAfterEmptyBatch: a first batch whose tabs open and never start stops t
     [timedOutLine(entries, 2), ended(2, 'timed-out')],
     ['stopped: no session of this batch started', undefined],
     ...[3, 4, 5].map((n) => [notStartedLine(entries, n), ended(n, 'not-started')]),
+  ]);
+});
+
+test('stopAfterEmptyBatch: an empty batch after one whose sessions started stops the run', async (t) => {
+  const { d, entries } = fiveToRestore(t);
+  const tabs = fakeTabs(d, { starts: (id) => id === sid(1) || id === sid(2) });
+  const { outcome, lines } = await run(d, tabs.terminal, entries, { stopAfterEmptyBatch: true });
+  assert.deepEqual(tabs.opened, [1, 2, 3, 4].map(sid));
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [sid(1), sid(2)],
+    timedOut: [sid(3), sid(4)],
+    notStarted: [sid(5)],
+    stopped: true,
+  });
+  assert.deepEqual(lines, [
+    startedLine(entries, 1),
+    startedLine(entries, 2),
+    timedOutLine(entries, 3),
+    timedOutLine(entries, 4),
+    'stopped: no session of this batch started',
+    notStartedLine(entries, 5),
+  ]);
+  // Their terminals may still start them.
+  assert.notEqual(d.deck.store.getKv(lockKey(sid(3))), null);
+  assert.notEqual(d.deck.store.getKv(lockKey(sid(4))), null);
+});
+
+test('stopAfterEmptyBatch with a signal first seen at the look that ends the wait: the signal’s stop is said', async (t) => {
+  const { d, entries, sleeps } = fiveToRestore(t);
+  const controller = new AbortController();
+  const sleep = d.clock.sleep;
+  d.clock.sleep = async (ms) => {
+    await sleep(ms);
+    if (sleeps.length === 3) {
+      controller.abort("the window's server is stopping"); // the wait's time is up at the next look
+    }
+  };
+  const tabs = fakeTabs(d, { starts: () => false });
+  const { outcome, lines } = await run(d, tabs.terminal, entries, {
+    signal: controller.signal,
+    stopAfterEmptyBatch: true,
+  });
+  assert.deepEqual(sleeps, [1000, 1000, 1000]);
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    timedOut: [sid(1), sid(2)],
+    notStarted: [3, 4, 5].map(sid),
+    stopped: true,
+  });
+  assert.deepEqual(lines, [
+    timedOutLine(entries, 1),
+    timedOutLine(entries, 2),
+    "stopped: the window's server is stopping",
+    ...[3, 4, 5].map((n) => notStartedLine(entries, n)),
   ]);
 });
 
