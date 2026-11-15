@@ -187,13 +187,48 @@ export function restorePlan(
   };
 }
 
+/**
+ * What the window's server adds to a restore (S2 11.1; plan C8, C23). The command passes none, and
+ * without them a restore runs exactly as step 1's.
+ */
 export interface RestoreHooks {
+  /**
+   * Before prepareResumeById: a reason this session must not be resumed at all (the window's "this
+   * session is already open in the window"); reported `failed <short>: <reason>`, nothing taken,
+   * nothing opened.
+   */
   refuse?(sessionId: string): string | null;
+  /**
+   * At every look of the wait, after the start check: a reason the session can no longer start from
+   * this restore (its window terminals ended, were lost, were not started or were closed); reported
+   * `failed <short>: <reason>` at once, its lock released with the value restore wrote last, and no
+   * longer waited for.
+   */
   gone?(sessionId: string): string | null;
+  /**
+   * Looked at before each batch, before each entry is prepared and after each look of the wait.
+   * Once aborted, no further entry is prepared or opened and the wait ends at its next look; the
+   * sessions still waited for are reported `timed out <short> <title>` (their locks stay, renewed
+   * last: their terminals may still start them), then one line `stopped: <String(signal.reason)>`,
+   * then `not started <short> <title>` for the entries not opened; outcome.stopped is true. A run
+   * that sees the abort with nothing left — no session still waited for, no entry to open — ends
+   * as it would have.
+   */
   signal?: AbortSignal;
+  /**
+   * C23: after a batch that opened at least one terminal and saw none of its sessions start, when
+   * entries are left, the run stops as for the signal with the reason `no session of this batch
+   * started`. A last (or only) batch that starts nothing ends the run as any run with failures.
+   */
   stopAfterEmptyBatch?: boolean;
 }
 
+/**
+ * The session a report line is about and what became of it: given with every line that records the
+ * session in the outcome (`started`, `timed out`, `failed`, `not started`, the hand-off, each
+ * printed command); header and warning lines (the flag warnings, `stopped: …`, `to resume these
+ * yourself, run:`, the line that names a printed session) carry none.
+ */
 export type ReportOutcome = {
   sessionId: string;
   kind: 'started' | 'timed-out' | 'failed' | 'not-started' | 'handed-off' | 'printed';
@@ -203,9 +238,9 @@ export interface RestoreOutcome {
   /** Session ids with a start event in time. */
   started: string[];
   timedOut: string[];
-  /** Refused by the guard, or the terminal failed. */
+  /** Refused (by the guard or the refuse hook), the terminal failed, or gone (the gone hook). */
   failed: { id: string; reason: string }[];
-  /** Left out by the memory stop. */
+  /** Left out by a stop: the memory check, the signal, an empty batch. */
   notStarted: string[];
   /** Resumed --here (no tab adapter). */
   handedOff: string | null;
@@ -215,14 +250,21 @@ export interface RestoreOutcome {
    */
   printed: string[];
   stoppedForMemory: boolean;
+  /** Ended by the signal or by stopAfterEmptyBatch (RestoreHooks); not by the memory check. */
+  stopped: boolean;
 }
 
 interface Run {
   deck: Deck;
   terminal: Terminal;
-  report: (line: string) => void;
+  report: (line: string, outcome?: ReportOutcome) => void;
+  /** The caller's hooks, called on the object it passed. */
+  hooks: RestoreHooks;
   outcome: RestoreOutcome;
 }
+
+/** C23's reason. */
+const EMPTY_BATCH = 'no session of this batch started';
 
 /**
  * 7.8 "Running it". With a terminal that opens tabs: batches of config.restoreBatch, each started
@@ -234,10 +276,16 @@ interface Run {
  *
  * Every session goes through the resume guard on fresh state (a refresh just before it), so a
  * session another skydeck resumed meanwhile is refused, not resumed a second time (principle 7).
- * `report` gets one line per outcome; every foreign string in it is sanitised.
+ * `report` gets one line per outcome, with the outcome it records (ReportOutcome); every foreign
+ * string in it is sanitised. The hooks (RestoreHooks) are the window's server's; without them
+ * nothing of this changes.
  */
 export async function runRestore(
-  deps: { deck: Deck; terminal: Terminal; report: (line: string) => void },
+  deps: {
+    deck: Deck;
+    terminal: Terminal;
+    report: (line: string, outcome?: ReportOutcome) => void;
+  } & RestoreHooks,
   entries: readonly RestoreEntry[],
 ): Promise<RestoreOutcome> {
   const outcome: RestoreOutcome = {
@@ -248,8 +296,15 @@ export async function runRestore(
     handedOff: null,
     printed: [],
     stoppedForMemory: false,
+    stopped: false,
   };
-  const run: Run = { ...deps, outcome };
+  const run: Run = {
+    deck: deps.deck,
+    terminal: deps.terminal,
+    report: deps.report,
+    hooks: deps,
+    outcome,
+  };
   if (deps.terminal.opensTabs) {
     await runInTabs(run, entries);
   } else {
@@ -259,15 +314,25 @@ export async function runRestore(
 }
 
 async function runInTabs(run: Run, entries: readonly RestoreEntry[]): Promise<void> {
-  const { deck } = run;
+  const { deck, outcome } = run;
   const size = deck.config.restoreBatch;
-  for (let first = 0; first < entries.length; first += size) {
-    if (!enoughMemory(run, entries.slice(first))) {
+  let next = 0; // the first entry not prepared yet
+  while (next < entries.length) {
+    if (aborted(run)) {
+      stopForSignal(run, entries.slice(next));
+      return;
+    }
+    if (!enoughMemory(run, entries.slice(next))) {
       return;
     }
     const sinceNs = deck.platform.clock.nowNs();
+    const startedBefore = outcome.started.length;
     const opened: Waiting[] = [];
-    for (const entry of entries.slice(first, first + size)) {
+    for (const entry of entries.slice(next, next + size)) {
+      if (aborted(run)) {
+        break;
+      }
+      next += 1;
       // Opening a tab can take its full timeout: the locks of the tabs already opened are renewed
       // before the refresh in prepare() could sweep them as stale.
       renewLocks(deck, opened);
@@ -290,7 +355,20 @@ async function runInTabs(run: Run, entries: readonly RestoreEntry[]): Promise<vo
         releaseLock(deck, entry.row.id, lock);
       }
     }
-    await awaitStarts(run, opened, sinceNs);
+    const cut = await awaitStarts(run, opened, sinceNs);
+    if (cut || (aborted(run) && next < entries.length)) {
+      stopForSignal(run, entries.slice(next));
+      return;
+    }
+    if (
+      run.hooks.stopAfterEmptyBatch === true &&
+      opened.length > 0 &&
+      outcome.started.length === startedBefore &&
+      next < entries.length
+    ) {
+      stop(run, EMPTY_BATCH, entries.slice(next));
+      return;
+    }
   }
 }
 
@@ -312,29 +390,47 @@ interface Waiting {
  * every look the locks of the sessions still waited for are renewed, the last time when restore
  * gives up on them: the wait (default 120 s) is longer than a lock holds (60 s), and a tab that is
  * slow to start claude must not let another resume start it again.
+ *
+ * With the hooks: a session `gone` names is failed at that look and its lock given back; an abort of
+ * the signal ends the wait after the look, and whether it cut the wait short (sessions were still
+ * waited for) is returned.
  */
-async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): Promise<void> {
+async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): Promise<boolean> {
   const { deck, outcome, report } = run;
   const { clock } = deck.platform;
   const limitNs = BigInt(deck.config.restoreStartTimeoutSeconds) * NS_PER_SECOND;
   let waiting = [...opened];
+  let cut = false;
   while (waiting.length > 0) {
     ingestSpool(deck);
     waiting = waiting.filter(({ row, lock, afterEventId }) => {
-      if (!resumeStarted(deck.store, row.id, sinceNs, afterEventId)) {
+      if (resumeStarted(deck.store, row.id, sinceNs, afterEventId)) {
+        // D16: a start removes the lock. Restore may have renewed it after the start (before it read
+        // the start event), so the start alone would no longer make it stale: restore drops its own.
+        if (lock !== null) {
+          releaseLock(deck, row.id, lock);
+        }
+        outcome.started.push(row.id);
+        report(`started ${row.shortId} ${row.title}`, { sessionId: row.id, kind: 'started' });
+        return false;
+      }
+      const reason = run.hooks.gone?.(row.id) ?? null;
+      if (reason === null) {
         return true;
       }
-      // D16: a start removes the lock. Restore may have renewed it after the start (before it read
-      // the start event), so the start alone would no longer make it stale: restore drops its own.
+      // Nothing can start it from this restore any more: the lock would only keep the user waiting.
       if (lock !== null) {
         releaseLock(deck, row.id, lock);
       }
-      outcome.started.push(row.id);
-      report(`started ${row.shortId} ${row.title}`);
+      fail(run, row, reason);
       return false;
     });
     renewLocks(deck, waiting);
     if (waiting.length === 0 || clock.nowNs() - sinceNs >= limitNs) {
+      break;
+    }
+    if (aborted(run)) {
+      cut = true;
       break;
     }
     await clock.sleep(START_CHECK_MS);
@@ -342,8 +438,9 @@ async function awaitStarts(run: Run, opened: readonly Waiting[], sinceNs: Ns): P
   for (const { row } of waiting) {
     // Its tab may still start it: its lock, renewed just now, holds for another LOCK_TTL_NS.
     outcome.timedOut.push(row.id);
-    report(`timed out ${row.shortId} ${row.title}`);
+    report(`timed out ${row.shortId} ${row.title}`, { sessionId: row.id, kind: 'timed-out' });
   }
+  return cut;
 }
 
 /** Renews the lock of each session (renewLock); one that is no longer restore's is not touched again. */
@@ -356,11 +453,19 @@ function renewLocks(deck: Deck, sessions: readonly Waiting[]): void {
 }
 
 async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void> {
+  if (aborted(run)) {
+    stopForSignal(run, entries);
+    return;
+  }
   if (!enoughMemory(run, entries)) {
     return;
   }
   let handoffTried = false;
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
+    if (aborted(run)) {
+      stopForSignal(run, entries.slice(index));
+      return;
+    }
     if (!handoffTried) {
       const taken = prepare(run, entry);
       if (taken === null) {
@@ -371,7 +476,10 @@ async function runHere(run: Run, entries: readonly RestoreEntry[]): Promise<void
       const result = await openSafely(run.terminal, launchSpec(prepared, lock));
       if (result.ok) {
         run.outcome.handedOff = entry.row.id;
-        run.report(`resuming ${entry.row.shortId} ${entry.row.title} in this terminal`);
+        run.report(`resuming ${entry.row.shortId} ${entry.row.title} in this terminal`, {
+          sessionId: entry.row.id,
+          kind: 'handed-off',
+        });
         continue;
       }
       fail(run, entry.row, result.error);
@@ -446,7 +554,7 @@ function printLine(run: Run, row: ListRow, line: string): void {
   const where = row.dir === null ? '' : ` in ${shellQuote(row.dir)}`;
   run.report(`${row.shortId} ${shellQuote(row.title)}${where}:`);
   run.outcome.printed.push(line);
-  run.report(line);
+  run.report(line, { sessionId: row.id, kind: 'printed' });
 }
 
 /**
@@ -464,11 +572,36 @@ function enoughMemory(run: Run, rest: readonly RestoreEntry[]): boolean {
   report(
     `stopped: only ${availableMb} MiB of memory available, less than restoreMinFreeMb (${minimumMb} MiB)`,
   );
-  for (const { row } of rest) {
-    outcome.notStarted.push(row.id);
-    report(`not started ${row.shortId} ${row.title}`);
-  }
+  reportNotStarted(run, rest);
   return false;
+}
+
+/** Records `rest` as not started, one line each. */
+function reportNotStarted(run: Run, rest: readonly RestoreEntry[]): void {
+  for (const { row } of rest) {
+    run.outcome.notStarted.push(row.id);
+    run.report(`not started ${row.shortId} ${row.title}`, {
+      sessionId: row.id,
+      kind: 'not-started',
+    });
+  }
+}
+
+/** Whether the caller's signal (RestoreHooks) has been aborted. */
+function aborted(run: Run): boolean {
+  return run.hooks.signal?.aborted === true;
+}
+
+/** A stop of the run (RestoreHooks): `stopped: <reason>`, then `rest` not started. */
+function stop(run: Run, reason: string, rest: readonly RestoreEntry[]): void {
+  run.outcome.stopped = true;
+  run.report(`stopped: ${sanitize(reason)}`);
+  reportNotStarted(run, rest);
+}
+
+/** The signal's stop, with its reason. */
+function stopForSignal(run: Run, rest: readonly RestoreEntry[]): void {
+  stop(run, String(run.hooks.signal?.reason), rest);
 }
 
 /**
@@ -496,6 +629,11 @@ function prepare(
   entry: RestoreEntry,
 ): { prepared: PreparedLaunch; lock: string | null; afterEventId: number | null } | null {
   const { row } = entry;
+  const refusal = run.hooks.refuse?.(row.id) ?? null;
+  if (refusal !== null) {
+    fail(run, row, refusal);
+    return null;
+  }
   let prepared: PreparedLaunch;
   try {
     prepared = prepareResumeById(run.deck, row.id);
@@ -527,5 +665,5 @@ function warn(
 function fail(run: Run, row: ListRow, reason: string): void {
   const shown = sanitize(reason);
   run.outcome.failed.push({ id: row.id, reason: shown });
-  run.report(`failed ${row.shortId}: ${shown}`);
+  run.report(`failed ${row.shortId}: ${shown}`, { sessionId: row.id, kind: 'failed' });
 }
