@@ -209,7 +209,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C17 | `SKYDECK_TEST_WINDOW_TIMES` (A31) gains `answerMs` (30 s: the wait for an answer to `POST /resume` and `/new`, and the silence that ends a `POST /restore`), honoured only with `SKYDECK_TEST_NO_WINDOWS=1`. The restorer's heartbeat interval is an option of `createRestorer` (10 s by default), set only by tests. | A31's rule: no test waits 30 s. | — |
 | C18 | The times the banner shows are the page's (`web/banner-text.js`): `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02`, `on 12 Nov 2025 at 18:02` (a year other than this one), in the page's time zone, 24-hour. | S2 12.7's "yesterday at 18:02"; the server sends nanoseconds (S2 8.2.3). | — |
 | C19 | **The resume lock's take mark** (S2 7.3's and 7.8's named limit, closed; ruled on review A). A renewal writes the lock's time with a mark in its last six digits, the sub-millisecond part that skydeck's clock (milliseconds, `Date.now()` × 10⁶) leaves 0: the mark of a value whose last six digits are 0 — every lock `acquireLock` writes, as today — is `1 + (its milliseconds mod 999,999)`; any other value's mark is those six digits; `renewLock` writes the time of now, to the millisecond, plus the mark of the value it renews. **Those six digits of a renewed lock are a mark, not time** (design 7.6 says so). Two values are **of one take** when both record an event id, the same one, and the same mark (`sameTake`), and they are not two different values whose last six digits are both 0 (ruled, task 80: only `acquireLock` writes such a time, `renewLock` never does, so they are always two takes); a value without an event id (an older skydeck's) is of one take only with itself. **A lock's time is read to the millisecond** (ruled, task 80): `lockTakenNs` and `freshAge` drop its last six digits before they compute an age, a wait or a deadline, so a renewal's mark moves none of them. The window's found-keeper decision accepts a lock of the hello's take (a renewal), and the settlement of an ended terminal gives back a lock of its take (`releaseLockOfTake`); a take-over (a new `acquireLock`, a new millisecond) is another take. `acquireLock`, `releaseLock` and every value stage A writes or compares are unchanged. | A renewal and a take-over of a stale lock with no new event looked alike, so a keeper of a restore whose hello comes after the 5 s of `open()` was refused (restore renews in the same turn), an exit after restore stopped waiting kept the lock a minute, and a keeper found by a restarted server was refused. Old code reads a renewed value as a time less than 1 ms later, so a server of an older build that runs between `git pull` and `skydeck window` neither sweeps it nor takes it over (a third field would be "not a lock skydeck writes": swept as stale within 2 s). A take-over whose millisecond is congruent to the first take's modulo 999,999 (about one in a million) has the take's mark, but it is a value `acquireLock` wrote and so another take (ruled, task 80: otherwise a settlement would give the taker's lock back before its program reported a start, and a third resume could start the session twice). What stays, the named limit: a restore's renewal of such a take-over reads as of the first take; a found keeper of the first take is past its 55 s deadline and starts nothing, and a settlement while that restore waits gives its lock back, so the restore's next `renewLock` returns null. | 80 (design 7.6; S2 4.4, 7.3, 7.8) |
-| C20 | **The second window after a cold start** (stage A's follow-up "a second window opens when `skydeck window` starts a server while an old window is still open", carried; ruled on review A). The server keeps `kv` `window_pages_open` while pages are connected: each refresh that works makes the store agree with its page count (`createPageMark(…).update`: the key while pages > 0, none at 0 — its FIRST call writes or removes whatever the store holds, so a mark a dead server left is removed by the next server's first refresh without a page); it leaves the key as it is when it stops or dies. **The wait is the server's fact**: a server that finds the key at its start expects a window back from the end of its start until a page connects or 7 s have passed, and says so in `GET /status` (`windowExpectedMs`, the ms left; 2.2). Every command that would open a window — `skydeck window`, a second `skydeck window` meanwhile, C12's window — waits for that same deadline when no page is connected, with one line on stderr: `waiting up to 7 s for the open window to come back; --new-window opens one now`; a page that comes back is "a window is already open". `--new-window`, `--print-url` and `--new-secret` do not wait. | It is W16's case: after `wsl --shutdown` the old window reconnects a few seconds after `skydeck window` started a server (the page tries every 5 s at most, S2 6.3). The cost: after a PC restart or shutdown with the window left open the mark may still be there (WSL can end before the server's next refresh sees the page go), and the first `skydeck window` then waits 7 s for a window that cannot come; W16 and "what only you can check" ask whether it does. The remedy if it does every day — the mark holds the boot id, and in another boot the wait asks whether Edge still runs on the profile — is a follow-up. The first update from a stage A server, which writes no mark, may still open a second window once (stage B's "Updating" order avoids it). | 81 (5.1, 8.3, 10.2) |
+| C20 | **The second window after a cold start** (stage A's follow-up "a second window opens when `skydeck window` starts a server while an old window is still open", carried; ruled on review A). The server keeps `kv` `window_pages_open` while pages are connected: each refresh that works makes the store agree with its page count (`createPageMark(…).update`: the key while pages > 0, none at 0 — its FIRST call writes or removes whatever the store holds, so a mark a dead server left is removed by the next server's first refresh without a page); it leaves the key as it is when it stops or dies. **The wait is the server's fact**: a server that finds the key at its start expects a window back from the end of its start until a page connects or 7 s have passed, and says so in `GET /status` (`windowExpectedMs`, the ms left; 2.2). Every command that would open a window — `skydeck window`, a second `skydeck window` meanwhile, C12's window — waits for that same deadline when no page is connected, with one line on stderr: `skydeck: waiting up to 7 s for the open window to come back; --new-window opens one now`; a page that comes back is "a window is already open". `--new-window`, `--print-url` and `--new-secret` do not wait. A command waits at most the start wait and 7 s of its own from its first look, whatever the server says, so that a stale mark never leaves the user without a window (task 81). Named limits (ruled on task 81's review 2): a server replaced within its own expectation (`--restart`, a crash, another `wsl --shutdown` within those 7 s) has removed the key at its first refresh, so the next server expects nothing and the command opens a second window — no worse than before stage C; the 7 s rest on a page that tries again at least every 5 s, but Chromium wakes a window hidden for more than 5 minutes only once a minute (S2 6.3), so such a window can come back after the command has opened a new one; the waits add up when a start hangs: 10 s + 17 s on a cold start, 10 s + 7 s + 17 s after a restart with a page. | It is W16's case: after `wsl --shutdown` the old window reconnects a few seconds after `skydeck window` started a server (the page tries every 5 s at most, S2 6.3). The cost: after a PC restart or shutdown with the window left open the mark may still be there (WSL can end before the server's next refresh sees the page go), and the first `skydeck window` then waits 7 s for a window that cannot come; W16 and "what only you can check" ask whether it does. The remedy if it does every day — the mark holds the boot id, and in another boot the wait asks whether Edge still runs on the profile — is a follow-up. The first update from a stage A server, which writes no mark, may still open a second window once (stage B's "Updating" order avoids it). | 81 (5.1, 8.3, 10.2) |
 | C21 | The banner lies in the list zone, above `#list`, in the list's width; it takes height from the list (the list scrolls under it), never width, so the right side, the header's one height (stage D) and every terminal's area stay as they are: its coming and going sends no `resize`. A restore selects nothing and moves no keyboard, in any page, also while a dialog of stage D is shown: its result carries no `sessionId` (stage A's `act` selects only a resume's or a new session's). | S2 12.7: "at the top of the list"; the size a restored terminal starts with is the last focused page's area (S2 8.2.6), which the banner must not change. | 73 (12.7) |
 | C22 | **A restore asked for by a command stops when its asker goes** (ruled on review A). The asker's connection closing before the outcome was written ends the run through C8's `signal`, with the reason `the command that asked for it stopped`: the server lives, the sessions already opened go on starting, the rest are `not started`, then `restore finished: …` (to the pages). So Ctrl+C in `skydeck restore` stops it, as in step 1. A restore started from the banner has no stop in stage C; `skydeck window --stop` ends it (the opened sessions go on), and `docs/install.md` says so. A Stop control in the banner is a follow-up candidate. | Otherwise Ctrl+C would end the command and the server would go on opening every batch. | 73 (11.4) |
 | C23 | **A batch in which no session started stops the run** in the server: once a batch that opened at least one terminal ends with none of its sessions started **while entries are left**, the restore reports `stopped: no session of this batch started` and the rest `not started`, then `restore finished: …` — a hook of `runRestore` (`stopAfterEmptyBatch`), which the command does not pass, so step 1's restore is unchanged. A restore whose last (or only) batch starts nothing ends as any finished run with failures does: no `stopped:` line, code 1 (C5), not 5 (ruled on review A's re-check). A run that a busy store ended says `stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the rest`. | A `claudeCommand` that cannot start (the server's `PATH` after a boot) would otherwise open every keeper and fill the slots with ended terminals. The server's connection waits 250 ms for the store, not the commands' 5 s. | 71 (11.3), 73 (11.3) |
@@ -485,16 +485,19 @@ export function releaseLockOfTake(deck: Deck, sessionId: string, taken: string):
 
 // src/window/page-mark.ts — task 81 (C20)
 export interface PageMark {
-  /** Whether kv window_pages_open was there when the mark was created (the server's start). */
+  /** Whether kv window_pages_open was there when the mark was created (the server's start); a
+   *  read that fails is logged by kind and counts as not there: no wait that cannot be known. */
   readonly foundAtStart: boolean;
   /** Makes the store agree with `pages`: the key ('1') when > 0, none at 0. The first call writes
    *  or removes whatever the store holds; later calls write only on a change. A write that fails
    *  is logged by kind and tried again at the next call. */
   update(pages: number): void;
-  /** C20: from `startDoneNs` (the end of the server's start) the server expects a window back
-   *  while foundAtStart, no page has connected since (`pages` > 0 seen by update or by this call)
-   *  and 7 s have not passed: the ms left, else null. */
-  expectedMs(nowNs: Ns, startDoneNs: Ns, pages: number): number | null;
+  /** C20: from `startDoneNs` (the end of the server's start; null while it is not done: 7,000 —
+   *  ruled, task 81) the server expects a window back while foundAtStart, no page has connected
+   *  since (`pages` > 0 seen by update or by this call) and 7 s have not passed: the ms left — a
+   *  whole number, never 0, never more than 7,000 (a clock that stepped back) —, else null.
+   *  `nowNs` and `startDoneNs` are of the one clock the server gives it. */
+  expectedMs(nowNs: Ns, startDoneNs: Ns | null, pages: number): number | null;
 }
 export function createPageMark(deps: { store: Store; log: (line: string) => void }): PageMark;
 ```
@@ -518,11 +521,15 @@ export interface WindowTimes extends LifecycleTimes { pageMs: number; reuseMs: n
 // (stage A's lifecycle times stay optional: lifecycle.ts keeps its own defaults)
 /** A31's SKYDECK_TEST_WINDOW_TIMES (only with SKYDECK_TEST_NO_WINDOWS=1) over the defaults; C17 adds answerMs. */
 export function windowTimes(env: Env): WindowTimes;
-/** S2 5.1 step 2 (stage A's `launch`, with task 81's wait): unless `newWindow`, while the server's
- *  status says `windowExpectedMs` and no page is connected, `say`s C20's line once and waits for a
- *  page or the deadline ('came back': no window opened); then the window_launching lock, a token,
- *  Edge, the wait for its use, the token given up. Throws a SkydeckError with 5.1's lines. */
-export function launchWindow(deck: Deck, client: ControlClient, ping: PingAnswer, newWindow: boolean, times: WindowTimes, say: (line: string) => void): Promise<'opened' | 'came-back'>;
+/** S2 5.1 step 2 (stage A's `launch`, with task 81's wait): unless `newWindow`, or `oldMayReturn`
+ *  is false, while the server's status says `windowExpectedMs` and no page is connected, `say`s
+ *  C20's line once (without `skydeck: `, which the caller's `say` adds) and waits for a page or the server's deadline — at most `startMs` and
+ *  `reconnectMs` of its own — ('came back': no window opened); then the window_launching lock, a
+ *  token, Edge, the wait for its use, the token given up. Throws a SkydeckError with 5.1's lines.
+ *  `oldMayReturn` (ruled on task 81's question): false for `--new-secret`, whose old pages are refused with the
+ *  old key and so cannot come back — no C20 wait even when the server expects a window; true for
+ *  C12's windows. Two booleans side by side: a case of task 81 fails when they are swapped. */
+export function launchWindow(deck: Deck, client: ControlClient, ping: PingAnswer, newWindow: boolean, oldMayReturn: boolean, times: WindowTimes, say: (line: string) => void): Promise<'opened' | 'came-back'>;
 
 // src/cli/window-requests.ts — task 76
 export interface WindowServer { client: ControlClient; ping: PingAnswer }
@@ -1160,35 +1167,68 @@ side, and task 74 wires the mark into the server.
 **Files**
 - Create: `src/window/page-mark.ts`, `test/window/page-mark.test.ts`
 - Modify: `src/window/client.ts` (`readStatus` takes the optional `windowExpectedMs`: a whole
-  number of ms or null; another type is an answer that cannot be read); `src/cli/commands/window.ts`
-  (stage A's `launch`: unless `--new-window`, it first reads `GET /status`; while the server is
-  starting with `windowExpectedMs` set, or `windowExpectedMs` is above 0, and no page is connected,
-  it prints C20's line on stderr once and looks again every 100 ms, at most for the start wait and
-  the 7 s; a page → `skydeck window: a window is already open`, no token, no Edge; the deadline → it
-  goes on as today; `--print-url` and `--new-secret` keep their ways); `test/fixtures/fake-serve/fake-serve.ts`
-  (`FAKE_SERVE_WINDOW_EXPECTED_MS=<ms>`: `/status` reports that many ms counting down from when it
-  was ready; `FAKE_SERVE_PAGES_AFTER=<ms>:<n>`: `/status` reports `n` pages once `ms` have passed);
+  number of ms (≥ 0) or null; another type, a fraction or a number below 0 is an answer that cannot
+  be read; absent, it stays absent); `src/cli/commands/window.ts` (stage A's `launch` takes 2.4's
+  parameters of `launchWindow` — `newWindow`, `oldMayReturn`, `say` — and returns `'opened'` or
+  `'came-back'`: unless `--new-window` or `--new-secret` (`oldMayReturn` false: the old pages are
+  refused with the old key; ruled, review A's re-check F3), it first reads `GET /status`; while the
+  server is starting with `windowExpectedMs` set, or `windowExpectedMs` is above 0, and no page is
+  connected, it prints C20's line on stderr once — `skydeck: waiting up to 7 s …`, with the prefix
+  of the command's other diagnostic lines, which the `say` that `useServer` passes adds — and looks
+  again every 100 ms, at most for the start wait and the 7 s (`startMs` and `reconnectMs`, A31's names, from its first look: a server whose
+  mark never ends never leaves the user without a window); a page → `skydeck window: a window is
+  already open`, no token, no Edge; the server's deadline or its own → it goes on as today (its
+  wait for another command's page while that one holds `window_launching` returns `'opened'`, so
+  stage A's address line stays there); `--print-url` keeps its way); `test/fixtures/fake-serve/fake-serve.ts`
+  (`FAKE_SERVE_WINDOW_EXPECTED_MS=<ms>`: `/status` reports that many ms while it starts, then
+  counting down from the end of its start — when it was ready, without a start —, and null once
+  that is down to 0 or it reports a page, as the server's mark (so `0` is null from the start,
+  also while it starts); `json:<value>` reports a value as it is (`json:0` is 0 throughout);
+  `FAKE_SERVE_STARTING_MS=<ms>`: `starting` true for that long after it was ready;
+  `FAKE_SERVE_PAGES_AFTER=<ms>:<n>`: `/status` reports `n` pages once `ms` have passed since the
+  first `/status` it answered, so that a case does not depend on how long the command took to ask;
+  a value of these three of another form ends the fake at once, exit 2);
   `test/cli/commands/window.test.ts` (cases at the end); `docs/design-step-2.md` (5.1's paragraph on
-  the wait after a restart, 8.3's `GET /status` row, 10.2's `kv` table: C20)
+  the wait after a restart, 8.3's `GET /status` row — task 81's, not 70's: ruled, review B's
+  re-check —, 10.2's `kv` table: C20)
 
 **Behaviour.** As C20 and 2.3. `skydeck window`'s restart wait of stage A (the old server's
 `pages`) stays as it is; C20's wait comes after it, inside `launch`, so that task 76's move of
-`launch` into `window-open.ts` gives C12's window the same wait.
+`launch` into `window-open.ts` gives C12's window the same wait. A status that cannot be had
+during the wait fails the command as stage A's look before it does.
 
-**Tests** (platform: `testPlatform` for `page-mark.test.ts`; `realTestPlatform` with
-`windowMachine` and the fake serve for the command, as stage A's restart-wait cases)
-- `createPageMark`: `foundAtStart` true with the key in the store, false without; "a mark left by a
-  dead server is removed by the next server's first refresh without a page": the first `update(0)`
-  removes it; then `update(1)` writes it, `update(2)` writes nothing, `update(0)` removes it; a
-  store that is busy at a write → one log line by kind, written at the next call; `expectedMs`:
-  7,000 while the start is not done, counting down from `startDoneNs`, null after 7 s, null once
-  a page was seen, null when nothing was found.
-- `skydeck window` against a fake serve that expects a window (`FAKE_SERVE_WINDOW_EXPECTED_MS=3000`)
-  and gets a page after 1 s → C20's line on stderr once, `skydeck window: a window is already
-  open`, the Edge stub never run, no token minted; no page → Edge once, after the deadline; with
-  `--new-window` → no wait; without the expectation → Edge at once, no line.
+**Tests** (platform: `testPlatform` for `page-mark.test.ts`; `realTestPlatform` with the window
+test's harness (`serverSandbox`) and the fake serve of the fixture checkout, which the command runs
+from, for the command, as stage A's restart-wait cases)
+- `createPageMark`: `foundAtStart` true with the key in the store, false without (false and one
+  log line by kind when the read fails); "a mark left by a dead server is removed by the next
+  server's first refresh without a page": the first `update(0)` removes it; then `update(1)` writes
+  it, `update(2)` writes nothing, `update(0)` removes it; a store that is busy at a write → one log
+  line by kind, written at the next call; `expectedMs`: 7,000 while the start is not done
+  (`startDoneNs` null), counting down from `startDoneNs` (a whole number, never 0, at most 7,000
+  after the clock stepped back), null after 7 s, null once a page was seen (by `update` too, also
+  when its write failed), null when nothing was found; the first refresh's removal does not end
+  the expectation.
+- `skydeck window` against a fake serve that expects a window and gets a page after 1 s → C20's
+  line on stderr once, `skydeck window: a window is already open`, the Edge stub never run, no
+  token minted (this case fails when `launch`'s two booleans are swapped); no page → Edge once,
+  after the server's deadline (it went on at an answer that said null); a server still starting
+  (`windowExpectedMs` constant while it starts, also at 0) → the wait goes through the start, then
+  the count-down, and it goes on at the first look that says null; a server whose expectation
+  never ends → Edge after `startMs` + `reconnectMs` (measured from stage A's look before the wait,
+  with two different values), also when its start never ends;
+  with `--new-window` → no wait; with `--new-secret` → no wait although the new server's mark says
+  a window is expected (ruled, F3); without the expectation (none, null or 0) → Edge at once, no
+  line; a `windowExpectedMs` the client cannot read (a text, a fraction, below 0, `true`, an
+  object) → the answer that cannot be read, exit 1, nothing started; the reader keeps the number
+  and null and leaves out what an older server does not send; the fake serve refuses a timing
+  option of another form (exit 2). Edge starts are counted where the
+  command starts them (the fake Edge's own record may come after a command that does not wait for
+  its page).
 - "The wait is the server's fact": two `skydeck window` started one after the other while the fake
-  expects a window both wait for the same deadline (the second does not open a window at once).
+  expects a window both wait for the same deadline (the second does not open a window at once):
+  each goes on only at an answer that says null, and the second's first answer is the first's
+  less the time between them.
 - Every existing case of `window.test.ts` passes unchanged.
 
 **Done when:** a command that would open a window waits while the server expects one back; `npm
@@ -1199,7 +1239,10 @@ serve are stage C's alone); task 76 moves `launch` with this wait.
 
 **Not in it:** the mark in the server, the status field and the first refresh's removal (74); a
 mark left after a PC restart costs one wait of 7 s (C20), which W16 and section 6 ask the user
-about.
+about. The three named limits of C20 (ruled on review 2): a server replaced within its own
+expectation forgets the window; a window hidden for more than 5 minutes can come back after a new
+one was opened; the waits add up when a start hangs. The clock the server's count follows is task
+74's (ruled on review 2: a clock that cannot step).
 
 ---
 
@@ -1338,7 +1381,7 @@ out of `window.ts` is a commit of its own in it ("moved unchanged"), so that a r
 **Behaviour.** As 2.4 and 2.5. `windowServer`: `findServer(deck, appRoot, computeBuild(...))` —
 `ours` and `other-build` are used, the rest refused. `resumeInWindow` / `newInWindow`: the
 request; every answer line on stderr through the sanitiser; then, unless the code is 2 or 3,
-`client.status()`, and with 0 pages `launchWindow(deck, client, ping, false, times, say)` — a
+`client.status()`, and with 0 pages `launchWindow(deck, client, ping, false, true, times, say)` — a
 SkydeckError there is C12's line —, or under `CLAUDECODE` no window and C12's `no window is open;
 run skydeck window in a terminal of your own`. `restoreInWindow`: with 0 pages the same window
 first (not under `CLAUDECODE`), then the request, every line on stdout. The usage texts name
