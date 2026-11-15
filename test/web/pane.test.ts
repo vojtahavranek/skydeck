@@ -36,7 +36,17 @@ function row(id: string, more: Partial<RowPayload> = {}): RowPayload {
 }
 
 function term(id: string, state: string, sessionId: string | null): TerminalPayload {
-  return { id, slot: 1, sessionId, state, notReported: false, cols: 80, rows: 24, ownsSize: true };
+  return {
+    id,
+    slot: 1,
+    sessionId,
+    state,
+    notReported: false,
+    cols: 80,
+    rows: 24,
+    ownsSize: true,
+    openedNs: '1794473000000000000',
+  };
 }
 
 const T1 = '0123456789ab';

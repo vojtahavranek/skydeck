@@ -3026,7 +3026,7 @@ start no Windows program.
 
 **Goal.** The tooling the page tasks need, and the CI of S2 17.5: Playwright as a pinned
 development dependency, `npm run test:page`, `check` running it, and a CI leg that installs
-Chromium with a cache and runs the page suite on Node 24 only, within 20 minutes.
+Chromium with a cache and runs the page suite on Node 24 only, within 30 minutes.
 
 **Files**
 - Modify: `package.json` (devDependency `playwright` 1.60.0 (A5); scripts `"test:page": "node --test \"test-page/**/*.test.ts\""`,
@@ -3045,7 +3045,7 @@ Chromium with a cache and runs the page suite on Node 24 only, within 20 minutes
   again until a claim sees the whole flood, and the waits on the flood's pace have a 90 s ceiling)
 - Modify: `docs/design-step-2.md` 17.4 (A5: Playwright 1.60.0), 17.5 (A13, A15: how the leg is split)
 
-**Workflow.** `timeout-minutes: 20`. Both legs: `npm ci`, `npm run format:check`,
+**Workflow.** `timeout-minutes: 30`. Both legs: `npm ci`, `npm run format:check`,
 `npm run typecheck`, `npm test`, `python3 -m py_compile bin/skydeck-keeper`, `shellcheck` by name
 (both from task 9). The Node 24 leg only: read the installed Playwright version
 (`node -p "require('playwright/package.json').version"`) and the system's (`ID-VERSION_ID` of

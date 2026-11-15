@@ -805,7 +805,7 @@ test('an openLink that rejects, or a hub whose close throws: ok false and one lo
   }
 });
 
-test('an action that is not one of stage A, or not well formed, is refused without acting', async (t) => {
+test('an action that is not one of stages A and D, or not well formed, is refused without acting', async (t) => {
   const d = testDeck(t);
   resumableSession(d);
   const h = harness(d);
@@ -846,6 +846,52 @@ test('an action that is not one of stage A, or not well formed, is refused witho
     // The parser's kind: fixed text, never what the page sent.
     assert.match(line, /^act: refused an action that is not valid \([\w.-]+: [a-z ]+\)$/);
   }
+});
+
+test("stage D's actions are known but not acted on yet: each answers so and nothing is written (task 36 acts on them)", async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const h = harness(d);
+  const url = 'https://github.com/acme/web/pull/7';
+  const stageD: ActMessage[] = [
+    { t: 'act', id: 21, kind: 'label', sessionId: S1, text: 'a label' },
+    { t: 'act', id: 22, kind: 'group', sessionId: S1, text: 'ORB-2107' },
+    { t: 'act', id: 23, kind: 'note', sessionId: S1, text: 'a note', base: '' },
+    { t: 'act', id: 24, kind: 'done', sessionId: S1 },
+    { t: 'act', id: 25, kind: 'undone', sessionId: S1 },
+    { t: 'act', id: 26, kind: 'pr-refresh', sessionId: S1 },
+    { t: 'act', id: 27, kind: 'pr-add', sessionId: S1, url },
+    { t: 'act', id: 28, kind: 'pr-rm', sessionId: S1, url },
+  ];
+  for (const action of stageD) {
+    assert.deepEqual(
+      await h.act(action),
+      refused(action.id, 'skydeck cannot do that action yet'),
+      action.kind,
+    );
+  }
+  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.links, []);
+  assert.deepEqual(h.logs, []);
+  assert.deepEqual(d.deck.store.allMeta(), []);
+  assert.deepEqual(d.deck.store.prs(), []);
+  assert.deepEqual(d.deck.store.sessionPrs(), []);
+  // One that is not well formed is still the parser's refusal.
+  assert.deepEqual(
+    await h.act({ t: 'act', id: 29, kind: 'label', sessionId: S1, text: 'x'.repeat(1025) }),
+    refused(29, 'skydeck cannot do that action'),
+  );
+  assert.deepEqual(
+    await h.act({
+      t: 'act',
+      id: 30,
+      kind: 'note',
+      sessionId: S1,
+      text: 'x',
+    } as unknown as ActMessage),
+    refused(30, 'skydeck cannot do that action'),
+  );
+  assert.equal(h.logs.length, 2);
 });
 
 test('a refusal naming a hostile directory reaches the page sanitised', async (t) => {
