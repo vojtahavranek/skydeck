@@ -749,7 +749,9 @@ function markDone(sessionId, fromList) {
     if (state.leaving?.sessionId === sessionId) {
       state.leaving.answered = true;
       if (state.leaving.listed) {
-        leaveDone(); // a list came since the act was sent: it holds the result (ruled 06:38Z)
+        leaveDone(); // a list since the act was sent holds the result (ruled 06:38Z, 08:15Z)
+      } else {
+        sendView(); // as M2: the list that holds it comes at once (review 2's S3, ruled)
       }
     }
   });
@@ -788,9 +790,11 @@ function undoDone(sessionId) {
 }
 
 /**
- * At each list while this page's `d` waits: before its answer, the list is one that came since
- * the act was sent (`listed`), and the place of the row in it is kept while it is there; after
- * its answer, with none come before, it is the list that holds the result, and it decides.
+ * At each list while this page's `d` waits. Before its answer, a list holds the result only when
+ * the row is gone from its section or marked done there (`listed`); one that still shows it as
+ * not done is older than the write — a list that crossed the act, or one a busy store left stale
+ * (review 2's S3, ruled 08:15Z) —, and only the row's place in it is kept. After its answer, with
+ * no list holding it before, the next list decides, whatever it shows.
  */
 function followDone() {
   const leaving = state.leaving;
@@ -801,7 +805,13 @@ function followDone() {
     leaveDone();
     return;
   }
-  leaving.listed = true;
+  const row = state.list?.sections
+    .find((section) => section.name === leaving.section)
+    ?.rows.find((candidate) => candidate.id === leaving.sessionId);
+  if (row === undefined || row.done) {
+    leaving.listed = true;
+    return;
+  }
   const place = placeOf(leaving.sessionId);
   if (place !== null) {
     Object.assign(leaving, place);
@@ -810,7 +820,8 @@ function followDone() {
 
 /**
  * S2 12.9's exception (D15, ruled), decided once, on the list that holds the result of this
- * page's `d` — one that came since its act was sent, else the next one (ruled 06:38Z): when that
+ * page's `d` — one that came since its act was sent and shows the write, else the next one, which
+ * the page asks for (ruled 06:38Z and 08:15Z): when that
  * list no longer has the row, while that session is still the selected one, the row after it in
  * the same section is selected, else the one before it, else none — never a row of Open. A row
  * that list still has (it runs, under Open; done sessions shown) moves nothing, then or later.

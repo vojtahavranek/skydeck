@@ -1346,6 +1346,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
           );
           w.answer(act, { ok: true });
         } else {
+          w.holdViews(true); // the page then asks for the list; it comes late, as the test's
           w.answer(act, { ok: true });
           await eventually(async () => (await toast(page)).undo, 'the toast');
           d.set({ sections: { week: [row(S1), row(S3)] } });
@@ -1354,6 +1355,30 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       },
     );
   }
+
+  await t.test(
+    "before `d`'s answer, a list that still shows the row as not done is older than the write and holds no result; at an answer that found no list holding it, the page asks for one (review 2's S3, ruled)",
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await selectedHasCome(page, S2);
+      await page.keyboard.press('d');
+      const act = await w.act(1);
+      d.set({ sections: { week: [row(S1), row(S2), row(S3)] } }); // crosses the write: S2 not done
+      await sleep(300);
+      // The list that holds the write, which the page gets only by asking for it.
+      d.set({ sections: { week: [row(S1), row(S3)] } }, false);
+      const views = w.sent.filter((m) => m['t'] === 'view').length;
+      w.answer(act, { ok: true });
+      await eventually(async () => (await selectedRow(page)) === S3, 'the next row');
+      assert.equal(
+        w.sent.filter((m) => m['t'] === 'view').length > views,
+        true,
+        'the page asked for the list',
+      );
+    },
+  );
 
   await t.test(
     "the list that holds `d`'s result decides once: a list before the answer that still has the row (listed with `a`) → no move, and a later list without it moves nothing either (ruled 06:38Z)",
@@ -1780,6 +1805,8 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         d.set({ sections: { open: [R], week } });
       };
       await clickRow(page, S2);
+      await selectedHasCome(page, S2); // its view's list came before `d`
+      w.holdViews(true); // each list comes after the answer, as the test sends it
       await doneOf(1, S2, [row(S1), row(S3)]);
       await eventually(async () => (await selectedRow(page)) === S3, 'the next row');
       await doneOf(2, S3, [row(S1)]);
@@ -1834,6 +1861,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       ] as const) {
         await clickRow(page, S2);
         await selectedHasCome(page, S2); // its view's list came before `d`
+        w.holdViews(true); // the lists come after the answers, as the test sends them
         await page.keyboard.press('d');
         w.answer(await w.act(n), { ok: true });
         await eventually(async () => (await toast(page)).undo, 'the toast');
@@ -1854,6 +1882,8 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
           moved ? S1 : S2,
           moved ? 'it stays' : 'selected again',
         );
+        w.holdViews(false);
+        d.set({}); // the list its re-selection's view would have got
       }
     },
   );
@@ -1925,4 +1955,36 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       },
     );
   }
+
+  await t.test(
+    'the real server: five `d` 300 ms apart from the first row of This week mark five rows done (review 2’s S3, ruled)',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const ids = [
+        S1,
+        S2,
+        S3,
+        S4,
+        '4f9d7a5c-2b6e-4daf-9a7b-6c5d4e3f2a1b',
+        '5a0e8b6d-3c7f-4eb0-8b8c-7d6e5f4a3b2c',
+      ];
+      for (const id of ids) l.d.resumable(id);
+      const drawn = (): Promise<string[]> =>
+        l.page.evaluate(() =>
+          [...document.querySelectorAll('#list [data-id]')].map(
+            (element) => element.getAttribute('data-id') ?? '',
+          ),
+        );
+      await eventually(async () => (await drawn()).length === 6, 'six rows');
+      const first = (await drawn())[0] as string;
+      await clickRow(l.page, first);
+      await showsText(l.page, '#cards .card-command', /--resume/); // its `selected` has come
+      for (let n = 0; n < 5; n++) {
+        await l.page.keyboard.press('d');
+        await sleep(300);
+      }
+      await eventually(async () => (await drawn()).length === 1, 'one row left');
+      assert.deepEqual(l.problems, []);
+    },
+  );
 });
