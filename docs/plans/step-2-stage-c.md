@@ -323,7 +323,8 @@ export interface RestoreHooks {
    *  sessions still waited for are reported `timed out <short> <title>` (their locks stay, renewed
    *  last), then one line `stopped: <String(signal.reason)>`, then `not started <short> <title>`
    *  for the sessions not opened; outcome.stopped is true. A run that sees the abort with nothing
-   *  left (no session still waited for, no entry to open) ends as it would have (task 71). */
+   *  left (no session still waited for, no entry to open) ends as it would have (ruled on task
+   *  71's review 1). */
   signal?: AbortSignal;
   /** C23: after a batch that opened at least one terminal and saw none of its sessions start, when
    *  entries are left, the run stops as for the signal, with the reason `no session of this batch
@@ -661,7 +662,10 @@ before `prepareResumeById` (so also for `runHere`, which the window never reache
 `awaitStarts` for each session still waited for, after `resumeStarted` was checked for it;
 `signal` is looked at before each batch, before each entry is prepared, and after each look of the
 wait; at an abort the sessions still waited for are reported `timed out …` first (as at the wait's
-end), then the `stopped:` line, then the `not started …` lines. `stopAfterEmptyBatch`: a batch that
+end), then the `stopped:` line, then the `not started …` lines. `runHere` looks at it before its
+memory check and before each entry: the hooks are `runRestore`'s as a whole. A run that sees the
+abort with nothing left (no session still waited for, no entry to open) ends as it would have: no
+`stopped:` line, `outcome.stopped` false (both ruled on task 71's review 1). `stopAfterEmptyBatch`: a batch that
 opened at least one terminal and saw none of its sessions start stops the run the same way, with
 the reason `no session of this batch started`, when entries are left; a last (or only) batch that
 starts nothing ends the run as any run with failures, with no `stopped:` line (C23). `report`'s second argument for every line that ends a session's part: `started`, `timed out`,
