@@ -300,6 +300,25 @@ test('counts: counts and needYou.count are the same with and without a filter th
   assert.deepEqual(plain.needYou.order, [S4]);
 });
 
+test('counts: a done row that needs nothing, listed by a filter, is in no count either', () => {
+  const list = rows([idle(S1, 'alpha', MIN), idle(S2, 'beta done', 2n * MIN, true)]);
+  const plain = buildListMessage(input({ rows: list }));
+  const filtered = buildListMessage(input({ rows: list, view: { filter: 'beta' } }));
+  assert.deepEqual(allIds(filtered), [S2]);
+  assert.equal(plain.counts.notRunning, 1);
+  assert.deepEqual(filtered.counts, plain.counts);
+  const chip = buildListMessage(
+    input({
+      rows: rows([idle(S1, 'alpha', MIN), idle(S2, 'beta', MIN, true)], {
+        metas: [meta(S2, { note: 'n' })],
+      }),
+      view: { chips: ['note'] },
+    }),
+  );
+  assert.deepEqual(allIds(chip), [S2]);
+  assert.equal(chip.counts.notRunning, 1);
+});
+
 // --- the chips (E4) ----------------------------------------------------------------------------
 
 /** S1 in a terminal of the window; S2 elsewhere, with a note; S3 a draft pull request; S4 a merged
@@ -634,6 +653,63 @@ test("switcher: Open's items in Open's order (slots, then elsewhere), whatever t
     `${S3}:open`,
     `${S4}:not-running`,
   ]);
+});
+
+test('switcher: the candidates are sorted by the view model, whatever order the rows come in', () => {
+  const list = rows([
+    idle(S6, 'older', 3n * MIN),
+    running(S3, { pid: 9003, procStart: 700, transcript: { aiTitle: 'c' } }),
+    idle(S5, 'newest', MIN),
+    running(S2, { pid: 9002, procStart: 600, transcript: { aiTitle: 'b' } }),
+    idle(S4, 'middle', 2n * MIN),
+    running(S1, { pid: 9001, transcript: { aiTitle: 'a' } }),
+  ]);
+  const message = buildListMessage(
+    input({
+      rows: list,
+      terminals: [term(1, { expectedSessionId: S1, slot: 1 })],
+      elsewhere: new Map([
+        [S2, { pid: 9002, tty: null }],
+        [S3, { pid: 9003, tty: null }],
+      ]),
+      view: { switcher: '' },
+    }),
+  );
+  assert.deepEqual(ranked(message), [
+    `${S1}:open`,
+    `${S2}:open`,
+    `${S3}:open`,
+    `${S5}:not-running`,
+    `${S4}:not-running`,
+    `${S6}:not-running`,
+  ]);
+});
+
+test('switcher: a done session that runs is open (S2 12.10): a filter hides it by `filter` alone', () => {
+  const list = rows([
+    running(S1, { hidden: true, doneAtNs: T0, transcript: { aiTitle: 'alpha' } }),
+    idle(S2, 'beta', MIN),
+  ]);
+  const message = buildListMessage(
+    input({
+      rows: list,
+      elsewhere: new Map([[S1, { pid: 9000, tty: null }]]),
+      view: { switcher: '', filter: 'beta' },
+    }),
+  );
+  assert.equal(item(message, S1).row.done, true);
+  assert.equal(item(message, S1).rank, 'open');
+  assert.deepEqual(item(message, S1).hiddenBy, ['filter']);
+  // Without the filter the list shows it, done mark and all.
+  const plain = buildListMessage(
+    input({
+      rows: list,
+      elsewhere: new Map([[S1, { pid: 9000, tty: null }]]),
+      view: { switcher: '' },
+    }),
+  );
+  assert.deepEqual(ids(plain, 'open'), [S1]);
+  assert.deepEqual(item(plain, S1).hiddenBy, []);
 });
 
 test("switcher: each item's hiddenBy says what this page's list would have to change (filter, done, folded)", () => {
