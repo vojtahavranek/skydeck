@@ -128,7 +128,14 @@ function listOf(shown: RowPayload[], selectedRow?: RowPayload | null): ListMessa
     needYou: { count: 0, order: [] },
     sections: [
       { name: 'open', folded: false, firstNs: null, lastNs: null, count: 0, rows: [] },
-      { name: 'week', folded: false, firstNs: null, lastNs: null, count: shown.length, rows: shown },
+      {
+        name: 'week',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: shown.length,
+        rows: shown,
+      },
       { name: 'earlier', folded: true, firstNs: null, lastNs: null, count: 0, rows: [] },
     ],
     doneHidden: 0,
@@ -157,7 +164,7 @@ test("sessionRow: the sections' row of the id, else selectedRow when its id is t
   assert.equal(sessionRow(listOf([listed], hidden), null), null, 'no id');
 });
 
-test("paneFor: a hidden session whose selectedRow names a running terminal shows it with that row; an ended one with the ended bar", () => {
+test('paneFor: a hidden session whose selectedRow names a running terminal shows it with that row; an ended one with the ended bar', () => {
   for (const [state, ended] of [
     ['running', false],
     ['reconnecting', false],
@@ -175,7 +182,7 @@ test("paneFor: a hidden session whose selectedRow names a running terminal shows
   }
 });
 
-test("paneFor: a hidden session whose terminal is starting (its session id still null) shows it", () => {
+test('paneFor: a hidden session whose terminal is starting (its session id still null) shows it', () => {
   const terminal = term(T2, 'starting', null);
   const hidden = row(S2, { terminal: T2, starting: true });
   assert.deepEqual(paneFor(S2, [], [terminal], false, hidden), {
@@ -194,14 +201,17 @@ test("paneFor: a hidden session's row decides, not a terminal whose sessionId is
 
 test('paneFor: a row from selectedRow without a terminal shows nothing — no elsewhere card, no resume card (S2 12.9)', () => {
   const resumable = row(S1);
-  const elsewhere = row(S2, { state: 'working', elsewhere: { pid: 42, tty: '/dev/pts/3', dir: null } });
+  const elsewhere = row(S2, {
+    state: 'working',
+    elsewhere: { pid: 42, tty: '/dev/pts/3', dir: null },
+  });
   assert.deepEqual(paneFor(S1, [], [], false, resumable), { kind: 'none' });
   assert.deepEqual(paneFor(S2, [], [], false, elsewhere), { kind: 'none' });
   // Nor one whose terminal the list does not carry.
   assert.deepEqual(paneFor(S1, [], [], false, row(S1, { terminal: T1 })), { kind: 'none' });
 });
 
-test("paneFor: a listed row wins over selectedRow, and a selectedRow of another session is not used", () => {
+test('paneFor: a listed row wins over selectedRow, and a selectedRow of another session is not used', () => {
   const listed = row(S1);
   const hiddenView = row(S1, { terminal: T1, state: 'running' });
   const terminal = term(T1, 'running', S1);
