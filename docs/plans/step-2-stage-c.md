@@ -800,10 +800,12 @@ false for two different values whose last six digits are both 0 (C19).
 - `decideFoundKeeper`: a resume whose stored lock is a renewal of the hello's → started (also after
   a chain of renewals) — the case `test/window/starts.test.ts:179` ("a renewed lock is not the
   hello's either", stage A's rule) is the one this task turns around; taken over → refused with
-  `its resume lock was taken over` (also after renewals; also an older skydeck's renewal; also the
-  congruent take-over); the congruent take-over's renewal → `the start deadline passed`.
-  `settleEndedTerminal`: an exit before the start releases a renewed lock of its take, not a
-  taken-over one; a congruent take-over stays, before and after its program's start; its
+  `its resume lock was taken over` (also after renewals; also a take-over its taker renewed, which
+  only the mark tells apart; also an older skydeck's renewal; also the congruent take-over); the
+  congruent take-over's renewal → `the start deadline passed`. `settleEndedTerminal`: an exit
+  before the start releases a renewed lock of its take, not a taken-over one, nor one its taker
+  renewed; a start counts from the hello's take, not from a later renewal; a congruent take-over
+  stays, before and after its program's start; its
   renewal by a restore is given back (the named limit). Every other case of `starts.test.ts`
   passes unchanged but for the refusal's words (the case "the lock replaced by another value").
 

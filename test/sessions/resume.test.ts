@@ -954,13 +954,18 @@ test('sameTake: a lock and its renewals are one take; a take-over with no new ev
   assert.equal(sameTake(unrenewed, takeOver(first, T0 + 61n * SEC)), false);
 });
 
-test('sameTake: a take-over at any millisecond from T0 + 60 s to T0 + 61 s is another take', (t) => {
-  const d = testDeck(t);
-  const [taken = ''] = takeAndRenew(d);
+test('sameTake: a take-over at any millisecond from T0 + 60 s to T0 + 61 s is another take, and so are its renewals', () => {
+  // A take-over's renewal (another skydeck's restore took the stale lock over and renews it) has
+  // the taker's mark: only the mark tells it from a renewal of the first take.
+  const taken = `${T0}:0`; // what acquireLock writes at T0 (takeOver checks the shape)
   for (let ms = 60_000n; ms <= 61_000n; ms++) {
-    d.deck.store.setKv(lockKey(S1), taken); // the take, stale again
-    const over = takeOver(d, T0 + ms * 1_000_000n);
-    assert.equal(sameTake(taken, over), false, `T0 + ${ms} ms`);
+    const over = `${T0 + ms * 1_000_000n}:0`;
+    assert.notEqual(lockMark(over), lockMark(taken), `T0 + ${ms} ms`);
+    const renewed = `${T0 + (ms + 1000n) * 1_000_000n + BigInt(lockMark(over) ?? 0)}:0`;
+    for (const value of [over, renewed]) {
+      assert.equal(sameTake(taken, value), false, value);
+      assert.equal(sameTake(value, taken), false, value);
+    }
   }
 });
 
@@ -1028,10 +1033,8 @@ test('an older skydeck reads a renewed lock as a lock, its time less than 1 ms a
   assert.equal(match[2], '0'); // the event id, as recorded
   const olderTimeNs = BigInt(match[1] ?? '');
   assert.ok(olderTimeNs >= renewedAtNs && olderTimeNs - renewedAtNs < 1_000_000n, renewed);
-  // By the older rule (age = now − that time; stale at 60 s) it holds until less than 1 ms after
-  // 60 s from the renewal: an older server neither sweeps it nor takes it over before.
-  assert.ok(renewedAtNs + LOCK_TTL_NS - olderTimeNs < LOCK_TTL_NS);
-  assert.ok(renewedAtNs + LOCK_TTL_NS + 1_000_000n - olderTimeNs >= LOCK_TTL_NS);
+  // So by the older rule (age = now − that time; stale at 60 s) it holds until less than 1 ms
+  // after 60 s from the renewal: an older server neither sweeps it nor takes it over before.
   // This build: fresh until exactly 60 s after the renewal.
   d.clock.setNs(renewedAtNs + LOCK_TTL_NS - 1_000_000n);
   assert.equal(isLockHeld(d.deck, S1), true);

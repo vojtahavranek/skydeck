@@ -230,6 +230,16 @@ describe('decideFoundKeeper: a resume', () => {
     });
   });
 
+  test('a take-over that its taker renews (another skydeck’s restore) → taken over: the mark tells them apart', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    const over = takeOver(d, T0 + 61n * SEC);
+    d.clock.setNs(T0 + 62n * SEC);
+    const theirs = renewLock(d.deck, S1, over);
+    assert.ok(theirs !== null && lockMark(theirs) !== lockMark(hello.lock ?? ''));
+    assert.deepEqual(decideFoundKeeper(d.deck, hello), { start: false, reason: TAKEN_OVER });
+  });
+
   test('a renewal an older skydeck wrote (now, no mark) → refused as taken over, as stage A does', (t) => {
     // Conservative across an update: nothing starts on a lock this build cannot tie to the hello.
     const d = testDeck(t);
@@ -447,10 +457,25 @@ describe('settleEndedTerminal', () => {
     assert.equal(readLock(renewedFirst.deck, S1), overAfter);
   });
 
+  test('an exit before the start leaves a take-over that its taker renewed; the taker renews it still', (t) => {
+    const d = testDeck(t);
+    const { hello } = resumeLaunch(d);
+    const over = takeOver(d, T0 + 61n * SEC);
+    d.clock.setNs(T0 + 62n * SEC);
+    const theirs = renewLock(d.deck, S1, over);
+    assert.ok(theirs !== null);
+    settleEndedTerminal(d.deck, hello);
+    assert.equal(readLock(d.deck, S1), theirs);
+    d.clock.setNs(T0 + 63n * SEC);
+    assert.notEqual(renewLock(d.deck, S1, theirs), null);
+  });
+
   test('a renewed lock of a session that started (its start still in the spool) stays', (t) => {
     const d = testDeck(t);
     const { lock, hello } = resumeLaunch(d);
-    d.clock.setNs(T0 + 2n * SEC);
+    // Renewed more than the 5 s tolerance after the start: the start counts from the hello's take,
+    // not from the stored renewal (S2 7.8: "for this launch").
+    d.clock.setNs(T0 + 10n * SEC);
     const renewed = renewLock(d.deck, S1, lock);
     spoolStart(d, S1, 4343, T0 + SEC, 1, false);
     settleEndedTerminal(d.deck, hello);
