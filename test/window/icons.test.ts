@@ -2,13 +2,17 @@
 // web/manifest.webmanifest, read from the checkout. scripts/icons.ts made the PNG and ICO files
 // once from web/icons/skydeck.svg; no test runs it, so these cases hold what it wrote.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 
 import * as prettier from 'prettier';
+
+import { readBuild } from '../../src/window/build.ts';
+import { testPlatform } from '../helpers/platform.ts';
 
 const checkout = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, '');
 const read = (path: string): Buffer => readFileSync(join(checkout, path));
@@ -24,6 +28,9 @@ const TILE = [0x2f, 0x6f, 0xde];
 /** How far a pixel may differ from the background and still count as background: at 153.6 and
  *  409.6 pixels the tile's edge leaves a seam one step off the background, which no eye sees. */
 const SEAM = 2;
+
+/** The sha256 of web/icons/skydeck.svg as scripts/icons.ts last drew it. */
+const SVG_SHA256 = '0544fd2a8abb4a2ab523c4a57c815953499442afd3a24973ad8323ae4c2e10a8';
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -192,10 +199,18 @@ describe('the PNG files', () => {
     }
   });
 
-  test('web/icons/ holds exactly the source, the seven PNGs and favicon.ico', () => {
+  test('of web/icons/ the server reads exactly the source, the seven PNGs and favicon.ico', (t) => {
+    const { platform } = testPlatform(t);
+
+    // What the build holds and the server serves; an editor's `.skydeck.svg.swp` is neither.
+    const served = [...readBuild(platform.files, checkout).files.keys()]
+      .filter((path) => path.startsWith(`${ICONS}/`))
+      .map((path) => path.slice(ICONS.length + 1));
+
     assert.deepEqual(
-      readdirSync(join(checkout, ICONS)).sort(),
+      served.sort(),
       ['favicon.ico', 'skydeck.svg', ...PNGS.map((p) => p.file)].sort(),
+      'a file left by scripts/icons.ts, or one added by hand: every file of web/ is served (S2 8.2.1)',
     );
   });
 });
@@ -231,6 +246,16 @@ test("favicon.ico: a directory of three images, 16, 32 and 48 pixels, whose byte
 
 describe('web/manifest.webmanifest', () => {
   const manifest = (): unknown => JSON.parse(read('web/manifest.webmanifest').toString('utf8'));
+
+  test('no start_url, scope or id: the page is not to be installed as an app (ruled)', () => {
+    const value = manifest() as Record<string, unknown>;
+
+    // Without start_url Chromium counts the page as not installable (start-url-not-valid), and
+    // an installed app's shortcut would hold no launch token (S2 5.1).
+    for (const key of ['start_url', 'scope', 'id']) {
+      assert.equal(Object.hasOwn(value, key), false, key);
+    }
+  });
 
   test('name, short_name, display and icons, and nothing else', () => {
     const value = manifest() as Record<string, unknown>;
@@ -397,6 +422,17 @@ function outsideAllowed(svg: string): string[] {
 describe('web/icons/skydeck.svg', () => {
   test('holds only shapes: no script, no reference outside the file, no image', () => {
     assert.deepEqual(outsideAllowed(read(`${ICONS}/skydeck.svg`).toString('utf8')), []);
+  });
+
+  test('is the drawing the committed PNG files were made from', () => {
+    // Nothing draws in a test (ruled): this hash notices an edit of the SVG without a new run.
+    assert.equal(
+      createHash('sha256')
+        .update(read(`${ICONS}/skydeck.svg`))
+        .digest('hex'),
+      SVG_SHA256,
+      'web/icons/skydeck.svg changed: run node scripts/icons.ts, commit what it wrote, then put the new hash here',
+    );
   });
 
   test('is square and in the SVG namespace', () => {

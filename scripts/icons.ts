@@ -144,23 +144,29 @@ async function main(): Promise<void> {
       await page.goto(url);
       await page.locator('img').evaluate((img: HTMLImageElement) => img.decode());
 
+      // Everything is drawn first and written last, so that a run that stops writes nothing.
       const pngs = new Map<number, Buffer>();
+      const written = new Map<string, Buffer>();
       for (const size of SIZES) {
         const png = await draw(page, size, false);
         pngs.set(size, png);
-        writeFileSync(join(icons, `icon-${size}.png`), png);
+        written.set(`icon-${size}.png`, png);
       }
       for (const size of MASKABLE) {
-        writeFileSync(join(icons, `icon-${size}-maskable.png`), await draw(page, size, true));
+        written.set(`icon-${size}-maskable.png`, await draw(page, size, true));
       }
-      const images = IN_ICO.map((size) => ({
-        size,
-        png: pngs.get(size) ?? Buffer.alloc(0),
-      }));
-      writeFileSync(join(icons, 'favicon.ico'), ico(images));
-      console.log(
-        `icons: wrote ${SIZES.length + MASKABLE.length} PNG files and favicon.ico to ${icons}`,
-      );
+      const images = IN_ICO.map((size) => {
+        const png = pngs.get(size);
+        if (png === undefined) {
+          throw new Error(`favicon.ico needs icon-${size}.png, which SIZES does not draw`);
+        }
+        return { size, png };
+      });
+      written.set('favicon.ico', ico(images));
+      for (const [name, bytes] of written) {
+        writeFileSync(join(icons, name), bytes);
+      }
+      console.log(`icons: wrote ${[...written.keys()].join(', ')} to ${icons}`);
     } finally {
       await browser.close();
     }

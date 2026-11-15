@@ -24,22 +24,22 @@ export interface Assets {
 
 const KEEPER = 'bin/skydeck-keeper';
 const INDEX = 'web/index.html';
-/** The page's manifest and icon (S2 12.12), served at the paths S2 8.2.1 gives them. */
-const MANIFEST = 'web/manifest.webmanifest';
+/** The page's web app manifest and icon (S2 12.12), served at the paths S2 8.2.1 gives them. Not
+ *  to be confused with vendor/MANIFEST.json, the list of the vendored files. */
+const PAGE_MANIFEST = 'web/manifest.webmanifest';
 const FAVICON = 'web/icons/favicon.ico';
-/** The contract with web/index.html (task 26) and the manifest: every occurrence becomes
+/** The contract with web/index.html (task 26) and the page's manifest: every occurrence becomes
  *  `/assets/<build>/`. */
 const PLACEHOLDER = '/assets/__VERSION__/';
-/** Files of web/ not on the versioned list: the type checker's, and index.html and the manifest,
- *  which are served with the build put in at their own paths (as they are on disk, they would name
- *  files of no build). */
-const NOT_SERVED = new Set(['web/tsconfig.json', INDEX, MANIFEST]);
+/** Files of web/ not on the versioned list: the type checker's, and index.html and the page's
+ *  manifest, which are served with the build put in at their own paths (as they are on disk, they
+ *  would name files of no build). */
+const NOT_SERVED = new Set(['web/tsconfig.json', INDEX, PAGE_MANIFEST]);
 /** Vendored files the page loads: the bundles and the stylesheet (S2 16.6). */
 const LOADED_FROM_VENDOR = /\.(mjs|css)$/;
 
 const HTML = 'text/html; charset=utf-8';
-const ICO = 'image/x-icon';
-const WEB_MANIFEST = 'application/manifest+json';
+/** By extension, for every file served, the page's manifest and the icon at their own paths too. */
 const TYPES: Readonly<Record<string, string>> = {
   '.html': HTML,
   '.js': 'text/javascript; charset=utf-8',
@@ -48,37 +48,39 @@ const TYPES: Readonly<Record<string, string>> = {
   '.json': 'application/json',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
-  '.ico': ICO,
-  '.webmanifest': WEB_MANIFEST,
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
 };
 /** With `nosniff`, a file of another kind is never run or shown as a page. */
 const OTHER_TYPE = 'application/octet-stream';
+
+const typeOf = (path: string): string => TYPES[extname(path)] ?? OTHER_TYPE;
 
 function refuse(reason: string): never {
   throw new SkydeckError(`skydeck cannot serve this checkout: ${reason}`);
 }
 
-/** index.html (or the manifest) with the build put in: done on the bytes, which keep every other
- *  byte as it was. */
+/** index.html (or the page's manifest) with the build put in: done on the bytes, which keep every
+ *  other byte as it was. */
 function withBuild(file: Uint8Array, build: string): Uint8Array {
   const latin1 = Buffer.from(file).toString('latin1'); // one character per byte, both ways
   return Buffer.from(latin1.replaceAll(PLACEHOLDER, `/assets/${build}/`), 'latin1');
 }
 
 /**
- * Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only, and
- * web/manifest.webmanifest as '/manifest.webmanifest' only, each with the build put in), the
- * vendored files of the manifest that the page loads (`vendor/xterm/**` .mjs and .css) and
- * bin/skydeck-keeper; web/icons/favicon.ico is also served as '/favicon.ico' (S2 8.2.1, 12.12).
- * Refuses (Error) when verifyVendored
+ * Reads web/** (but web/tsconfig.json; web/index.html is served as '/' only, and the page's
+ * manifest web/manifest.webmanifest as '/manifest.webmanifest' only, each with the build put in),
+ * the vendored files of vendor/MANIFEST.json that the page loads (`vendor/xterm/**` .mjs and
+ * .css) and bin/skydeck-keeper; web/icons/favicon.ico is also served as '/favicon.ico' (S2 8.2.1,
+ * 12.12). Refuses (Error) when verifyVendored
  * reports a problem. A missing or empty web/ is no error (task 23's tests run before task 26
- * creates it): then `GET /` is 404, as are the manifest's and the icon's paths for a checkout
+ * creates it): then `GET /` is 404, as are the page manifest's and the icon's paths for a checkout
  * without them.
  *
  * Every file is read once, by `readBuild`, and the build is the hash of exactly the bytes served
- * (S2 8.2.1). A served vendored file must have the manifest's hash in those bytes too, so that a
- * file changed between that read and verifyVendored's is refused as well. Names starting with '.'
- * and `__pycache__` are neither in the build nor served (A12).
+ * (S2 8.2.1). A served vendored file must have vendor/MANIFEST.json's hash in those bytes too, so
+ * that a file changed between that read and verifyVendored's is refused as well. Names starting
+ * with '.' and `__pycache__` are neither in the build nor served (A12).
  */
 export function loadAssets(files: Files, appRoot: string): Assets {
   const { build, files: read } = readBuild(files, appRoot);
@@ -101,7 +103,7 @@ export function loadAssets(files: Files, appRoot: string): Assets {
   const prefix = `/assets/${build}/`;
   for (const [path, body] of read) {
     if (path.startsWith('web/') && !NOT_SERVED.has(path)) {
-      served.set(prefix + path, { body, type: TYPES[extname(path)] ?? OTHER_TYPE });
+      served.set(prefix + path, { body, type: typeOf(path) });
     }
   }
   for (const entry of readManifest(files, appRoot) ?? refuse('vendor/MANIFEST.json changed')) {
@@ -112,19 +114,22 @@ export function loadAssets(files: Files, appRoot: string): Assets {
     if (body === undefined || createHash('sha256').update(body).digest('hex') !== entry.sha256) {
       refuse(`${entry.path} changed while skydeck read it`);
     }
-    served.set(prefix + entry.path, { body, type: TYPES[extname(entry.path)] ?? OTHER_TYPE });
+    served.set(prefix + entry.path, { body, type: typeOf(entry.path) });
   }
   const index = read.get(INDEX);
   if (index !== undefined) {
     served.set('/', { body: withBuild(index, build), type: HTML });
   }
-  const manifest = read.get(MANIFEST);
-  if (manifest !== undefined) {
-    served.set('/manifest.webmanifest', { body: withBuild(manifest, build), type: WEB_MANIFEST });
+  const pageManifest = read.get(PAGE_MANIFEST);
+  if (pageManifest !== undefined) {
+    served.set('/manifest.webmanifest', {
+      body: withBuild(pageManifest, build),
+      type: typeOf(PAGE_MANIFEST),
+    });
   }
   const favicon = read.get(FAVICON);
   if (favicon !== undefined) {
-    served.set('/favicon.ico', { body: favicon, type: ICO });
+    served.set('/favicon.ico', { body: favicon, type: typeOf(FAVICON) });
   }
   return { build, keeperCode, get: (path) => served.get(path) ?? null };
 }

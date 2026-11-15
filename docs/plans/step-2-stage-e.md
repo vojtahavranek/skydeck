@@ -676,6 +676,10 @@ accent colour; the mockup's logo is a rounded square with a blue gradient), squa
 no script, no `on…` attribute, no `<foreignObject>`, no `href` or `xlink:href` but to `#…`, no
 `@import`, no `url(` but to `#…`. `scripts/icons.ts` as 2.6; the implementer runs it once and
 commits what it wrote, and the pull request shows the 32 and 192 PNGs. The routes as 2.6.
+The manifest has no `start_url`, `scope` or `id` (ruled, review 2 of #87): the page is not meant
+to be installed as an app. Without `start_url` Chromium counts it as not installable
+(`start-url-not-valid`, run in the pinned Chromium with task 97's links), and the shortcut of an
+installed app would hold no launch token (S2 5.1).
 
 **Tests** (platform: `testPlatform`; the files read from the checkout)
 - `icons.test.ts`: each PNG starts with the PNG signature, its `IHDR` gives the size its name
@@ -684,7 +688,9 @@ commits what it wrote, and the pull request shows the 32 and 192 PNGs. The route
   are those of the three PNGs; the manifest is JSON with exactly `name`, `short_name`, `display`
   and `icons`, `skydeck`, `skydeck`, `standalone`, and seven icons whose `src` is
   `/assets/__VERSION__/web/icons/<file>` of a file that exists, with its `sizes` and `type`, the
-  two maskable ones `purpose` `maskable`; the SVG holds none of what the behaviour forbids.
+  two maskable ones `purpose` `maskable`, and no `start_url`, `scope` or `id` (a case of its
+  own); the SVG holds none of what the behaviour forbids (checked by what it may hold: the
+  elements and attributes of a drawing of shapes).
 - `assets.test.ts`: `/manifest.webmanifest` → 200, `application/manifest+json`, `no-store`, the
   build in every `src` and no `__VERSION__` left; every `src` is served under the build, `image/png`;
   `/favicon.ico` → 200, `image/x-icon`, `no-store`, the ICO's bytes; both carry the security
