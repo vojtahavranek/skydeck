@@ -217,7 +217,7 @@ test(
 );
 
 test(
-  'a failed gh: one log line by kind, nothing of the address or of what gh said; the pull request is "can\'t read"',
+  'a failed gh: one log line with the counts, nothing of the address or of what gh said; the pull request is "can\'t read"',
   LIMIT,
   async (t) => {
     const f = fixture(t, {

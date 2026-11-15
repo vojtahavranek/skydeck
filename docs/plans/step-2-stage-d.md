@@ -347,7 +347,7 @@ passes the sanitiser before it is sent (stage A's `act`) and is shown as text.
 | A label or group design 7.1 refuses (a line break, a control character, a label starting with `-`) | `cleanLabel` / `cleanGroup`'s message, the same as `skydeck label` / `group` print | dialog |
 | Empty or only white space | clears it (as the commands do) | — |
 | The note changed since the dialog opened (another window, a command) | `the note was changed elsewhere while you edited it; your text is still in the box` (S2 12.5); nothing written | dialog |
-| The stored note already equals the text sent (a save sent again after a lost answer) | `ok`, nothing written (D9) | — |
+| The stored note already equals the text sent, or the text stores nothing while there is no note (a save sent again after a lost answer, also one that cleared the note) | `ok`, nothing written (D9) | — |
 | Two windows edit a label, group or done | the later write wins; every window's list follows (D7) | — |
 | A session the store does not know (gone) | RefError's `no session matches '<id>'`, as `act resume` | dialog or key bar |
 | A `new` session not started yet (A28's row) | `this session has not started yet; edit it once it runs` | dialog or key bar |
