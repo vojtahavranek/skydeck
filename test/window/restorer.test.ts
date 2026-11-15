@@ -1047,6 +1047,56 @@ test('a store that fails while a run goes on: the banner says running all the wh
   assert.equal(made?.running, false);
 });
 
+test('a store that fails after a run whose banner was made while it ran: the offer with running false (ruled by the plan owner, task 74)', async (t) => {
+  const d = restarted(t, 2);
+  let fail = false;
+  const deck = deckWith(d.deck, {
+    store: {
+      getKv: (key) => {
+        if (fail && key === 'window_restore_dismissed') throw BUSY();
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const rows = (): readonly ListRow[] => loadRows(d.deck);
+  const w = world(d, { deck });
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  const during = w.restorer.banner(rows());
+  assert.equal(during?.running, true);
+  assert.equal(during?.bootId, BOOT_A, 'made while the run goes on, with its offer');
+  fail = true;
+  await started.done;
+  assert.deepEqual(w.restorer.banner(rows()), { ...during, running: false });
+});
+
+test('a store that fails after a run that offered nothing: no banner (null while nothing is offered and no restore runs; ruled by the plan owner, task 74)', async (t) => {
+  const d = restarted(t, 2);
+  let fail = false;
+  const deck = deckWith(d.deck, {
+    store: {
+      getKv: (key) => {
+        if (fail && key === 'window_restore_dismissed') throw BUSY();
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const none: readonly ListRow[] = [];
+  const w = world(d, { deck });
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  assert.deepEqual(w.restorer.banner(none), {
+    bootId: null,
+    lastActivityNs: null,
+    entries: [],
+    shown: true,
+    running: true,
+  });
+  fail = true;
+  await started.done;
+  assert.equal(w.restorer.banner(none), null);
+});
+
 test('a store that fails before any banner was made: while a run goes on, the payload of a run with nothing offered; after it, none', async (t) => {
   const d = restarted(t, 2);
   let fail = true;
