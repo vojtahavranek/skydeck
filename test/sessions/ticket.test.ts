@@ -252,6 +252,12 @@ describe('ticketAddress: an escape left unfinished right before {key} gives no l
     assert.equal(ticketAddress('2e', WORD, 'https://host/b/%25{key}'), 'https://host/b/%252e');
   });
 
+  test('a % and a character that is no hex digit right before {key} is a link: no key finishes it', () => {
+    const url = 'https://host/b/%g{key}';
+    assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, url), 'https://host/b/%gABC-12');
+    assert.equal(ticketAddress('2e', WORD, url), 'https://host/b/%g2e');
+  });
+
   test('a key "." or ".." in a path', () => {
     for (const key of ['.', '..']) {
       assert.equal(ticketAddress(key, ANYTHING, 'https://host/b/{key}/x'), null, key);

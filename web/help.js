@@ -1,9 +1,10 @@
 // The key help (S2 12.9, Ctrl+Shift+H; plan task 29): every key of S2 12.9 and of the list zone
-// (stage D's `l`, F2, `g`, `n`, `p`, `d` with plan D task 37), those whose action comes in a later
-// stage marked so (A11), a note on stage D's dialogs, the note for a browser tab and the
-// note on the Claude Code bindings the window shadows. Its interface is contract 2.9's. Every key
-// it names is one web/keys.js handles in that zone, and every key keys.js handles is named here
-// (test-page/cards.test.ts reads the help and checks both against keys.js).
+// (stage D's `l`, F2, `g`, `n`, `p`, `d` with plan D task 37; stage B's Ctrl+Shift+J with plan B
+// task 55), those whose action comes in a later stage marked so (A11), a note on stage D's
+// dialogs, the note for a browser tab and the note on the Claude Code bindings the window
+// shadows. Its interface is contract 2.9's. Every key it names is one web/keys.js handles in that
+// zone, and every key keys.js handles is named here (test-page/cards.test.ts reads the help and
+// checks both against keys.js).
 
 const LATER = 'comes in a later stage';
 
@@ -30,7 +31,7 @@ const SECTIONS = [
         'reload the page, once skydeck’s server has proven itself (Refresh: the keyboard’s refresh key)',
       ],
       [['Ctrl+Shift+P'], `the quick switcher: ${LATER}`],
-      [['Ctrl+Shift+J'], `the next session that needs you: ${LATER}`],
+      [['Ctrl+Shift+J'], 'the next session that needs you; again goes on'],
     ],
   },
   {

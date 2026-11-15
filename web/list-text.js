@@ -1,13 +1,15 @@
 // The list's text (S2 12.1, 12.2, stage A; plan task 27): what a row and its state line say, a
 // section header, the footer and the title bar's counts — from exactly what the server's `list`
-// says (S2 8.2.3); web/list.js draws it. Pure: no DOM and no clock, so that node:test and the root
-// type check load it (test/web/list.test.ts).
+// says (S2 8.2.3); web/list.js draws it. A row that needs you (stage B, plan B13) has the reason's
+// line, web/attention-text.js's, as its second line. Pure: no DOM and no clock, so that node:test
+// and the root type check load it (test/web/list.test.ts).
 //
 // The server sanitised every string when it built the list (design 7.4); the page passes each one
 // through the same rule again before showing it (`sanitize`, a copy of src/text/sanitize.ts that
 // the test holds to the server's): a page that shows foreign text decides that for itself.
 
 /** @import { ChipPayload, ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
+import { attentionLine } from './attention-text.js';
 import { ageBetween } from './format.js';
 
 // --- the sanitiser (a copy of src/text/sanitize.ts: web/ never imports code from src/) ----------
@@ -64,7 +66,10 @@ function clean(text) {
  * @property {ChipText | null} chip S2 12.3's chip, null when no pull request is attached
  * @property {string | null} note null without a note; else the note's first line, the ✎'s tooltip
  * @property {string} age a one-line row's age (its last activity); '' on a row of two lines
- * @property {string | null} stateLine the second line of a running or starting row, else null
+ * @property {string | null} stateLine the second line of a running or starting row, and of a row
+ *   that needs you (the reason's line, B13); else null
+ * @property {'asks' | 'ended' | 'finished' | 'other' | null} attention why the row needs you
+ *   (S2 12.4: its mark; `other` for a reason the page does not know), null when it needs nothing
  */
 
 /** Design 6.3's marks in words (S2 12.2), in design 6.3's order, and what their tooltips say. */
@@ -278,16 +283,30 @@ function stateLineOf(row, nowNs, terminal) {
 }
 
 /**
+ * The mark of a row that needs you (S2 12.4): its reason, each drawn in its own way
+ * (web/list.css), or `other` for a reason the page does not know.
+ * @param {RowPayload} row
+ * @returns {'asks' | 'ended' | 'finished' | 'other'}
+ */
+function attentionMark(row) {
+  const reason = row.attention?.reason;
+  return reason === 'asks' || reason === 'ended' || reason === 'finished' ? reason : 'other';
+}
+
+/**
  * Everything a row shows (S2 12.2, stage A). A running or starting row has two lines — the first,
- * then its state line —, any other one line that ends with its age. Every string from the server
- * is sanitised again; nothing becomes markup (web/list.js sets text only).
+ * then its state line —, any other one line that ends with its age. A row that needs you (B13)
+ * has two lines whatever its state, the reason's line (`attentionLine`) as the second; a row
+ * without `attention` (a list of stage A) needs nothing. Every string from the server is
+ * sanitised again; nothing becomes markup (web/list.js sets text only).
  * @param {RowPayload} row
  * @param {string} nowNs the server's time now, estimated (S2 8.2.3: ages are the page's, A18)
  * @param {TerminalPayload | null} terminal the row's terminal (`row.terminal` in `list.terminals`)
  * @returns {RowText}
  */
 export function rowText(row, nowNs, terminal) {
-  const twoLines = row.starting || row.state !== 'not-running';
+  const needs = attentionLine(row.attention ?? null, nowNs);
+  const twoLines = needs !== null || row.starting || row.state !== 'not-running';
   const marks = marksOf(row);
   /** @type {RowIcon} */
   const icon = row.starting
@@ -306,7 +325,8 @@ export function rowText(row, nowNs, terminal) {
     chip: chipOf(row, nowNs),
     note: row.hasNote ? clean(noteHead[0] ?? '') : null,
     age: twoLines ? '' : ageBetween(nowNs, row.lastActivityNs),
-    stateLine: twoLines ? stateLineOf(row, nowNs, terminal) : null,
+    stateLine: needs ?? (twoLines ? stateLineOf(row, nowNs, terminal) : null),
+    attention: needs === null ? null : attentionMark(row),
   };
 }
 
