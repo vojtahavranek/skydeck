@@ -1109,7 +1109,8 @@ The server, on `exit`:
   keeps its label and group (the program may yet report its start; ruled by the plan owner, stage
   C's plan, task 82, for both kinds), and the window refuses every start of the session — the
   page's Resume, `POST /resume`, restore's own check (11.1) — with the guard's words,
-  `<short> is running (pid <p>)`. Once that program is gone, or 60 seconds after the loss, the exit
+  `<short> is running (pid <p>)`, `<p>` being that program (with a wrapper `claudeCommand` the
+  guard names its `claude` instead, once that has reported its start). Once that program is gone, or 60 seconds after the loss, the exit
   is settled as above. Known limits: a program that still runs 60 seconds after the loss and never
   reported a start is no longer seen — its lock is given back and a start of its session starts a
   second one; and a keeper lost when its launch is older than the lock's 60 seconds has no lock

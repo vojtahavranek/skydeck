@@ -1298,7 +1298,9 @@ of its session through the window.
   a lost terminal is listed `lost` with its program; a hub that cannot be read gives none), and the
   settling of each refresh keeps an exit answered `false` for the next one. A close of the terminal
   meanwhile changes nothing (what was kept decides). `settleAll` (the server's stop) leaves such an
-  exit unsettled: its lock expires by itself. A database failure keeps an exit unsettled as before.
+  exit unsettled: its lock expires by itself; a new session's label and group stay for good if its
+  program never reports a start (no session is derived from them alone; step 1 leaves the same
+  after a `new` that timed out). A database failure keeps an exit unsettled as before.
 - **The window refuses** (`Launches.refusal`, and `resume` before anything is built or taken):
   "this session is already open in the window" while a terminal of the session is in `MAY_START`,
   as before; else, while a lost terminal of the session has a program for which the rule holds,
@@ -1306,7 +1308,10 @@ of its session through the window.
   4, `refused`, every such program's pid, the terminal opened last first (`, ` between them). So
   the page's Resume answers that line, `POST /resume` its code and line (task 74), and restore's
   `refuse` reports `failed <short>: <short> is running (pid <p>)`, as it reports the guard's own
-  refusal. `MAY_START` (`view/sections.ts`) is unchanged: the page's view model shows the lost
+  refusal. The pid is the program's (what its keeper reported), the guard's the holder's: with a
+  wrapper `claudeCommand` whose `claude` has reported its start, the window names the wrapper for
+  those 60 s, the guard (before, after, and on the command line) the `claude`; the refusal is the
+  same. `MAY_START` (`view/sections.ts`) is unchanged: the page's view model shows the lost
   terminal as before.
 - `gone` (C8) reads `lives` instead of a copy of it; its answer is unchanged (no 60 s bound there:
   restore's own time limit ends its wait).

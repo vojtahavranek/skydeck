@@ -81,7 +81,8 @@ export interface Tick {
   /** No tick from now on; resolves once a running tick and a pull-request fetch have ended. */
   stop(): Promise<void>;
   /** Settles the exits not settled yet, now (the server's stop); a failure is logged by kind. A lost
-   *  keeper's exit whose program may still run stays unsettled: its lock expires by itself. */
+   *  keeper's exit whose program may still run stays unsettled: its lock expires by itself, and a
+   *  new session's label and group stay for good (no session is derived from them alone). */
   settleAll(): void;
 }
 

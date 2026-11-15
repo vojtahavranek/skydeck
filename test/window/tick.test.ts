@@ -652,6 +652,63 @@ describe('ended terminals (S2 7.8; plan task 21)', () => {
     assert.equal(d.deck.store.meta(prepared.sessionId), null);
   });
 
+  test('ended() keeps the terminal of that hello, not another one the hub lists before it (task 82)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    const lock = `${T0}:0`;
+    d.deck.store.setKv(lockKey(S1), lock);
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    const terminals = [
+      terminal({ id: 'aaaaaaaaaaaa', expectedSessionId: S2, program: { pid: 9999, procStart: 1 } }),
+      terminal({
+        id: 'bbbbbbbbbbbb',
+        state: 'lost',
+        program: { pid: PID, procStart: START },
+        exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+      }),
+    ];
+    const f = fixture(t, { d, terminals });
+    f.tick.ended(helloOf({ id: 'bbbbbbbbbbbb', lock, started: false }));
+    await ticks(f, 1);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), lock, 'the lost one, listed second, is held');
+  });
+
+  test('a held exit holds back no other: an exit the keeper sent, listed and ended after it, is settled at the same refresh (task 82)', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    writeTranscript(d, S2);
+    const lockS1 = `${T0}:0`;
+    const lockS2 = `${T0 + 1_000_000n}:0`;
+    d.deck.store.setKv(lockKey(S1), lockS1);
+    d.deck.store.setKv(lockKey(S2), lockS2);
+    d.proc.setProcess(PID, { stat: statLine(PID, START), cmdline: ['claude'] });
+    // The ended terminal's program pid is alive too: only the exit its keeper sent tells it is over.
+    d.proc.setProcess(PID + 1, { stat: statLine(PID + 1, START), cmdline: ['claude'] });
+    const terminals = [
+      terminal({
+        id: 'aaaaaaaaaaaa',
+        state: 'lost',
+        program: { pid: PID, procStart: START },
+        exit: { code: null, signal: 1, atNs: String(T0), notStarted: null },
+      }),
+      terminal({
+        id: 'bbbbbbbbbbbb',
+        state: 'ended',
+        expectedSessionId: S2,
+        sessionId: S2,
+        program: { pid: PID + 1, procStart: START },
+        exit: { code: 1, signal: null, atNs: String(T0), notStarted: null },
+      }),
+    ];
+    const f = fixture(t, { d, terminals });
+    const s2 = helloOf({ id: 'bbbbbbbbbbbb', lock: lockS2, started: false });
+    f.tick.ended(helloOf({ id: 'aaaaaaaaaaaa', lock: lockS1, started: false }));
+    f.tick.ended({ ...s2, meta: { ...s2.meta, sessionId: S2 } });
+    await ticks(f, 1);
+    assert.equal(d.deck.store.getKv(lockKey(S2)), null, 'the sent exit is settled at once');
+    assert.equal(d.deck.store.getKv(lockKey(S1)), lockS1, 'the lost one is held');
+  });
+
   test('… the terminal as the registry listed it at ended(): closed since, its program still keeps the lock (task 82)', async (t) => {
     const d = testDeck(t);
     writeTranscript(d, S1);
