@@ -859,6 +859,10 @@ filter or the fold` (`1 more that needs you is hidden by the filter or the fold`
 shown `2 that need you are hidden by the filter or the fold`; clear the filter (Esc) or unfold
 Earlier. While a dialog is open it says `close the edit first (Esc)` and selects nothing.
 
+**Several windows** show the same marks, the same count and the same title, but for what each
+lists (the done sessions it shows); Ctrl+Shift+J follows each window's own filter and fold. A
+session seen in one window is seen in all of them.
+
 **Desktop notifications.** At the right of the title bar, `Turn on notifications` shows until Edge
 has your answer. Click it once: Edge asks whether the page may show notifications (its own
 prompt). Allow, or Block: either way the button goes, and it comes back only when that answer is
@@ -995,7 +999,7 @@ said before.
   unexpectedly while no server ran (its keeper waits up to 10 minutes for one) is marked `ended
   unexpectedly · not seen` by the next server, without a notification. At the first start of a
   server of stage B, which has no marks yet, that can be a session that ended before the update:
-  it shows `ended` once; select it, and it goes.
+  its row shows `ended unexpectedly · not seen` once; select it, and it goes.
 
 ### What `doctor` says about the window
 
