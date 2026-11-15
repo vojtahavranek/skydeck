@@ -788,23 +788,27 @@ anything that is not a string `''`.
   after them, repeated words, only white space, a word of 100 units, 1,024 bytes of one word (of
   one-byte, two-byte and four-byte characters), `İ` (lower-casing makes it two units: 40 of them,
   and 63 units then an `İ`), a surrogate pair at the server's 64th unit and at the page's cut, a
-  lone surrogate, 17 words in 1,024 bytes) and for 5,000 generated texts of those characters:
-  `searchWords(cutWords(t).text)` equals `searchWords(t)` of task 90, `cut` is true exactly when a
-  17th word was there, the result is a prefix of `t`, uncut it is `t` as typed, cut it ends where
-  the 16th word ends (the page does not cut a long word: the server counts its first 64 units,
-  E3); a cut text is not cut again.
+  lone surrogate, 17 words in 1,024 bytes, a 16th word of 100 units or of 70 `İ` before a 17th),
+  for 17 words joined by each of the 65,536 UTF-16 units, and for 5,000 generated texts of those
+  characters: `searchWords(cutWords(t).text)` equals `searchWords(t)` of task 90, `cut` is true
+  exactly when a 17th word was there (for a unit: exactly when the server splits `a<unit>b` in
+  two), the result is a prefix of `t`, uncut it is `t` as typed, cut it ends where the 16th word
+  ends (the page does not cut a long word: the server counts its first 64 units, E3); a cut text
+  is not cut again.
 - `stackBadge(4)` → `×4`; `moreText(4, 'ORB-2107')` → `+3 more in ORB-2107`; a group holding an
   escape sequence, a control or a line break → sanitised; a group holding markup → as it is.
 - `highlightParts`: two ranges → five parts that join to the text; ranges out of order,
   overlapping, touching, empty, reversed, past the end, negative, not whole numbers, not pairs
   (`[0, 2, 9]` too) → clamped or dropped, the parts still join to the text and none is empty; a
-  range never splits a surrogate pair; markup in a title stays text; no range → one part; the
-  ranges of task 90's `foundIn` mark the words of a search text.
+  range never splits a surrogate pair; a dropped range leaves no trace for the ranges after it;
+  markup in a title stays text; no range → one part; the ranges of task 90's `foundIn` mark the
+  words of a search text.
 - `rankHeading` of each rank, of one it does not know and of no string; `switcherFooter` for each
   action, with and without `more`.
 - The module's source (comments left out): no `RegExp`, no `.match(` / `.matchAll(` / `.search(`
-  with an argument that is not a literal, no `eval` or `Function(`, no `console`, no DOM, and its
-  only import is `sanitize` of `./list-text.js`.
+  with an argument that is not a literal nor those names as a computed member, no `eval` or
+  `Function(`, no `console`, no DOM, no clock or timer, no storage, no network, and its only
+  import is `sanitize` of `./list-text.js` (no `export … from`, no `import(`).
 
 **Done when:** the texts are tested and the page's cut equals the server's; `npm run check`
 passes.

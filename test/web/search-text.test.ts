@@ -167,6 +167,17 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
       `${'x'.repeat(100)} ${words(14).join(' ')} ${'İ'.repeat(50)} w17`,
       `${'x'.repeat(100)} ${words(14).join(' ')} ${'İ'.repeat(50)}`,
     ],
+    // The 16th word is the one a cut at the end of the 16th word could shorten.
+    [
+      'a 16th word of 100 units, and a 17th',
+      `${words(15).join(' ')} ${'x'.repeat(100)} w17`,
+      `${words(15).join(' ')} ${'x'.repeat(100)}`,
+    ],
+    [
+      'a 16th word of 70 İ (140 units once lower-cased), and a 17th',
+      `${words(15).join(' ')} ${'İ'.repeat(70)} w17`,
+      `${words(15).join(' ')} ${'İ'.repeat(70)}`,
+    ],
     ['a lone surrogate', `a\ud800 b \udc00c`, `a\ud800 b \udc00c`],
   ];
   for (const [name, text, expected] of texts) {
@@ -187,6 +198,16 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
     assert.equal(utf8.encode(text).length, 17 * 59 + 16);
     assertParity(text);
     assert.deepEqual(cutWords(text), { text: long.slice(0, 16).join(' '), cut: true });
+  });
+
+  test('every UTF-16 unit separates words for the page exactly when it does for the server', () => {
+    for (let code = 0; code <= 0xffff; code += 1) {
+      const unit = String.fromCharCode(code);
+      const text = words(MAX_WORDS + 1).join(unit);
+      const separates = searchWords(`a${unit}b`).length === 2;
+      assert.equal(cutWords(text).cut, separates, `U+${code.toString(16).padStart(4, '0')}`);
+      assertParity(text);
+    }
   });
 
   test('a cut text is not cut again', () => {
@@ -361,6 +382,22 @@ describe('highlightParts (E9: a title with its found parts)', () => {
     );
   });
 
+  test('a dropped range leaves no trace for the ranges after it', () => {
+    assert.deepEqual(
+      assertJoins('abcdefghij', [
+        [12, 15],
+        [5, 5],
+        [7, 6],
+        [1, 3],
+      ]),
+      [
+        { text: 'a', found: false },
+        { text: 'bc', found: true },
+        { text: 'defghij', found: false },
+      ],
+    );
+  });
+
   test('past the end: clamped to the text, or dropped', () => {
     assert.deepEqual(assertJoins('abcdefghij', [[8, 99]]), [
       { text: 'abcdefgh', found: false },
@@ -504,18 +541,24 @@ describe('switcherFooter', () => {
 
 describe('web/search-text.js is pure page code (plan 2.1, ruled for task 93)', () => {
   const source = readFileSync(new URL('../../web/search-text.js', import.meta.url), 'utf8');
-  // The code without its comments, so that a comment may name what the code must not do.
-  const code = source.replaceAll(/\/\*[^]*?\*\//g, '').replaceAll(/\/\/.*$/gm, '');
+  // The code without its comments (block comments, and lines that are a comment), so that a
+  // comment may name what the code must not do. A `//` inside a line is left: it may be in a
+  // string, and what follows it is code.
+  const code = source.replaceAll(/\/\*[^]*?\*\//g, '').replaceAll(/^\s*\/\/.*$/gm, '');
 
   test('it builds no pattern from a text: no RegExp, and match/matchAll/search take literals only', () => {
     assert.doesNotMatch(code, /\bRegExp\b/);
     assert.doesNotMatch(code, /\.(?:match|matchAll|search)\(\s*(?!\/)/);
+    assert.doesNotMatch(code, /\[\s*['"`](?:match|matchAll|search)['"`]\s*\]/);
     assert.doesNotMatch(code, /\b(?:eval|Function)\s*\(/);
   });
 
-  test('it logs nothing and touches no DOM', () => {
+  test('it logs nothing, touches no DOM, reads no clock, stores nothing, sends nothing', () => {
     assert.doesNotMatch(code, /\bconsole\b/);
     assert.doesNotMatch(code, /\b(?:document|window|innerHTML|outerHTML|insertAdjacentHTML)\b/);
+    assert.doesNotMatch(code, /\b(?:Date|performance|setTimeout|setInterval|queueMicrotask)\b/);
+    assert.doesNotMatch(code, /\b(?:localStorage|sessionStorage|indexedDB|navigator|location)\b/);
+    assert.doesNotMatch(code, /\b(?:fetch|XMLHttpRequest|WebSocket|globalThis|self)\b/);
   });
 
   test('it imports sanitize of web/list-text.js and nothing else, nor passes a module on', () => {

@@ -104,7 +104,9 @@ function append(parts, text, found) {
  * taken in their order, each clamped to the text and to start where the last one ended, its ends
  * moved off the middle of a surrogate pair (inwards); one that is then empty, or that is not a
  * pair of whole numbers, is dropped. Neighbouring parts marked alike are one part and no part is
- * empty, so that the parts always join to `text` ([] for an empty text).
+ * empty, so that the parts always join to `text` ([] for an empty text). `text` must be the string
+ * the ranges were found in: the row's title as the server sent it (plan 2.2: `foundIn(row.title,
+ * words)`), not list-text.js's `rowText` title (its ticket key taken off) nor a sanitised copy.
  * @param {string} text
  * @param {readonly (readonly [number, number])[]} found
  * @returns {HighlightPart[]}
