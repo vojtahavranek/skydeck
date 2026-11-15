@@ -133,8 +133,8 @@ lead's rulings of 2026-11-15).
 | D5 | A note's `text` and `base` hold at most 65,536 bytes of UTF-8 each, as `input.data`; S2 8.2.3's 1,024 bytes would refuse most notes. The largest note `act`, every character escaped by JSON, stays under the WebSocket's message limit (1 MiB). `selected.note` is null for a longer stored note, with `noteTooLong`; the window then does not edit it and says `this note is longer than the window edits; use skydeck note <short id>`. The page refuses a longer text before sending it (the server would close the connection for it). | A note is free text of any length (design 7.1); the list is sent whole on every change. | 34 (8.2.3) |
 | D6 | `list` carries what the header and the dialogs need: `selected.note`, `selected.noteTooLong`, `selected.ticketUrl`; each pull request's `okAtNs`; each terminal's `openedNs` (2.2). The header gets them through `header(row, selected, term, now)` (2.4, ruled on review B): `selected` for every pane, the pane's terminal, and the list's estimate of the server's now (`serverNow`, moved from `web/list.js` into `web/format.js`); the header and the pull-request dialog repaint their ages on their own age tick, as the list does. `app.js` (task 37) passes all four, so that task 38 needs no `web/app.js`. | S2 12.5 shows "checked 4m ago", "last read 3h ago", "opened <time>", and a running session's chip needs `ticketUrl`; the page decides no rule (S2 4.3); ages are the page's (A18). | 34 (8.2.3) |
 | D7 | An edit shows within a second: after an action that wrote to the store, the server loads the rows again and pushes the lists at once (`ActionDeps.changed`, `Tick.reloadNow`), within the pages' once-a-second rule; it does not wait for the next refresh. | The tick reloads after a write only at its next refresh, up to two seconds later; a dialog that closed should not show the old text that long. | 36 (10.1) |
-| D8 | `pr-add` answers as soon as the pull request is attached; its fetch (design 7.3: at once, the 10-second timeout) and `pr-refresh`'s explicit refresh run in the background on the server (`src/window/pr-fetches.ts`), ended by the server's stop. One such fetch runs at a time per server: a request whose pull requests the one running already covers joins it; any other waits and runs, together with every request that came meanwhile, when it ends. The lists follow when a fetch saved something; a failed one is logged by kind. A failed fetch shows on the pull request as `can't read`, as `pr add` leaves it. | The dialog must not wait up to 10 seconds; a ↻ pressed three times must not start three `gh` runs beside the tick's own (which runs one at a time). | 36 (12.5) |
-| D9 | Refusals and conflicts are section 2.5's. An edit acts only on a session the store knows (`loadRows`; the id is whole, so nothing is resolved and no refresh runs first). A note whose stored text already equals the `text` sent is `ok` with nothing written, whatever `base` says (a save sent again after a lost answer). Between two windows, label, group and done are last-write-wins, as two commands are; a note is refused by its `base`. | S2 12.5 names the note's conflict only; the rest is step 1's behaviour. | 36 (12.5) |
+| D8 | `pr-add` answers as soon as the pull request is attached; its fetch (design 7.3: at once, the 10-second timeout) and `pr-refresh`'s explicit refresh run in the background on the server (`src/window/pr-fetches.ts`), ended by the server's stop. One such fetch runs at a time per server: a request whose pull requests the one running already covers joins it; any other waits and runs, together with every request that came meanwhile, when it ends. The lists follow when a fetch saved something, or threw after it may have (ruled on #90, review 2); a failed one is logged: a failure saved on the pull requests as `prs: <n> of <m> pull requests could not be read` (fixed text with counts; the reason is on the pull request), a thrown one by kind (ruled on #90, review 1). A failed fetch shows on the pull request as `can't read`, as `pr add` leaves it. | The dialog must not wait up to 10 seconds; a ↻ pressed three times must not start three `gh` runs beside the tick's own (which runs one at a time). | 36 (12.5) |
+| D9 | Refusals and conflicts are section 2.5's. An edit acts only on a session the store knows (`loadRows`; the id is whole, so nothing is resolved and no refresh runs first). A note whose stored text already equals the `text` sent, or whose `text` stores nothing (empty or white space) while there is no note, is `ok` with nothing written, whatever `base` says (a save sent again after a lost answer, also one that cleared the note; ruled on #90, review 1). Between two windows, label, group and done are last-write-wins, as two commands are; a note is refused by its `base`. | S2 12.5 names the note's conflict only; the rest is step 1's behaviour. | 36 (12.5) |
 | D10 | A note saved in the window removes a note file that a failed editor kept (`<stateDir>/note-<id>.md`), as `note --set` does (design 7.1); `discardKeptNote` and the path rule move from `src/cli/notes.ts` to `src/sessions/meta.ts` so that the server can call them (`src/window/` never imports `src/cli/`). The dialog starts from the stored note, never from a kept file. | Otherwise the next `skydeck note` would open the old kept text over the window's note (ruled as planned). | 36 (12.5) |
 | D11 | Two parts of S2 12.5 that S2 19 names for no stage are built in task 38: `pr-refresh` (S2 8.2.3) as the ↻ of the pull-request dialog, and "opened <time> · last active <age>" with where the title comes from, on the header's second line. | They are the header's facts and its pull-request detail (ruled: in task 38). | 38 (19) |
 | D12 | The header keeps one height for every session and window width (S2 12.5, ruled): stage A's two lines and two more, the pull requests' line and the note's line, each one line cut with an ellipsis, there for every session. The pull requests' line: the window's chip, the open ones side by side (`owner/repo #7 · failing`) as far as they fit, and the button `Pull requests`, never cut; while none is attached, the hint `no pull request` in the dim style and the button `+ PR`. The note's line: its first line, `…` after it when there are more, or the hint `no note` in the dim style while there is none. `area()` and Z1's rule stay as on main: the header is still measured as it is, and it no longer changes with what skydeck knows about a session. | Review A on main's code: a height that follows the content resizes a running program whenever a pull request is attached by itself, merges, or a note is edited, moves the terminal's top edge between sessions, starts New at a wrong size, and has no bound. | — (S2 12.5) |
@@ -252,7 +252,8 @@ export function createPrFetches(deps: {
   deck: Deck;
   /** The server's stop: aborts a running fetch, starts no other. */
   signal: AbortSignal;
-  /** Called when a fetch saved something (fetched + failed > 0). */
+  /** Called when a fetch saved something (fetched + failed > 0), or threw after it may have
+   *  (ruled on #90, review 2). */
   changed(): void;
   log: (line: string) => void;
 }): PrFetches;
@@ -346,7 +347,7 @@ passes the sanitiser before it is sent (stage A's `act`) and is shown as text.
 | A label or group design 7.1 refuses (a line break, a control character, a label starting with `-`) | `cleanLabel` / `cleanGroup`'s message, the same as `skydeck label` / `group` print | dialog |
 | Empty or only white space | clears it (as the commands do) | — |
 | The note changed since the dialog opened (another window, a command) | `the note was changed elsewhere while you edited it; your text is still in the box` (S2 12.5); nothing written | dialog |
-| The stored note already equals the text sent (a save sent again after a lost answer) | `ok`, nothing written (D9) | — |
+| The stored note already equals the text sent, or the text stores nothing while there is no note (a save sent again after a lost answer, also one that cleared the note) | `ok`, nothing written (D9) | — |
 | Two windows edit a label, group or done | the later write wins; every window's list follows (D7) | — |
 | A session the store does not know (gone) | RefError's `no session matches '<id>'`, as `act resume` | dialog or key bar |
 | A `new` session not started yet (A28's row) | `this session has not started yet; edit it once it runs` | dialog or key bar |
@@ -534,17 +535,22 @@ lists, and shows in every window within a second.
 **Behaviour.** Common to all: stage A's check of the action again; the session is a row of
 `loadRows(deck)`, else a `new` terminal of the hub waits for it (the not-started refusal), else
 RefError. After every write `deps.changed()`; the result is `ok` with no lines (a `pr-add`:
-`attached <url>`). `label`: `text.trim() === '' ? null : cleanLabel(text)`, then `setLabel` — the
-expression of `skydeck label`; `group` likewise with `cleanGroup` and `setGroup`. `note`: in one
-store transaction the stored note (`''` for none) is read — equal to `text`, `ok` and nothing
-written; different from `base`, the refusal of 2.5 and no write; else `setNote(text)` (empty or
-white space clears) — and after the commit `discardKeptNote` (D10). `done`, `undone`:
-`markDone`, `markUndone`. `pr-add`: `attachManualPr` (origin `manual`; an earlier detach
-cleared), `changed()`, then `deps.prs.fetch([key.url])` (D8). `pr-rm`: `detachSessionPr`.
+`attached <url>`), also when `changed()` or `prs.fetch` throws: the write is committed, and the
+throw is logged by kind (ruled on #90, review 2). `label`:
+`text.trim() === '' ? null : cleanLabel(text)`, then `setLabel` — the expression of
+`skydeck label`; `group` likewise with `cleanGroup` and `setGroup`. `note`: in one store
+transaction the stored note (`''` for none) is read — equal to `text`, or `''` while `text` stores
+nothing (empty or white space; ruled on #90, review 1), `ok` and nothing written; different from
+`base`, the refusal of 2.5 and no write; else `setNote(text)` (empty or white space clears) — and
+after the commit `discardKeptNote` (D10).
+`done`, `undone`: `markDone`, `markUndone`. `pr-add`: `attachManualPr` (origin `manual`; an earlier
+detach cleared), `changed()`, then `deps.prs.fetch([key.url])` (D8). `pr-rm`: `detachSessionPr`.
 `pr-refresh`: `deps.prs.refresh(sessionId)`, `ok` at once. `createPrFetches`: D8's one-at-a-time
 rule; `fetchPrs` and `refreshPrs` of `src/github.ts` with the platform's runner, clock and
-environment and the store; `changed()` when something was fetched or failed; a failure logged by
-kind.
+environment and the store; `changed()` when something was fetched or failed, and after a throw (a
+batch may have been saved before; ruled on #90, review 2); a failure saved on the pull requests
+logged as `prs: <n> of <m> pull requests could not be read`, a thrown one by kind (ruled on #90,
+review 1).
 
 **Tests** (platform: `testPlatform` through `testDeck` for the actions, the fetches and the tick;
 `realTestPlatform` through `startTestServer` for `server-edits.test.ts`)
@@ -570,9 +576,10 @@ kind.
   log lines hold nothing of the label, group, note or address sent (by kind only, as stage A).
 - `pr-fetches.test.ts` (the `gh` stand-in holding its answer): three `refresh` of one session at
   once → `gh` ran once and `changed()` once; a `fetch` of another pull request while one runs →
-  `gh` once more after it ends, with both requests' pull requests; a failed `gh` → one log line by
-  kind, the pull request `can't read`; the signal aborted while one runs → `idle()` resolves, no
-  other starts.
+  `gh` once more after it ends, with both requests' pull requests; a failed `gh` → one log line
+  `prs: <n> of <m> pull requests could not be read` (fixed text with counts; the reason is on the
+  pull request, ruled on #90, review 1), the pull request `can't read`; the signal aborted while
+  one runs → `idle()` resolves, no other starts.
 - `reloadNow`: the rows are loaded and the lists pushed at once; a busy store → one log line by
   kind, the rows loaded at the next refresh.
 - `server-edits.test.ts`, two pages: a label set from page A is in page B's `list` within 1.5 s and

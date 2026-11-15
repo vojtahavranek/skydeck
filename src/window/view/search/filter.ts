@@ -4,8 +4,9 @@
  *
  * A search text is foreign input, typed on every keystroke and matched on the server's one
  * thread: it is split by one literal pattern and compared with `includes` and `startsWith`, never
- * made into a pattern, and every size the cost depends on is bounded here. The cost is linear:
- * rows × words × units searched.
+ * made into a pattern. The cost is linear: rows × words × units searched, the units of all a row's
+ * fields — the title, the group, the note, the directory, three per pull request — each at most
+ * FIELD_UNITS; nothing bounds how many pull requests a row has.
  *
  * Imports (plan 2.1): values only from this directory and `text`'s `sanitize`; types from
  * `sessions`.

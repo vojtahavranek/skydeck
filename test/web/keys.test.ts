@@ -50,7 +50,7 @@ type Chord = ReturnType<typeof windowChord>;
 function chordTable(shiftedDigits: readonly string[]): Array<[string, KeyLike, Chord]> {
   const rows: Array<[string, KeyLike, Chord]> = [
     ['Ctrl+Shift+P', cs('P', 'KeyP'), { kind: 'later', stage: 'E' }],
-    ['Ctrl+Shift+J', cs('J', 'KeyJ'), { kind: 'later', stage: 'B' }],
+    ['Ctrl+Shift+J', cs('J', 'KeyJ'), { kind: 'next-attention' }],
     ['Ctrl+Tab', ev('Tab', 'Tab', 'ctrl'), { kind: 'previous' }],
     ['Ctrl+Shift+O', cs('O', 'KeyO'), { kind: 'previous' }],
     ['Ctrl+Shift+L', cs('L', 'KeyL'), { kind: 'toggle-zone' }],
@@ -107,13 +107,14 @@ describe('windowChord: matching', () => {
     test(`${zone} zone: a lower-case letter (Caps Lock) still matches`, () => {
       assert.deepEqual(windowChord(cs('h', 'KeyH'), zone), { kind: 'help' });
       assert.deepEqual(windowChord(cs('p', 'KeyP'), zone), { kind: 'later', stage: 'E' });
+      assert.deepEqual(windowChord(cs('j', 'KeyJ'), zone), { kind: 'next-attention' });
     });
   }
 
   test('letters are matched by the character typed, not by the physical key', () => {
     // Dvorak: the physical J key types H, the physical C key types J.
     assert.deepEqual(windowChord(cs('H', 'KeyJ'), 'terminal'), { kind: 'help' });
-    assert.deepEqual(windowChord(cs('J', 'KeyC'), 'terminal'), { kind: 'later', stage: 'B' });
+    assert.deepEqual(windowChord(cs('J', 'KeyC'), 'terminal'), { kind: 'next-attention' });
     // A layout whose H key types another letter: no chord.
     assert.equal(windowChord(cs('Р', 'KeyH'), 'terminal'), null);
   });
@@ -457,10 +458,19 @@ describe('cancels (S2 12.9, what the page cancels)', () => {
     }
   });
 
-  test('every later key: Ctrl+Shift+P and Ctrl+Shift+J in both zones', () => {
+  test('every later key: Ctrl+Shift+P in both zones', () => {
     for (const zone of ZONES) {
       assert.equal(cancels(cs('P', 'KeyP'), zone, false), true);
-      assert.equal(cancels(cs('J', 'KeyJ'), zone, false), true);
+    }
+  });
+
+  test('Ctrl+Shift+J (stage B: the next session that needs you) in both zones, on both layouts', () => {
+    for (const zone of ZONES) {
+      for (const e of [cs('J', 'KeyJ'), cs('j', 'KeyJ')]) {
+        for (const handled of [false, true]) {
+          assert.equal(cancels(e, zone, handled), true, `${e.key} in the ${zone} zone`);
+        }
+      }
     }
   });
 
@@ -563,7 +573,7 @@ describe('`later` (A11) after stage D', () => {
     return events;
   };
 
-  test('only Ctrl+Shift+J and Ctrl+Shift+P are still `later`; no list key is', () => {
+  test('only Ctrl+Shift+P is still `later` (stage B took Ctrl+Shift+J); no list key is', () => {
     const later: string[] = [];
     for (const e of everyEvent()) {
       const name = `${e.ctrlKey ? 'Ctrl+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.altKey ? 'Alt+' : ''}${e.metaKey ? 'Meta+' : ''}${e.key}`;
@@ -573,13 +583,9 @@ describe('`later` (A11) after stage D', () => {
       }
     }
     assert.deepEqual(later.sort(), [
-      'list: Ctrl+Shift+J',
       'list: Ctrl+Shift+P',
-      'list: Ctrl+Shift+j',
       'list: Ctrl+Shift+p',
-      'terminal: Ctrl+Shift+J',
       'terminal: Ctrl+Shift+P',
-      'terminal: Ctrl+Shift+j',
       'terminal: Ctrl+Shift+p',
     ]);
   });

@@ -678,3 +678,125 @@ describe('footerText (S2 12.1: "17 done hidden · show")', () => {
     assert.equal(footerText(0, false), null);
   });
 });
+
+describe('rowText: a row that needs you (S2 12.2, 12.4; plan B13)', () => {
+  test("a running row: the reason's line is its second line, in place of the state's", () => {
+    const text = rowText(
+      row({
+        state: 'waiting',
+        stateDetail: 'permission · Bash',
+        sinceNs: ago(3n * MIN),
+        terminal: 'aaaaaaaaaaaa',
+        slot: 1,
+        attention: { reason: 'asks', detail: 'permission · Bash', sinceNs: ago(3n * MIN) },
+      }),
+      now,
+      terminal(),
+    );
+    assert.equal(text.stateLine, 'needs you · permission · Bash · 3m');
+    assert.equal(text.attention, 'asks');
+    assert.equal(text.age, '');
+    assert.equal(text.icon, 'waiting');
+  });
+
+  test('a running row that finished its turn: "finished · not seen · 2m"', () => {
+    const text = rowText(
+      row({
+        state: 'running',
+        terminal: 'aaaaaaaaaaaa',
+        slot: 1,
+        attention: { reason: 'finished', detail: null, sinceNs: ago(2n * MIN) },
+      }),
+      now,
+      terminal(),
+    );
+    assert.equal(text.stateLine, 'finished · not seen · 2m');
+    assert.equal(text.attention, 'finished');
+  });
+
+  test('a row that is not running and ended in the window has two lines: the age is on the second', () => {
+    const text = rowText(
+      row({
+        marks: ['ended-unexpectedly'],
+        attention: { reason: 'ended', detail: null, sinceNs: ago(2n * MIN) },
+      }),
+      now,
+      null,
+    );
+    assert.equal(text.stateLine, 'ended unexpectedly · not seen · 2m');
+    assert.equal(text.attention, 'ended');
+    assert.equal(text.age, '', 'no age on its first line');
+    assert.equal(text.icon, 'crashed');
+    assert.deepEqual(
+      text.marks.map((mark) => mark.text),
+      ['crashed'],
+    );
+  });
+
+  test("the reason's line counts on with the time given (the list repaints its ages)", () => {
+    const needs = row({
+      state: 'running',
+      terminal: 'aaaaaaaaaaaa',
+      attention: { reason: 'finished', detail: null, sinceNs: ago(59n * SEC) },
+    });
+    assert.equal(rowText(needs, now, terminal()).stateLine, 'finished · not seen · 59s');
+    assert.equal(
+      rowText(needs, String(NOW + 2n * SEC), terminal()).stateLine,
+      'finished · not seen · 1m',
+    );
+  });
+
+  test('a detail with markup or an escape sequence is text, sanitised', () => {
+    const text = rowText(
+      row({
+        state: 'waiting',
+        terminal: 'aaaaaaaaaaaa',
+        attention: { reason: 'asks', detail: '\x1b[31m<b>rm</b>\x1b[0m', sinceNs: null },
+      }),
+      now,
+      terminal(),
+    );
+    assert.equal(text.stateLine, 'needs you · <b>rm</b>');
+  });
+
+  test('a reason the page does not know still marks the row (`other`), its words sanitised', () => {
+    const text = rowText(
+      row({
+        state: 'running',
+        terminal: 'aaaaaaaaaaaa',
+        attention: {
+          reason: 'pinged\x07',
+          detail: null,
+          sinceNs: null,
+        } as unknown as RowPayload['attention'],
+      }),
+      now,
+      terminal(),
+    );
+    assert.equal(text.attention, 'other');
+    assert.equal(text.stateLine, 'pinged');
+  });
+
+  test('a row without attention is as before: no mark; one line when not running', () => {
+    const notRunning = rowText(row(), now, null);
+    assert.equal(notRunning.attention, null);
+    assert.equal(notRunning.stateLine, null);
+    assert.equal(notRunning.age, '2d');
+    const working = rowText(
+      row({ state: 'working', sinceNs: ago(4n * MIN), terminal: 'aaaaaaaaaaaa' }),
+      now,
+      terminal(),
+    );
+    assert.equal(working.attention, null);
+    assert.equal(working.stateLine, 'working 4m');
+  });
+
+  test("a row of stage A's list, without the field, is a row without attention", () => {
+    const { attention: _, ...withoutField } = row({ state: 'running', terminal: 'aaaaaaaaaaaa' });
+    const text = rowText(withoutField as RowPayload, now, terminal());
+    assert.equal(text.attention, null);
+    assert.equal(text.stateLine, 'running 2d');
+    const notRunning = rowText({ ...withoutField, state: 'not-running' } as RowPayload, now, null);
+    assert.equal(notRunning.stateLine, null);
+  });
+});

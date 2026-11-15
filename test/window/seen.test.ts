@@ -139,6 +139,12 @@ test("isTyping (C1 of review 2, ruled): a terminal's own reports are not typing,
   assert.equal(isTyping(`${ESC}[12;40Rx`, false), true, 'a key after a report');
 });
 
+test('isTyping: a `c` with no marker is no answer (DA1 and DA2 carry `?` and `>`), so it is typing', () => {
+  for (const data of [`${ESC}[c`, `${ESC}[0c`, `${ESC}[1;2c`]) {
+    assert.equal(isTyping(data, false), true, JSON.stringify(data));
+  }
+});
+
 test('isTyping: an OSC or DCS is a report only when it is whole in one message', () => {
   assert.equal(isTyping(`${ESC}]11;rgb:0000/0000/0000`, false), true);
   assert.equal(isTyping(`${ESC}P1$r0m`, false), true);

@@ -31,9 +31,9 @@ the two test platforms; page tests in headless Chromium through `test-page/helpe
 contracts (its section 2) stay in force where this plan does not change them; this plan's section
 2 gives only the additions.
 
-**Task numbers** are 50–56 (stage D has 34–39, stage C 70 and up), so that branch names,
-pull-request titles and the lead's notes stay unique. The implementer brief names the branch and
-the title.
+**Task numbers** are 50–57 (57 added on 2026-11-15; stage D has 34–39, stage C 70 and up), so
+that branch names, pull-request titles and the lead's notes stay unique. The implementer brief
+names the branch and the title.
 
 **CI stays as it is**: two Node legs, one job each (the user's decision of 2026-11-14). No task
 changes `.github/workflows/`, `package.json` or a dependency.
@@ -67,20 +67,23 @@ Task 0 is `main` at 9c5cbfb (stage A complete) with this plan merged.
 | 53 | The turn-end rule and seen | 0 | 1 | — | ~350 |
 | 52 | Attention on the server: the look, the writes, the notifier | 50, 51, 53 | 2 | — | ~650 |
 | 55 | The page: marks, the title, Ctrl+Shift+J, notifications | 51; D 37 (ruled: 55 is written on top of it) | 2 | `web/app.js`, `keys.js`, `help.js`, `list.js`, `list-text.js`, `list.css`, `index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts` | ~750 |
-| 54 | The server assembly, and attention end to end | 52, 53, 55; D 36 (ruled order) | 3 | `src/window/tick.ts`, `server.ts`, `pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts` | ~650 |
+| 57 | A lost keeper's own program is not "elsewhere" | 0; D 36 (on `main`; ruled 2026-11-15) | 3, merges before 54 | `src/window/tick.ts` (a comment), `test/window/tick.test.ts` | ~350 |
+| 54 | The server assembly, and attention end to end | 52, 53, 55, 57; D 36 (ruled order) | 3 | `src/window/tick.ts`, `server.ts`, `pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts` | ~650 |
 | 56 | Documentation of stage B | all | 4 | `docs/*`, `README.md` | docs only |
 
 ```
 wave 1:  50  51  53
 wave 2:  52  55
-wave 3:  54
+wave 3:  57 → 54   (57 merges first)
 wave 4:  56
 ```
 
 The critical path is store and contracts → the server's attention → the assembly. Task 55 builds
 the page against a scripted stand-in server (as stage A's `actsWorld`), so it does not wait for the
 server; task 54 is the first to drive attention end to end, with the real server and the real page.
-Task 56 may start its reading while 54 is built and merges last.
+Task 56 may start its reading while 54 is built and merges last. Task 57 (added on 2026-11-15,
+found by task 52's review 2) fixes stage A's mapping so that a lost keeper's session can be judged
+`ended` at all (S2 14); it shares `tick.ts` and `tick.test.ts` with 54 and merges before it.
 
 ### 1a. Which tasks can start at once
 
@@ -155,16 +158,18 @@ same as its row here.
 | 53 | `src/window/seen.ts`, `test/window/seen.test.ts` | `src/claude/terminal.ts`; `test/claude/terminal.test.ts`; `docs/design-step-2.md` (10.3, 12.4) |
 | 52 | `src/window/attention.ts`, `src/window/notify.ts`, `test/window/attention.test.ts`, `test/window/notify.test.ts` | `docs/design-step-2.md` (10.3, 12.4, 13) |
 | 55 | `web/attention-text.js`, `web/notify.js`, `web/attention.css`, `test/web/attention-text.test.ts`, `test-page/attention.test.ts`, `test-page/helpers/notification.ts` | `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html`; `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts`; `docs/design-step-2.md` (12.2, 12.4, 13, 17.4) |
+| 57 | — | `src/window/mapping.ts`, `src/window/tick.ts` (the comment of `map()` only); `test/window/mapping.test.ts`, `test/window/tick.test.ts`; `docs/design-step-2.md` (7.5) |
 | 54 | `test/window/attention-server.test.ts`, `test/window/pages-attention.test.ts`, `test-page/attention-server.test.ts` | `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`; `test/window/tick.test.ts`, `test/helpers/pages.ts`; `docs/design-step-2.md` (8.2.7) |
 | 56 | — | `docs/install.md` (all but task 50's paragraphs), `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (19, and any decision of 1d still missing) |
 
 **Shared source files** (changed by another stage too; never two stage B tasks of one wave):
 `src/store/types.ts` (50; C 70), `src/window/protocol.ts` and `src/window/view/build.ts` (51; D
 34, C, E), `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html` (55; D 37, C 75, E),
-`web/list.js`, `web/list-text.js`, `web/list.css` (55; D 34, C, E), `src/window/tick.ts` and
-`src/window/server.ts` (54; D 36, C 74), `src/window/pages.ts` (54; no other stage known to this
-author). `docs/design-step-2.md`: each task writes after the paragraph its task names (B10 of
-review B), so that two tasks of one wave never append at the same place. `docs/install.md`: 50
+`web/list.js`, `web/list-text.js`, `web/list.css` (55; D 34, C, E), `src/window/tick.ts` (57, a
+comment; 54; D 36, C 74) and `src/window/server.ts` (54; D 36, C 74), `src/window/pages.ts` (54;
+no other stage known to this author). `docs/design-step-2.md`: each task writes after the
+paragraph its task names (B10 of review B), so that two tasks of one wave never append at the same
+place. `docs/install.md`: 50
 ("Updating", in wave 1) and 56; `docs/manual-checks.md`, `README.md`: 56 only.
 
 **The order across stages** (ruled) for the files that tasks of several stages change at the same
@@ -176,7 +181,7 @@ resolving the places named:
 | `test/window/view/build.test.ts` (the case that pins the view's files and imports), S2 8.2.3's `list` row | D 34 → B 51 → C 73 | B 51: the file list keeps `chip.ts` and adds `attention.ts`; the allowed imports keep `windowChip` and `CHIP_ORDER` and add `./attention.ts`; the `list` row keeps D's fields and adds `needYou` after `counts`. C 73 adds its `banner.ts` to the same lines |
 | `src/store/types.ts`, `KvKey` after `window_launching` | B 50 → C 70 | C 70 inserts after `attention_seq` (S2 10.2's order) |
 | `web/app.js` (the import block, `received()`'s `case 'list'`), `web/index.html` (the style-sheet links after `cards.css`), `test/web/keys.test.ts` (the "every later key" case) | D 37 → B 55 → C 75 → E | B 55: its imports after D's, the window title in `case 'list'` beside D's dialog update, `attention.css` after `edit.css`; the "every later key" case keeps only Ctrl+Shift+P |
-| `src/window/server.ts` (`listFor`, the orderly stop), `src/window/tick.ts`, `test/window/tick.test.ts` | D 36 → B 54 → C 74 | B 54: `listFor` passes `attention` beside D's lines; `seen.stop()` in the stop block after D's background fetches; `TickDeps.attention` and the look in `run()` beside `reloadNow`; cases at the end after D's |
+| `src/window/server.ts` (`listFor`, the orderly stop), `src/window/tick.ts`, `test/window/tick.test.ts` | D 36 → B 57 → B 54 → C 74 | B 57: one comment in `map()`, and a block of cases after "ended terminals" with the imports of its end-to-end case, which 54 keeps. B 54: `listFor` passes `attention` beside D's lines; `seen.stop()` in the stop block after D's background fetches; `TickDeps.attention` and the look in `run()` beside `reloadNow`; cases at the end after D's |
 | `docs/install.md`, `docs/manual-checks.md`, `README.md` | B 50 ("Updating" only) first; then D 39 → B 56 → C 79 → E | B 56: "Using the window", the known limits, "Updating while the window runs", the new part at the end of `manual-checks.md` and the window's paragraph of `README.md`, each after D's |
 
 Where a rebase keeps both without thought (different lines): `web/keys.js` (B: the window chords'
@@ -200,7 +205,8 @@ terminals), `src/window/protocol.ts` (B's `AttentionPayload` and `NotifyMessage`
 | `test-page/shell.test.ts` | 55 | in the keys case, the two lines of Ctrl+Shift+J's `comes in a later stage` become `no session needs you` (D 37 changes the lines of the six list keys of the same case) |
 | `test-page/helpers/browser.ts` | 55 | a context helper `newContext(chromium, options?)` that adds B17's init script; `newPage` makes its context with it |
 | `test-page/terminal.test.ts` | 55 | its two contexts of its own (lines 1243 and 1415) are made with `newContext` |
-| `test/window/tick.test.ts` | 54 | new cases at the end (D 36 adds `reloadNow`'s) |
+| `test/window/mapping.test.ts` | 57 | a block of cases before "with real programs"; nothing else |
+| `test/window/tick.test.ts` | 57, 54 | 57: a block of cases after "ended terminals" and the imports of its end-to-end case; 54: new cases at the end (D 36 adds `reloadNow`'s) |
 
 **Not changed by stage B** although the type changes reach them: `test-page/helpers/shell.ts`
 (`scriptedList` and the worlds build plain records, and the page reads a missing `needYou` as
@@ -234,11 +240,11 @@ decision in the design in its own pull request; `—` means it is an implementat
 | B10 | A window end is judged at each refresh after it was settled, for a terminal in state `ended` or `lost` (a keeper that died: its exit time is the server's clock) that started its program: recorded when its session's row is not running and marked `ended-unexpectedly`, not recorded when the session ended deliberately; judged once, at the first refresh where its row no longer runs and the row's last holder is gone: while the row still runs (a lost keeper's program lives on its SIGHUP for a moment), or while that holder still lives (its end event can be ingested before its exit, and `ended-unexpectedly` needs the holder gone; ruled 2026-11-15 09:47Z; reloading the rows while it waits is task 54's), it is left for the next refresh, and a terminal that leaves the list is forgotten (ruled on task 52's review 2; that the tick's `map()` closes such a lost terminal at once is task 57's). It is the same end when the stored `window_end_ns` equals the exit's time, so a server restart, which finds a lingering keeper again, never marks it twice. At the first start of a stage B server the table is empty, so each lingering keeper of an ended-unexpectedly session gets `ended` once (no notification, B12; one sentence in `docs/install.md`, task 56). | S2 12.4 reason 2 says "at the next refresh"; S2 14: a keeper that dies makes its session need you; a restart for an update must not bring back what the user saw. | 52 (12.4) |
 | B11 | A write the store refuses (busy, S2 14) is kept; the next look tries the kept writes again first, in their order, each as an entry of its own (`recordAttention` takes the writes in order), then its own; nothing is folded but two turn ends of one session (the later is kept). The baselines move on, so a turn end is neither lost nor recorded twice. Kept writes are tried again only at the look: while there are any, `refreshed()` and `seenNow()` put theirs behind them and touch no store (ruled: `seenNow` runs at every key press on some paths, and a busy store's 250 ms must not come per key). A refusal that is not busy (B2's limit; a damaged table) is logged by kind and dropped. The marks are read once, at the first look that can (a busy read: the next look); a read that fails otherwise (one damaged row makes `attention()` throw for every session; so does schema 2 without the table) leaves no marks, logged once by kind, and the look goes on (ruled). A store migrated under the server stops it (S2 10.1). | A turn end is seen once, at one look; folding a kept `seen` into a later turn end of the same session would make that turn seen (B3's order) although the user had left. | 52 (10.3) |
 | B12 | The server judges "starts to need you" over the rows a page without a filter lists (it builds that list with `buildListMessage`). The first judgement, which records without notifying, is the first check made once a refresh has worked, the marks have been read and nothing is kept (`Attention.ready()`, latched, `NotifierDeps.ready`; nothing kept: ruled on task 52's review 2, so that a busy store at the start cannot keep that refresh's window ends out of the first judgement), not simply the first call: a start whose first refresh fails must not notify everything that already needed you at the next one. A session whose reason changes does not start to need you. `Pages.notify` sends only while no page has focus, to the page that had it last. | S2 13; a restart must not notify everything that already needed you. | 52 (13) |
-| B13 | The page's words: a row that needs you has the reason on its second line — `needs you · <detail> · 3m` (`needs you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — also a row that is not running (an ended one), which then has two lines; the title bar starts with the count, whose text is `3 need you` (the dot before it is drawn by the style sheet on the count's element, in the rows' attention colour, not a character; ruled); the window title is `(3) skydeck`, and `skydeck` when none; a notification's body is `asks: <detail>` (`asks`), `finished`, `ended unexpectedly`. The detail is the live file's `waitingFor`, sanitised, trimmed and cut to 120 UTF-16 units with `…` (never inside a surrogate pair) by the view model (ruled; the blank test and the cut apply to the trimmed text, ruled on task 51's review 2); a `waitingFor` that is blank once sanitised (empty, or only white space) gives `detail: null` (ruled on task 51). | S2 12.2's and 13's examples; S2 12.4: "the reason on its second line"; a `waitingFor` has no length limit. Question 2 in section 7. | 51 (the cut, 12.4), 55 (the words, 12.2, 12.4) |
-| B14 | Ctrl+Shift+J selects the next id of `needYou.order` after the selected one, else the first; after the last the first. None: the key bar says `no session needs you`; only the selected one: it stays selected and the key bar says `no other session needs you`. When `needYou.count` is greater than the length of `order`, the key bar also says how many are hidden: `<n> more that need you are hidden by the filter or the fold` (with none shown, `<n> that need you are hidden by the filter or the fold`). While a dialog of stage D is shown (stage D's D2: `app.js` moves the keyboard nowhere and acts on no list key), Ctrl+Shift+J is a window chord like the others: it says `close the edit first (Esc)` and selects nothing. | S2 12.4 "pressed again it goes on"; the title bar's count includes rows the filter or the fold hides; an edit belongs to the session it was opened for. | 55 (12.4) |
-| B15 | The page asks for the permission only from a click on `Turn on notifications`, a button in the title bar shown while `Notification` exists and its permission is `default`. A `notify` is shown only with the permission `granted`, never for the session that is selected while the page has focus, with the session's title (sanitised) as title, B13's body and `tag` the session id. A click goes through the gate of a window chord (the one function of `app.js` through which stage D's task 37 passes every chord, D2): it calls `window.focus()` and selects the session through `select(id, 'chord')`; while a dialog is shown it only brings the window to the front, selects nothing, and the key bar says `close the edit first (Esc)` (ruled). | S2 13; a click must not move the keyboard out of a dialog half typed (stage D's review A, its finding 2). | 55 (13) |
-| B16 | The page closes a session's notification when that session no longer needs you (the next `list` without its attention; best effort: W11 writes down what Windows does with it); what a notification shows — the session's title and `asks: <detail>` — is the user's to judge for a shared screen (ruled; told to the user). | Not in S2 13; a toast left in Windows' notification centre would hold a title and a detail that are no longer true. | 55 (13) |
-| B17 | Every context of the page suite is made by `newContext` of `test-page/helpers/browser.ts` (and `newPage` with it), which installs an inert `Notification` (permission `denied`, `requestPermission` answers `denied` and asks nothing) unless a double is there already: a recording double sets a marker and is installed by the case's own init script, and Playwright does not order a context's and a page's init scripts, so either order ends with the double (ruled on review B). | No test may show a notification or ask for a permission, whatever a server sends. | 55 (17.4) |
+| B13 | The page's words: a row that needs you has the reason on its second line — `needs you · <detail> · 3m` (`needs you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — also a row that is not running (an ended one), which then has two lines; the title bar starts with the count, whose text is `3 need you` (`1 needs you`; the dot before it is drawn by the style sheet on the count's element, in the rows' attention colour — that of an ask —, not a character; ruled); the bar and the reason's line are in the reason's colour (an ask in the waiting colour, a finished turn in green, an end of the window in the crash colour: the mockup's; the colours are `web/attention.css`'s); the window title is `(3) skydeck`, and `skydeck` when none; a notification's body is `asks: <detail>` (`asks`), `finished`, `ended unexpectedly`. The detail is the live file's `waitingFor`, sanitised, trimmed and cut to 120 UTF-16 units with `…` (never inside a surrogate pair) by the view model (ruled; the blank test and the cut apply to the trimmed text, ruled on task 51's review 2); a `waitingFor` that is blank once sanitised (empty, or only white space) gives `detail: null` (ruled on task 51). | S2 12.2's and 13's examples; S2 12.4: "the reason on its second line"; a `waitingFor` has no length limit. Question 2 in section 7. | 51 (the cut, 12.4), 55 (the words, 12.2, 12.4) |
+| B14 | Ctrl+Shift+J selects the next id of `needYou.order` after the selected one, else the first; after the last the first. None: the key bar says `no session needs you`; only the selected one: it stays selected and the key bar says `no other session needs you`. When `needYou.count` is greater than the length of `order`, the key bar says how many are hidden instead: `<n> more that need you are hidden by the filter or the fold` (`1 more that needs you is hidden …`; also when only the selected one is shown, which then stays selected; with none shown, `<n> that need you are hidden by the filter or the fold`, `1 that needs you is hidden …`). An id twice in `order` counts at its first place. While a dialog of stage D is shown (stage D's D2: `app.js` moves the keyboard nowhere and acts on no list key), Ctrl+Shift+J is a window chord like the others: it passes `windowChordGate`, which says `close the edit first (Esc)`, and selects nothing. | S2 12.4 "pressed again it goes on"; the title bar's count includes rows the filter or the fold hides; an edit belongs to the session it was opened for. | 55 (12.4) |
+| B15 | The page asks for the permission only from a click on `Turn on notifications`, a button in the title bar shown while `Notification` exists and its permission is `default`. A `notify` is shown only with the permission `granted`, never for the session that is selected while the page has focus, with the session's title (sanitised) as title, B13's body and `tag` the session id. A click goes through the gate of a window chord (`windowChordGate(kind)`, the one function of `app.js` through which stage D's task 37 passes every chord, D2): it calls `window.focus()`, closes the notification and selects the session through `select(id, 'chord')`; while a dialog is shown it only brings the window to the front, selects nothing, and the key bar says `close the edit first (Esc)` (ruled). A session this page's list does not show (the filter, the folded Earlier) and that has no terminal of the window is not selected either: the key bar says `that session is hidden by the filter or the fold`, and the selection, the right side and what `focus` reports stay as they were, so that no mark is cleared for a session never shown (ruled on review 2; showing a selected session the list hides is stage E's, task 95, E13). A held key asks once: its auto-repeats on the button do nothing (ruled on review 2, as task 37's held-key rule). The button follows a permission changed in the browser's settings at each list and when the window comes back to the front. Pressed from the keyboard and answered at once (a policy that denies), it hides itself: the zone's holder takes the keyboard back, and task 37's rule for a key pressed in a dialog (its auto-repeats are no list keys once the dialog is gone) holds for a key pressed on the button, so that a held Enter resumes nothing. | S2 13; a click must not move the keyboard out of a dialog half typed (stage D's review A, its finding 2). | 55 (13) |
+| B16 | The page closes a session's notification when that session no longer needs you — ONLY at a `list` that carries the session's row with `attention` null, or whose `needYou.count` is 0 (or that has no `needYou`, as a list of stage A); a list that merely does not carry the row (the filter or the fold hides it) closes nothing, and the first list that shows the row without attention closes it (ruled on review A's re-check). The server sends a list whenever this page's list changes, and a session that stops needing you changes its row or the count. Best effort: W11 writes down what Windows does with it. Named limits: a notification whose session changes its reason keeps its first words (only a start notifies, B12), and one shown before the page reloads is not closed by the new page. What a notification shows — the session's title and `asks: <detail>` — is the user's to judge for a shared screen (ruled; told to the user). | Not in S2 13; a toast left in Windows' notification centre would hold a title and a detail that are no longer true. | 55 (13) |
+| B17 | Every context of the page suite is made by `newContext` of `test-page/helpers/browser.ts` (and `newPage` with it), which installs an inert `Notification` (permission `denied`, `requestPermission` answers `denied` and asks nothing, a notification made anyway shows nothing) unless a double is there already, and in any case a service worker's `showNotification` that refuses (the double has none of its own; ruled on review 2): a recording double sets a marker and is installed by the case's own init script, and Playwright does not order a context's and a page's init scripts, so either order ends with the double (ruled on review B). One case pins that no `.newContext(` (nor a persistent context, a context over CDP, or a page made by a browser rather than a context) stands under `test-page/` outside `helpers/browser.ts`, so that a later stage's own context cannot lose the inert `Notification` silently (ruled on review A's re-check). | No test may show a notification or ask for a permission, whatever a server sends. | 55 (17.4) |
 | B18 | Stage B leaves the header as it is: attention shows on the row, in the title bar, the window title and the notification. Nothing of stage B changes the header's height or resizes a terminal (the list's rows are not under a terminal). | S2 12.5 names no attention; the header keeps one fixed height for every session (S2 12.5, kept by the lead's ruling on stage D's plan). | — |
 | B19 | No hook entry and no settings change: `install`, `uninstall` and `doctor`'s hook check stay as they are, and nobody needs to run `install` again. | S2 10.3 decided against turn hooks. | — |
 | B20 | Several windows (S2 8.2.7): the marks, the counts and the window title are the same in every window (the facts are the server's); `needYou.order` follows each window's own filter; a session seen in any focused window is seen for all; a notification goes to one window (B12). | S2 12.4 and 13 say it for one window and for the notification only. | 54 (8.2.7) |
@@ -403,7 +409,9 @@ export interface Seen {
    *  typed into since the last call (given once). */
   take(): Set<string>;
   /** A session began to be seen: a hold completed, or a typing when it was not yet seen (a key
-   *  into a session already being seen calls no listener). Listeners must not throw; a throw out
+   *  into a session already being seen calls no listener: keys into one session call the
+   *  listeners at most once between two `take()`s, unless a `focus` or `gone` in between ended
+   *  the hold that made it seen). Listeners must not throw; a throw out
    *  of a completed hold is dropped so that the timer cannot end the server; `typed` throws only
    *  if a listener throws. */
   onChange(listener: () => void): () => void;
@@ -503,7 +511,7 @@ selected: null }`; the server's stop calls `seen.stop()`.
 // web/attention-text.js — pure, no DOM (node:test and the root tsc load it)
 /** B13: the second line of a row that needs you, or null when `attention` is null. */
 export function attentionLine(attention, nowNs) {}
-/** `3 need you`, or null for 0 (B13: the text only; the dot is the style sheet's). */
+/** `3 need you` (`1 needs you`), or null for 0 (B13: the text only; the dot is the style sheet's). */
 export function needYouText(count) {}
 /** `(3) skydeck`, or `skydeck` for 0. */
 export function windowTitle(count) {}
@@ -517,11 +525,14 @@ export function nextNeeding(order, selected, count) {}
 /** @param {HTMLButtonElement} item  #notify-on (index.html's title bar)
  *  @param {{ select(id: string): void }} deps */
 export function createNotifications(item, deps) {}
-// deps.select is app.js's gate of a window chord (B15), not `select` itself.
+// deps.select is app.js's gate of a window chord (B15: `windowChordGate('notification')`, then
+// `select(id, 'chord')`), not `select` itself.
 // → { show(message: NotifyMessage, page: { focused: boolean, selected: string | null }): void,
-//     update(list: ListMessage): void,  // B16: closes the notification of each session shown that
-//                                       // no longer needs you; and the item, as refresh
-//     refresh(): void }   // refresh: the item shown exactly while the permission is `default`
+//     update(list: ListMessage): void,  // B16: closes the notification of each session shown whose
+//                                       // row the list carries with attention null, all of them when
+//                                       // needYou.count is 0; and the item, as refresh
+//     refresh(): void }   // refresh: the item shown exactly while the permission is `default`; also
+//                         // at creation and when the window gets the focus
 
 // web/keys.js — windowChord: Ctrl+Shift+J gives { kind: 'next-attention' }. WindowChord's `later`
 // is 'B' | 'E' on main and becomes 'E' only; ListAction's `later` ('D') is stage D's (task 37).
@@ -529,11 +540,16 @@ export function createNotifications(item, deps) {}
 
 `web/app.js` (task 55, on top of stage D's task 37): `document.title` from
 `windowTitle(list.needYou.count)` and `notifications.update(list)` at each list; the chord
-`next-attention` through `nextNeeding` and `select(id, 'chord')`; a `notify` message to
-`createNotifications(…).show` with `document.hasFocus()` and the selection; the notification's
-click through the same gate as a window chord (D2's: while a dialog is shown, `close the edit
-first (Esc)` and nothing else; B15). `web/list.js` sets `data-attention="<reason>"` on a row
-element that needs you (the coloured left bar and the bold title are `web/list.css`'s) and writes
+`next-attention` (after `windowChordGate`, as every chord) through `nextNeeding` and
+`select(id, 'chord')`; a `notify` message to `createNotifications(…).show` with
+`document.hasFocus()` and the selection; the notification's click through the same gate as a
+window chord (D2's: while a dialog is shown, `close the edit first (Esc)` and nothing else; B15);
+`#notify-on`'s blur gives the keyboard back to the zone's holder when the item hid itself, and a
+key pressed on it joins task 37's `pressedInDialog` (B15). `web/list.js` sets `data-attention="<reason>"` on a row
+element that needs you (the coloured left bar and the bold title are `web/list.css`'s; a reason
+the page does not know is shown as `other` with its words — sanitised, in the row's line and a
+notification's body —, so that an older page never puts an unknown word into an attribute the
+style sheet keys on; ruled on review 1) and writes
 `needYouText` first into `#counts`, on an element with `data-state="need-you"` whose dot
 `web/list.css` draws.
 `web/list-text.js`'s `rowText` gives `attentionLine` as `stateLine` when the row needs you (and
@@ -822,7 +838,7 @@ and the judgement of S2 13 is tested; `npm run check` passes.
 
 ### Task 55: The page — marks, the title, Ctrl+Shift+J, notifications
 
-**Depends on:** 51; stage D's task 37 (ruled: 37 merges first, and 55 is written on top of it; while 37 is open, 55 may be built against stage D's plan text of D2, but is not pushed) · **Wave:** 2 · **Design:** S2 12.1 (the title bar, the window title), 12.2 (the second line), 12.4 (the marks, Ctrl+Shift+J), 12.9 (the key help), 13 (the page's side), 17.4 · **Contracts:** 2.8; stage A's 2.9 · **Decisions:** B13, B14, B15, B16, B17 (update S2 12.2, 12.4, 13, 17.4) · **Shared files:** `web/app.js`, `web/keys.js`, `web/help.js`, `web/list.js`, `web/list-text.js`, `web/list.css`, `web/index.html`, `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts`. Order (1c): D 34 and D 37 → B 55 → C 75. On top of them: `list-text.js`'s chip is D's (`chipText` of a `ChipPayload`); `app.js` holds D's dialog, the toast, the new list keys and the header's call with `list.selected` for every pane — while a dialog is shown it moves the keyboard nowhere and acts on no list key, and its gate of a window chord is what Ctrl+Shift+J (B14) and a notification's click (B15) pass through; `keys.js`'s WindowChord `later` is `'B' | 'E'` and becomes `'E'`; `help.js` lists D's keys; `index.html` has `#editor`, `#toast` and `edit.css` (B's `attention.css` after it); `shell.test.ts`'s case of the six list keys is D's. This task owns the page case of a notification's click while a dialog is shown (F3).
+**Depends on:** 51; stage D's task 37 (ruled: 37 merges first, and 55 is written on top of it; while 37 is open, 55 may be built against stage D's plan text of D2, but is not pushed; built stacked on #88 while GitHub Actions was stopped, and its pull request opened once 37 is merged) · **Wave:** 2 · **Design:** S2 12.1 (the title bar, the window title), 12.2 (the second line), 12.4 (the marks, Ctrl+Shift+J), 12.9 (the key help), 13 (the page's side), 17.4 · **Contracts:** 2.8; stage A's 2.9 · **Decisions:** B13, B14, B15, B16, B17 (update S2 12.2, 12.4, 13, 17.4) · **Shared files:** `web/app.js`, `web/keys.js`, `web/help.js`, `web/list.js`, `web/list-text.js`, `web/list.css`, `web/index.html`, `test/web/keys.test.ts`, `test/web/list.test.ts`, `test-page/shell.test.ts`, `test-page/terminal.test.ts`, `test-page/helpers/browser.ts`. Order (1c): D 34 and D 37 → B 55 → C 75. On top of them: `list-text.js`'s chip is D's (`chipText` of a `ChipPayload`); `app.js` holds D's dialog, the toast, the new list keys and the header's call with `list.selected` for every pane — while a dialog is shown it moves the keyboard nowhere and acts on no list key, and its gate of a window chord is what Ctrl+Shift+J (B14) and a notification's click (B15) pass through; `keys.js`'s WindowChord `later` is `'B' | 'E'` and becomes `'E'`; `help.js` lists D's keys; `index.html` has `#editor`, `#toast` and `edit.css` (B's `attention.css` after it); `shell.test.ts`'s case of the six list keys is D's. This task owns the page case of a notification's click while a dialog is shown (F3). The gate is task 37's `windowChordGate(kind)`; its rule that the auto-repeats of a key pressed in a dialog are no list keys is built on, not copied (B15).
 
 **Goal.** The window shows what S2 12.4 and 13 say, from exactly what the server sends: the marks,
 the counts and the window title, Ctrl+Shift+J, and desktop notifications with the permission asked
@@ -831,11 +847,15 @@ only on a click.
 **Files**
 - Create: `web/attention-text.js`, `web/notify.js`, `web/attention.css`,
   `test/web/attention-text.test.ts`, `test-page/attention.test.ts`,
-  `test-page/helpers/notification.ts` (`notificationDouble(page, permission)` — an init script
-  that sets B17's marker and records each `new Notification` with its strings, each `close()`,
-  `requestPermission` calls with `navigator.userActivation.isActive`, and clicks on a recorded
-  one; `pageFocus(page, focused)` — `document.hasFocus` answering `focused` and a `focus` or
-  `blur` event dispatched)
+  `test-page/helpers/notification.ts` (`notificationDouble(page, permission, answer =
+  'granted')` — an init script that sets B17's marker and records each `new Notification` with
+  its strings, each `close()`, `requestPermission` calls with `navigator.userActivation.isActive`
+  (each answered `answer`, which then is the permission), and clicks on a recorded one;
+  `pageFocus(page, focused)` — `document.hasFocus` answering `focused` and a `focus` or `blur`
+  event dispatched; the file, and `helpers/browser.ts` for B17's script and marker, may export
+  what their cases need besides: here `installDouble`, `notificationsOf`, `clickNotification`,
+  `closedByBrowser`, `setPermission`, `NOTIFICATION_DOUBLE`, `inertNotification`; ruled on review
+  1)
 - Modify: `web/list-text.js`, `web/list.js`, `web/list.css`, `web/app.js`, `web/keys.js`,
   `web/help.js` (`Ctrl+Shift+J`: `the next session that needs you; again goes on`),
   `web/index.html` (`#notify-on` in the title bar, `attention.css` after `edit.css`),
@@ -872,12 +892,24 @@ only on a click.
   button hidden; a `notify` while the page is unfocused → one notification with the title, B13's
   body and the tag; a hostile title and detail arrive as plain strings and add no element; a click
   on it → `window.focus` called and the session selected; a `list` in which that session no longer
-  needs you → its notification closed (B16); focused with that session selected → none; `denied` →
-  none and no button. With stage D's dialog shown (opened by `l`): Ctrl+Shift+J and a click on a
+  needs you → its notification closed (B16), a `list` with `needYou.count` 0 → every one closed, and
+  a filter that hides the session, `notify`, then the `list` → the notification still open (ruled);
+  focused with that session selected → none, with another selected → one, unfocused with it
+  selected → one; `denied`, or no `Notification` at all → none, no button, nothing thrown; a
+  permission changed outside → the button shown again at the next list, hidden again when the
+  window comes back; an Enter held on the button whose answer comes at once → the list takes the
+  keyboard back and nothing resumes; an Enter held while the answer leaves `default` → asked once,
+  a fresh press asks again; a click on the notification of a session the filter hides with no
+  window terminal → `that session is hidden by the filter or the fold`, nothing selected, nothing
+  sent; of one hidden with a window terminal → selected, its terminal shown, `Focus: terminal`;
+  two notifications of one session, the browser's `close` of the older, a list where it needs
+  nothing → the newer closed; a `list` with `needYou.count` 0 that does not carry the row, and a
+  list of stage A (no `needYou`) → closed (all ruled on review 2). With stage D's dialog shown (opened by `l`): Ctrl+Shift+J and a click on a
   notification each say `close the edit first (Esc)`, select nothing and leave the keyboard in the
   dialog's field, the click bringing the window to the front (F3; this task's case). The double
   and the inert `Notification` in either order of their init scripts end with the double (B17); a
-  page from `newPage` without the double sees the inert one.
+  page from `newPage` without the double sees the inert one; no context is made under `test-page/`
+  outside `helpers/browser.ts` (a source scan).
 
 **Done when:** every page-side rule of S2 12.4 and 13 is shown for its case, the help lists
 Ctrl+Shift+J as a key that acts, and no page test can show a notification; `npm run check` passes.
@@ -886,9 +918,117 @@ Ctrl+Shift+J as a key that acts, and no page test can show a notification; `npm 
 
 ---
 
+### Task 57: A lost keeper's own program is not "elsewhere"
+
+**Depends on:** 0; stage D's task 36 (on `main`) · **Wave:** 3, merges before 54 · **Design:** S2 7.5 (a terminal's program), 7.8 (a lost keeper; "a terminal whose program may still run is never dropped this way"), 7.9, 14 ("A keeper dies") · **Contracts:** none (stage A's `mapTerminals` and `Mapping` keep their signatures) · **Decisions:** none (update S2 7.5, its first bullet) · **Shared files:** `src/window/tick.ts` (a comment), `test/window/tick.test.ts`. Order (1c): D 36 → B 57 → B 54 → C 74. Found by task 52's review 2 on `main` 27d6e0e; added and ruled on 2026-11-15.
+
+**Goal.** S2 14 promises that after a keeper dies its session needs you (12.4's `ended`, which
+task 52 judges, B10). The program gets SIGHUP, runs its `SessionEnd` hooks and ends a moment
+later; the server knows the loss at once (`lose()` makes the exit up at once, S2 7.8) and the
+next refresh comes 0–2 s later. On `main` the mapping counts a terminal's program only while the
+terminal has no exit, so a lost terminal's own living program counts as outside every terminal:
+its session is "running in another terminal" (7.9) and the tick closes the lost terminal as "its
+session runs elsewhere" — after which no terminal is left whose window end could be recorded.
+This task makes S2 7.8's sentence true: a terminal whose program may still run is never dropped
+this way — for a lost terminal, for 60 seconds after the loss (ruled on review 2; 7.8 says so
+too).
+
+**Files**
+- Modify: `src/window/mapping.ts` (the programs of `mapTerminals`; the private `keeperExitApplied`
+  and `lives`), `src/window/tick.ts` (the comment of `map()` only), `docs/design-step-2.md` 7.5
+  (the first bullet), this plan
+- Test: `test/window/mapping.test.ts` (a block before "with real programs"),
+  `test/window/tick.test.ts` (a block after "ended terminals")
+
+**Behaviour.** How a terminal knows its own program once its keeper is gone: from the keeper's own
+report, which the registry keeps — `TerminalInfo.program`, the pid AND the process start of the
+program the keeper sent in `T` or `hello` (S2 7.5, 8.1) — never from a pid alone (a pid is
+reused). A terminal's program counts in the mapping (S2 7.5) while the terminal has no exit (as
+before), and also while it has an exit that is not an applied one its keeper sent — its state is
+neither `ended` nor `not-started`: `lost`, or `lose()`'s made-up exit still on its way through the
+screen side — as long as the program may still run by design 5.5 and the loss is less than 60
+seconds old. The program is gone only when `/proc/<pid>/stat` is gone or names another process
+start than the reported one; what cannot be told — a read that throws, or a stat line without a
+readable start — may still run and counts (ruled on review 2: Proc's contract, "a process that
+could not be read is never taken for one that is gone"; a read that failed once and works a moment
+later in `holderPlace` must not make the session `elsewhere`). It errs only towards keeping:
+`holderPlace` matches a program by pid AND start, so a pid another process took never reaches it.
+The age of the loss is the lost exit's `atNs` (the server's clock when `lose()` made it up)
+against the `nowNs` the tick already passes to `mapTerminals` (the mapping reads no clock): less
+than 60 s → counted; 60 s or more → as on `main` (the program is outside, the session
+`elsewhere`, the tick closes the lost terminal, and 7.9's card names the holder's pid and tty); a
+clock that stepped back since gives a negative age and keeps it (never closed early); a time that
+is no decimal number counts it out (ruled on review 2: a program that never ends after the
+hangup must not leave a row that looks healthy, a refused Resume and a lost terminal on no row
+for ever). An exit the keeper sent
+comes after it reaped the program, so such a terminal's program never counts (the case "an ended
+terminal keeps the session it showed; its old program pid is no one" stays as it is). So while the
+lost program may still run and the loss is less than 60 s old, the terminal shows its session,
+the session is not `elsewhere`, and the tick does not close the terminal; once the program is
+gone the terminal is an ended one as any other —
+its exit stays the lost one, the row is not running and marked `ended-unexpectedly`, and task 52's
+module judges it. A session that really runs elsewhere — in a program outside the window, or in
+another terminal — still closes its ended terminal, as before. A session held by the lost program
+AND by a process outside is not elsewhere until the program is gone or the loss is 60 s old; then
+the terminal is closed (as for a running terminal: one holder in a terminal is enough). `holderPlace` and
+`src/window/in-window.ts` are unchanged, and so is every other decision of the mapping and the
+tick.
+
+**Tests** (unit: `testPlatform`'s fake `/proc`; end to end: `windowDeck`, `realTestPlatform`)
+- `mapping.test.ts`: a lost terminal whose program lives (its stat line names the reported
+  start) → its holder is the terminal's: shown, not elsewhere, not unknown, never `notReported`;
+  the same while the state is still `reconnecting` or `running` with the exit, and for a holder
+  below the program (a wrapper); a session held by the lost program and by a process outside →
+  not elsewhere; the program gone → not counted, its holder gone, a holder outside → elsewhere;
+  its pid another process's now (another start) → never the terminal's, also for the dead
+  program's own holder record (starts 899 and 901: the input on which the start check decides);
+  its stat line unreadable or without a start → counted (the holder being the program: shown, not
+  elsewhere, not unknown; a holder below it: shown, not elsewhere, unknown); a read that fails
+  once (EMFILE) and works a moment later → shown, not elsewhere, not unknown, for both shapes;
+  the loss 0 s, 59 s, 60 s − 1 ns old → counted, 60 s, 61 s, an hour → elsewhere as on `main`; a
+  clock that stepped back an hour → counted; an exit time that is no decimal number → elsewhere,
+  no throw; an exit the keeper sent (`ended`, `not-started`) → the program never counts, even
+  with its pid and start alive.
+- `tick.test.ts`: a lost terminal whose own program lives → not closed, its session not
+  elsewhere, `setSession` with it; once the program is gone → still not closed, its exit the lost
+  one, the row `not-running`; then the session running in a program outside → closed; the fake
+  clock 59 s after the loss → kept, 61 s → closed with the holder's pid in `elsewhere()`; the clock
+  stepped back an hour → kept; lost terminals whose programs live but whose sessions run in
+  another program and in another terminal → both closed (as before).
+- End to end (`tick.test.ts`, a real registry and keeper): `claudeCommand` is a `sh` the test
+  writes, which runs the stand-in as its child and, at SIGHUP, waits for a file the test creates
+  (200 rounds of `sleep 0.1`, and not past the sandbox). At a hangup only the session leader gets SIGHUP, so
+  the stand-in, which holds the session, lives on until the `sh` ends; then the kernel hangs it up
+  too and it ends as at a hangup (`SessionEnd` with reason `other`). The test kills ITS OWN keeper
+  by the pid of that keeper's `.pid` record (`keeperOf`, `signalKeeper`; nothing else is
+  signalled). Once the terminal is `lost`, a refresh while the holder demonstrably lives (no `hup`
+  or `exit` record, the row still running) → the terminal is not closed and the session not
+  elsewhere; then the file, the stand-in's `exit` record, the holder's process gone (the record
+  comes a moment before the exit, and `ended-unexpectedly` needs the last holder gone), refreshes
+  until the row is `not-running` → the terminal is still there, `lost`, its exit `{ code: null, signal: 1 }`, the
+  row marked `ended-unexpectedly`. It fails on `main` 27d6e0e (the terminal is closed at the
+  first refresh after the loss) and passes with the fix. It holds the shape "the holder below the
+  program"; the real `claude` is the program itself, a shape the mapping's cases carry (the
+  states on the way, the holder being the program). An `after` hook registered before
+  `windowDeck`'s releases the `sh`, kills the test's own keeper while it runs and waits for the
+  stand-in's `exit` record, so that a failure half way leaves no process and no sandbox.
+
+**Done when:** a lost terminal whose program still runs is never closed as "its session runs
+elsewhere" within 60 s of the loss, and is as on `main` after; every existing case of `mapping.test.ts`, `tick.test.ts`, `terminals*.test.ts` and
+`server*.test.ts` passes unchanged; `npm run check` passes.
+
+**Not in it:** NAMED LIMIT — a wrapper `claudeCommand` whose program (the wrapper) dies at the
+SIGHUP before its `claude` child: the child is given to init, its chain leaves every terminal, it
+counts as outside, and the lost terminal is closed while the child runs its end, as today (ruled
+2026-11-15). NAMED LIMIT — a program that ends 60 s or more after the loss: the lost terminal was
+closed at 60 s, so that end is not marked in the window (ruled). The attention itself (52) and its wiring (54). The stand-in is not changed (the
+end-to-end case needs no option of it).
+
+---
+
 ### Task 54: The server assembly, and attention end to end
 
-**Depends on:** 52, 53, 55; stage D's task 36 (ruled order) · **Wave:** 3 · **Design:** S2 8.2.7 (several windows), 10.1, 10.3, 12.4, 13, 14, 17.3, 17.4 · **Contracts:** 2.7 · **Decisions:** B20 (update S2 8.2.7, after its paragraph) · **Shared files:** `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`, `test/window/tick.test.ts`, `test/helpers/pages.ts` (`startPages` passes `seen`). Order (1c): D 36 → B 54 → C 74. On top of D 36: `tick.ts` has `reloadNow` and `server.ts` gives the actions `changed`, `fetchPrs` and `refreshPrs`, and its stop waits for their background fetches — B's lines go beside them (`listFor`'s `attention`, `seen.stop()` after D's in the stop), and an edit's `reloadNow` brings the attention facts along through `listFor`.
+**Depends on:** 52, 53, 55, 57 (merges first); stage D's task 36 (ruled order) · **Wave:** 3 · **Design:** S2 8.2.7 (several windows), 10.1, 10.3, 12.4, 13, 14, 17.3, 17.4 · **Contracts:** 2.7 · **Decisions:** B20 (update S2 8.2.7, after its paragraph) · **Shared files:** `src/window/tick.ts`, `src/window/server.ts`, `src/window/pages.ts`, `test/window/tick.test.ts`, `test/helpers/pages.ts` (`startPages` passes `seen`). Order (1c): D 36 → B 57 → B 54 → C 74. On top of D 36: `tick.ts` has `reloadNow` and `server.ts` gives the actions `changed`, `fetchPrs` and `refreshPrs`, and its stop waits for their background fetches — B's lines go beside them (`listFor`'s `attention`, `seen.stop()` after D's in the stop), and an edit's `reloadNow` brings the attention facts along through `listFor`.
 
 **Goal.** Wire 52, 53 and 55 into the running server so that a real turn end, a real selection
 and a real typing in a real page do what S2 12.4 and 13 say, in every window.
@@ -1027,6 +1167,7 @@ sandbox: `show` and others read the real `~/.claude`, an agent's shell has `CLAU
 | 2 (principle 4: no content in logs) | 52, 54 (the marker case) |
 | 4.3 (`src/claude/terminal.ts`, `src/window/view/`) | 53, 51 |
 | 4.4 (`src/store/`, B) | 50 |
+| 7.5, 7.8, 7.9 (a lost keeper's program while it lives) | 57 |
 | 8.2.3 (`list`'s attention, `notify`) | 51, 54, 55 |
 | 8.2.7 (several windows) | 54 |
 | 10.1 (the one-second look; the guard) | 52, 54; 50 (tests) |
@@ -1037,7 +1178,7 @@ sandbox: `show` and others read the real `~/.claude`, an agent's shell has `CLAU
 | 12.4 (reasons, seen, marks, Ctrl+Shift+J) | 51, 52, 53, 55, 54 |
 | 12.9 (Ctrl+Shift+J, the help) | 55 |
 | 13 (notifications) | 52, 54, 55 |
-| 14 (a busy store) | 50, 52, 54 |
+| 14 (a busy store; a keeper dies) | 50, 52, 54; 57 |
 | 16 (install, doctor: unchanged), 16.5 (updating) | B19; 1b, 50 (`install.md`, "Updating"), 56 |
 | 17.3, 17.4 | 52, 53, 54, 55 |
 | 18 (W3's title, W11, W19, W21) | 56 |
