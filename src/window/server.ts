@@ -5,6 +5,8 @@
  * `server.sock`, finds the keepers left running, points the interop link, and starts the tick
  * (tick.ts); `stop` is S2 5.5. The command `skydeck serve` (src/cli/commands/serve.ts) runs it in a process of its own;
  * tests run it in theirs (A19), so nothing here touches the process itself (signals, exit).
+ * Stage B (plan B 2.7): Seen, attention and the notifier, wired into the tick, the pages and the
+ * lists (`attentionParts`).
  *
  * Stage C (plan C task 74) wires in: `server.sock`'s `POST /resume` and `/new` through the one way
  * the window starts a session (launches.ts), answered as the command would end (C2); the restorer
@@ -20,9 +22,12 @@ import { procStartFromStat } from '../claude/procstat.ts';
 import { SkydeckError } from '../platform/errors.ts';
 import type { HttpListener, Ns, Platform } from '../platform/types.ts';
 import { openDeck } from '../sessions/deck.ts';
+import type { Deck } from '../sessions/deck.ts';
 import type { LaunchSpec, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { createActions } from './actions.ts';
+import { createAttention } from './attention.ts';
+import type { Attention } from './attention.ts';
 import { httpHandler, loadAssets } from './assets.ts';
 import { createTokens, ensureSecret, failureKind, raiseAlarm } from './auth.ts';
 import { isBusy } from './busy.ts';
@@ -36,12 +41,14 @@ import { createKeepAlive } from './keepalive.ts';
 import { createLaunches } from './launches.ts';
 import type { Launched } from './launches.ts';
 import { rotateLog, serverLog } from './log.ts';
+import { createNotifier } from './notify.ts';
 import { createPageMark } from './page-mark.ts';
 import { createPages } from './pages.ts';
-import type { PageState } from './pages.ts';
+import type { PageState, Pages } from './pages.ts';
 import { formatPidLine, parsePidLine } from './pidline.ts';
 import { createPrFetches } from './pr-fetches.ts';
 import type {
+  AttentionPayload,
   KeepAlivePayload,
   LaunchAnswer,
   ListMessage,
@@ -62,6 +69,8 @@ import {
   writeServerJson,
 } from './runtime.ts';
 import type { RuntimeFiles, ServerJson } from './runtime.ts';
+import { createSeen } from './seen.ts';
+import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { createRegistry } from './terminals.ts';
@@ -169,6 +178,106 @@ export function keepAliveNotices(): (state: KeepAlivePayload) => {
       kind: 'keepalive-lost',
       text: `WSL is not kept running: ${reason}; skydeck tries again`,
     };
+  };
+}
+
+/** B12: the view the notifier judges "needs you" over: a page without a filter, Earlier unfolded. */
+const NOTIFIER_VIEW = { filter: '', unfolded: ['earlier'], showDone: false, selected: null };
+
+/** Stage B's parts of the server (plan B 2.7): what `runServer` wires into the tick and the pages. */
+interface AttentionParts {
+  seen: Seen;
+  attention: Attention;
+  /** The tick's `attention`: each call followed by the notifier's check. */
+  tick: Pick<Attention, 'look' | 'refreshed'>;
+}
+
+/**
+ * Plan B 2.7: Seen (S2 12.4) on the server's clock, attention over the tick's rows, and the notifier
+ * (S2 13, B12) over the list a page without a filter gets; a session that begins to be seen writes
+ * its seen at once (`seenNow`) and pushes the lists when that changed the facts. The notifier's
+ * check never stops the tick (contract 2.6: it throws what its deps throw): a failure is logged by
+ * kind, once until a check works again.
+ */
+function attentionParts(deps: {
+  deck: Deck;
+  hub: TerminalHub;
+  tick: () => Tick | null;
+  pages: () => Pick<Pages, 'notify' | 'pushList'>;
+  log: (line: string) => void;
+  storeNewer: (reason: string) => void;
+}): AttentionParts {
+  const { deck, hub, log } = deps;
+  const seen = createSeen(deck.platform.clock);
+  const attention = createAttention({
+    deck,
+    hub,
+    seen,
+    rows: () => deps.tick()?.rows() ?? [],
+    log,
+    storeNewer: deps.storeNewer,
+  });
+  /** The sessions that need you now, with their titles, in Ctrl+Shift+J's order (B6, B12). */
+  const needs = (): Map<string, { title: string; attention: AttentionPayload }> => {
+    const tick = deps.tick();
+    const message = buildListMessage({
+      rows: tick?.rows() ?? [],
+      terminals: hub.list(),
+      elsewhere: tick?.elsewhere() ?? new Map(),
+      view: NOTIFIER_VIEW,
+      selected: null,
+      nowNs: deck.platform.clock.nowNs(),
+      attention: attention.facts(),
+    });
+    const rows = new Map(message.sections.flatMap((section) => section.rows).map((r) => [r.id, r]));
+    const needing = new Map<string, { title: string; attention: AttentionPayload }>();
+    for (const id of message.needYou.order) {
+      const row = rows.get(id);
+      if (row !== undefined && row.attention !== null) {
+        needing.set(id, { title: row.title, attention: row.attention });
+      }
+    }
+    return needing;
+  };
+  const notifier = createNotifier({
+    needs,
+    ready: () => attention.ready(),
+    send: (message) => deps.pages().notify(message),
+  });
+  let failing: string | null = null;
+  const check = (): void => {
+    try {
+      notifier.check();
+      failing = null;
+    } catch (error) {
+      const kind = failureKind(error);
+      if (kind !== failing) log(`notify: the check failed (${kind})`);
+      failing = kind;
+    }
+  };
+  // A listener must not throw (contract 2.5): seenNow never does, pushList guards each page and
+  // check is wrapped.
+  seen.onChange(() => {
+    if (attention.seenNow()) {
+      deps.pages().pushList();
+      check();
+    }
+  });
+  return {
+    seen,
+    attention,
+    tick: {
+      look() {
+        const changed = attention.look();
+        check();
+        return changed;
+      },
+      refreshed() {
+        const changed = attention.refreshed();
+        check();
+        return changed;
+      },
+    },
   };
 }
 
@@ -464,11 +573,18 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     const restoreLaunches = createLaunches({ deck, hub: created, terminalFor, log: quietLog });
     // Plan C6–C9, C22 (task 73): one restore at a time, whoever asked; its report to every page.
+    // A run's wait ingests the spool on the server's own connection at every look, which the
+    // tick's change marks do not show: `gone`, called at every look after its ingest, tells the
+    // tick to load the rows again (review 2), so that what a look took is in the lists within a
+    // refresh.
     const restorer = createRestorer({
       deck,
       terminalFor: (size) => restoreLaunches.restoreTerminal(size),
       refuse: (sessionId) => restoreLaunches.refusal(sessionId),
-      gone: (sessionId) => restoreLaunches.gone(sessionId),
+      gone: (sessionId) => {
+        tick?.reload();
+        return restoreLaunches.gone(sessionId);
+      },
       size: firstSize,
       progress: (text) => {
         pages.notice('restore-progress', text);
@@ -522,6 +638,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         view,
         selected: row === undefined ? null : selectedPayload(deck, row),
         nowNs: clock.nowNs(),
+        attention: attending.attention.facts(),
       });
       tick?.listed(message.sections.flatMap((section) => section.rows.map((r) => r.id)));
       return {
@@ -541,6 +658,17 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     let stopBegun = false;
     /** Plan C20: the end of the start on the clock that cannot step (null while it starts). */
     let startDoneNs: Ns | null = null;
+    // Stage B (plan B 2.7): made before the tick and the pages, which it looks up when it runs.
+    const attending = attentionParts({
+      deck,
+      hub: created,
+      tick: () => tick,
+      pages: () => pages,
+      log,
+      storeNewer: (reason) => {
+        storeNewer(reason);
+      },
+    });
     const pages = createPages({
       platform,
       port: () => boundPort,
@@ -560,6 +688,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       listFor,
       log,
       starting: () => !ready,
+      seen: attending.seen,
     });
     created.onChange(() => {
       pages.pushList();
@@ -581,6 +710,14 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       asked ??= reason;
       return Promise.resolve();
     };
+    /** S2 10.1: the store was migrated under the server — told by the tick or by attention. */
+    let migrated = false;
+    const storeNewer = (reason: string): void => {
+      if (migrated) return;
+      migrated = true;
+      log('server: the store was migrated by a newer skydeck; the server stops');
+      void stop(reason);
+    };
     const startedTick = createTick({
       deck,
       hub: created,
@@ -593,10 +730,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
       },
-      storeNewer: (reason) => {
-        log('server: the store was migrated by a newer skydeck; the server stops');
-        void stop(reason);
-      },
+      storeNewer,
+      attention: attending.tick,
     });
     tick = startedTick;
 
@@ -752,12 +887,17 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     const orderlyStop = async (reason: string): Promise<void> => {
       stopBegun = true;
       log('server: stopping');
-      // First (plan C8, S2 5.5): a restore ends before anything it uses is closed; the sessions it
+      // Plan C20 (ruled 13:28Z): the mark once more as the pages are, before they are told bye —
+      // a page that connected since the last refresh is recorded, one that went is not; a write
+      // that fails is logged by kind. A server that dies leaves it as its last refresh did.
+      pageMark.update(pages.count());
+      // Then (plan C8, S2 5.5): a restore ends before anything it uses is closed; the sessions it
       // opened go on starting, the rest are said to be not started.
       await restorer.stop();
       stopPrs.abort();
       await startedTick.stop();
       await prFetches.idle(); // aborted: it saves nothing more and starts no other (plan D8)
+      attending.seen.stop(); // no hold ends from now on (plan B 2.7)
       await control.close(); // no command reaches it any more; its file goes with it
       await pages.bye(reason); // then an upgrade is answered 503 until the port closes (task 17)
       for (const listener of listeners) {

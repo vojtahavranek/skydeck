@@ -1,12 +1,13 @@
 /**
  * The server's tick (S2 10.1; plan task 23): what the server does on its own, once a second.
  *
- * - Every second: the keep-alive (S2 6.1, 6.2).
+ * - Every second: attention's look at the live-session files (S2 10.3; plan B 2.7), then the
+ *   keep-alive (S2 6.1, 6.2).
  * - Every second tick: the refresh every command runs (design 5.3), the settling of the terminals
  *   that ended since (S2 7.8), the rows loaded again by step 1's rule of the interactive list
  *   (A24), the mapping of the window's terminals to sessions (S2 7.5, 7.9) with the ended terminals
- *   whose session runs again dropped, the automatic pull-request refresh for the sessions the pages
- *   list (design 7.3), and the pages' lists.
+ *   whose session runs again dropped, attention's judgement of the window ends (B10), the automatic
+ *   pull-request refresh for the sessions the pages list (design 7.3), and the pages' lists.
  * - Every 30 seconds: the interop link (S2 6.4).
  * - Once a minute: keepers.log rotated (the keepers only append to it; S2 4.2).
  *
@@ -15,10 +16,10 @@
  * that a newer skydeck migrated (StoreNewerError, S2 10.1) stops the server: the tick tells
  * `storeNewer` once and does nothing more.
  */
-import { isLiveFileTrusted, readLiveFiles } from '../claude/live.ts';
+import { isAlive, isLiveFileTrusted, readLiveFiles } from '../claude/live.ts';
 import { refreshPrs } from '../github.ts';
 import { NS_PER_SECOND } from '../platform/time.ts';
-import type { Ns } from '../platform/types.ts';
+import type { Ns, Proc } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
 import type { ListRow } from '../sessions/list.ts';
 import { loadRows } from '../sessions/load.ts';
@@ -27,6 +28,7 @@ import { refresh } from '../sessions/refresh.ts';
 import type { RefreshResult } from '../sessions/refresh.ts';
 import { isDatabaseFailure, StoreNewerError } from '../store/store.ts';
 import { sanitize } from '../text/sanitize.ts';
+import type { Attention } from './attention.ts';
 import { failureKind } from './auth.ts';
 import type { KeeperHello } from './frames.ts';
 import type { TerminalHub, TerminalInfo } from './hub.ts';
@@ -54,6 +56,9 @@ export interface TickDeps {
   storeNewer: (reason: string) => void;
   /** Called after each refresh that worked (the server's postponed found-keeper decisions). */
   afterRefresh?: () => void;
+  /** Every second, before the keep-alive: look(); every refresh that worked: refreshed(), after
+   *  the mapping. When either says true the pages' lists are pushed (plan B 2.7). */
+  attention?: Pick<Attention, 'look' | 'refreshed'>;
 }
 
 export interface Tick {
@@ -108,6 +113,33 @@ function marksOf(deck: Deck): ChangeMarks {
     ),
   );
   return { live: live.join('\n'), data: store.dataVersion() };
+}
+
+/**
+ * Ruled 2026-11-15 09:47Z (stage B, part b): whether a row's last holding was alive at the last load
+ * and its process is gone now. A session's end event can be ingested before its process exits, and
+ * the row's `ended-unexpectedly` needs that process gone (design 6.3); a program that removes its
+ * live file at its end moves no change mark when it exits, so without this the row — and a lost
+ * terminal's window end judged on it (B10) — would wait for the minute's reload. Unknown is not gone
+ * (design 5.5): a /proc read that throws, or a boot id that cannot be read, counts as alive.
+ */
+function holderGone(rows: readonly ListRow[], proc: Proc): boolean {
+  let bootId: string | null;
+  try {
+    bootId = proc.bootId();
+  } catch {
+    return false;
+  }
+  if (bootId === null) return false;
+  return rows.some((row) => {
+    const holding = row.session.lastHolding;
+    if (holding?.alive !== true) return false;
+    try {
+      return !isAlive(holding.process, proc, bootId);
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Whether a refresh saved anything that a row shows (the interactive list's test). */
@@ -170,6 +202,27 @@ export function createTick(deps: TickDeps): Tick {
     }
   };
 
+  /** Plan B 2.7: attention's look; true when the facts changed. A throw (its contract has none) is
+   *  logged by kind and the tick goes on. */
+  const look = (): boolean => {
+    try {
+      return deps.attention?.look() ?? false;
+    } catch (error) {
+      log(`tick: the attention look failed (${failureKind(error)})`);
+      return false;
+    }
+  };
+
+  /** Plan B 2.7: B10's window ends after a refresh that worked (the refresh pushes the lists in any
+   *  case). A throw is logged by kind: it is no failure of the refresh. */
+  const judgeWindowEnds = (): void => {
+    try {
+      deps.attention?.refreshed();
+    } catch (error) {
+      log(`tick: the window ends were not judged (${failureKind(error)})`);
+    }
+  };
+
   /**
    * S2 7.8: settleEndedTerminal for each exit not settled yet. A failure of the database keeps it
    * for the next refresh and fails this one; any other failure is logged and that exit is given up.
@@ -192,7 +245,8 @@ export function createTick(deps: TickDeps): Tick {
     }
   };
 
-  /** A24: the rows again when the refresh saved something, a change mark moved, or a minute passed. */
+  /** A24: the rows again when the refresh saved something, a change mark moved, or a minute passed;
+   *  stage B: also when a last holder that lived at the last load is gone (holderGone). */
   const reloadIfDue = (result: RefreshResult): void => {
     const now = marksOf(deck);
     const nowNs = clock.nowNs();
@@ -203,7 +257,8 @@ export function createTick(deps: TickDeps): Tick {
       marks === null ||
       now.live !== marks.live ||
       now.data !== marks.data ||
-      nowNs - loadedAtNs >= FULL_RELOAD_NS;
+      nowNs - loadedAtNs >= FULL_RELOAD_NS ||
+      holderGone(rows, platform.proc);
     marks = now;
     if (due) {
       rows = loadRows(deck);
@@ -300,6 +355,7 @@ export function createTick(deps: TickDeps): Tick {
       settle();
       reloadIfDue(result);
       map();
+      judgeWindowEnds();
       fetchPrs();
       deps.afterRefresh?.();
       failing = null;
@@ -333,9 +389,12 @@ export function createTick(deps: TickDeps): Tick {
     if (now > 0 && now % INTEROP_SECONDS === 0) {
       await attempt('the interop link', () => deps.interop.refresh());
     }
+    const looked = look();
     await attempt('the keep-alive', () => deps.keepAlive.tick());
     if (now % 2 === 0 && !stopped) {
-      refreshStep();
+      refreshStep(); // its lists carry what the look changed
+    } else if (looked && !stopped) {
+      pages.pushList();
     }
     if (now > 0 && now % ROTATE_SECONDS === 0) {
       await attempt('keepers.log rotation', () => {

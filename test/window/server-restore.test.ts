@@ -9,11 +9,13 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { NS_PER_MINUTE } from '../../src/platform/time.ts';
+import { isoFromNs, NS_PER_MINUTE } from '../../src/platform/time.ts';
 import type { Ns, Platform } from '../../src/platform/types.ts';
 import { readLock } from '../../src/sessions/resume.ts';
 import type { ListMessage, RestoreStreamLine } from '../../src/window/protocol.ts';
 import { procStartOf, stillRuns, until, within } from '../helpers/keeper.ts';
+import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
+import type { SpoolFields } from '../helpers/spool.ts';
 import { readRecords, waitForRecord } from '../helpers/standin.ts';
 import type { StandinRecord } from '../helpers/standin.ts';
 import { connectTestPage, rowsOf, WAIT_MS } from '../helpers/window.ts';
@@ -274,7 +276,7 @@ describe('a restore from a page (S2 12.7, plan C6, C7)', () => {
     assert.equal(test.server.hub.list().length, 1, 'one terminal');
   });
 
-  test('a session whose program exits at once: `failed <short>: claude ended before the session started (status 3)`, its lock gone', async (t) => {
+  test('a session whose program exits at once: `failed <short>: claude ended before the session started (status 3)`, its lock gone; restored again, its ended terminal is closed first (restoreTerminal)', async (t) => {
     // Only the terminal's end can say it before the start's time is up (a timeout says `timed out`).
     const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120 } });
     const { d } = r;
@@ -294,6 +296,105 @@ describe('a restore from a page (S2 12.7, plan C6, C7)', () => {
     assert.ok(performance.now() - begun < 60_000, 'well before the start timeout');
     assert.equal(readLock(d.deck, X1), null, 'its lock given back');
     assert.deepEqual(startsOf(d, X1), []);
+    assert.deepEqual(
+      test.server.hub.list().map((term) => term.state),
+      ['ended'],
+      'its ended terminal is listed',
+    );
+
+    // Restored again: the terminal restore opens with closes the session's ended one first.
+    r.shut(X1);
+    const again = await page.act({ kind: 'restore', sessionIds: [X1] });
+    assert.equal(again.ok, true, JSON.stringify(again));
+    await until(() => r.waiting(X1), "the second restore's program at its gate", WAIT_MS);
+    const terms = test.server.hub.list();
+    assert.equal(
+      terms.length,
+      1,
+      `one terminal: the ended one was closed before the new one opened (${terms.map((term) => term.state).join(', ')})`,
+    );
+    assert.notEqual(terms[0]?.state, 'ended');
+  });
+
+  test("act restore takes the banner's set (`all` false): a session of an older boot is no longer offered", async (t) => {
+    const r = restoreSandbox(t);
+    const { d } = r;
+    threeSessions(r);
+    const old = earlierId(9);
+    r.earlierBoot(
+      [{ sessionId: old, startNs: d.platform.clock.nowNs() - 300n * NS_PER_MINUTE }],
+      '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+    );
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    await offering(page, [X1, X2, X3]); // the latest earlier boot's, not the older one's
+    const result = await page.act({ kind: 'restore', sessionIds: [old] });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    await noticed(page, FINISHED);
+    assert.deepEqual(notices(page), [
+      `failed ${old.slice(0, 8)}: no longer offered for restore`,
+      'restore finished: 1 failed',
+    ]);
+    assert.equal(r.waiting(old), false, 'nothing opened for it');
+  });
+});
+
+describe('while a restore waits (S2 10.1: the rows follow the store)', () => {
+  test("the events the restore's looks ingest on the server's connection reach the lists: the rows are loaded again", async (t) => {
+    const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120 } });
+    const { d } = r;
+    threeSessions(r);
+    const ys = [1, 2, 3].map((n) => `f000000${n}-cccc-4ccc-8ccc-cccccccccccc`);
+    // Their transcripts first, so that each is a row before its start event comes (the tick's
+    // scan reads a transcript; a look of the restore reads only the spool).
+    const folder = join(d.s.claudeHome, 'projects', 'project');
+    const nowNs = d.platform.clock.nowNs();
+    for (const sessionId of ys) {
+      const record = (type: string, atNs: bigint): string =>
+        `${JSON.stringify({ type, sessionId, timestamp: isoFromNs(atNs), cwd: d.s.home, entrypoint: 'cli' })}\n`;
+      writeFileSync(
+        join(folder, `${sessionId}.jsonl`),
+        record('user', nowNs - 66n * NS_PER_MINUTE) +
+          record('assistant', nowNs - 65n * NS_PER_MINUTE),
+      );
+    }
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    await page.list(
+      (l) => ys.every((id) => rowsOf(l).some((row) => row.id === id)),
+      'the three rows, from their transcripts',
+    );
+    const result = await page.act({ kind: 'restore', sessionIds: [X1] });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    await until(() => r.waiting(X1), 'the restore waits for X1 at its gate', WAIT_MS);
+
+    // Each one's start in the earlier boot, while the restore waits: a look of the restore (one
+    // a second) or the tick's refresh (one every 2 s) ingests it, whichever comes first — three,
+    // so that a look takes at least one on any but a rare run. Ingested, the session is offered:
+    // the banner's entries show whether the rows were loaded again.
+    mkdirSync(d.deck.places.spoolDir, { recursive: true });
+    for (const [index, sessionId] of ys.entries()) {
+      const fields: SpoolFields = {
+        event: 'SessionStart',
+        timeNs: nowNs - 70n * NS_PER_MINUTE,
+        pid: 4_200_000 + index,
+        procStart: 4242, // no live process has it: it is not running
+        bootId: EARLIER_BOOT,
+        pwd: d.s.home,
+        input: hookInput('SessionStart', sessionId, { source: 'startup', cwd: d.s.home }),
+      };
+      writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, index)), spoolText(fields));
+      await until(
+        () => d.deck.store.events().some((event) => event.sessionId === sessionId),
+        `the start of ${sessionId.slice(0, 8)} ingested`,
+        WAIT_MS,
+      );
+      await page.list(
+        (l) => l.banner?.entries.some((entry) => entry.sessionId === sessionId) === true,
+        `${sessionId.slice(0, 8)} offered while the restore waits`,
+      );
+    }
+    assert.equal(r.waiting(X1) && startsOf(d, X1).length === 0, true, 'the restore still waits');
   });
 });
 
@@ -412,18 +513,20 @@ describe('a restore from a command (S2 8.3, 11.4; plan C5, C22)', () => {
 
 describe("the server's stop (S2 5.5, plan C4, C8)", () => {
   test('the server stopped while a restore waits: a POST /resume once the stop has begun is 503 stopping and starts nothing; stop() resolves within 10 s; the stream got `stopped: …` and code 5; one `restore finished:` line; the started stand-ins still run', async (t) => {
-    const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120 } });
-    const { d } = r;
-    threeSessions(r);
-    r.open(X1);
     // The restore's looks of the wait (one a second, clock.sleep(1000)) can be held, so that the
-    // stop is seen to have begun while the restore still waits.
+    // stop is seen to have begun while the restore still waits. Let go before the sandbox's own
+    // hooks run (they stop the server, which waits for the restore): a case that fails while the
+    // hold is on ends instead of hanging.
     let hold: Promise<void> | null = null;
     let release = (): void => {};
     let held = false;
     t.after(() => {
       release();
     });
+    const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120 } });
+    const { d } = r;
+    threeSessions(r);
+    r.open(X1);
     const test = await d.start({
       platform: (p): Platform => ({
         ...p,

@@ -7,11 +7,14 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import type { TestContext } from 'node:test';
+import { Worker } from 'node:worker_threads';
 
 import { buildNewCommand, buildResumeCommand } from '../../src/claude/launch.ts';
 import { main } from '../../src/cli/main.ts';
 import { NS_PER_MS, NS_PER_SECOND } from '../../src/platform/time.ts';
 import type { Platform } from '../../src/platform/types.ts';
+import { readLock } from '../../src/sessions/resume.ts';
 import type { LaunchAnswer, ListMessage } from '../../src/window/protocol.ts';
 import { testContextOn } from '../helpers/context.ts';
 import { sleep, startProgram, until } from '../helpers/keeper.ts';
@@ -306,18 +309,26 @@ describe('the bodies (plan C3; S2 8.3: no program, no argument list)', () => {
 });
 
 describe('the first size (S2 8.2.6, plan C7)', () => {
-  test("with a page focused at 132 × 41 the new terminal's first size is 132 × 41; with no page 120 × 40", async (t) => {
-    const d = serverSandbox(t);
+  test('with a page focused at 132 × 41 a terminal the server opens — POST /new, POST /resume, a restore — starts at 132 × 41; with no page at 120 × 40', async (t) => {
+    // Every gate open: the programs go straight to the stand-in, whose record has its size.
+    const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120 } });
+    const { d } = r;
+    r.openAll();
+    const [E1, E2] = [earlierId(1), earlierId(2)];
+    r.earlierBoot([{ sessionId: E1 }, { sessionId: E2 }]);
     const dir = join(d.s.home, 'fresh');
     mkdirSync(dir);
     const test = await d.start();
     const body = { dir, label: null, group: null, flags: [] };
+    const sizeOf = async (sessionId: string): Promise<{ cols: unknown; rows: unknown }> => {
+      const start = await startOf(d, sessionId);
+      return { cols: start.cols, rows: start.rows };
+    };
 
     const alone = await launch(d, '/new', body);
     assert.equal(alone.code, 0, JSON.stringify(alone));
     assert.ok(alone.sessionId !== null);
-    const first = await startOf(d, alone.sessionId);
-    assert.deepEqual({ cols: first.cols, rows: first.rows }, { cols: 120, rows: 40 });
+    assert.deepEqual(await sizeOf(alone.sessionId), { cols: 120, rows: 40 });
 
     const page = await connectTestPage(t, d, test.server);
     page.send({ t: 'focus', focused: true, selected: null, area: { cols: 132, rows: 41 } });
@@ -326,10 +337,106 @@ describe('the first size (S2 8.2.6, plan C7)', () => {
     const focused = await launch(d, '/new', body);
     assert.equal(focused.code, 0, JSON.stringify(focused));
     assert.ok(focused.sessionId !== null);
-    const second = await startOf(d, focused.sessionId);
-    assert.deepEqual({ cols: second.cols, rows: second.rows }, { cols: 132, rows: 41 });
+    assert.deepEqual(await sizeOf(focused.sessionId), { cols: 132, rows: 41 });
+    const resumed = await launch(d, '/resume', { sessionId: E1 });
+    assert.equal(resumed.code, 0, JSON.stringify(resumed));
+    assert.deepEqual(await sizeOf(E1), { cols: 132, rows: 41 });
+    const restored = postRestore(d, { sessionIds: [E2], all: false });
+    assert.equal((await restored.ended).status, 200);
+    assert.deepEqual(await sizeOf(E2), { cols: 132, rows: 41 });
   });
 });
+
+describe("C2's answers to what is not a refusal", () => {
+  test("a busy store: POST /resume and /new answer code 1 with `skydeck: skydeck's database is busy; try again`, logged by kind; nothing started, no lock or label left", async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    const dir = join(d.s.home, 'fresh');
+    mkdirSync(dir);
+    const test = await d.start();
+    const lock = holdWriteLock(t, d);
+    await lock.held;
+    const busy = {
+      code: 1,
+      lines: ["skydeck: skydeck's database is busy; try again"],
+      sessionId: null,
+    };
+    assert.deepEqual(await launch(d, '/resume', { sessionId: S1 }), busy);
+    assert.deepEqual(
+      await launch(d, '/new', { dir, label: 'fix it', group: null, flags: [] }),
+      busy,
+    );
+    lock.release();
+    assert.deepEqual(test.server.hub.list(), [], 'no terminal');
+    assert.equal(readLock(d.deck, S1), null, 'no lock left');
+    assert.deepEqual(d.deck.store.allMeta(), [], 'no label stored');
+    const log = test.logs().join('\n');
+    assert.match(log, /server\.sock resume: the database is busy \(/);
+    assert.match(log, /server\.sock new: the database is busy \(/);
+  });
+
+  test("an unexpected failure: code 1 with `skydeck: the window's server could not start it (<kind>)`, logged by kind, never its message", async (t) => {
+    const d = serverSandbox(t);
+    const dir = join(d.s.home, 'fresh');
+    mkdirSync(dir);
+    let broken = false;
+    const test = await d.start({
+      platform: (p) => ({
+        ...p,
+        uuid: () => {
+          if (broken) throw new Error('the uuid broke at /secret/place');
+          return p.uuid();
+        },
+      }),
+    });
+    broken = true;
+    const answer = await launch(d, '/new', { dir, label: null, group: null, flags: [] });
+    broken = false;
+    assert.deepEqual(answer, {
+      code: 1,
+      lines: ["skydeck: the window's server could not start it (Error)"],
+      sessionId: null,
+    });
+    assert.deepEqual(test.server.hub.list(), [], 'no terminal');
+    const log = test.logs().join('\n');
+    assert.match(log, /server\.sock new: failed \(Error\)/);
+    assert.equal(log.includes('/secret/place'), false, log);
+  });
+});
+
+/**
+ * Another skydeck holding the store's write lock (server-failures.test.ts's, copied): a worker in
+ * the store's own transaction until `release()`.
+ */
+function holdWriteLock(t: TestContext, d: ServerSandbox): { held: Promise<void>; release(): void } {
+  const signal = new SharedArrayBuffer(4);
+  const flag = new Int32Array(signal);
+  const holder = new Worker(new URL('../fixtures/hold-write-lock.ts', import.meta.url), {
+    workerData: { path: join(d.s.skydeckHome, 'data', 'skydeck.db'), signal },
+  });
+  const release = (): void => {
+    Atomics.store(flag, 0, 1);
+    Atomics.notify(flag, 0);
+  };
+  t.after(async () => {
+    release();
+    await holder.terminate();
+  });
+  return {
+    held: new Promise<void>((resolve) => holder.once('message', () => resolve())),
+    release,
+  };
+}
+
+/** `GET /status`'s page count as the server sends it. */
+async function pagesOf(d: ServerSandbox): Promise<unknown> {
+  const answer = await d.platform.net.requestUnix(d.files.serverSock, {
+    method: 'GET',
+    path: '/status',
+    timeoutMs: 10_000,
+  });
+  return (answer.body as { pages?: unknown }).pages;
+}
 
 /** `GET /status`'s `windowExpectedMs` as the server sends it (C20; absent reads as undefined). */
 async function expectedMs(d: ServerSandbox): Promise<unknown> {
@@ -395,16 +502,6 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
       writeFileSync(path, 'not a spool file\n');
       await until(() => !existsSync(path), `refresh ${markers} of the server`, WAIT_MS);
     };
-    const pagesOf = async (): Promise<unknown> =>
-      (
-        (
-          await d.platform.net.requestUnix(d.files.serverSock, {
-            method: 'GET',
-            path: '/status',
-            timeoutMs: 10_000,
-          })
-        ).body as { pages?: unknown }
-      ).pages;
 
     await refreshed();
     assert.equal(mark(), null, 'no page, no mark');
@@ -414,7 +511,7 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
     assert.equal(mark(), '1', 'written by the first refresh after the page started');
     await one.close();
     const deadline = performance.now() + WAIT_MS;
-    while ((await pagesOf()) !== 0) {
+    while ((await pagesOf(d)) !== 0) {
       assert.ok(performance.now() < deadline, 'the server saw the page go');
       await sleep(50);
     }
@@ -426,6 +523,68 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
     assert.equal(mark(), '1', 'written again');
     await test.server.stop('the test stops it');
     assert.equal(mark(), '1', 'the stop leaves it: a window may come back');
+  });
+
+  test('an orderly stop writes the mark once more as its pages are (ruled 13:28Z): a page that connected after the last refresh is recorded, a page that went since is not', async (t) => {
+    const d = serverSandbox(t);
+    // The tick's one-second timer is the test's: no refresh runs but those the test lets run.
+    const ticks: (() => void)[] = [];
+    const server = async () =>
+      d.start({
+        platform: (p) => ({
+          ...p,
+          clock: {
+            ...p.clock,
+            every: (ms, callback) => {
+              if (ms !== 1000) return p.clock.every(ms, callback);
+              ticks.push(callback);
+              return () => {};
+            },
+          },
+        }),
+      });
+    const mark = (): string | null => d.deck.store.getKv('window_pages_open');
+    const { spoolDir } = d.deck.places;
+    mkdirSync(spoolDir, { recursive: true });
+    let markers = 0;
+    /** Ticks until one refresh has run whole: its ingest moved a file no hook writes to spool/bad. */
+    const refreshed = async (): Promise<void> => {
+      markers += 1;
+      const path = join(spoolDir, `0-0-${markers}-task74-stop.ev`);
+      writeFileSync(path, 'not a spool file\n');
+      await until(
+        () => {
+          for (const tick of ticks) tick();
+          return !existsSync(path);
+        },
+        `refresh ${markers}`,
+        WAIT_MS,
+      );
+    };
+
+    // A page that connected after the last refresh: no refresh has seen it; the stop records it.
+    const first = await server();
+    const page = await connectTestPage(t, d, first.server);
+    await page.next('list', 'the first list: the server has the page');
+    assert.equal(mark(), null, 'no refresh has seen the page');
+    await first.server.stop('the test stops it');
+    assert.equal(mark(), '1', 'written by the stop');
+
+    // The last page gone just before the stop: recorded by a refresh, not any more by the stop.
+    const second = await server();
+    const again = await connectTestPage(t, d, second.server);
+    await again.next('list', "the second server's first list");
+    await refreshed();
+    assert.equal(mark(), '1', 'a refresh recorded the page');
+    await again.close();
+    const deadline = performance.now() + WAIT_MS;
+    while ((await pagesOf(d)) !== 0) {
+      assert.ok(performance.now() < deadline, 'the server saw the page go');
+      await sleep(50);
+    }
+    assert.equal(mark(), '1', 'no refresh since the page went');
+    await second.server.stop('the test stops it');
+    assert.equal(mark(), null, 'removed by the stop');
   });
 
   test("a dead server's mark: the next server removes it at its first refresh without a page, and expects a window from the end of its start for 7 s on a clock that cannot step", async (t) => {
@@ -486,9 +645,11 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
     d.deck.store.setKv('window_pages_open', '1');
     await d.start();
     const readings: number[] = [];
+    const deadline = performance.now() + WAIT_MS;
     for (;;) {
       const left = await expectedMs(d);
       if (left === null) break;
+      assert.ok(performance.now() < deadline, `still expected after ${WAIT_MS} ms: ${left}`);
       assert.ok(typeof left === 'number' && Number.isInteger(left) && left >= 1 && left <= 7000);
       readings.push(left);
       await sleep(200);
