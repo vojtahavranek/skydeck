@@ -10,6 +10,11 @@
 // on no list key, and every window chord passes `windowChordGate` first; when it closes,
 // `dialogClosed` gives the keyboard back.
 //
+// Stage C (plan C task 75): the restore banner of web/banner.js at the top of the list zone, drawn
+// from each `list`'s `banner`, with the report of every restore run (`notice restore-progress`). A
+// restore selects nothing and moves no keyboard (C21); a key held on one of its controls acts on
+// nothing once the control is gone, as a key held in a dialog (`heldFromDialog`).
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
@@ -18,6 +23,7 @@
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
 import { decodeKey, loadKey, takeToken } from './auth.js';
+import { createBanner } from './banner.js';
 import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
@@ -65,6 +71,7 @@ const dom = {
   keepAlive: byId('keepalive'),
   tick: byId('tick'),
   listZone: byId('list-zone'),
+  banner: byId('banner'),
   list: byId('list'),
   rightZone: byId('right-zone'),
   cards: byId('cards'),
@@ -216,6 +223,15 @@ const editor = createEditor(dom.editor, {
   closed: () => dialogClosed(),
   now: () => listNow(),
 });
+// Stage C (plan C task 75): the restore banner; its times in the page's own time zone (C18).
+const banner = createBanner(dom.banner, {
+  act: (action) => act(action),
+  say: (text) => say(text),
+  timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+});
+// A control of the banner pressed from the keyboard can take itself away (the report's ×): the
+// zone's holder takes the keyboard back once the click is done, as for the notice's ×.
+dom.banner.addEventListener('click', () => setTimeout(keepKeyboard, 0));
 
 /** Whether a dialog is shown (D2: then the page is modal). */
 function modal() {
@@ -429,6 +445,10 @@ function focusChanged() {
 const TEXT_BYTES = 1024;
 const PATH_BYTES = 4096;
 const NOTE_BYTES = 65536;
+/** At most this many sessions in one `restore`, and the form of the boot "Not now" names: what
+ *  S2 8.2.3 takes (plan C 2.2), the server closing the connection for anything else. */
+const RESTORE_IDS = 1000;
+const BOOT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const utf8 = new TextEncoder();
 
 /**
@@ -503,6 +523,15 @@ const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
  * @returns {string | null}
  */
 function overLimit(action) {
+  // Stage C (plan C 2.2): a restore's count of sessions, the form of the boot "Not now" names.
+  const ids = action['sessionIds'];
+  if (action.kind === 'restore' && Array.isArray(ids) && ids.length > RESTORE_IDS) {
+    return `skydeck restores at most ${RESTORE_IDS.toLocaleString('en-US')} sessions at once; untick some`;
+  }
+  const bootId = action['bootId'];
+  if (action.kind === 'dismiss-restore' && !(typeof bootId === 'string' && BOOT_ID.test(bootId))) {
+    return "this offer's boot id is not one skydeck takes; it cannot be dismissed";
+  }
   for (const [field, name, bytes] of LIMITED[action.kind] ?? []) {
     const value = action[field];
     if (typeof value !== 'string') {
@@ -963,6 +992,9 @@ function received(message) {
       }
       followDone();
       followUndo();
+      // Stage C: before the render, whose keepKeyboard gives the zone the keyboard when a control
+      // of the banner that had it went away (a restore began: Restore is gone).
+      banner.render(message.banner ?? null);
       render();
       if (modal()) {
         editor.update(message); // the dialog's session's row (task 38's list)
@@ -1009,7 +1041,12 @@ function received(message) {
         // A7: shown until the next list.
         dom.tick.textContent = message.text;
         dom.tick.hidden = false;
-      } else if (message.kind !== 'restore-progress' && message.term !== null) {
+      } else if (message.kind === 'restore-progress') {
+        // Stage C (C10): one report line of a restore, whoever asked for it; it moves no keyboard
+        // (C21), but a new report takes the last one's × away.
+        banner.progress(message.text);
+        keepKeyboard();
+      } else if (message.term !== null) {
         terminalView.notice(message.term, message.kind, message.text);
         keepKeyboard();
       }
@@ -1555,14 +1592,17 @@ function dialogKey(event) {
  * is pressed again): over a terminal `heldIntoTerminal` swallows its events, and over the list its
  * auto-repeats would be list keys (an Enter that resumes). Once the dialog is gone they act on
  * nothing; the next press acts (review 2 of task 37). Forgotten at the key's release, at a fresh
- * press, and when the window loses focus.
+ * press, and when the window loses focus. Stage C: the same for a key pressed on a control of the
+ * restore banner, which can go away under it — Restore once a restore runs, Not now once the offer
+ * is dismissed, the report's × —, so that a held Enter there is no list `enter` either.
  * @type {Set<string>}
  */
 const pressedInDialog = new Set();
 
 /**
- * Keeps `pressedInDialog` and swallows an auto-repeat of a key held since a dialog was shown,
- * once the dialog is gone. True when it swallowed the event.
+ * Keeps `pressedInDialog` and swallows an auto-repeat of a key held since a dialog was shown (or
+ * on a control of the banner), once the dialog (or the control) no longer has it. True when it
+ * swallowed the event.
  * @param {KeyboardEvent} event
  * @returns {boolean}
  */
@@ -1570,7 +1610,7 @@ function heldFromDialog(event) {
   if (MODIFIER_KEYS.has(event.key)) {
     return false;
   }
-  if (modal()) {
+  if (modal() || dom.banner.contains(document.activeElement)) {
     if (!event.repeat) {
       pressedInDialog.add(event.code);
     }
