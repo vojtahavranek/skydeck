@@ -157,7 +157,24 @@ describe('ticketAddress: no link', () => {
 });
 
 // The configuration refuses each of these (S2 16.4); ticketAddress refuses them again on its own,
-// so that a key can choose no host whatever ticketUrl it is given.
+// so that a key can choose no host and no login whatever ticketUrl it is given. The keys are
+// those a title could give under a wide pattern: upper and lower case, dotted, a digit, a hex
+// digit, an underscore, the configuration's own sample keys, and the short ones a stand-in could
+// be mistaken for.
+const KEYS = [
+  'KEY-1',
+  'OTHER-2',
+  'abc-12',
+  'evil.com',
+  'x',
+  'a',
+  'e',
+  's',
+  '1',
+  '0',
+  '8443',
+  'a_b',
+];
 describe('ticketAddress: a ticketUrl that puts the key before its path gives no link', () => {
   for (const url of [
     'https:///{key}/x',
@@ -171,14 +188,76 @@ describe('ticketAddress: a ticketUrl that puts the key before its path gives no 
     'https://{key}@host/x',
     'https://u:{key}@host/x',
     'https://{key}/',
+    'https://host:{key}/x',
+    'https://[::{key}]/x',
+    'http{key}://host/x',
   ]) {
     test(url, () => {
       assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, url), null);
-      // The keys the configuration's check reads it with are no way around it.
-      assert.equal(ticketAddress('KEY-1', WORD, url), null);
-      assert.equal(ticketAddress('OTHER-2', WORD, url), null);
+      for (const key of KEYS) {
+        assert.equal(ticketAddress(key, WORD, url), null, key);
+      }
     });
   }
+
+  test('a ticketUrl with a user name or a password of its own', () => {
+    for (const url of [
+      'https://user@host/{key}',
+      'https://user:secret@host/{key}',
+      'https://:secret@host/{key}',
+    ]) {
+      assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, url), null, url);
+    }
+  });
+});
+
+// S2 12.5: the address is the pattern's parsed address with the key in the place of `{key}`,
+// character for character; a key that the parser reads otherwise gives no link.
+describe('ticketAddress: a key the parser reads otherwise than the place it fills', () => {
+  test('a title "e. retry the upload" that finishes the escape %2 into a dot segment', () => {
+    const group = new RegExp(WORD).exec('e. retry the upload')?.[0] ?? null;
+    assert.equal(group, 'e.');
+    const url = 'https://tickets.example.net/team/browse/%2{key}';
+    assert.equal(linkToOpen(url.replace('{key}', 'e.')), 'https://tickets.example.net/team/');
+
+    assert.equal(ticketAddress(group, WORD, url), null);
+  });
+
+  for (const [url, keys] of [
+    ['https://host/b/%2{key}', ['e', 'E', 'e.']],
+    ['https://host/b/%{key}', ['2e', '2E', '2e.']],
+    ['https://host/b/.%2{key}', ['e']],
+    ['https://host/b/.%{key}', ['2e']],
+    ['https://host/b/%2e%{key}', ['2e']],
+  ] as const) {
+    test(`${url}: a key that ends the escape the pattern began`, () => {
+      for (const key of keys) {
+        assert.equal(ticketAddress(key, WORD, url), null, key);
+      }
+    });
+  }
+
+  test('a key "." or ".." in a path', () => {
+    for (const key of ['.', '..']) {
+      assert.equal(ticketAddress(key, ANYTHING, 'https://host/b/{key}/x'), null, key);
+    }
+  });
+
+  test('an ordinary key after a whole escape, in a path, a query and a fragment, is a link', () => {
+    for (const [url, address] of [
+      ['https://host/issues/?jql=key%3D{key}', 'https://host/issues/?jql=key%3DABC-12'],
+      ['https://host/b/%7E{key}', 'https://host/b/%7EABC-12'],
+      ['https://host/b/{key}/x', 'https://host/b/ABC-12/x'],
+      ['https://host/b?k={key}&x=1', 'https://host/b?k=ABC-12&x=1'],
+      ['https://host/#/b/{key}', 'https://host/#/b/ABC-12'],
+    ] as const) {
+      assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, url), address, url);
+    }
+  });
+
+  test('a ticketUrl that holds the stand-in\'s text "_key_" itself gives no link (a named limit)', () => {
+    assert.equal(ticketAddress('ABC-12', DEFAULT_PATTERN, 'https://host/_key_/{key}'), null);
+  });
 });
 
 describe('the modules of the ticket link (D18, design 11)', () => {

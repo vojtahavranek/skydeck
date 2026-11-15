@@ -211,11 +211,9 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     'http://host:8080/t?id={key}',
     'https://host/#/{key}',
     'https://Example.net:443/{key}',
-    'https://user:secret@host/{key}',
-    // A host or a user name of the pattern's own that holds a sample key's text: the parts are
-    // the same for both sample keys, so the key is not in them (ruled on #77).
+    // A host of the pattern's own that holds a sample key's text: it is the same for both sample
+    // keys, so the key is not in it (ruled on #77).
     'https://key-1.example.net/{key}',
-    'https://Other-2@host/{key}',
   ]) {
     test(`accepts ${JSON.stringify(value)}, kept as it was written`, (t) => {
       const config = withTicketUrl(t, value).run() as { ticketUrl: unknown };
@@ -244,6 +242,11 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     ['the key as the user name', 'https://{key}@host/x'],
     ['the key as the password', 'https://u:{key}@host/x'],
     ['the key as the port', 'https://host:{key}/'],
+    // No user name or password: show would print it, and Edge's command line would carry it.
+    ['a user name', 'https://user@host/{key}'],
+    ['a user name and a password', 'https://user:secret@host/{key}'],
+    ['a password', 'https://:secret@host/{key}'],
+    ['a user name that holds a sample key', 'https://Other-2@host/{key}'],
     ['javascript:', 'javascript:{key}'],
     ['file:', 'file:///{key}'],
     ['ftp:', 'ftp://host/{key}'],

@@ -73,20 +73,20 @@ const MAX_TICKET_URL_LENGTH = 2048;
 const NOT_IN_A_TICKET_URL = /[\s\u0000-\u001f\u007f-\u009f"\\]/;
 
 /**
- * The scheme, user name, password and host that the URL parser reads in `pieces` joined by `key`;
- * null when it reads no http or https URL.
+ * The host that the URL parser reads in `pieces` joined by `key`; null when it reads no http or
+ * https URL, or one with a user name or a password.
  */
-function originWith(pieces: string[], key: string): string[] | null {
+function hostWith(pieces: string[], key: string): string | null {
   const url = URL.parse(pieces.join(key));
   if (url === null || (url.protocol !== 'http:' && url.protocol !== 'https:')) return null;
-  return [url.protocol, url.username, url.password, url.host];
+  return url.username === '' && url.password === '' ? url.host : null;
 }
 
 /**
  * S2 16.4: null, or a string of at most 2,048 characters holding `{key}` exactly once and no
  * white space, control character, '"' or backslash, that the URL parser reads with each of two
- * different sample keys in place of `{key}` as http or https with the same scheme, user name,
- * password and host — parts the key went into would differ. The parser decides where the key
+ * different sample keys in place of `{key}` as http or https without a user name or password and
+ * with the same host — a host the key went into would differ. The parser decides where the key
  * stands, not the text: it skips extra slashes, and reads `https:{key}` with the key as the host.
  */
 function isTicketUrl(value: unknown): value is string | null {
@@ -100,9 +100,8 @@ function isTicketUrl(value: unknown): value is string | null {
   }
   const pieces = value.split(KEY_PLACE);
   if (pieces.length !== 2) return false;
-  const one = originWith(pieces, SAMPLE_KEY);
-  const other = originWith(pieces, OTHER_SAMPLE_KEY);
-  return one !== null && other !== null && one.every((part, i) => part === other[i]);
+  const host = hostWith(pieces, SAMPLE_KEY);
+  return host !== null && host === hostWith(pieces, OTHER_SAMPLE_KEY);
 }
 
 /**

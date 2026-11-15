@@ -1966,21 +1966,26 @@ attaches with origin `manual` and fetches at once (design 7.3). Done shows an Un
 
 **The ticket link** (asked for by the user on 2026-11-15; the details ruled by the lead that day).
 The group stays only a group (design 7.1), and nothing in the core depends on one ticket system
-(design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the
-group holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`,
-`_` and `.` and starting with a letter or a digit (the default pattern matches nothing else) —
-the address is `ticketUrl` with `{key}` replaced by exactly that text, as 9.6's rule
-re-serialises it, and only while its scheme, user name, password and host are those of
-`ticketUrl` itself. The chip then shows that it is a link (an arrow after the key, underlined),
-its tooltip is the address, and a click on it that selected no text opens it in the user's own
-Edge profile, as any link (9.6: `act open-link`, which the server checks again). Without a link
-the chip is plain text. The chip never edits: the ✎ beside it and `g` edit the group, with and
-without a link, and while there is no group the dashed `+ group` sets one. So nothing a program
-wrote into a title can add a host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`,
-`%` or white space, and the URL parser, not the text, decides that `{key}` stands after the host
-(16.4). The address reaches the page as a string of `list` and is shown only as text; it never
-becomes markup. skydeck reads nothing from the ticket system: no API, no login. `skydeck show`
-prints the address as `ticket:` after `group:` (its `--json` is unchanged).
+(design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the group
+holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`, `_` and
+`.` and starting with a letter or a digit (the default pattern matches nothing else) — the address
+is `ticketUrl` with `{key}` replaced by exactly that text, as 9.6's rule re-serialises it, and only
+while it is, character for character, `ticketUrl` as the parser reads it with a stand-in for `{key}`
+and the key in the stand-in's place, without a user name or password and with that reading's host: a
+key the parser reads otherwise (one that finishes a percent-escape the pattern began into a dot
+segment, `…/%2{key}` with `e.`) gives no link. The chip then shows that it is a link (an arrow after
+the key, underlined), its tooltip is the address, and a click on it that selected no text opens it
+in the user's own Edge profile, as any link (9.6: `act open-link`, which the server checks again).
+Without a link the chip is plain text. The chip never edits: the ✎ beside it and `g` edit the group,
+with and without a link, and while there is no group the dashed `+ group` sets one. So nothing a
+program wrote into a title can add a host, a path or a query: the key holds no `/`, `?`, `#`, `@`,
+`:`, `%` or white space, and the URL parser, not the text, decides that `{key}` stands after the
+host (16.4). A named limit: a pattern that leaves a percent-escape unfinished right before `{key}`
+lets a key finish it into one the parser keeps (`?id=%2{key}` with `6x` gives `%26x`, an escaped `&`
+the ticket system may decode); such a pattern is the user's to avoid. The address reaches the page
+as a string of `list` and is shown only as text; it never becomes markup. skydeck reads nothing from
+the ticket system: no API, no login. `skydeck show` prints the address as `ticket:` after `group:`
+(its `--json` is unchanged).
 
 ### 12.6 The right side
 
@@ -2450,7 +2455,7 @@ New keys, all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
-| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` with the same scheme, user name, password and host (a part the key went into would differ): the parser decides where the key stands, not the text (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
+| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ): the parser decides where the key stands, not the text (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
