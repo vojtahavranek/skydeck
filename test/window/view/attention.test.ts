@@ -130,6 +130,8 @@ test('attentionOf: the cut is measured on the sanitised text', () => {
 
 test('attentionOf: the detail is trimmed once sanitised, and the cut is measured on the trimmed text', () => {
   assert.equal(detailOf('  permission · Bash \n'), 'permission · Bash');
+  // Sanitised first, then trimmed: spaces inside escape sequences go too.
+  assert.equal(detailOf('\x1b[1m  Bash \x1b[0m'), 'Bash');
   assert.equal(detailOf(`${' '.repeat(130)}text`), 'text');
   assert.equal(detailOf(`\t\n${' '.repeat(10)}${'x'.repeat(120)}  `), 'x'.repeat(120));
   assert.equal(detailOf(`${' '.repeat(5)}${'y'.repeat(200)}`), `${'y'.repeat(119)}…`);
