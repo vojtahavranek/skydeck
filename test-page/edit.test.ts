@@ -996,6 +996,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       await page.keyboard.press('Enter');
       w.answer(await w.act(1), { ok: false, error: 'refused' });
       await showsText(page, '#editor .edit-message', /^refused$/);
+      assert.equal((await dialog(page)).inField, true, 'the field has the keyboard at once');
       await page.keyboard.type('cd');
       assert.equal(await value(), 'abcd', 'typed after the refusal: in the field');
 
@@ -1491,6 +1492,49 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
   );
 
   await t.test(
+    "only an `ok` makes a key wait: after a refused save `l` opens at once; `p` never waits, also after a label's `ok` with no list yet; a key opened from the header's controls says `press l again` (review 2's re-check, review 1's nit)",
+    async (t) => {
+      const d = await deck(t, chromium, { sections: { week: [row(S2)] } }, { modules: RECORDING });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.type('-x');
+      await page.keyboard.press('Enter');
+      w.answer(await w.act(1), { ok: false, error: 'refused' });
+      await showsText(page, '#editor .edit-message', /^refused$/);
+      await page.click('#editor .edit-cancel');
+      await dialogShown(page, false);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.click('#editor .edit-cancel');
+      await dialogShown(page, false);
+
+      w.holdViews(true); // no list comes after the next `ok`
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.press('Enter');
+      w.answer(await w.act(2), { ok: true });
+      await dialogShown(page, false);
+      await page.keyboard.press('p');
+      await dialogShown(page, true);
+      assert.equal((await dialog(page)).what, 'pr', 'p does not wait');
+      await page.click('#editor .edit-cancel');
+      await dialogShown(page, false);
+      // The cards' `edit` (the header's controls of task 38) names the dialog's own key.
+      await page.evaluate(
+        (id) =>
+          (Reflect.get(globalThis, 'cardsDeps') as { edit(what: string, id: string): void }).edit(
+            'label',
+            id,
+          ),
+        S2,
+      );
+      await showsText(page, '#key-message', /^the label is not here yet; press l again$/);
+    },
+  );
+
+  await t.test(
     'a refusal whose dialog was closed meanwhile shows as a toast `not saved: <the error>`, as text; an `ok` stays silent (review 2 C4, ruled)',
     async (t) => {
       const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
@@ -1864,7 +1908,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         };
         await opens('first');
         await mark(l.page, `${key} saved`);
-        await l.page.keyboard.press('Control+Enter'); // saves, unchanged
+        await l.page.keyboard.press(key === 'n' ? 'Control+Enter' : 'Enter'); // saves, unchanged
         await dialogShown(l.page, false);
         // The server sends no list equal to the last one: the list after the result is the one
         // the page asks for (M2). Without it none comes, and the key waits for good.

@@ -472,6 +472,8 @@ function changeView(change) {
 /** The acts whose result a dialog starts from: after this page's own `ok`, it waits for the list
  *  that holds it (C1). */
 const EDITS = new Set(['label', 'group', 'note']);
+/** Each dialog's list key, for D3's sentence. */
+const KEY_OF = { label: 'l', group: 'g', note: 'n', pr: 'p' };
 
 /** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
 const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
@@ -662,7 +664,8 @@ function edit(what, sessionId, key, code) {
   }
   const selected = state.list?.selected?.sessionId === sessionId ? state.list.selected : null;
   if ((what === 'note' && selected === null) || (what !== 'pr' && state.unlisted.has(sessionId))) {
-    say(`the ${what} is not here yet; ${key === '' ? 'try again' : `press ${key} again`}`);
+    // D3's sentence; from the header's controls (no key) it names the dialog's own key.
+    say(`the ${what} is not here yet; press ${key === '' ? KEY_OF[what] : key} again`);
     return;
   }
   state.openedBy = code;

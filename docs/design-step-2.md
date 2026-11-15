@@ -2234,8 +2234,9 @@ hidden again, the row gone from the list), no row is selected — the right side
 that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the first row shown
 (ruled by the plan owner, plan task 27). One exception, ruled by the lead on 2026-11-15 (the user
 may change it): when this page's own `d` in the list has marked the selected session done — its
-answer came, and the list that holds its result (one that arrived since the act was sent, as the
-server sends it before the answer; else the next one) no longer has the row, while that session is
+answer came, and the list that holds its result (one that arrived since the act was sent — the
+server sends it before the answer, unless a list went to the page within the last second; else the
+next one) no longer has the row, while that session is
 still the selected one (moved away meanwhile, the selection stays where the user put it) — the row after it in the
 same section is selected, else the one before it in that section, else none; never a row of Open.
 The Undo of that `d` selects the session again once it is back in the list, if the selection is
@@ -2280,13 +2281,13 @@ window chord but Ctrl+Shift+H says `close the edit first (Esc)` and does nothing
 Ctrl+Shift+V stays the browser's paste. When the dialog closes, whatever closed it, a terminal that
 this page's resume or new brought meanwhile takes the keyboard, else the zone's holder gets it, at
 once (no list is waited for). Enter saves (Ctrl+Enter in the note, where Enter is a line break); a
-held Enter saves once, and the key that opened a dialog types nothing into it while it is held. Esc
+held Enter saves once, and the key that opened a dialog types nothing into it while it is held. An Enter or Esc of an IME composition is the IME's: it neither saves nor closes. Esc
 and Cancel (Close in the pull-request dialog) close; a note whose text was changed needs a second Esc (`Esc again discards your
 text`; a held Esc is one Esc). The reload keys (F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and
 BrowserRefresh) say `save or cancel the edit first` while the dialog holds changed text, and do not
 reload; otherwise they reload as anywhere. A held Enter or Esc that closes a dialog over a terminal
 is a key pressed off the program's holder: its repeats and its release are the page's, and the next
-press is the program's. Over the list, the auto-repeats of a key that closed a dialog act on no list key (an Enter must not resume a session); the next press does (review 2 of plan D task 37). A save keeps the dialog open with its text and its keyboard when it is
+press is the program's. Over the list, the auto-repeats of a key pressed in a dialog act on no list key once it is gone (an Enter must not resume a session); the next press does (review 2 of plan D task 37). A save keeps the dialog open with its text and its keyboard when it is
 refused, the connection is lost or the page refuses it before sending (over a limit of 8.2.3, or
 text that is not well formed); its `ok` closes the dialog, except Attach in the pull-request dialog,
 which empties the field and keeps the dialog open so that the new pull request shows in its list
