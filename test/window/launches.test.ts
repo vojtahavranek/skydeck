@@ -1062,7 +1062,7 @@ describe('restoreTerminal(): the terminal restore opens with', () => {
     assert.deepEqual(h.logs, ['restore: an ended terminal was not closed (RangeError)']);
   });
 
-  test('a spec that is not a resume is refused for certain: nothing closed, nothing opened (no export starts a program past resume() and newSession())', async (t) => {
+  test('a spec that is not a resume is refused for certain: nothing closed, nothing opened (restore never starts a new session)', async (t) => {
     // Ruled on review 2 (C4): restore never starts a new session.
     const d = deckOf(t);
     const h = harness(d, {

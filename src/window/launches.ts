@@ -323,8 +323,8 @@ export function createLaunches(deps: LaunchesDeps): Launches {
         name: terminal.name,
         opensTabs: terminal.opensTabs,
         async open(spec) {
-          // Ruled on review 2: restore only resumes, so no export starts a program that did not
-          // come through resume() or newSession() (a `new` spec would start with any argv).
+          // Ruled on review 2: restore never starts a new session (a `new` spec would start with
+          // any argv); a resume spec is runRestore's, which ran the guard and took the lock.
           if (spec.kind !== 'resume') return NOT_A_RESUME;
           closeEnded(spec.sessionId, 'restore');
           return terminal.open(spec);

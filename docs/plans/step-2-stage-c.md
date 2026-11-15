@@ -372,7 +372,7 @@ export interface Launches {
    *  spec's session's terminals that are over, then opens; a throw is a timeout, as for resume. A
    *  factory that throws: its open fails with `timedOut: false` (nothing was spawned). A spec that
    *  is not a resume: `restore starts only resumes`, `timedOut: false`, nothing closed or opened
-   *  (ruled: no export starts a program that did not come through resume() or newSession()). */
+   *  (ruled: restore never starts a new session). */
   restoreTerminal(size: Size): Terminal;
 }
 /** Throws only what is not a refusal: a busy store (isBusy) and unexpected errors; callers map them. */
@@ -895,10 +895,11 @@ As built, with the rulings of the lead's start message for this task:
 - **`restoreTerminal`** builds its terminal at once with the size given; a factory that throws
   does not make it throw: its `open` answers `{ ok: false, error: 'the terminal failed
   unexpectedly (<kind>)', timedOut: false }` (nothing was spawned, so restore gives the lock
-  back), closes nothing, and the failure is logged once by kind. Ruled on review 2 (C4): NO
-  EXPORT MAY START A PROGRAM THAT DID NOT COME THROUGH `resume()` OR `newSession()` — restore
-  only resumes, so `open` answers a spec whose `kind` is not `resume` with `{ ok: false, error:
-  'restore starts only resumes', timedOut: false }`, closes nothing and opens nothing.
+  back), closes nothing, and the failure is logged once by kind. Ruled on review 2 (C4): RESTORE
+  NEVER STARTS A NEW SESSION — `open` answers a spec whose `kind` is not `resume` with `{ ok:
+  false, error: 'restore starts only resumes', timedOut: false }`, closes nothing and opens
+  nothing; a resume spec is opened as given (it is `runRestore`'s, which ran the guard and took
+  the lock).
 - **Log lines** name the launch they were part of (`resume: …`, `new: …`, `restore: …`) and carry
   kinds only; the caller's `log` adds its prefix (`createActions` passes `act `, so stage A's lines
   `act resume: the terminal failed (<kind>)` are unchanged). A refusal is answered, never logged.
