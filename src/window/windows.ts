@@ -1,12 +1,14 @@
 /**
  * The Windows side of the window, as pure rules: Windows paths, the Edge profile folder (S2 5.4),
- * Edge's arguments (S2 5.3) and the links it may open (S2 9.6). Nothing here starts a program;
- * task 19 does, with what these return.
+ * Edge's arguments (S2 5.3) and the links it may open (S2 9.6; the rule lives in src/text/link.ts
+ * and is re-exported here). Nothing here starts a program; task 19 does, with what these return.
  */
 
 import { join } from 'node:path';
 
 import type { Files } from '../platform/types.ts';
+
+export { linkToOpen } from '../text/link.ts';
 
 /** `/mnt/<letter>` and what follows it; WSL mounts drives under lowercase letters. */
 const DRIVE_PATH = /^\/mnt\/([a-z])(?:\/(.*))?$/;
@@ -101,26 +103,4 @@ export function edgeArgs(port: number, token: string, profileDir: string): strin
     '--no-first-run',
     '--no-default-browser-check',
   ];
-}
-
-/** S2 9.6: the longest URL the server opens. */
-const MAX_LINK_LENGTH = 2048;
-
-/**
- * S2 9.6: the URL to open (re-serialised), or null when it must not be opened: longer than 2,048
- * characters, not a URL, or not http/https. The re-serialised URL — the one passed to Edge — must
- * fit the same limit (percent-encoding can make it longer than what the page sent), and must hold
- * no '"' and no backslash: it becomes one argument of a Windows program, and either can change how
- * that program splits its command line. (The parser encodes a '"' everywhere but in the host, and
- * a backslash keeps only in the query and the fragment.)
- */
-export function linkToOpen(url: string): string | null {
-  if (url.length > MAX_LINK_LENGTH) return null;
-  const parsed = URL.parse(url);
-  if (parsed === null || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
-    return null;
-  }
-  const href = parsed.href;
-  if (href.length > MAX_LINK_LENGTH || href.includes('"') || href.includes('\\')) return null;
-  return href;
 }
