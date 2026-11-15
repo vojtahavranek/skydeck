@@ -12,7 +12,9 @@ export interface WindowConfig {
 }
 
 export interface Config {
-  terminal: 'here' | 'wezterm';
+  /** Where `resume`, `new`, `restore` and the interactive list's `R` start a session (design 7.6
+   *  "Where"; S2 11.4, 16.4: `window` sends them to the window's server). */
+  terminal: 'here' | 'wezterm' | 'window';
   wezterm: { domain: string | null };
   groupPattern: string; // a RegExp source
   firstRunDoneAfterDays: number;
@@ -111,10 +113,10 @@ function isTicketUrl(value: unknown): value is string | null {
 /**
  * Parses config.json text and merges it over DEFAULT_CONFIG. Throws ConfigError naming `source`
  * and the key on: invalid JSON; a top level that is not an object; an unknown key (also inside
- * `wezterm`); a wrong type; `terminal` not here|wezterm; a number that is not a positive integer;
- * `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute; `claudeCommand` empty;
- * `ticketUrl` that isTicketUrl refuses (S2 16.4); in `window` (S2 16.4): an unknown key, `port`
- * outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
+ * `wezterm`); a wrong type; `terminal` not here|wezterm|window (S2 16.4); a number that is not a
+ * positive integer; `groupPattern` that `new RegExp` rejects; `claudeHome` not absolute;
+ * `claudeCommand` empty; `ticketUrl` that isTicketUrl refuses (S2 16.4); in `window` (S2 16.4): an
+ * unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
  * `keepAlive` neither "wsl" nor "off".
  *
  * `claudeHome`, `ticketUrl` and `wezterm.domain` may also be `null`, which is their default; an
@@ -139,8 +141,8 @@ export function parseConfig(text: string, source: string): Config {
   for (const [key, value] of Object.entries(parsed)) {
     switch (key) {
       case 'terminal':
-        if (value !== 'here' && value !== 'wezterm') {
-          fail('"terminal" must be "here" or "wezterm"');
+        if (value !== 'here' && value !== 'wezterm' && value !== 'window') {
+          fail('"terminal" must be "here", "wezterm" or "window"');
         }
         config.terminal = value;
         break;

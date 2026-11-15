@@ -303,3 +303,40 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     assert.deepEqual(from, ['node:path', './errors.ts', './types.ts']);
   });
 });
+
+describe('terminal "window" (S2 16.4, 11.4; plan C13, task 77)', () => {
+  const MESSAGE = '"terminal" must be "here", "wezterm" or "window"';
+
+  test('"window" is accepted', (t) => {
+    assert.deepEqual(load(t, '{"terminal":"window"}').run(), {
+      ...DEFAULT_CONFIG,
+      terminal: 'window',
+    });
+  });
+
+  test('"here" and "wezterm" are accepted as before', (t) => {
+    assert.equal((load(t, '{"terminal":"here"}').run() as { terminal: unknown }).terminal, 'here');
+    assert.equal(
+      (load(t, '{"terminal":"wezterm"}').run() as { terminal: unknown }).terminal,
+      'wezterm',
+    );
+  });
+
+  for (const value of ['tabs', 'Window', 'window ', '', null, 3, ['window']]) {
+    test(`${JSON.stringify(value)} is refused with the message that names the three values`, (t) => {
+      const { path, run } = load(t, JSON.stringify({ terminal: value }));
+
+      assert.throws(run, (error: unknown) => {
+        assert.ok(error instanceof ConfigError, String(error));
+        assert.equal(error.message, `${path}: ${MESSAGE}`);
+        return true;
+      });
+    });
+  }
+
+  test('the default stays "here"', (t) => {
+    assert.equal(DEFAULT_CONFIG.terminal, 'here');
+    assert.equal((load(t, '{}').run() as { terminal: unknown }).terminal, 'here');
+    assert.equal((load(t, null).run() as { terminal: unknown }).terminal, 'here');
+  });
+});
