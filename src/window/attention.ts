@@ -13,7 +13,8 @@
  * kept. While writes are kept, `refreshed` and `seenNow` put theirs behind them without touching
  * the store, so that a busy store costs its 250 ms once a look, never at every key (`seenNow` runs
  * at every key press on some paths; ruled). Any other failure of a write — B2's limit at 2^53 − 1,
- * a damaged table — drops it. A store migrated under the server (StoreNewerError) stops the module
+ * a damaged table — drops it; a seen that would still clear a mark is made anew at the next look or
+ * key while the hold lasts, and each such try is refused at once (logged once). A store migrated under the server (StoreNewerError) stops the module
  * (S2 10.1). The marks are read once, at the first look that can (only the server writes them),
  * and then follow from what each write returns; a read that fails for another reason than a busy
  * store leaves no attention facts from the store (ruled: one damaged row makes `attention()` throw
@@ -73,6 +74,8 @@ export interface Attention {
   /** B12: true once the marks have been read and a refresh has worked since (refreshed() was
    *  called), so that the window ends of that refresh are among the first judgement. */
   ready(): boolean;
+  /** The module's own maps, read-only to the caller: current until its next call that changes them
+   *  (a caller builds its lists at once, as the server's do). */
   facts(): AttentionFacts;
 }
 
@@ -132,7 +135,8 @@ function unseenAfter(
  * B11: `write` put behind `queue`. A turn end takes the place of an earlier one of its session (the
  * later is kept): the earlier write loses its turn end, and goes when nothing is left of it. Nothing
  * else is folded — a seen folded into a later turn end would make that turn seen (B3) although the
- * user had left.
+ * user had left. A turn end's write holds no window end (the look writes turn ends, `refreshed`
+ * window ends), so what is left of it is its seen.
  */
 function enqueue(queue: readonly AttentionWrite[], write: AttentionWrite): AttentionWrite[] {
   const next: AttentionWrite[] = [];
@@ -145,13 +149,19 @@ function enqueue(queue: readonly AttentionWrite[], write: AttentionWrite): Atten
       next.push(earlier);
       continue;
     }
-    const rest: AttentionWrite = { sessionId: earlier.sessionId };
-    if (earlier.windowEndNs !== undefined) rest.windowEndNs = earlier.windowEndNs;
-    if (earlier.seen === true) rest.seen = true;
-    if (hasEnd(rest) || rest.seen === true) next.push(rest);
+    if (earlier.seen === true) next.push({ sessionId: earlier.sessionId, seen: true });
   }
   next.push(write);
   return next;
+}
+
+/** The largest time an INTEGER column holds (design 9.2), in nanoseconds. */
+const INT64_MAX = 2n ** 63n - 1n;
+
+/** A live file's time, or null when no INTEGER column could hold it (a foreign file's, from the year
+ *  2262 on): unknown, so that one file cannot make the write of every session fail. */
+function storable(ns: Ns | null): Ns | null {
+  return ns !== null && ns <= INT64_MAX ? ns : null;
 }
 
 function sameLive(a: ReadonlyMap<string, LiveStatus>, b: ReadonlyMap<string, LiveStatus>): boolean {
@@ -175,10 +185,10 @@ export function createAttention(deps: AttentionDeps): Attention {
   const { store, places } = deck;
   const { files, proc, clock } = deck.platform;
 
-  let facts: { marks: ReadonlyMap<string, AttentionRow>; live: ReadonlyMap<string, LiveStatus> } = {
-    marks: new Map(),
-    live: new Map(),
-  };
+  /** The stored rows by session (the facts' marks): filled by the read, and by each write's rows. */
+  const marks = new Map<string, AttentionRow>();
+  /** The statuses of the baselines (B4, B5). */
+  let live: ReadonlyMap<string, LiveStatus> = new Map();
   let baselines: ReadonlyMap<number, LookedFile> = new Map();
   let first = true;
   /** The writes a busy store refused, in their order (B11). */
@@ -216,7 +226,8 @@ export function createAttention(deps: AttentionDeps): Attention {
       return false;
     }
     marksRead = true;
-    facts = { marks: new Map(rows.map((row) => [row.sessionId, row])), live: facts.live };
+    // Every stored row: also those of writes made before the read worked.
+    for (const row of rows) marks.set(row.sessionId, row);
     return rows.length > 0;
   };
 
@@ -239,7 +250,7 @@ export function createAttention(deps: AttentionDeps): Attention {
         sessionId: file.sessionId,
         status: file.status,
         waitingFor: file.waitingFor,
-        sinceNs: file.statusUpdatedAtNs ?? file.updatedAtNs,
+        sinceNs: storable(file.statusUpdatedAtNs) ?? storable(file.updatedAtNs),
       });
     }
     return looked;
@@ -285,7 +296,7 @@ export function createAttention(deps: AttentionDeps): Attention {
       const own = writes.findLast((write) => write.sessionId === sessionId && hasEnd(write));
       if (
         own === undefined &&
-        !unseenAfter(facts.marks.get(sessionId), [...kept, ...writes], sessionId)
+        !unseenAfter(marks.get(sessionId), [...kept, ...writes], sessionId)
       ) {
         continue;
       }
@@ -321,9 +332,7 @@ export function createAttention(deps: AttentionDeps): Attention {
     }
     busy.worked();
     refused.worked();
-    const marks = new Map(facts.marks);
     for (const row of rows) marks.set(row.sessionId, row);
-    facts = { marks, live: facts.live };
     return true;
   };
 
@@ -344,9 +353,9 @@ export function createAttention(deps: AttentionDeps): Attention {
         const { baselines: next, ends } = lookAt(baselines, looked, goneOf(looked), first);
         first = false;
         baselines = next;
-        const live = liveStatuses(baselines.values());
-        if (!sameLive(facts.live, live)) {
-          facts = { marks: facts.marks, live };
+        const statuses = liveStatuses(baselines.values());
+        if (!sameLive(live, statuses)) {
+          live = statuses;
           changed = true;
         }
         const writes = turnEnds(ends);
@@ -395,7 +404,7 @@ export function createAttention(deps: AttentionDeps): Attention {
           }
           const atNs = BigInt(exit.atNs);
           // The same end (a server restart finds the keeper again) is never marked twice.
-          if (facts.marks.get(sessionId)?.windowEndNs === atNs) continue;
+          if (marks.get(sessionId)?.windowEndNs === atNs) continue;
           writes.push({ sessionId, windowEndNs: atNs });
         }
         judged = true;
@@ -425,6 +434,6 @@ export function createAttention(deps: AttentionDeps): Attention {
 
     ready: () => marksRead && judged,
 
-    facts: () => facts,
+    facts: () => ({ marks, live }),
   };
 }

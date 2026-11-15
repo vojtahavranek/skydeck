@@ -727,7 +727,10 @@ put theirs behind them and touch no store, so that `seenNow`, which runs at ever
 path of a terminal that is not the selection of a focused page (measured: 200 keys, 200 calls), is
 cheap and never blocks per call (ruled). A RangeError of `recordAttention` (B2's limit at 2^53 − 1)
 is a failure of the write that is not "busy": logged by kind, not kept and retried at every look
-(ruled on task 50's review 1); so is any other refusal that is not busy. The marks are read once,
+(ruled on task 50's review 1); so is any other refusal that is not busy (a `seen` that would still
+clear a mark is made anew at the next look or key while the hold lasts, each try refused at once).
+A live file's time past 2^63 − 1 ns is unknown (no INTEGER column holds it; review 2), so that one
+foreign file cannot make every session's write fail. The marks are read once,
 at the first look that can (a busy read: tried again at the next look); a read that fails otherwise
 — one damaged `attention` row makes `attention()` throw for every session, and a `schema_version`
 of 2 without the table makes every call throw `no such table` — is taken as no attention facts,
@@ -748,7 +751,8 @@ keeper this test kills also uses `registrySandbox`, on `realTestPlatform`, A36)
   `finished` (ruled: the end-to-end case); `updatedAt` without `statusUpdatedAt`, and neither (the
   clock) → finished too; the first look of a new module records nothing for a file that was idle
   already; two holders of one session that end at one look → one turn end with the later time,
-  finished.
+  finished, in either order; `statusUpdatedAt` before `updatedAt`; a time past 2^63 − 1 ns →
+  unknown, and the other sessions' turn ends of that look are stored (review 2).
 - While `seen.take()` gives the session, a turn end and its seen are one write (seen = turn + 1);
   a hold that starts on a finished session writes seen at once; a hold over a session without a
   mark writes nothing, at that look and at every later one (no periodic write, ruled); a seen for
@@ -782,7 +786,8 @@ keeper this test kills also uses `registrySandbox`, on `realTestPlatform`, A36)
   second `refreshed` → nothing more; a new module over a store that holds that exit's time (a
   server restart) → nothing, another exit time → recorded; a `not-started` terminal, or a `lost`
   one whose program never started → nothing; before the marks are read → nothing, judged at the
-  first refresh after.
+  first refresh after; two ended terminals of one session at one refresh while it is seen → the
+  seen after both ends.
 - `ready()`: false until the marks are read and `refreshed()` was called; true after (a refresh
   before the marks are read does not count).
 - Never throws (ruled): a `take()` that throws, a `hub.list()` that throws, a store that fails every

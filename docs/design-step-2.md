@@ -1731,7 +1731,11 @@ had left. The baselines move on, so a turn end is neither lost nor recorded twic
 kept, a refresh's window ends (12.4) and the `seen` that a hold or a typing brings are put behind
 them, and the store is not tried again before the next look: a busy store costs its 250 ms once a
 second at most, never at every key press. Any other refusal of a write — the counter at 2^53 − 1
-(10.2), a damaged table — is logged by its kind and dropped, not kept. The marks are read from the
+(10.2), a damaged table — is logged by its kind and dropped, not kept; a `seen` that would still
+clear a mark is made anew at the next look, or the next key that begins a seen, while the hold
+lasts, and each such try is refused at once. A live file's time that no INTEGER column holds (past
+2^63 − 1 ns, from the year 2262 on) is taken as unknown, so that one foreign file cannot make the
+write of every session fail. The marks are read from the
 store once, at the first look that can, and then follow from what each write returns; a read that
 fails for another reason than a busy store (one damaged row makes every read of the table fail, and
 so does a schema version 2 without the table) leaves no marks from the store, logged once by kind:

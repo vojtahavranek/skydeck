@@ -27,7 +27,7 @@ import { attentionOf } from '../../src/window/view/attention.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { until } from '../helpers/keeper.ts';
-import { S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
+import { S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
 import { info, registrySandbox } from '../helpers/registry.ts';
 import { listRow } from '../helpers/rows.ts';
 
@@ -269,6 +269,45 @@ describe('the look (S2 10.3; B4)', () => {
     ]);
     assert.equal(reasonOf(w, S1), 'finished');
     assert.equal(reasonOf(w, S2), 'finished');
+  });
+
+  test("the status time is the file's statusUpdatedAt before its updatedAt (a rewrite of an idle file keeps it)", (t) => {
+    const w = world(t);
+    liveFile(w.d, PID, S1, 'busy', T0);
+    w.attention.look();
+    const status = T0 + 2n * SEC;
+    liveFile(w.d, PID, S1, 'idle', status, { updatedAt: Number((status + 5n * SEC) / MS) });
+    w.attention.look();
+    assert.equal(stored(w.d)[0]?.turnEndedNs, status);
+    assert.equal(w.attention.facts().live.get(S1)?.sinceNs, status);
+    assert.equal(reasonOf(w, S1), 'finished');
+  });
+
+  test('a status time no INTEGER column holds (past 2^63 - 1 ns) is unknown: one foreign file costs no other session its turn end', (t) => {
+    const w = world(t, { rows: [running(S1), running(S2), running(S3)] });
+    const PID3 = 4444;
+    liveFile(w.d, PID, S1, 'busy', T0);
+    liveFile(w.d, PID2, S2, 'busy', T0);
+    liveFile(w.d, PID3, S3, 'busy', T0);
+    w.attention.look();
+    const far = 1e13; // epoch ms in the year 2286: 1e19 ns
+    const at = T0 + 2n * SEC;
+    liveFile(w.d, PID, S1, 'idle', at, { statusUpdatedAt: far }); // its updatedAt counts
+    liveFile(w.d, PID2, S2, 'idle', at, { statusUpdatedAt: far, updatedAt: far }); // the clock
+    liveFile(w.d, PID3, S3, 'idle', at);
+    w.d.clock.advanceMs(3000);
+    w.attention.look();
+    assert.deepEqual(w.logs, []);
+    assert.deepEqual(stored(w.d), [
+      row({ sessionId: S1, turnEndedSeq: 1, turnEndedNs: at }),
+      row({ sessionId: S2, turnEndedSeq: 2, turnEndedNs: T0 + 3n * SEC }),
+      row({ sessionId: S3, turnEndedSeq: 3, turnEndedNs: at }),
+    ]);
+    assert.equal(w.attention.facts().live.get(S2)?.sinceNs, null);
+    assert.deepEqual(
+      [S1, S2, S3].map((id) => reasonOf(w, id)),
+      ['finished', 'finished', 'finished'],
+    );
   });
 
   test('the first look of a new module only sets the baselines: a file idle already records nothing, nor one that turned idle while no module looked', (t) => {
@@ -721,6 +760,7 @@ describe('a busy store (S2 14; B11)', () => {
 
   test('the store migrated under the server: storeNewer once, nothing written, and later calls do nothing', (t) => {
     const d = testDeck(t);
+    d.deck.store.recordAttention([{ sessionId: S1, windowEndNs: T0 }]); // a mark to clear
     const w = world(t, { d, deck: guardedDeck(t, d), rows: [endedUnexpectedly(S1), running(S2)] });
     liveFile(d, PID2, S2, 'busy', T0);
     w.attention.look();
@@ -732,13 +772,14 @@ describe('a busy store (S2 14; B11)', () => {
 
     w.terminals.push(terminal({ id: 'aaaaaaaaaaaa' }));
     liveFile(d, PID2, S2, 'busy', T0 + 2n * SEC);
+    hold(w, S1);
     assert.equal(w.attention.look(), false);
     assert.equal(w.attention.refreshed(), false);
     assert.equal(w.attention.seenNow(), false);
     assert.equal(w.writes.length, calls, 'nothing tried after it');
     assert.equal(w.attention.facts().live.get(S2)?.status, 'idle', 'the facts stay as they were');
     assert.deepEqual(w.storeNewer, ['skydeck was updated; run skydeck window']);
-    assert.deepEqual(stored(d), []);
+    assert.deepEqual(stored(d), [row({ sessionId: S1, windowEndSeq: 1, windowEndNs: T0 })]);
     assert.deepEqual(w.logs, []);
   });
 
@@ -762,6 +803,17 @@ describe('a busy store (S2 14; B11)', () => {
     assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 3n * SEC }]);
     assert.deepEqual(stored(w.d), [
       row({ sessionId: S1, turnEndedSeq: 8, turnEndedNs: T0 + 3n * SEC }),
+    ]);
+
+    // A write worked: the next refusal is logged again.
+    w.d.deck.store.setKv('attention_seq', String(Number.MAX_SAFE_INTEGER));
+    liveFile(w.d, PID, S1, 'busy', T0 + 4n * SEC);
+    w.attention.look();
+    liveFile(w.d, PID, S1, 'idle', T0 + 5n * SEC);
+    w.attention.look();
+    assert.deepEqual(w.logs, [
+      'attention: a write failed and is dropped (RangeError)',
+      'attention: a write failed and is dropped (RangeError)',
     ]);
   });
 });
@@ -881,7 +933,6 @@ describe('window ends (S2 12.4 reason 2; B10)', () => {
   });
 
   test('nothing for a deliberate end (no mark), a row that runs again (whatever its marks say), a not-started terminal, a lost one whose program never started, or one still running', (t) => {
-    const S3 = '2d7b5e3a-0f4c-4b8d-9e5f-4a3b2c1d0e9f';
     const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
     const S5 = '4f9d7a5c-2b6e-4dae-9a7b-6c5d4e3f2a1b';
     const S6 = '5a0e8b6d-3c7f-4ebf-8b8c-7d6e5f4a3b2c';
@@ -985,6 +1036,29 @@ describe('window ends (S2 12.4 reason 2; B10)', () => {
     assert.deepEqual(stored(w.d), [
       row({ sessionId: S1, windowEndSeq: 1, windowEndNs: T0 + 5n * SEC, seenSeq: 2 }),
     ]);
+  });
+
+  test('two ended terminals of one session at one refresh, that session being seen: the seen after both ends', (t) => {
+    const w = ended(
+      t,
+      [
+        terminal({ id: 'aaaaaaaaaaa1' }),
+        terminal({
+          id: 'aaaaaaaaaaa2',
+          exit: { code: null, signal: 1, atNs: String(T0 + 7n * SEC), notStarted: null },
+        }),
+      ],
+      [endedUnexpectedly(S1)],
+    );
+    hold(w, S1);
+    w.attention.refreshed();
+    assert.deepEqual(w.writes, [
+      [
+        { sessionId: S1, windowEndNs: T0 + 5n * SEC },
+        { sessionId: S1, windowEndNs: T0 + 7n * SEC, seen: true },
+      ],
+    ]);
+    assert.equal(reasonOf(w, S1, 'not-running'), null);
   });
 
   test('the session is the one the terminal shows, else the one it was opened for', (t) => {
