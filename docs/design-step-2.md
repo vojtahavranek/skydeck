@@ -2037,7 +2037,9 @@ gives them back when its program never started (7.8).
   more is said —, a refusal (codes 2–4) or a line of plan C 2.5 as the message line, and for a
   failed launch `starting <short> in the window failed; the details are printed when the list
   ends`, its lines (sanitised) printed when the list ends; an answer without lines (a server of
-  another build) names its code instead.
+  another build) names its code instead. A named limit (ruled, task 77's review 2): a line longer
+  than the terminal is cut in the list's message line, the advice at its end with it; the
+  command line prints it whole.
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
   sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
   after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
