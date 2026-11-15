@@ -913,8 +913,8 @@ short id   /` while it is empty. A click into it, or `/` while the list has the 
 (`Focus: list`), gives it the keyboard: its border takes the selection's colour and the caret
 blinks in it. What you type there is text, and the list follows each keystroke; but Enter ends
 the entry and gives the keyboard back to the list, Esc does the same and clears the field, Tab
-goes on to the chips below, and the window's Ctrl+Shift chords and the reload keys act as
-anywhere. With the keyboard on the list, Esc clears the filter, and the next Esc goes to the
+goes on to the chips below, and the window's keys (its Ctrl+Shift chords and Ctrl+Tab) and the
+reload keys act as anywhere, but Ctrl+Shift+V, which pastes into the field as the browser does. With the keyboard on the list, Esc clears the filter, and the next Esc goes to the
 terminal.
 
 - **Words.** The text is split at white space into words, and a session is listed when every

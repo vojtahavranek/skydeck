@@ -1251,7 +1251,10 @@ Setup:
   session is ever resumed, or typed into.
 - **Its short id.** Click the throwaway session's row once, then look at the header's second
   line: it must start with the throwaway folder, `/home/<you>/skydeck-try`. When it shows another
-  folder, you clicked another session: click another row once and look again. Then write down the
+  folder, you clicked another session: find the throwaway session's row first (under Open by its
+  slot number; or in W, where `skydeck show <short id>` prints the folder on its `dir:` line for
+  a short id of `skydeck ls`'s last column), click it once and look again; never click a row
+  marked as needing you (a coloured bar at its left) to look. Then write down the
   short id the header shows (on that second line, after the directory, the times and where the
   title comes from). Each check starts with the throwaway session selected, so that a key that
   lands where you did not mean it to reaches only the throwaway session.
@@ -1274,8 +1277,10 @@ Setup:
   (a click on each chip that is on). At the end put back what you wrote down: the filter's text
   typed again into its field (look for the caret first), each chip that was on clicked on again,
   the stacks you opened closed and those that were open opened again, Earlier folded or unfolded
-  as it was (a fold while the selected session is in Earlier selects the row above it: select the
-  throwaway session first), and your own layout (Win+Space).
+  as it was, and your own layout (Win+Space). Fold Earlier only while the selected session is not
+  in Earlier (a fold with the selection inside it selects the row above it, which may be a real
+  session); when the throwaway session's row is in Earlier, leave Earlier unfolded and write that
+  down.
 
 ## W30. Search on your own sessions (real claude)
 
