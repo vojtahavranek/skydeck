@@ -130,7 +130,7 @@ same as its row here.
 | 75 | `web/banner.js`, `web/banner-text.js`, `web/banner.css`, `test/web/banner.test.ts`, `test-page/banner.test.ts` | `web/app.js`, `web/index.html`; `test-page/helpers/shell.ts` |
 | 81 | `src/window/page-mark.ts`, `test/window/page-mark.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/window.test.ts`; `docs/design-step-2.md` (5.1, 8.3, 10.2) |
 | 82 | — | `src/window/mapping.ts`, `src/window/starts.ts`, `src/window/tick.ts`, `src/window/launches.ts`; `test/window/mapping.test.ts`, `test/window/starts.test.ts`, `test/window/tick.test.ts`, `test/window/launches.test.ts`, `test/window/actions.test.ts`; `docs/design-step-2.md` (7.5, 7.8) |
-| 74 | `test/helpers/window-restore.ts`, `test/window/server-launch.test.ts`, `test/window/server-restore.test.ts` | `src/window/server.ts` |
+| 74 | `test/helpers/window-restore.ts`, `test/window/server-launch.test.ts`, `test/window/server-restore.test.ts` | `src/window/server.ts`; ruled (task 81's review 2, D): `src/platform/types.ts`, `src/platform/real.ts`, `test/helpers/platform.ts`, `test/helpers/window.ts` (one line), `test/platform/real.test.ts`, `test/platform/helpers.test.ts` (`Clock.monotonicNs`); ruled: `test/cli/commands/window.test.ts` (its restart cases), `src/window/restorer.ts` (`banner()`'s `catch`), `test/window/restorer.test.ts`; `docs/design-step-2.md` (5.1, 10.2's `window_pages_open` row) |
 | 76 | `src/cli/window-open.ts`, `src/cli/window-requests.ts`, `test/window/client-launch.test.ts`, `test/cli/window-requests.test.ts` | `src/window/client.ts`, `src/cli/commands/window.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `test/fixtures/fake-serve/fake-serve.ts`; `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`; `docs/design-step-2.md` (11.4), `docs/design.md` (7.5) |
 | 77 | `test/cli/window-e2e.test.ts`, `test/cli/commands/restore-window.test.ts` | `src/platform/config.ts`, `src/cli/launching.ts`, `src/cli/commands/resume.ts`, `src/cli/commands/new.ts`, `src/cli/commands/restore.ts`, `src/cli/commands/doctor.ts`, `src/cli/tui/run.ts`; `test/platform/config.test.ts`, `test/cli/commands/doctor.test.ts`, `test/cli/tui/run.test.ts`, `test/cli/commands/resume.test.ts`, `test/cli/commands/new.test.ts`, `test/cli/commands/restore.test.ts`; `docs/design-step-2.md` (11.4, 16.4) |
 | 79 | — | `docs/install.md`, `docs/manual-checks.md`, `README.md`; `docs/design-step-2.md` (18, 19, and any decision of 1a still missing) |
@@ -213,7 +213,7 @@ decision in the design in its own pull request; `—` means it is an implementat
 | C17 | `SKYDECK_TEST_WINDOW_TIMES` (A31) gains `answerMs` (30 s: the wait for an answer to `POST /resume` and `/new`, and the silence that ends a `POST /restore`), honoured only with `SKYDECK_TEST_NO_WINDOWS=1`. The restorer's heartbeat interval is an option of `createRestorer` (10 s by default), set only by tests. | A31's rule: no test waits 30 s. | — |
 | C18 | The times the banner shows are the page's (`web/banner-text.js`): `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02`, `on 12 Nov 2025 at 18:02` (a year other than this one), in the page's time zone, 24-hour. | S2 12.7's "yesterday at 18:02"; the server sends nanoseconds (S2 8.2.3). | — |
 | C19 | **The resume lock's take mark** (S2 7.3's and 7.8's named limit, closed; ruled on review A). A renewal writes the lock's time with a mark in its last six digits, the sub-millisecond part that skydeck's clock (milliseconds, `Date.now()` × 10⁶) leaves 0: the mark of a value whose last six digits are 0 — every lock `acquireLock` writes, as today — is `1 + (its milliseconds mod 999,999)`; any other value's mark is those six digits; `renewLock` writes the time of now, to the millisecond, plus the mark of the value it renews. **Those six digits of a renewed lock are a mark, not time** (design 7.6 says so). Two values are **of one take** when both record an event id, the same one, and the same mark (`sameTake`), and they are not two different values whose last six digits are both 0 (ruled, task 80: only `acquireLock` writes such a time, `renewLock` never does, so they are always two takes); a value without an event id (an older skydeck's) is of one take only with itself. **A lock's time is read to the millisecond** (ruled, task 80): `lockTakenNs` and `freshAge` drop its last six digits before they compute an age, a wait or a deadline, so a renewal's mark moves none of them. The window's found-keeper decision accepts a lock of the hello's take (a renewal), and the settlement of an ended terminal gives back a lock of its take (`releaseLockOfTake`); a take-over (a new `acquireLock`, a new millisecond) is another take. `acquireLock`, `releaseLock` and every value stage A writes or compares are unchanged. | A renewal and a take-over of a stale lock with no new event looked alike, so a keeper of a restore whose hello comes after the 5 s of `open()` was refused (restore renews in the same turn), an exit after restore stopped waiting kept the lock a minute, and a keeper found by a restarted server was refused. Old code reads a renewed value as a time less than 1 ms later, so a server of an older build that runs between `git pull` and `skydeck window` neither sweeps it nor takes it over (a third field would be "not a lock skydeck writes": swept as stale within 2 s). A take-over whose millisecond is congruent to the first take's modulo 999,999 (about one in a million) has the take's mark, but it is a value `acquireLock` wrote and so another take (ruled, task 80: otherwise a settlement would give the taker's lock back before its program reported a start, and a third resume could start the session twice). What stays, the named limit: a restore's renewal of such a take-over reads as of the first take; a found keeper of the first take is past its 55 s deadline and starts nothing, and a settlement while that restore waits gives its lock back, so the restore's next `renewLock` returns null. | 80 (design 7.6; S2 4.4, 7.3, 7.8) |
-| C20 | **The second window after a cold start** (stage A's follow-up "a second window opens when `skydeck window` starts a server while an old window is still open", carried; ruled on review A). The server keeps `kv` `window_pages_open` while pages are connected: each refresh that works makes the store agree with its page count (`createPageMark(…).update`: the key while pages > 0, none at 0 — its FIRST call writes or removes whatever the store holds, so a mark a dead server left is removed by the next server's first refresh without a page); it leaves the key as it is when it stops or dies. **The wait is the server's fact**: a server that finds the key at its start expects a window back from the end of its start until a page connects or 7 s have passed, and says so in `GET /status` (`windowExpectedMs`, the ms left; 2.2). Every command that would open a window — `skydeck window`, a second `skydeck window` meanwhile, C12's window — waits for that same deadline when no page is connected, with one line on stderr: `skydeck: waiting up to 7 s for the open window to come back; --new-window opens one now`; a page that comes back is "a window is already open". `--new-window`, `--print-url` and `--new-secret` do not wait. A command waits at most the start wait and 7 s of its own from its first look, whatever the server says, so that a stale mark never leaves the user without a window (task 81). Named limits (ruled on task 81's review 2): a server replaced within its own expectation (`--restart`, a crash, another `wsl --shutdown` within those 7 s) has removed the key at its first refresh, so the next server expects nothing and the command opens a second window — no worse than before stage C; the 7 s rest on a page that tries again at least every 5 s, but Chromium wakes a window hidden for more than 5 minutes only once a minute (S2 6.3), so such a window can come back after the command has opened a new one; the waits add up when a start hangs: 10 s + 17 s on a cold start, 10 s + 7 s + 17 s after a restart with a page. | It is W16's case: after `wsl --shutdown` the old window reconnects a few seconds after `skydeck window` started a server (the page tries every 5 s at most, S2 6.3). The cost: after a PC restart or shutdown with the window left open the mark may still be there (WSL can end before the server's next refresh sees the page go), and the first `skydeck window` then waits 7 s for a window that cannot come; W16 and "what only you can check" ask whether it does. The remedy if it does every day — the mark holds the boot id, and in another boot the wait asks whether Edge still runs on the profile — is a follow-up. The first update from a stage A server, which writes no mark, may still open a second window once (stage B's "Updating" order avoids it). | 81 (5.1, 8.3, 10.2) |
+| C20 | **The second window after a cold start** (stage A's follow-up "a second window opens when `skydeck window` starts a server while an old window is still open", carried; ruled on review A). The server keeps `kv` `window_pages_open` while pages are connected: each refresh that works makes the store agree with its page count (`createPageMark(…).update`: the key while pages > 0, none at 0 — its FIRST call writes or removes whatever the store holds, so a mark a dead server left is removed by the next server's first refresh without a page); at an orderly stop it writes the mark once more as its pages are; when it dies the key stays as the last refresh left it (ruled 13:28Z, task 74). **The wait is the server's fact**: a server that finds the key at its start expects a window back from the end of its start until a page connects or 7 s have passed, and says so in `GET /status` (`windowExpectedMs`, the ms left; 2.2). Every command that would open a window — `skydeck window`, a second `skydeck window` meanwhile, C12's window — waits for that same deadline when no page is connected, with one line on stderr: `skydeck: waiting up to 7 s for the open window to come back; --new-window opens one now`; a page that comes back is "a window is already open". `--new-window`, `--print-url` and `--new-secret` do not wait. A command waits at most the start wait and 7 s of its own from its first look, whatever the server says, so that a stale mark never leaves the user without a window (task 81). Named limits (ruled on task 81's review 2): a server replaced within its own expectation (`--restart`, a crash, another `wsl --shutdown` within those 7 s) has removed the key at its first refresh, so the next server expects nothing and the command opens a second window — no worse than before stage C; the 7 s rest on a page that tries again at least every 5 s, but Chromium wakes a window hidden for more than 5 minutes only once a minute (S2 6.3), so such a window can come back after the command has opened a new one; the waits add up when a start hangs: 10 s + 17 s on a cold start, 10 s + 7 s + 17 s after a restart with a page. | It is W16's case: after `wsl --shutdown` the old window reconnects a few seconds after `skydeck window` started a server (the page tries every 5 s at most, S2 6.3). The cost: after a PC restart or shutdown with the window left open the mark may still be there (WSL can end before the server's next refresh sees the page go), and the first `skydeck window` then waits 7 s for a window that cannot come; W16 and "what only you can check" ask whether it does. The remedy if it does every day — the mark holds the boot id, and in another boot the wait asks whether Edge still runs on the profile — is a follow-up. The first update from a stage A server, which writes no mark, may still open a second window once (stage B's "Updating" order avoids it). | 81 (5.1, 8.3, 10.2) |
 | C21 | The banner lies in the list zone, above `#list`, in the list's width; it takes height from the list (the list scrolls under it), never width, so the right side, the header's one height (stage D) and every terminal's area stay as they are: its coming and going sends no `resize`. A restore selects nothing and moves no keyboard, in any page, also while a dialog of stage D is shown: its result carries no `sessionId` (stage A's `act` selects only a resume's or a new session's). | S2 12.7: "at the top of the list"; the size a restored terminal starts with is the last focused page's area (S2 8.2.6), which the banner must not change. | 73 (12.7) |
 | C22 | **A restore asked for by a command stops when its asker goes** (ruled on review A). The asker's connection closing before the outcome was written ends the run through C8's `signal`, with the reason `the command that asked for it stopped`: the server lives, the sessions already opened go on starting, the rest are `not started`, then `restore finished: …` (to the pages). So Ctrl+C in `skydeck restore` stops it, as in step 1. A restore started from the banner has no stop in stage C; `skydeck window --stop` ends it (the opened sessions go on), and `docs/install.md` says so. A Stop control in the banner is a follow-up candidate. | Otherwise Ctrl+C would end the command and the server would go on opening every batch. | 73 (11.4) |
 | C23 | **A batch in which no session started stops the run** in the server: once a batch that opened at least one terminal ends with none of its sessions started **while entries are left**, the restore reports `stopped: no session of this batch started` and the rest `not started`, then `restore finished: …` — a hook of `runRestore` (`stopAfterEmptyBatch`), which the command does not pass, so step 1's restore is unchanged. A restore whose last (or only) batch starts nothing ends as any finished run with failures does: no `stopped:` line, code 1 (C5), not 5 (ruled on review A's re-check). A run that a busy store ended says `stopped: skydeck's database is busy; press Restore again (or run skydeck restore) for the rest`. | A `claudeCommand` that cannot start (the server's `PATH` after a boot) would otherwise open every keeper and fill the slots with ended terminals. The server's connection waits 250 ms for the store, not the commands' 5 s. | 71 (11.3), 73 (11.3) |
@@ -438,7 +438,10 @@ export interface Restorer {
   /** C9. */
   dismiss(bootId: string): { ok: true } | { ok: false; error: string };
   /** The view model's banner for the tick's rows (cached, C9). A store that fails while it is made
-   *  keeps the previous one (one log line by kind). */
+   *  keeps the previous one (one log line by kind) with the live `running` (ruled, task 74): while
+   *  a run goes on, that one with `running: true`, or with none made the payload of a run that
+   *  offers nothing; else that one with `running: false`, or null when it offered nothing (none
+   *  made, or a run's whose `bootId` is null). */
   banner(rows: readonly ListRow[]): BannerPayload | null;
   /** Aborts a running restore with the reason `the window's server is stopping`, resolves once it
    *  is over; nothing starts afterwards. */
@@ -1441,21 +1444,32 @@ routes (74).
 command, `POST /resume` and `/new`; and its stop ends a restore before it closes anything.
 
 **Files**
-- Modify: `src/window/server.ts`: `createLaunches` over the registry and `terminalFor`;
+- Modify: `src/window/server.ts`: `createLaunches` over the registry and `terminalFor` (one for
+  the routes, one for the restorer, each with a log that never throws);
   `createRestorer` with `launches.restoreTerminal`, `.refusal`, `.gone`, `size: () =>
   pages.lastFocused()?.area ?? { cols: 120, rows: 40 }`, `progress: (text) =>
   pages.notice('restore-progress', text)`, `changed: () => { tick?.reload(); pages.pushList(); }`;
   `ActionDeps.restore` and `.dismissRestore` → the restorer (`all` false); `listFor` sets
-  `banner: restorer.banner(tick?.rows() ?? [])`; `controlHandler` gets `launch` (`resume` and
+  `banner: restorer.banner(tick?.rows() ?? [])` (one empty array kept for the start, so that the
+  banner's cache, keyed on the array, holds); `controlHandler` gets `launch` (`resume` and
   `newSession` through `launches` with the same size, mapped to C2's `LaunchAnswer`, a busy store
   and an unexpected error as C2 says; `restore` → `restorer.start(request, write)` and its `done`,
-  with the handler's `closed` signal as the `asker` (C22), a refusal as its line, the finished line
-  and an outcome with code 1) and `launchState` (`starting` until `ready`, `stopping` from the
+  with the handler's `closed` signal as the `asker` (C22); a refused request — one runs, or the
+  stop has begun — its line and an outcome with code 1 and nothing to the pages (C6, ruled F1); a
+  run that cannot begin its line, the finished line and an outcome with code 1) and `launchState` (`starting` until `ready`, `stopping` from the
   first line of the orderly stop); `createPageMark` over the server's store, made at the start
   before the first tick (so that `foundAtStart` reads the mark a dead server left), its
   `update(pages.count())` called in `afterRefresh` beside `decidePostponed`, and `GET /status`'s
   `windowExpectedMs` from its `expectedMs` with the end of the start (C20); the orderly stop's first
-  step is `await restorer.stop()`, before the tick's stop and `control.close()`
+  step is `pageMark.update(pages.count())` (ruled 13:28Z), its next `await restorer.stop()`, before
+  the tick's stop and `control.close()`
+- Modify, ruled by the plan owner: `src/window/restorer.ts` (`banner()`'s `catch`, 13:52Z) and
+  `test/window/restorer.test.ts` (its cases); `src/platform/types.ts`, `src/platform/real.ts`,
+  `test/platform/real.test.ts` (one case), `test/helpers/platform.ts` (`fakeClock`),
+  `test/platform/helpers.test.ts` (one case), `test/helpers/window.ts` (one line) — each for
+  `Clock.monotonicNs` only (task 81's review 2, D; 11:55Z); `test/cli/commands/window.test.ts`
+  (its restart cases, 12:45Z and 13:22Z); `docs/design-step-2.md` (5.1, 10.2's `window_pages_open`
+  row)
 - Create: `test/helpers/window-restore.ts` (sessions of an earlier boot in a server sandbox: for
   each, a resumable transcript (`resumable`), and through `test/helpers/spool.ts` a `start` event
   in an invented boot id with a pid and process start that are not alive and no end, so that the
@@ -1491,7 +1505,9 @@ two launch routes get `skydeck: ` in front, the launch lines are passed as they 
   not open a second terminal for a session the window is starting" (a `claudeCommand` that sleeps
   before the stand-in, the session resumed from a page, then restored: `failed <short>: this
   session is already open in the window`, one terminal); a session whose program exits at once →
-  `failed <short>: claude ended before the session started (status 3)` within 3 s, its lock gone;
+  `failed <short>: claude ended before the session started (status 3)`, its lock gone — the exit
+  ends the wait, not the start's time (ruled 12:34Z: `restoreStartTimeoutSeconds` raised so that
+  only the exit can say it, and the line within half of it; no wall-clock bound of 3 s);
   `POST /restore` with `all: true` and an id not offered → `failed <short>: no longer offered for
   restore`, the outcome's code 1; `restoreMinFreeMb` 999999999 → `stopped: only …`, nothing
   started, code 5; `dismiss-restore` → both pages' banners `shown: false`, the kv entry; after
@@ -1512,15 +1528,59 @@ two launch routes get `skydeck: ` in front, the launch lines are passed as they 
   then `restore finished: …`, and a later `act restore` is accepted.
 - Every run's notices to the pages end with exactly one `restore finished: …` line (a run asked for
   by a page, by a command, one stopped by the server's stop).
-- The pages mark (C20): `window_pages_open` is in the store within 2 s of a page's `start`,
-  removed within 2 s of the last page closing, and still there after `stop()` with a page
-  connected; a server started with the mark in the store (a dead server's) and no page removes it
+- The pages mark (C20): `window_pages_open` is in the store after the server's first refresh
+  once a page has started, removed after its first refresh once the last page closed (a refresh
+  every 2 s; held by order, ruled 12:34Z: a file the test puts into the spool and that refresh
+  moves to `spool/bad`), and still there after `stop()` with a page connected; a server started with the mark in the store (a dead server's) and no page removes it
   at its first refresh, and its `GET /status` says `windowExpectedMs` while it starts and counts it
   down to null within 7 s of the end of its start; a page that connects meanwhile ends it at once.
 
 **Done when:** a page and a command can restore through the server, the banner follows the store
 and the run, and `POST /resume` and `/new` start sessions with the rules of 2.5; `npm run check`
 passes.
+
+**As built** (ruled on task 81's review 2, D): the page mark's `expectedMs` is given
+`Clock.monotonicNs()` — a reading that cannot step, which this task adds to `Platform`
+(`process.hrtime.bigint()`; the fake clock moves it with `advanceMs` and `sleep`, never with
+`setNs`) — for `nowNs` and for the end of the start, so that a step of the wall clock neither
+stretches nor shortens the 7 s. In the tests a program that must wait is held at a gate the test
+opens (`test/helpers/window-restore.ts`: a `claudeCommand` script that waits for a file, then
+`exec`s the stand-in or exits with the status the test gives), not by a `sleep` before the
+stand-in, so that no case rests on a time; the cases that hold a gate while they look raise
+`restoreStartTimeoutSeconds`, and the C20 cases move the server's monotonic reading themselves.
+The refusal lines of the launch routes are `failureText`'s: `skydeck: ` before the first line
+(every refusal they can meet is one line: what they quote is sanitised). After every launch of
+`POST /resume` and `/new`, whatever its outcome, `launchFor` calls `tick.reload()`, as the
+actions' wrapper does after an `act`: `prepareResumeById` and `prepareNew` refresh and write (the
+lock, the label, the group) on the server's own connection, which the store's change marks do
+not show, so the next refresh loads the rows again. Stage A's `--restart` case of
+`test/cli/commands/window.test.ts` expects C20's waiting line after the restart line (ruled
+12:45Z): with the mark wired, the old server had a page, so the new one expects the window back,
+and the fake page does not return; the case asserts the line and Edge's start, not a duration.
+That case alone needed it (the full run). The exit-at-once case and the pages mark's cases hold
+their promptness as the test lines above say (ruled 12:34Z). No stage A restart case of that file
+depends any more on whether the old server's refresh recorded its page before the restart (ruled
+13:22Z): the `--restart` case waits for `window_pages_open` and expects C20's line; every other
+restart case whose old server had a page waits for the mark and then takes it out of the store
+(the old server writes it again only when its page count turns to none and back, contract 2.3,
+and the fake page stays until the restart), so that the new server expects no window and the
+case's stderr and waits stay stage A's. A restore's run refreshes, ingests and writes on the
+server's own connection (`prepare()` before each session, the spool at every look of its wait),
+which the tick's change marks do not show: the restorer's `gone`, called at every look after its
+ingest, calls `tick.reload()` before it answers (review 2; `refuse` and `progress` do not, ruled
+13:47Z: nothing goes missing without them), so that what a look ingested is in the lists within
+a refresh, not only after 60 s or the run's end (a case holds it). Ruled 13:28Z: the orderly
+stop's first step is `pageMark.update(pages.count())` (not forced), so a page that connected
+since the last refresh is recorded and one that went is not; a server that dies leaves the key
+as its last refresh did. The restart cases that take the mark out of the store keep working:
+`update` writes nothing while its own record agrees with its pages. Ruled 13:52Z (task 73's
+file, `banner()`'s `catch` only): a banner whose store read fails keeps the last payload with the
+live `running` — while a restore runs `running: true` (with none made, a run's payload that
+offers nothing), else `running: false`, or null when nothing was offered (none made, or a run's
+payload whose `bootId` is null; ruled 14:56Z) — and what it returns is not kept, because the
+page (task 75) ends a restore's report at the first list whose banner does not say it runs. What no case holds,
+being promptness the tick's own push within 2 s also gives: the restorer's `changed` (a run
+begun or ended, a dismissal) calling `tick.reloadNow()`, and `launchFor`'s `tick.reload()`.
 
 **At the merge** (after D 36 and B 54; built beside them):
 - If D was merged first: `server.ts` passes D's required `changed` and `prs` to `createActions`

@@ -328,7 +328,9 @@ After a WSL restart, a crash of the server or `--stop`, no old server is there t
 but the old window may still be open, and its page connects a few seconds after the new server's
 start is done (6.3). So the server keeps the `kv` entry `window_pages_open` while pages are
 connected (10.2), and a server that finds it at its start **expects a window back**: from the end
-of its start until a page connects or 7 seconds have passed, and says so in `GET /status`
+of its start until a page connects or 7 seconds have passed — counted on the server's monotonic
+reading (`Clock.monotonicNs`), a clock that cannot step, so that a step of the wall clock neither
+stretches nor shortens them (ruled by the plan owner, plan task 74) —, and says so in `GET /status`
 (`windowExpectedMs`, 8.3). The wait is the server's fact, not each command's guess: unless
 `--new-window`, `--print-url` or `--new-secret` (its old windows are refused, so none comes back),
 step 2 first reads `GET /status`, and while the server is starting with `windowExpectedMs` set, or
@@ -349,7 +351,11 @@ nothing and the command opens a second window — no worse than before; the 7 se
 that tries again at least every 5 seconds, but Chromium wakes a window hidden for more than 5
 minutes only once a minute (6.3), so such a window can come back after the command has opened a
 new one; and the waits add up when a start hangs: 10 and 17 seconds on a cold start, 10, 7 and 17
-seconds after a restart with a page.
+seconds after a restart with a page. At an orderly stop the server writes the entry once more as
+its pages are; when it dies the entry stays as its last refresh left it. A fourth named limit
+(ruled by the plan owner, plan task 74): the entry follows the server's refresh, one every 2
+seconds, not the page's connect, so a server that dies within about 2 seconds of its first page's
+connect has not written it, and the next server expects no window.
 
 When a page is already connected it starts nothing on Windows and says
 `skydeck window: a window is already open`; `--new-window` opens another one anyway (several
@@ -1798,7 +1804,7 @@ the first time one of them is known and never removed.
 | `window_launching` | The lock of the one command that starts Edge (5.1). |
 | `attention_seq` | The counter above. |
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
-| `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; the server leaves it as it is when it stops or dies, so that the next server knows that a window may come back. |
+| `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 
 ### 10.3 When a turn ends
 

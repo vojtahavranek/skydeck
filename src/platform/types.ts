@@ -4,6 +4,14 @@ export type Ns = bigint;
 /** Wall clock. `sleep` resolves after `ms` milliseconds; the fake one advances its time instead. */
 export interface Clock {
   nowNs(): Ns;
+  /**
+   * A reading of a clock that cannot step (CLOCK_MONOTONIC): it never goes back and never jumps,
+   * whatever the wall clock does (WSL steps `nowNs`'s clock now and then). Its value is no time of
+   * day; only the difference of two readings means something — how long passed between them. For
+   * what must count real time: a wait that a step of the wall clock must neither stretch nor cut
+   * short (plan C20's expectation of the window, task 74).
+   */
+  monotonicNs(): Ns;
   sleep(ms: number): Promise<void>;
   /**
    * Calls `callback` every `ms` milliseconds (a positive whole number; RangeError otherwise) until

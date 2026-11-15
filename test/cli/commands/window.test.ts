@@ -542,6 +542,31 @@ function restartLine(h: Harness): string {
   return `skydeck: restarting the window's server for the new build; new sessions in the window get the environment of this shell (${h.project})\n`;
 }
 
+/**
+ * Plan C20 (task 74; ruled 13:22Z): the running server has recorded that it has a page — its
+ * refresh (one every 2 s) wrote `window_pages_open` — so that the server a restart starts expects
+ * the window back. A restart case waits for this fact instead of racing that refresh.
+ */
+async function pageRecorded(h: Harness): Promise<void> {
+  await until(
+    () => h.d.deck.store.getKv('window_pages_open') === '1',
+    'the running server recorded its page (window_pages_open)',
+    WAIT_MS,
+  );
+}
+
+/**
+ * A known absent pages mark for a restart case that is not about C20 (ruled 13:22Z): once the
+ * running server has recorded its page, the key is taken out of the store behind it. Its mark
+ * writes only when its page count turns from none to some or back (contract 2.3, `update`), and
+ * the fake page stays until the restart, so it writes none again: the new server expects no
+ * window, and the command waits only as stage A's rules say.
+ */
+async function noPageRecorded(h: Harness): Promise<void> {
+  await pageRecorded(h);
+  h.d.deck.store.deleteKv('window_pages_open');
+}
+
 const SUCCESS = /^skydeck window: http:\/\/127\.0\.0\.1:([0-9]+)\/ \(server pid ([0-9]+)\)\n$/;
 
 // ---------------------------------------------------------------------------------------------
@@ -871,6 +896,7 @@ describe('skydeck window: a server running (S2 5.1, 14)', () => {
     assert.equal(old.checkout, checkout);
     writeFileSync(join(checkout, 'src', 'added.ts'), 'export {};\n');
     const back = reconnectingPage(t, h, old.pid);
+    await noPageRecorded(h);
 
     const r = await h.run([], {
       env: { FAKE_EDGE_PAGE: 'once' },
@@ -936,19 +962,23 @@ async function openTerminal(
 }
 
 describe('skydeck window --restart, --stop, --new-secret (S2 5.1, 5.5)', () => {
-  test('--restart: the restart line, a new server pid; the keeper alive and rediscovered', async (t) => {
+  test("--restart: the restart line, then C20's wait for the window the old server had (it does not come back), Edge; a new server pid; the keeper alive and rediscovered", async (t) => {
     const h = windowHarness(t);
     const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
     assert.equal(first.code, 0, first.stderr);
     const old = h.server();
     assert.ok(old !== null);
     const keeper = await openTerminal(t, h);
+    await pageRecorded(h);
 
     const r = await h.run(['--restart'], { env: { FAKE_EDGE_PAGE: 'once' } });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.stderr, restartLine(h));
+    // Plan C20 (task 74 wires the pages mark): the old server had a page, so the new one expects
+    // the window back; the fake page does not return, and after the wait Edge is started.
+    assert.equal(r.stderr, `${restartLine(h)}${WAITING}`);
     assert.match(r.stdout, SUCCESS);
+    await until(() => h.edgeRuns().length === 2, 'Edge started for the restart', WAIT_MS);
     const now = h.server();
     assert.ok(now !== null);
     assert.notEqual(now.pid, old.pid, 'a new server');
@@ -1107,6 +1137,7 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     const old = h.server();
     assert.ok(old !== null);
     const back = reconnectingPage(t, h, old.pid);
+    await noPageRecorded(h);
 
     const r = await h.run(['--restart'], {
       env: { FAKE_EDGE_PAGE: 'once' },
@@ -1125,6 +1156,7 @@ describe('after a restart, the window that was open comes back (ruled, task 25)'
     const h = windowHarness(t);
     const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
     assert.equal(first.code, 0, first.stderr);
+    await noPageRecorded(h);
 
     const r = await h.run(['--restart'], {
       env: { FAKE_EDGE_PAGE: 'once' },
@@ -2017,6 +2049,7 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     // the page's first try meets the start and its next one comes 5 s later.
     slowServerStart(h, 12);
     const page = pageOnItsSchedule(t, h, old.pid, 5000);
+    await noPageRecorded(h);
 
     const r = await h.run(['--restart'], {
       env: { FAKE_EDGE_PAGE: 'once' },
@@ -2040,6 +2073,7 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     const first = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' } });
     assert.equal(first.code, 0, first.stderr);
     slowServerStart(h, 12); // the start goes on at least 5 s after server.json
+    await noPageRecorded(h);
 
     const r = await h.run(['--restart', '--new-window'], { env: { FAKE_EDGE_PAGE: 'once' } });
 
@@ -2126,6 +2160,7 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     assert.ok(old !== null);
     slowServerStart(h); // the new server's start goes on for 3 s after it answers
     const back = reconnectingPage(t, h, old.pid);
+    await noPageRecorded(h);
 
     const r = await h.run(['--restart'], {
       env: { FAKE_EDGE_PAGE: 'once' },
@@ -2146,6 +2181,7 @@ describe('a server that answers but has not finished its start (ruled, server-fi
     // The server gives its python3 check 5 s: its start ends at least 5 s after it answers, which
     // is after the 4 s start wait begun before it was started.
     slowServerStart(h, 12);
+    await noPageRecorded(h);
 
     const r = await h.run(['--restart'], {
       env: { FAKE_EDGE_PAGE: 'once' },

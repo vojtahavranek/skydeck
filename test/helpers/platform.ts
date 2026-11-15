@@ -32,14 +32,18 @@ export interface FakeClock extends Clock {
   /**
    * Jumps to `ns`. No timer is called; each running one of `every` is next due one period after
    * `ns`, as a real interval is after the wall clock jumped, and one of `after` keeps the time it
-   * had left (a real timeout counts on a clock that does not jump).
+   * had left (a real timeout counts on a clock that does not jump). A step of the wall clock:
+   * `monotonicNs` (from 0 at the start) does not move.
    */
   setNs(ns: Ns): void;
   /**
-   * Moves the time on by `ms`. Every timer of `every` and `after` that falls due on the way is
-   * called at its time (nowNs() answers that time meanwhile), once per period, in time order; of
+   * Moves the time on by `ms`, `monotonicNs` with it. Every timer of `every` and `after` that falls
+   * due on the way is called at its time (nowNs() answers that time meanwhile), once per period, in time order; of
    * two due at once, the one started first. `sleep(ms)` calls this and resolves on the next
-   * microtask.
+   * microtask. A timer that steps the wall clock (setNs) during it takes nothing from
+   * `monotonicNs`'s `ms`; after a step forward, the timers due in the rest of the advance are not
+   * called (the advance ends where it would have on the wall clock), while `monotonicNs` counts
+   * that rest.
    */
   advanceMs(ms: number): void;
   /** How many timers run: those of `every` not stopped, those of `after` not fired or cancelled. */
@@ -55,6 +59,8 @@ interface FakeTimer {
 
 export function fakeClock(startNs: Ns): FakeClock {
   let now = startNs;
+  /** The reading of monotonicNs: it moves with advanceMs (and so sleep) only, never with setNs. */
+  let mono: Ns = 0n;
   const running = new Set<FakeTimer>();
   /** The timer due first at or before `endNs`; of two due at once, the one started first. */
   const nextDue = (endNs: Ns): FakeTimer | undefined => {
@@ -68,8 +74,17 @@ export function fakeClock(startNs: Ns): FakeClock {
   };
   const advanceMs = (ms: number): void => {
     const endNs = now + nsFromMs(ms);
+    // monotonicNs moves by the advance itself, `ms` in all: a callback that steps the wall clock
+    // (setNs) moves `now` but takes nothing from it and adds nothing to it.
+    let leftNs = nsFromMs(ms);
+    const pass = (ns: Ns): void => {
+      const taken = ns < leftNs ? ns : leftNs;
+      mono += taken;
+      leftNs -= taken;
+    };
     for (let timer = nextDue(endNs); timer !== undefined; timer = nextDue(endNs)) {
       if (timer.dueNs > now) {
+        pass(timer.dueNs - now);
         now = timer.dueNs;
       }
       if (timer.periodNs === null) {
@@ -82,6 +97,7 @@ export function fakeClock(startNs: Ns): FakeClock {
     if (endNs > now) {
       now = endNs;
     }
+    pass(leftNs);
   };
   /** Starts a timer; the returned function stops it. Sets keep insertion order: first started, first called. */
   const start = (timer: FakeTimer): (() => void) => {
@@ -92,6 +108,7 @@ export function fakeClock(startNs: Ns): FakeClock {
   };
   return {
     nowNs: () => now,
+    monotonicNs: () => mono,
     sleep: (ms) => {
       advanceMs(ms);
       return Promise.resolve();

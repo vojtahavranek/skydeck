@@ -7,8 +7,9 @@
  * server's fact, which every command that would open a window reads (`skydeck window`, a second
  * one meanwhile, the window a command opens), not each command's own guess.
  *
- * The server leaves the key as it is when it stops or dies; the next server's first refresh makes
- * the store agree with its own pages, so a mark that a dead server left costs at most one wait.
+ * At an orderly stop the server writes the mark once more as its pages are (plan task 74); a server
+ * that dies leaves the key as its last refresh wrote it. The next server's first refresh makes the
+ * store agree with its own pages, so a mark that a dead server left costs at most one wait.
  * Nothing here holds a page, a window or a session: the key is "1" or absent.
  */
 import { NS_PER_MS } from '../platform/time.ts';
