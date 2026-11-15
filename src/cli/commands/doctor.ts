@@ -431,15 +431,24 @@ async function checkGh({ platform }: Facts, report: Report): Promise<void> {
 }
 
 /**
- * The tab adapter answers. `--no-auto-start`: without it `wezterm cli` starts a hidden server when
- * no WezTerm window is open, and the check would pass where opening a tab fails. From WSL,
- * `wezterm.exe` is tried when `wezterm` is not found, as the adapter does (D15).
+ * The configured terminal (S2 16.4): `here` and `window` start no program and are named; for
+ * `wezterm`, the tab adapter answers. `--no-auto-start`: without it `wezterm cli` starts a hidden
+ * server when no WezTerm window is open, and the check would pass where opening a tab fails. From
+ * WSL, `wezterm.exe` is tried when `wezterm` is not found, as the adapter does (D15).
  */
 async function checkTerminal(
   { platform, config }: Facts & { config: Config },
   report: Report,
 ): Promise<void> {
   const { runner, env } = platform;
+  if (config.terminal === 'window') {
+    // S2 11.4: the window's server starts them; whether it runs is the server line's to say.
+    report(
+      'ok',
+      'terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)',
+    );
+    return;
+  }
   if (config.terminal !== 'wezterm') {
     report('ok', 'terminal: here (sessions start in the terminal skydeck runs in)');
     return;

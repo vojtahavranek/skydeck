@@ -1015,6 +1015,117 @@ test('a store that fails while the banner is made keeps the previous one, one lo
   assert.deepEqual(made, first);
 });
 
+test('a store that fails while a run goes on: the banner says running all the while, and not after (ruled by the plan owner, task 74)', async (t) => {
+  const d = restarted(t, 2);
+  let fail = false;
+  const deck = deckWith(d.deck, {
+    store: {
+      // The banner's own read; the run reads no such key.
+      getKv: (key) => {
+        if (fail && key === 'window_restore_dismissed') throw BUSY();
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const rows = (): readonly ListRow[] => loadRows(d.deck);
+  const seen: (boolean | undefined)[] = [];
+  const w = world(d, { deck, onChanged: () => seen.push(w.restorer.banner(rows())?.running) });
+  const first = w.restorer.banner(rows());
+  assert.equal(first?.running, false);
+  fail = true;
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  const during = w.restorer.banner(rows());
+  assert.deepEqual(during, { ...first, running: true }, "the last payload, with the run's flag");
+  await started.done;
+  assert.deepEqual(seen, [true, false], 'at the run begun and at its end');
+  assert.equal(w.restorer.banner(rows()), first, 'after it: the last payload made, as it was');
+  // What the failures answered was not kept: made again at the next call that works.
+  fail = false;
+  const made = w.restorer.banner(rows());
+  assert.notEqual(made, first);
+  assert.equal(made?.running, false);
+});
+
+test('a store that fails after a run whose banner was made while it ran: the offer with running false (ruled by the plan owner, task 74)', async (t) => {
+  const d = restarted(t, 2);
+  let fail = false;
+  const deck = deckWith(d.deck, {
+    store: {
+      getKv: (key) => {
+        if (fail && key === 'window_restore_dismissed') throw BUSY();
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const rows = (): readonly ListRow[] => loadRows(d.deck);
+  const w = world(d, { deck });
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  const during = w.restorer.banner(rows());
+  assert.equal(during?.running, true);
+  assert.equal(during?.bootId, BOOT_A, 'made while the run goes on, with its offer');
+  fail = true;
+  await started.done;
+  assert.deepEqual(w.restorer.banner(rows()), { ...during, running: false });
+});
+
+test('a store that fails after a run that offered nothing: no banner (null while nothing is offered and no restore runs; ruled by the plan owner, task 74)', async (t) => {
+  const d = restarted(t, 2);
+  let fail = false;
+  const deck = deckWith(d.deck, {
+    store: {
+      getKv: (key) => {
+        if (fail && key === 'window_restore_dismissed') throw BUSY();
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const none: readonly ListRow[] = [];
+  const w = world(d, { deck });
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  assert.deepEqual(w.restorer.banner(none), {
+    bootId: null,
+    lastActivityNs: null,
+    entries: [],
+    shown: true,
+    running: true,
+  });
+  fail = true;
+  await started.done;
+  assert.equal(w.restorer.banner(none), null);
+});
+
+test('a store that fails before any banner was made: while a run goes on, the payload of a run with nothing offered; after it, none', async (t) => {
+  const d = restarted(t, 2);
+  let fail = true;
+  const deck = deckWith(d.deck, {
+    store: {
+      getKv: (key) => {
+        if (fail && key === 'window_restore_dismissed') throw BUSY();
+        return d.deck.store.getKv(key);
+      },
+    },
+  });
+  const rows = (): readonly ListRow[] => loadRows(d.deck);
+  const w = world(d, { deck });
+  assert.equal(w.restorer.banner(rows()), null);
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  assert.deepEqual(w.restorer.banner(rows()), {
+    bootId: null,
+    lastActivityNs: null,
+    entries: [],
+    shown: true,
+    running: true,
+  });
+  await started.done;
+  assert.equal(w.restorer.banner(rows()), null);
+  fail = false;
+  assert.notEqual(w.restorer.banner(rows()), null, 'made at the next call that works');
+});
+
 test('rows without a boot id: no plan, so no banner (the run that cannot begin says why)', (t) => {
   const d = restarted(t, 2);
   d.proc.setBootId(null);

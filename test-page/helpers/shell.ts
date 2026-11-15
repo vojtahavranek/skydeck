@@ -871,6 +871,97 @@ export async function actsWorld(
   return { acts, focuses, attaches, resizes, terms, end };
 }
 
+/** What the page sent to a `bannerWorld`, and the means to script it (plan C task 75). */
+export interface BannerWorld {
+  /** Every message the page sent after its `start` but pings, in order. */
+  sent: Record<string, unknown>[];
+  /** The page's acts so far, in order. */
+  acts(): Record<string, unknown>[];
+  /** The page's `n`-th act (1, 2, …), once it has come (fails after PAGE_WAIT_MS). */
+  act(n: number): Promise<Record<string, unknown>>;
+  /** Answers `act` with a `result`: `ok`, or a refusal whose `error` is also its one line. */
+  answer(act: Record<string, unknown>, result: { ok: boolean; error?: string }): void;
+  /** Sends `list` now, and as the answer to every later `view`. */
+  list(list: Record<string, unknown>): void;
+  /** Sends one report line of a restore (`notice restore-progress`, S2 8.2.3, plan C6). */
+  progress(text: string): void;
+}
+
+let bannerSeed = 80;
+
+/**
+ * A scripted stand-in for the page cases of the restore banner (plan C task 75), as `actsWorld`
+ * but scripted by the test: the page on `page` (pinned or not) is opened with a stored key and
+ * connected; it sends the lists (`first` to begin with, then each the test gives, also as the
+ * answer to every `view`) and the restore's report lines the test gives, answers every `attach`
+ * with an empty `snap` at the size it proposed, and records every `act` — the test answers it
+ * (`answer`) when it chooses, or never.
+ */
+export async function bannerWorld(
+  t: TestContext,
+  page: Page,
+  first: Record<string, unknown>,
+): Promise<BannerWorld> {
+  const secret = new Uint8Array(32).fill(bannerSeed++);
+  const sent: Record<string, unknown>[] = [];
+  const acts: Record<string, unknown>[] = [];
+  let current = first;
+  const standin = await standinServer(t, {
+    socket: honest(secret, {
+      open: (conn, message) => {
+        sent.push(message);
+        if (message['t'] === 'view') {
+          conn.send(current);
+        } else if (message['t'] === 'attach') {
+          const { term, cols, rows } = message as { term: string; cols: number; rows: number };
+          conn.send({ t: 'snap', term, ch: 1, cols, rows, data: '' });
+        } else if (message['t'] === 'act') {
+          acts.push(message);
+        }
+      },
+    }),
+  });
+  const conn = (): StandinConnection => {
+    const last = standin.connections.at(-1);
+    assert.ok(last !== undefined, 'the page is connected');
+    return last;
+  };
+  await page.goto(standin.url);
+  await storeKey(page, secret);
+  await page.goto(standin.url);
+  await connection(page, 'open');
+  return {
+    sent,
+    acts: () => [...acts],
+    async act(n) {
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (acts.length < n) {
+        assert.ok(performance.now() < deadline, `act ${n} comes (${acts.length} came)`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return acts[n - 1] as Record<string, unknown>;
+    },
+    answer(act, result) {
+      const error = result.error ?? null;
+      conn().send({
+        t: 'result',
+        id: act['id'],
+        ok: result.ok,
+        lines: error === null ? [] : [error],
+        error,
+        sessionId: null,
+      });
+    },
+    list(list) {
+      current = list;
+      conn().send(list);
+    },
+    progress(text) {
+      conn().send({ t: 'notice', kind: 'restore-progress', term: null, text });
+    },
+  };
+}
+
 /** `text` as a regular expression that matches it literally. */
 export function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
