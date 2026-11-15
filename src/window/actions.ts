@@ -1,20 +1,19 @@
 /**
  * What a page can ask the server to do (S2 8.2.3 `act`): in stage A resume a session, start a new
  * one, close an ended terminal, open a link; from stage D edit a session (S2 12.5): its label,
- * group and note, done and undone, its pull requests. Every field of an action is the page's — any
- * page that passed the handshake — so each one is checked here again and goes through step 1's own
- * rules: a resume names a session and nothing more (the guard, the lock and the command builder
- * decide the rest, S2 11.1), a new session's directory, label, group and flags are checked as
- * `skydeck new` checks them (design 7.7), a terminal is closed only once its program has ended
- * (principle 6), a link is opened only when S2 9.6 allows it, and an edit is made by step 1's own
- * functions (design 7.1, 7.3) on a session the store knows. No action carries a program or an
- * argument list (S2 8.3).
+ * group and note, done and undone, its pull requests; from stage C restore the banner's sessions
+ * and dismiss its offer (S2 12.7). Every field of an action is the page's — any page that passed
+ * the handshake — so each one is checked here again and goes through step 1's own rules: a resume
+ * names a session and nothing more (the guard, the lock and the command builder decide the rest,
+ * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
+ * them (design 7.7) — both through `launches.ts`, the one way the window starts a session (plan
+ * C1) —, a terminal is closed only once its program has ended (principle 6), a link is opened only
+ * when S2 9.6 allows it, and an edit is made by step 1's own functions (design 7.1, 7.3) on a
+ * session the store knows. No action carries a program or an argument list (S2 8.3).
  */
 import { RefError, SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { cleanGroup, cleanLabel } from '../sessions/labels.ts';
-import { launchPrepared } from '../sessions/launch.ts';
-import type { LaunchOutcome } from '../sessions/launch.ts';
 import { loadRows } from '../sessions/load.ts';
 import {
   attachManualPr,
@@ -26,19 +25,17 @@ import {
   setLabel,
   setNote,
 } from '../sessions/meta.ts';
-import { prepareNew, readLock, releaseLock } from '../sessions/resume.ts';
-import type { PreparedLaunch } from '../sessions/resume.ts';
-import { prepareResumeById } from '../sessions/resume-by-id.ts';
 import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
 import { splitFlags } from './flags.ts';
-import type { ActionHandler, TerminalHub, TerminalInfo } from './hub.ts';
+import type { ActionHandler, TerminalHub } from './hub.ts';
+import { createLaunches } from './launches.ts';
+import type { Launched } from './launches.ts';
 import type { PrFetches } from './pr-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
 import type { ActMessage, ResultMessage } from './protocol.ts';
-import { MAY_START } from './view/sections.ts';
 import { linkToOpen } from './windows.ts';
 
 export interface ActionDeps {
@@ -58,6 +55,11 @@ export interface ActionDeps {
   changed(): void;
   /** task 36's PrFetches (the server passes one). */
   prs: Pick<PrFetches, 'fetch' | 'refresh'>;
+  /** Plan C 2.3: `act restore` (task 73's restorer, wired by task 74), which answers once the run
+   *  has begun or with its refusal. Absent: the kind answers "skydeck cannot do that action". */
+  restore?(sessionIds: readonly string[]): { ok: true } | { ok: false; error: string };
+  /** Plan C 2.3, C9: `act dismiss-restore`. Absent: as `restore`. */
+  dismissRestore?(bootId: string): { ok: true } | { ok: false; error: string };
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
@@ -77,34 +79,43 @@ const NO_TERMINAL = 'this terminal is no longer there';
 const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 characters';
 const LINK_FAILED = 'the link could not be opened: Edge could not be started';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
-/** Stage C's restore and dismiss-restore are parsed (plan C 2.2) and acted on from task 72 on. */
-const NOT_YET = 'skydeck cannot do that action yet';
 /** Plan D 2.5: the row of a `new` terminal whose session the store does not know yet (A28). */
 const NOT_STARTED = 'this session has not started yet; edit it once it runs';
 /** S2 12.5: a note's save whose `base` is no longer the stored note. */
 const NOTE_CHANGED =
   'the note was changed elsewhere while you edited it; your text is still in the box';
-const ALREADY_OPEN = 'this session is already open in the window';
 const BUSY = "skydeck's database is busy; try again";
 
 function refusal(message: string): Answer {
   return { ok: false, lines: [message], error: message, sessionId: null };
 }
 
-/** A launch's outcome as a result: its lines; the session only when it started (plan A25). */
-function launched(prepared: PreparedLaunch, outcome: LaunchOutcome): Answer {
-  const ok = outcome.code === 0;
-  return { ok, lines: outcome.lines, error: null, sessionId: ok ? prepared.sessionId : null };
+/**
+ * A launch (launches.ts) as a result. Refused: its message's lines, as step 1's command line prints
+ * them (failureText: one line per line of the message, sanitised — a message can quote what the
+ * page sent, a flag as typed), and the same text as one line for `error`. Otherwise its outcome's
+ * lines, and the session only when it started (plan A25).
+ */
+function answerOf(launch: Launched): Answer {
+  if (launch.refused) {
+    return { ok: false, lines: launch.lines, error: launch.lines.join(' '), sessionId: null };
+  }
+  const ok = launch.code === 0;
+  return { ok, lines: launch.lines, error: null, sessionId: ok ? launch.sessionId : null };
 }
 
 /**
- * A SkydeckError as the result's lines, as step 1's command line prints it (failureText): one line
- * per line of the message (`act` sanitises each: a message can quote what the page sent, a flag as
- * typed), and the same text as one line for `error`.
+ * A SkydeckError thrown by an action as its result, as answerOf answers a refusal: one line per
+ * line of the message (`act` sanitises each), and the same text as one line for `error`.
  */
 function refusedBy(error: SkydeckError): Answer {
   const lines = error.message.replace(/\n$/, '').split('\n');
   return { ok: false, lines, error: lines.join(' '), sessionId: null };
+}
+
+/** A restore dep's answer (plan C 2.3): `ok` with no lines and no session (C21), or its error. */
+function answered(outcome: { ok: true } | { ok: false; error: string }): Answer {
+  return outcome.ok ? DONE : refusal(outcome.error);
 }
 
 /** The action's id, to answer with; 0 when it has none (parsePageMessage lets no such action through). */
@@ -144,88 +155,39 @@ function orNone(text: string): string | null {
 }
 
 /**
- * The ActionHandler of stage A. `resume` → `prepareResumeById` (the guard on refreshed rows, the
- * lock) → `launchPrepared` with `terminalFor` the action's size; `new` → `splitFlags` →
- * `prepareNew` with the form's directory, label and group → `launchPrepared`. A launch answers its
- * outcome's lines (`ok` when it started, with the session's id); a SkydeckError (the guard, the
- * lock, RefError, prepareNew's refusals) answers its message. `close-terminal` → `hub.close`;
- * `open-link` → `linkToOpen`, then `openLink`. Stage D's kinds (label, group, note, done, undone,
- * pr-refresh, pr-add, pr-rm) → `edit` on a session the store knows (`requireKnown`); every write
- * calls `changed()` once, a refusal never. A resume is refused while the window has a terminal
- * of the session whose program may still run (ruled, review 2 of task 32), and before it opens its
- * terminal it closes the session's terminals that are over (ended, lost, not started): an ended
- * terminal is dropped when its session runs again (ruled, review of task 13). Stage C's kinds
- * (restore, dismiss-restore) are refused with `skydeck cannot do that action yet`, nothing done,
- * until task 72 acts on them.
+ * The ActionHandler of stage A. `resume` → `launches.resume` with the action's size (plan C1: the
+ * window's "already open" refusal, `prepareResumeById` — the guard on refreshed rows, the lock —,
+ * the session's terminals that are over closed, `launchPrepared` with `terminalFor`); `new` →
+ * `splitFlags` → `launches.newSession` with the form's directory, label and group (a blank one is
+ * none, `orNone`) → `prepareNew` → `launchPrepared`. A launch answers its outcome's lines (`ok` when
+ * it started, with the session's id); a refusal (the window's, the guard, the lock, RefError,
+ * prepareNew's) answers its message. `close-terminal` → `hub.close`; `open-link` → `linkToOpen`,
+ * then `openLink`. Stage D's kinds (label, group, note, done, undone, pr-refresh, pr-add, pr-rm) →
+ * `edit` on a session the store knows (`requireKnown`); every write calls `changed()` once, a
+ * refusal never. A resume is refused while the window has a terminal of the session whose program
+ * may still run (ruled, review 2 of task 32), and before it opens its terminal it closes the
+ * session's terminals that are over (ended, lost, not started): an ended terminal is dropped when
+ * its session runs again (ruled, review of task 13). Stage C's kinds: `restore` →
+ * `deps.restore(sessionIds)`, `dismiss-restore` → `deps.dismissRestore(bootId)`, each answering
+ * `ok` with no lines or its error; without the dep the kind answers `skydeck cannot do that
+ * action`, nothing done.
  *
  * Never rejects (2.5): an action that is not well formed is refused with one log line (the
  * parser's kind), and an unexpected error is answered `ok: false` and logged by kind (failureKind)
  * — never its message, which can quote what the page sent or a path; when it came after a resume's
  * lock was taken and before its terminal was opened, the lock is given back. A terminal whose
- * `open()` rejects is answered as an open that timed out (`guarded`): no command to run by hand,
- * the lock and the label kept. Every text of a result is sanitised.
+ * `open()` rejects is answered as an open that timed out: no command to run by hand, the lock and
+ * the label kept. Every text of a result is sanitised.
  */
 export function createActions(deps: ActionDeps): ActionHandler {
   const { deck, hub, log } = deps;
-
-  /**
-   * `terminal` with a rejection (or a throw) of its `open()` turned into the result of an open that
-   * timed out (ruled, review 1 of task 32): the window terminal may already have a keeper then, so
-   * launchPrepared must print no command to run by hand (a hand-run claude could resume the
-   * session twice) and keeps the lock and the label, as after a timeout. Logged once by kind; the
-   * error's message goes nowhere.
-   */
-  function guarded(terminal: Terminal, kind: 'resume' | 'new', onOpen = (): void => {}): Terminal {
-    return {
-      name: terminal.name,
-      opensTabs: terminal.opensTabs,
-      async open(spec) {
-        onOpen();
-        try {
-          return await terminal.open(spec);
-        } catch (error) {
-          const failure = failureKind(error);
-          log(`act ${kind}: the terminal failed (${failure})`);
-          return {
-            ok: false,
-            error: `the terminal failed unexpectedly (${failure})`,
-            timedOut: true,
-          };
-        }
-      },
-    };
-  }
-
-  /** The window's terminals of the session: the session each shows, or while it shows none the one
-   *  it was opened for — what the terminal itself carries, as the view model places it. */
-  function terminalsOf(sessionId: string): TerminalInfo[] {
-    return hub
-      .list()
-      .filter((terminal) => (terminal.sessionId ?? terminal.expectedSessionId) === sessionId);
-  }
-
-  /**
-   * After a throw before the terminal's `open()` was called (ruled, review 2 of task 32): nothing
-   * can have been started, so the lock this resume took (`ours`) is given back, and the next resume
-   * is not refused for a minute — that lock and no other (releaseLock keeps one taken over since).
-   */
-  function giveBackLock(sessionId: string, ours: string): void {
-    try {
-      releaseLock(deck, sessionId, ours);
-    } catch (error) {
-      log(`act resume: the lock was not given back (${failureKind(error)})`);
-    }
-  }
-
-  /** Best effort: a terminal left behind costs a slot and a row's place, never the resume itself. */
-  function closeEnded(sessionId: string): void {
-    try {
-      const ended = terminalsOf(sessionId).filter((terminal) => !MAY_START.has(terminal.state));
-      for (const terminal of ended) hub.close(terminal.id);
-    } catch (error) {
-      log(`act resume: an ended terminal was not closed (${failureKind(error)})`);
-    }
-  }
+  // The window's one way to start a session (plan C1); its log lines get the actions' prefix.
+  const launches = createLaunches({
+    deck,
+    hub,
+    terminalFor: (size) => deps.terminalFor(size),
+    log: (line) => log(`act ${line}`),
+  });
 
   /**
    * Plan D9: an edit acts only on a session the store knows, a row of loadRows — the id is whole,
@@ -316,47 +278,22 @@ export function createActions(deps: ActionDeps): ActionHandler {
 
   async function run(action: ActMessage): Promise<Answer> {
     switch (action.kind) {
-      case 'resume': {
-        // Ruled (review 2 of task 32): a terminal of the window opened for the session whose
-        // program may still run refuses a second resume, whatever the lock says — claude can wait
-        // at a dialog before its SessionStart for longer than the lock holds.
-        if (terminalsOf(action.sessionId).some((terminal) => MAY_START.has(terminal.state))) {
-          return refusal(ALREADY_OPEN);
-        }
-        // The terminal is made before anything is taken, so that a factory that throws leaves no
-        // lock behind; prepareResumeById and closeEnded run before the first await, so two
-        // resumes of one session meet at the lock.
-        let opened = false;
-        const terminal = guarded(
-          deps.terminalFor({ cols: action.cols, rows: action.rows }),
-          'resume',
-          () => {
-            opened = true;
-          },
+      case 'resume':
+        return answerOf(
+          await launches.resume(action.sessionId, { cols: action.cols, rows: action.rows }),
         );
-        const prepared = prepareResumeById(deck, action.sessionId);
-        let ours: string | null = null;
-        try {
-          ours = readLock(deck, prepared.sessionId); // the lock prepareResumeById has just taken
-          closeEnded(prepared.sessionId);
-          return launched(prepared, await launchPrepared(deck, prepared, terminal));
-        } catch (error) {
-          if (!opened && ours !== null) giveBackLock(prepared.sessionId, ours);
-          throw error;
-        }
-      }
       case 'new': {
         const flags = splitFlags(action.flags);
         if (!flags.ok) return refusal(flags.error);
-        // Made first for the same reason: a factory that throws leaves no label stored.
-        const terminal = guarded(deps.terminalFor({ cols: action.cols, rows: action.rows }), 'new');
-        const prepared = prepareNew(deck, {
+        const request = {
           dir: action.dir,
           label: orNone(action.label),
           group: orNone(action.group),
-          extra: flags.flags,
-        });
-        return launched(prepared, await launchPrepared(deck, prepared, terminal));
+          flags: flags.flags,
+        };
+        return answerOf(
+          await launches.newSession(request, { cols: action.cols, rows: action.rows }),
+        );
       }
       case 'close-terminal': {
         const closed = hub.close(action.term);
@@ -378,9 +315,13 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'pr-rm':
         return edit(action);
       case 'restore':
+        return deps.restore === undefined
+          ? refusal(NOT_AN_ACTION)
+          : answered(deps.restore(action.sessionIds));
       case 'dismiss-restore':
-        // Stage C's restore (plan C, task 72): nothing is done before then.
-        return refusal(NOT_YET);
+        return deps.dismissRestore === undefined
+          ? refusal(NOT_AN_ACTION)
+          : answered(deps.dismissRestore(action.bootId));
     }
   }
 

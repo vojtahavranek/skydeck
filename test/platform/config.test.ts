@@ -217,6 +217,9 @@ describe('ticketUrl (S2 16.4): the URL parser decides where {key} stands', () =>
     // A whole escape right before {key}: the key cannot finish it (ruled on #77).
     'https://host/issues/?jql=key%3D{key}',
     'https://host/b/%25{key}',
+    // A `%` and a character that is no hex digit right before {key}: no key can finish that into
+    // an escape, so the rule (`%`, or `%` and one hex digit) does not refuse it.
+    'https://host/b/%g{key}',
   ]) {
     test(`accepts ${JSON.stringify(value)}, kept as it was written`, (t) => {
       const config = withTicketUrl(t, value).run() as { ticketUrl: unknown };
