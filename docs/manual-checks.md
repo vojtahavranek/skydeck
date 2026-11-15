@@ -1280,7 +1280,7 @@ Setup:
 - VS Code's WSL window (it connects again by itself) and every WSL terminal.
 
 Windows programs should stay, the skydeck window among them (it is an Edge window): that is what
-the design expects (design-step-2.md, 6.3), not yet seen on this PC — W16 writes down what
+the design expects (design-step-2.md, section 6), not yet seen on this PC — W16 writes down what
 happens. A restart of the PC ends all of this and everything else.
 
 **Prepare**, before anything else:
@@ -1304,11 +1304,10 @@ happens. A restart of the PC ends all of this and everything else.
    When `mkdir` says `File exists` for one of them: if you made it in an earlier W16 that you did
    not finish, use it as it is; otherwise it is not W16's — stop here, and change nothing in it.
 2. Three throwaway sessions in the window, one in each folder. For each: press Ctrl+Shift+N (in a
-   browser tab, the `+ New` button). The right side shows the form `New session`, with the fields
-   `Directory`, `Label`, `Group` and `Flags for claude`; when it does not, type nothing and press
-   Ctrl+Shift+N again. Replace the text of `Directory` with the folder's full path
-   (`/home/<you>/skydeck-try/w16-a`, then `w16-b`, then `w16-c`), leave the other fields empty,
-   and press Enter. Wait until Claude Code shows its prompt in the new terminal; then, as the
+   browser tab, the `+ New` button). The right side shows the form for a new session, its first
+   field the directory; when it does not, type nothing and press Ctrl+Shift+N again. Replace the
+   text of the directory field with the folder's full path (`/home/<you>/skydeck-try/w16-a`, then
+   `w16-b`, then `w16-c`), leave the other fields empty, and press Enter. Wait until Claude Code shows its prompt in the new terminal; then, as the
    setup says, send it `say hello in one word`.
 3. Write down the three short ids, each with its folder: a session's header shows its own (on its
    second line, after the directory, the times and where the title comes from), and `skydeck ls`
