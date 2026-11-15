@@ -365,3 +365,15 @@ test('restore --dry-run never prints a command that holds control characters', a
   assert.equal(/[\x00-\x09\x0b-\x1f\x7f]/.test(out), false, JSON.stringify(out));
   assert.equal(out.includes('cd --'), false, out);
 });
+
+test('restore opens every batch though the first started nothing: the command passes no hooks (S2 11.1)', async (t) => {
+  const d = machine(t, {
+    config: { terminal: 'wezterm', restoreBatch: 1, restoreStartTimeoutSeconds: 3 },
+  });
+  assert.equal(await main(['restore', '--yes'], withTabs(d, [sid(2)])), 1);
+  assert.equal(
+    d.stdout(),
+    `timed out 00000001 ${titleOf(d, sid(1))}\nstarted 00000002 ${titleOf(d, sid(2))}\n`,
+  );
+  assert.equal(d.stderr(), '');
+});
