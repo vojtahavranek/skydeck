@@ -348,7 +348,10 @@ export function lockMark(value: string): number | null {
 /**
  * Whether two lock values are of one take (C19): both record an event id, the same one, and the
  * same mark — a lock and its renewals are; a take-over (a new acquireLock, a new millisecond) is
- * another take. A value without an event id (an earlier skydeck's) is of one take only with itself,
+ * another take. Two different values whose last six digits are both 0 are two takes whatever their
+ * marks (ruled): only acquireLock writes such a time, renewLock never does — so a take-over at a
+ * millisecond ≡ the take's (mod 999,999) is told apart too; a renewal of that one is not (C19's
+ * named limit). A value without an event id (an earlier skydeck's) is of one take only with itself,
  * and a value that is not a lock skydeck writes is of none.
  */
 export function sameTake(a: string, b: string): boolean {
@@ -359,6 +362,9 @@ export function sameTake(a: string, b: string): boolean {
   }
   if (first.afterEventId === null || second.afterEventId === null) {
     return a === b;
+  }
+  if (a !== b && first.takenNs % NS_PER_MS === 0n && second.takenNs % NS_PER_MS === 0n) {
+    return false; // two values acquireLock wrote: two takes
   }
   return (
     first.afterEventId === second.afterEventId && markOf(first.takenNs) === markOf(second.takenNs)

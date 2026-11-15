@@ -979,6 +979,7 @@ test('sameTake: other event ids are other takes; no event id: only itself; no lo
   const renewed = `${T0 + 50n * SEC + MARK_T0}`;
   assert.equal(sameTake(`${T0}:1`, `${T0}:2`), false);
   assert.equal(sameTake(`${T0}:1`, `${renewed}:2`), false); // the same mark, another event id
+  assert.equal(sameTake(`${T0}:1`, `${T0 + 50n * SEC + 42n}:1`), false); // a renewal of another take
   assert.equal(sameTake(`${T0}`, `${T0}`), true); // an earlier skydeck's lock (no event id)
   assert.equal(sameTake(`${T0}`, renewed), false); // … even its own renewal: the exact value only
   assert.equal(sameTake(`${T0}`, `${T0}:0`), false);
@@ -996,14 +997,34 @@ test('sameTake: a renewal an older skydeck wrote (now, no mark) is another take 
   assert.equal(sameTake(`${T0}:0`, `${T0 + 50n * SEC}:0`), false);
 });
 
-test('sameTake: a take-over whose millisecond is ≡ the take’s (mod 999,999) looks like it (C19’s one in a million)', (t) => {
-  // 999,999 ms (16 min 40 s) after the take, with no new event. decideFoundKeeper starts nothing on
-  // it (the keeper's deadline passed long before: test/window/starts.test.ts).
+test('sameTake: a take-over whose millisecond is ≡ the take’s (mod 999,999) is another take all the same (ruled)', (t) => {
+  // 999,999 ms (16 min 40 s) after the take, with no new event: the same mark and event id. But
+  // only acquireLock writes a time whose last six digits are 0 (renewLock's mark is 1 to 999,999),
+  // so two different such values are always two takes.
   const d = testDeck(t);
   const [taken = ''] = takeAndRenew(d);
   const over = takeOver(d, T0 + 999_999n * 1_000_000n);
   assert.equal(lockMark(over), lockMark(taken));
-  assert.equal(sameTake(taken, over), true);
+  assert.equal(sameTake(taken, over), false);
+  assert.equal(sameTake(over, taken), false);
+  for (const k of [2n, 3n, 1000n]) {
+    const value = `${T0 + k * 999_999n * 1_000_000n}:0`;
+    assert.equal(sameTake(taken, value), false, value);
+  }
+});
+
+test('sameTake: a renewal of such a take-over still looks like the take (the named limit that stays)', (t) => {
+  // Only a restore renews: one that took the lock over at that millisecond, renewed it, and is
+  // still waiting. A settlement of the first take's terminal then gives that lock back, and the
+  // restore's next renewLock returns null (C19).
+  const d = testDeck(t);
+  const [taken = ''] = takeAndRenew(d);
+  const overAtNs = T0 + 999_999n * 1_000_000n;
+  const over = takeOver(d, overAtNs);
+  d.clock.setNs(overAtNs + SEC);
+  const renewed = renewLock(d.deck, S1, over);
+  assert.equal(renewed, `${overAtNs + SEC + MARK_T0}:0`);
+  assert.equal(sameTake(taken, renewed), true);
 });
 
 /** Stage A's pattern of a lock value (`parseLock` on main at bd86f91), copied: what an older skydeck reads. */
