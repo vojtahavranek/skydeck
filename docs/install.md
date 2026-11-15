@@ -1154,18 +1154,20 @@ In its field ↑ ↓ move the highlight, PgUp and PgDn by a page; Enter acts on 
 session; Esc, or Ctrl+Shift+P again, closes the switcher, and the keyboard goes back where it
 was; Tab and Shift+Tab do nothing; every other key is text. The footer names the keys and what
 Enter does to the highlighted session: `↑ ↓ move · Enter switch · Esc close` for a session that
-runs, `↑ ↓ move · Enter resume here · Esc close` for one that is not running. A click on a
-session does what Enter does (a double click acts once); a click outside the panel closes the
-switcher.
+has a terminal of the window or runs in another terminal, `↑ ↓ move · Enter resume here · Esc
+close` for one that has neither — a session that is not running, or one whose program runs
+without skydeck knowing where (step 1's resume then refuses it). A click on a session does what
+Enter does (a double click acts once); a click outside the panel closes the switcher.
 
 **Enter** closes the switcher, selects the session and does what Enter on its row in the list
 does:
 
 - a session with a terminal of the window: its terminal shows and takes the keyboard (an ended
   one under its bar);
-- a session that runs in another terminal: its card;
-- a session that is not running: it is resumed into the window. A refusal shows on its card (an
-  expired session's, for one).
+- a session that runs in another terminal: its card, and the list has the keyboard;
+- every other session (`Enter resume here`): it is resumed into the window, the list has the
+  keyboard until its terminal comes and takes it. A refusal (an expired session's, for one) shows
+  on its card, or in the key bar when the list does not show the session.
 
 When the list does not show that session, the list first changes so that it does, by what hides
 it: the filter's field and the chips are cleared (the key bar says `the filter was cleared to
@@ -1189,8 +1191,10 @@ window has its own switcher.
 **The restore offer** (stage C). After `Not now` on the restore banner, the switcher still offers
 that restore until WSL restarts, in command form only: type `>restore` (or `>r`, `> rest`, `>
 RESTORE`: a text whose first character is `>`, and after it the start of `restore`), and the
-entry `Restore 3 sessions from yesterday at 18:02` is listed; Enter on it restores the sessions
-the banner had preselected, and the run's report shows where the banner's report shows. A text
+entry `Restore 3 sessions from yesterday at 18:02` is listed (the time as the banner says it),
+while no restore runs. Enter on it, not a click (a click on it does nothing), restores the
+sessions the banner had preselected, and the run's report shows where the banner's report shows;
+the footer then says `↑ ↓ move · Enter restore · Esc close`. A text
 that starts with `>` lists no session; without the offer it says `No command matches. > restore
 is listed after Not now on the restore banner, until WSL restarts.` Every other text lists
 sessions only (` >restore`, with a space first, looks for the word `>restore`), so the offer is

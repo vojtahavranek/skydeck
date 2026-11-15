@@ -1525,11 +1525,11 @@ chip on. Write down how many sessions the title bar counts.
    sessions stop changing (a second). Look at the highlighted session: its short id, at the right,
    must be the one you wrote down, whole. When it is another one, press ↓ until the highlighted
    session's short id is the throwaway session's; when no session shows it, press Esc and leave
-   this step out. Read the footer: `Enter resume here` (the throwaway session is not running) or
-   `Enter switch` (its terminal is in the window). Then press Enter once. Expected: the panel goes
-   and the throwaway session is selected; not running, it is resumed into the window (its row
-   under Open, `starting…`, then its terminal, which has the keyboard: `Focus: terminal`); running
-   in the window, its terminal shows and has the keyboard. Type nothing into it: it stays as it
+   this step out. Read the footer: `Enter resume here` (the throwaway session has no terminal in
+   the window) or `Enter switch` (its terminal is in the window). Then press Enter once. Expected:
+   the panel goes and the throwaway session is selected; with `Enter resume here`, it is resumed
+   into the window (its row under Open, `starting…`, then its terminal, which takes the keyboard:
+   `Focus: terminal`); with `Enter switch`, its terminal shows and has the keyboard. Type nothing into it: it stays as it
    is, for the other checks. When step 4 left Earlier unfolded: with the throwaway session's row
    now under Open, fold Earlier with a click on its header; with its row still in Earlier, leave
    Earlier unfolded and write that down.
