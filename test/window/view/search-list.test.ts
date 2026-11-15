@@ -610,6 +610,32 @@ test("switcher: '' lists every session listed with done ones shown, ranked open,
   }
 });
 
+test("switcher: Open's items in Open's order (slots, then elsewhere), whatever their activity", () => {
+  const message = buildListMessage(
+    input({
+      rows: rows([
+        running(S1, { pid: 9001, lastActivityNs: NOW - 9n * MIN, transcript: { aiTitle: 'a' } }),
+        running(S2, { pid: 9002, lastActivityNs: NOW - MIN, transcript: { aiTitle: 'b' } }),
+        running(S3, { pid: 9003, lastActivityNs: NOW, transcript: { aiTitle: 'c' } }),
+        idle(S4, 'd', 10n * MIN),
+      ]),
+      terminals: [
+        term(1, { expectedSessionId: S2, slot: 2 }),
+        term(2, { expectedSessionId: S1, slot: 1 }),
+      ],
+      elsewhere: new Map([[S3, { pid: 9003, tty: null }]]),
+      view: { switcher: '' },
+    }),
+  );
+  assert.deepEqual(ids(message, 'open'), [S1, S2, S3]);
+  assert.deepEqual(ranked(message), [
+    `${S1}:open`,
+    `${S2}:open`,
+    `${S3}:open`,
+    `${S4}:not-running`,
+  ]);
+});
+
 test("switcher: each item's hiddenBy says what this page's list would have to change (filter, done, folded)", () => {
   const world = switchWorld();
   const hidden = (view: Partial<ViewInput['view']>) => {

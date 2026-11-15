@@ -193,7 +193,8 @@ Added to design 11:
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses. | platform, text, store, claude, sessions, terminals, github |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
-| `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), stacks, attention, the switcher's ranking, the filter (12). | sessions (types, and the pure `isListed` and `matchesFilter` of `src/sessions/list.ts`: stage A's filter is design 7.4's, with one implementation), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4) |
+| `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` stacks, the switcher's ranking and the filter (12). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
+| `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the stacks (12.2), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS. No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
@@ -1359,7 +1360,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `t` | Fields | Effect |
 |---|---|---|
 | `ping` | `n` | `pong` with the same `n`, `bootId`, `serverId`. |
-| `view` | `filter`, `chips` (from stage E; stage A's `view` has none), `unfolded`, `showDone`, `selected` | The page's view state; the server answers with `list` and keeps sending `list` when it changes (12). |
+| `view` | `filter`, `unfolded`, `showDone`, `selected`; from stage E, each optional (a page before stage E sends none): `chips` (12.8's Running, Open PR and Has note as `running`, `open-pr`, `note`, each once; Show done is `showDone`), `opened` (the groups whose stacks the user opened, at most 64 distinct texts; absent: no stacks at all, 12.2), `switcher` (the quick switcher's text while it is shown, else null; each change of it is a `view`) | The page's view state; the server answers with `list` at once and keeps sending `list` when it changes (12). |
 | `focus` | `focused`, `selected`, `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
 | `attach` | `term`, `cols`, `rows` | Start a terminal stream (8.2.4). The page's size is a proposal (8.2.6). |
 | `detach` | `term` | Stop it. |
@@ -1406,7 +1407,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack`. |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing) and `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the stack the row is drawn in, 12.2: `group`, `size` — its rows, the head included —, `open`, `role` — `head` or `member` — and `head`, the head's session id). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -2007,6 +2008,20 @@ rule (4.3; stage B, plan B7).
   the stack. Running sessions never stack; a filter flattens every stack.
 - Slot numbers 1–9 show at the left of Open's rows.
 
+The rule of stacks is the server's (4.3; stage E, plan E6). In This week and in Earlier, each on
+its own, the rows of one group — the row's group as sanitised, compared as exact text — stack
+under the newest when there are at least two. A row that a terminal of the window holds (running,
+starting or ended: it may hold a slot) never stacks, nor does one that needs you (12.4), so that
+a row that needs you never sits inside a closed stack where no mark shows it; Open never stacks,
+and while a filter or a chip is set (12.8) nothing does. A stack is open when the page's view
+names its group (`opened`, 8.2.3) or when the selected session is one of its members other than
+the newest, its head; the page then adds the group to `opened` and keeps it there until the user
+closes the stack, so that the list does not move when the selection leaves (ruled). So the
+selection is never on a row hidden in a stack, however it got there. A section's count and time
+span are all its rows', a closed stack's members included. A page that sends no `opened` (one
+from before stage E's list) gets no stacks at all, so that no session is ever hidden in a stack
+it cannot draw (ruled).
+
 ### 12.3 The pull-request chip in the window
 
 The window's chip differs from the list's (design 7.3), which stays as it is for `ls` and the
@@ -2255,13 +2270,64 @@ restart.
 
 - `/` filters the list: title, group, note, pull-request repository and number, directory, short
   id; several words must all match; while a filter is set it includes done sessions and unfolds
-  every section and stack. (Stage A has design 7.4's filter: one text, the fields of 7.4.) A
-  filter that leaves no row says so: `No session matches the filter.` (ruled by the plan owner,
-  plan task 27).
+  every section and stack. A filter that leaves no row says so: `No session matches the filter.`
+  (ruled by the plan owner, plan task 27).
 - Chips: Running, Open PR, Has note, Show done.
 - Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (by slot), not
   running (most recent first), done. Enter switches to a running one and resumes one that is not
   running (11.3).
+
+The rules are the server's (4.3: `src/window/view/search/`, stage E, plans E2–E5 and E9); the page
+sends what it wants to see in its `view` and draws the `list` it gets (8.2.3), deciding no rule.
+One rule matches for the filter and for the switcher:
+
+- **Words.** A search text is split at white space (spaces, tabs, line breaks, the no-break
+  space) into words, each lower-cased. A row matches when every word, in any order, is found in
+  one of its fields — the title, the group, the note (sanitised line by line), the directory, and
+  of each attached pull request `owner/repo`, its number and `owner/repo#number` (design 7.4's
+  fields) — or, for a word of at least 4 characters, when the session's id starts with it (the
+  short id, and the whole id). Four characters, so that `fix 2` does not match nearly every
+  session through the hex digits of its id. A word is never found across two fields. (Stage A had
+  design 7.4's filter: one text, the fields of 7.4.)
+- **Bounds.** A search text is at most 1,024 bytes of UTF-8; at most 16 words count (the page cuts
+  a longer text after its 16th word and says so), each in its first 64 UTF-16 units; each field
+  is searched in its first 16,384 units (a note in the first 16,384 units of its raw text). No
+  pattern is ever built from a search text. The cost is linear in the rows, the words and the
+  units searched, on the server's one thread at each keystroke; the switcher adds where the words
+  are in each of the at most 50 titles it lists.
+- **Chips.** Running: the row is in Open (running or starting, in the window or elsewhere). Open
+  PR: at least one attached pull request is not known to be merged or closed (open, draft, never
+  fetched, can't read; 12.3's open ones). Has note. Every chip set must hold, with every word. Show
+  done is the fourth chip and is the view's `showDone`, the same state as the list key `a` and the
+  footer's `show`.
+- **Filtering** is a word or one of the first three chips. While filtering, done sessions are
+  listed (with their `done` mark), every section is unfolded, every stack is flat (12.2) and the
+  footer of done sessions is not shown; nothing folds. Whether a list is filtering is the server's
+  answer (`list.filtering`). The title bar's counts and the `need you` count (12.1) are taken over
+  the rows listed without the filter, so that neither the title bar nor `(n) skydeck` moves when
+  a filter lists a done row.
+- **The switcher's ranking.** While the switcher is shown its text is part of the page's `view`
+  (each change one `view`, answered at once), and the `list` carries its items: every session the
+  list lists with done ones shown — also those the page's filter, chips, folded Earlier or closed
+  stacks leave out — whose fields match every word of its text (all of them for none), ranked:
+  needs you (in 12.4's order), open (Open's order: slots, then by opening time, then those
+  elsewhere), not running (most recent first), done (not running and done, most recent first). At
+  most 50, with how many more match. Each item carries where the words are in its title (every
+  occurrence, overlapping ones merged, at most 32) and what this page's list would have to change
+  to show it: the filter cleared, done sessions shown, Earlier unfolded. A text whose first
+  character is `>` is a command and lists no session (12.7).
+- Each window has its own filter, chips, opened stacks, folded Earlier, done shown, selection and
+  switcher; what it shows of each session is the same in every window (8.2.7).
+
+Named limits: a zero-width or control character in a search text is part of a word (as in stage
+A's filter), so a text that looks empty can hide every session. While filtering, stage D's toast
+after `d` (`Marked done: hidden from the list…`) is untrue for as long as the filter lists the row.
+A done session that needs you and that a filter lists shows its mark and Ctrl+Shift+J reaches it,
+but the `need you` count leaves it out (it is not listed without the filter), so the key bar's
+count of those hidden by the filter (12.4) is then one too low for each such row. The switcher
+marks no match in a title whose length lower-casing changes. The server's automatic refresh of
+pull requests (design 7.3) follows the rows the sections carry, so the members of a closed stack
+and the switcher's items are not refreshed by it, as a folded Earlier's rows never were.
 
 ### 12.9 Keys and focus
 
