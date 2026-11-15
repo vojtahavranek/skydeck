@@ -5,6 +5,10 @@
 // each element says comes from web/list-text.js; everything from the server reaches the DOM as
 // text (textContent, title), never as markup.
 //
+// Stage B (plan B task 55): a row that needs you carries `data-attention="<reason>"` (its left bar
+// and bold title are list.css's) and the reason's line as its second line (list-text.js), and the
+// counts start with `3 need you` on an element `data-state="need-you"`, whose dot list.css draws.
+//
 // A render never loses a click (contract 2.9): app.js renders when a list arrives and when only
 // the zone changed — the focus a mousedown moves, before its mouseup —, so every element the list
 // draws is made once and kept: a row keeps its element and every element inside it across
@@ -13,6 +17,7 @@
 /** @import { ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { ListAction, Zone } from './keys.js' */
 /** @import { RowText } from './list-text.js' */
+import { needYouText } from './attention-text.js';
 import { serverNow } from './format.js';
 import { countsText, footerText, rowText, sectionText } from './list-text.js';
 
@@ -155,6 +160,13 @@ function paintRow(row, text, done) {
   setData(row.root, 'icon', text.icon);
   setData(row.root, 'lines', text.stateLine === null ? '1' : '2');
   setData(row.root, 'done', String(done));
+  if (text.attention === null) {
+    if (row.root.dataset['attention'] !== undefined) {
+      delete row.root.dataset['attention'];
+    }
+  } else {
+    setData(row.root, 'attention', text.attention);
+  }
   setData(row.icon, 'icon', text.icon);
   setTip(row.icon, text.icon === 'crashed' ? 'not running: it ended unexpectedly' : text.icon);
   setText(row.slot, text.slot);
@@ -369,13 +381,20 @@ export function createList(root, hooks) {
   };
   setInterval(paintAges, AGE_TICK_MS);
 
-  /** The title bar's counts (S2 12.1), written into index.html's `#counts`. */
+  /**
+   * The title bar's counts (S2 12.1), written into index.html's `#counts`: first those that need
+   * you (`needYou.count`, none in a list without it), then each state's.
+   */
   const paintCounts = () => {
     const counts = document.getElementById('counts');
     if (counts === null) {
       return;
     }
-    const parts = current === null ? [] : countsText(current.counts);
+    const needYou = current === null ? null : needYouText(current.needYou?.count ?? 0);
+    const parts = [
+      ...(needYou === null ? [] : [{ state: 'need-you', text: needYou }]),
+      ...(current === null ? [] : countsText(current.counts)),
+    ];
     const text = parts.map((part) => part.text).join(' · ');
     if (counts.textContent === text) {
       return;

@@ -46,8 +46,9 @@ function noteOf(note: string | null): Pick<SelectedPayload, 'note' | 'noteTooLon
  * argument list buildResumeCommand gives for the session (claudeCommand, its recorded launch, its
  * label), as `prepareResume` builds them; null when the directory is not known or a word holds
  * anything the sanitiser would change. `unknownFlags` are sanitised: they come from a recorded
- * command line. `note` and `noteTooLong` as `noteOf` says (plan D5); `ticketUrl` is null until
- * task 36 fills it. Takes no lock and reads nothing but `deck.config`.
+ * command line. `note` and `noteTooLong` as `noteOf` says (plan D5); `ticketUrl` is S2 12.5's
+ * ticket address of the row's group (`ticketAddress` with the configuration's `groupPattern` and
+ * `ticketUrl`), null without one. Takes no lock and reads nothing but `deck.config`.
  */
 export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
   const launch = row.session.launch;
