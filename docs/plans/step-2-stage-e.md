@@ -958,11 +958,12 @@ and a page from before task 97 still gets stage A's list (no stacks); `npm run c
 **To resolve when merging `origin/main`:** the end of `ListMessage` in `protocol.ts` (after
 96's `switcher`); the object `buildListMessage` returns (B 51's `needYou`, D 34's terminal
 fields, 96's fields): `selectedRow` goes last; `render()` in `app.js`, rebuilt by D 37 around
-`header(row, selected, term, now)` and its render key, and touched by B 55 and C 75 (the title,
-the banner): only its `paneFor(…)` call changes; D 37's `edit` and `done` handlers in `app.js`
+`header(row, selected, term, now)` and its render key, and touched by B 55 (the title; C 75 calls
+`banner.render` in `received()`'s `case 'list'`, not in `render()`): only its `paneFor(…)` call
+changes; D 37's `edit` and `done` handlers in `app.js`
 (the row they look up) and D 38's `update(list)` in `web/edit.js` (the row it looks up): only that
-lookup changes, to `sessionRow`; the ends of `build.test.ts` and `pane.test.ts`, where D 34, B 51
-and C 73 add cases: E's cases go after theirs; S2 8.2.3's `list` row (after 96's fields); S2
+lookup changes, to `sessionRow`; the ends of `build.test.ts` and `pane.test.ts`, where D 34 and
+B 51 add cases (C 73 changes only the pinned list of `build.test.ts`): E's cases go after theirs; S2 8.2.3's `list` row (after 96's fields); S2
 12.6's paragraph on the ended terminal and S2 12.9's sentence on the selection (D's plan and task
 97 write other sentences of 12.9: keep them).
 
