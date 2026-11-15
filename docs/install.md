@@ -452,10 +452,11 @@ running when the window or skydeck's server is closed or restarted: each termina
 python3 process of its own, its **keeper**. A session ends only when you end it inside `claude`; the
 window has no action that stops one.
 
-This is stages A, D and B of step 2 ([design-step-2.md](design-step-2.md), section 19): the list,
-the terminals, resume and new (A); editing in the window — the label, group, note, done mark and
-pull requests, and the ticket link (D); and which sessions need you, with desktop notifications
-(B). Restoring into the window, and the search beyond one text, come in later stages. The commands
+This is stages A, D, B and E of step 2 ([design-step-2.md](design-step-2.md), section 19): the
+list, the terminals, resume and new (A); editing in the window — the label, group, note, done mark
+and pull requests, and the ticket link (D); which sessions need you, with desktop notifications
+(B); and search — several words and the short id in the filter, the chips, stacks and the quick
+switcher — with the page's own icon (E). Restoring into the window comes in a later stage. The commands
 of step 1 stay as they are, also while the window runs: `skydeck resume`, `new` and `restore`
 start `claude` in the terminal you type them in, not in the window.
 
@@ -890,6 +891,94 @@ Nothing is installed for any of this: turn ends are read from Claude Code's own 
 entries stay as they were, `skydeck install` is not run again, and `skydeck doctor` says what it
 said before.
 
+#### Search, the chips and stacks (stage E)
+
+**The filter** is the field at the top of the list, `Filter: title, group, note, PR, directory,
+short id   /` while it is empty. A click into it, or `/` while the list has the keyboard
+(`Focus: list`), gives it the keyboard: its border takes the selection's colour and the caret
+blinks in it. There every key but Enter and Esc is text, and the list follows each keystroke.
+Enter ends the entry and gives the keyboard back to the list; Esc does the same and clears the
+field. With the keyboard on the list, Esc clears the filter, and the next Esc goes to the
+terminal.
+
+- **Words.** The text is split at white space into words, and a session is listed when every
+  word, in any order and in either case, is found in one of its fields: the title, the group, the
+  note, the directory, or an attached pull request (`owner/repo`, its number, or
+  `owner/repo#number`). `orb login` lists a session titled `ORB-2107 fix login`, and `web#7` one
+  with `acme/web #7` attached. A word is never found across two fields.
+- **The short id.** A word of at least 4 characters also lists the session whose id starts with
+  it: the first characters of the short id in the header (or in `skydeck ls`'s last column), or
+  the whole id. A shorter word is looked for in the fields only, so that `fix 2` does not list
+  nearly every session through the digits of its id.
+- **While filtering** — a word in the field, or one of the chips below but `Show done` — done
+  sessions are listed too, with their `done` mark; every section is unfolded and every stack flat
+  (below); the footer `17 done hidden · show` is not shown; and nothing folds: ← and → do nothing,
+  nor does a click on Earlier's header. A filter that leaves no session says `No session matches
+  the filter.` A text of white space only is no filter. The title bar's counts, the `need you`
+  count and `(3) skydeck` do not change with the filter: they count what the list lists without
+  it.
+
+**The chips**, under the field: `Running` (the sessions under Open), `Open PR` (those with a pull
+request that is not merged or closed: open, draft, `not fetched` or `can't read`), `Has note`, and
+`Show done`. A click turns one on or off, drawn pressed while it is on, and leaves the keyboard
+where it was. Every chip that is on must hold, with every word: `Running` with `Has note` lists
+the running sessions that have a note. `Show done` is the same switch as the list key `a` and the
+footer's `show` (`done sessions shown · hide`): each turns the others on and off, and it shows
+done sessions without filtering. Esc clears the words, not the chips: a chip stays on until it is
+clicked again. The chips are buttons: Tab from the field reaches them, Enter or Space presses the
+one that has the keyboard, and while one has it no list key acts.
+
+**Stacks.** In This week and in Earlier, each on its own, the sessions of one group stack under
+the newest when there are at least two. The newest, the stack's head, shows `×4` after its ticket
+key (or its group); while the stack is closed the line `+3 more in ORB-2107` follows it, which is
+no row: it is never selected, and ↑ ↓ pass over it and the sessions it hides. An open stack's
+other sessions follow the head, indented. A group is its exact text: `ORB-1` and `orb-1` are two.
+Never in a stack: the sessions under Open, a session that has a terminal of the window (an ended
+one too), and a session that needs you, so that no mark ever hides in a closed stack. A section's
+count counts every session in it, those of a closed stack too.
+
+- A click on `×4` or on the `+3 more` line opens or closes the stack. It selects nothing and
+  leaves the keyboard where it was, but a click on `×4` that closes the stack while one of its
+  members is selected selects the head first. A double click on either acts once.
+- In the list (`Focus: list`): → on a closed head opens the stack, ← on an open head closes it,
+  and ← on a member selects the head and closes the stack. On a session in no stack ← and → fold
+  and unfold Earlier as before.
+- A stack whose member becomes the selected session opens, however that happens (the switcher,
+  or a newer session of its group that makes the selected one a member), and stays open when the
+  selection leaves, until you close it. Ctrl+Tab skips a member of a stack you closed, as
+  it skips a session that the filter or the folded Earlier hides: the page does not know a closed
+  stack's members.
+- `d` on a closed stack's head marks that session only: the next one becomes the head (or the
+  last one stands alone), and the selection goes to the row after the stack (stage D's rule takes
+  the row after it among those the list drew, and the stack's other sessions were not drawn).
+- While filtering, every session stands alone.
+
+Each window has its own filter, chips, open stacks, folded Earlier and done shown, and a reload
+(F5) forgets the chips and the stacks you opened. What a window shows of a session is the same in
+every window.
+
+#### A selected session the list does not show (stage E)
+
+When the list stops showing the selected session — the filter or a chip hides it, done sessions
+are hidden again, Earlier is folded — no row is selected and the list's keys act on none: `l`, F2,
+`g`, `n`, `p` and `d` say `no session selected`. When a terminal of the window holds the session,
+the right side keeps it: the terminal with its header, whose controls edit that session as usual
+(a click on the title, ✎, `Note`, `Done`, `Pull requests`), and once its program has ended, the
+ended bar with Resume and Close. A session without a terminal of the window shows nothing on the
+right then, no card. `Done` in
+the header of such a session says `Marked done. Stays under Open while it runs; hidden once it
+stops.` while it runs or starts, else `Marked done: hidden from the list. It comes back on new
+activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
+holds it. When the list shows the session again (the filter cleared), it is selected again.
+
+#### The icon (stage E)
+
+The page has an icon of its own, a white stack of cards with a `>_` prompt on a blue square, for
+the window's taskbar button and its title bar; manual check W3 says whether Edge shows it there.
+The page also has a manifest, for the icon: Edge's menu may offer to install the page as an app.
+Do not: the window is opened by `skydeck window`, and the page is built not to be installable (its
+manifest names no start address).
+
 ### Known limits of stage A
 
 - **The keep-alive is not verified** (above; W14).
@@ -928,10 +1017,9 @@ said before.
   With several windows open, clicking into a window can give it the terminal's size while the
   program has asked for focus reports.
 - **The list.** An expiring session says `expires soon`, without the number of days. From an empty
-  filter field it is two Escs to the terminal. The ended bar of a selected session that the filter
-  hides offers no Resume, and Close only once the end is known: clear the filter. A resume card's
-  warnings about flags (`original flags unknown; resuming with defaults`, flags not passed on)
-  show until the terminal replaces the card, not after a successful resume. In one rare case
+  filter field it is two Escs to the terminal. A resume card's warnings about flags (`original
+  flags unknown; resuming with defaults`, flags not passed on) show until the terminal replaces
+  the card, not after a successful resume. In one rare case
   (a click outside the list and, within a double click's time, a click on a row a list update has
   just moved under the pointer) that row is resumed as by a double click.
 - **A flood of output.** When a program writes faster than skydeck can show (megabytes at once), a
@@ -951,8 +1039,6 @@ said before.
 
 ### Known limits of stage D
 
-- **A session the filter hides has no header**, and so is not edited: its keys say `no session
-  selected`. Clear the filter first (Esc).
 - **Two windows.** Label, group and done are last-write-wins between two windows, and between a
   window and a command, as between two commands. Only the note is guarded: a save over a note that
   changed meanwhile is refused, with your text kept in the box.
@@ -1000,6 +1086,30 @@ said before.
   unexpectedly · not seen` by the next server, without a notification. At the first start of a
   server of stage B, which has no marks yet, that can be a session that ended before the update:
   its row shows `ended unexpectedly · not seen` once; select it, and it goes.
+
+### Known limits of stage E
+
+- **How far search reads.** A word counts in its first 64 characters, and only the first 16 words
+  of a text count. Each field is searched in its first 16,384 characters (a long note in the first
+  16,384 characters of its text).
+- **A character you cannot see**, a zero-width space or a control character pasted into the field,
+  is part of a word: a filter that looks empty, or like a plain word, can then list nothing. Clear
+  the field (Esc) and type it again.
+- **The `need you` count and a filter.** A done session that needs you and that a filter lists
+  shows its mark, and Ctrl+Shift+J reaches it, but the title bar's count leaves it out (without
+  the filter it is not listed), so the key bar's `… hidden by the filter or the fold` counts one
+  too few for each such session.
+- **`d` while filtering.** The toast says `Marked done: hidden from the list. It comes back on new
+  activity.` while the filter still lists the session, with its `done` mark.
+- **Stacks the window cannot remember.** A group over 1,024 bytes (of UTF-8) opens its stack only
+  while one of its members is selected. A window remembers at most 64 open stacks: opening
+  another closes the one opened first.
+- **The automatic pull-request refresh** (design.md 7.3) leaves out the sessions inside a closed
+  stack, as it leaves out those of a folded Earlier: open the stack, or use `↻` in the session's
+  pull-request dialog.
+- **A session that ended before its first prompt** has no transcript, so the list does not list
+  it once its program has ended: selected, it keeps stage A's ended bar, without Resume, and with
+  Close only once the end is known.
 
 ### What `doctor` says about the window
 

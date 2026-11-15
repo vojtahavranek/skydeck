@@ -6,7 +6,9 @@ terminal tab, never restart WSL and never start a Windows program. Each item giv
 the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 check the window of
 step 2 (stage A) and start at "The window (step 2, stage A)" below; W27–W29 check editing in the
 window (stage D), at "The window (step 2, stage D)"; W11, W19 and W21 check which sessions need
-you and the desktop notifications (stage B), at "The window (step 2, stage B)".
+you and the desktop notifications (stage B), at "The window (step 2, stage B)"; W30, W31 and W3's
+icon check search, the quick switcher and the page's icon (stage E), at "The window (step 2,
+stage E)".
 
 Setup:
 
@@ -266,8 +268,8 @@ pull requests again. Press `q` to leave.
 
 The checks of the design's section 18 (design-step-2.md) that stage A needs: W1–W10, W12–W15,
 W17, W18, W20 and W22–W26, and one more that came with the page's ping rule ("Minimised for half
-an hour", after W15). W11, W19 and W21 are stage B's (at the end), and W16 comes with the stage
-that builds what it checks. Each check says what to set up, what to type, what to look at and what
+an hour", after W15). W11, W19 and W21 are stage B's and W30 and W31 stage E's (both further
+on), and W16 comes with the stage that builds what it checks. Each check says what to set up, what to type, what to look at and what
 to write down.
 
 Setup:
@@ -395,8 +397,8 @@ Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn and Ctrl+PgUp).
 
 ## W3. One window, its own taskbar button
 
-With the window open: it has a taskbar button of its own, apart from your own Edge's (the icon is
-Edge's until a later stage gives the page its own; the title is `skydeck` while no session needs
+With the window open: it has a taskbar button of its own, apart from your own Edge's (its icon is
+"W3, the icon", in the part of stage E at the end; the title is `skydeck` while no session needs
 you, below). `skydeck window` again opens no second window (`a window is already open`).
 `skydeck window --restart`: the same window stays, with the same button, and says `skydeck's
 server restarted; your sessions kept running`.
@@ -1168,3 +1170,116 @@ Write down: what each step showed; in step 5, the commands Claude Code proposed,
 `finished` or a `finished` notification came before the answer was written, and how many
 notifications came. Yours to judge: the list and the title bar's counts call an idle session
 `waiting` (stage A's word); whether they should say `idle`.
+
+## The window (step 2, stage E)
+
+The checks of the design's section 18 (design-step-2.md) that stage E needs: W30 and W31, search,
+the chips, stacks and the quick switcher ([install.md](install.md), "Search, the chips and stacks
+(stage E)" and "The quick switcher (stage E)"), and the icon's part of W3. Each check says what to
+set up, what to type, what to look at and what to write down.
+
+Setup:
+
+- The setup of "The window (step 2, stage A)" above, with its **throwaway session in the
+  window**. These checks look at your real sessions and change none of them: only the throwaway
+  session is ever resumed, or typed into.
+- **Its short id.** Click the throwaway session's row once and write down the short id its header
+  shows (on its second line, after the directory, the times and where the title comes from).
+  Each check starts with the throwaway session selected, so that a key that lands where you did
+  not mean it to reaches only the throwaway session.
+- **Where the keyboard is, before you type.** Text belongs in a field only while that field has
+  the keyboard: the filter's field when its border has the selection's colour and its caret
+  blinks in it (click into it first), the switcher's field while the switcher's panel is shown
+  over the window. Typed anywhere else, letters are list keys — `k` moves to a real session, `d`
+  marks it done, `l`, `g` and `n` open a dialog — or reach the terminal of the selected session.
+  When the field shows no caret, type nothing: click into it first. In the filter's field press
+  no Enter: Enter gives the keyboard to the list, where the next letter is a list key.
+- **One click on a row, on its title.** A double click on a session that is not running resumes
+  it. These checks click only rows inside a stack, which never need you (a session that needs
+  you and stays selected for 1.5 seconds is marked seen), and the throwaway session's row. A
+  session's resume card shows `Resume here`: never click it in these checks.
+- **Leave the window as you found it.** Write down at the start whether the filter is empty,
+  which chips are on and which stacks are open; at the end, the filter is empty again (Esc in it),
+  the chips you turned on are off and the stacks you opened are closed.
+
+## W30. Search on your own sessions (real claude)
+
+Setup: the throwaway session selected (look at the short id in its header), the filter empty, no
+chip on. Write down how many sessions the title bar counts.
+
+1. **Two words.** Take one of your ticket keys and a word of that session's title (`ORB-2107` and
+   `login` below). Click into the filter's field: its caret blinks. Type `orb-2107 login`, in lower
+   case. Expected: the list follows each keystroke; at the end it lists only the sessions that
+   have both words (in their title, group, note, directory or a pull request), done ones too with
+   their `done` mark; every section is unfolded, no stack is drawn, and the footer of done
+   sessions is gone. The title bar's counts did not change. Then Ctrl+A (in the field: it selects
+   the field's text) and type `login orb-2107`: the same sessions. Press Esc: the field is empty,
+   the list as before, and the key bar says `Focus: list`.
+2. **A short id.** Click into the field again (look for the caret) and type the first 6 characters
+   of the throwaway session's short id. Expected: the throwaway session is listed (and any session
+   whose title, group, note, directory or pull request holds those characters, which is rare).
+   Backspace twice (4 characters left): still listed. Backspace once more (3 characters): the id
+   no longer counts, only the fields do; mostly `No session matches the filter.` Press Esc.
+3. **The chips.** Look at the key bar's `Focus: …` and keep it in mind. Click `Running`. Expected:
+   the chip is drawn pressed, only the sessions under Open are listed, and `Focus: …` did not
+   change. Click it again: it is off, the list as before. The same with `Open PR` (only the
+   sessions with a pull request that is not merged or closed) and `Has note` (only those with a
+   note). Then `Running` and `Has note` together: only the running sessions that have a note
+   (`No session matches the filter.` when none has one); click both off. Then `Show done`: the
+   done sessions show with their `done` mark and the footer says `done sessions shown · hide`;
+   click it again, and the footer is `<n> done hidden · show` again (or gone when none is done).
+4. **A stack.** Look in This week (and in Earlier: a click on its header unfolds it) for a line
+   `+<n> more in <group>`. When there is none, write that down and go on with step 5. Click that
+   stack's head once, on its title (the row just above the line). Expected: the head is selected,
+   its resume card shows, the key bar says `Focus: list`. That is a real session: from here to
+   the end of this step press only ← and →, never Enter (Enter would resume it). Press →: the
+   stack opens, its other sessions follow the head, indented, and the `+… more` line is gone.
+   Press ←: it closes again. Press →, click the first indented session once, then press ←.
+   Expected: the head is selected again and the stack is closed. Then click the `×<n>` after the
+   head's key: the stack opens; wait a moment (two quick clicks are a double click, which acts
+   once) and click it again: it closes; neither click moved the selection or the keyboard. Then
+   click the throwaway session's row once (look at the short id): the next steps start from it.
+   When you unfolded Earlier, fold it again now, with a click on its header.
+
+Write down: whether any answer of the list came late enough to notice (the filter as you typed,
+the chips, the stack); every step that showed something else than described.
+
+## W31. The filter's and the switcher's fields on your layouts
+
+Run it once on the US layout and once on the Czech one (Win+Space switches, W8). Setup: the
+throwaway session selected (look at the short id), the filter empty.
+
+1. Click into the filter's field: its caret blinks. Type `\ [ ] { } @ # ~ |`, each with the keys
+   your layout has for it (on the Czech layout with AltGr), and on the Czech layout also the dead
+   keys: háček, then `e` (`ě`), čárka, then `e` (`é`). Expected: each character shows in the field
+   as typed, and nothing else happens: no dialog, no other session selected, the key bar shows
+   no new message. Press Esc: the field is empty.
+
+Write down, per layout and per field: every character that did not show as typed, or that did
+something else.
+
+## W3, the icon
+
+Setup: the window open after the update to stage E (`git pull` and `skydeck window`, install.md,
+"Updating"; the page reloads itself for the new build), the throwaway session selected (look at
+the short id).
+
+1. Look at the window's taskbar button and at the left end of the window's own title bar (Edge's,
+   above the page). Expected: skydeck's icon, a white stack of cards with a `>_` prompt on a blue
+   square, not Edge's.
+2. In W: `skydeck window --restart`. Expected: the same window stays and says `skydeck's server
+   restarted; your sessions kept running`. Look at the button again.
+3. When the button showed Edge's icon in step 1 or 2, write that down, and look at it again the
+   next time the window is opened anew: after you closed it for a reason of your own, or after a
+   restart of the PC (do not close it for this check).
+4. After a WSL restart: only when WSL restarts anyway, or in W14's third part. A WSL restart ends
+   every session running in WSL, your real ones too: never restart it for this check. When none
+   came, write down "left out".
+5. Edge's menu of the window: when Edge's title bar above the page has a `…` button, click it and
+   read the entries without choosing any: does one offer to install the page, or the site, as an
+   app? **Do not install it.** Close the menu with Esc. When there is no such button, write that
+   down.
+
+Write down: the icon the button and the title bar showed, after the update, after the restart (and
+when the window was opened anew, after a WSL restart, or "left out"); whether Edge's menu offered
+to install the page as an app, in its own words.

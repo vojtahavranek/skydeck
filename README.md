@@ -11,9 +11,12 @@ group, note and done mark are edited there too, its pull requests attached and d
 `ticketUrl` in `config.json` its group chip opens the session's ticket. A session that needs you
 (it asks, its turn finished while you were not looking, or its terminal ended unexpectedly) is
 marked in the list and counted in the title bar and on the taskbar, Ctrl+Shift+J goes to the next
-one, and a desktop notification says so while no skydeck window has the focus. The window's
-sessions run in terminals of skydeck's own inside WSL, so they keep running when the window or its
-server is closed or restarted ([docs/install.md](docs/install.md), "The window (step 2)"; design in
+one, and a desktop notification says so while no skydeck window has the focus. The list's filter
+finds a session by several words or the first characters of its short id, chips narrow the list
+to the running sessions, those with an open pull request or those with a note, the sessions of
+one group stack in the history, and Ctrl+Shift+P opens a quick switcher over every session. The
+window's sessions run in terminals of skydeck's own inside WSL, so they keep running when the
+window or its server is closed or restarted ([docs/install.md](docs/install.md), "The window (step 2)"; design in
 [docs/design-step-2.md](docs/design-step-2.md)).
 
 ```
