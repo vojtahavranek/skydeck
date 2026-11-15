@@ -2250,7 +2250,7 @@ Ctrl+Shift+V stays the browser's paste. When the dialog closes, whatever closed 
 this page's resume or new brought meanwhile takes the keyboard, else the zone's holder gets it, at
 once (no list is waited for). Enter saves (Ctrl+Enter in the note, where Enter is a line break); a
 held Enter saves once, and the key that opened a dialog types nothing into it while it is held. Esc
-and Cancel close; a note whose text was changed needs a second Esc (`Esc again discards your
+and Cancel (Close in the pull-request dialog) close; a note whose text was changed needs a second Esc (`Esc again discards your
 text`; a held Esc is one Esc). The reload keys (F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and
 BrowserRefresh) say `save or cancel the edit first` while the dialog holds changed text, and do not
 reload; otherwise they reload as anywhere. A held Enter or Esc that closes a dialog over a terminal

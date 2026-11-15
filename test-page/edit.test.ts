@@ -168,6 +168,7 @@ async function dialog(page: Page): Promise<{
   inField: boolean;
   save: string | null;
   saveDisabled: boolean;
+  cancel: string;
 }> {
   return page.evaluate(() => {
     const root = document.getElementById('editor') as HTMLElement;
@@ -192,6 +193,7 @@ async function dialog(page: Page): Promise<{
       inField: fieldShown && document.activeElement === field,
       save: save === null || save.closest('[hidden]') !== null ? null : save.textContent,
       saveDisabled: save?.disabled ?? false,
+      cancel: text('.edit-cancel'),
     };
   });
 }
@@ -367,6 +369,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       assert.equal(shown.value, 'my label');
       assert.equal(shown.inField, true, 'the keyboard in the field');
       assert.equal(shown.save, 'Save');
+      assert.equal(shown.cancel, 'Cancel');
       assert.equal(
         shown.help,
         'Shown as the title, and passed to Claude Code as the session name on the next start or resume. Empty clears it.',
@@ -598,6 +601,8 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       assert.equal(shown.value, '');
       assert.equal(shown.inField, true);
       assert.equal(shown.save, 'Attach');
+      // Ruled: Attach keeps the dialog open, so nothing is left to cancel.
+      assert.equal(shown.cancel, 'Close');
       assert.equal(shown.help, 'Pull requests a session touched are attached by themselves.');
       const url = 'https://github.com/owner/repo/pull/7';
       await page.keyboard.type(url);
@@ -636,8 +641,9 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         assert.equal(shown.saveDisabled, false);
       }
       assert.equal(await dialog(page).then((shown) => shown.value), '');
-      await page.keyboard.press('Escape'); // emptied: nothing changed, one Esc closes it
+      await page.click('#editor .edit-cancel'); // `Close`
       await dialogShown(page, false);
+      assert.equal(await active(page), '#list');
     },
   );
 

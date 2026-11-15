@@ -1,7 +1,7 @@
 // The dialogs of stage D (S2 12.5, 12.9; plan D1–D3, D2, D17; plan D's contract 2.4): the label,
 // the group, the note and the pull requests of one session, edited in a dialog that lies over the
 // page, as the mockup shows — a heading that names the session, the field (a text box for the
-// note), a line of help, Cancel and Save (Attach in the pull-request dialog). Task 38 adds the
+// note), a line of help, Cancel and Save (Close and Attach in the pull-request dialog, ruled). Task 38 adds the
 // pull-request dialog's list above its field.
 //
 // The dialog decides no rule (S2 4.3): it sends the `act` through app.js's `deps.act` and shows
@@ -278,6 +278,8 @@ export function createEditor(root, deps) {
       help.textContent = HELP[what];
       help.hidden = field === null;
       say(warning);
+      // Attach keeps the pull-request dialog open, so its other button closes it (ruled).
+      cancel.textContent = what === 'pr' ? 'Close' : 'Cancel';
       save.textContent = what === 'pr' ? 'Attach' : 'Save';
       save.hidden = field === null;
       save.disabled = false;
