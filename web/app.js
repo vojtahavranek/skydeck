@@ -606,6 +606,10 @@ function act(action) {
         state.lists === listsAtSend
       ) {
         state.unlisted.add(action['sessionId']);
+        // The server sends no list equal to the last one, so after a save that changed nothing
+        // shown none would come: a `view` asks for one, which the server answers at once
+        // (review 2 of task 37, M2).
+        sendView();
       }
       if (action.kind === 'resume' && typeof action['sessionId'] === 'string') {
         state.lines.set(

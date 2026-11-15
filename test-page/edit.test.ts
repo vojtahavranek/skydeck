@@ -19,6 +19,8 @@ import {
   clickRow,
   editWorld,
   fixture,
+  keyMessage,
+  launched,
   logOf,
   mark,
   PAGE_WAIT_MS,
@@ -117,12 +119,11 @@ function listOf(sections: Sections, terminals: Row[], selected: Row | null): Row
 interface Deck {
   page: Page;
   w: EditWorld;
-  /** Sets what the next lists hold and sends one. */
-  set(change: {
-    sections?: Sections;
-    terminals?: Row[];
-    selected?: Record<string, Row | null>;
-  }): void;
+  /** Sets what the next lists hold and sends one (unless `send` is false). */
+  set(
+    change: { sections?: Sections; terminals?: Row[]; selected?: Record<string, Row | null> },
+    send?: boolean,
+  ): void;
 }
 
 async function deck(
@@ -147,11 +148,11 @@ async function deck(
   return {
     page,
     w,
-    set(change) {
+    set(change, send = true) {
       sections = change.sections ?? sections;
       terminals = change.terminals ?? terminals;
       selected = change.selected ?? selected;
-      w.list(listFor);
+      w.list(listFor, { send });
     },
   };
 }
@@ -397,13 +398,15 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       await page.keyboard.press('Enter');
       const saved = await w.act(2);
       assert.equal(saved['text'], 'new name');
-      const lists = w.sent.length;
+      // At once, before any further list (deps.closed): the world answers no `view` meanwhile, so
+      // no list comes (the page asks for one, M2).
+      w.holdViews(true);
       w.answer(saved, { ok: true });
       await dialogShown(page, false);
-      // At once, before any further list (deps.closed): the world sends none.
       assert.equal(await active(page), '#list', 'the keyboard back on the list');
       assert.equal(await zone(page), 'Focus: list');
-      assert.equal(w.sent.slice(lists).filter((m) => m['t'] === 'view').length, 0);
+      w.holdViews(false);
+      d.set({}); // the list that holds the result
 
       await clickRow(page, S3);
       await page.keyboard.press('F2');
@@ -1023,6 +1026,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
 
       // The toast's Undo over a dialog, reached with Tab and pressed with Enter.
       await clickRow(page, S1);
+      await selectedHasCome(page, S1); // its view's list came before `d`
       await page.keyboard.press('d');
       w.answer(await w.act(3), { ok: true });
       await eventually(async () => (await toast(page)).undo, 'the toast');
@@ -1157,6 +1161,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       const d = await deck(t, chromium, { sections: { week: [row(S2)] } });
       const { page, w } = d;
       await clickRow(page, S2);
+      await selectedHasCome(page, S2); // its view's list came before `d`
       await page.keyboard.down('d');
       w.answer(await w.act(1), { ok: true });
       d.set({ sections: { week: [row(S2, { done: true })] } }); // listed with `a`, say
@@ -1296,6 +1301,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         ).observe(root, { attributes: true, childList: true, characterData: true, subtree: true });
       });
       await clickRow(page, S1);
+      await selectedHasCome(page, S1); // its view's list came before `d`
       await page.keyboard.press('d');
       w.answer(await w.act(1), { ok: true });
       await eventually(async () => (await toast(page)).text === DONE_WORDS, 'the first toast');
@@ -1327,6 +1333,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
         const { page, w } = d;
         await clickRow(page, S2);
+        await selectedHasCome(page, S2); // its view's list came before `d`
         await page.keyboard.press('d');
         const act = await w.act(1);
         if (order === 'before') {
@@ -1353,6 +1360,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
       const { page, w } = d;
       await clickRow(page, S2);
+      await selectedHasCome(page, S2); // its view's list came before `d`
       await page.keyboard.press('d');
       const act = await w.act(1);
       d.set({ sections: { week: [row(S1), row(S2, { done: true }), row(S3)] } });
@@ -1399,9 +1407,16 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
           await page.keyboard.press('Control+Enter'); // saves in every dialog
           return w.act(n);
         };
-        // The answer first, no list yet: the key waits.
+        // The answer first, no list yet (the page asks for one, whose answer is late): the key
+        // waits.
+        w.holdViews(true);
+        const views = w.sent.filter((m) => m['t'] === 'view').length;
         w.answer(await save(1), { ok: true });
         await dialogShown(page, false);
+        await eventually(
+          async () => w.sent.filter((m) => m['t'] === 'view').length > views,
+          'the page asks for the list (a view)',
+        );
         await page.keyboard.press(key);
         await showsText(
           page,
@@ -1409,6 +1424,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
           new RegExp(`^the ${what} is not here yet; press ${key} again$`),
         );
         assert.equal((await dialog(page)).shown, false);
+        w.holdViews(false);
         d.set(newer);
         await sleep(300);
         await page.keyboard.press(key);
@@ -1446,6 +1462,31 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       await dialogShown(page, false);
       await page.keyboard.press('p');
       await dialogShown(page, true);
+    },
+  );
+
+  await t.test(
+    "after an `ok` that no list followed, the page asks for one (a `view`), and its answer ends the wait at once — the server sends no list equal to the last one, so a save that changes nothing shown would wait for good (review 2's re-check, M2)",
+    async (t) => {
+      const d = await deck(t, chromium, {
+        sections: { week: [row(S2, { title: 'kept', titleSource: 'label' })] },
+      });
+      const { page, w } = d;
+      await clickRow(page, S2);
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      await page.keyboard.press('Enter'); // unchanged: no list would follow
+      const act = await w.act(1);
+      const views = w.sent.filter((m) => m['t'] === 'view').length;
+      w.answer(act, { ok: true });
+      await dialogShown(page, false);
+      await eventually(
+        async () => w.sent.filter((m) => m['t'] === 'view').length === views + 1,
+        'one view asks for the list',
+      );
+      await page.keyboard.press('l');
+      await dialogShown(page, true);
+      assert.equal((await dialog(page)).value, 'kept');
     },
   );
 
@@ -1603,6 +1644,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       });
       const { page, w } = d;
       await clickRow(page, S2);
+      await selectedHasCome(page, S2); // its view's list came before `d`
       await page.keyboard.press('d');
       const done = await w.act(1);
       assert.deepEqual(
@@ -1634,6 +1676,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       // `d` on a done row (shown with `a`): undone, no toast.
       d.set({ sections: { week: [row(S1), row(S2, { done: true }), row(S3)] } });
       await clickRow(page, S2);
+      await selectedHasCome(page, S2); // its view's list came before `d`
       await page.keyboard.press('d');
       const again = await w.act(4);
       assert.deepEqual(
@@ -1652,6 +1695,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
       const { page, w } = d;
       await clickRow(page, S2);
+      await selectedHasCome(page, S2); // its view's list came before `d`
       await page.keyboard.down('d');
       await page.keyboard.down('d'); // repeat: true
       await page.keyboard.down('d');
@@ -1711,6 +1755,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       const d = await deck(t, chromium, { sections: { week: [row(S1), row(S2), row(S3)] } });
       const { page, w } = d;
       await clickRow(page, S2);
+      await selectedHasCome(page, S2); // its view's list came before `d`
       await page.keyboard.press('d');
       const act = await w.act(1);
       await page.keyboard.press('ArrowUp');
@@ -1743,6 +1788,7 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
         [3, true],
       ] as const) {
         await clickRow(page, S2);
+        await selectedHasCome(page, S2); // its view's list came before `d`
         await page.keyboard.press('d');
         w.answer(await w.act(n), { ok: true });
         await eventually(async () => (await toast(page)).undo, 'the toast');
@@ -1796,4 +1842,42 @@ test('stage D: the dialogs, the Undo toast and the list keys', async (t) => {
       assert.equal(await selectedRow(page), null, 'no row selected (S2 12.9)');
     },
   );
+
+  for (const [key, what] of [
+    ['l', 'label'],
+    ['n', 'note'],
+  ] as const) {
+    await t.test(
+      `the real server: \`${key}\`, a save that changes nothing, \`${key}\` again → the ${what} dialog opens (review 2's re-check, M2)`,
+      async (t) => {
+        const l = await launched(t, chromium);
+        l.d.resumable(S1);
+        await clickRow(l.page, S1);
+        await showsText(l.page, '#cards .card-command', /--resume/); // its `selected` has come
+        const opens = async (when: string): Promise<void> => {
+          await l.page.keyboard.press(key);
+          await dialogShown(l.page, true).catch(async (error: unknown) => {
+            assert.fail(
+              `${when}: no dialog (${String(error).split('\n')[0]}); the key bar: ${await keyMessage(l.page)}; ${await zone(l.page)}; the keyboard: ${await active(l.page)}; selected ${String(await selectedRow(l.page))}; editor ${String((await dialog(l.page)).shown)}`,
+            );
+          });
+        };
+        await opens('first');
+        await mark(l.page, `${key} saved`);
+        await l.page.keyboard.press('Control+Enter'); // saves, unchanged
+        await dialogShown(l.page, false);
+        // The server sends no list equal to the last one: the list after the result is the one
+        // the page asks for (M2). Without it none comes, and the key waits for good.
+        await eventually(async () => {
+          const since = after(await logOf(l.page), `${key} saved`).filter((e) => e.e === 'in');
+          const result = since.findIndex((e) => e.t === 'result');
+          return result !== -1 && since.slice(result + 1).some((e) => e.t === 'list');
+        }, 'a list after the result');
+        await opens('after the save');
+        assert.equal((await dialog(l.page)).what, what);
+        assert.equal(await keyMessage(l.page), '');
+        assert.deepEqual(l.problems, []);
+      },
+    );
+  }
 });

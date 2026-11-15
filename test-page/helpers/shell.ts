@@ -1043,11 +1043,14 @@ export interface EditWorld {
     act: Record<string, unknown>,
     result: { ok: boolean; error?: string; sessionId?: string },
   ): void;
-  /** Sends `list` now, and as the answer to every later `view`; a function is given the
-   *  selection of the page's last `view`. */
+  /** Sends `list` now (unless `send` is false), and as the answer to every later `view`; a
+   *  function is given the selection of the page's last `view`. */
   list(
     list: Record<string, unknown> | ((selected: string | null) => Record<string, unknown>),
+    options?: { send?: boolean },
   ): void;
+  /** While held, a `view` is recorded but not answered (as a server whose answer is late). */
+  holdViews(hold: boolean): void;
   /** The selection of the page's last `view`. */
   selected(): string | null;
   /** Ends the connection the page uses now, as a server that stopped answering. */
@@ -1073,6 +1076,7 @@ export async function editWorld(
   const acts: Record<string, unknown>[] = [];
   let current = first;
   let shown: string | null = null;
+  let viewsHeld = false;
   const listNow = (): Record<string, unknown> =>
     typeof current === 'function' ? current(shown) : current;
   const standin = await standinServer(t, {
@@ -1081,7 +1085,7 @@ export async function editWorld(
         sent.push(message);
         if (message['t'] === 'view') {
           shown = (message['selected'] as string | null) ?? null;
-          conn.send(listNow());
+          if (!viewsHeld) conn.send(listNow());
         } else if (message['t'] === 'attach') {
           const { term, cols, rows } = message as { term: string; cols: number; rows: number };
           conn.send({ t: 'snap', term, ch: 1, cols, rows, data: '' });
@@ -1122,9 +1126,12 @@ export async function editWorld(
         sessionId: result.sessionId ?? null,
       });
     },
-    list(list) {
+    list(list, options = {}) {
       current = list;
-      conn().send(listNow());
+      if (options.send !== false) conn().send(listNow());
+    },
+    holdViews(hold) {
+      viewsHeld = hold;
     },
     selected: () => shown,
     drop() {
