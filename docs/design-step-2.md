@@ -2630,7 +2630,8 @@ skips a member of a closed stack (ruled: the page never knows a closed stack's m
 skips a row a filter or a folded Earlier hides. While filtering (a word or a chip, 12.8)
 nothing folds and no stack is formed, so ← and → do nothing. The chips under the filter field
 (12.8) take no keyboard on a click: the keyboard stays where it was (in the field, on the list, in
-the terminal). The selection is never on a row the
+the terminal). They are buttons: Tab from the filter field reaches them, Enter or Space presses
+one, and while one has the keyboard no list key acts, as on any button of the list zone. The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
 of the window that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the
@@ -2663,7 +2664,9 @@ stays (ruled for plan D task 37). That list decides once: a row it still has (ru
 Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
 of plan D task 37). The header's Done leaves the selection to the main rule. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
-(ruled for plan D task 38). A held
+(ruled for plan D task 38), nor does it on a stack's `+n more` line or `×n`, wherever the list
+has moved under it: such a double click opens or closes the stack once, and its second click
+selects no row, takes no keyboard and resumes nothing (ruled for plan E task 97). A held
 `d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
