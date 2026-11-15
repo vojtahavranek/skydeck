@@ -2,8 +2,10 @@
 // 50, section 1b): the user's store is in daily use when migration 2 reaches it, so its tests start
 // from a database with data in it, never from one on the machine.
 import { chmodSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 
 import { MIGRATIONS } from '../../src/store/migrations.ts';
 
@@ -36,9 +38,19 @@ function insert(db: DatabaseSync, table: string, row: Record<string, SQLInputVal
  * window_server, window_runtime_dir, window_alarm, window_launching, a resume lock,
  * first_scan_done), and step 1's other ones (dropped_scripted, doctor_probe, scan_problems).
  * Written with node:sqlite directly: openStore would migrate it.
+ *
+ * Every path it stores (a working directory, a transcript, the settings backup, the runtime
+ * directory, the server's checkout) lies under the directory of `path`, which must be absolute,
+ * so that a command a later test runs on it acts inside that test's sandbox; nothing exists
+ * there. The processes the locks name are of another boot: by design 5.5's rule they are dead.
  */
 export function schema1Database(path: string): void {
+  if (!isAbsolute(path)) {
+    throw new RangeError(`not an absolute path: ${path}`);
+  }
   const { s1, s2, bootId, t0, pr } = SCHEMA1;
+  const dir = dirname(path);
+  const project = join(dir, 'projects', 'app');
   const db = new DatabaseSync(path);
   try {
     // As openStore: the mode first, so that the -wal and -shm files SQLite creates take it.
@@ -57,7 +69,7 @@ export function schema1Database(path: string): void {
       boot_id: bootId,
       pid: 4242,
       proc_start: 51_234_567,
-      cwd: '/home/you/projects/app',
+      cwd: project,
       name: null,
     };
     insert(db, 'events', {
@@ -130,12 +142,12 @@ export function schema1Database(path: string): void {
       updated_ns: t0 + 610n * SEC,
     });
     insert(db, 'transcripts', {
-      path: `/home/you/.claude/projects/-home-you-projects-app/${s2}.jsonl`,
+      path: join(dir, 'claude', 'projects', project.replaceAll('/', '-'), `${s2}.jsonl`),
       session_id: s2,
       size_read: 48_211,
       file_size: 48_211,
       mtime_ns: t0 + 905n * SEC + 123_456_789n,
-      first_cwd: '/home/you/projects/app',
+      first_cwd: project,
       entrypoint: 'cli',
       ai_title: 'Plan the migration',
       custom_title: null,
@@ -176,14 +188,14 @@ export function schema1Database(path: string): void {
     const kv: Record<string, string> = {
       // install
       settings_hash: 'f'.repeat(64),
-      settings_backup: '/home/you/.claude/settings.json.skydeck-backup-1762987000',
+      settings_backup: join(dir, 'claude', 'settings.json.skydeck-backup-20261112T090000Z'),
       first_run_offered: '1',
       // stage A
       window_secret: Buffer.from(Array.from({ length: 32 }, (_, i) => i * 7 + 3)).toString(
         'base64url',
       ),
-      window_server: `5150:61234567:${bootId}:/home/you/projects/mine/skydeck`,
-      window_runtime_dir: '/run/user/1000/skydeck-0123456789abcdef',
+      window_server: `5150:61234567:${bootId}:${join(dir, 'checkout')}`,
+      window_runtime_dir: join(dir, 'runtime'),
       window_alarm: String(t0 + 500n * SEC),
       window_launching: `0123456789abcdef ${t0 + 100n * SEC} 5151 61234999 ${bootId}`,
       [`resume_lock:${s1}`]: `${t0 + 400n * SEC}:${SCHEMA1.events.s1Start}`,
@@ -242,4 +254,27 @@ export function dumpDatabase(path: string): DatabaseDump {
   } finally {
     db.close();
   }
+}
+
+/**
+ * Another skydeck in the middle of a write, in a worker thread so that the test's own thread can
+ * start a write that has to wait for it: it takes the write lock (BEGIN IMMEDIATE), runs `sql`,
+ * posts 'locked' with the write not yet committed, and commits `holdMs` later.
+ */
+export function uncommittedWrite(path: string, sql: string, holdMs: number): Worker {
+  return new Worker(
+    `const { DatabaseSync } = require('node:sqlite');
+     const { parentPort, workerData } = require('node:worker_threads');
+     const db = new DatabaseSync(workerData.path);
+     try {
+       db.exec('BEGIN IMMEDIATE');
+       db.exec(workerData.sql);
+       parentPort.postMessage('locked');
+       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workerData.holdMs);
+       db.exec('COMMIT');
+     } finally {
+       db.close();
+     }`,
+    { eval: true, workerData: { path, sql, holdMs } },
+  );
 }

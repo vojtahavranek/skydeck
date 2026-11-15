@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -17,7 +17,7 @@ import { isDatabaseFailure, openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import { testPlatform } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
-import { SCHEMA1, dumpDatabase, schema1Database } from '../helpers/schema1.ts';
+import { SCHEMA1, dumpDatabase, schema1Database, uncommittedWrite } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 const MIGRATION_1_TABLES = [
@@ -136,6 +136,19 @@ test('schema1Database leaves a database as step 1 and stage A do: WAL, mode 600,
     ],
     'attached to one session, detached from the other',
   );
+  // Every path it stores lies under the database's directory, so that a command a later test runs
+  // on it stays in the sandbox.
+  const under = `${dirname(path)}/`;
+  const paths = Object.values(dump.tables)
+    .flat()
+    .flatMap((row) => Object.values(row))
+    .filter((value): value is string => typeof value === 'string' && value.startsWith('/'));
+  assert.ok(paths.length >= 5, String(paths.length));
+  for (const value of paths) {
+    assert.ok(value.startsWith(under), value);
+  }
+  const server = dump.tables['kv']?.find((row) => row['key'] === 'window_server')?.['value'];
+  assert.equal(String(server).split(':').slice(3).join(':'), join(dirname(path), 'checkout'));
 });
 
 test('openStore migrates a schema-1 database to 2: nothing of migration 1 changes, attention is empty', (t) => {
@@ -253,6 +266,29 @@ test('a migration waits for another connection that holds the write lock, and th
   await once(holder, 'exit');
   assert.equal(store.getKv('schema_version'), '2');
   assertMigrated(before, dumpDatabase(path));
+});
+
+test('two processes open a schema-1 database at once: the one that waited for the lock reads the version again, finds 2 and changes nothing', async (t) => {
+  const path = schema1(t);
+  // The other one in the middle of migration 2: its table made, the version set, not committed.
+  const other = uncommittedWrite(
+    path,
+    `${MIGRATIONS[1]} UPDATE kv SET value = '2' WHERE key = 'schema_version';`,
+    500,
+  );
+  await once(other, 'message');
+
+  const store = opened(t, path); // reads 1, waits for the lock, reads 2 inside it
+
+  await once(other, 'exit');
+  assert.equal(store.getKv('schema_version'), '2');
+  assert.deepEqual(store.attention(), []);
+  assert.deepEqual(
+    dumpDatabase(path)
+      .schema.filter(isAttention)
+      .map((entry) => entry.name),
+    ['sqlite_autoindex_attention_1', 'attention'],
+  );
 });
 
 test("at the server's own open the migration waits the commands' 5 s, not the server's 250 ms", async (t) => {

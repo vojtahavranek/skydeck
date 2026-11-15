@@ -29,6 +29,7 @@ import type {
   TranscriptRow,
 } from '../../src/store/types.ts';
 import { sandbox } from '../helpers/sandbox.ts';
+import { uncommittedWrite } from '../helpers/schema1.ts';
 
 const T0 = 1_762_988_000_000_000_000n;
 const BOOT_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -1751,11 +1752,38 @@ describe('attention (S2 10.2; stage B, B2 and B3)', () => {
     });
   }
 
-  test('B2: a counter at 2^53 - 1 cannot go on: RangeError, nothing written', (t) => {
+  test('B2: the last value is 2^53 - 1; past it the write is a RangeError and nothing is written', (t) => {
     const { store, path } = fresh(t);
-    store.setKv('attention_seq', String(Number.MAX_SAFE_INTEGER));
-    assert.throws(() => store.recordAttention([{ sessionId: S1, seen: true }]), RangeError);
-    assert.deepEqual(stored(path), { rows: [], counter: String(Number.MAX_SAFE_INTEGER) });
+    store.setKv('attention_seq', String(Number.MAX_SAFE_INTEGER - 1));
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, seen: true }]), [
+      row({ sessionId: S1, seenSeq: Number.MAX_SAFE_INTEGER }),
+    ]);
+    const before = stored(path);
+    assert.equal(before.counter, String(Number.MAX_SAFE_INTEGER));
+
+    assert.throws(() => store.recordAttention([{ sessionId: S2, turnEndedNs: TURN }]), {
+      name: 'RangeError',
+      message: 'the attention counter is at 2^53 - 1 and cannot go on',
+    });
+    assert.deepEqual(stored(path), before);
+  });
+
+  test('B2: the next value is read inside the write lock: what another connection commits while this write waits counts', async (t) => {
+    const { store, path } = fresh(t);
+    store.recordAttention([{ sessionId: S1, seen: true }]); // seen_seq 1, the counter '1'
+    // Another writer gives the values up to 50 and commits while this one waits for the lock.
+    const other = uncommittedWrite(
+      path,
+      `UPDATE attention SET seen_seq = 50; UPDATE kv SET value = '50' WHERE key = 'attention_seq';`,
+      500,
+    );
+    await once(other, 'message');
+
+    const written = store.recordAttention([{ sessionId: S2, turnEndedNs: TURN }]);
+
+    await once(other, 'exit');
+    assert.deepEqual(written, [row({ sessionId: S2, turnEndedSeq: 51, turnEndedNs: TURN })]);
+    assert.equal(store.getKv('attention_seq'), '51');
   });
 
   test('an empty list writes nothing: no row, no counter', (t) => {
