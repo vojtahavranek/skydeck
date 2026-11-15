@@ -1656,6 +1656,14 @@ decided by the `*_seq` columns, never by times: `statusUpdatedAt` is Claude Code
 it. Each write takes the next value of the `kv` counter `attention_seq` in the same transaction.
 The times are kept only to show ("finished 2m ago").
 
+**The next value** (stage B's plan, B2) is one more than the larger of `attention_seq` and every
+`*_seq` stored in `attention`: a counter that is missing, or whose value is not a canonical decimal
+whole number below 2^53 (`abc`, `09`, ` 9 `, `1e3`), counts as 0, and after the write it holds the
+last value given. So a counter that was deleted, damaged or set back can never make a later
+observation look earlier than a `seen`. One write is one transaction, and inside it each session's
+observations take their values in the order turn end, window end, seen (B3): a turn that ends while
+the user looks at the session is seen after it ended, never "finished".
+
 These are skydeck's own observations, not the user's data (design principle 6); a row is written
 the first time one of them is known and never removed.
 
