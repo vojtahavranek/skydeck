@@ -73,7 +73,8 @@ export interface Restorer {
   /** The view model's banner for the tick's rows (cached, C9). A store that fails while it is made
    *  keeps the previous one (one log line by kind) with the live `running` (ruled, task 74): while
    *  a run goes on, that one with `running: true`, or with none made the payload of a run that
-   *  offers nothing; else that one with `running: false`, or null. */
+   *  offers nothing; else that one with `running: false`, or null when it offered nothing (none
+   *  made, or a run's whose `bootId` is null). */
   banner(rows: readonly ListRow[]): BannerPayload | null;
   /** Aborts a running restore with the reason `the window's server is stopping`, resolves once it
    *  is over; nothing starts afterwards. */
@@ -383,8 +384,10 @@ export function createRestorer(deps: RestorerDeps): Restorer {
       } catch (error) {
         log(`restore: the banner was not made (${failureKind(error)})`);
         // Ruled by the plan owner (task 74): `running` is the live one — the page ends a restore's
-        // report at the first list whose banner does not say it runs. The last payload made with
-        // that flag, or, with none made, a run's that offers nothing; not kept (made again at the
+        // report at the first list whose banner does not say it runs. While a run goes on: the last
+        // payload made with that flag, or, with none made, a run's that offers nothing. While none
+        // runs: null when nothing was offered (no payload, or a run's that offered nothing, whose
+        // boot id is null), else the last payload with the flag off. Not kept (made again at the
         // next call).
         const last = made?.payload ?? null;
         if (running) {
@@ -393,7 +396,8 @@ export function createRestorer(deps: RestorerDeps): Restorer {
           }
           return last.running ? last : { ...last, running: true };
         }
-        return last === null || !last.running ? last : { ...last, running: false };
+        if (last === null || last.bootId === null) return null;
+        return last.running ? { ...last, running: false } : last;
       }
     },
 

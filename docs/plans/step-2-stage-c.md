@@ -440,7 +440,8 @@ export interface Restorer {
   /** The view model's banner for the tick's rows (cached, C9). A store that fails while it is made
    *  keeps the previous one (one log line by kind) with the live `running` (ruled, task 74): while
    *  a run goes on, that one with `running: true`, or with none made the payload of a run that
-   *  offers nothing; else that one with `running: false`, or null. */
+   *  offers nothing; else that one with `running: false`, or null when it offered nothing (none
+   *  made, or a run's whose `bootId` is null). */
   banner(rows: readonly ListRow[]): BannerPayload | null;
   /** Aborts a running restore with the reason `the window's server is stopping`, resolves once it
    *  is over; nothing starts afterwards. */
@@ -1460,7 +1461,8 @@ command, `POST /resume` and `/new`; and its stop ends a restore before it closes
   before the first tick (so that `foundAtStart` reads the mark a dead server left), its
   `update(pages.count())` called in `afterRefresh` beside `decidePostponed`, and `GET /status`'s
   `windowExpectedMs` from its `expectedMs` with the end of the start (C20); the orderly stop's first
-  step is `await restorer.stop()`, before the tick's stop and `control.close()`
+  step is `pageMark.update(pages.count())` (ruled 13:28Z), its next `await restorer.stop()`, before
+  the tick's stop and `control.close()`
 - Modify, ruled by the plan owner: `src/window/restorer.ts` (`banner()`'s `catch`, 13:52Z) and
   `test/window/restorer.test.ts` (its cases); `src/platform/types.ts`, `src/platform/real.ts`,
   `test/platform/real.test.ts` (one case), `test/helpers/platform.ts` (`fakeClock`),
@@ -1574,7 +1576,8 @@ as its last refresh did. The restart cases that take the mark out of the store k
 `update` writes nothing while its own record agrees with its pages. Ruled 13:52Z (task 73's
 file, `banner()`'s `catch` only): a banner whose store read fails keeps the last payload with the
 live `running` — while a restore runs `running: true` (with none made, a run's payload that
-offers nothing), else `running: false` (or null) — and what it returns is not kept, because the
+offers nothing), else `running: false`, or null when nothing was offered (none made, or a run's
+payload whose `bootId` is null; ruled 14:56Z) — and what it returns is not kept, because the
 page (task 75) ends a restore's report at the first list whose banner does not say it runs. What no case holds,
 being promptness the tick's own push within 2 s also gives: the restorer's `changed` (a run
 begun or ended, a dismissal) calling `tick.reloadNow()`, and `launchFor`'s `tick.reload()`.

@@ -522,7 +522,7 @@ describe('the pages mark (plan C20, S2 5.1)', () => {
     await refreshed();
     assert.equal(mark(), '1', 'written again');
     await test.server.stop('the test stops it');
-    assert.equal(mark(), '1', 'the stop leaves it: a window may come back');
+    assert.equal(mark(), '1', 'the stop records the connected page: a window may come back');
   });
 
   test('an orderly stop writes the mark once more as its pages are (ruled 13:28Z): a page that connected after the last refresh is recorded, a page that went since is not', async (t) => {
