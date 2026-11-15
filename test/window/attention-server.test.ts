@@ -215,9 +215,15 @@ describe('a turn end in a window terminal (S2 10.3, 12.4)', () => {
     );
     assert.equal(stored(d, S1)?.seenSeq, null, 'no seen stored');
 
-    // Focused with it selected: seen after the hold.
+    // Focused with it selected: seen after the hold, written at once when the hold ends (Seen's
+    // listener, `seenNow`), not at the next look: the hold ends on a timer of this process set
+    // before the test's own of the same length.
     const from = performance.now();
     show(page, true, S1);
+    await roundTrip(page);
+    await sleep(SEEN_AFTER_MS);
+    const held = stored(d, S1);
+    assert.ok((held?.seenSeq ?? 0) > (held?.turnEndedSeq ?? Infinity), 'seen when the hold ended');
     await page.list(
       (list) => rowOf(list, S1) !== undefined && reasonOf(list, S1) === null,
       'the mark cleared',
@@ -265,6 +271,12 @@ describe('a turn end in a window terminal (S2 10.3, 12.4)', () => {
     await page.list((list) => reasonOf(list, S1) === 'finished', 'S1 finished again');
     const unseen = stored(d, S1);
     page.send({ t: 'input', term, data: 'x' });
+    // Written on the input path itself (Seen's listener, `seenNow`), not at the next look.
+    await roundTrip(page);
+    assert.ok(
+      (stored(d, S1)?.seenSeq ?? 0) > (unseen?.turnEndedSeq ?? Infinity),
+      'seen once the input was taken',
+    );
     await page.list(
       (list) => rowOf(list, S1) !== undefined && reasonOf(list, S1) === null,
       'cleared by the typing',

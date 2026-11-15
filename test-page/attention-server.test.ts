@@ -204,14 +204,14 @@ test('attention against the server', async (t) => {
       const term = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
       await clickRow(page, S2);
-      // While the page has focus: asks, then busy — nothing is notified, and a look saw `busy`.
+      // While the page has focus it asks: nothing is notified. Then the focus goes, and `busy`,
+      // seen by a look (the ask is gone), lies between that and the turn's end (review 2, C1).
       say(l, term, '/waiting a question');
       await untilReason(page, S1, 'asks');
+      assert.deepEqual((await notificationsOf(page)).made, [], 'none while the page has focus');
+      await pageFocus(page, false);
       say(l, term, '/busy');
       await untilReason(page, S1, null);
-      assert.deepEqual((await notificationsOf(page)).made, [], 'none while the page has focus');
-
-      await pageFocus(page, false);
       say(l, term, '/idle');
       await until(async () => (await notificationsOf(page)).made.length > 0, 'the notification');
       const shown = await notificationsOf(page);

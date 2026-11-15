@@ -1505,8 +1505,9 @@ them goes to the program in the order the server receives it. `list` goes to eve
 page's `view` state is its own. Notifications go to one page only (13).
 
 Attention (12.4, 13; stage B's plan, B20) is the server's, so it is the same in every window: the
-marks, the title bar's count and the window title; only `needYou.order` follows each window's own
-filter and fold. A session seen in any window that has focus is seen for all of them, and a typing
+marks, the title bar's count and the window title — but for what a window lists at all: a done
+session that has stopped counts only in a window that shows done sessions (`showDone`, 12.8); and
+`needYou.order` follows each window's own filter and fold. A session seen in any window that has focus is seen for all of them, and a typing
 from any window counts. A notification goes to the one window that had focus last, and only while
 no window has it.
 
