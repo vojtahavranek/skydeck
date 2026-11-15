@@ -2,6 +2,7 @@
 // and `new` with `--window` send the session id or the new session's fields to the running server
 // instead of starting anything themselves, print its answer's lines and exit with its code; then,
 // when no page is connected, they open a window as `skydeck window` does (src/cli/window-open.ts).
+// `restore` with the window opens that window before its request, then prints the run's lines.
 // They never start, restart or signal a server: its environment becomes every session's (S2 5.2),
 // so only `skydeck window` starts one. Every line that comes from the server is sanitised again
 // before it is printed (the server may be of another build).
@@ -12,7 +13,7 @@ import { computeBuild } from '../window/build.ts';
 import { controlClient } from '../window/client.ts';
 import type { ControlClient } from '../window/client.ts';
 import { findServer } from '../window/lifecycle.ts';
-import type { LaunchAnswer, NewRequest, PingAnswer } from '../window/protocol.ts';
+import type { LaunchAnswer, NewRequest, PingAnswer, RestoreRequest } from '../window/protocol.ts';
 import { resolveRuntimeDir, runtimeFiles } from '../window/runtime.ts';
 import type { Context } from './context.ts';
 import { launchWindow, windowTimes } from './window-open.ts';
@@ -85,11 +86,8 @@ const OLDER =
   "the window's server is older than this command and cannot start sessions for it; run skydeck window to restart it, or use --here";
 
 /** `asked`'s answer; 'unknown-route' is C11's older-server line; every line for `server.here`. */
-async function answerOf(
-  server: WindowServer,
-  asked: Promise<LaunchAnswer | 'unknown-route'>,
-): Promise<LaunchAnswer> {
-  let answer: LaunchAnswer | 'unknown-route';
+async function answerOf<T>(server: WindowServer, asked: Promise<T | 'unknown-route'>): Promise<T> {
+  let answer: T | 'unknown-route';
   try {
     answer = await asked;
   } catch (error) {
@@ -118,6 +116,38 @@ export function requestNew(
   times: WindowTimes,
 ): Promise<LaunchAnswer> {
   return answerOf(server, server.client.newSession(request, times.answerMs));
+}
+
+/**
+ * Plan C14's request (`restore` with `"terminal": "window"`, task 77, which calls it inside its own
+ * withDeck with the deck it planned with; ruled, task 76): first C12's window when no page is
+ * connected (none under CLAUDECODE), so that the terminals start at the window's size and a start
+ * dialog can be answered; then `POST /restore`, every line of the run on stdout as it arrives
+ * (sanitised), heartbeats too. The outcome's code; with 5, the line that says the run stopped.
+ * Rejects with a SkydeckError of plan 2.5 (a server that stopped answering, an older one, …).
+ */
+export async function restoreInWindow(
+  ctx: Context,
+  deck: Deck,
+  server: WindowServer,
+  request: RestoreRequest,
+  times: WindowTimes,
+): Promise<number> {
+  await windowFor(ctx, deck, server, times);
+  const outcome = await answerOf(
+    server,
+    server.client.restore(
+      request,
+      (line) => {
+        ctx.io.stdout(`${sanitize(line)}\n`);
+      },
+      times.answerMs,
+    ),
+  );
+  if (outcome.code === 5) {
+    ctx.io.stderr('skydeck: restore stopped before it finished; see above\n');
+  }
+  return outcome.code;
 }
 
 /** `resume <ref> --window` (S2 11.4): the request for the session `<ref>` resolved to. */
