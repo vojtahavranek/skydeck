@@ -13,6 +13,11 @@ import type { TestContext } from 'node:test';
 import type { Browser, Page } from 'playwright';
 
 import { isoFromNs } from '../src/platform/time.ts';
+import type { Deck } from '../src/sessions/deck.ts';
+import { attachManualPr, requirePrKey } from '../src/sessions/meta.ts';
+import type { PrFetchResult } from '../src/store/types.ts';
+import { ghRunner } from '../test/helpers/gh.ts';
+import type { GhRunner } from '../test/helpers/gh.ts';
 import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import type { ServerSandbox } from '../test/helpers/window.ts';
@@ -130,6 +135,56 @@ async function terminalIn(
     return found !== '';
   }, `a ${state} terminal of ${sessionId}`);
   return found;
+}
+
+/** A page of a real server whose runner holds every `gh` (as test-page/header.test.ts). */
+async function withGh(t: TestContext, chromium: Browser): Promise<Launched & { gh: GhRunner }> {
+  let gh: GhRunner | null = null;
+  const l = await launched(t, chromium, {
+    server: {
+      platform: (platform) => {
+        gh = ghRunner(platform.runner, { hold: 'held' });
+        return { ...platform, runner: gh };
+      },
+    },
+  });
+  assert.ok(gh !== null);
+  return { ...l, gh };
+}
+
+/** Attaches the open pull request `url` to `sessionId` as `skydeck pr add` does, read just now. */
+function attach(deck: Deck, sessionId: string, url: string): void {
+  deck.store.ensurePr(requirePrKey(url));
+  const read: PrFetchResult = {
+    ok: true,
+    atNs: deck.platform.clock.nowNs(),
+    title: 'Fix the retry',
+    state: 'open',
+    review: null,
+    checks: 'passing',
+  };
+  deck.store.savePrResult(url, read);
+  attachManualPr(deck, sessionId, url);
+}
+
+/** Whether stage D's dialog is shown, and its heading. */
+async function dialog(page: Page): Promise<{ shown: boolean; heading: string }> {
+  return readPage(
+    page,
+    () => {
+      const root = document.getElementById('editor');
+      return {
+        shown: root instanceof HTMLElement && !root.hidden,
+        heading: root?.querySelector('.edit-heading')?.textContent ?? '',
+      };
+    },
+    null,
+  );
+}
+
+/** The pull-request dialog's lines, in order. */
+async function prLines(page: Page): Promise<string[]> {
+  return page.locator('#editor .edit-pr .edit-pr-text').allTextContents();
 }
 
 /** The page of a real server with the real web/ reported no problem (ruled for tasks 27-29). */
@@ -252,6 +307,78 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
   );
 }
 
+async function stageDCases(t: TestContext, chromium: Browser): Promise<void> {
+  await t.test(
+    "with stage D: the header's label control (a click on the title) of a hidden running session opens its label dialog and saves its label; the header's Done marks it done",
+    async (t) => {
+      const l = await withGh(t, chromium);
+      const { page } = l;
+      session(l.d, S1, 2n * MIN, 'alpha work');
+      session(l.d, S2, 3n * MIN, 'omega work');
+      await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      await filterTo(page, 'omega', [S2]);
+      assert.equal(await selectedRow(page), null);
+      await showsText(page, '#cards .header-title', /^alpha work$/);
+
+      await page.locator('#cards .header-title').click();
+      await until(async () => (await dialog(page)).shown, 'the label dialog');
+      assert.equal((await dialog(page)).heading, 'Label — alpha work');
+      await page.keyboard.type('alpha renamed');
+      await page.keyboard.press('Enter');
+      await until(async () => !(await dialog(page)).shown, 'the dialog closed');
+      await until(
+        () => l.d.deck.store.meta(S1)?.label === 'alpha renamed',
+        "S1's label in the store",
+      );
+      await showsText(page, '#cards .header-title', /^alpha renamed$/);
+      assert.deepEqual(await listed(page), [S2], 'still hidden');
+
+      await page.locator('#cards .header-done').click();
+      await until(() => (l.d.deck.store.meta(S1)?.doneAtNs ?? null) !== null, 'S1 marked done');
+      await showsText(page, '#cards .header-done', /^Undone$/);
+      assert.equal(await selectedRow(page), null);
+      noProblems(l);
+    },
+  );
+
+  await t.test(
+    "with stage D: the filter `repo#12` matches the session only by a pull request; `p`'s dialog stays open after × detaches it and goes on listing the session's row, which the list no longer shows",
+    async (t) => {
+      const l = await withGh(t, chromium);
+      const { page } = l;
+      session(l.d, S1, 2n * MIN, 'alpha work');
+      session(l.d, S2, 3n * MIN, 'omega work');
+      attach(l.d.deck, S1, 'https://github.com/acme/repo/pull/12');
+      attach(l.d.deck, S1, 'https://github.com/acme/other/pull/5');
+      await until(async () => (await listed(page)).join() === [S1, S2].join(), 'both listed');
+      await clickRow(page, S1);
+      await filterTo(page, 'repo#12', [S1]);
+      assert.equal(await selectedRow(page), S1);
+
+      await page.keyboard.press('p');
+      await until(async () => (await dialog(page)).shown, 'the pull-request dialog');
+      await until(async () => (await prLines(page)).length === 2, 'its two lines');
+      const lines = await prLines(page);
+      assert.match(lines[0] ?? '', /^acme\/other #5 · /);
+      assert.match(lines[1] ?? '', /^acme\/repo #12 · /);
+
+      await page
+        .locator('#editor .edit-pr', { hasText: 'acme/repo #12' })
+        .locator('.edit-pr-remove')
+        .click();
+      // The list no longer shows S1 (the filter matched it by that pull request alone) …
+      await until(async () => (await listed(page)).length === 0, 'S1 hidden by the filter');
+      assert.equal(await selectedRow(page), null);
+      // … and the dialog, still open, lists the session's row as the server has it now.
+      await until(async () => (await prLines(page)).length === 1, 'the line of #12 gone');
+      assert.match((await prLines(page))[0] ?? '', /^acme\/other #5 · /);
+      assert.equal((await dialog(page)).shown, true, 'the dialog stays open');
+      noProblems(l);
+    },
+  );
+}
+
 /** A scripted stand-in's page and the means to serve it lists (helpers/shell.ts). */
 async function scripted(
   t: TestContext,
@@ -332,4 +459,5 @@ test('the selected session the list does not show', async (t) => {
   );
 
   await realServerCases(t, chromium);
+  await stageDCases(t, chromium);
 });

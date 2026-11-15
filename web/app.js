@@ -673,7 +673,8 @@ function selectedRow() {
 
 /**
  * Opens the dialog `what` for `sessionId` (D1–D3): the list keys on the selected row, and the
- * header's controls (task 38) through the cards' `edit`. The note's dialog needs the list's
+ * header's controls (task 38) through the cards' `edit` — the session's row from `sessionRow`, so
+ * also one the list does not show (E13). The note's dialog needs the list's
  * `selected` of that session, which holds the whole note (D3); a label, group or note that this
  * page's own act just changed waits for the list that holds it (C1). `key` is the key that opened
  * it ('' from the cards), `code` its physical key.
@@ -686,8 +687,8 @@ function edit(what, sessionId, key, code) {
   if (modal()) {
     return;
   }
-  const row = rowOf(sessionId);
-  if (row === undefined) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
     say('no session selected');
     return;
   }
@@ -742,13 +743,14 @@ function placeOf(sessionId) {
  * D15: `d` and the header's Done mark the session done, or undone for a done row; one act per
  * session at a time, and none while its own act waits. A `done` that the server took shows the
  * Undo toast. `fromList`: this page's `d` in the list, after which S2 12.9's exception moves the
- * selection (`leaveDone`); the Done button leaves it to the main rule.
+ * selection (`leaveDone`); the Done button leaves it to the main rule. The row is `sessionRow`'s:
+ * the header's Done also marks a session the list does not show (E13).
  * @param {string} sessionId
  * @param {boolean} fromList
  */
 function markDone(sessionId, fromList) {
-  const row = rowOf(sessionId);
-  if (row === undefined) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
     say('no session selected');
     return;
   }
