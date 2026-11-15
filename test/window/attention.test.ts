@@ -309,6 +309,12 @@ describe('the look (S2 10.3; B4)', () => {
     assert.deepEqual(w.writes, []);
     liveFile(w.d, PID, S1, 'waiting', T0, { waitingFor: 'a question' });
     assert.equal(w.attention.look(), true, 'another detail is a change');
+    liveFile(w.d, PID, S1, 'waiting', T0 + SEC, { waitingFor: 'a question' });
+    assert.equal(w.attention.look(), true, 'another status time is a change');
+    assert.equal(w.attention.facts().live.get(S1)?.sinceNs, T0 + SEC);
+    liveFile(w.d, PID, S1, 'busy', T0 + SEC, { waitingFor: 'a question' });
+    assert.equal(w.attention.look(), true, 'another status is a change (no turn end: no write)');
+    assert.deepEqual(w.writes, []);
   });
 
   test('a file that cannot be parsed between the busy and the idle look keeps the baseline: the end is recorded', (t) => {
@@ -385,6 +391,16 @@ describe('the look (S2 10.3; B4)', () => {
     liveFile(w.d, PID2, S1, 'idle', T0 + 2n * SEC);
     w.attention.look();
     assert.deepEqual(w.writes, [[{ sessionId: S1, turnEndedNs: T0 + 4n * SEC }]]);
+    assert.equal(reasonOf(w, S1), 'finished');
+
+    // The other order: the later time is the second holder's, and it is still the one kept.
+    liveFile(w.d, PID, S1, 'busy', T0 + 5n * SEC);
+    liveFile(w.d, PID2, S1, 'busy', T0 + 5n * SEC);
+    w.attention.look();
+    liveFile(w.d, PID, S1, 'idle', T0 + 6n * SEC);
+    liveFile(w.d, PID2, S1, 'idle', T0 + 8n * SEC);
+    w.attention.look();
+    assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 8n * SEC }]);
     assert.equal(reasonOf(w, S1), 'finished');
   });
 });
