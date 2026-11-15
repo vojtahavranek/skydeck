@@ -2235,15 +2235,16 @@ that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start 
 (ruled by the plan owner, plan task 27). One exception, ruled by the lead on 2026-11-15 (the user
 may change it): when this page's own `d` in the list has marked the selected session done — its
 answer came, and the list that holds its result (one that arrived since the act was sent — the
-server sends it before the answer, unless a list went to the page within the last second; else the
-next one) no longer has the row, while that session is
+server sends it before the answer, unless a list went to the page within the last second — and no
+longer shows the row as not done in its section, since one that still does is older than the write;
+else the next one, which the page asks for with a `view`) no longer has the row, while that session is
 still the selected one (moved away meanwhile, the selection stays where the user put it) — the row after it in the
 same section is selected, else the one before it in that section, else none; never a row of Open.
 The Undo of that `d` selects the session again once it is back in the list, if the selection is
 still where that `d` left it (the row it selected, or none); if the user moved it meanwhile, it
 stays (ruled for plan D task 37). That list decides once: a row it still has (running, under
-Open) moves nothing later either. A named limit: a list that the server pushed just before it read
-the act also counts as holding the result. The header's Done leaves the selection to the main rule. A held
+Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
+of plan D task 37). The header's Done leaves the selection to the main rule. A held
 `d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
@@ -2295,7 +2296,8 @@ which empties the field and keeps the dialog open so that the new pull request s
 
 After this page's own save of a label, group or note, its key waits for the list that holds the
 result (one that arrived since the act was sent, else the next one: `the label is not here yet;
-press l again`), so that the dialog never starts from the old text and an Enter never writes the
+press l again`; a named limit: a list that the server pushed just before it read the act also
+counts as holding it), so that the dialog never starts from the old text and an Enter never writes the
 old label back (the pull-request dialog does not wait). When no list came by the answer, the page asks
 for one (a `view`, which the server answers at once; it sends no list equal to the last one, so a
 save that changed nothing shown would otherwise wait for good). A named limit: when the store was
