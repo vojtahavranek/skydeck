@@ -2504,7 +2504,10 @@ first row shown (ruled by the plan owner, plan task 27); when the list shows the
 selected again. From stage E the right side takes such a session's row from the list's
 `selectedRow` (8.2.3): its terminal is shown with its header (stage D's, so that the header's
 controls and their dialogs edit that session) and its ended bar with Resume and Close (12.6); a
-session without a terminal of the window shows nothing, never its card. The list keys (`l`, F2,
+session without a terminal of the window shows nothing, never its card. The header's Done on such
+a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
+while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
+the lead on 2026-11-15). The list keys (`l`, F2,
 `g`, `n`, `p`, `d`) act only on a row the list shows: on a hidden selection they say `no session
 selected` and send nothing. One exception, ruled by the lead on 2026-11-15 (the user
 may change it): when this page's own `d` in the list has marked the selected session done — its

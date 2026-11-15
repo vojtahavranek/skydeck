@@ -776,7 +776,11 @@ function markDone(sessionId, fromList) {
     if (kind === 'undone') {
       return;
     }
-    toast.show(place?.section === 'open' ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
+    // A row with no section (`selectedRow`'s, E13) says whether it runs by itself: the server's
+    // rule of Open (`open` in src/window/view/build.ts; ruled 13:05Z).
+    const running =
+      place !== null ? place.section === 'open' : row.starting || row.state !== 'not-running';
+    toast.show(running ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
     if (state.leaving?.sessionId === sessionId) {
       state.leaving.answered = true;
       if (state.leaving.listed) {

@@ -27,6 +27,7 @@ import {
   after,
   clickRow,
   connection,
+  escape,
   honest,
   keyMessage,
   launched,
@@ -47,6 +48,9 @@ import type { Launched } from './helpers/shell.ts';
 import { promptOf, resumeHere, until, untilScreen } from './helpers/terminal.ts';
 
 const MIN = 60_000_000_000n;
+/** D15's toasts (web/app.js): for a session that runs, and for one that does not. */
+const DONE_RUNNING = 'Marked done. Stays under Open while it runs; hidden once it stops.';
+const DONE_HIDDEN = 'Marked done: hidden from the list. It comes back on new activity.';
 
 /** A session last active `agoNs` before now, titled `title` (a `custom-title` record). */
 function session(d: ServerSandbox, sessionId: string, agoNs: bigint, title: string): void {
@@ -309,13 +313,13 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
 
 async function stageDCases(t: TestContext, chromium: Browser): Promise<void> {
   await t.test(
-    "with stage D: the header's label control (a click on the title) of a hidden running session opens its label dialog and saves its label; the header's Done marks it done",
+    "with stage D: the header's label control (a click on the title) of a hidden running session opens its label dialog and saves its label; the header's Done marks it done with the toast of a running session, and once its terminal ended with the toast of a hidden one",
     async (t) => {
       const l = await withGh(t, chromium);
       const { page } = l;
       session(l.d, S1, 2n * MIN, 'alpha work');
       session(l.d, S2, 3n * MIN, 'omega work');
-      await resumeHere(page, S1);
+      const term = await resumeHere(page, S1);
       await untilScreen(page, promptOf(S1));
       await filterTo(page, 'omega', [S2]);
       assert.equal(await selectedRow(page), null);
@@ -334,10 +338,23 @@ async function stageDCases(t: TestContext, chromium: Browser): Promise<void> {
       await showsText(page, '#cards .header-title', /^alpha renamed$/);
       assert.deepEqual(await listed(page), [S2], 'still hidden');
 
+      // Done: the toast of a running session (ruled 13:05Z: a row with no section takes it from
+      // the row itself), not "hidden from the list".
       await page.locator('#cards .header-done').click();
       await until(() => (l.d.deck.store.meta(S1)?.doneAtNs ?? null) !== null, 'S1 marked done');
+      await showsText(page, '#toast .toast-text', new RegExp(`^${escape(DONE_RUNNING)}$`));
       await showsText(page, '#cards .header-done', /^Undone$/);
       assert.equal(await selectedRow(page), null);
+      // Undone, then /exit: Done on the ended terminal of the hidden session says it is hidden.
+      await page.locator('#cards .header-done').click();
+      await until(() => (l.d.deck.store.meta(S1)?.doneAtNs ?? null) === null, 'S1 undone');
+      await showsText(page, '#cards .header-done', /^Done$/);
+      const p = await connectTestPage(t, l.d, l.server, { focused: false, view: null });
+      p.send({ t: 'input', term, data: '/exit\r' });
+      await showsText(page, '#cards .card-ended', /^claude exited \(status 0\)/);
+      await page.locator('#cards .header-done').click();
+      await until(() => (l.d.deck.store.meta(S1)?.doneAtNs ?? null) !== null, 'S1 done again');
+      await showsText(page, '#toast .toast-text', new RegExp(`^${escape(DONE_HIDDEN)}$`));
       noProblems(l);
     },
   );
