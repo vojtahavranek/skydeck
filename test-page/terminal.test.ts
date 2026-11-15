@@ -101,7 +101,11 @@ function captureSinks(
 
 const MiB = 1024 * 1024;
 
-/** One input the server's hub was given, with its answer ('full' is sent to the page as `input-full`). */
+/** How long the input-full case waits for the page to show what a server message says: under
+ *  heavy load (a load of 75 on 16 cores) the page can be more than PAGE_WAIT_MS behind. */
+const BEHIND_MS = 60_000;
+
+/** One input the server's hub was given, and its answer ('full' sends the page `input-full`). */
 interface InputAnswer {
   term: string;
   bytes: number;
@@ -153,12 +157,25 @@ async function pressSent(
   key: string,
   settle: () => Promise<void>,
 ): Promise<void> {
-  for (;;) {
-    await connection(page, 'open');
+  for (let tries = 0; ; tries++) {
+    assert.ok(
+      tries < 5,
+      `the page sent ${key} (pressed 5 times; it lost its connection each time)`,
+    );
+    await connection(page, 'open', BEHIND_MS);
     await settle();
-    const log = await logOf(page);
-    const before = inputsSent(log, term);
-    const sockets = socketsOf(log);
+    // The state and the sockets in one read, so that a socket counted here was open.
+    const now = await readPage(
+      page,
+      () => ({
+        open: document.documentElement.dataset['connection'] === 'open',
+        log: JSON.parse(sessionStorage.getItem('skydeck-test-log') ?? '[]') as Logged[],
+      }),
+      null,
+    );
+    if (!now.open) continue;
+    const before = inputsSent(now.log, term);
+    const sockets = socketsOf(now.log);
     await page.keyboard.press(key);
     const sent = async (): Promise<boolean> => inputsSent(await logOf(page), term) > before;
     await until(
@@ -220,8 +237,9 @@ async function keyAnswered(
  * again; a large paste under heavy load can cause it (the ping waits behind the paste at the
  * server), and what the old connection still carried never comes. Once the server has answered
  * all the old one carried (every input the page sent, or nothing new for 3 s), the new one is
- * open and nothing more has come for 1 s, what has not come is lost. The recorder logs no notice's kind, so a gap or newer-keeper
- * notice for `term` would count too; the case that uses this has none.
+ * open and nothing more has come for 1 s, what has not come is lost. The connection it counts
+ * from is the page's latest whenever nothing is on its way. The recorder logs no notice's kind,
+ * so a gap or newer-keeper notice for `term` would count too; the case that uses this has none.
  */
 async function refusalSync(
   page: Page,
@@ -243,7 +261,12 @@ async function refusalSync(
         const received = log.filter(
           (e) => e.e === 'in' && e.t === 'notice' && e.term === term,
         ).length;
-        if (received + lost >= refused) return true;
+        if (received + lost >= refused) {
+          // Nothing on its way: from here on, count from the page's latest connection (a reconnect
+          // that lost nothing must not make a later slow refusal look lost).
+          if (mine.length >= inputsSent(log, term)) sockets = socketsOf(log);
+          return true;
+        }
         if (received !== lastReceived) {
           lastReceived = received;
           stillSince = performance.now();
@@ -754,10 +777,10 @@ test('the terminal view', async (t) => {
       await watchInputFull(page);
       const refusalsReached = await refusalSync(page, answers, term);
       // Long enough that everything up to the second paste reaches the server while it stalls,
-      // even under heavy load (it took 17 s at a load of 50); checked below, not assumed.
-      const stall = '/stall 40\r';
+      // even under heavy load (17 s at a load of 50; over 40 s once at 85); checked below.
+      const stall = '/stall 60\r';
       await typeLine(page, stall.slice(0, -1));
-      await untilScreen(page, /stalling 40 s/);
+      await untilScreen(page, /stalling 60 s/);
       const stalled = (): boolean => inputOf(d.record, S1).endsWith(hexOf(stall));
       const stillStalled = 'the stall still on (the program read nothing since /stall)';
       // Input the server takes shows nothing: the typed line, and a paste it takes whole while
@@ -767,10 +790,19 @@ test('the terminal view', async (t) => {
       assert.equal(refused(answers), 0, 'the server took all of it');
       assert.deepEqual(await inputFullChanges(page), [], 'no notice without a refusal');
       // More than the keeper (4 MiB), the sockets and the server (4 MiB) take while it stalls.
-      const first = await pasteAnswered(page, answers, term, 10 * MiB, refusalsReached);
-      assert.ok(stalled(), stillStalled);
-      assert.ok(refused(first) > 0, 'part of the paste refused');
-      await until(shown, 'shown');
+      // Pasted again when the page dropped its connection before any refusal of it came (it
+      // never learns of them then).
+      for (let pastes = 0; ; pastes++) {
+        assert.ok(pastes < 3, 'a refusal of the paste reached the page (pasted 3 times)');
+        const first = await pasteAnswered(page, answers, term, 10 * MiB, refusalsReached);
+        assert.ok(stalled(), stillStalled);
+        assert.ok(refused(first) > 0, 'part of the paste refused');
+        await refusalsReached();
+        const got = afterInput(await logOf(page), term);
+        if (got.refusals > 0) break;
+        assert.ok(got.reconnected, 'a refusal of the paste reached the page');
+      }
+      await until(shown, 'shown', BEHIND_MS);
       const firstShown = await inputFullChanges(page);
       assert.deepEqual(firstShown.at(-1)?.terms, [term], 'on its terminal only');
       assert.ok((firstShown[0]?.notices ?? 0) > 0, 'shown only once a refusal reached the page');
@@ -790,7 +822,11 @@ test('the terminal view', async (t) => {
         const got = afterInput(await logOf(page), term);
         if (got.refusals === 0) {
           assert.ok(got.reconnected, `a refusal reached the page ${what}`);
-          await until(async () => !(await shown()), `gone ${what}: no refusal of it came`);
+          await until(
+            async () => !(await shown()),
+            `gone ${what}: no refusal of it came`,
+            BEHIND_MS,
+          );
         } else {
           assert.equal(await shown(), true, `kept ${what}`);
         }
@@ -801,7 +837,7 @@ test('the terminal view', async (t) => {
       // the taken one makes it go. Each is pressed once the page has every refusal sent before.
       const letters = 'xabcdefghijklmnopqrstuvwz0123456789';
       const keys: { key: string; answer: string }[] = [];
-      const deadline = performance.now() + 90_000;
+      const deadline = performance.now() + 120_000;
       for (;;) {
         assert.ok(performance.now() < deadline, `a key taken: ${JSON.stringify(keys)}`);
         const key = letters.charAt(keys.length % letters.length);
@@ -816,6 +852,7 @@ test('the terminal view', async (t) => {
       await until(
         async () => (await noticeText(page, 'input-full')) === '',
         'gone once a key is taken',
+        BEHIND_MS,
       );
       const changes = await inputFullChanges(page);
       assert.deepEqual(changes.at(-1)?.terms, [], 'gone from every terminal');
@@ -823,32 +860,6 @@ test('the terminal view', async (t) => {
         changes.every((change) => change.terms.every((id) => id === term)),
         'never on the other terminal',
       );
-      // A refusal for the other terminal (sent through its stream while this one is shown) is
-      // shown on that one only. It is sent once that terminal is attached on the page's current
-      // connection, and again through the new one when the page reconnects before it shows (it
-      // went with the old connection).
-      const onOther = async (): Promise<boolean> =>
-        (await inputFullChanges(page)).at(-1)?.terms.join(' ') === other;
-      const attachedNow = (log: Logged[]): boolean =>
-        log.some(
-          (e) => e.e === 'in' && e.t === 'snap' && e.term === other && e.s === socketsOf(log),
-        );
-      for (let sends = 0; !(await onOther()); sends++) {
-        assert.ok(sends < 5, 'on the other terminal only (sent 5 times)');
-        await until(
-          async () => (await isOpen(page)) && attachedNow(await logOf(page)),
-          'the other terminal attached on the current connection',
-        );
-        const sink = sinks.get(other);
-        assert.ok(sink !== undefined, "the other terminal's sink");
-        const sockets = socketsOf(await logOf(page));
-        sink.notice('input-full', INPUT_FULL);
-        await until(
-          async () => (await onOther()) || socketsOf(await logOf(page)) > sockets,
-          'on the other terminal only',
-        );
-      }
-      assert.equal(await noticeText(page, 'input-full'), '', 'not on the shown terminal');
       // The program reads the key the server took, and none it refused.
       const taken = keys.at(-1)?.key ?? '';
       const keysRead = (): string => {
@@ -869,6 +880,46 @@ test('the terminal view', async (t) => {
         await sleep(500);
       }
       assert.equal(keysRead(), taken, 'only the key taken reached the program');
+      // A refusal for the other terminal (sent through its stream while this one is shown) is
+      // shown on that one only. It is sent once the page has caught up with the program's echo
+      // (the taken key is its last) and that terminal is attached on the current connection;
+      // again when the page connects anew or that terminal is attached anew before it shows (a
+      // notice through a stream that has ended is dropped: the server ends a stream it marked
+      // lost while the page was behind, S2 8.2.8).
+      // (The key may begin a row of its own: the echo wraps.)
+      await untilScreen(page, new RegExp(`[y~]\\n?${taken}$`, 'm'), BEHIND_MS);
+      const onOther = async (): Promise<boolean> =>
+        (await inputFullChanges(page)).at(-1)?.terms.join(' ') === other;
+      const snapsOf = (log: Logged[]): number =>
+        log.filter((e) => e.e === 'in' && e.t === 'snap' && e.term === other).length;
+      const attachedNow = (log: Logged[]): boolean =>
+        log.some(
+          (e) => e.e === 'in' && e.t === 'snap' && e.term === other && e.s === socketsOf(log),
+        );
+      for (let sends = 0; !(await onOther()); sends++) {
+        assert.ok(sends < 5, 'on the other terminal only (sent 5 times)');
+        await until(
+          async () => (await isOpen(page)) && attachedNow(await logOf(page)),
+          'the other terminal attached on the current connection',
+          BEHIND_MS,
+        );
+        const sink = sinks.get(other);
+        assert.ok(sink !== undefined, "the other terminal's sink");
+        const log = await logOf(page);
+        const sockets = socketsOf(log);
+        const snaps = snapsOf(log);
+        sink.notice('input-full', INPUT_FULL);
+        await until(
+          async () => {
+            if (await onOther()) return true;
+            const now = await logOf(page);
+            return socketsOf(now) > sockets || snapsOf(now) > snaps;
+          },
+          'on the other terminal only',
+          BEHIND_MS,
+        );
+      }
+      assert.equal(await noticeText(page, 'input-full'), '', 'not on the shown terminal');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
