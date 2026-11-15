@@ -1424,7 +1424,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 |---|---|---|
 | `resume` | `sessionId`, `cols`, `rows` | 11.3; the size is the new terminal's first size (8.2.6). |
 | `new` | `dir`, `label`, `group`, `flags` (the text as typed), `cols`, `rows` | 11.3; the server splits `flags` by 12.6's rule and checks them as `skydeck new` does (design 7.7). |
-| `restore` | `sessionIds` (1 to 1,000 distinct session ids) | 12.7. |
+| `restore` | `sessionIds` (1 to 1,000 distinct session ids) | 12.7, 11.3. The result comes at once: `ok` with no lines and no `sessionId` once the run has begun (a restore selects nothing, 12.7; its lines come as `notice restore-progress`), else the refusal as the result's error — `a restore is already running; wait until it has finished`, after the server's stop has begun `the window's server is stopping`, or the line of a run that cannot begin (plan C6). |
 | `label`, `group` | `sessionId`, `text` (empty clears) | 12.5. |
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
@@ -1530,6 +1530,13 @@ Any number of pages may attach to one terminal; they share its ordered stream. I
 them goes to the program in the order the server receives it. `list` goes to every page; each
 page's `view` state is its own. Notifications go to one page only (13).
 
+Attention (12.4, 13; stage B's plan, B20) is the server's, so it is the same in every window: the
+marks, the title bar's count and the window title — but for what a window lists at all: a done
+session that has stopped counts only in a window that shows done sessions (`showDone`, 12.8); and
+`needYou.order` follows each window's own filter and fold. A session seen in any window that has focus is seen for all of them, and a typing
+from any window counts. A notification goes to the one window that had focus last, and only while
+no window has it.
+
 #### 8.2.8 Backpressure
 
 The server never pauses a program; it may stop reading a keeper's connection (7.3, Reading), which
@@ -1575,7 +1582,7 @@ absolute and existing, no flag that picks a session or names it). The program is
 | `GET /status` | `{ starting, pages, terminals: [{ id, slot, state, sessionId, pid }], keepAlive, python, build, checkout, startedAtNs, envOrigin, windowExpectedMs }` (`envOrigin`: where the server's environment came from and when, 5.2; `starting`: true while the server's start is not done and a page's upgrade is answered 503 (8.2.1) — a server answers before then, 5.2; a server of an older build sends none, which means false; ruled by the plan owner, follow-up "server-findable"; `windowExpectedMs`: the milliseconds left while the server expects a window back (5.1) — 7,000 while its start is not done, then counting down from its end —, else null; a server of an older build sends none, which means null; plan C20), for `skydeck window` and `doctor`. |
 | `POST /resume` | `{ sessionId }` (a session id) → `prepareResumeById` and the window terminal (11.2) → `{ code, lines, sessionId }`: the exit code `skydeck resume` would end with and the lines it prints on stderr (design 7.6), refusals included, each as printed (`skydeck: …`); `sessionId`, the session it started, else null. |
 | `POST /new` | `{ dir, label, group, flags }` (`label` and `group` null when the option was not given, and passed to `prepareNew` as the command passes them; `flags` the words after `--`, an array of strings, not split again) → `prepareNew` with `dir` (absolute, an existing directory) and the refusals of design 7.7 → `{ code, lines, sessionId }`. |
-| `POST /restore` | `{ sessionIds, all }` (the ids the user selected, 1 to 1,000; `all` as `--all`) → 11.4. The answer (200, chunked) is a stream of JSON lines: `{ "line": … }` per report line of the run, `{ "line": "waiting for <n> sessions" }` (`waiting for 1 session` for one) after 10 s without one, and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request that cannot run is the same stream: when a restore runs already (or the server's stop has begun), its line, then an outcome with code 1 — a refused request is no run (11.3); when the run cannot begin (the boot id cannot be read, the store is busy), its line, `restore finished: nothing was started` (every run ends with one, 11.3), then an outcome with code 1. |
+| `POST /restore` | `{ sessionIds, all }` (the ids the user selected, 1 to 1,000; `all` as `--all`) → 11.4. The answer (200, chunked) is a stream of JSON lines: `{ "line": … }` per report line of the run, `{ "line": "waiting for <n> sessions" }` (`waiting for 1 session` for one) after 10 s without one, and last `{ "outcome": { code, started, timedOut, failed, notStarted } }`. A request refused because a restore runs already is its one line, then an outcome with code 1. A run that cannot begin (the boot id cannot be read, the store is busy) is its line, `restore finished: nothing was started`, then an outcome with code 1. |
 | `POST /token` | `{ seconds }` (30 for a window, 600 for `--print-url`) → `{ id, token, expiresAtNs }`: a launch token, minted and held in memory (8.2.2). |
 | `GET /token/<id>` | `{ state }`: `waiting`, `used`, `reused` (a second proof came: the alarm, 8.2.2), `expired` or `dropped`. |
 | `POST /token/drop` | `{ id }` → `{ ok }`: the token is given up; a later proof with it fails with 4003 (or 4004 when it had been used). |
@@ -1722,7 +1729,12 @@ and turn ends (10.3); check the keep-alive. Every second tick: the refresh every
 (design 5.3: ingest, reconcile, transcript scan, lock sweep), the automatic pull-request refresh
 (design 7.3) for the sessions the pages list, and a reload of the rows when that refresh saved
 something, a live file or its trust changed, another process committed to the store
-(`Store.dataVersion()`), or a minute passed — the interactive list's rule. The server then sends
+(`Store.dataVersion()`), or a minute passed — the interactive list's rule — or when a row's last
+holding that was alive at the last load is gone now (stage B, ruled 2026-11-15): a session's end
+event can be ingested before its process exits, `ended-unexpectedly` (design 6.3) and a window end
+judged on it (12.4) need that process gone, and an exit after the live file went moves no change
+mark, so without it the mark would wait for the minute. A /proc read that fails, or a boot id that
+cannot be read, is not taken for gone (design 5.5). The server then sends
 `list` to every page whose view model changed. An edit a page made (12.5) does not wait for that:
 the server's own writes move no change mark, so after one the server loads the rows again and
 sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
@@ -1996,7 +2008,8 @@ gives them back when its program never started (7.8).
   alive by its `.pid` line in the runtime directory the store records (4.2, design 5.5's rule). It
   needs no running server: it creates nothing and connects to nothing, and with no runtime
   directory, no keeper line or no boot id there is no mark. `show --json` is unchanged.
-- `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other), or
+- `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other: two
+  of them are a usage error, exit 2, `--here and --window cannot be used together`; plan C13), or
   configuration `"terminal": "window"`, sends the request to the server (8.3) instead of starting
   anything itself: `resume` sends the session id its `<ref>` resolved to, `new` sends its current
   directory, `--label`, `--group` and the flags after `--`. It never starts, restarts or signals a
@@ -2031,7 +2044,8 @@ gives them back when its program never started (7.8).
 - `restore` with `"terminal": "window"` plans and shows its list and asks as in design 7.8, then
   sends the selected session ids (and `--all`) to `POST /restore` — when no page is connected
   after opening a window first, as `resume` does above (none under `CLAUDECODE`), so that the
-  terminals start at the window's size and a start dialog can be answered. The server takes
+  terminals start at the window's size and a start dialog can be answered; a window that cannot be
+  opened is its one line, and the request is sent all the same (plan C12). The server takes
   design 7.8's set from freshly refreshed rows, keeps the entries the user selected (an id no
   longer in the set is reported `failed <short>: no longer offered for restore`), and runs
   `runRestore` with the
@@ -2197,7 +2211,8 @@ exits it settled (7.8) — each terminal of the window in state `ended` or `lost
 its exit time is the server's clock) that started its program is judged, once, at the first refresh
 where its session's row no longer runs and that row's last holder is gone (a lost keeper's program
 lives on its SIGHUP for a moment, and its end event can be ingested before it exits, while
-`ended-unexpectedly` needs the holder gone, design 6.3):
+`ended-unexpectedly` needs the holder gone, design 6.3; the rows are loaded again once that holder
+is gone, 10.1):
 its session, the one it shows or else the one it was opened for, gets `window_end_seq` and, as
 `window_end_ns`, the exit's time when that row is marked `ended-unexpectedly`; nothing when the
 session ended deliberately. A terminal that leaves the list is forgotten. It is the same end when the stored `window_end_ns` equals the exit's
@@ -2386,7 +2401,9 @@ preselected by design 7.8's rule, "Restore 3" and "Not now". Restore runs as in 
 show under Open as `starting…` and the banner reports each line of the run (started, timed out,
 failed, stopped for memory). "Not now" stores the boot id (10.2): the banner does not come back for
 that boot, and the switcher still offers "Restore 3 sessions from <time>" until the next WSL
-restart.
+restart. The time is the page's (plan C18): `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at
+18:02`, and `on 12 Nov 2025 at 18:02` in another year than this one, in the page's time zone, on a
+24-hour clock.
 
 The banner is the view model's (4.3: the page decides no rule). It offers design 7.8's default set
 of the latest earlier boot, in list order, each session once, every text sanitised as the list's
@@ -3276,7 +3293,7 @@ grants a permission through Playwright.
   Playwright's version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
   `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
-  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 30
+  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 45
   minutes.
 
 ## 18. Manual checks for step 2
@@ -3316,9 +3333,9 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404? Answered for Chromium by the page suite (17.4, plan task 26): no, the worker keeps answering and stays registered; Edge itself is still to be checked here. | A | 15.3 |
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
-| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check keeps a copy of `config.json` first and puts it back at the end. | D | 12.5, 9.6 |
+| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
 | W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
-| W29 | On the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key. | D | 12.5, 12.9 |
+| W29 | **Real claude**, on the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

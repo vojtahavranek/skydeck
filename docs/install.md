@@ -17,7 +17,7 @@ No. skydeck works in any terminal. Only one thing needs a terminal program: star
 | Recording sessions (the hook) | No. It is a Claude Code hook. It records a session whatever terminal `claude` runs in. |
 | `skydeck`, `ls`, `show`, `label`, `group`, `note`, `done`, `undone`, `pr ...` | No. They read and write skydeck's own database and call `gh`. |
 | `install`, `uninstall`, `doctor` | No. (`doctor` runs a WezTerm check only when the configuration says `"terminal": "wezterm"`.) |
-| `resume`, `new`, `restore`, and `R` in the interactive list | They start `claude`. By default they do it in the terminal you are in: skydeck ends and `claude` takes its place. That works in any terminal. |
+| `resume`, `new`, `restore`, and `R` in the interactive list | They start `claude`. By default they do it in the terminal you are in: skydeck ends and `claude` takes its place. That works in any terminal. With `--window` (`resume`, `new`) or `"terminal": "window"` the window's server starts it in the skydeck window instead ("Starting sessions in the window from a terminal (stage C)"). |
 | Starting a session in a **new tab** (`--tab`, or `"terminal": "wezterm"`) | Yes. WezTerm is the only terminal skydeck can open tabs in. There are two adapters, `here` and `wezterm`, in `src/terminals/`. |
 
 What WezTerm adds is tabs: `resume --tab`, `new --tab`, `R` in the list, and `restore`, which brings
@@ -45,7 +45,8 @@ The commands skydeck prints are quoted for `sh`, `bash` and `zsh`; `fish` is not
 See "WezTerm on WSL" below for the configuration.
 
 The window of step 2 needs no terminal program either: it is an Edge window on the Windows side,
-and every session started in it runs in a terminal of skydeck's own (see "The window (step 2)").
+and every session started in it — also by `resume --window`, `new --window` and, with `"terminal":
+"window"`, by `restore` and `R` — runs in a terminal of skydeck's own (see "The window (step 2)").
 
 ## Prerequisites
 
@@ -719,8 +720,8 @@ leaves the keyboard where it was.
 heading names the session (`Label — <title>`, `Group — …`, `Note — …`, `Pull requests — …`):
 look at it before you save.
 
-- The label's field holds your label; it is empty, with the title as its hint, while the title is
-  Claude Code's. An empty label clears yours. The label is also the session's name for Claude
+- The label's field holds your label; it is empty, with the title as its hint, while you have set
+  none. An empty label clears yours. The label is also the session's name for Claude
   Code at its next start or resume.
 - The group's field holds the group you set; it is empty, with the title's ticket key as its
   hint, while the group comes from the title. An empty group gives the session the ticket key at
@@ -739,16 +740,20 @@ look at it before you save.
   you have changed nothing, and say `save or cancel the edit first` once you have. Closing the
   window, or Edge's own reload, with changed text asks first (Edge's own prompt). Ctrl+V and
   Ctrl+Shift+V paste into the field.
-- Right after a save, the same key on that session can say `the label is not here yet; press l
-  again` (likewise for the group and the note) until the list that holds the new text has come,
-  within a second; right after you select a session, `n` can say `the note is not here yet; press
-  n again`. A refusal that comes after you closed its dialog shows in the toast as `not saved:
-  <why>`.
+- Right after this window saved a label, group or note of a session, its dialogs wait for the
+  list that holds the new text (within a second). Until it has come, whichever of the three was
+  saved, each of these on that session only says so: `l` `the label is not here yet; press l
+  again`, F2 `the label is not here yet; press F2 again`, `g` `the group is not here yet; press g
+  again`, `n` `the note is not here yet; press n again`; the header's controls say the same with
+  the list's key (`press l again`, …). `p` never waits. Right after you select a session, `n`
+  can also say `the note is not here yet; press n again`. A refusal that comes after you closed
+  its dialog shows in the toast as `not saved: <why>`.
 
 **Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
 `Marked done: hidden from the list. It comes back on new activity.`, or for a session under Open
 (it runs) `Marked done. Stays under Open while it runs; hidden once it stops.` — such a row stays
-under Open with a `done` mark until the session stops. A click on `Undo` marks it undone again.
+under Open with a `done` mark until the session stops. `Undo` marks it undone again: a click
+presses it, or Tab until it has the keyboard and then Enter.
 After `d` in the list, once the row is gone, the row after it in the same section is selected,
 else the one before it, else none; never a row of Open. That row is another session, and the
 next key acts on it: to take the `d` back, click `Undo` first. `Undo` selects the session again,
@@ -771,8 +776,9 @@ again). On a line:
 `↻`, under the open ones, reads the status of the session's pull requests that are not merged or
 closed from GitHub now, in the background; the lines follow. The field takes a pull request's
 address (`https://github.com/owner/repo/pull/123`): Enter or `Attach` attaches it, as `skydeck pr
-add` does, empties the field and keeps the dialog open, where the new line shows `not fetched`,
-then its state within seconds, read through your `gh`; an address that is not a pull request's is
+add` does, empties the field and keeps the dialog open, where the new line shows `not fetched`
+(or its last state, when skydeck has read that pull request before), then within seconds its
+state read now, through your `gh`; an address that is not a pull request's is
 refused (`not a GitHub pull-request URL: <the text>`). `Close` or Esc closes the dialog. With
 none attached it says `no pull request attached`. Pull requests a session touched are still
 attached by themselves (design.md 7.3).
@@ -788,7 +794,7 @@ line's chip (design.md 7.3).
 #### The ticket link
 
 With `ticketUrl` in `config.json` ("Configuration" above), the group chip opens the session's
-ticket. For Jira:
+ticket. For Jira, a file with only this key (in a file with others, add the key beside them):
 
 ```json
 {
@@ -798,10 +804,11 @@ ticket. For Jira:
 
 When the session's group holds a ticket key — the text `groupPattern` matches in it, made of
 letters, digits, `-`, `_` and `.` and starting with a letter or a digit; with the default pattern
-a key such as `ABC-123` at its start — the chip shows `ABC-123 ↗`, underlined, with the ticket's
-address as its tooltip, and a click on it that selected no text opens the ticket in your own Edge.
-Without such a key, or without `ticketUrl`, the chip is plain text. The chip never edits: ✎ and
-`g` edit the group. skydeck reads nothing from the ticket system.
+a key such as `ABC-123` at its start — the chip shows the group with `↗` after it (`ABC-123 ↗`,
+`ABC-123 cleanup ↗`), underlined, with the ticket's address as its tooltip, and a click on it that
+selected no text opens the ticket in your own Edge. Without such a key, or without `ticketUrl`,
+the chip is plain text. The chip never edits: ✎ and `g` edit the group. skydeck reads nothing
+from the ticket system.
 
 `ticketUrl` must be an `http` or `https` address with `{key}` exactly once, after its host, with
 no user name or password, no white space, control character, `"` or backslash, no `%` (or `%` and
@@ -838,9 +845,11 @@ The age is left out while skydeck does not know when the reason began.
 **Seen.** You have seen a session once it has been the selected one for 1.5 seconds in a skydeck
 window that has the focus (in front: the one you work in), or at once when you type into its
 terminal. Selecting it is enough, also for a session that runs in another terminal (its card
-shows). A turn that ends while you look at its session never shows `finished`. Selecting another
-session, or the window losing the focus, ends the looking; when the window comes back to the
-front, the session selected in it is seen 1.5 seconds later.
+shows). A turn that ends while you look at its session never shows `finished`, and a terminal
+that ends while you look at its session never shows `ended unexpectedly`: both are seen as they
+happen. Selecting another session, or the window losing the focus, ends the looking; when the
+window comes back to the front, the session selected in it is seen after 1.5 seconds or a little
+more.
 
 Asks and finished turns come from the files Claude Code itself keeps for every running session,
 so they show for the sessions that run in another terminal too; `ended unexpectedly` is only for
@@ -864,14 +873,30 @@ filter or the fold` (`1 more that needs you is hidden by the filter or the fold`
 shown `2 that need you are hidden by the filter or the fold`; clear the filter (Esc) or unfold
 Earlier. While a dialog is open it says `close the edit first (Esc)` and selects nothing.
 
+**Several windows** show the same marks, the same count and the same title, but for what each
+lists (the done sessions it shows); Ctrl+Shift+J follows each window's own filter and fold. A
+session seen in one window is seen in all of them.
+
 **Desktop notifications.** At the right of the title bar, `Turn on notifications` shows until Edge
 has your answer. Click it once: Edge asks whether the page may show notifications (its own
 prompt). Allow, or Block: either way the button goes, and it comes back only when that answer is
-reset in Edge's settings for the site. Edge keeps the answer for the window's address and profile
-folder (after a change of `window.port` the button shows again). Closed without an answer, the
-prompt leaves the button there. When Edge or the company's policy refuses (the button is not there
-at all, or it goes at once without a prompt), or you chose Block, nothing else changes: the count
-in the title bar and `(3) skydeck` on the taskbar still show what needs you.
+reset in Edge's settings for the site. Closed without an answer, the prompt leaves the button
+there. When Edge or the company's policy refuses (the button is not there at all, or it goes at
+once without a prompt), or you chose Block, nothing else changes: the count in the title bar and
+`(3) skydeck` on the taskbar still show what needs you.
+
+The window's own Edge profile (its profile folder, above) keeps the answer, not your own Edge's,
+and keeps it per address: after a change of `window.port` the button shows again. To see or
+change it, open a normal Edge window on that profile folder, as manual check W13 does, in
+PowerShell (with the folder `skydeck doctor` names):
+
+```powershell
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --user-data-dir="C:\Users\<you>\AppData\Local\skydeck\edge-profile"
+```
+
+and in its address bar `edge://settings/content/notifications`; close that window afterwards, the
+skydeck window stays. Windows' own Settings › System › Notifications › Microsoft Edge turns
+notifications off for every Edge window, yours too.
 
 With notifications allowed, a session that **starts** to need you while no skydeck window has the
 focus shows one desktop notification: its title is the session's title, its text `asks: <detail>`
@@ -906,11 +931,13 @@ a WSL terminal of your own, run `skydeck window`:
   for a window that cannot come, then it opens one.
 - The old window says `WSL has restarted since <time>: the sessions that were running have ended.`
   (`<time>`: when it lost the old server).
-- **The banner**, at the top of the list, offers the sessions that `skydeck restore` would offer
-  (those that were open when WSL stopped, and those that ended unexpectedly shortly before;
-  design.md 7.8): `Before the restart (last activity today at 18:02) 3 sessions were open`, then
-  a checkbox per session, `<short id>  <title> · no exit recorded` (or `· ended 17:58`, with
-  `· was working` after it when a turn was cut off), ticked as `skydeck restore` preselects them,
+- **The banner**, at the top of the list, offers the sessions that `skydeck restore` offers
+  (design.md 7.8): every session of the last boot before this one that ended unexpectedly, not done
+  — those still open when WSL stopped, and those that had ended unexpectedly earlier in that boot.
+  `Before the restart (last activity today at 18:02) 3 sessions were open`, then a checkbox per
+  session, `<short id>  <title> · no exit recorded` (or `· ended 17:58`, with `· was working` after
+  it when a turn was cut off), ticked as `skydeck restore` preselects them (those still open, and
+  those that ended within two minutes of that boot's last event; the others are listed unticked),
   and the buttons `Restore 3` (the number counts the ticked ones) and `Not now`. The time reads
   `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02` or `on 12 Nov 2025 at 18:02`, in the
   page's (Windows') time zone, and follows the clock: `today` becomes `yesterday` at midnight.
@@ -959,7 +986,8 @@ window's own Resume and New do: through the same checks, with the same refusals 
 (`skydeck: <short id> is running (pid <n>)` or `skydeck: this session is already open in the
 window`: exit 4; what `skydeck new` refuses: exit 2). The command prints on stderr the lines
 `skydeck resume` or `new` would print (such as `skydeck: original flags unknown; resuming with
-defaults`), and exits with its code. `--here`, `--tab` and `--window` exclude each other.
+defaults`), and exits with its code. `--here`, `--tab` and `--window` exclude each other: two of
+them are a usage error, exit 2 (`skydeck: --here and --window cannot be used together`).
 
 - **It never starts the window's server**: run `skydeck window` first (the lines when it is not
   running are below). A server of this checkout is used also when it runs an older build; one from
@@ -987,8 +1015,9 @@ there is none) makes the window the place for every command:
 - `restore` looks for the window's server before anything else, so that `skydeck: the window is
   not running; run skydeck window first` comes before its list and its question. It then lists and
   asks as in step 1, opens a window first when none is open (so that the sessions start at the
-  window's size, and a question Claude Code asks at its start can be answered there), and hands the
-  chosen sessions to the server, which runs them as the banner's Restore does. It prints each line
+  window's size, and a question Claude Code asks at its start can be answered there; a window that
+  cannot be opened is its one line, and the restore goes on), and hands the chosen sessions to the
+  server, which runs them as the banner's Restore does. It prints each line
   of the run on stdout as it comes, and `waiting for <n> sessions` when nothing else came for 10
   seconds; after 30 seconds without a line, `skydeck: the window's server stopped answering; run
   skydeck to see what started`, exit 1. The exit code is the run's (design.md 7.8): 0; 1 when a
@@ -1099,21 +1128,23 @@ running server and asks it nothing; `--json` is unchanged.
 - **Two windows.** Label, group and done are last-write-wins between two windows, and between a
   window and a command, as between two commands. Only the note is guarded: a save over a note that
   changed meanwhile is refused, with your text kept in the box.
-- **The toast's Undo takes a click**; no key presses it. It is shown for 5 seconds, and the next
-  toast replaces it. Once it is gone: `a` shows done sessions, then `d` on the session.
+- **The toast's Undo has no key of its own.** It is a button: a click presses it, or Tab until
+  it has the keyboard and then Enter. The toast is shown for 5 seconds, and the next toast
+  replaces it. Once it is gone: `a` shows done sessions, then `d` on the session.
 - **A long note** (over 64 KiB, 65,536 bytes of UTF-8) is edited with `skydeck note <short id>`
   only: its dialog says `this note is longer than the window edits; use skydeck note <short id>`.
   A label or group over 1,024 bytes is refused before it is sent (`the label is longer than skydeck
   takes: at most 1,024 bytes of UTF-8`).
-- **Line breaks.** A note whose line breaks are CR alone (another program wrote it) is saved with
-  LF ones after an edit in the window.
+- **Line breaks.** A note whose line breaks are CR or CRLF (another program wrote it) is saved
+  with LF ones after an edit in the window.
 - **Text in a dialog and a reload.** While a dialog holds changed text, closing the window, Edge's
   reload and the page's own reload when it reconnects to a server of another build (after an
   update) ask first, with Edge's own prompt; leaving loses the text. Staying after an update keeps
   the dialog and its text, but the page stays not connected (a save says `skydeck's server is not
-  connected; try again`): copy the text, then reload (F5). Text typed between an F5 on an unchanged
+  connected; try again`): copy the text, close the dialog (Esc; twice for a changed note), then
+  press F5. Text typed between an F5 on an unchanged
   dialog and the reload is held back only by that prompt.
-- **A busy database.** When the database was busy at a save, a dialog opened right after it can
+- **A busy database.** When the database was busy right after a save, a dialog opened then can
   start from the text before the save; a note saved from there is refused as changed elsewhere.
   Close the dialog and open it again.
 
@@ -1128,12 +1159,15 @@ running server and asks it nothing; `--json` is unchanged.
   it shows there.
 - **One notification, to one window**, the one that had the focus last, and only while no skydeck
   window has the focus. With no window open none comes, and none comes later for what happened
-  meanwhile: the marks and the count are there when you open one.
+  meanwhile: the marks and the count are there when you open one. A browser tab of a
+  `--print-url` address counts as a window: when it had the focus last, the notification goes to
+  it, and it shows nothing unless that browser allows the page's notifications.
 - **A notification keeps its first words** when its session's reason changes (it asked, then
-  finished): only a start notifies. One that was shown before the page reloaded (after an update,
-  or F5) is not closed by the new page; a session the filter or the folded Earlier hides keeps its
-  notification until the list shows its row. What Windows does with a notification the page closes
-  is manual check W11's.
+  finished): only a start notifies. One that was shown before the page reloaded (after an update, or
+  F5) is not closed by the new page; a session the filter or the folded Earlier hides keeps its
+  notification until the list shows its row without a mark, or nothing needs you any more. A done
+  session that has stopped never notifies, also when a window that shows done sessions marks it.
+  What Windows does with a notification the page closes is manual check W11's.
 - **What a notification shows**: the session's title and, for an ask, its detail, which may name a
   command or a path (W19). On a shared screen others can read it; judge for yourself whether to
   allow notifications there.
@@ -1141,7 +1175,7 @@ running server and asks it nothing; `--json` is unchanged.
   unexpectedly while no server ran (its keeper waits up to 10 minutes for one) is marked `ended
   unexpectedly · not seen` by the next server, without a notification. At the first start of a
   server of stage B, which has no marks yet, that can be a session that ended before the update:
-  it shows `ended` once; select it, and it goes.
+  its row shows `ended unexpectedly · not seen` once; select it, and it goes.
 
 ### Known limits of stage C
 
