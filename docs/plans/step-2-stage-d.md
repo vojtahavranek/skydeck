@@ -453,7 +453,10 @@ prints `ticket: <address>` after `group:` when there is one; `--json` is unchang
   gives); no match, `ticketUrl` null, `group` null → null. With the pattern `^\S+` a group of each
   of `evil.com/x`, `a?b=1`, `a#b`, `u@h`, `a:b`, `..`, `.x`, `-x`, `%2e%2e`, `ÄBC-1` → null. An
   address that would be over 2,048 characters → null. A group taken from the title that a
-  look-ahead in `groupPattern` no longer matches on its own → null (no link; safe).
+  look-ahead in `groupPattern` no longer matches on its own → null (no link; safe). `ABC-12`, the
+  default pattern and each of review A's five refused patterns above (`https:///{key}/x`, …) →
+  null: `ticketAddress` holds the host by itself, whatever `ticketUrl` it is given (ruled on
+  review A's re-check of a03677a).
 - `formatShow` (`test/cli/output.test.ts`): the `ticket:` line after `group:`, sanitised, and none
   for `null`. `show` (`test/cli/commands/show.test.ts`, the sandbox): with `ticketUrl` set and a
   ticket-key group the `ticket:` line; without either, none. These cases are what holds the line;
