@@ -4,6 +4,7 @@
  *
  * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed` and `matchesFilter` (stage
  * A's filter is design 7.4's, one implementation), the window's message and hub types, and `text`.
+ * Stage B adds attention (`./attention.ts`, plan B 2.4): each row's, and the page's `needYou`.
  */
 import type { Ns } from '../../platform/types.ts';
 import { isListed, matchesFilter } from '../../sessions/list.ts';
@@ -12,12 +13,15 @@ import type { DerivedSession } from '../../sessions/types.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import type { TerminalInfo } from '../hub.ts';
 import type {
+  AttentionPayload,
   ListMessage,
   RowPayload,
   SectionPayload,
   SelectedPayload,
   TerminalPayload,
 } from '../protocol.ts';
+import { attentionOf, attentionOrder, NO_ATTENTION } from './attention.ts';
+import type { AttentionFacts } from './attention.ts';
 import { MAY_START, projectDirs, rowPayload, sectionOf } from './sections.ts';
 
 export interface ViewInput {
@@ -29,6 +33,8 @@ export interface ViewInput {
   /** The resume card of the selected row (task 32's selectedPayload). */
   selected: SelectedPayload | null;
   nowNs: Ns;
+  /** What attention is judged on (S2 12.4, plan B 2.4); absent: NO_ATTENTION, no row needs you. */
+  attention?: AttentionFacts;
 }
 
 /** Design 7.4: the short id is the first 8 characters of the id. */
@@ -222,11 +228,16 @@ function sectionPayload(
  *   never shows a done session in stage A. `counts` are the title bar's: every listed row once,
  *   by state, the starting ones and those running elsewhere apart, whatever the filter.
  * - `selected` is the resume card given only when it is the card of the view's selected session.
+ * - Attention (S2 12.4, plan B7): a row's `attention` is `attentionOf` over `input.attention`.
+ *   `needYou.count` counts the listed rows that need you, whatever the filter or the fold, and
+ *   such a row is in no field of `counts` (the title bar's parts add up); `needYou.order` holds the
+ *   ids of the rows the sections carry that need you, in B6's order (`attentionOrder`).
  */
 export function buildListMessage(
   input: ViewInput,
 ): Omit<ListMessage, 'terminals'> & { terminals: Omit<TerminalPayload, 'ownsSize'>[] } {
   const { view, nowNs } = input;
+  const facts = input.attention ?? NO_ATTENTION;
   const bySession = terminalsBySession(input.terminals);
   const known = new Set(input.rows.map((row) => row.id));
   const candidates: ListRow[] = [...input.rows];
@@ -241,6 +252,7 @@ export function buildListMessage(
   }
 
   const counts = { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 };
+  let needYouCount = 0;
   const shown = new Map<SectionName, Entry[]>(SECTIONS.map((name) => [name, []]));
   let doneHidden = 0;
   for (const row of candidates) {
@@ -252,7 +264,10 @@ export function buildListMessage(
         ? claimed
         : null;
     const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
-    const payload = rowPayload(row, { terminal, elsewhere });
+    const payload: RowPayload = {
+      ...rowPayload(row, { terminal, elsewhere }),
+      attention: attentionOf(row, facts),
+    };
     const open = payload.starting || row.state !== 'not-running';
     const matches = matchesFilter(row, view.filter);
     // A `new` terminal keeps its own session's row while it is there (A28, ruled), also a row step
@@ -268,7 +283,9 @@ export function buildListMessage(
       }
       continue;
     }
-    if (payload.starting) {
+    if (payload.attention !== null) {
+      needYouCount += 1;
+    } else if (payload.starting) {
       counts.starting += 1;
     } else if (payload.elsewhere !== null) {
       counts.elsewhere += 1;
@@ -292,11 +309,20 @@ export function buildListMessage(
     entries.sort(name === 'open' ? compareOpen : compareRecent);
     return sectionPayload(name, entries, folded(name));
   });
+  const needing: { id: string; attention: AttentionPayload }[] = [];
+  for (const section of sections) {
+    for (const row of section.rows) {
+      if (row.attention !== null) {
+        needing.push({ id: row.id, attention: row.attention });
+      }
+    }
+  }
 
   return {
     t: 'list',
     nowNs: String(nowNs),
     counts,
+    needYou: { count: needYouCount, order: attentionOrder(needing, facts) },
     sections,
     doneHidden,
     banner: null,
