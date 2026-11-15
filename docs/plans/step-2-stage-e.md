@@ -133,7 +133,7 @@ marked **shared**.
 | 93 | `web/search-text.js`, `test/web/search-text.test.ts` | — |
 | 94 | `web/icons/skydeck.svg`, `web/icons/icon-16.png`, `web/icons/icon-32.png`, `web/icons/icon-48.png`, `web/icons/icon-192.png`, `web/icons/icon-512.png`, `web/icons/icon-192-maskable.png`, `web/icons/icon-512-maskable.png`, `web/icons/favicon.ico`, `web/manifest.webmanifest`, `scripts/icons.ts`, `test/window/icons.test.ts` | `src/window/assets.ts`, `test/window/assets.test.ts` |
 | 96 | `test/window/view/search-list.test.ts`, `test/window/protocol-search.test.ts` | `src/window/view/search/filter.ts`, `stacks.ts`, `switcher.ts` (their message types now come from `protocol.ts`, and they export none of them: ruled), `test/window/view/search/stacks.test.ts` and `switcher.test.ts` (their import lines only: those types from `protocol.ts`, ruled); **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `test/window/protocol.test.ts` (the two cases that pin stage A's view without `chips`), `test/window/view/build.test.ts` (the pinned case extended to `search/`, the allowed imports; the cases that pin design 7.4's filter in the window), `test-page/list.test.ts` (its one case, at about line 487, that expects a done session to stay hidden while filtering), `docs/design-step-2.md` (4.3, 8.2.3, 12.2, 12.8) |
-| 95 | `test-page/hidden-selection.test.ts` | **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `web/pane.js`, `web/app.js` (the selected session's row, in three places, and the New form's directory, ruled), `web/edit.js` (stage D's: `update` reads that row), `test/window/view/build.test.ts` (new cases only), `test/web/pane.test.ts` (new cases only), `docs/design-step-2.md` (8.2.3's `selectedRow`, 12.6, 12.9) |
+| 95 | `test-page/hidden-selection.test.ts`, `test/window/selected-row-prs.test.ts` (ruled on its review 2) | **shared:** `src/window/protocol.ts`, `src/window/view/build.ts`, `src/window/server.ts` (one statement in `listFor`: the automatic refresh's `listed`, ruled on its review 2), `web/pane.js`, `web/app.js` (the selected session's row, in three places, and the New form's directory, ruled), `web/edit.js` (stage D's: `update` reads that row), `test/window/view/build.test.ts` (new cases only), `test/web/pane.test.ts` (new cases only), `docs/design-step-2.md` (8.2.3's `selectedRow`, 12.6, 12.9) |
 | 97 | `web/chips.js`, `web/search.css`, `test-page/search.test.ts`, `test-page/icon.test.ts` | **shared:** `web/list.js`, `web/index.html` (the style sheet and the icon's links only), `docs/design-step-2.md` (8.2.1, 12.12; 12.2's look of a stack; 12.9's ← → on a stack) |
 | 98 | `web/switcher.js`, `test-page/switcher.test.ts`, `test/window/switcher-offer.test.ts` | `web/search.css` (the switcher's styles); **shared:** `src/window/server.ts` (the offer, one statement in `listFor`), `web/app.js`, `web/keys.js`, `web/help.js`, `web/index.html` (`#switcher`, the `Switch…` button, the key bar's hint), `test/web/keys.test.ts`, `test-page/shell.test.ts` (the Ctrl+Shift+P steps of the later-keys case), `test-page/keys.test.ts` (its Ctrl+Shift+P step), `docs/design-step-2.md` (12.7, 12.8's switcher, 12.9) |
 | 99 | — | **shared:** `docs/install.md`, `docs/manual-checks.md`, `README.md`, `docs/design-step-2.md` (18, 19) |
@@ -983,14 +983,20 @@ handlers or dialog to give the row to (`sessionRow` serves `paneFor` alone, `web
 touched); without B or C nothing differs.
 
 **Files**
-- Create: `test-page/hidden-selection.test.ts`
+- Create: `test-page/hidden-selection.test.ts`, `test/window/selected-row-prs.test.ts` (ruled on
+  review 2: the automatic pull-request refresh of a hidden selection with a terminal)
 - Modify: `src/window/protocol.ts` (`ListMessage.selectedRow`), `src/window/view/build.ts`,
+  `src/window/server.ts` (ruled on review 2: one statement in `listFor`, the automatic refresh's
+  `tick.listed` also gets a hidden `selectedRow`'s id while it has a terminal),
   `web/pane.js` (`sessionRow`, `paneFor`), `web/app.js` (the selected session's row through
-  `sessionRow` in `render()` and in stage D's `edit` and `done` handlers), `web/edit.js` (stage
+  `sessionRow` in `render()` and in stage D's `edit` and `done` handlers, and, ruled on review 2,
+  the New form's directory), `web/edit.js` (stage
   D's `update(list)` takes its session's row through `sessionRow`), `test/window/view/build.test.ts`
   (new cases only), `test/web/pane.test.ts` (new cases only), `docs/design-step-2.md` (8.2.3:
   `selectedRow`; 12.6: E13 in a sentence, the known limit narrowed to a session the view model
-  does not list; 12.9: the sentence on the right side of a selection the list does not show)
+  does not list; 12.9: the sentence on the right side of a selection the list does not show;
+  ruled on review 2: 12.6's New form, 12.8's limit of the automatic refresh, 12.9's corner of a
+  hidden session that runs again elsewhere)
 
 **Behaviour.** As E13, 2.3, 2.4 and 2.5.
 
@@ -1103,7 +1109,8 @@ cut after 16 words (98: until then the server uses the first 16, E3).
 
 **To resolve when merging `origin/main`:** in `server.ts`, `listFor` (D 36's deps, B 54's
 attention passed to `buildListMessage`, C 74's `banner` set on its result: E's one statement
-comes right after C's); in `app.js`, the imports and the modules made at load (D 37's editor and
+comes right after C's; task 95's `tick.listed` statement, which also feeds a hidden `selectedRow`'s
+id, stays beside them); in `app.js`, the imports and the modules made at load (D 37's editor and
 toast, B 55's notifications, C 75's banner; E's switcher after them), `received()`'s `case 'list'`
 (D 37's `editor.update`, B 55's `document.title`, C 75's `banner.render`; E's `switcher.update`
 after them), `doChord` (B 55's `next-attention` beside E's `switcher`), the gate of a window chord

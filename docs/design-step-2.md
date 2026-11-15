@@ -2577,7 +2577,7 @@ the lead on 2026-11-15). The list keys (`l`, F2,
 selected` and send nothing. A named limit: when Ctrl+Tab, a slot chord or a click on its
 notification selects a session the list does not show that runs again in another terminal while an
 ended terminal of the window still names it, the right side first shows that ended terminal as
-stage A did (no header, no Resume or Close), until the list that answers the new selection comes —
+stage A did (no header, no Resume), until the list that answers the new selection comes —
 a few milliseconds —, then nothing, the focus zone still the terminal's: the server gives an ended
 terminal to no session that runs again elsewhere, and such a session gets no card here (a
 notification's session then counts as seen after 1.5 s, 12.4, though nothing of it was shown). One exception, ruled by the lead on 2026-11-15 (the user
