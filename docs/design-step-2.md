@@ -1721,6 +1721,23 @@ would ask until that program ends). The statuses attention reads (12.4) are the 
 file being rewritten does not make a mark blink. The rule is pure, `isTurnEnd` and `lookAt` of
 `src/claude/terminal.ts` (4.3); the server reads the files and asks `/proc`.
 
+**A busy store** (stage B's plan, B11; 14). The look writes this look's turn ends (12.4: with the
+`seen` of a session being seen) in one transaction. A store another process keeps locked refuses it
+after the server's 250 ms: the write is kept, and the next look tries the kept writes again first,
+in their order, each as an entry of its own, then its own. Nothing is folded but two turn ends of
+one session, the later kept (two holders of one session that end their turns at one look give the
+later time): a kept `seen` folded into a later turn end would make that turn seen although the user
+had left. The baselines move on, so a turn end is neither lost nor recorded twice. While writes are
+kept, a refresh's window ends (12.4) and the `seen` that a hold or a typing brings are put behind
+them, and the store is not tried again before the next look: a busy store costs its 250 ms once a
+second at most, never at every key press. Any other refusal of a write — the counter at 2^53 − 1
+(10.2), a damaged table — is logged by its kind and dropped, not kept. The marks are read from the
+store once, at the first look that can, and then follow from what each write returns; a read that
+fails for another reason than a busy store (one damaged row makes every read of the table fail, and
+so does a schema version 2 without the table) leaves no marks from the store, logged once by kind:
+the list goes on, and a session that asks still shows it, from its live file. A store migrated under
+the server stops it (10.1).
+
 **Decided against: a `Stop` hook** (design 16 had planned turn hooks for step 2). The live-session
 file already says when a turn ends, for every session, including those running outside the window,
 and it needs no new settings entry. A `Stop` hook would add one hook run per turn, and since the
@@ -1989,6 +2006,17 @@ detail. The time a row shows is the file's `statusUpdatedAt` (else `updatedAt`) 
 in full: those that ask by that time, the longest-waiting first and an unknown time last; then those
 that ended by `window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties
 by session id.
+
+**When a window end is recorded** (stage B's plan, B10). At each refresh that worked — after the
+exits it settled (7.8) — each terminal of the window in state `ended` or `lost` (a keeper that died:
+its exit time is the server's clock) that started its program is judged, once: its session, the one
+it shows or else the one it was opened for, gets `window_end_seq` and, as `window_end_ns`, the exit's
+time when its row is not running and marked `ended-unexpectedly`; nothing when the row runs again or
+the session ended deliberately. It is the same end when the stored `window_end_ns` equals the exit's
+time, so a server restart, which finds a lingering keeper again, never marks it twice; nothing is
+judged before the server has read the marks. A session being seen at that moment gets its `seen` in
+the same write. At the first start of a stage B server the table is empty, so each lingering keeper
+of a session that ended unexpectedly gives `ended` once, with no notification (13).
 
 Seen is a **condition that holds**, not a moment: a session **is being seen** while it is the
 selected one in a window that has focus, from 1.5 seconds after it was selected; typing into its
@@ -2287,6 +2315,13 @@ taskbar button show it is check W3. Low priority: stage E (19).
 - When a session starts to need you (12.4: a change from not needing you to needing you, for any
   of the three reasons) and no window has focus, the server sends `notify` to **one** page: the
   one that had focus last (several windows would otherwise each raise one).
+- How the server judges it (stage B's plan, B12): over the rows a page without a filter lists,
+  against its last judgement. A session whose reason changes does not start to need you; one that
+  stops needing you and needs you again later does. The first judgement records and notifies
+  nothing, so that a restart does not notify everything that already needed you, and it is made
+  only once the server has read the marks and a refresh has worked (with that refresh's window
+  ends): a start whose first refresh fails must not notify all of it at the next one. A `notify`
+  that no page takes (a window has focus, or none is open) is not sent again later.
 - That page shows a desktop notification with the Notification API (allowed: `127.0.0.1` is a
   secure context, section 21): title = the session's title, body = the reason (`asks: permission ·
   Bash`, `finished`, `ended unexpectedly`), both plain text; `tag` = the session id, so a newer
