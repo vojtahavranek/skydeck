@@ -1249,10 +1249,12 @@ Setup:
 - The setup of "The window (step 2, stage A)" above, with its **throwaway session in the
   window**. These checks look at your real sessions and change none of them: only the throwaway
   session is ever resumed, or typed into.
-- **Its short id.** Click the throwaway session's row once and write down the short id its header
-  shows (on its second line, after the directory, the times and where the title comes from).
-  Each check starts with the throwaway session selected, so that a key that lands where you did
-  not mean it to reaches only the throwaway session.
+- **Its short id.** Click the throwaway session's row once, then look at the header's second
+  line: it must start with the throwaway folder, `/home/<you>/skydeck-try`. When it shows another
+  folder, you clicked another session: click another row once and look again. Then write down the
+  short id the header shows (on that second line, after the directory, the times and where the
+  title comes from). Each check starts with the throwaway session selected, so that a key that
+  lands where you did not mean it to reaches only the throwaway session.
 - **Where the keyboard is, before you type.** Text belongs in a field only while that field has
   the keyboard: the filter's field when its border has the selection's colour and its caret
   blinks in it (click into it first), the switcher's field while the switcher's panel is shown
@@ -1266,9 +1268,14 @@ Setup:
   it. These checks click only rows inside a stack, which never need you (a session that needs
   you and stays selected for 1.5 seconds is marked seen), and the throwaway session's row. A
   session's resume card shows `Resume here`: never click it in these checks.
-- **Leave the window as you found it.** Write down at the start whether the filter is empty,
-  which chips are on and which stacks are open; at the end, the filter is empty again (Esc in it),
-  the chips you turned on are off and the stacks you opened are closed.
+- **Leave the window as you found it.** Write down at the start what the filter holds, which
+  chips are on (`Show done` among them), which stacks are open, whether Earlier is unfolded, and
+  your keyboard layout. Each check starts from an empty filter (Esc in its field) and no chip on
+  (a click on each chip that is on). At the end put back what you wrote down: the filter's text
+  typed again into its field (look for the caret first), each chip that was on clicked on again,
+  the stacks you opened closed and those that were open opened again, Earlier folded or unfolded
+  as it was (a fold while the selected session is in Earlier selects the row above it: select the
+  throwaway session first), and your own layout (Win+Space).
 
 ## W30. Search on your own sessions (real claude)
 
@@ -1296,8 +1303,9 @@ chip on. Write down how many sessions the title bar counts.
    (`No session matches the filter.` when none has one); click both off. Then `Show done`: the
    done sessions show with their `done` mark and the footer says `done sessions shown · hide`;
    click it again, and the footer is `<n> done hidden · show` again (or gone when none is done).
-4. **A stack.** Look in This week (and in Earlier: a click on its header unfolds it) for a line
-   `+<n> more in <group>`. When there is none, write that down and go on with step 5. Click that
+4. **A stack.** Look in This week, and in Earlier, for a line `+<n> more in <group>`. When
+   Earlier is folded (none of its rows shows), a click on its header unfolds it; when its rows
+   show, do not click its header (that click folds it). When there is none, write that down and go on with step 5. Click that
    stack's head once, on its title (the row just above the line). Expected: the head is selected,
    its resume card shows, the key bar says `Focus: list`. That is a real session: from here to
    the end of this step press only ← and →, never Enter (Enter would resume it). Press →: the
@@ -1307,7 +1315,10 @@ chip on. Write down how many sessions the title bar counts.
    head's key: the stack opens; wait a moment (two quick clicks are a double click, which acts
    once) and click it again: it closes; neither click moved the selection or the keyboard. Then
    click the throwaway session's row once (look at the short id): the next steps start from it.
-   When you unfolded Earlier, fold it again now, with a click on its header.
+   When you unfolded Earlier in this step and the throwaway session's row is not in Earlier, fold
+   Earlier again now, with a click on its header. When its row is in Earlier, leave Earlier
+   unfolded until the end of step 6 (folding Earlier with the selection inside it selects the
+   row above it, which may be a real session).
 5. **The switcher, without Enter.** Press Ctrl+Shift+P. Expected: a panel over the window with a
    field on top, `Switch to a session…  (title, group, note, PR, directory, short id)`, whose
    caret blinks; under it your sessions under `Needs you`, `Open`, `Not running` and `Done`, each
@@ -1328,7 +1339,9 @@ chip on. Write down how many sessions the title bar counts.
    and the throwaway session is selected; not running, it is resumed into the window (its row
    under Open, `starting…`, then its terminal, which has the keyboard: `Focus: terminal`); running
    in the window, its terminal shows and has the keyboard. Type nothing into it: it stays as it
-   is, for the other checks.
+   is, for the other checks. When step 4 left Earlier unfolded: with the throwaway session's row
+   now under Open, fold Earlier with a click on its header; with its row still in Earlier, leave
+   Earlier unfolded and write that down.
 
 Write down: whether any answer of the list came late enough to notice (the filter as you typed,
 the chips, the stack, the switcher); whether the switcher's order — those that need you, then
@@ -1351,6 +1364,7 @@ throwaway session selected (look at the short id), the filter empty.
    the switcher's field as typed, and nothing else happens (most likely the panel says `No session
    matches.`). Press Ctrl+Shift+P: the panel goes. Press Ctrl+Shift+P again: it shows, with an
    empty field; press Esc: it goes.
+3. Switch back to the layout you work with (Win+Space).
 
 Write down, per layout and per field: every character that did not show as typed, or that did
 something else; whether Ctrl+Shift+P opened and closed the switcher.

@@ -911,9 +911,10 @@ said before.
 **The filter** is the field at the top of the list, `Filter: title, group, note, PR, directory,
 short id   /` while it is empty. A click into it, or `/` while the list has the keyboard
 (`Focus: list`), gives it the keyboard: its border takes the selection's colour and the caret
-blinks in it. There every key but Enter and Esc is text, and the list follows each keystroke.
-Enter ends the entry and gives the keyboard back to the list; Esc does the same and clears the
-field. With the keyboard on the list, Esc clears the filter, and the next Esc goes to the
+blinks in it. What you type there is text, and the list follows each keystroke; but Enter ends
+the entry and gives the keyboard back to the list, Esc does the same and clears the field, Tab
+goes on to the chips below, and the window's Ctrl+Shift chords and the reload keys act as
+anywhere. With the keyboard on the list, Esc clears the filter, and the next Esc goes to the
 terminal.
 
 - **Words.** The text is split at white space into words, and a session is listed when every
@@ -940,7 +941,7 @@ where it was. Every chip that is on must hold, with every word: `Running` with `
 the running sessions that have a note. `Show done` is the same switch as the list key `a` and the
 footer's `show` (`done sessions shown · hide`): each turns the others on and off, and it shows
 done sessions without filtering. Esc clears the words, not the chips: a chip stays on until it is
-clicked again. The chips are buttons: Tab from the field reaches them, Enter or Space presses the
+clicked again, the page reloads, or the switcher (below) clears it to show a session it hides. The chips are buttons: Tab from the field reaches them, Enter or Space presses the
 one that has the keyboard, and while one has it no list key acts.
 
 **Stacks.** In This week and in Earlier, each on its own, the sessions of one group stack under
@@ -949,7 +950,8 @@ key (or its group); while the stack is closed the line `+3 more in ORB-2107` fol
 no row: it is never selected, and ↑ ↓ pass over it and the sessions it hides. An open stack's
 other sessions follow the head, indented. A group is its exact text: `ORB-1` and `orb-1` are two.
 Never in a stack: the sessions under Open, a session that has a terminal of the window (an ended
-one too), and a session that needs you, so that no mark ever hides in a closed stack. A section's
+one too), and a session that needs you, so that no session that needs you ever hides in a
+closed stack. A section's
 count counts every session in it, those of a closed stack too.
 
 - A click on `×4` or on the `+3 more` line opens or closes the stack. It selects nothing and
@@ -961,17 +963,19 @@ count counts every session in it, those of a closed stack too.
   or on a member.
 - A stack whose member becomes the selected session opens, however that happens (the switcher,
   or a newer session of its group that makes the selected one a member), and stays open when the
-  selection leaves, until you close it. Ctrl+Tab skips a member of a stack you closed, as
-  it skips a session that the filter or the folded Earlier hides: the page does not know a closed
-  stack's members.
+  selection leaves, until you close it. Ctrl+Tab skips a member of a stack you closed (the page
+  does not know a closed stack's members), as it skips a session that the filter or the folded
+  Earlier hides and that no terminal of the window holds.
 - `d` on a closed stack's head marks that session only: the next one becomes the head (or the
   last one stands alone), and the selection goes to the row after the stack (stage D's rule takes
   the row after it among those the list drew, and the stack's other sessions were not drawn).
+  With done sessions shown the session stays listed, still the head, and stays selected.
 - While filtering, every session stands alone.
 
-Each window has its own filter, chips, open stacks, folded Earlier and done shown, and a reload
-(F5) forgets the chips and the stacks you opened. What a window shows of a session is the same in
-every window.
+Each window has its own filter, chips, open stacks, folded Earlier and done shown. A reload (F5)
+forgets all of them: the page starts again with an empty filter, no chip on, Earlier folded, done
+sessions hidden and no stack opened. What a window shows of a session is the same in every
+window.
 
 #### The quick switcher (stage E)
 
@@ -1037,13 +1041,14 @@ never one Enter away.
 #### A selected session the list does not show (stage E)
 
 When the list stops showing the selected session — the filter or a chip hides it, done sessions
-are hidden again, Earlier is folded — no row is selected and the list's keys act on none: `l`, F2,
-`g`, `n`, `p` and `d` say `no session selected`. When a terminal of the window holds the session,
-the right side keeps it: the terminal with its header, whose controls edit that session as usual
-(a click on the title, ✎, `Note`, `Done`, `Pull requests`), and once its program has ended, the
-ended bar with Resume and Close. A session without a terminal of the window shows nothing on the
-right then, no card. `Done` in
-the header of such a session says `Marked done. Stays under Open while it runs; hidden once it
+are hidden again, or a filter is cleared while Earlier is folded and the session is in it (← and
+a click on Earlier's header select the row above it before they fold) — no row is selected and
+the list's keys act on none: `l`, F2, `g`, `n`, `p` and `d` say `no session selected`. When a
+terminal of the window holds the session, the right side keeps it: the terminal with its header,
+whose controls edit that session as usual (a click on the title, ✎, `Note`, `Done`, `Pull
+requests`), and once its program has ended, the ended bar with Resume and Close. A session
+without a terminal of the window shows nothing on the right then, no card. `Done` in the header
+of such a session says `Marked done. Stays under Open while it runs; hidden once it
 stops.` while it runs or starts, else `Marked done: hidden from the list. It comes back on new
 activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
 holds it. When the list shows the session again (the filter cleared), it is selected again.
@@ -1198,9 +1203,12 @@ manifest names no start address).
   holds it (its header shows its pull requests). So it leaves out the sessions inside a closed
   stack and the switcher's, as it leaves out those of a folded Earlier: open the stack, or use `↻`
   in the session's pull-request dialog.
-- **A session that ended before its first prompt** has no transcript, so the list does not list
-  it once its program has ended: selected, it keeps stage A's ended bar, without Resume, and with
-  Close only once the end is known.
+- **A session that a terminal of the window went on in, and that ended before its first
+  prompt**, has no transcript, so the list does not list it once its program has ended — for
+  one, `/clear` in a resumed terminal (Claude Code goes on in a new session there), then `/exit`
+  before any prompt. Selected, its ended terminal keeps stage A's bar, without Resume, and with
+  Close only once the end is known. (A session started with Ctrl+Shift+N keeps its row while its
+  terminal is there, with Resume on its ended bar.)
 
 ### What `doctor` says about the window
 
