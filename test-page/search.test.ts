@@ -123,6 +123,40 @@ const VIEWS = `(() => {
 })();`;
 
 /**
+ * An init script that records in the page the `terminals` of the last `list` the page received
+ * (`receivedTerminals`): what the page itself knows of each terminal's session, which (c2)'s copy
+ * reads to refuse closing a block. It wraps the `onmessage` handler the page sets, so the page's
+ * own handler takes the same list right after it is recorded.
+ */
+const LISTS = `(() => {
+  const record = (event) => {
+    if (typeof event.data !== 'string' || !event.data.startsWith('{')) return;
+    try {
+      const message = JSON.parse(event.data);
+      if (message !== null && message.t === 'list' && Array.isArray(message.terminals)) {
+        Reflect.set(globalThis, 'receivedTerminals', message.terminals);
+      }
+    } catch {}
+  };
+  // web/connection.js takes messages through \`onmessage\`: wrap what it sets.
+  const handler = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
+  Object.defineProperty(WebSocket.prototype, 'onmessage', {
+    ...handler,
+    set(listener) {
+      handler.set.call(
+        this,
+        typeof listener === 'function'
+          ? function (event) {
+              record(event);
+              return listener.call(this, event);
+            }
+          : listener,
+      );
+    },
+  });
+})();`;
+
+/**
  * helpers/shell.ts's `launched` (a real test server; the page opened with a launch token, as
  * `skydeck window` opens it; connected), with VIEWS among its init scripts from the start, so
  * that the first views the page sends are recorded too.
@@ -131,6 +165,7 @@ async function launchedWithViews(t: TestContext, chromium: Browser): Promise<Lau
   const page = await newPage(t, chromium);
   await page.addInitScript(RECORDER);
   await page.addInitScript(VIEWS);
+  await page.addInitScript(LISTS);
   const problems = problemsOf(page);
   const started = await startTestServer(t);
   const { token } = await controlClient(started.d.platform.net, started.d.files.serverSock).token(
@@ -148,6 +183,34 @@ async function sentViews(page: Page): Promise<Record<string, unknown>[]> {
     () => (Reflect.get(globalThis, 'sentViews') ?? []) as Record<string, unknown>[],
     null,
   );
+}
+
+/**
+ * Waits until the PAGE's own last list holds `count` terminals, each with its session reported (S2
+ * 7.5), so that the page lets a block of them close: its copy of the server's rule (c2) refuses
+ * while a member's terminal has `sessionId` null in its `list.terminals`. The server's hub can be
+ * ahead of the page by a list (at most one a second): waiting on the hub is not enough (F6, L6:
+ * a block that did not close on a slow runner).
+ */
+async function untilPageReported(page: Page, count: number): Promise<void> {
+  const deadline = performance.now() + PAGE_WAIT_MS;
+  for (;;) {
+    const terminals = await readPage(
+      page,
+      () => (Reflect.get(globalThis, 'receivedTerminals') ?? []) as { sessionId: unknown }[],
+      null,
+    );
+    if (
+      terminals.length === count &&
+      terminals.every((term) => typeof term.sessionId === 'string')
+    ) {
+      return;
+    }
+    if (performance.now() > deadline) {
+      assert.fail(`the page's terminals are ${JSON.stringify(terminals)}`);
+    }
+    await sleep(50);
+  }
 }
 
 /** The last `view` the page sent. */
@@ -880,10 +943,7 @@ test('search and stacks in the list', async (t) => {
       }
       // Each program has reported its session (S2 7.5), so that a terminal's slot names it: a
       // slot chord reaches a hidden member through its terminal (a named limit before that).
-      await until(
-        () => l.server.hub.list().every((term) => term.sessionId === term.expectedSessionId),
-        'the three programs reported their sessions',
-      );
+      await untilPageReported(page, 3); // the PAGE knows each session (F6, L6)
       const open = await untilLines(
         page,
         (drawn) =>
@@ -977,10 +1037,7 @@ test('search and stacks in the list', async (t) => {
       for (const id of [S1, S2, S3]) {
         await resumeHere(page, id);
       }
-      await until(
-        () => l.server.hub.list().every((term) => term.sessionId === term.expectedSessionId),
-        'the three programs reported their sessions',
-      );
+      await untilPageReported(page, 3); // the PAGE knows each session (F6, L6)
       await untilRows(page, [S1, S2, S3], 'the open block under Open');
       // The member S2's terminal has the keyboard (a click on a running row).
       await page.locator(`#list [data-id="${S2}"]`).click();
@@ -1046,10 +1103,7 @@ test('search and stacks in the list', async (t) => {
       for (const id of [S1, S2]) {
         await resumeHere(page, id);
       }
-      await until(
-        () => l.server.hub.list().every((term) => term.sessionId === term.expectedSessionId),
-        'the two programs reported their sessions',
-      );
+      await untilPageReported(page, 2); // the PAGE knows each session (F6, L6)
       session(d, S3, 1n * MIN, 'week three');
       session(d, S4, 2n * MIN, 'week four');
       setGroup(d.deck, S3, 'test');
@@ -1459,10 +1513,7 @@ test('search and stacks in the list', async (t) => {
         await resumeHere(page, id);
       }
       // Each program has reported its session: until then its block cannot be closed.
-      await until(
-        () => l.server.hub.list().every((term) => term.sessionId === term.expectedSessionId),
-        'the three programs reported their sessions',
-      );
+      await untilPageReported(page, 3); // the PAGE knows each session (F6, L6)
       await untilRows(page, [S1, S2, S3], 'the open block under Open');
       // S3 asks a question: it needs you, while S1 is selected.
       await page.locator(`#list [data-id="${S1}"]`).click();
