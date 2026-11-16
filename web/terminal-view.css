@@ -22,6 +22,37 @@
   --tv-bright-white: #8c959f;
   --tv-selection: #b6d3fb;
   --tv-overlay: rgba(255, 255, 255, 0.94);
+  /* The room between the terminal's text and its box (F2): terminal-view.js reads these four
+     (`padding`, registered below as lengths, so in any unit and wherever they are set) from the
+     element they style and counts them out of every size it proposes: the one place to change it.
+     The right one lies between the text and the scroll bar's room, which stays at the box's right
+     edge: it is room the view leaves, not padding. */
+  --tv-pad-top: 8px;
+  --tv-pad-right: 10px;
+  --tv-pad-bottom: 8px;
+  --tv-pad-left: 10px;
+}
+/* Lengths, so that their computed value is in px whatever unit sets them: what is counted is
+   what is drawn. A negative one draws and counts no room. */
+@property --tv-pad-top {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --tv-pad-right {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --tv-pad-bottom {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --tv-pad-left {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -68,9 +99,20 @@
      resize per two columns (review 2 of task 28). */
   contain: size;
 }
-/* On xterm.js's element, not its parent: the fit addon counts this padding out. */
+/* On xterm.js's element, not its parent: the view measures its parent (`propose`). No padding at
+   the right, so that the scroll bar stays at the box's edge (the right room is counted, above).
+   One side per declaration: a value no padding takes leaves that side alone at 0. A wheel in this
+   margin is handed on to the text by terminal-view.js (`wheelInMargin`). */
 .tv-screen .xterm {
-  padding: 2px 0 0 4px;
+  padding-top: var(--tv-pad-top);
+  padding-right: 0;
+  padding-bottom: var(--tv-pad-bottom);
+  padding-left: var(--tv-pad-left);
+}
+/* xterm.css paints this element black, and it lies under the padding: the margin is the inside
+   of the terminal, in its own background (F2). */
+.tv-screen .xterm .xterm-viewport {
+  background-color: var(--term-bg);
 }
 /* S2 7.8: an ended terminal's last screen, dimmed. */
 .tv-term.over .tv-screen {

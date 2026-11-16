@@ -1481,6 +1481,12 @@ skydeck window and tab first for this update too, as for stage B. The banner sho
 or the PC restarted; to have every command start in the window, set `"terminal": "window"`
 ("Starting sessions in the window from a terminal (stage C)" above).
 
+The update that brings the terminal's frame (softer lines around the terminal, and a margin
+between the terminal's text and the list, the header and the key bar) resizes every terminal of
+the window once, when a window first shows it after the update: the margin takes a little room (at
+a window of 1400 × 900, about two columns and one row), and Claude Code redraws its screen, as at any
+resize. It installs nothing; from then on the terminal's size changes only with the window's.
+
 ## Checking: `skydeck doctor`
 
 `doctor` prints one line per check, `ok`, `info` or `problem`, and exits 1 when any line is a

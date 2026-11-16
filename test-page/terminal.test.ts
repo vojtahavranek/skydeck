@@ -1799,7 +1799,7 @@ test('the terminal view', async (t) => {
   );
 
   await t.test(
-    "the rule is xterm.js's own: at the proposed size the real screen ends inside the box (the addon's 14 px scroll bar left free), and one more column or one more row would not; a sample of widths and heights at each pixel ratio, at two font sizes",
+    "the rule is xterm.js's own: at the proposed size the real screen ends inside the room the style sheet keeps around the text (and the addon's 14 px scroll bar left free), and one more column or one more row would not; a sample of widths and heights at each pixel ratio, at two font sizes",
     async (t) => {
       const started = await startTestServer(t);
       for (const ratio of [1, 1.25, 1.5, 2]) {
@@ -1872,6 +1872,11 @@ test('the terminal view', async (t) => {
               };
               const box = root.querySelector('.tv-screen');
               if (!(box instanceof HTMLElement)) throw new Error('no .tv-screen');
+              /** The room the style sheet keeps on `side` of the text (terminal-view.css). */
+              const pad = (side: string): number =>
+                parseFloat(
+                  getComputedStyle(document.documentElement).getPropertyValue(`--tv-pad-${side}`),
+                ) || 0;
               const out: string[] = [];
               let size = { cols: 80, rows: 24 };
               const areas: [number, number][] = [];
@@ -1889,11 +1894,13 @@ test('the terminal view', async (t) => {
                   size = { cols: resize['cols'] as number, rows: resize['rows'] as number };
                 }
                 // Edges, not widths: the screen's right edge leaves the box the room the fit addon
-                // gave its scroll bar (14 px), its bottom edge stays in the box — whatever padding
-                // the page's styles give xterm.js's element (it is not repeated here).
+                // gave its scroll bar (14 px) and the room the style sheet keeps between the text
+                // and it, its bottom edge the room the style sheet keeps below the text (read from
+                // it, not repeated here) — whatever padding the page's styles give xterm.js's
+                // element, which moves the screen (it is not repeated here either).
                 const room = box.getBoundingClientRect();
-                const right = room.right - 14;
-                const bottom = room.bottom;
+                const right = room.right - 14 - pad('right');
+                const bottom = room.bottom - pad('bottom');
                 const at = await apply(size.cols, size.rows);
                 const wider = await apply(size.cols + 1, size.rows);
                 const higher = await apply(size.cols, size.rows + 1);
@@ -1988,12 +1995,20 @@ test('the terminal view', async (t) => {
         }
         document.documentElement.style.removeProperty('--term-font-size');
         const box = root.querySelector('.tv-screen')?.getBoundingClientRect();
+        /** The room the style sheet keeps on `side` of the text (terminal-view.css). */
+        const pad = (side: string): number =>
+          parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue(`--tv-pad-${side}`),
+          ) || 0;
         root.remove();
         return {
           first: { cols, rows },
           resize: resize === undefined ? null : { cols: resize['cols'], rows: resize['rows'] },
           end,
-          room: box === undefined ? null : { right: box.right - 14, bottom: box.bottom },
+          room:
+            box === undefined
+              ? null
+              : { right: box.right - 14 - pad('right'), bottom: box.bottom - pad('bottom') },
         };
       }, base);
       assert.ok(result.resize !== null, 'a new proposal');
