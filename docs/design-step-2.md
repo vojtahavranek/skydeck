@@ -3589,7 +3589,7 @@ grants a permission through Playwright.
   `test/vendor/vendor.test.ts`, is a test in `npm test` that needs the packages `npm ci`
   installed, so it has no step of its own). `page (i/n)` runs the page suite. CI does not run
   `npm run check`, which is these three in a row. A suite runs in n shards, each a job of its own
-  (two for each suite; the count is the length of the job's `shard` list in the workflow): Node's
+  (three for each suite; the count is the length of the job's `shard` list in the workflow): Node's
   `--test-shard=i/n` cuts the sorted list of test files into n parts by taking every n-th file,
   so the shards together run every file once, no file is named in the workflow, and a new test
   file needs no upkeep there. The workflow gives the option as `NODE_OPTIONS` and not as
