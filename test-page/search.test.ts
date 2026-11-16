@@ -41,6 +41,7 @@ import {
   shownText,
   TERM_A,
   TERM_B,
+  TERM_C,
   termOf,
   toZone,
 } from './helpers/shell.ts';
@@ -1211,6 +1212,148 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
+    'a block an unreported terminal holds open says which (F6, L1): `still starting` while that terminal may still start, the ended line once it ended before its session was known, on ← and on `×n`; the starting line when both kinds hold it; the guard lets go once the ended terminal is closed; an unreported HEAD alone holds nothing (L2)',
+    async (t) => {
+      // A scripted server that applies the server's own rule (`stackRows`) to the rows of `test`
+      // under one section: S1 in TERM_A (reported), S2 in TERM_B, S3 in TERM_C (each present or
+      // not, reported or not, in any state). (The real server lists an ended, unreported row in
+      // Recent and a starting one under Open, so one block never holds both kinds; the page's rule
+      // does not depend on the section, and this case holds that the starting line wins.)
+      type Term = { id: string; slot: number; sessionId: string | null; state: string };
+      let terms: Term[] = [
+        { id: TERM_A, slot: 1, sessionId: S1, state: 'running' },
+        { id: TERM_B, slot: 2, sessionId: S2, state: 'running' },
+      ];
+      let ids = [S1, S2];
+      let world: Awaited<ReturnType<typeof editWorld>> | null = null;
+      const termFor: Record<string, string> = { [S1]: TERM_A, [S2]: TERM_B, [S3]: TERM_C };
+      const blockList = (selected: string | null): Record<string, unknown> => {
+        const rows = ids.map((id) => {
+          const term = terms.find((one) => one.id === termFor[id]) ?? null;
+          return {
+            id,
+            terminal: term?.id ?? null,
+            slot: term?.slot ?? null,
+            title: id.slice(0, 4),
+          };
+        });
+        const base = scriptedList(rows, terms) as {
+          sections: { rows: Record<string, unknown>[] }[];
+          terminals: Record<string, unknown>[];
+        } & Record<string, unknown>;
+        const views = (world?.sent ?? []).filter((message) => message['t'] === 'view');
+        const closed = (views.at(-1)?.['closed'] ?? []) as ClosedBlock[];
+        const drawn = stackRows(
+          (base.sections[0]?.rows ?? []).map((row) => ({
+            id: row['id'] as string,
+            group: 'test',
+            needsYou: false,
+            unreported: terms.find((term) => term.id === row['terminal'])?.sessionId === null,
+            row: { ...row, group: 'test' },
+          })),
+          'open',
+          closed,
+          selected,
+        ).map(({ entry, stack }) => ({ ...entry.row, stack }));
+        return {
+          ...base,
+          terminals: base.terminals.map((term) => ({
+            ...term,
+            state: terms.find((one) => one.id === term['id'])?.state ?? 'running',
+          })),
+          sections: [{ ...base.sections[0], count: ids.length, rows: drawn }],
+        };
+      };
+      const page = await newPage(t, chromium);
+      await page.addInitScript(RECORDER);
+      await page.addInitScript(VIEWS);
+      const problems = problemsOf(page);
+      world = await editWorld(t, page, blockList);
+      const w = world;
+      const resend = (): void => w.list(blockList);
+      const STARTING = /^this block holds a session that is still starting; it stays open$/;
+      const ENDED =
+        /^this block holds a terminal that ended before its session was known; close that terminal to close the block$/;
+      const clearKeyBar = async (): Promise<void> => {
+        await page.evaluate(() => {
+          const message = document.getElementById('key-message');
+          if (message !== null) message.textContent = '';
+        });
+      };
+      /** ← on the selected head, then a click on its `×n`: each says `line`, nothing is sent. */
+      const refusesBoth = async (line: RegExp, what: string): Promise<void> => {
+        const views = (await sentViews(page)).length;
+        await clearKeyBar();
+        await page.keyboard.press('ArrowLeft');
+        await showsText(page, '#key-message', line);
+        await clearKeyBar();
+        await page.locator(`#list [data-id="${S1}"] .row-stack`).click();
+        await showsText(page, '#key-message', line);
+        assert.equal((await sentViews(page)).length, views, `${what}: no view`);
+      };
+      await untilRows(page, [S1, S2], 'the open block');
+      await toZone(page, 'list');
+      assert.equal(await selectedRow(page), S1);
+      await page.keyboard.press('ArrowLeft');
+      await untilClosed(page, shut('open', 'test'));
+      await untilRows(page, [S1], 'closed');
+
+      // S2's terminal ended before its session was known: the block is drawn open, and ← and ×2
+      // say the ended line, which names what frees it.
+      terms = terms.map((term) =>
+        term.id === TERM_B ? { ...term, sessionId: null, state: 'ended' } : term,
+      );
+      resend();
+      await untilRows(page, [S1, S2], 'open for the ended, unreported terminal');
+      await untilClosed(page, []);
+      await refusesBoth(ENDED, 'ended');
+
+      // S3 joins, in a terminal that is starting and has not reported: the starting line wins.
+      ids = [S1, S2, S3];
+      terms = [...terms, { id: TERM_C, slot: 3, sessionId: null, state: 'starting' }];
+      resend();
+      await untilRows(page, [S1, S2, S3], 'both kinds');
+      await refusesBoth(STARTING, 'both kinds');
+
+      // S3 leaves; the ended terminal is closed (S2 keeps its row, without a terminal): ← closes.
+      ids = [S1, S2];
+      terms = terms.filter((term) => term.id === TERM_A);
+      resend();
+      await until(
+        async () =>
+          (await readPage(
+            page,
+            (id) => document.querySelector(`#list [data-id="${id}"]`)?.getAttribute('data-stack'),
+            S3,
+          )) == null && (await rowIds(page)).join() === [S1, S2].join(),
+        'S3 gone, S2 without a terminal',
+      );
+      await clearKeyBar();
+      await page.keyboard.press('ArrowLeft');
+      await untilClosed(page, shut('open', 'test'));
+      await untilRows(page, [S1], 'closed: the guard let go');
+
+      // L2: only the HEAD's terminal unreported holds nothing open: ← closes, and so does ×2.
+      await page.keyboard.press('ArrowRight');
+      await untilClosed(page, []);
+      terms = terms.map((term) => ({ ...term, sessionId: null, state: 'starting' }));
+      resend();
+      await untilRows(page, [S1, S2], 'open, the head unreported');
+      await page.keyboard.press('ArrowLeft');
+      await untilClosed(page, shut('open', 'test'));
+      await untilRows(page, [S1], '← closes it');
+      await page.keyboard.press('ArrowRight');
+      await untilClosed(page, []);
+      await untilRows(page, [S1, S2], 'open again');
+      await page.locator(`#list [data-id="${S1}"] .row-stack`).click();
+      await untilClosed(page, shut('open', 'test'));
+      await untilRows(page, [S1], '×2 closes it');
+      assert.equal(await shownText(page, '#key-message'), '', 'nothing refused');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
     'a closed block whose hidden member needs you: `+2 more in test · 1 needs you`, that part alone in the needs-you colour, no bar and no bold; the title bar the same open or closed; Ctrl+Shift+J selects the hidden member and opens its block',
     async (t) => {
       const l = await launchedWithViews(t, chromium);
@@ -1297,6 +1440,21 @@ test('search and stacks in the list', async (t) => {
       assert.equal(look.textColour, look.lineColour);
       assert.deepEqual(look.weights, ['400', '400', '400'], 'no bold');
       assert.deepEqual(look.bar, ['0px', 'none'], 'no bar');
+      // The space before `·` is drawn (F6, L2): the dot stands clear of the group's text.
+      const gap = await readPage(
+        page,
+        () => {
+          const text = document.querySelector('#list .list-more .more-text');
+          const need = document.querySelector('#list .list-more .more-need')?.firstChild;
+          if (text == null || need == null || need.textContent?.[1] !== '·') return null;
+          const dot = document.createRange();
+          dot.setStart(need, 1);
+          dot.setEnd(need, 2);
+          return dot.getBoundingClientRect().left - text.getBoundingClientRect().right;
+        },
+        null,
+      );
+      assert.ok(gap !== null && gap >= 2, `the gap before the dot is drawn (${gap} px)`);
       assert.equal(await counts(), countsOpen, 'the title bar does not move');
       assert.equal(await page.title(), titleOpen);
 

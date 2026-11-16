@@ -64,6 +64,16 @@ const MAX_CLOSED = 64;
 const HOLDS_SELECTED = 'this block holds the selected session; it stays open';
 /** Ruled 2026-11-16 (review 2 of F3): what ← and `×n` say on a block a start holds open. */
 const HOLDS_STARTING = 'this block holds a session that is still starting; it stays open';
+/** F6 (L1): what they say on a block that a terminal which ended before its session was known
+ *  holds open — waiting never frees it; closing that terminal (the ended bar's Close) does. */
+const HOLDS_ENDED =
+  'this block holds a terminal that ended before its session was known; close that terminal to close the block';
+/**
+ * The terminal states in which a terminal may still come to hold a session (S2 7.5). A COPY OF THE
+ * SERVER'S SET (`MAY_START`, src/window/view/sections.ts): a change of one is a change of the
+ * other. It tells HOLDS_STARTING from HOLDS_ENDED.
+ */
+const MAY_START = new Set(['starting', 'running', 'reconnecting', 'newer-keeper']);
 /** S2 8.2.3: a text of a view is at most 1,024 bytes of UTF-8 and well formed. */
 const TEXT_BYTES = 1024;
 const utf8 = new TextEncoder();
@@ -506,10 +516,11 @@ export function createList(root, hooks) {
 
   /**
    * Closes the block of `group` in `section` (E7): adds it to `closed`, the oldest dropped past
-   * MAX_CLOSED (that block opens again). With one of its members selected the head is selected
-   * first, as ← on a member does: a selected member keeps its block open (G5), and the page would
-   * forget the closing at the next list. A group the server would refuse is never sent: its block
-   * cannot be closed, and nothing happens (it stays open).
+   * MAX_CLOSED (that block opens again). With one of its members other than the head selected —
+   * which only ← on a member reaches: a click on `×n` refuses then (`toggleStack`, ruled) — the
+   * head is selected first: a selected member keeps its block open (G5), and the page would forget
+   * the closing at the next list. A group the server would refuse is never sent: its block cannot
+   * be closed, and nothing happens (it stays open).
    * @param {SectionPayload['name']} section
    * @param {string} group
    */
@@ -561,8 +572,9 @@ export function createList(root, hooks) {
       hooks.say?.(HOLDS_SELECTED);
       return;
     }
-    if (holdsStart(place.section, stack.group)) {
-      hooks.say?.(HOLDS_STARTING); // the server keeps it open: nothing moves
+    const held = holdsStart(place.section, stack.group);
+    if (held !== null) {
+      hooks.say?.(held); // the server keeps it open: nothing moves
       return;
     }
     closeBlock(place.section, stack.group);
@@ -602,7 +614,8 @@ export function createList(root, hooks) {
    * it reported. A COPY OF THE SERVER'S RULE (`src/window/view/build.ts`, `stacked`'s
    * `unreported`; ruled 2026-11-16): the server draws a closed block open while one of its members
    * is such a row, and this page forgets that it closed it (render) and refuses to close it
-   * (`holdsStart`). A change of one is a change of the other.
+   * (`holdsStart`, which tells the two lines apart by MAY_START, a copy too). A change of one is a
+   * change of the other.
    * @param {RowPayload} row
    */
   const unreported = (row) =>
@@ -610,20 +623,31 @@ export function createList(root, hooks) {
     current?.terminals.find((candidate) => candidate.id === row.terminal)?.sessionId === null;
 
   /**
-   * Whether the drawn block of `group` in `section` holds a member that `unreported` names: the
-   * server keeps it open, so ← and `×n` say so and do nothing.
+   * What ← and `×n` say on the drawn block of `group` in `section` when a member other than the
+   * head is one that `unreported` names — the server keeps it open, so they do nothing —, or null
+   * when none is: HOLDS_STARTING while such a member's terminal may still start (MAY_START; it also
+   * wins when both kinds hold the block, since it is the one that changes by itself), else
+   * HOLDS_ENDED (its terminal ended, was lost or never started before its session was known).
    * @param {SectionPayload['name']} section
    * @param {string} group
+   * @returns {string | null}
    */
-  const holdsStart = (section, group) =>
-    (current?.sections.find((candidate) => candidate.name === section)?.rows ?? []).some(
-      (row) =>
-        row.stack !== null &&
-        row.stack !== undefined &&
-        row.stack.role === 'member' &&
-        row.stack.group === group &&
-        unreported(row),
-    );
+  const holdsStart = (section, group) => {
+    let held = null;
+    for (const row of current?.sections.find((candidate) => candidate.name === section)?.rows ??
+      []) {
+      const stack = row.stack ?? null;
+      if (stack === null || stack.role !== 'member' || stack.group !== group || !unreported(row)) {
+        continue;
+      }
+      const state = current?.terminals.find((candidate) => candidate.id === row.terminal)?.state;
+      if (state !== undefined && MAY_START.has(state)) {
+        return HOLDS_STARTING;
+      }
+      held = HOLDS_ENDED;
+    }
+    return held;
+  };
 
   /** The server's time now: the list's, counted on by the time since it came (`serverNow`). */
   const nowNs = () =>
@@ -928,8 +952,9 @@ export function createList(root, hooks) {
         const place = placeOf(selected);
         const stack = place?.row.stack ?? null;
         if (place !== undefined && stack !== null && (stack.open || stack.role === 'member')) {
-          if (holdsStart(place.section, stack.group)) {
-            hooks.say?.(HOLDS_STARTING); // the server keeps it open: nothing moves
+          const held = holdsStart(place.section, stack.group);
+          if (held !== null) {
+            hooks.say?.(held); // the server keeps it open: nothing moves
           } else {
             closeBlock(place.section, stack.group);
           }

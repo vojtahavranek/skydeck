@@ -25,7 +25,9 @@ const NOTE_LINE_MAX = 1024;
 
 /** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was lost or
  *  never started has no program that could. Shared inside the view model (ruled, #45): `rowPayload`'s
- *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. */
+ *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. THE PAGE COPIES
+ *  IT (web/list.js, `MAY_START`: which line ← and `×n` say on a block an unreported terminal holds
+ *  open, F6); a change of one is a change of the other. */
 export const MAY_START: ReadonlySet<TerminalState> = new Set([
   'starting',
   'running',

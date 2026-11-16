@@ -766,7 +766,11 @@ test('attention in the page', async (t) => {
       // beta: not running, hidden by the filter, no window terminal — nothing is selected.
       await clearKeyMessage(w.page);
       await clickNotification(w.page, 0);
-      await showsText(w.page, '#key-message', /^that session is hidden by the filter or the fold$/);
+      await showsText(
+        w.page,
+        '#key-message',
+        /^that session is hidden by the filter, the fold or a closed block$/,
+      );
       assert.equal((await notificationsOf(w.page)).focused, 1, 'the window to the front');
       assert.equal(await selectedRow(w.page), S1, 'the selection stays');
       assert.equal(
@@ -886,7 +890,11 @@ test('attention in the page', async (t) => {
       // An id the list neither draws nor holds in `needYou.order`, with no terminal: refused.
       const from = w.sent.length;
       await clickNotification(w.page, 2);
-      await showsText(w.page, '#key-message', /^that session is hidden by the filter or the fold$/);
+      await showsText(
+        w.page,
+        '#key-message',
+        /^that session is hidden by the filter, the fold or a closed block$/,
+      );
       assert.equal(await selectedRow(w.page), S3, 'the selection stays');
       assert.equal(sentWith(w.sent.slice(from), 'view', OUT), false, 'no view selects it');
       assert.deepEqual(w.problems, []);

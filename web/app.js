@@ -263,7 +263,9 @@ const editor = createEditor(dom.editor, {
 // selection is seen after 1.5 s (S2 12.4), which would clear a mark of a session never shown. One
 // that a closed block hides is selected (F3, G5): `needYou.order` holds it — it holds the rows the
 // list shows and those closed blocks hide, never one a filter, the fold or done hidden leaves out —,
-// and the server opens its block for the selection.
+// and the server opens its block for the selection. One that no longer needs you, has no terminal of
+// the window and sits in a closed block is still refused (the page cannot know a closed block's
+// members), so the line names the closed block too (F6, L4).
 const notifications = createNotifications(dom.notifyOn, {
   select: (id) => {
     if (!windowChordGate('notification')) {
@@ -271,7 +273,7 @@ const notifications = createNotifications(dom.notifyOn, {
     }
     const inBlock = state.list?.needYou?.order?.includes(id) ?? false;
     if (rowOf(id) === undefined && !hasTerminal(id) && !inBlock) {
-      say('that session is hidden by the filter or the fold');
+      say('that session is hidden by the filter, the fold or a closed block');
       return;
     }
     select(id, 'chord');
