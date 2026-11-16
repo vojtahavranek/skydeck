@@ -25,6 +25,7 @@ import {
   toZone,
 } from './helpers/shell.ts';
 import {
+  inputOf,
   promptOf,
   recordsOf,
   resumeHere,
@@ -189,6 +190,34 @@ async function keptStill(page: Page, quiet = 500): Promise<void> {
 async function typeLine(page: Page, line: string): Promise<void> {
   await page.keyboard.type(line);
   await page.keyboard.press('Enter');
+}
+
+/** The number of the first `line <n>` the shown terminal shows (the stand-in's `/lines`), or -1. */
+async function firstLine(page: Page): Promise<number> {
+  const shown = /^line (\d+)$/m.exec(await screenText(page));
+  return shown === null ? -1 : Number(shown[1]);
+}
+
+/**
+ * Waits until the first line shown is no longer line `from` and has not changed for 300 ms (a
+ * scroll that goes on is waited for to its end); returns it.
+ */
+async function scrolledFrom(page: Page, from: number, what: string): Promise<number> {
+  const deadline = performance.now() + PAGE_WAIT_MS;
+  let last = from;
+  let since = performance.now();
+  for (;;) {
+    const now = await firstLine(page);
+    if (now !== last) {
+      last = now;
+      since = performance.now();
+    }
+    if (last !== from && performance.now() - since >= 300) return last;
+    if (performance.now() > deadline) {
+      assert.fail(`${what}: the screen never scrolled from line ${from} (now ${last})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 /** A real server's page at `width` × `height` with S1 resumed in it and its prompt shown. */
@@ -596,7 +625,7 @@ test("the terminal's frame", async (t) => {
   );
 
   await t.test(
-    "the room is read from the style sheet: changed there, the text moves with it and the view's proposal and `fits` count the new room (one source for both)",
+    "the room is read from the style sheet: changed there — also on an ancestor, also in another unit than px — the text moves with it and the view's proposal and `fits` count the room as drawn (one source for both)",
     async (t) => {
       const page = await newPage(t, chromium);
       const started = await startTestServer(t);
@@ -678,8 +707,15 @@ test("the terminal's frame", async (t) => {
         for (const side of ['top', 'right', 'bottom', 'left'])
           root2.removeProperty(`--tv-pad-${side}`);
         const back = await measure();
+        // On an ancestor of xterm.js's element (the view's root), in rem: counted as it is drawn.
+        root.style.setProperty('--tv-pad-left', '2rem');
+        root.style.setProperty('--tv-pad-right', '1.5rem');
+        const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+        const ancestor = await measure();
+        root.style.removeProperty('--tv-pad-left');
+        root.style.removeProperty('--tv-pad-right');
         root.remove();
-        return { as, changed, back };
+        return { as, changed, back, ancestor, rem };
       }, base);
       type Measured = {
         size: { cols: number; rows: number };
@@ -695,6 +731,7 @@ test("the terminal's frame", async (t) => {
       const as = result.as as Measured;
       const changed = result.changed as Measured;
       const back = result.back as Measured;
+      const ancestor = result.ancestor as Measured;
       assert.deepEqual([as.left, as.top], [LEFT, TOP], 'the page as it is');
       assert.ok(changed.resized, 'a new proposal for the new room');
       assert.deepEqual(changed.fits, changed.size, '`fits` counts the same room');
@@ -714,6 +751,132 @@ test("the terminal's frame", async (t) => {
       );
       assert.deepEqual(back.size, as.size, 'and back');
       assert.deepEqual(back.fits, as.size);
+      // 2rem at the left and 1.5rem at the right, set on the view's root.
+      const left = 2 * result.rem;
+      const right = 1.5 * result.rem;
+      assert.ok(ancestor.resized, "a new proposal for the ancestor's room");
+      assert.deepEqual(ancestor.fits, ancestor.size, '`fits` counts the same room');
+      assert.equal(ancestor.left, left, 'drawn at 2rem');
+      assert.ok(
+        ancestor.right >= SCROLL_BAR + right - 0.01 &&
+          ancestor.right < SCROLL_BAR + right + ancestor.cell + 1,
+        `right ${ancestor.right}: counted as drawn (${right} px and the scroll bar's room)`,
+      );
+    },
+  );
+
+  await t.test(
+    'a wheel in each of the four margins does what one over the nearest text cell does, once: it scrolls the scrollback as far as one over the text; in the mouse mode of the program it reaches the program as one report, as one over the text does',
+    async (t) => {
+      const l = await resumed(t, chromium, 1400, 900);
+      const { page, d } = l;
+      await typeLine(page, '/lines 200');
+      await untilScreen(page, /^line 200$/m);
+      const g = await geometry(page);
+      const { box, text } = g;
+      const middle = { x: (text.left + text.right) / 2, y: (text.top + text.bottom) / 2 };
+      const points = {
+        text: middle,
+        left: { x: box.left + 4, y: middle.y },
+        top: { x: middle.x, y: box.top + 4 },
+        bottom: { x: middle.x, y: box.bottom - 3 },
+        right: { x: box.right - SCROLL_BAR - 4, y: middle.y },
+      };
+      assert.ok(points.right.x > text.right, 'the right point is in the margin');
+      const bottom = await firstLine(page);
+      const scrolled: Record<string, number> = {};
+      for (const [where, at] of Object.entries(points)) {
+        await page.mouse.move(at.x, at.y);
+        await page.mouse.wheel(0, -100);
+        scrolled[where] = bottom - (await scrolledFrom(page, bottom, `a wheel at ${where}`));
+        // Back to the bottom, with the wheel over the text.
+        await page.mouse.move(middle.x, middle.y);
+        await page.mouse.wheel(0, 5000);
+        await until(async () => (await firstLine(page)) === bottom, 'back at the bottom');
+      }
+      assert.ok((scrolled['text'] ?? 0) > 0, JSON.stringify(scrolled));
+      for (const where of Object.keys(points)) {
+        assert.equal(scrolled[where], scrolled['text'], `${where}: ${JSON.stringify(scrolled)}`);
+      }
+
+      // The program's mouse mode (SGR reports): one report per wheel, in a margin as over the text.
+      await typeLine(page, '/mouse');
+      await page.waitForSelector('#terminal .tv-term:not([hidden]) .xterm.enable-mouse-events', {
+        timeout: PAGE_WAIT_MS,
+      });
+      const typed = (): string => Buffer.from(inputOf(d.record, S1), 'hex').toString('latin1');
+      for (const [where, at] of Object.entries(points)) {
+        const from = typed().length;
+        await page.mouse.move(at.x, at.y);
+        await page.mouse.wheel(0, -100);
+        // A key after it: the program has the wheel's reports once it has the key (one stream).
+        await page.keyboard.press('KeyQ');
+        await until(() => typed().slice(from).includes('q'), `the key after a wheel at ${where}`);
+        const read = typed().slice(from);
+        const reports = read.slice(0, read.indexOf('q')).split('\x1b[<64;').length - 1;
+        assert.equal(reports, 1, `${where}: ${JSON.stringify(read)}`);
+      }
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    "at a fractional width of the terminal's area (as at a display scale of 125 %), the size a resume asks for is the one the view proposes: the program is not resized when its terminal attaches",
+    async (t) => {
+      const l = await launched(t, chromium);
+      const { page, d } = l;
+      const base = await assetBase(page);
+      // A width at which one pixel more holds one column more, by the view's own rule.
+      const width = await page.evaluate(async (base) => {
+        const module = (await import(`${base}terminal-view.js`)) as {
+          createTerminalView(
+            root: HTMLElement,
+            deps: object,
+          ): { fits(width: number, height: number): { cols: number; rows: number } | null };
+        };
+        const root = document.createElement('div');
+        root.className = 'terminal';
+        root.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:500px';
+        document.body.append(root);
+        const view = module.createTerminalView(root, {
+          send: () => {},
+          chord: () => false,
+          openLink: () => {},
+        });
+        try {
+          for (let w = 900; w < 1100; w++) {
+            const now = view.fits(w, 600);
+            const wider = view.fits(w + 1, 600);
+            if (now !== null && wider !== null && wider.cols > now.cols) return w;
+          }
+          return null;
+        } finally {
+          root.remove();
+        }
+      }, base);
+      assert.ok(width !== null, 'a column boundary between 900 and 1100 px');
+      // The right zone half a pixel wider than that width, at a whole-pixel left edge.
+      await page.addStyleTag({
+        content: '.main { grid-template-columns: 400px calc(100% - 400.5px); }',
+      });
+      await page.setViewportSize({ width: width + 401, height: 900 });
+      const zone = await readPage(
+        page,
+        () => document.getElementById('right-zone')?.getBoundingClientRect().width ?? 0,
+        null,
+      );
+      assert.equal(zone, width + 0.5);
+      l.d.resumable(S1);
+      await resumeHere(page, S1);
+      await untilScreen(page, promptOf(S1));
+      await typeLine(page, '/alt');
+      const { cols, rows } = await settled(page, d);
+      assert.deepEqual(
+        resizesOf(d),
+        [],
+        `started at ${sizesOf(d)[0]}; the view proposes ${cols}x${rows}`,
+      );
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
