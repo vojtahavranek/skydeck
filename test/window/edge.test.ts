@@ -386,6 +386,39 @@ for (const links of ['default', 'edge'] as const) {
     assert.deepEqual(processes.calls, []);
   });
 
+  test(`openLink (${links}) refuses an address the parser would give back with anything but printable ASCII, and starts nothing: the one-word rule does not rest on the parser`, async (t) => {
+    const { platform, processes } = setup(t);
+    /** URL.parse answering `href` for any input: a parser that would serialise otherwise. */
+    const parserGiving = (href: string): { mock: { restore(): void } } =>
+      t.mock.method(URL, 'parse', () => ({ protocol: 'https:', href }) as unknown as URL);
+    const unprintable = [
+      'https://a b/',
+      'https://a/b\tc',
+      'https://a/b\nc',
+      'https://a/b\x00c',
+      'https://a/b\x7fc',
+      'https://a/b\x85c',
+      'https://a/b\u00a0c',
+      'https://a/b\u3000c',
+      'https://a/b\u00e9c',
+      'https://a/b\uff02c',
+      'https://a/b\uff3cc',
+    ];
+    for (const href of unprintable) {
+      const parse = parserGiving(href);
+      const opened = await openLink(platform, windowConfig({ links }), 'https://a/', LINK);
+      parse.mock.restore();
+      assert.equal(opened, false, JSON.stringify(href));
+    }
+    assert.deepEqual(processes.calls, []);
+    // Not vacuous: the same stand-in with a printable address is what is opened.
+    const parse = parserGiving('https://a/b');
+    const opened = await openLink(platform, windowConfig({ links }), 'https://a/', LINK);
+    parse.mock.restore();
+    assert.equal(opened, true);
+    assert.deepEqual(onlyCall(processes).args, argsOf('https://a/b'));
+  });
+
   test(`openLink (${links}) answers false when ${program} cannot be started`, async (t) => {
     for (const code of ['ENOENT', 'EACCES', 'EWINDOWS']) {
       const { platform, processes } = setup(t, { handler: failWith(code) });

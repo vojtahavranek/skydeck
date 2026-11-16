@@ -165,12 +165,15 @@ export async function startEdge(
 /**
  * S2 9.6: opens `url` where `window.links` says. "default": the Windows default browser —
  * `rundll32.exe` with exactly two arguments, `url.dll,FileProtocolHandler` and the re-serialised
- * URL, which holds no white space and no control character (the parser removes tab and line
- * breaks, percent-encodes the rest, and fails a host or a port that keeps one), so that it is one
- * word of the Windows command line. "edge": the user's own Edge profile — `window.edge` with the
+ * URL, which linkToOpen holds to printable ASCII (the parser removes tab and line breaks,
+ * percent-encodes the rest, and fails a host or a port that keeps one), so that it is one word of
+ * the Windows command line. linkToOpen is applied here whatever the caller checked: it is what
+ * keeps a link from starting a program, since FileProtocolHandler opens what it is given as the
+ * Windows shell would (S2 15.5). "edge": the user's own Edge profile — `window.edge` with the
  * re-serialised URL as its only argument, no profile folder. False, starting nothing, for a URL
- * linkToOpen refuses; false too when the program cannot be started. True once it was started (it
- * is not waited for).
+ * linkToOpen refuses; false too when the program cannot be started from WSL. True once it was
+ * started; it is not waited for, so what Windows does then (a refusal of its own, a browser that
+ * opens nothing) is not seen.
  */
 export async function openLink(
   platform: Platform,

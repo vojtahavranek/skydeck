@@ -1712,21 +1712,22 @@ the Windows shell would, a program or a `file:` address included, so the `http` 
 also what keeps a link from starting a program on the Windows side (15.5). `FileProtocolHandler`
 takes the rest of the command line as it is, and WSL's interop quotes an argument only when it must,
 so the URL must be one unquoted word: the re-serialised URL holds no white space and no control
-character, whatever the page sent — the parser removes tab and line breaks everywhere and the C0
-controls and spaces around the address, percent-encodes every other white space and control
-character (and everything beyond ASCII) in the user name, password, path, query and fragment, and
-fails a host (also once its escapes are decoded) or a port that would keep one (IDNA maps most
-Unicode spaces in a host to a space, and drops U+FEFF and U+200B). With `window.links` `"edge"`
-(16.4) it runs `window.edge` with that URL as its only argument instead (no profile folder): it
-opens in the user's own Edge profile, not in the window's profile. When the program cannot be
-started the action is refused with `the link could not be opened: the default browser could not be
-started (window.links "edge" opens links in Edge)`, or, with `"edge"`, with `the link could not be
-opened: Edge could not be started`. That covers only a start that fails on the WSL side (the
-program is not there, interop is off): once interop has started it, what Windows does is not seen,
-so a start that Windows refuses afterwards (privilege management) or a browser that opens nothing
-leaves the action done and the key bar empty. The page itself never navigates away: it cancels drag and drop
-over the window, which would otherwise open a dropped file in place of the page. Whether a link
-opens in the user's default browser, logged in, is check W12.
+character, whatever the page sent (and the server refuses one that would hold anything but printable
+ASCII, so that this does not rest on the parser alone) — the parser removes tab and line breaks
+everywhere and the C0 controls and spaces around the address, percent-encodes every other white
+space and control character (and everything beyond ASCII) in the user name, password, path, query
+and fragment, and fails a host (also once its escapes are decoded) or a port that would keep one
+(IDNA maps most Unicode spaces in a host to a space, and drops U+FEFF and U+200B). With
+`window.links` `"edge"` (16.4) it runs `window.edge` with that URL as its only argument instead (no
+profile folder): it opens in the user's own Edge profile, not in the window's profile. When the
+program cannot be started the action is refused with `the link could not be opened: the default
+browser could not be started (window.links "edge" opens links in Edge)`, or, with `"edge"`, with
+`the link could not be opened: Edge could not be started`. That covers only a start that fails on
+the WSL side (the program is not there, interop is off): once interop has started it, what Windows
+does is not seen, so a start that Windows refuses afterwards (privilege management) or a browser
+that opens nothing leaves the action done and the key bar empty. The page itself never navigates
+away: it cancels drag and drop over the window, which would otherwise open a dropped file in place
+of the page. Whether a link opens in the user's default browser, logged in, is check W12.
 
 ### 9.7 Find
 
@@ -3079,11 +3080,12 @@ The keeper runs the launch the server gives it: `claudeCommand` and the argument
 `"edge"`), `wsl.exe` (the keep-alive) and `python3` (keepers), each with an argument list; `skydeck
 window` runs `window.edge` (the window). `rundll32.exe url.dll,FileProtocolHandler` opens what it is
 given as the Windows shell would, a program or a `file:` address included: 9.6's check (`http` or
-`https` only, re-serialised) is what keeps a page's text, a program's output or a pull request's
-data from starting anything but the browser. `openLink` applies it itself, whatever its caller
-checked, and it is not widened (another scheme) without this in mind. No input from a page
-becomes a program name or a shell string; a page's `new` flags become `claude` arguments only after
-design 7.7's refusals.
+`https` only, re-serialised, one word of printable ASCII) is what stands between a page's input
+(a terminal's text, a program's output, a pull request's data) and a program start on the Windows
+side. `openLink` applies it itself, whatever its caller checked, and it is not widened (another
+scheme) without this in mind. So no input from a page becomes a program name or a shell string by
+skydeck's hand, but a link does reach the Windows shell: only an `http` or `https` address that
+check let through; a page's `new` flags become `claude` arguments only after design 7.7's refusals.
 
 ## 16. Install, uninstall, doctor, configuration, updating
 

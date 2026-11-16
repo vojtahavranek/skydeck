@@ -534,8 +534,22 @@ that is what decides whether the fallback is tried.
 A link the window opens (a Ctrl+click on an address in a terminal, a pull request in the list or
 the header, the ticket chip) opens in your Windows default browser: skydeck hands it to
 `rundll32.exe url.dll,FileProtocolHandler`. With `window.links` `"edge"` it opens in your own Edge
-instead (install.md, "The `window` keys"). Part 1 needs no change of your configuration; part 2 is
-for trying `"edge"`, and only if you want to.
+instead (install.md, "The `window` keys"). On a managed PC, security monitoring may record or flag
+each start of `rundll32.exe url.dll,FileProtocolHandler`; `"edge"` avoids it. Part 1 needs no
+change of your configuration; part 2 is for trying `"edge"`, and only if you want to. Every step
+types only into the throwaway session, never into one of your real work.
+
+**First, what your configuration says.** The paths below are the default ones: with
+`XDG_CONFIG_HOME` set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME`
+set, it is `$SKYDECK_HOME/config/config.json`. In W (it only reads the file):
+
+```sh
+grep -n '"links"' ~/.config/skydeck/config.json
+```
+
+When it prints a line with `"edge"`, your links already open in your own Edge: in part 1 expect your
+own Edge wherever it says your default browser, and skip part 2 (it is what you have). When it prints
+nothing, a line with `"default"`, or `No such file or directory`, go on as written.
 
 **Part 1, the default.** In the window, select the throwaway session (look at the short id); its
 terminal has the keyboard (the key bar says `Focus: terminal`; else Ctrl+Shift+L; an ended terminal
@@ -545,11 +559,14 @@ Code asks for anything all the same (to run a command, to write a file), answer 
 the address in the terminal. Expected: it opens in your default browser (the one Windows opens
 links in), where you are logged in, not in skydeck's window and not in a new Edge window unless
 Edge is your default browser. A link whose text is not its address shows the address at the first
-Ctrl+click and opens at the second. When it opens nowhere: if the key bar says `the link could not
-be opened: the default browser could not be started (window.links "edge" opens links in Edge)`,
-`rundll32.exe` could not be started from WSL; if it says nothing, Windows did not open the link (the
-PC's privilege management may have blocked `rundll32.exe`, W20). Write down which, and any prompt of
-the privilege management; `window.links` `"edge"` (part 2) is the way round.
+Ctrl+click and opens at the second.
+
+When it opens nowhere: the key bar says `the link could not be opened: the default browser could not
+be started (window.links "edge" opens links in Edge)` only when `rundll32.exe` could not be started
+from WSL at all (the file is missing, interop is off). When a click opens nothing and the key bar
+says nothing, Windows stopped it (the PC's privilege management, W20). Write down which, and any
+prompt of the privilege management; then set `window.links` to `"edge"` in your configuration
+(install.md, "The `window` keys"; part 2 says where the key goes in the file), so that links open.
 
 Then, the same way (the throwaway session selected, `Focus: terminal`), type `print the address
 https://example.com/?q=%OS%&r=1%2C2#a,b and nothing else; reply in this chat, with no tool and no
@@ -557,14 +574,13 @@ file` and press Enter; answer **No** to anything Claude Code asks for. Look that
 the address as typed; if not, stop and write down what it shows. Ctrl+click it. Expected: one tab in
 your default browser whose address (click into the address bar to see it whole) reads
 `example.com/?q=%OS%&r=1%2C2#a,b`: `%OS%` as typed, not `Windows_NT`; `%2C` not turned into a
-comma; the parts after `&` and `#` there; no second window, no dialog, no other program. If `%OS%`
-became `Windows_NT`, something on the Windows side expanded it: write that down, and report it
-(`example.com` is IANA's page; it would only have received the word `Windows_NT`). Part 2 shows how
-to set `"edge"` meanwhile, if you want to.
+comma; the parts after `&` and `#` there; no second window, no dialog, no other program. If it does
+not (`%OS%` became `Windows_NT`, or `%2C` a comma), something on the Windows side changed the
+address: write down what the address bar showed, and set `window.links` to `"edge"` in your
+configuration as above (`example.com` is IANA's page; it would only have received the word
+`Windows_NT`).
 
-**Part 2, `"edge"` (only if you want to try it).** The paths below are the default ones: with
-`XDG_CONFIG_HOME` set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME`
-set, it is `$SKYDECK_HOME/config/config.json`. In W:
+**Part 2, `"edge"` (only if you want to try it).** The paths are those of "First" above. In W:
 
 ```sh
 ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w12
