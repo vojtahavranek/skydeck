@@ -236,7 +236,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
 | `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
-| `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the page suite on one leg, the time limit. | A |
+| `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the page suite on one leg, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the time limits. | A |
 
 ## 5. Starting the window
 
@@ -3532,21 +3532,34 @@ grants a permission through Playwright.
 - CI, on every pull request and every push to `main`, runs the newest leg of the Node matrix
   (Node 24). The oldest leg (Node 24.12) runs only when the workflow is started by hand
   (`workflow_dispatch`: the owner's decision, to save CI minutes), and a run started by hand runs
-  both legs. A leg runs format check, type checks, `npm test` (keeper and server tests included;
-  Ubuntu runners have python3), `python3 -m py_compile bin/skydeck-keeper`, the vendored-files
-  check (16.6: `test/vendor/vendor.test.ts`, a test in `npm test` that needs the packages `npm ci`
-  installed, so it has no step of its own), and `shellcheck` on the shell scripts by name —
+  both legs. The work is split into three kinds of job that run side by side, so that a pull
+  request waits for its slowest job (about 10 minutes) and not for the sum of them (about 32
+  minutes when they ran in one job). `lint` runs format check, type checks,
+  `python3 -m py_compile bin/skydeck-keeper` and `shellcheck` on the shell scripts by name —
   `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
-  bin/skydeck*` would also match the python keeper. Each is a step of its own: CI does not run
-  `npm run check`, which ends with the page suite. Only the newest leg (Node 24) runs the page
-  suite, and it runs on Ubuntu 24.04 (the development machine's system) while the other leg runs
-  on the newest Ubuntu (26.04), because Playwright 1.60.0 has no Chromium for Ubuntu 26.04; the pin
-  of that leg's runner is dropped when Playwright is upgraded. The leg reads the installed
-  Playwright's version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
+  bin/skydeck*` would also match the python keeper. `unit (i/n)` runs `npm test` (keeper and
+  server tests included; Ubuntu runners have python3; the vendored-files check of 16.6,
+  `test/vendor/vendor.test.ts`, is a test in `npm test` that needs the packages `npm ci`
+  installed, so it has no step of its own). `page (i/n)` runs the page suite. CI does not run
+  `npm run check`, which is these three in a row. A suite runs in n shards, each a job of its own
+  (two for each suite; the count is the length of the job's `shard` list in the workflow): Node's
+  `--test-shard=i/n` cuts the sorted list of test files into n parts by taking every n-th file,
+  so the shards together run every file once, no file is named in the workflow, and a new test
+  file needs no upkeep there. The workflow gives the option as `NODE_OPTIONS` and not as
+  `npm test -- --test-shard=i/n`: npm puts that argument after the glob in `package.json`, where
+  `node --test` ignores it without a word and every shard would run the whole suite. The commands
+  in `package.json` and `npm run check` stay as they are. A job has a time limit of its own: 10
+  minutes for `lint`, 25 for a shard. A failing shard does not stop the others (`fail-fast` is
+  off), so one run shows every failure. Only the newest leg (Node 24) runs the page suite, and it
+  runs on Ubuntu 24.04 (the development machine's system) while the other leg runs on the newest
+  Ubuntu (26.04), because Playwright 1.60.0 has no Chromium for Ubuntu 26.04; the pin of that
+  leg's runner is dropped when Playwright is upgraded. A run started by hand runs `lint` and
+  `unit` on both legs (the oldest leg's `unit` is in shards too, so that the one workflow has one
+  shape) and `page` on the newest leg only. Each `page` shard reads the installed Playwright's
+  version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
   `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
-  are installed every time) and then `npm run test:page`. The job's time limit goes from 10 to 45
-  minutes.
+  are installed every time) and then `npm run test:page` with its shard.
 
 ## 18. Manual checks for step 2
 
