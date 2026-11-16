@@ -182,8 +182,9 @@ async function headers(page: Page): Promise<string[]> {
 }
 
 /**
- * The tooltips the headers carry (F5): `<section> <the title element's tooltip>` for every header
- * element whose `title` is not empty, so that a header with none adds nothing.
+ * The tooltips the headers carry (F5): `<section> <class of the element>: <its tooltip>` for the
+ * header and every element in it whose `title` is not empty, so that a header with none adds
+ * nothing and a tooltip on the wrong element shows.
  */
 async function headerTips(page: Page): Promise<string[]> {
   return readPage(

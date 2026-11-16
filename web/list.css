@@ -42,7 +42,7 @@
   text-align: center;
 }
 
-/* Section headers: Open, Recent (key `week`), Earlier (folded by default, with its count and span). */
+/* Section headers: Open, Recent (key `week`), Earlier (folded by default: its count and span). */
 .list-section {
   position: sticky;
   top: 0;

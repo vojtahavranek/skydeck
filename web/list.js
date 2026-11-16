@@ -1,6 +1,6 @@
 // The list (S2 12.1, 12.2 stage A, 12.9's list zone, 12.10; plan task 27): the filter field, the
-// sections Open, Recent (key `week`) and Earlier as the server sent them, rows of one or two lines, the
-// footer of done sessions, and the title bar's counts (`#counts`). Its interface is contract
+// sections Open, Recent (key `week`) and Earlier as the server sent them, rows of one or two lines,
+// the footer of done sessions, and the title bar's counts (`#counts`). Its interface is contract
 // 2.9's; app.js owns the selection, the zones and the keys and hands the list its actions. What
 // each element says comes from web/list-text.js; everything from the server reaches the DOM as
 // text (textContent, title), never as markup.

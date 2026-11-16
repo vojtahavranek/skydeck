@@ -1,6 +1,7 @@
 // Test fixture: a verbatim copy of web/list.js at 40f7886 (task 26's placeholder), kept so
 // that the page shell's own tests do not change when the real module arrives; not developed
-// further. pinModules (test-page/helpers/shell.ts) serves it in place of web/list.js.
+// further. pinModules (test-page/helpers/shell.ts) serves it in place of web/list.js. One change
+// since: follow-up F5 renamed the title of the key `week` to Recent.
 //
 // The list (S2 12.1, 12.2) — the smallest working version, replaced by task 27 (plan A16): the
 // sections and rows the server sent, as plain lines, a selection, the list keys app.js hands on,

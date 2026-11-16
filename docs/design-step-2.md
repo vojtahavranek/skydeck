@@ -2135,7 +2135,7 @@ bar at the bottom. The list has three sections:
 - **Recent**: not running, last activity within 7 days (a rolling 7 days, not the calendar week),
   most recent first. Its title is `Recent`; its key in the code and the protocol is `week`. Its
   header's tooltip says `last active in the last 7 days` (follow-up F5, on the owner's words
-  "Maybe recent or something like that?"); the other two headers have no tooltip.
+  "Maybe recent or something like thatt?"); the other two headers have no tooltip.
 - **Earlier**: the rest, folded by default; the folded header shows the count and the time span.
   A click on its header folds and unfolds it, as ← and → do, and leaves the keyboard on the list
   (ruled by the plan owner, plan task 27).
@@ -2181,40 +2181,40 @@ The rule of blocks is the server's (4.3; stage E, plan E6 as ruled on 2026-11-16
 F3). A block is what the code and the protocol call a stack (`stackRows`, the row's `stack`,
 `data-stack`). In every section — Open, Recent and Earlier —, each on its own, the rows of one
 group (the row's group as sanitised, compared as exact text) form a block when there are at least
-two: Open holds only blocks of running sessions, Recent only of the sessions it holds, and a group with
-rows in two sections is two blocks. Every row of the group is in its block, one that a terminal of
-the window holds (running, starting or ended: it may hold a slot) and one that needs you (12.4)
-too. A block sits where its first row sits in the section's order (12.1), its other rows right
-after it in that order; that first row is its head. A row whose group no other row of its section
-has, and a row without a group, are drawn as before; while a filter or a chip is set (12.8) no
-block is formed. A block is open unless the page's view names its section and group in `closed`
-(8.2.3): the page remembers the blocks the user closed, per window, until a reload; a block the
-user closed stays closed until it is opened or the page reloads, also when its rows leave and a
-block of that section and group forms again later (ruled on 2026-11-16, review 2 of follow-up F3).
-A closed block is open while the selected session is one of its members other than the head, and
-the page then forgets that it was closed, so that it stays open when the selection leaves (ruled):
-whatever selects a hidden member — a click, a slot chord, Ctrl+Shift+J, Ctrl+Tab, a notification's
-click, a pick in the switcher, the server's own selection after a resume (12.9, 12.8) — opens its
-block, so the selection is never on a row hidden in a block. A closed block is open too while one of
-its members other than the head is drawn with a terminal of the window that has not reported a
-session (7.5: a start not yet reported, which may stay so, or a program that ended before it
-reported, until its terminal is closed), so that such a row and its slot are on screen and its slot
-chord reaches it; the page forgets that it was closed, as for a selection, and while such a member
-holds the block open ← and a click on `×4` do nothing and the key bar says why (ruled on
-2026-11-16; two lines from follow-up F6): `this block holds a session that is still starting; it
-stays open` while that member's terminal may still come to hold a session (it changes by itself),
-and `this block holds a terminal that ended before its session was known; close that terminal to
-close the block` when it can no longer start one (it ended, was lost or never started), since
-waiting never frees the block and the ended bar's Close does; when both kinds hold one block, the
-first. The page's rule is a copy of the server's (`build.ts` and `web/list.js` each say so): a
-terminal's `sessionId` null in `list.terminals` for the terminal a member's row is drawn with; and
-which of the two lines is told by the terminal's state, the page's copy of `MAY_START`
-(`sections.ts` and `web/list.js` each say so). A closed block never hides that a session
-needs you: its line says how many of the members it hides need you (below), Ctrl+Shift+J reaches
-them (`needYou.order` holds them, 8.2.3), and the title bar's counts (12.1) are the same whether a
-block is open or closed. A section's count and time span are all its rows', a closed block's
-hidden members included. A view without `closed` closes no block: the page and the server are one
-build (8.2.2), and an open block hides no row.
+two: Open holds only blocks of running sessions, Recent only of recent ones (not running, last
+active within 7 days), and a group with rows in two sections is two blocks. Every row of the group
+is in its block, one that a terminal of the window holds (running, starting or ended: it may hold
+a slot) and one that needs you (12.4) too. A block sits where its first row sits in the section's
+order (12.1), its other rows right after it in that order; that first row is its head. A row whose
+group no other row of its section has, and a row without a group, are drawn as before; while a
+filter or a chip is set (12.8) no block is formed. A block is open unless the page's view names
+its section and group in `closed` (8.2.3): the page remembers the blocks the user closed, per
+window, until a reload; a block the user closed stays closed until it is opened or the page
+reloads, also when its rows leave and a block of that section and group forms again later (ruled
+on 2026-11-16, review 2 of follow-up F3). A closed block is open while the selected session is one
+of its members other than the head, and the page then forgets that it was closed, so that it stays
+open when the selection leaves (ruled): whatever selects a hidden member — a click, a slot chord,
+Ctrl+Shift+J, Ctrl+Tab, a notification's click, a pick in the switcher, the server's own selection
+after a resume (12.9, 12.8) — opens its block, so the selection is never on a row hidden in a
+block. A closed block is open too while one of its members other than the head is drawn with a
+terminal of the window that has not reported a session (7.5: a start not yet reported, which may
+stay so, or a program that ended before it reported, until its terminal is closed), so that such a
+row and its slot are on screen and its slot chord reaches it; the page forgets that it was closed,
+as for a selection, and while such a member holds the block open ← and a click on `×4` do nothing
+and the key bar says why (ruled on 2026-11-16; two lines from follow-up F6): `this block holds a
+session that is still starting; it stays open` while that member's terminal may still come to hold a
+session (it changes by itself), and `this block holds a terminal that ended at its start; close it
+first` when it can no longer start one (it ended, was lost or never started), since waiting never
+frees the block and the ended bar's Close does; when both kinds hold one block, the first. The
+page's rule is a copy of the server's (`build.ts` and `web/list.js` each say so): a terminal's
+`sessionId` null in `list.terminals` for the terminal a member's row is drawn with; and which of the
+two lines is told by the terminal's state, the page's set of the states that may still start, a copy
+of the server's `MAY_START` (`sections.ts` and `web/pane.js` each say so, and a unit test holds them
+equal). A closed block never hides that a session needs you: its line says how many of the members
+it hides need you (below), Ctrl+Shift+J reaches them (`needYou.order` holds them, 8.2.3), and the
+title bar's counts (12.1) are the same whether a block is open or closed. A section's count and time
+span are all its rows', a closed block's hidden members included. A view without `closed` closes no
+block: the page and the server are one build (8.2.2), and an open block hides no row.
 
 How a block looks and is used (stage E, plan E7 as ruled on 2026-11-16). The head shows `×4`
 after its ticket key (or its group); an open block's other rows follow it, indented. A closed

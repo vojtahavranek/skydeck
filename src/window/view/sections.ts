@@ -37,8 +37,8 @@ export const MAY_START: ReadonlySet<TerminalState> = new Set([
 
 /**
  * S2 12.1: Open for a row that is open (running or starting, in the window or elsewhere: the caller
- * knows the terminals); else Recent (key `week`) when its last activity is at most 7 days before `nowNs` (or
- * after it: the clock can step back); else Earlier.
+ * knows the terminals); else Recent (key `week`) when its last activity is at most 7 days before
+ * `nowNs` (or after it: the clock can step back); else Earlier.
  */
 export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'week' | 'earlier' {
   if (isOpen) {
