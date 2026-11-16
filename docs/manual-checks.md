@@ -529,14 +529,143 @@ the window uses, match Claude Code's own layout better than `addon-unicode11`, t
 Write down which rows are off, and by how many columns, in the window and in your usual terminal;
 that is what decides whether the fallback is tried.
 
-## W12. Links open in your own Edge (real claude)
+## W12. Links open in your default browser (real claude)
 
-In the throwaway session: `print the address https://github.com/` (or any page where you are
-logged in). Ctrl+click it in the terminal. Expected: it opens in your own Edge window, where you
-are logged in, not in skydeck's window. A link whose text is not its address shows the address at
-the first Ctrl+click and opens at the second.
+A link the window opens (a Ctrl+click on an address in a terminal, a pull request in the list or
+the header, the ticket chip) opens in your Windows default browser: skydeck hands it to
+`rundll32.exe url.dll,FileProtocolHandler`. With `window.links` `"edge"` it opens in your own Edge
+instead (install.md, "The `window` keys"). On a managed PC, security monitoring may record or flag
+each start of `rundll32.exe url.dll,FileProtocolHandler`; `"edge"` avoids it. Part 1 needs no
+change of your configuration; part 2 is for trying `"edge"`, and only if you want to. Every step
+types only into the throwaway session, never into one of your real work.
 
-Write down where it opened, and whether you were logged in there.
+**First, what your configuration says.** The paths below are the default ones: with
+`XDG_CONFIG_HOME` set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME`
+set, it is `$SKYDECK_HOME/config/config.json`. In W (it only reads the file):
+
+```sh
+grep -n '"links"' ~/.config/skydeck/config.json
+```
+
+When it prints a line with `"edge"`, your links already open in your own Edge: in part 1 expect your
+own Edge wherever it says your default browser, and skip part 2 (it is what you have). When it prints
+nothing, a line with `"default"`, or `No such file or directory`, go on as written.
+
+**Part 1, the default.** In the window, select the throwaway session (look at the short id); its
+terminal has the keyboard (the key bar says `Focus: terminal`; else Ctrl+Shift+L; an ended terminal
+is resumed first). Type `print the address https://github.com/ and nothing else; reply in this
+chat, with no tool and no file` (or any page where you are logged in) and press Enter. When Claude
+Code asks for anything all the same (to run a command, to write a file), answer **No**. Ctrl+click
+the address in the terminal. Expected: it opens in your default browser (the one Windows opens
+links in), where you are logged in, not in skydeck's window and not in a new Edge window unless
+Edge is your default browser. A link whose text is not its address shows the address at the first
+Ctrl+click and opens at the second.
+
+When it opens nowhere: the key bar says `the link could not be opened: the default browser could not
+be started (window.links "edge" opens links in Edge)` only when `rundll32.exe` could not be started
+from WSL at all (the file is missing, interop is off). When a click opens nothing and the key bar
+says nothing, Windows stopped it (the PC's privilege management, W20). Write down which, and any
+prompt of the privilege management; then set `window.links` to `"edge"` in your configuration
+(install.md, "The `window` keys"; part 2 says where the key goes in the file), so that links open.
+
+Then, the same way (the throwaway session selected, `Focus: terminal`), type `print the address
+https://example.com/?q=%OS%&r=1%2C2#a,b and nothing else; reply in this chat, with no tool and no
+file` and press Enter; answer **No** to anything Claude Code asks for. Look that the terminal shows
+the address as typed; if not, stop and write down what it shows. Ctrl+click it. Expected: one tab in
+your default browser whose address (click into the address bar to see it whole) reads
+`example.com/?q=%OS%&r=1%2C2#a,b`: `%OS%` as typed, not `Windows_NT`; `%2C` not turned into a
+comma; the parts after `&` and `#` there; no second window, no dialog, no other program. If it does
+not (`%OS%` became `Windows_NT`, or `%2C` a comma), something on the Windows side changed the
+address: write down what the address bar showed, and set `window.links` to `"edge"` in your
+configuration as above (`example.com` is IANA's page; it would only have received the word
+`Windows_NT`).
+
+**Part 2, `"edge"` (only if you want to try it).** The paths are those of "First" above. In W:
+
+```sh
+ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w12
+```
+
+- **`config.json.before-w12` is listed**: an earlier W12 did not finish. Do step 2 first (it
+  compares the two files before anything is moved back), then start again.
+- **Only `config.json` is listed**: you have a configuration, whatever it holds. Copy it aside, as
+  it is (`-n`: an existing copy is never written over):
+
+  ```sh
+  cp -p -n ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w12
+  ```
+
+  Then change one thing in `config.json`. When it has a `"window"` object, add `"links": "edge",`
+  on a line of its own right after that object's `{`, as its first key (without the trailing comma
+  when the object holds no key yet); when that object already has a `"links"` key, change only its
+  value to `"edge"`. When it says `"links": "edge"` already (yours, or left by an earlier W12 that
+  did not finish), change nothing: the check uses it, and the file is the same at the end; if you
+  do not want it, change it by hand afterwards. When it has no `"window"` key, add
+  `"window": { "links": "edge" },` on a line of its own right after the file's opening `{`, as its
+  first key (without the trailing comma when the file holds no key yet). Never add a second
+  `"window"` key: the later one would replace your other `window` keys.
+- **Both are missing** (`No such file or directory` twice): you have none. Create the file with
+  only this key (the command writes nothing when the file exists):
+
+  ```sh
+  mkdir -p ~/.config/skydeck
+  test -e ~/.config/skydeck/config.json || printf '%s\n' '{ "window": { "links": "edge" } }' > ~/.config/skydeck/config.json
+  ```
+
+To see that the file is valid: `skydeck ls > /dev/null` prints nothing; a line that names
+`config.json` says what is wrong (correct the line, or go on with step 2). Then, in W (the server
+reads the file when it starts; the window stays and connects again, and the sessions keep
+running):
+
+```sh
+skydeck window --restart
+```
+
+1. As in part 1 (the throwaway session selected, `Focus: terminal`), Ctrl+click the address again.
+   Expected: it opens in your own Edge window, not in skydeck's window, where you are logged in to
+   Edge.
+2. **Give your configuration back**, by the branch you took above. Nothing here removes a file.
+   - **You made the copy** (`config.json.before-w12`). Compare first; move nothing yet:
+
+     ```sh
+     diff ~/.config/skydeck/config.json.before-w12 ~/.config/skydeck/config.json
+     ```
+
+     It must show only this check's change: the line you added after `> ` (with a line such as
+     `1a2` above it), or the `"links"` line before (`< `) and after (`> `) when you changed its
+     value; for a file on one line, that line before and after, differing only by your change; or
+     nothing when you changed nothing. Only then move the copy back over the file (this gives
+     back your file as it was, and leaves no copy):
+
+     ```sh
+     mv ~/.config/skydeck/config.json.before-w12 ~/.config/skydeck/config.json
+     ```
+
+     **When `diff` says `config.json: No such file or directory`**, the file was removed since (after
+     an unfinished run), and your keys are only in the copy: move it back with the same `mv` line.
+     **When `diff` shows anything else**, the file was changed since the copy was made (by you or by
+     a program): move nothing back. Take out of `config.json` by hand only the change this check
+     made, keep everything else, and keep the copy until you are sure (remove it yourself then).
+   - **You had no file before**: `cat ~/.config/skydeck/config.json` must print exactly the one line
+     this check wrote. Then move it aside, so that it is no longer read (it is not removed; remove
+     it yourself whenever you like):
+
+     ```sh
+     mv -n ~/.config/skydeck/config.json ~/.config/skydeck/config.json.made-by-w12
+     ls -l ~/.config/skydeck/config.json
+     ```
+
+     `ls` must say `No such file or directory`. When the file is still there, a
+     `config.json.made-by-w12` of an earlier W12 was in the way (`-n` never writes over it): look
+     at that old one, remove it yourself, and run the two lines again. When `cat` shows more than
+     the check's line, something was added since: move nothing, and take out only the `"links"` key
+     by hand.
+
+   Then `skydeck window --restart`, and Ctrl+click the address once more. Expected: it opens in your
+   default browser again, as in part 1.
+
+Write down where the link opened in part 1 (which browser, logged in or not), the address the
+browser showed for the second link, and, if you did part 2, where it opened in part 2.
 
 ## W13. What the company's Edge policy does to the window
 
@@ -688,12 +817,14 @@ Expected: no characters you did not type in the prompt (such as `[?62;c`, `0;276
 
 Write down: any stray characters; whether a key was swallowed.
 
-## W20. Privilege management lets Edge and wsl.exe start
+## W20. Privilege management lets Edge, wsl.exe and rundll32.exe start
 
 The PC's privilege management (BeyondTrust on the development PC) must neither block nor ask for
-`msedge.exe` started by `skydeck window` (W1) or for the keep-alive's `wsl.exe`, which the server
-starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`). Watch for a dialog
-during W1 and right after a `skydeck window --restart`.
+`msedge.exe` started by `skydeck window` (W1), for the keep-alive's `wsl.exe`, which the server
+starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`), or for `rundll32.exe`,
+which the server starts for every link the window opens with `window.links` `"default"` (W12).
+Watch for a dialog during W1, right after a `skydeck window --restart`, and at W12's first link. A
+silent block of `rundll32.exe` shows as a link that opens nowhere with an empty key bar.
 
 Write down: any dialog's exact text, and what you chose.
 
@@ -913,8 +1044,9 @@ skydeck window --restart
    address as its tooltip.
 2. In W: `skydeck show <short id>`. Expected: the line `group:     ABC-123`, and after it
    `ticket:    ` with your ticket's address.
-3. Click the group chip once. Expected: the ticket opens in your own Edge window, not in skydeck's,
-   where you are logged in. A drag over the chip selects its text and opens nothing.
+3. Click the group chip once. Expected: the ticket opens where links open (W12: your default
+   browser, or your own Edge with `window.links` `"edge"`), not in skydeck's window, where you are
+   logged in. A drag over the chip selects its text and opens nothing.
 4. **Give your configuration back**, by the branch you took above:
    - **You made the copy.** Compare first; copy nothing yet:
 
@@ -979,8 +1111,8 @@ select the throwaway session: the header's third line says `no pull request` and
    list has the same chip.
 3. In W: `skydeck show <short id>`. Expected: a `pr:` line with the same state, in the command
    line's words (`checks-pending`, `approved-green`, …).
-4. Click the item on the header's third line. Expected: the pull request opens in your own Edge
-   window.
+4. Click the item on the header's third line. Expected: the pull request opens where links open
+   (W12: your default browser, or your own Edge with `window.links` `"edge"`).
 5. `Pull requests`, then `↻`. Expected: within seconds the line's `checked … ago` starts again
    from a few seconds.
 6. `×` on the line. Expected: the line goes, and the toast says `Detached <owner>/<repo> #<n>`

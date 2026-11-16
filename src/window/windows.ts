@@ -1,7 +1,8 @@
 /**
  * The Windows side of the window, as pure rules: Windows paths, the Edge profile folder (S2 5.4),
- * Edge's arguments (S2 5.3) and the links it may open (S2 9.6; the rule lives in src/text/link.ts
- * and is re-exported here). Nothing here starts a program; task 19 does, with what these return.
+ * Edge's arguments (S2 5.3) and the links that may be passed to a Windows program (Edge or
+ * `rundll32.exe`; S2 9.6; the rule lives in src/text/link.ts and is re-exported here). Nothing here
+ * starts a program; task 19 does, with what these return.
  */
 
 import { join } from 'node:path';

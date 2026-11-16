@@ -491,9 +491,10 @@ Two things only you can check decide whether the window is safe for real work:
   (`window.edge` names another place). Without Edge, `skydeck window --print-url` gives an address
   for any browser.
 - **WSL with the C: drive at `/mnt/c` and interop on**, as WSL sets it up by default: skydeck starts
-  two Windows programs, and only these, through interop: `msedge.exe` (the window, and links you
-  Ctrl+click) and `wsl.exe` (the keep-alive). It writes nothing on the Windows side; Edge writes its
-  profile folder (below).
+  three Windows programs, and only these, through interop: `msedge.exe` (the window),
+  `rundll32.exe` (the links the window opens: it hands them to your default browser; with
+  `window.links` `"edge"` they open with `msedge.exe` instead) and `wsl.exe` (the keep-alive). It
+  writes nothing on the Windows side; Edge writes its profile folder (below).
 
 Nothing is fetched or installed for the window. xterm.js, the terminal in the page, and its addons
 are committed in the repository under `vendor/`, with their licences and a list of their hashes
@@ -597,9 +598,10 @@ In `config.json` ("Configuration" above), all optional:
 | Key | Default | What it does |
 |---|---|---|
 | `window.port` | `47613` | The server's port on `127.0.0.1`: a whole number from 1 to 65535. Keep it unchanged once windows were opened: a window keeps its key per port, so after a change the old windows cannot connect (close them) and `skydeck window` opens a new one. |
-| `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program: an absolute path in WSL. Links you Ctrl+click in a terminal open with it too, in your own Edge profile. |
+| `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program: an absolute path in WSL. With `window.links` `"edge"` the links the window opens open with it too, in your own Edge profile. |
 | `window.profileDir` | `null` | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
+| `window.links` | `"default"` | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. On a managed PC, security monitoring may record or flag each start of `rundll32.exe url.dll,FileProtocolHandler`; `"edge"` avoids it. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
@@ -708,8 +710,8 @@ is one line, cut with an ellipsis when it is long:
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
    folder`), and the short id, which a click copies whole (`id copied`);
 3. the pull requests: the window's chip (below), the open ones side by side as far as they fit
-   (`acme/web #7 · failing`; a click opens one in your own Edge), and `Pull requests`; while none
-   is attached, `no pull request` and `+ PR`;
+   (`acme/web #7 · failing`; a click opens one in your default browser), and `Pull requests`;
+   while none is attached, `no pull request` and `+ PR`;
 4. the note's first line, with ` …` after it when there is more, or `no note`.
 
 The title, the group chip, a pull request and the note's line act on a click that selected no
@@ -770,7 +772,7 @@ line's tooltip has it whole, after the pull request's title). The merged and clo
 folded into `30 merged, 2 closed ▸`; a click unfolds them (they show no age: they are never read
 again). On a line:
 
-- a click that selected no text opens the pull request in your own Edge;
+- a click that selected no text opens the pull request in your default browser (`window.links`);
 - `×` detaches it and shows the toast `Detached acme/web #7` with `Undo`, which attaches it again.
 
 `↻`, under the open ones, reads the status of the session's pull requests that are not merged or
@@ -806,9 +808,9 @@ When the session's group holds a ticket key — the text `groupPattern` matches 
 letters, digits, `-`, `_` and `.` and starting with a letter or a digit; with the default pattern
 a key such as `ABC-123` at its start — the chip shows the group with `↗` after it (`ABC-123 ↗`,
 `ABC-123 cleanup ↗`), underlined, with the ticket's address as its tooltip, and a click on it that
-selected no text opens the ticket in your own Edge. Without such a key, or without `ticketUrl`,
-the chip is plain text. The chip never edits: ✎ and `g` edit the group. skydeck reads nothing
-from the ticket system.
+selected no text opens the ticket in your default browser (`window.links`). Without such a key,
+or without `ticketUrl`, the chip is plain text. The chip never edits: ✎ and `g` edit the group.
+skydeck reads nothing from the ticket system.
 
 `ticketUrl` must be an `http` or `https` address with `{key}` exactly once, after its host, with
 no user name or password, no white space, control character, `"` or backslash, no `%` (or `%` and

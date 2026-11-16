@@ -16,8 +16,8 @@ function shQuote(text: string): string {
 
 /**
  * Writes `<s.skydeckHome>/config/config.json` for a test that starts a server (A32): `window.edge`
- * is a stub script in the sandbox that records its arguments instead of starting Edge, and
- * `keepAlive` is `off`; `window` is merged over them (it may hold keys the configuration refuses,
+ * is a stub script in the sandbox that records its arguments instead of starting Edge,
+ * `keepAlive` is `off`, and `links` is `edge`; `window` is merged over them (it may hold keys the configuration refuses,
  * for a test that wants them refused; a key given as undefined is left out). A config.json already there keeps its other keys and its
  * other `window` keys. `edgeCalls()` gives the arguments of every run of the stub, in order.
  */
@@ -53,9 +53,12 @@ export function writeWindowConfig(
   const given = Object.fromEntries(
     Object.entries(window).filter(([, value]) => value !== undefined),
   );
+  // links "edge": the sandbox's Edge is the stub, which records every link; the default would hand
+  // every link to rundll32.exe, which the A32 guard refuses. A test that wants the default passes
+  // `links: 'default'`.
   writeFileSync(
     configPath,
-    `${JSON.stringify({ ...existing, window: { ...own, edge: edgeStub, keepAlive: 'off', ...given } }, null, 2)}\n`,
+    `${JSON.stringify({ ...existing, window: { ...own, edge: edgeStub, keepAlive: 'off', links: 'edge', ...given } }, null, 2)}\n`,
   );
 
   return {

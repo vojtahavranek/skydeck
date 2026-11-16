@@ -42,6 +42,8 @@ import type { TestPage } from '../helpers/window.ts';
 
 /** S2 6.1: the Windows client the keep-alive is. */
 const WSL_EXE = '/mnt/c/Windows/System32/wsl.exe';
+/** S2 9.6: what opens a link in the Windows default browser (window.links "default"). */
+const RUNDLL32_EXE = '/mnt/c/Windows/System32/rundll32.exe';
 const KEEPER_CODE = readFileSync(new URL('../../bin/skydeck-keeper', import.meta.url), 'utf8');
 const NS_TEXT = /^[1-9][0-9]*$/;
 
@@ -553,8 +555,8 @@ describe('a keeper found unstarted (S2 7.3; plan task 21)', () => {
 });
 
 describe('Windows programs (A32)', () => {
-  test('open-link starts the Edge stub with the link; nothing is run under /mnt/', async (t) => {
-    const d = serverSandbox(t);
+  test('open-link with window.links "edge" starts the Edge stub with the link; nothing is run under /mnt/', async (t) => {
+    const d = serverSandbox(t, { window: { links: 'edge' } });
     const started: string[] = [];
     const asked: string[] = [];
     const recording = (p: Platform): Platform => ({
@@ -590,6 +592,116 @@ describe('Windows programs (A32)', () => {
     for (const command of started) {
       assert.ok(!command.startsWith('/mnt/') && !/\.exe$/i.test(command), command);
     }
+  });
+
+  /**
+   * The sandbox's platform with every start of rundll32.exe answered by `answer` and recorded,
+   * never passed on: no test starts the real program (it would open a browser on the desktop). Any
+   * other start is recorded in `others` and passed on to the real processes, which refuse Windows
+   * programs (A32).
+   */
+  function fakeRundll32(answer: () => Promise<Detached>): {
+    platform: (p: Platform) => Platform;
+    calls: { args: readonly string[]; cwd: string }[];
+    others: string[];
+  } {
+    const calls: { args: readonly string[]; cwd: string }[] = [];
+    const others: string[] = [];
+    return {
+      calls,
+      others,
+      platform: (p) => ({
+        ...p,
+        processes: {
+          ...p.processes,
+          startDetached(command, args, options) {
+            if (command === RUNDLL32_EXE) {
+              calls.push({ args, cwd: options.cwd });
+              return answer();
+            }
+            others.push(command);
+            return p.processes.startDetached(command, args, options);
+          },
+        },
+      }),
+    };
+  }
+
+  test('open-link with window.links "default": a pull request\'s address reaches rundll32.exe as url.dll,FileProtocolHandler and the address; Edge is not run', async (t) => {
+    const d = serverSandbox(t, { window: { links: 'default' } });
+    assert.equal(d.deck.config.window.links, 'default');
+    const rundll32 = fakeRundll32(async () => ({ pid: 4_000_001, exited: new Promise(() => {}) }));
+    const test = await d.start({ platform: rundll32.platform });
+    const page = await connectTestPage(t, d, test.server);
+    const url = 'https://github.com/acme/web/pull/7';
+    const result = await page.act({ kind: 'open-link', url });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(rundll32.calls, [
+      { args: ['url.dll,FileProtocolHandler', url], cwd: d.cDrive },
+    ]);
+    assert.ok(
+      !rundll32.others.includes(d.deck.config.window.edge),
+      'the Edge stub was not started',
+    );
+    for (const command of rundll32.others) {
+      assert.ok(!command.startsWith('/mnt/') && !/\.exe$/i.test(command), command);
+    }
+    await sleep(200);
+    assert.deepEqual(d.edgeCalls(), []);
+  });
+
+  test('open-link with window.links "default" when rundll32.exe cannot be started: refused in words that name window.links "edge"', async (t) => {
+    const d = serverSandbox(t, { window: { links: 'default' } });
+    const rundll32 = fakeRundll32(() =>
+      Promise.reject(Object.assign(new Error('spawn failed ENOENT'), { code: 'ENOENT' })),
+    );
+    const test = await d.start({ platform: rundll32.platform });
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'open-link', url: 'https://github.com/acme/web/pull/7' });
+    assert.equal(result.ok, false);
+    assert.equal(
+      result.error,
+      'the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)',
+    );
+    assert.equal(rundll32.calls.length, 1);
+    assert.deepEqual(d.edgeCalls(), []);
+  });
+
+  test('open-link with window.links "default" and no stand-in for rundll32.exe: the A32 guard refuses the real one, so the link is refused (D5) and nothing is started', async (t) => {
+    // The net under every test of links: a stand-in that is forgotten or falls through reaches
+    // the real processes, which refuse rundll32.exe by its path before any process exists.
+    const d = serverSandbox(t, { window: { links: 'default' } });
+    const outcomes: { command: string; code: unknown }[] = [];
+    const watching = (p: Platform): Platform => ({
+      ...p,
+      processes: {
+        ...p.processes,
+        async startDetached(command, args, options) {
+          try {
+            const child = await p.processes.startDetached(command, args, options);
+            outcomes.push({ command, code: null });
+            return child;
+          } catch (error) {
+            outcomes.push({ command, code: (error as { code?: unknown }).code });
+            throw error;
+          }
+        },
+      },
+    });
+    const test = await d.start({ platform: watching });
+    const page = await connectTestPage(t, d, test.server);
+    const result = await page.act({ kind: 'open-link', url: 'https://github.com/acme/web/pull/7' });
+    assert.equal(result.ok, false);
+    assert.equal(
+      result.error,
+      'the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)',
+    );
+    assert.deepEqual(
+      outcomes.filter((outcome) => outcome.command === RUNDLL32_EXE),
+      [{ command: RUNDLL32_EXE, code: 'EWINDOWS' }],
+    );
+    await sleep(200);
+    assert.deepEqual(d.edgeCalls(), []);
   });
 });
 

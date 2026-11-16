@@ -92,9 +92,11 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
 - **Principle 8 (local only)**: the server listens on the loopback interface only (15). The only
   network use is still `gh`.
 - **Windows programs.** Step 2 is the first time skydeck starts Windows programs by itself, through
-  WSL interop. It starts exactly two, and only these: `msedge.exe` (the window, 5.3, and links the
-  user Ctrl+clicks, 9.6) and `wsl.exe` (the keep-alive, 6.1). Never `cmd.exe`, `powershell.exe` or
-  a shell; arguments are passed as an argument list. Every such start goes through one function
+  WSL interop. It starts exactly three, and only these: `msedge.exe` (the window, 5.3, and the
+  links the window opens when `window.links` is `"edge"`, 9.6), `rundll32.exe` (the links the
+  window opens, handed to the Windows default browser, 9.6) and `wsl.exe` (the keep-alive, 6.1).
+  Never `cmd.exe`, `powershell.exe`, `explorer.exe` or a shell; arguments are passed as an argument
+  list. Every such start goes through one function
   (`startWindowsProgram`), which refuses an argument that is empty, holds a `"` or a control
   character, or ends with a backslash: the program receives one command line and splits it
   itself, and each of these can change how it does. A **control character**, here and wherever
@@ -153,6 +155,7 @@ Design 3's words keep their meaning. New:
 | the program (`claude`) | its keeper, as the pty's child | until it exits | — |
 | the keep-alive: `wsl.exe` on Windows and the `sh` it runs in WSL | the server, through interop | while the server or any keeper lives (6.1) | `bin/skydeck-keepalive` (sh) |
 | Edge (`msedge.exe`) | `skydeck window`, through interop | until the user closes the window; outlives WSL | — |
+| a link's opener: `rundll32.exe`, or Edge with `window.links` `"edge"` (9.6) | the server, through interop, when the page asks to open a link | not waited for | — |
 
 A server restart leaves keepers, programs and the keep-alive running. A keeper never depends on
 the server: it keeps its program, its pty and its stream while no server is connected.
@@ -1695,19 +1698,38 @@ terminal can write to the clipboard but not read it).
 ### 9.6 Links
 
 Ctrl+click on a URL in a terminal (an OSC 8 link, or plain text that looks like `http://` or
-`https://` followed by URL characters) and a click on a pull-request link in the list or header
-send `act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so
-for one whose text is not its URL the page first shows the target and opens it only on a second
-click. The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme
-`http` or `https`, and is still at most 2,048 characters once the WHATWG URL parser has
-re-serialised it (so it cannot start with `-`; percent-encoding can make it several times longer,
-and the re-serialised URL is what Edge gets), and holds no `"` and no backslash: it becomes one
-argument of a Windows program, and either can change how that program splits its command line. It
-opens it by running
-`window.edge` with that URL as its only argument (no profile folder): it opens in the user's own
-Edge profile, where they are logged in, not in the window's profile. The page itself never
-navigates away: it cancels drag and drop over the window, which would otherwise open a dropped file
-in place of the page. Whether a link opens in the user's main Edge window is check W12.
+`https://` followed by URL characters) and a click on a pull-request link in the list or header send
+`act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so for
+one whose text is not its URL the page first shows the target and opens it only on a second click.
+The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme `http`
+or `https`, and is still at most 2,048 characters once the WHATWG URL parser has re-serialised it
+(so it cannot start with `-`; percent-encoding can make it several times longer, and the
+re-serialised URL is what the Windows program gets), and holds no `"` and no backslash: it becomes
+one argument of a Windows program, and either can change how that program splits its command line.
+Asked for by the user on 2026-11-15, ruled by the lead that day: the server opens it in the user's
+**Windows default browser**, where they are logged in, by running
+`/mnt/c/Windows/System32/rundll32.exe` with exactly two arguments, `url.dll,FileProtocolHandler` and
+the re-serialised URL (`explorer.exe <url>` is not used). That entry point opens what it is given as
+the Windows shell would, a program or a `file:` address included, so the `http` and `https` check is
+also what keeps a link from starting a program on the Windows side (15.5). `FileProtocolHandler`
+takes the rest of the command line as it is, and WSL's interop quotes an argument only when it must,
+so the URL must be one unquoted word: the re-serialised URL holds no white space and no control
+character, whatever the page sent (and the server refuses one that would hold anything but printable
+ASCII, so that this does not rest on the parser alone) — the parser removes tab and line breaks
+everywhere and the C0 controls and spaces around the address, percent-encodes every other white
+space and control character (and everything beyond ASCII) in the user name, password, path, query
+and fragment, and fails a host (also once its escapes are decoded) or a port that would keep one
+(IDNA maps most Unicode spaces in a host to a space, and drops U+FEFF and U+200B). With
+`window.links` `"edge"` (16.4) it runs `window.edge` with that URL as its only argument instead (no
+profile folder): it opens in the user's own Edge profile, not in the window's profile. When the
+program cannot be started the action is refused with `the link could not be opened: the default
+browser could not be started (window.links "edge" opens links in Edge)`, or, with `"edge"`, with
+`the link could not be opened: Edge could not be started`. That covers only a start that fails on
+the WSL side (the program is not there, interop is off): once interop has started it, what Windows
+does is not seen, so a start that Windows refuses afterwards (privilege management) or a browser
+that opens nothing leaves the action done and the key bar empty. The page itself never navigates
+away: it cancels drag and drop over the window, which would otherwise open a dropped file in place
+of the page. Whether a link opens in the user's default browser, logged in, is check W12.
 
 ### 9.7 Find
 
@@ -2369,8 +2391,9 @@ while it has no user name or password and its host is the one the parser reads i
 stand-in for `{key}`, and while `ticketUrl` holds no white space or control character and leaves no
 percent-escape unfinished right before `{key}` (a key would finish it: `…/%2{key}` with `e.` makes
 `..`). The chip then shows that it is a link (an arrow after the key, underlined), its tooltip is
-the address, and a click on it that selected no text opens it in the user's own Edge profile, as any
-link (9.6: `act open-link`, which the server checks again). Without a link the chip is plain text.
+the address, and a click on it that selected no text opens it where any link opens (9.6: `act
+open-link`, which the server checks again; the default browser, or Edge with `window.links`
+`"edge"`). Without a link the chip is plain text.
 The chip never edits: the ✎ beside it and `g` edit the group, with and without a link, and while
 there is no group the dashed `+ group` sets one. So nothing a program wrote into a title can add a
 host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`, `%` or white space, and the URL
@@ -3059,7 +3082,8 @@ A program's output is untrusted (it may print a hostile file):
 - xterm.js renders it as cells, never as markup; the page never puts any server-provided string
   into `innerHTML` (only `textContent`), and the CSP forbids inline script.
 - The clipboard: write only (9.5).
-- Links: opened only on a Ctrl+click, only `http` and `https`, and in Edge, never in the page (9.6).
+- Links: opened only on a Ctrl+click, only `http` and `https`, and in the default browser (or
+  Edge), never in the page (9.6).
 - The program's window title (OSC 0, 2) is ignored: the window shows skydeck's own titles.
 - Query answers come only from the screen side (9.3), and the page's terminal answers nothing, so
   output cannot make the page type into the program.
@@ -3067,9 +3091,16 @@ A program's output is untrusted (it may print a hostile file):
 ### 15.5 What runs
 
 The keeper runs the launch the server gives it: `claudeCommand` and the arguments design 7.6 and
-7.7 build. The server runs `window.edge` (the window, links), `wsl.exe` (the keep-alive) and
-`python3` (keepers), each with an argument list. No input from a page becomes a program name or a
-shell string; a page's `new` flags become `claude` arguments only after design 7.7's refusals.
+7.7 build. The server runs `rundll32.exe` (links, 9.6), `window.edge` (links with `window.links`
+`"edge"`), `wsl.exe` (the keep-alive) and `python3` (keepers), each with an argument list; `skydeck
+window` runs `window.edge` (the window). `rundll32.exe url.dll,FileProtocolHandler` opens what it is
+given as the Windows shell would, a program or a `file:` address included: 9.6's check (`http` or
+`https` only, re-serialised, one word of printable ASCII) is what stands between a page's input
+(a terminal's text, a program's output, a pull request's data) and a program start on the Windows
+side. `openLink` applies it itself, whatever its caller checked, and it is not widened (another
+scheme) without this in mind. So no input from a page becomes a program name or a shell string by
+skydeck's hand, but a link does reach the Windows shell: only an `http` or `https` address that
+check let through; a page's `new` flags become `claude` arguments only after design 7.7's refusals.
 
 ## 16. Install, uninstall, doctor, configuration, updating
 
@@ -3157,9 +3188,10 @@ New keys, all optional:
 |---|---|---|
 | `terminal` | `"here"` | Gains the value `"window"` (11.4): `resume` and `new` without an option or with `--tab`, `restore` and the interactive list's `R` start their sessions in the window, through its server, which `skydeck window` must have started; `--here` still starts one in this terminal (plan C13). Any other value is refused as every key of the file is: `<file>: "terminal" must be "here", "wezterm" or "window"`. `doctor` names it: `ok terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)`. |
 | `window.port` | `47613` | The server's port on `127.0.0.1` (5.2). A whole number from 1 to 65535: 0 ("the system picks") is not a setting; tests give it to the server directly (17). |
-| `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3, 9.6). An absolute path. |
+| `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3; and links with `window.links` `"edge"`, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
+| `window.links` | `"default"` | Asked for by the user on 2026-11-15, ruled by the lead that day. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
 | `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
@@ -3233,8 +3265,8 @@ Design 12's rules hold: tests are written before the code they test, never start
 test listens on a port the system picks (port 0, given to the server directly; `window.port`
 accepts 1–65535 only, 16.4).
 
-**No Windows program, enforced.** The development machine has a real `msedge.exe`, `wsl.exe` and
-`/run/WSL/1_interop`, so the rule is built in rather than only asked for. The test sandbox's
+**No Windows program, enforced.** The development machine has a real `msedge.exe`, `wsl.exe`,
+`rundll32.exe` and `/run/WSL/1_interop`, so the rule is built in rather than only asked for. The test sandbox's
 environment carries `SKYDECK_TEST_NO_WINDOWS=1`; while it is set — in skydeck's own environment or
 in the one given to the child — the real platform refuses to start a program that is under `/mnt/`,
 ends in `.exe` (any case) or starts with `MZ` (what WSL interop runs), also when the name reaches
@@ -3243,9 +3275,11 @@ runs. A test platform that can start a real process refuses them always, whateve
 says; the pure fake starts nothing: it records the start and returns what the test scripts, also for
 a Windows program, so that a test can check the command line Edge or the keep-alive would get. Every
 test that starts a server gives it a sandbox `config.json` whose `window.edge` is a stub that
-records its arguments and whose `keepAlive` is `off`, unless the test is about them, and points the
-first interop candidate (6.4) into the sandbox. Without the variable nothing is refused: the rule
-belongs to the tests, not to skydeck.
+records its arguments, whose `keepAlive` is `off` and whose `links` is `"edge"` (so that every link
+reaches the stub; the default would hand it to `rundll32.exe`, which is refused), unless the test is
+about them, and points the first interop candidate (6.4) into the sandbox. A test of the default
+browser stands in for `rundll32.exe` in its own platform and never passes it on. Without the
+variable nothing is refused: the rule belongs to the tests, not to skydeck.
 
 **Two test platforms.** Logic is tested on a platform with a fake clock, a fake `/proc` and fake
 processes. Every test that starts a keeper, the stand-in or a server, or judges a real process
@@ -3498,7 +3532,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W9 | Cascadia and Segoe draw Claude Code's `⏺ ⎿ ⏵` (headless Linux showed empty boxes). | A | the page's font list |
 | W10 | **Real claude**: rows with emoji, ZWJ and skin-tone sequences line up; `unicode-graphemes` against `unicode11`, compared with Claude Code's own layout. | A | 9.4 |
 | W11 | Desktop notifications are allowed on the managed PC: the permission prompt, a toast, a click that selects the session; and they still come when the window has been minimised for half an hour (Chromium throttles hidden pages and Edge may put them to sleep). | B | 13 |
-| W12 | Ctrl+click on a link opens it in the user's main Edge window, logged in. | A | 9.6 |
+| W12 | Ctrl+click on a link opens it in the user's default browser, logged in; with `window.links` `"edge"` (set only if the user wants to try it) in their main Edge window. The check copies the user's `config.json` aside first and gives it back at the end, and removes no file. | A | 9.6, 16.4 |
 | W13 | `edge://policy` (any `URLBlocklist`, `BrowserSignin`, `SyncDisabled`, `WebApp*`, `Extension*` entry), `edge://extensions` in the window's profile (which extensions are forced in), and whether the window's profile is signed in and syncs its history (`edge://settings/profiles`). | A | 15.1, 15.2 |
 | W14 | WSL lifetime: the lifetime script against a throwaway distribution measures the idle rule; then, with the window open and every WSL terminal closed, WSL is still running after a minute (`wsl -l -v` in PowerShell). Without the keep-alive (`"off"`) it stops. | A | 6.1 |
 | W15 | Sleep: with the window open, lock or sleep the PC for a few minutes. The page recovers by itself, keys work, the terminal repaints, sessions still run. | A | 6.5 |
@@ -3506,14 +3540,14 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W17 | **Real claude**, `/tui fullscreen`: the alternate screen and the mouse mode come back after `skydeck window --restart`. | A | 7.2 |
 | W18 | **Real claude**: a terminal query answered late (the server stopped for a few seconds while Claude Code starts) — does the answer leak into the prompt? | A | 7.1, 14 |
 | W19 | **Real claude**: does `waitingFor` tell a permission prompt from a question? | B | 12.4 |
-| W20 | Privilege management does not block or prompt for `msedge.exe` and `wsl.exe` started through interop. | A | 2, 5.3, 6.1 |
+| W20 | Privilege management does not block or prompt for `msedge.exe`, `wsl.exe` and `rundll32.exe` (with `window.links` `"default"` the server starts it for every link) started through interop; a silent block of `rundll32.exe` shows as a link that opens nowhere with an empty key bar. | A | 2, 5.3, 6.1, 9.6 |
 | W21 | **Real claude**: a turn that ends in a session that is not selected shows "finished · not seen"; selecting it for 1.5 s clears it; a permission dialog shows "asks". | B | 10.3, 12.4 |
 | W22 | **Real claude**: a session started in a WSL terminal shows "running in another terminal", Resume is refused with the guard's message, and after `/exit` it resumes into the window. | A | 7.9 |
 | W23 | **Real claude**: which `CLAUDE*` variables Claude Code sets for the programs it runs — print the variable names (never their values) in a session's `!env` against a plain shell's — to confirm 7.4's list. And `skydeck window` run from a session's `!` command refuses (5.1). | A | 5.1, 7.4 |
 | W24 | Crash dumps: kill a stand-in keeper, and a throwaway `node` started through the launcher's `/usr/bin/python3 -I -S -c` program (soft core limit 1 byte), by SIGSEGV; does a dump appear in WSL's crash folder (`%Temp%\wsl-crashes`, or `crashDumpFolder` in `.wslconfig`)? Neither should. | A | 2 |
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404? Answered for Chromium by the page suite (17.4, plan task 26): no, the worker keeps answering and stays registered; Edge itself is still to be checked here. | A | 15.3 |
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
-| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket in their main Edge window, logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
+| W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket where links open (W12), logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
 | W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
 | W29 | **Real claude**, on the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
 | W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a stack opened and closed with → and ←, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |

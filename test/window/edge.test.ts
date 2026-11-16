@@ -309,10 +309,36 @@ test('startEdge throws a RangeError for a port or a token that cannot be part of
 // ---------------------------------------------------------------------------------------------
 // openLink
 
-test('openLink opens an allowed URL with window.edge, the URL its only argument', async (t) => {
+/** S2 9.6: the program that opens a link in the Windows default browser (window.links "default"). */
+const RUNDLL32 = '/mnt/c/Windows/System32/rundll32.exe';
+/** Its first argument: the entry point that hands the rest of the command line to the shell. */
+const HANDLER = 'url.dll,FileProtocolHandler';
+
+test('openLink with window.links "default" starts rundll32.exe with exactly the handler and the URL', async (t) => {
   const { platform, processes } = setup(t);
+  const url = 'https://github.com/search?q=skydeck&type=repositories#a,b';
+  assert.equal(await openLink(platform, windowConfig({ links: 'default' }), url, LINK), true);
+  const call = onlyCall(processes);
+  assert.equal(call.command, RUNDLL32);
+  assert.deepEqual(call.args, [HANDLER, url]);
+  assert.deepEqual(Object.keys(call.options).sort(), ['cwd', 'env']);
+  assert.equal(call.options.cwd, C_DRIVE);
+  assert.equal(call.options.env.WSL_INTEROP, LINK);
+});
+
+test('openLink with the default configuration opens the link in the default browser, not in Edge', async (t) => {
+  const { platform, processes } = setup(t);
+  assert.equal(DEFAULT_CONFIG.window.links, 'default');
   const url = 'https://github.com/a/b/pull/1';
   assert.equal(await openLink(platform, windowConfig(), url, LINK), true);
+  assert.equal(onlyCall(processes).command, RUNDLL32);
+  assert.deepEqual(onlyCall(processes).args, [HANDLER, url]);
+});
+
+test('openLink with window.links "edge" opens an allowed URL with window.edge, the URL its only argument', async (t) => {
+  const { platform, processes } = setup(t);
+  const url = 'https://github.com/a/b/pull/1';
+  assert.equal(await openLink(platform, windowConfig({ links: 'edge' }), url, LINK), true);
   const call = onlyCall(processes);
   assert.equal(call.command, DEFAULT_CONFIG.window.edge);
   assert.deepEqual(call.args, [url]); // no profile folder: the user's own Edge profile (S2 9.6)
@@ -321,34 +347,225 @@ test('openLink opens an allowed URL with window.edge, the URL its only argument'
   assert.equal(call.options.env.WSL_INTEROP, LINK);
 });
 
-test('openLink passes the URL as the WHATWG parser re-serialised it', async (t) => {
+test('openLink with window.links "edge" starts the configured window.edge', async (t) => {
   const { platform, processes } = setup(t);
-  assert.equal(await openLink(platform, windowConfig(), 'http://x', null), true);
-  assert.deepEqual(onlyCall(processes).args, ['http://x/']);
-  assert.equal(onlyCall(processes).options.env.WSL_INTEROP, OWN_INTEROP);
+  const edge = '/mnt/d/Edge/msedge.exe';
+  assert.equal(
+    await openLink(platform, windowConfig({ links: 'edge', edge }), 'https://x/', LINK),
+    true,
+  );
+  assert.equal(onlyCall(processes).command, edge);
 });
 
-test('openLink starts nothing for a URL linkToOpen refuses, and answers false', async (t) => {
+for (const links of ['default', 'edge'] as const) {
+  const program = links === 'default' ? 'rundll32.exe' : 'Edge';
+  const argsOf = (url: string): string[] => (links === 'default' ? [HANDLER, url] : [url]);
+
+  test(`openLink (${links}) passes the URL as the WHATWG parser re-serialised it`, async (t) => {
+    const { platform, processes } = setup(t);
+    assert.equal(await openLink(platform, windowConfig({ links }), 'http://x', null), true);
+    assert.deepEqual(onlyCall(processes).args, argsOf('http://x/'));
+    assert.equal(onlyCall(processes).options.env.WSL_INTEROP, OWN_INTEROP);
+  });
+
+  test(`openLink (${links}) starts nothing for a URL linkToOpen refuses, and answers false`, async (t) => {
+    const { platform, processes } = setup(t);
+    const refused = [
+      'javascript:alert(1)',
+      'file:///etc',
+      'not a url',
+      '-https://x',
+      'https://x/?a=\\b', // the parser keeps a backslash in the query
+      'https://x/#\\b',
+      'https://a"b/', // the parser keeps a '"' in the host
+      `https://x/${'a'.repeat(2049 - 'https://x/'.length)}`,
+    ];
+    for (const url of refused) {
+      assert.equal(await openLink(platform, windowConfig({ links }), url, LINK), false, url);
+    }
+    assert.deepEqual(processes.calls, []);
+  });
+
+  test(`openLink (${links}) refuses an address the parser would give back with anything but printable ASCII, and starts nothing: the one-word rule does not rest on the parser`, async (t) => {
+    const { platform, processes } = setup(t);
+    /** URL.parse answering `href` for any input: a parser that would serialise otherwise. */
+    const parserGiving = (href: string): { mock: { restore(): void } } =>
+      t.mock.method(URL, 'parse', () => ({ protocol: 'https:', href }) as unknown as URL);
+    const unprintable = [
+      'https://a b/',
+      'https://a/b\tc',
+      'https://a/b\nc',
+      'https://a/b\x00c',
+      'https://a/b\x7fc',
+      'https://a/b\x85c',
+      'https://a/b\u00a0c',
+      'https://a/b\u3000c',
+      'https://a/b\u00e9c',
+      'https://a/b\uff02c',
+      'https://a/b\uff3cc',
+    ];
+    for (const href of unprintable) {
+      const parse = parserGiving(href);
+      const opened = await openLink(platform, windowConfig({ links }), 'https://a/', LINK);
+      parse.mock.restore();
+      assert.equal(opened, false, JSON.stringify(href));
+    }
+    assert.deepEqual(processes.calls, []);
+    // Not vacuous: the same stand-in with a printable address is what is opened.
+    const parse = parserGiving('https://a/b');
+    const opened = await openLink(platform, windowConfig({ links }), 'https://a/', LINK);
+    parse.mock.restore();
+    assert.equal(opened, true);
+    assert.deepEqual(onlyCall(processes).args, argsOf('https://a/b'));
+  });
+
+  test(`openLink (${links}) answers false when ${program} cannot be started`, async (t) => {
+    for (const code of ['ENOENT', 'EACCES', 'EWINDOWS']) {
+      const { platform, processes } = setup(t, { handler: failWith(code) });
+      const config = windowConfig({ links });
+      assert.equal(await openLink(platform, config, 'https://example.com/', LINK), false, code);
+      assert.equal(onlyCall(processes).command, links === 'default' ? RUNDLL32 : config.edge);
+    }
+  });
+
+  test(`openLink (${links}) in a sandbox without the C: drive stand-in starts nothing and answers false`, async (t) => {
+    const { platform, processes } = setup(t, { env: { SKYDECK_TEST_MNT_C: undefined } });
+    const config = windowConfig({ links });
+    assert.equal(await openLink(platform, config, 'https://example.com/', LINK), false);
+    assert.deepEqual(processes.calls, []);
+  });
+}
+
+/**
+ * D4 of follow-up F1: hostile addresses — white space, control characters, Unicode spaces and
+ * characters beyond ASCII (among them ones that Windows' best-fit mapping turns into '"' or a
+ * backslash) — in every part of a URL: scheme, user info, host (raw and percent-encoded), port,
+ * path, query, fragment, around it. WSL's interop quotes an argument only when it must, and
+ * FileProtocolHandler takes the rest of the command line raw (an ANSI one, perhaps, where best-fit
+ * mapping applies), so the address handed to rundll32.exe must be one unquoted word: printable
+ * ASCII (U+0021–U+007E) with no '"' and no backslash. The parser removes tab, LF and CR anywhere
+ * and strips C0 controls and spaces around the address; it percent-encodes the others, and all
+ * beyond ASCII, in the user info, path, query and fragment; it writes a host beyond ASCII as
+ * punycode; a host (also once its escapes are decoded) or a port that keeps one fails.
+ */
+const HOSTILE_CHARACTERS: readonly string[] = [
+  ' ',
+  '\t',
+  '\n',
+  '\r',
+  '\v',
+  '\f',
+  '\0',
+  '\x01',
+  '\x1b',
+  '\x1f',
+  '\x7f',
+  '\x85', // NEL
+  '\x9b', // CSI
+  '\u00a0', // no-break space
+  '\u1680', // Ogham space mark
+  '\u2002', // en space
+  '\u200a', // hair space
+  '\u200b', // zero width space
+  '\u2028', // line separator
+  '\u2029', // paragraph separator
+  '\u202f', // narrow no-break space
+  '\u205f', // medium mathematical space
+  '\u3000', // ideographic space
+  '\ufeff', // byte order mark
+  '\u00fc', // beyond ASCII, not a space
+  '\uff02', // fullwidth quotation mark: '"' after best-fit mapping
+  '\uff3c', // fullwidth reverse solidus: a backslash after best-fit mapping
+  '\u00a5', // yen sign: a backslash on a Japanese code page
+];
+const HOSTILE_PLACES: readonly ((c: string) => string)[] = [
+  (c) => `${c}https://example.com/a${c}`,
+  (c) => `ht${c}tps://example.com/`,
+  (c) => `https:${c}//example.com/`,
+  (c) => `https://us${c}er:pa${c}ss@example.com/`,
+  (c) => `https://${c}example.com/`,
+  (c) => `https://exa${c}mple.com/`,
+  (c) => `https://exa${encodeURIComponent(c)}mple.com/`, // the host is the one part decoded
+  (c) => `https://example.com${c}/`,
+  (c) => `https://[::1${c}]/`,
+  (c) => `https://1.2.3${c}.4/`,
+  (c) => `https://example.com:4${c}43/`,
+  (c) => `https://example.com/a${c}b/${c}`,
+  (c) => `https://example.com/a?q=${c}b&r=${c}`,
+  (c) => `https://example.com/a?${c}`,
+  (c) => `https://example.com/a#f${c}g`,
+  (c) => `https://example.com/a#${c}`,
+  (c) => `https://example.com/%${c}20`,
+  (c) => `HTTP://Example.COM/${c}${c}${c}?${c}${c}#${c}${c}`,
+];
+/** One word of the Windows command line: an http(s) address in printable ASCII, no space. */
+const ONE_WORD = /^https?:\/\/[\x21-\x7e]+$/;
+
+test('openLink hands rundll32.exe an address with no white space and no control character, whatever the page sent (D4)', async (t) => {
   const { platform, processes } = setup(t);
-  const refused = [
-    'javascript:alert(1)',
-    'file:///etc',
-    'not a url',
-    '-https://x',
-    'https://x/?a=\\b', // the parser keeps a backslash in the query
-    'https://x/#\\b',
-    `https://x/${'a'.repeat(2049 - 'https://x/'.length)}`,
-  ];
-  for (const url of refused) {
-    assert.equal(await openLink(platform, windowConfig(), url, LINK), false, url);
+  let opened = 0;
+  for (const place of HOSTILE_PLACES) {
+    for (const c of HOSTILE_CHARACTERS) {
+      const url = place(c);
+      const before = processes.calls.length;
+      const result = await openLink(platform, windowConfig({ links: 'default' }), url, LINK);
+      const calls = processes.calls.slice(before);
+      assert.equal(calls.length, result ? 1 : 0, JSON.stringify(url));
+      const [call] = calls;
+      if (call === undefined) continue;
+      opened += 1;
+      const [handler, address, ...more] = call.args;
+      assert.equal(handler, HANDLER);
+      assert.deepEqual(more, []);
+      const shown = `${JSON.stringify(url)} → ${JSON.stringify(address)}`;
+      assert.match(address ?? '', ONE_WORD, shown);
+      assert.doesNotMatch(address ?? '', /["\\]/, shown);
+    }
   }
-  assert.deepEqual(processes.calls, []);
+  // Not vacuous: more than half of the table is opened (encoded, removed, or as punycode).
+  const all = HOSTILE_PLACES.length * HOSTILE_CHARACTERS.length;
+  assert.ok(opened > all / 2, `${opened} of ${all} opened`);
 });
 
-test('openLink answers false when Edge cannot be started', async (t) => {
-  for (const code of ['ENOENT', 'EACCES']) {
-    const { platform } = setup(t, { handler: failWith(code) });
-    assert.equal(await openLink(platform, windowConfig(), 'https://example.com/', LINK), false);
+test('the parser percent-encodes white space, controls and what is beyond ASCII in the user info, path, query and fragment, removes tab and line breaks, and fails a host (also percent-encoded) or port that keeps one (D4)', async (t) => {
+  const { platform, processes } = setup(t);
+  const cases: [url: string, opened: string | null][] = [
+    ['https://example.com/a b', 'https://example.com/a%20b'],
+    ['https://example.com/a\tb\nc\rd', 'https://example.com/abcd'],
+    ['https://example.com/?q=a b\u3000c', 'https://example.com/?q=a%20b%E3%80%80c'],
+    ['https://example.com/#a\x1bb\x7fc\x85d', 'https://example.com/#a%1Bb%7Fc%C2%85d'],
+    ['https://a b:c\u00a0d@example.com/', 'https://a%20b:c%C2%A0d@example.com/'],
+    ['  https://example.com/\x00\x1f ', 'https://example.com/'],
+    ['https://exa\tmple.com/', 'https://example.com/'],
+    ['https://exa mple.com/', null],
+    ['https://exa\u00a0mple.com/', null], // IDNA maps it to a space
+    ['https://exa\u2028mple.com/', null],
+    ['https://exa\x1fmple.com/', null],
+    ['https://example.com:4 43/', null],
+    ['https://example.com:4\u3000/', null],
+    ['https://exa%20mple.com/', null], // the host's escapes are decoded first
+    ['https://exa%0Ample.com/', null],
+    ['https://exa%C2%A0mple.com/', null],
+    ['https://exa%22mple.com/', null],
+    ['https://exa%5Cmple.com/', null],
+    ['https://exa%EF%BC%82mple.com/', null], // IDNA maps U+FF02 to '"'
+    ['https://exa\uff02mple.com/', null],
+    ['https://exa\uff3cmple.com/', null],
+    ['https://exa\u00fcmple.com/', 'https://xn--example-p2a.com/'],
+    [
+      'https://example.com/\uff02\uff3c?\u00a5#\u00fc',
+      'https://example.com/%EF%BC%82%EF%BC%BC?%C2%A5#%C3%BC',
+    ],
+  ];
+  for (const [url, address] of cases) {
+    const before = processes.calls.length;
+    const result = await openLink(platform, windowConfig({ links: 'default' }), url, LINK);
+    assert.equal(result, address !== null, JSON.stringify(url));
+    assert.deepEqual(
+      processes.calls.slice(before).map((call) => call.args),
+      address === null ? [] : [[HANDLER, address]],
+      JSON.stringify(url),
+    );
   }
 });
 

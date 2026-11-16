@@ -44,6 +44,7 @@ describe('loadConfig', () => {
       edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
       profileDir: null,
       keepAlive: 'wsl',
+      links: 'default',
     });
   });
 
@@ -56,7 +57,13 @@ describe('loadConfig', () => {
 
   test('every window key can be set (S2 16.4)', (t) => {
     const text = JSON.stringify({
-      window: { port: 1, edge: '/opt/edge', profileDir: 'D:\\skydeck\\edge', keepAlive: 'off' },
+      window: {
+        port: 1,
+        edge: '/opt/edge',
+        profileDir: 'D:\\skydeck\\edge',
+        keepAlive: 'off',
+        links: 'edge',
+      },
     });
 
     assert.deepEqual((load(t, text).run() as { window: unknown }).window, {
@@ -64,10 +71,35 @@ describe('loadConfig', () => {
       edge: '/opt/edge',
       profileDir: 'D:\\skydeck\\edge',
       keepAlive: 'off',
+      links: 'edge',
     });
     assert.equal(parseConfig('{"window":{"port":65535}}', 'x').window.port, 65535);
     assert.equal(parseConfig('{"window":{"profileDir":"c:\\\\"}}', 'x').window.profileDir, 'c:\\');
     assert.equal(parseConfig('{"window":{"profileDir":null}}', 'x').window.profileDir, null);
+  });
+
+  test('window.links is "default" unless set, and takes "default" or "edge" (S2 9.6, 16.4)', () => {
+    assert.equal(parseConfig('{}', 'x').window.links, 'default');
+    assert.equal(parseConfig('{"window":{"port":47000}}', 'x').window.links, 'default');
+    assert.equal(parseConfig('{"window":{"links":"default"}}', 'x').window.links, 'default');
+    assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.links, 'edge');
+  });
+
+  test('a wrong window.links is refused as a wrong window.keepAlive is, in the same words', () => {
+    for (const value of ['"chrome"', '"EDGE"', '1', 'true', 'null', '{}']) {
+      assert.throws(
+        () => parseConfig(`{"window":{"links":${value}}}`, '/c/config.json'),
+        (error: unknown) => {
+          assert.ok(error instanceof ConfigError, String(error));
+          assert.equal(
+            error.message,
+            '/c/config.json: "window.links" must be "default" or "edge"',
+            value,
+          );
+          return true;
+        },
+      );
+    }
   });
 
   test('an empty wezterm object leaves the domain null', (t) => {
@@ -122,6 +154,12 @@ describe('loadConfig', () => {
     ['{"window":{"profileDir":3}}', 'window.profileDir'],
     ['{"window":{"keepAlive":"on"}}', 'window.keepAlive'],
     ['{"window":{"keepAlive":false}}', 'window.keepAlive'],
+    ['{"window":{"links":"chrome"}}', 'window.links'],
+    ['{"window":{"links":"Default"}}', 'window.links'],
+    ['{"window":{"links":""}}', 'window.links'],
+    ['{"window":{"links":false}}', 'window.links'],
+    ['{"window":{"links":null}}', 'window.links'],
+    ['{"window":{"links":["edge"]}}', 'window.links'],
   ];
   for (const [text, key] of invalid) {
     test(`${text} is a ConfigError naming the file${key === null ? '' : ` and ${key}`}`, (t) => {
@@ -184,6 +222,7 @@ describe('parseConfig', () => {
         edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
         profileDir: null,
         keepAlive: 'wsl',
+        links: 'default',
       },
     });
   });
