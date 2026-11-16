@@ -3596,8 +3596,9 @@ grants a permission through Playwright.
   suite; the job's `shard` list in the workflow holds `1/n` to `n/n`, each entry naming the count
   too, so a wrong list, an entry added or left out, would leave files unrun or run twice with
   every job still green; a step of `lint` therefore reads the workflow as text and fails unless
-  every `shard` list is exactly `1/n` to `n/n` for one n and there are as many lists as steps that
-  give Node a shard): Node's
+  every `shard` list is exactly `1/n` to `n/n` for one n, there are as many lists as steps that
+  give Node a shard, and no line of the workflow opens a matrix `include` or `exclude`, which could
+  add or drop a shard without touching a list): Node's
   `--test-shard=i/n` cuts the sorted list of test files into n parts by taking every n-th file,
   so the shards together run every file once, no file is named in the workflow, and a new test
   file needs no upkeep there. The workflow gives the option as `NODE_OPTIONS` and not as

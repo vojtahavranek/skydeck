@@ -29,7 +29,9 @@ concurrency:
 # sharded too and could pass with no test at all.
 # The `shard` list of a job must hold 1/n to n/n: each entry names the count too, so a list with an
 # entry added or left out would leave files unrun or run twice with every job green. The `lint`
-# job therefore reads this file and fails unless every list is exactly that, for one n.
+# job therefore reads this file and fails unless every list is exactly that, for one n. For the same
+# reason the matrices of the sharded jobs may not use `include` or `exclude` (they can add or drop a
+# shard without touching the list), and that step fails on any such line in this file.
 # A job that reaches its `timeout-minutes` is only cancelled, which not every reader of the checks
 # takes for a failure; a step that reaches its own limit fails the job. So each test step has one.
 jobs:
@@ -64,7 +66,8 @@ jobs:
       - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive
       - run: python3 -m py_compile bin/skydeck-keeper
       # Each `shard` list against itself (no knowledge of the legs): every entry is i/n for one n,
-      # each i from 1 to n appears once, and there are as many lists as steps that give Node a shard.
+      # each i from 1 to n appears once, there are as many lists as steps that give Node a shard, and
+      # no matrix has an include or an exclude (either changes the shards without touching a list).
       - name: Check the shard lists
         run: |
           python3 - .github/workflows/ci.yml <<'PY'
@@ -81,6 +84,9 @@ jobs:
           use = r"\s*NODE_OPTIONS:\s*--test-shard=\$[{][{]\s*matrix\.shard\s*[}][}]\s*"
           uses = [line for line in lines if re.fullmatch(use, line)]
           errors = []
+          for line in lines:
+              if re.match(r"\s*(include|exclude):", line):
+                  errors.append(f"{line.strip()}: a matrix include or exclude can change the shards unseen")
           if not uses:
               errors.append("no step gives Node a shard")
           if len(lists) != len(uses):
