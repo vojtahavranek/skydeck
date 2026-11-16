@@ -15,12 +15,30 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Three kinds of job run side by side (S2 17.5), so that a pull request waits for its slowest job
+# (about 10 minutes) and not for the sum of them (about 32 minutes when they ran in one job):
+# - lint: the format check, both type checks, shellcheck and py_compile;
+# - unit: `npm test`, in shards;
+# - page: `npm run test:page`, in shards (Node 24 only).
+# A shard is Node's own `--test-shard=i/n`: the sorted list of test files is cut into n parts by taking
+# every n-th file, so no file is named here and a new test file needs no upkeep. The option is given
+# as NODE_OPTIONS, not as `npm test -- --test-shard=i/n`: npm puts that argument after the glob, where
+# `node --test` ignores it without a word and every shard would run the whole suite.
+# The suites' sandbox builds the environment of its child processes from nothing, so it drops
+# NODE_OPTIONS and a nested `node --test` of a test stays whole; one given process.env would be
+# sharded too and could pass with no test at all.
+# The `shard` list of a job must hold 1/n to n/n: each entry names the count too, so a list with an
+# entry added or left out would leave files unrun or run twice with every job green. The `lint`
+# job therefore reads this file and fails unless every list is exactly that, for one n. For the same
+# reason the matrices of the sharded jobs may not use `include` or `exclude` (they can add or drop a
+# shard without touching the list), and that step fails on any such line in this file.
+# A job that reaches its `timeout-minutes` is only cancelled, which not every reader of the checks
+# takes for a failure; a step that reaches its own limit fails the job. So each test step has one.
 jobs:
-  check:
-    runs-on: ${{ matrix.os }}
-    # The page suite's browser download and run (S2 17.5). The Node 24 leg with the page suite takes
-    # 22 to 25 minutes; 45 leaves room without letting a hung run burn an hour.
-    timeout-minutes: 45
+  lint:
+    name: lint (node ${{ matrix.leg.node }})
+    runs-on: ${{ matrix.leg.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -28,41 +46,121 @@ jobs:
         # oldest-Node leg, runs only when the workflow is started by hand (workflow_dispatch), and a
         # run started by hand runs both. That is the owner's decision, to save CI minutes: the
         # oldest-Node leg is run on main at checkpoints and when the work is done
-        # (`gh workflow run CI --ref main`).
+        # (`gh workflow run CI --ref main`). The unit job has the same legs; the page job has only
+        # the second.
         # - node '24.12': the oldest Node the launcher accepts, on the newest Ubuntu.
-        # - node '24': the newest 24.x, with the page suite, on Ubuntu 24.04 (the development
-        #   machine's): Playwright 1.60.0 has no Chromium for 26.04. Drop the pin when Playwright is
-        #   upgraded.
-        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"node":"24.12","os":"ubuntu-latest"},{"node":"24","os":"ubuntu-24.04"}]' || '[{"node":"24","os":"ubuntu-24.04"}]') }}
-    name: check (node ${{ matrix.node }})
+        # - node '24': the newest 24.x, on Ubuntu 24.04 (the development machine's), the system
+        #   of the page job, whose runner pin (see there) is the one to drop with Playwright's
+        #   upgrade; this leg's goes with it.
+        leg: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"node":"24.12","os":"ubuntu-latest"},{"node":"24","os":"ubuntu-24.04"}]' || '[{"node":"24","os":"ubuntu-24.04"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ matrix.leg.node }}
           cache: npm
       - run: npm ci
-      # `npm run check` without its last step, the page suite, which only the newest leg runs.
       - run: npm run format:check
       - run: npm run typecheck
-      - run: npm test
       # By name: bin/skydeck-keeper is python, not sh (plan A14).
       - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive
       - run: python3 -m py_compile bin/skydeck-keeper
-      # The page suite (S2 17.4, 17.5): Node 24 only, with Chromium cached under the pinned
-      # Playwright's version and the runner's system.
+      # Each `shard` list against itself (no knowledge of the legs): every entry is i/n for one n,
+      # each i from 1 to n appears once, there are as many lists as steps that give Node a shard, and
+      # no matrix has an include or an exclude (either changes the shards without touching a list).
+      - name: Check the shard lists
+        run: |
+          python3 - .github/workflows/ci.yml <<'PY'
+          import re
+          import sys
+
+          lines = [
+              line
+              for line in open(sys.argv[1], encoding="utf-8").read().splitlines()
+              if not line.lstrip().startswith("#")
+          ]
+          matches = [re.fullmatch(r"\s*shard:\s*\[(.*)\]\s*", line) for line in lines]
+          lists = [m.group(1) for m in matches if m]
+          use = r"\s*NODE_OPTIONS:\s*--test-shard=\$[{][{]\s*matrix\.shard\s*[}][}]\s*"
+          uses = [line for line in lines if re.fullmatch(use, line)]
+          errors = []
+          for line in lines:
+              if re.match(r"\s*(include|exclude):", line):
+                  errors.append(f"{line.strip()}: a matrix include or exclude can change the shards unseen")
+          if not uses:
+              errors.append("no step gives Node a shard")
+          if len(lists) != len(uses):
+              errors.append(f"{len(lists)} shard lists for {len(uses)} steps that use one")
+          for text in lists:
+              entries = [e.strip().strip("'\"") for e in text.split(",")]
+              pairs = [re.fullmatch(r"([0-9]+)/([0-9]+)", e) for e in entries]
+              if not all(pairs):
+                  errors.append(f"[{text}]: an entry is not i/n")
+                  continue
+              indexes = sorted(int(p.group(1)) for p in pairs)
+              totals = {int(p.group(2)) for p in pairs}
+              if len(totals) != 1:
+                  errors.append(f"[{text}]: the entries do not share one n")
+              elif indexes != list(range(1, totals.pop() + 1)):
+                  errors.append(f"[{text}]: not exactly 1/n to n/n")
+          for error in errors:
+              print("shard lists:", error)
+          if errors:
+              sys.exit(1)
+          print(f"shard lists: {len(lists)} lists, all 1/n to n/n")
+          PY
+
+  unit:
+    name: unit (node ${{ matrix.leg.node }}, ${{ matrix.shard }})
+    runs-on: ${{ matrix.leg.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same legs as the lint job (see there).
+        leg: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"node":"24.12","os":"ubuntu-latest"},{"node":"24","os":"ubuntu-24.04"}]' || '[{"node":"24","os":"ubuntu-24.04"}]') }}
+        shard: ['1/3', '2/3', '3/3']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.leg.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+        timeout-minutes: 20
+        env:
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
+
+  # The page suite (S2 17.4, 17.5): Node 24 only, with Chromium cached under the pinned Playwright's
+  # version and the runner's system. On Ubuntu 24.04 and not the newest: Playwright 1.60.0 has no
+  # Chromium for 26.04. Drop the pin when Playwright is upgraded.
+  page:
+    name: page (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/3', '2/3', '3/3']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
       - name: Read the Playwright version and the system
-        if: matrix.node == '24'
         id: playwright
         run: |
           echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "system=$(. /etc/os-release && echo "$ID-$VERSION_ID")" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: matrix.node == '24'
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.system }}-${{ steps.playwright.outputs.version }}
-      - if: matrix.node == '24'
-        run: npx playwright install --with-deps chromium
-      - if: matrix.node == '24'
-        run: npm run test:page
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:page
+        timeout-minutes: 20
+        env:
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
