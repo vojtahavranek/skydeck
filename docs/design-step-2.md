@@ -1519,8 +1519,10 @@ page last proposed (`attach`, `resize`). The rules:
   the screen side allocate gigabytes of scrollback (ruled, plan task 12's review). The page
   computes its proposal itself (not with the fit addon): the most columns and rows whose screen
   fits the terminal's area, the screen being cell × count rounded to whole pixels as xterm.js
-  6.0.0 rounds it, and the room the addon gave its scroll bar (14 px) and xterm.js's padding
-  counted out; the answer does not depend on the terminal's current size. The fit addon's does (it
+  6.0.0 rounds it, and the room the addon gave its scroll bar (14 px) and the margin the page
+  keeps around the terminal's text (12.6) counted out — read from the page's style sheet at every
+  count, so that the margin drawn and the margin counted cannot drift apart; the answer does not
+  depend on the terminal's current size. The fit addon's does (it
   divides by the cell of the current size), so at some widths no size proposes itself — 104
   columns propose 103 and 103 propose 104 — and a terminal shown there was resized every second
   (ruled by the plan owner, M4 of plan task 28's review). The proposal is a function of the box,
@@ -2384,6 +2386,19 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   recently shown detached beyond that; while the window is hidden (minimised) it detaches all but
   the selected one. Switching between attached terminals is instant; switching to another costs one
   snapshot (7.3).
+  The terminal's text keeps a margin in the terminal's own background: 8 px above and below,
+  10 px at the left, and 10 px between the text and the scroll bar's room, which stays at the
+  terminal's right edge (the room is kept whether the scroll bar shows or not, so without one the
+  text ends 24 px or more from the edge). The size is in whole cells, so at the right and the
+  bottom the margin is wider by what is left of a cell. The size the page proposes is counted
+  inside it (8.2.6); what lies over the terminal (its bars, the hint, the find bar) keeps its
+  place in the terminal's box. The lines that frame the terminal — the list's right edge, the line
+  under the header (and under an ended bar), the line over the key bar — have one colour of their
+  own (`--edge`), softer than the page's other lines in both colour schemes; the focused zone's
+  coloured top edge (12.9) is the focus sign and keeps its colour. The owner's request of
+  2026-11-16 (follow-up F2): before it, the text touched the list and the header, and xterm.js's
+  own style painted the 4 px and 2 px it had there black, which read as a hard border, above all
+  in the light scheme.
   What the server says about a terminal is shown over that terminal, as the page's own text and
   never written into it (so that the page's screen stays the screen side's): the reconnecting bar
   (7.8) and "sized by another window" (8.2.6) while they hold; a gap or a newer keeper, which the
