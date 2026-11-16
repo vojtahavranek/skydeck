@@ -209,6 +209,10 @@ export function createTerminalView(root, deps) {
     });
     xterm.onBinary((data) => sendInput(t, data, true));
     xterm.open(screen);
+    screen.addEventListener('wheel', (event) => wheelInMargin(t, event), {
+      capture: true,
+      passive: false,
+    });
     // S2 9.1: the page pastes, before xterm.js sees the event (the capture phase of its element):
     // xterm.js 6.0.0 neither cancels a paste (the browser then puts the whole text into its
     // hidden textarea, which makes the page slow at everything after) nor filters it (a text
@@ -224,6 +228,61 @@ export function createTerminalView(root, deps) {
       true,
     );
     return t;
+  };
+
+  /**
+   * F2: a wheel in the margin around the text (terminal-view.css) does what one over the nearest
+   * text cell does, once. xterm.js 6.0.0 scrolls with the wheel only over its scrollable element,
+   * which the margin lies outside of; in the program's mouse mode its element reports the wheel.
+   * So a wheel whose target is outside the scrollable element goes no further, and one like it
+   * (the same deltas, keys and buttons, at the nearest point of the text) is dispatched on the
+   * text, where it takes the way a wheel over the text takes: it scrolls, or reaches the program
+   * as one report. The browser's own action follows the copy's (`preventDefault`).
+   * @param {Term} t
+   * @param {WheelEvent} event
+   */
+  const wheelInMargin = (t, event) => {
+    const scrollable = t.xterm.element?.querySelector('.xterm-scrollable-element');
+    const text = scrollable?.querySelector('.xterm-screen');
+    if (!(text instanceof HTMLElement) || !(event.target instanceof Node)) {
+      return;
+    }
+    if (scrollable?.contains(event.target)) {
+      return; // over the text or the room at its right: xterm.js has it
+    }
+    event.stopPropagation();
+    const box = text.getBoundingClientRect();
+    /** @param {number} value @param {number} low @param {number} high */
+    const clamp = (value, low, high) => Math.min(Math.max(value, low), Math.max(low, high));
+    const x = clamp(event.clientX, box.left + 0.5, box.right - 0.5);
+    const y = clamp(event.clientY, box.top + 0.5, box.bottom - 0.5);
+    const copy = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      clientX: x,
+      clientY: y,
+      screenX: event.screenX + x - event.clientX,
+      screenY: event.screenY + y - event.clientY,
+      deltaX: event.deltaX,
+      deltaY: event.deltaY,
+      deltaZ: event.deltaZ,
+      deltaMode: event.deltaMode,
+      button: event.button,
+      buttons: event.buttons,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
+      // Chromium's own wheel amounts, which xterm.js's scrolling reads first (not in the standard).
+      ...{
+        wheelDeltaX: Reflect.get(event, 'wheelDeltaX'),
+        wheelDeltaY: Reflect.get(event, 'wheelDeltaY'),
+      },
+    });
+    if (!text.dispatchEvent(copy)) {
+      event.preventDefault();
+    }
   };
 
   /**
@@ -707,7 +766,7 @@ export function createTerminalView(root, deps) {
     if (!(width > 0) || !(height > 0) || cell === null) {
       return null; // hidden, or no font yet
     }
-    return fitInside(width, height, cell);
+    return fitInside(width, height, cell, t.xterm.element ?? root);
   };
 
   /**
@@ -1154,7 +1213,7 @@ export function createTerminalView(root, deps) {
       if (cell === null) {
         return null;
       }
-      return fitInside(Math.floor(width), Math.floor(height), cell);
+      return fitInside(Math.floor(width), Math.floor(height), cell, shown?.xterm.element ?? root);
     },
   };
 }
@@ -1162,27 +1221,31 @@ export function createTerminalView(root, deps) {
 /**
  * What a terminal box of `width` × `height` CSS pixels holds (`propose` and `fits`, so that the two
  * cannot count differently): `fitIn` for the area inside the room the style sheet keeps around
- * the text (`padding`) and the scroll bar's room.
+ * the text (`padding`, as it styles `element`) and the scroll bar's room.
  * @param {number} width
  * @param {number} height
  * @param {{ width: number, height: number, ratio: number }} cell
+ * @param {Element} element
  * @returns {{ cols: number, rows: number }}
  */
-function fitInside(width, height, cell) {
-  const room = padding();
+function fitInside(width, height, cell, element) {
+  const room = padding(element);
   return fitIn(width - room.left - room.right - SCROLL_BAR, height - room.top - room.bottom, cell);
 }
 
 /**
  * The room between the terminal's text and its box (F2): terminal-view.css's `--tv-pad-top`,
- * `--tv-pad-right`, `--tv-pad-bottom` and `--tv-pad-left`, read from the style sheet at every
- * measure, so that it and the size the view proposes cannot drift apart (one source). The top,
- * left and bottom ones are the padding of xterm.js's element; the right one is room left between
- * the text and the scroll bar's. A value that is not a number of CSS pixels counts as 0.
+ * `--tv-pad-right`, `--tv-pad-bottom` and `--tv-pad-left` as they style `element` (xterm.js's
+ * element, or the view's root while no terminal is shown), read at every measure, so that the
+ * room counted is the room drawn (one source). The style sheet registers them as lengths: their
+ * computed value is in px whatever unit or ancestor sets them. The top, left and bottom ones are
+ * the padding of xterm.js's element; the right one is room left between the text and the scroll
+ * bar's. A value that is no length of 0 or more counts as 0, as it draws none.
+ * @param {Element} element
  * @returns {{ top: number, right: number, bottom: number, left: number }}
  */
-function padding() {
-  const style = getComputedStyle(document.documentElement);
+function padding(element) {
+  const style = getComputedStyle(element);
   /** @param {string} side */
   const px = (side) => {
     const match = /^\s*(\d+(?:\.\d+)?)px\s*$/.exec(style.getPropertyValue(`--tv-pad-${side}`));
