@@ -30,7 +30,7 @@
 /** @import { EditWhat } from './keys.js' */
 import {
   noteLine,
-  prItemText,
+  prItemParts,
   prItemTip,
   splitPrs,
   timesText,
@@ -773,13 +773,28 @@ export function createCards(root, deps) {
       const key = open.map((pr) => pr.url).join('\n');
       if (key !== itemsKey) {
         itemsKey = key;
-        items.replaceChildren(...open.map(() => element('span', 'header-pr')));
+        // F4: the state's words apart, so that they alone take the state's tint (style.css).
+        items.replaceChildren(
+          ...open.map(() => {
+            const item = element('span', 'header-pr');
+            item.append(element('span', 'header-pr-name'), element('span', 'header-pr-state'));
+            return item;
+          }),
+        );
       }
       open.forEach((pr, at) => {
         const item = items.children[at];
-        if (item instanceof HTMLElement) {
+        const [name, state] = item instanceof HTMLElement ? item.children : [];
+        if (
+          item instanceof HTMLElement &&
+          name instanceof HTMLElement &&
+          state instanceof HTMLElement
+        ) {
+          const parts = prItemParts(pr);
           setData(item, 'url', pr.url);
-          setText(item, prItemText(pr));
+          setText(name, parts.name);
+          setText(state, parts.state);
+          setData(state, 'level', parts.level);
         }
       });
       const note = noteLine(row, selected);

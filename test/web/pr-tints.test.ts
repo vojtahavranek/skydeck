@@ -1,16 +1,49 @@
 // The pull-request chips' quiet tints (follow-up F4): the variables of web/style.css, in both
-// colour schemes, read from the file itself. Each tint's text has a contrast of at least 4.5 : 1
-// (WCAG 2) against its own background and against the backgrounds a row, the header and the
-// dialog draw it on (`--panel`, the hovered row's `--panel2`, the selected row's `--sel`), and it
-// is a softer colour than the attention colour of its family (S2 12.4's marks stay the strongest).
+// colour schemes, read from the files themselves. Each tint's text has a contrast of at least
+// 4.5 : 1 (WCAG 2) against its own background (the list's and the header's chips) and against
+// every background the state's words stand on (PLACES: a row, a hovered and a selected row, the
+// header, the dialog, the switcher and its highlighted item — each checked to be that variable
+// still), and it is a softer colour than the attention colour of its family (S2 12.4's marks stay
+// the strongest).
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
 const TINTS = ['red', 'amber', 'blue', 'green', 'purple'] as const;
-/** The backgrounds a tint's text is drawn on beside its own. */
-const BACKGROUNDS = ['--panel', '--panel2', '--sel'] as const;
 const MIN_CONTRAST = 4.5;
+
+/**
+ * Where a state's words (a chip, or the words alone) stand beside their own background: the style
+ * sheet and rule that draw that background, and the variable it is.
+ */
+const PLACES = [
+  ['a row of the list', 'style.css', '.list-zone', '--panel'],
+  ['a hovered row', 'list.css', '.list-row:hover', '--panel2'],
+  ['the selected row', 'list.css', ".list-row[data-selected='true']", '--sel'],
+  [
+    "the header (its chip and its open pull requests' words)",
+    'cards.css',
+    '.card-header',
+    '--panel',
+  ],
+  ["the pull-request dialog's lines", 'edit.css', '.edit-dialog', '--panel'],
+  ["the quick switcher's chip", 'search.css', '.switcher-panel', '--panel'],
+  [
+    "the switcher's highlighted item",
+    'search.css',
+    ".switcher-item[data-active='true'],\n.switcher-offer[data-active='true']",
+    '--sel',
+  ],
+] as const;
+
+/** The background variable a rule of `file` draws, `null` when it draws none of `var(--…)`. */
+function backgroundOf(file: string, selector: string): string | null {
+  const css = readFileSync(new URL(`../../web/${file}`, import.meta.url), 'utf8');
+  const at = css.indexOf(`\n${selector} {`);
+  assert.ok(at !== -1, `${file} has the rule ${selector}`);
+  const block = css.slice(at, css.indexOf('}', at));
+  return /\bbackground(?:-color)?:\s*var\((--[\w-]+)\)/.exec(block)?.[1] ?? null;
+}
 
 /** The custom properties of a block of CSS declarations. */
 function properties(block: string): Map<string, string> {
@@ -105,12 +138,13 @@ describe('the chip tints of web/style.css (follow-up F4)', () => {
       }
     });
 
-    test(`${scheme}: each tint's text has at least ${MIN_CONTRAST} : 1 against its own background, --panel, --panel2 and --sel`, (t) => {
+    test(`${scheme}: each tint's text has at least ${MIN_CONTRAST} : 1 against its own background and every background its words stand on`, (t) => {
+      const grounds = [...new Set(PLACES.map(([, , , name]) => name))];
       for (const tint of TINTS) {
         const text = value(`--pr-${tint}`);
         const against: [string, string][] = [
           [`--pr-${tint}-bg`, value(`--pr-${tint}-bg`)],
-          ...BACKGROUNDS.map((name): [string, string] => [name, value(name)]),
+          ...grounds.map((name): [string, string] => [name, value(name)]),
         ];
         const measured = against.map(([name, background]) => {
           const ratio = contrast(text, background);
@@ -121,6 +155,13 @@ describe('the chip tints of web/style.css (follow-up F4)', () => {
           return `${name} ${ratio.toFixed(2)}`;
         });
         t.diagnostic(`${scheme} --pr-${tint} ${text}: ${measured.join(', ')}`);
+      }
+    });
+
+    test(`${scheme}: where the words stand, the background is still the one measured`, (t) => {
+      for (const [where, file, selector, name] of PLACES) {
+        assert.equal(backgroundOf(file, selector), name, `${where}: ${file} ${selector}`);
+        t.diagnostic(`${where}: ${name} ${value(name)}`);
       }
     });
 

@@ -10,7 +10,7 @@
 
 /** @import { PrPayload, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 import { ageBetween } from './format.js';
-import { chipText, sanitize } from './list-text.js';
+import { chipText, knownLevel, sanitize } from './list-text.js';
 
 /** An error is cut to this many UTF-16 units on its line of the dialog (its tooltip has it whole). */
 export const ERROR_MAX = 120;
@@ -73,7 +73,23 @@ export function prName(pr) {
  * @returns {string}
  */
 export function prItemText(pr) {
-  return `${prName(pr)} · ${chipText({ level: pr.level, open: 1, merged: 0 }).replace(/^PR · /, '')}`;
+  const { name, state } = prItemParts(pr);
+  return name + state;
+}
+
+/**
+ * prItemText in its parts (follow-up F4), so that only the state's words take its tint: the name
+ * with its separator (`acme/web #7 · `), the state's words (`failing`), and the state they name
+ * (`knownLevel`: '' for a level the page does not know).
+ * @param {PrPayload} pr
+ * @returns {{ name: string, state: string, level: string }}
+ */
+export function prItemParts(pr) {
+  return {
+    name: `${prName(pr)} · `,
+    state: chipText({ level: pr.level, open: 1, merged: 0 }).replace(/^PR · /, ''),
+    level: knownLevel(pr.level),
+  };
 }
 
 /** A level in the dialog's words (D13); an unknown one is shown as sent, sanitised. */
@@ -102,19 +118,42 @@ const LINE_WORDS = /** @type {Record<string, string>} */ ({
  * @returns {string}
  */
 export function prLineText(pr, nowNs, cutError = true) {
+  const { head, state, tail } = prLineParts(pr, nowNs, cutError);
+  return head + state + tail;
+}
+
+/**
+ * prLineText in its parts (follow-up F4), so that only the state's words take its tint: the head
+ * (`acme/web #7 · `), the state's words (`checks failing`), the tail (` · checked 4m ago`), and the
+ * state they name (`knownLevel`: '' for a level the page does not know). Without words for the
+ * state the head has no separator.
+ * @param {PrPayload} pr
+ * @param {string} nowNs the server's time now (`serverNow`)
+ * @param {boolean} [cutError]
+ * @returns {{ head: string, state: string, tail: string, level: string }}
+ */
+export function prLineParts(pr, nowNs, cutError = true) {
   const words = Object.hasOwn(LINE_WORDS, pr.level)
     ? (LINE_WORDS[pr.level] ?? pr.level)
     : clean(pr.level);
-  const parts = [prName(pr), words];
+  const rest = [];
   const age = pr.okAtNs === null ? '' : ageBetween(nowNs, pr.okAtNs);
   if (pr.level === 'cant-read') {
-    parts.push(pr.okAtNs === null ? 'never read' : age === '' ? '' : `last read ${age} ago`);
+    rest.push(pr.okAtNs === null ? 'never read' : age === '' ? '' : `last read ${age} ago`);
     const error = clean(pr.error);
-    parts.push(cutError ? cut(error) : error);
+    rest.push(cutError ? cut(error) : error);
   } else if (!finalLevel(pr.level) && age !== '') {
-    parts.push(`checked ${age} ago`);
+    rest.push(`checked ${age} ago`);
   }
-  return parts.filter((part) => part !== '').join(' · ');
+  return {
+    head: words === '' ? prName(pr) : `${prName(pr)} · `,
+    state: words,
+    tail: rest
+      .filter((part) => part !== '')
+      .map((part) => ` · ${part}`)
+      .join(''),
+    level: knownLevel(pr.level),
+  };
 }
 
 /**

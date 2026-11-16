@@ -338,6 +338,8 @@ export function createSwitcher(root, deps) {
       chip === null ? '' : chip.merged === '' ? chip.text : `${chip.text} ${chip.merged}`,
     );
     setTip(made.chip, chip?.tip ?? '');
+    // F4: the state it names, so that its words take the state's tint (style.css).
+    setData(made.chip, 'level', chip?.level ?? '');
     setText(made.slot, text.slot);
     setTip(made.slot, text.slot === '' ? '' : `Ctrl+Shift+${text.slot}`);
     setText(made.short, typeof row.shortId === 'string' ? sanitize(row.shortId) : '');

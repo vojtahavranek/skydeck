@@ -10,8 +10,10 @@ import {
   ERROR_MAX,
   foldText,
   noteLine,
+  prItemParts,
   prItemText,
   prItemTip,
+  prLineParts,
   prLineText,
   prName,
   prLineTip,
@@ -241,6 +243,71 @@ describe('prLineText: a pull request on its line of the dialog (D13)', () => {
       ),
       "acme/web #7 · can't read · never read · gh: red second",
     );
+  });
+});
+
+describe("prItemParts and prLineParts: the state's words apart, for their tint (follow-up F4)", () => {
+  /** Every level of design 7.3, one the page does not know (with an escape), and none. */
+  const LEVELS = [
+    'cant-read',
+    ...LINE_WORDS.map(([level]) => level),
+    'later\x1b[31m-level',
+    '',
+    'constructor',
+  ];
+  const KNOWN = new Set(['cant-read', ...LINE_WORDS.map(([level]) => level)]);
+
+  test("an item: its name and separator, then the state's words; together exactly prItemText", () => {
+    for (const level of LEVELS) {
+      const parts = prItemParts(pr(level));
+      assert.equal(parts.name + parts.state, prItemText(pr(level)), level);
+      assert.equal(parts.name, 'acme/web #7 · ', level);
+      assert.equal(parts.level, KNOWN.has(level) ? level : '', level);
+    }
+    assert.equal(prItemParts(pr('checks-failing')).state, 'failing');
+    assert.equal(prItemParts(pr('later\x1b[31m-level')).state, 'later-level');
+  });
+
+  test("a line: its head, the state's words, its tail; together exactly prLineText, the error cut or whole", () => {
+    const variants: Partial<PrPayload>[] = [
+      {},
+      { okAtNs: null },
+      { okAtNs: 'soon' },
+      { okAtNs: ago(3n * HOUR), error: 'gh: HTTP 502' },
+      { okAtNs: null, error: `gh: ${'e'.repeat(300)}` },
+      { okAtNs: 'soon', error: 'x' },
+    ];
+    for (const level of LEVELS) {
+      for (const over of variants) {
+        for (const cutError of [true, false]) {
+          const given = pr(level, over);
+          const parts = prLineParts(given, now, cutError);
+          const what = `${JSON.stringify(level)} ${JSON.stringify(over)} ${String(cutError)}`;
+          assert.equal(
+            parts.head + parts.state + parts.tail,
+            prLineText(given, now, cutError),
+            what,
+          );
+          assert.equal(parts.level, KNOWN.has(level) ? level : '', what);
+        }
+      }
+    }
+    for (const [level, words] of LINE_WORDS) {
+      const parts = prLineParts(pr(level), now);
+      assert.deepEqual([parts.head, parts.state], ['acme/web #7 · ', words], level);
+    }
+    assert.deepEqual(prLineParts(pr('draft'), now), {
+      head: 'acme/web #7 · ',
+      state: 'draft',
+      tail: ' · checked 4m ago',
+      level: 'draft',
+    });
+    assert.deepEqual(prLineParts(pr('', { okAtNs: null }), now), {
+      head: 'acme/web #7',
+      state: '',
+      tail: '',
+      level: '',
+    });
   });
 });
 

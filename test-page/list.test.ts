@@ -1020,7 +1020,7 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    "S2 12.3's chip: one open failing pull request and 30 merged show `PR · failing` and a dim `+30`; a chip with none open is dim, an unreadable one dotted; a row without pull requests has no chip; hostile text in a chip stays text",
+    "S2 12.3's chip: one open failing pull request and 30 merged show `PR · failing` and `+30` in the chip's tint (F4); `3 merged` is purple, `closed` dim, an unreadable one dotted; a row without pull requests has no chip; hostile text in a chip stays text",
     async (t) => {
       const merged = Array.from({ length: 30 }, (_, at) => fullPr(100 + at, 'merged'));
       const hostile = '<img src=x onerror="window.pwned=1"><b>x</b>';
@@ -1098,9 +1098,15 @@ test('the list', async (t) => {
         s.page,
         (ids) => {
           const probe = document.createElement('span');
-          probe.style.color = 'var(--faint)';
           document.body.append(probe);
-          const faint = getComputedStyle(probe).color;
+          /** A colour as the page computes it. */
+          const computed = (color: string): string => {
+            probe.style.color = color;
+            return getComputedStyle(probe).color;
+          };
+          const faint = computed('var(--faint)');
+          const red = computed('var(--pr-red)');
+          const purple = computed('var(--pr-purple)');
           probe.remove();
           const colour = (id: string, part: string): string => {
             const found = document.querySelector(`#list [data-id="${id}"] ${part}`);
@@ -1110,6 +1116,8 @@ test('the list', async (t) => {
           };
           return {
             faint,
+            red,
+            purple,
             failing: colour(ids[0] ?? '', '.row-chip-text'),
             failingText: document.querySelector(`#list [data-id="${ids[0]}"] .row-chip-text`)
               ?.textContent,
@@ -1125,9 +1133,10 @@ test('the list', async (t) => {
       );
       assert.equal(looks.failingText, 'PR · failing');
       assert.equal(looks.plusText, ' +30');
-      assert.equal(looks.plus, looks.faint, 'the +30 is dim');
-      assert.notEqual(looks.failing, looks.faint, 'the open part is not');
-      assert.equal(looks.merged, looks.faint, '3 merged is dim');
+      // F4 (ruled): a tinted chip's `+30` keeps the chip's tint; `3 merged` is merged's purple.
+      assert.equal(looks.failing, looks.red, 'the open part is in the failing tint');
+      assert.equal(looks.plus, looks.red, "the +30 keeps the chip's tint");
+      assert.equal(looks.merged, looks.purple, '3 merged is purple');
       assert.equal(looks.mergedPlus, 'not shown', 'no +n with none open');
       assert.equal(looks.closed, looks.faint, 'closed is dim');
       // The same row without pull requests: no chip at all.

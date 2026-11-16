@@ -113,29 +113,36 @@ kbd {
 }
 /* A pull request's state names its quiet tint (S2 12.3; follow-up F4). An element that shows a
    state carries it in `data-level` — a level of design 7.3, the page's own name for it
-   (list-text.js's knownLevel), never a text of the server's — and its own style sheet draws
-   `--tint` (the text) and `--tint-bg` (the faint background) where it wants them. A level not
-   named here (draft, closed, not fetched, can't read) or none sets neither: it stays grey. */
+   (list-text.js's knownLevel), never a text of the server's. Its words take the tint's colour
+   wherever they stand (the header's open pull requests, the dialog's lines, the switcher's chip:
+   text colour only); a chip's own style sheet adds `--tint-bg`, the faint background, and keeps
+   its own grey without a tint. A level not named here (draft, closed, not fetched, can't read) or
+   none sets nothing: it stays as it is. */
 [data-level='checks-failing'],
 [data-level='changes-requested'] {
   --tint: var(--pr-red);
   --tint-bg: var(--pr-red-bg);
+  color: var(--tint);
 }
 [data-level='checks-pending'] {
   --tint: var(--pr-amber);
   --tint-bg: var(--pr-amber-bg);
+  color: var(--tint);
 }
 [data-level='review-required'] {
   --tint: var(--pr-blue);
   --tint-bg: var(--pr-blue-bg);
+  color: var(--tint);
 }
 [data-level='approved-green'] {
   --tint: var(--pr-green);
   --tint-bg: var(--pr-green-bg);
+  color: var(--tint);
 }
 [data-level='merged'] {
   --tint: var(--pr-purple);
   --tint-bg: var(--pr-purple-bg);
+  color: var(--tint);
 }
 
 .app {

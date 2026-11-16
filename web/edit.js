@@ -25,7 +25,7 @@
 
 /** @import { ListMessage, PrPayload, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
-import { foldText, prLineText, prLineTip, prName, splitPrs } from './header-text.js';
+import { foldText, prLineParts, prLineTip, prName, splitPrs } from './header-text.js';
 import { sessionRow } from './pane.js';
 
 /**
@@ -223,7 +223,14 @@ export function createEditor(root, deps) {
           line.dataset['url'] = pr.url;
           const remove = button('edit-pr-remove', '×');
           remove.title = 'detach it';
-          line.append(element('span', 'edit-pr-text'), remove);
+          // F4: the state's words apart, so that they alone take the state's tint (style.css).
+          const text = element('span', 'edit-pr-text');
+          text.append(
+            element('span', 'edit-pr-head'),
+            element('span', 'edit-pr-state'),
+            element('span', 'edit-pr-tail'),
+          );
+          line.append(text, remove);
           return line;
         }),
       );
@@ -243,8 +250,20 @@ export function createEditor(root, deps) {
           text.textContent !== '' &&
           (pressed ||
             (selection !== null && !selection.isCollapsed && selection.containsNode(text, true)));
-        if (!held) {
-          setText(text, prLineText(pr, now));
+        const [head, state, tail] = text.children;
+        if (
+          !held &&
+          head instanceof HTMLElement &&
+          state instanceof HTMLElement &&
+          tail instanceof HTMLElement
+        ) {
+          const parts = prLineParts(pr, now);
+          setText(head, parts.head);
+          setText(state, parts.state);
+          setText(tail, parts.tail);
+          if (state.dataset['level'] !== parts.level) {
+            state.dataset['level'] = parts.level;
+          }
         }
         if (text.title !== prLineTip(pr)) {
           text.title = prLineTip(pr);

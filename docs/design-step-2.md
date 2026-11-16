@@ -2206,10 +2206,10 @@ interactive list: open and finished pull requests are counted apart.
   one that most needs the user, in design 7.3's order without merged and closed: can't read
   (`can't read`), not fetched (`not fetched`), checks failing (`failing`), changes requested
   (`changes`), checks pending (`pending`), review required (`review`), draft (`draft`), approved
-  and green (`approved`). After it, dim, `+<n>` for the merged ones, when there are any. Closed
-  ones are not counted.
-- **With nothing open:** `<n> merged` (dim) when any is merged, else `closed` (dim); no chip when
-  none is attached.
+  and green (`approved`). After it `+<n>` for the merged ones, when there are any: in the chip's
+  tint (below), dim only on a grey chip. Closed ones are not counted.
+- **With nothing open:** `<n> merged` (in merged's tint) when any is merged, else `closed` (dim);
+  no chip when none is attached.
 - A chip whose state is `can't read` is drawn dotted.
 - **The tooltip** lists each open pull request with its own state (`repo #n · failing`, or `can't
   read · last read 3h ago`), then the merged and closed counts. The header (12.5) shows the open
@@ -2225,6 +2225,31 @@ interactive list: open and finished pull requests are counted apart.
 | 3 open, the worst failing; 30 merged | `3 PRs · failing +30` |
 | none open; 3 merged, 1 closed | `3 merged` |
 | none open; 1 closed | `closed` |
+
+**Colours** (asked for by the user on 2026-11-16, follow-up F4; the tints ruled by the lead). Each
+state has one quiet tint: on a chip, its text colour and a faint background of the same hue
+(`--pr-<tint>` and `--pr-<tint>-bg` in `web/style.css`, with values for both colour schemes), with
+the size, border and weight of a grey chip — the header's chip looks as the list's, with the
+neutral border (it had a red or amber border for failing, changes and pending before). Where a
+state is named outside a chip — the header's open pull requests (`acme/web #7 · failing`), the
+state on a line of the pull-request dialog, the quick switcher's chip — only the state's words take
+the tint's colour, without a background. A chip that sums several takes the tint of the state its
+text names, its `+<n>` too. The words stay, so the colour never says anything alone; an element
+names its state by its level (design 7.3), the page's own name for it, never a text of the
+server's. The tints stay below the attention marks (12.4): only a row that needs you has a left
+bar, a bold title and the strongest colours, and each tint is softer than the mark's colour of its
+family. Each tint's text has a contrast of at least 4.5 : 1 against its own background and against
+every background its words stand on (a row, hovered or selected; the header; the dialog; the
+switcher and its highlighted item), in both schemes (`test/web/pr-tints.test.ts`).
+
+| State | Tint |
+|---|---|
+| checks failing (`failing`), changes requested (`changes`) | red |
+| checks pending (`pending`) | amber |
+| review required (`review`) | blue |
+| approved and green (`approved`) | green |
+| merged (`3 merged`, a merged line of the dialog) | purple |
+| draft, closed, not fetched, can't read, a state the page does not know | grey, as before |
 
 ### 12.4 Attention: needs you and seen
 
