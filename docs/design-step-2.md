@@ -2785,11 +2785,10 @@ the block, as folding Earlier first selects the row above it (in the list zone, 
 the selection move; a click on `×n` never moves it, 12.2) — except on a block that a member's
 unreported terminal holds open, where ← does nothing, selects no head and says one of 12.2's two
 lines — `this block holds a session that is still starting; it stays open`, or `this block holds a
-terminal that ended before its session was known; close that terminal to close the block` —, and
-→ on a closed head opens it (a click on `×n` that would close a block says first `this block holds
-the selected session; it stays open` when a member other than the head is selected, and only else
-one of those two lines; ruled on 2026-11-16); on
-any other row — and ← on a closed head, → on an open head or on a member — ← and → fold and unfold
+terminal that ended at its start; close it first` —, and → on a closed head opens it (a click on
+`×n` that would close a block says first `this block holds the selected session; it stays open`
+when a member other than the head is selected, and only else one of those two lines; ruled on
+2026-11-16); on any other row — and ← on a closed head, → on an open head or on a member — ← and → fold and unfold
 Earlier. Ctrl+Shift+1–9 select the session of that slot also while a closed block hides it, and
 its block opens (12.2); a member whose terminal has not reported a session is never hidden (its
 block is drawn open, 12.2), so its slot chord finds its row as any drawn row's. Ctrl+Tab skips a member of a closed block

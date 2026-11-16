@@ -1150,9 +1150,9 @@ every session in it, those of a closed block too.
   its slot chord reaches it; it then stays open. While such a session holds it open, ← and a click
   on `×n` do nothing, and the key bar says why: `this block holds a session that is still
   starting; it stays open` while its terminal may still start (wait, and the block can be closed
-  once the session is known), or `this block holds a terminal that ended before its session was
-  known; close that terminal to close the block` when its program ended first (select that
-  session and press Close on its ended bar).
+  once the session is known), or `this block holds a terminal that ended at its start; close it
+  first` when its program ended before its session was known (select that session and press
+  Close on its ended bar).
 - Whatever selects a session that a closed block hides opens the block, and it stays open when
   the selection leaves, until you close it again: Ctrl+Shift+1–9 on its slot, Ctrl+Shift+J when it
   needs you, a click on its notification, a pick in the switcher, a resume that brings it, or a

@@ -1644,8 +1644,9 @@ chip on. Write down how many sessions the title bar counts.
    selected row is that head with its sessions indented under it (the block open); when it is
    not, press nothing more and write down what you see. When ← (or, later, a click on `×<n>`)
    does nothing and the key bar says why — a line that begins `this block holds` —, write that
-   line down, press nothing more in this step (no →: on the still open head it would unfold
-   Earlier), and take another open block from its first click on, or go on with step 5. Press ←.
+   line down: it shows for about five seconds, and pressing ← once more shows it again (the block
+   stays as it is). Then press nothing more in this step (no →: on the still open head it would
+   unfold Earlier), and take another open block from its first click on, or go on with step 5. Press ←.
    Expected: the block closes — its
    indented sessions are gone, the line `+<n−1> more in <group>` follows the head, and the head
    stays selected. Press →. Expected: it opens again, its sessions indented under the head, the
