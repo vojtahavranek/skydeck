@@ -138,9 +138,13 @@ const LISTS = `(() => {
       }
     } catch {}
   };
-  // web/connection.js takes messages through \`onmessage\`: wrap what it sets.
-  const handler = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
-  Object.defineProperty(WebSocket.prototype, 'onmessage', {
+  // web/connection.js takes messages through \`onmessage\`: wrap what it sets. The accessor is
+  // the native prototype's; helpers/shell.ts's RECORDER may have put a subclass in front of it.
+  let owner = WebSocket.prototype;
+  while (owner !== null && !Object.hasOwn(owner, 'onmessage')) owner = Object.getPrototypeOf(owner);
+  if (owner === null) return;
+  const handler = Object.getOwnPropertyDescriptor(owner, 'onmessage');
+  Object.defineProperty(owner, 'onmessage', {
     ...handler,
     set(listener) {
       handler.set.call(
