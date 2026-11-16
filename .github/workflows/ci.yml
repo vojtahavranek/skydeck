@@ -23,8 +23,11 @@ concurrency:
 # A shard is Node's own `--test-shard=i/n`: the sorted list of test files is cut into n parts by taking
 # every n-th file, so no file is named here and a new test file needs no upkeep. The option is given
 # as NODE_OPTIONS, not as `npm test -- --test-shard=i/n`: npm puts that argument after the glob, where
-# `node --test` ignores it without a word and every shard would run the whole suite. To change the
-# number of shards, change the `shard` list of the job: each entry holds the index and the count.
+# `node --test` ignores it without a word and every shard would run the whole suite.
+# The `shard` list of a job must hold 1/n to n/n: each entry names the count too, and nothing checks
+# the list, so an entry added or left out leaves files unrun or run twice with every job green.
+# A job that reaches its `timeout-minutes` is only cancelled, which not every reader of the checks
+# takes for a failure; a step that reaches its own limit fails the job. So each test step has one.
 jobs:
   lint:
     name: lint (node ${{ matrix.leg.node }})
@@ -40,9 +43,8 @@ jobs:
         # (`gh workflow run CI --ref main`). The unit job has the same legs; the page job has only
         # the second.
         # - node '24.12': the oldest Node the launcher accepts, on the newest Ubuntu.
-        # - node '24': the newest 24.x, on Ubuntu 24.04 (the development machine's): Playwright
-        #   1.60.0 has no Chromium for 26.04, and the page job needs it. Drop the pin when
-        #   Playwright is upgraded.
+        # - node '24': the newest 24.x, on Ubuntu 24.04 (the development machine's), the system
+        #   of the page job (see there).
         leg: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"node":"24.12","os":"ubuntu-latest"},{"node":"24","os":"ubuntu-24.04"}]' || '[{"node":"24","os":"ubuntu-24.04"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,11 +77,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+        timeout-minutes: 20
         env:
           NODE_OPTIONS: --test-shard=${{ matrix.shard }}
 
   # The page suite (S2 17.4, 17.5): Node 24 only, with Chromium cached under the pinned Playwright's
-  # version and the runner's system.
+  # version and the runner's system. On Ubuntu 24.04 and not the newest: Playwright 1.60.0 has no
+  # Chromium for 26.04. Drop the pin when Playwright is upgraded.
   page:
     name: page (${{ matrix.shard }})
     runs-on: ubuntu-24.04
@@ -106,5 +110,6 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.system }}-${{ steps.playwright.outputs.version }}
       - run: npx playwright install --with-deps chromium
       - run: npm run test:page
+        timeout-minutes: 20
         env:
           NODE_OPTIONS: --test-shard=${{ matrix.shard }}
