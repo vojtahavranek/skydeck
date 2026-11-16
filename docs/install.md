@@ -919,8 +919,11 @@ one, and the page closes a session's notification once that session no longer ne
 on one brings the window to the front and selects the session. While a dialog is open it only
 brings the window to the front, and the key bar says `close the edit first (Esc)`. A session the
 list does not show (the filter, the folded Earlier) and that has no terminal in the window is not
-selected: the key bar says `that session is hidden by the filter or the fold`. A session that a
-closed block hides is selected, terminal or not, and its block opens. Whether a
+selected: the key bar says `that session is hidden by the filter, the fold or a closed block`. A
+session that a closed block hides is selected, terminal or not, and its block opens — but not one
+that no longer needs you, has no terminal in the window and sits in a closed block (the window
+cannot know a closed block's sessions): that click is refused with the same line; open the block
+to see it. Whether a
 notification pops up is also Windows' own business (its Do not disturb, its settings for Edge),
 which skydeck does not touch.
 
@@ -1140,11 +1143,15 @@ before. A section's count counts every session in it, those of a closed block to
   open head or on another session of a block.
 - A block you closed stays closed until you open it or reload the page, also when its sessions
   leave and the block forms again later.
-- A closed block opens by itself while one of its sessions has a terminal of the window whose
-  program has not reported its session yet (a start, or a program that ended before it reported,
-  until you close its terminal), so that its row and its slot number show and its slot chord
-  reaches it; it then stays open. While such a start holds it open, ← and a click on `×n` do
-  nothing, and the key bar says `this block holds a session that is still starting; it stays open`.
+- A closed block opens by itself while one of its sessions other than its head has a terminal of
+  the window whose program has not reported its session yet (a start, or a program that ended
+  before it reported, until you close its terminal), so that its row and its slot number show and
+  its slot chord reaches it; it then stays open. While such a session holds it open, ← and a click
+  on `×n` do nothing, and the key bar says why: `this block holds a session that is still
+  starting; it stays open` while its terminal may still start (wait, and the block can be closed
+  once the session is known), or `this block holds a terminal that ended before its session was
+  known; close that terminal to close the block` when its program ended first (select that
+  session and press Close on its ended bar).
 - Whatever selects a session that a closed block hides opens the block, and it stays open when
   the selection leaves, until you close it again: Ctrl+Shift+1–9 on its slot, Ctrl+Shift+J when it
   needs you, a click on its notification, a pick in the switcher, a resume that brings it, or a
