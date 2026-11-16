@@ -2236,11 +2236,15 @@ state on a line of the pull-request dialog, the quick switcher's chip — only t
 the tint's colour, without a background. A chip that sums several takes the tint of the state its
 text names, its `+<n>` too. The words stay, so the colour never says anything alone; an element
 names its state by its level (design 7.3), the page's own name for it, never a text of the
-server's. The tints stay below the attention marks (12.4): only a row that needs you has a left
-bar, a bold title and the strongest colours, and each tint is softer than the mark's colour of its
-family. Each tint's text has a contrast of at least 4.5 : 1 against its own background and against
-every background its words stand on (a row, hovered or selected; the header; the dialog; the
-switcher and its highlighted item), in both schemes (`test/web/pr-tints.test.ts`).
+server's. The tints stay below the attention marks (12.4), the user's one condition ("needs you /
+finished should be still more important"): only a row that needs you has a left bar and its
+reason's line in the reason's colour, and its title is the boldest (700; a running session's is
+600, any other row's 400); each tint is softer than the mark's colour of its family, and its text
+is no stronger than an ordinary row's title (`--dim`): on `--panel` and on `--sel` its contrast is
+at most `--dim`'s + 0.1 (ruled). Each tint's text has a contrast of at least 4.5 : 1 against its
+own background and against every background its words stand on (a row, hovered or selected; the
+header; the dialog; the switcher and its highlighted item), in both schemes
+(`test/web/pr-tints.test.ts`).
 
 | State | Tint |
 |---|---|

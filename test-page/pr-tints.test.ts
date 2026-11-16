@@ -17,10 +17,12 @@ import type { TestContext } from 'node:test';
 import type { Browser, Page } from 'playwright';
 
 import { windowChip } from '../src/window/view/chip.ts';
+import { sleep } from '../test/helpers/keeper.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
   clickRow,
   connection,
+  TERM_A,
   honest,
   PAGE_WAIT_MS,
   scriptedList,
@@ -68,9 +70,15 @@ const merged = (count: number): Row[] => Array.from({ length: count }, () => pr(
  * A list whose This week holds `rows`, with `selected` (S2 8.2.3), and while the page's view has
  * a switcher text the switcher's payload for it: every row, not running, in their order (E9).
  */
-function listOf(rows: Row[], selected: string | null, switcher: string | null = null): Row {
+function listOf(
+  rows: Row[],
+  selected: string | null,
+  switcher: string | null = null,
+  terminals: Row[] = [],
+): Row {
   return {
     ...scriptedList([], []),
+    terminals,
     sections: [
       { name: 'open', folded: false, firstNs: null, lastNs: null, count: 0, rows: [] },
       { name: 'week', folded: false, firstNs: null, lastNs: null, count: rows.length, rows },
@@ -106,28 +114,37 @@ function listOf(rows: Row[], selected: string | null, switcher: string | null = 
 
 let seed = 200;
 
+interface World {
+  page: Page;
+  /** The rows of every later list; a list of them is sent at once, for the page's last view. */
+  set(rows: Row[]): void;
+}
+
 /**
  * A page at 1400 x 900 with a stored key, connected to a stand-in server that answers every
- * `view` with `listOf(rows, …)` for its selection and switcher text, and an `attach` with an
- * empty snap.
+ * `view` with `listOf(rows, …)` for its selection and switcher text (and `terminals`), and an
+ * `attach` with an empty snap.
  */
-async function world(t: TestContext, chromium: Browser, rows: Row[]): Promise<Page> {
+async function world(
+  t: TestContext,
+  chromium: Browser,
+  first: Row[],
+  terminals: Row[] = [],
+): Promise<World> {
   const page = await newPage(t, chromium);
   await page.setViewportSize({ width: 1400, height: 900 });
   const secret = new Uint8Array(32).fill(seed++);
+  let rows = first;
+  let selected: string | null = null;
+  let switcher: string | null = null;
+  const listNow = (): Row => listOf(rows, selected, switcher, terminals);
   const standin = await standinServer(t, {
     socket: honest(secret, {
       open: (conn, message) => {
         if (message['t'] === 'view') {
-          const selected = message['selected'];
-          const switcher = message['switcher'];
-          conn.send(
-            listOf(
-              rows,
-              typeof selected === 'string' ? selected : null,
-              typeof switcher === 'string' ? switcher : null,
-            ),
-          );
+          selected = typeof message['selected'] === 'string' ? message['selected'] : null;
+          switcher = typeof message['switcher'] === 'string' ? message['switcher'] : null;
+          conn.send(listNow());
         } else if (message['t'] === 'attach') {
           conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
         }
@@ -138,7 +155,13 @@ async function world(t: TestContext, chromium: Browser, rows: Row[]): Promise<Pa
   await storeKey(page, secret);
   await page.goto(standin.url);
   await connection(page, 'open');
-  return page;
+  return {
+    page,
+    set(next) {
+      rows = next;
+      standin.connections.at(-1)?.send(listNow());
+    },
+  };
 }
 
 /** The tint of each level of design 7.3 (F4's table, P1); a level without one stays grey. */
@@ -371,7 +394,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
   await t.test(
     'every state of the table and every summed chip, in the list and in the header, light and dark: the tint’s text colour and faint background, or today’s grey; the `+n` in the chip’s tint; the same weight, size and shape; also on the selected row',
     async (t) => {
-      const page = await world(t, chromium, ROWS);
+      const { page } = await world(t, chromium, ROWS);
       await page.waitForFunction(
         (count) => document.querySelectorAll('#list .row-chip:not([hidden])').length === count,
         CASES.length,
@@ -427,7 +450,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
   );
 
   await t.test(
-    'the attention marks stay the strongest: the rows that need you keep their bars, bold titles and reason lines in their own colours, light and dark; a chip on them is in its quiet tint, not bold, without a bar; a row that needs nothing has no bar',
+    "the attention marks stay the strongest: the rows that need you keep their bars, their reason lines in their own colours and the boldest titles (700; a running session's 600, any other row's 400), light and dark; a chip on them is in its quiet tint, not bold, without a bar; a row that needs nothing has no bar",
     async (t) => {
       const since = String(NOW_NS - 3n * MIN_NS);
       const rows = [
@@ -454,8 +477,28 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
           prs: [pr('review-required')],
           chip: windowChip([{ level: 'review-required' }]),
         }),
+        row(sid(105), {
+          title: 'running, needs nothing',
+          state: 'running',
+          terminal: TERM_A,
+          slot: 1,
+          prs: [pr('merged')],
+          chip: windowChip([{ level: 'merged' }]),
+        }),
       ];
-      const page = await world(t, chromium, rows);
+      const { page } = await world(t, chromium, rows, [
+        {
+          id: TERM_A,
+          slot: 1,
+          sessionId: sid(105),
+          state: 'running',
+          notReported: false,
+          cols: 80,
+          rows: 24,
+          ownsSize: true,
+          openedNs: String(NOW_NS - 60n * MIN_NS),
+        },
+      ]);
       await page.waitForFunction(
         () => document.querySelectorAll('#list .list-row[data-attention]').length === 3,
         null,
@@ -480,6 +523,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
         finished: 'green',
         ended: 'red',
         none: 'blue',
+        running: 'purple',
       };
       for (const s of ['light', 'dark'] as const) {
         await scheme(page, s);
@@ -487,7 +531,9 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
           [...document.querySelectorAll('#list .list-row')].map((element) => {
             const chip = element.querySelector('.row-chip') as Element;
             return {
-              reason: element.getAttribute('data-attention') ?? 'none',
+              reason:
+                element.getAttribute('data-attention') ??
+                (element.getAttribute('data-lines') === '2' ? 'running' : 'none'),
               bar: getComputedStyle(element, '::before').content,
               barColor: getComputedStyle(element, '::before').backgroundColor,
               titleWeight: getComputedStyle(element.querySelector('.row-title') as Element)
@@ -502,7 +548,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
         );
         assert.deepEqual(
           drawn.map((d) => d.reason),
-          ['asks', 'finished', 'ended', 'none'],
+          ['asks', 'finished', 'ended', 'none', 'running'],
         );
         for (const d of drawn) {
           const tint = tintOf[d.reason] as Tint;
@@ -517,9 +563,11 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
           );
           assert.equal(d.chipWeight, '400', `${s} ${d.reason}: the chip is not bold`);
           assert.equal(d.chipBar, 'none', `${s} ${d.reason}: the chip has no bar`);
-          if (d.reason === 'none') {
-            assert.equal(d.bar, 'none', `${s}: a row that needs nothing has no bar`);
-            assert.notEqual(d.titleWeight, '700', `${s}: its title is not bold`);
+          if (d.reason === 'none' || d.reason === 'running') {
+            assert.equal(d.bar, 'none', `${s} ${d.reason}: a row that needs nothing has no bar`);
+            // Measured, so that the documents say what is true: only a row that needs you has a
+            // title of 700; a running session's (two lines) is 600, any other row's 400.
+            assert.equal(d.titleWeight, d.reason === 'running' ? '600' : '400', `${s} ${d.reason}`);
             continue;
           }
           const mark = marks[s][d.reason];
@@ -577,7 +625,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
     async (t) => {
       const prs = LEVELS.map(pr);
       const id = sid(201);
-      const page = await world(t, chromium, [
+      const { page } = await world(t, chromium, [
         row(id, { title: 'every state', prs, chip: windowChip(prs as { level: string }[]) }),
       ]);
       await clickRow(page, id);
@@ -652,7 +700,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
           );
           assert.equal(got.color, want?.color, `${where}: the words' colour`);
           assert.equal(got.background, want?.background, `${where}: no background`);
-          assert.equal(got.weight, place === 'header' ? '400' : got.weight, `${where}: not bold`);
+          assert.equal(got.weight, '400', `${where}: not bold`);
           assert.ok(
             got.others.every((color) => color === got.own),
             `${where}: the rest of the line keeps its colour ${got.own}: ${JSON.stringify(got.others)}`,
@@ -666,7 +714,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
     await t.test(
       `the quick switcher's chip, ${s}: the state's words in its tint, as text colour only, also on the highlighted item; a grey state keeps today's faint; the words are today's`,
       async (t) => {
-        const page = await world(t, chromium, ROWS);
+        const { page } = await world(t, chromium, ROWS);
         await scheme(page, s);
         await page.waitForFunction(
           (count) => document.querySelectorAll('#list .row-chip:not([hidden])').length === count,
@@ -718,4 +766,178 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
       },
     );
   }
+
+  await t.test(
+    'the tints are scoped to the elements that show a state: any other element with a `data-level` gets neither a tint nor a colour, and passes none down',
+    async (t) => {
+      const { page } = await world(t, chromium, ROWS);
+      await page.waitForFunction(
+        (count) => document.querySelectorAll('#list .row-chip:not([hidden])').length === count,
+        CASES.length,
+        { timeout: PAGE_WAIT_MS },
+      );
+      const found = await page.evaluate(() => {
+        const outer = document.createElement('div');
+        outer.dataset['level'] = 'checks-failing';
+        const inner = document.createElement('span');
+        inner.className = 'row-chip-merged';
+        inner.textContent = '+1';
+        outer.append(inner);
+        document.querySelector('#list')?.append(outer);
+        const style = getComputedStyle(outer);
+        const out = {
+          color: style.color,
+          tint: style.getPropertyValue('--tint'),
+          innerTint: getComputedStyle(inner).getPropertyValue('--tint'),
+          parent: getComputedStyle(outer.parentElement as Element).color,
+        };
+        outer.remove();
+        return out;
+      });
+      assert.deepEqual(
+        found,
+        { color: found.parent, tint: '', innerTint: '', parent: found.parent },
+        'no tint outside the chips and the state words',
+      );
+    },
+  );
+
+  await t.test(
+    "a state that changes while the page is open: the list's chip, the header's chip and item, the dialog's line and the switcher's chip take the new tint, and lose it for a grey state",
+    async (t) => {
+      const X = sid(301);
+      const B = sid(302);
+      const C = sid(303);
+      const p1 = pr('checks-pending');
+      const p3 = pr('approved-green');
+      const p2 = pr('review-required');
+      const p4 = pr('approved-green');
+      const at = (given: Row, level: string): Row => ({ ...given, level });
+      const rowsOf = (levels: [string, string, string, string]): Row[] => {
+        const x = [at(p1, levels[0]), at(p3, levels[1])];
+        const b = [at(p2, levels[2])];
+        const c = [at(p4, levels[3])];
+        return [
+          row(X, { title: 'x', prs: x, chip: windowChip(x as { level: string }[]) }),
+          row(B, { title: 'b', prs: b, chip: windowChip(b as { level: string }[]) }),
+          row(C, { title: 'c', prs: c, chip: windowChip(c as { level: string }[]) }),
+        ];
+      };
+      const first: [string, string, string, string] = [
+        'checks-pending',
+        'approved-green',
+        'review-required',
+        'approved-green',
+      ];
+      const second: [string, string, string, string] = [
+        'checks-failing',
+        'draft',
+        'merged',
+        'draft',
+      ];
+      const w = await world(t, chromium, rowsOf(first));
+      const { page } = w;
+      await clickRow(page, X);
+      await showsText(page, '#cards .header-title', /^x$/);
+      await page.locator('#cards .header-prs-button').click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('.edit-prs-open .edit-pr').length === 2,
+        null,
+        {
+          timeout: PAGE_WAIT_MS,
+        },
+      );
+      /** The colour each place draws now, and the colour it should draw for `level`. */
+      const colours = async () =>
+        page.evaluate(() => {
+          const colour = (selector: string): string[] =>
+            [...document.querySelectorAll(selector)].map(
+              (element) => getComputedStyle(element).color,
+            );
+          return {
+            list: colour('#list .row-chip'),
+            header: colour('#cards .header-chip'),
+            items: colour('#cards .header-pr-state'),
+            lines: colour('.edit-prs-open .edit-pr-state'),
+            switcher: colour('#switcher .switcher-chip'),
+          };
+        });
+      const expect = async (
+        levels: [string, string, string, string],
+        withDialog: boolean,
+      ): Promise<Record<string, string[]>> => {
+        const colour = async (level: string, grey: string): Promise<string> => {
+          const tint = TINT_OF[level];
+          const [got] = await resolve(page, [
+            { color: tint === undefined ? grey : `var(--pr-${tint})`, background: '' },
+          ]);
+          return got?.color ?? '';
+        };
+        // The chips name the state windowChip picks: X's the worse of its two.
+        const chipOf = (prs: string[]): string =>
+          (windowChip(prs.map((level) => ({ level }))) as { level: string }).level;
+        const xChip = chipOf([levels[0], levels[1]]);
+        const out: Record<string, string[]> = {
+          list: [
+            await colour(xChip, 'var(--dim)'),
+            await colour(levels[2], levels[2] === 'closed' ? 'var(--faint)' : 'var(--dim)'),
+            await colour(levels[3], 'var(--dim)'),
+          ],
+          header: [await colour(xChip, 'var(--dim)')],
+        };
+        if (withDialog) {
+          // The item's and the line's grey is the colour of the text around them.
+          out['items'] = [
+            await colour(levels[0], 'var(--dim)'),
+            await colour(levels[1], 'var(--dim)'),
+          ];
+          out['lines'] = [
+            await colour(levels[0], 'var(--text)'),
+            await colour(levels[1], 'var(--text)'),
+          ];
+        }
+        return out;
+      };
+      const settle = async (wanted: Record<string, string[]>, what: string): Promise<void> => {
+        const deadline = performance.now() + PAGE_WAIT_MS;
+        let last: Record<string, string[]> = {};
+        for (;;) {
+          const got = await colours();
+          last = Object.fromEntries(
+            Object.keys(wanted).map((key) => [key, got[key as keyof typeof got]]),
+          );
+          if (JSON.stringify(last) === JSON.stringify(wanted)) return;
+          if (performance.now() > deadline) break;
+          await sleep(50);
+        }
+        assert.deepEqual(last, wanted, what);
+      };
+      await settle(await expect(first, true), 'the first states');
+      w.set(rowsOf(second));
+      await settle(
+        await expect(second, true),
+        'pending → failing, approved → draft, review → merged',
+      );
+
+      // The switcher's chips, drawn while it is open, follow too.
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.edit-dialog', { state: 'hidden', timeout: PAGE_WAIT_MS });
+      await page.keyboard.press('Control+Shift+P');
+      await page.waitForFunction(
+        () => document.querySelectorAll('#switcher .switcher-item').length === 3,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+      const switcherOf = async (levels: [string, string, string, string]): Promise<string[]> => {
+        const want = await expect(levels, false);
+        const faint = (await resolve(page, [{ color: 'var(--faint)', background: '' }]))[0]?.color;
+        const dim = (await resolve(page, [{ color: 'var(--dim)', background: '' }]))[0]?.color;
+        // The switcher's grey is its line's faint, where the list's chip is dim.
+        return (want['list'] ?? []).map((color) => (color === dim ? (faint as string) : color));
+      };
+      await settle({ switcher: await switcherOf(second) }, 'the switcher, the second states');
+      w.set(rowsOf(first));
+      await settle({ switcher: await switcherOf(first) }, 'the switcher, back to the first states');
+    },
+  );
 });

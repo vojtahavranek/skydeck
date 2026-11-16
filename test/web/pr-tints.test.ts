@@ -3,14 +3,20 @@
 // 4.5 : 1 (WCAG 2) against its own background (the list's and the header's chips) and against
 // every background the state's words stand on (PLACES: a row, a hovered and a selected row, the
 // header, the dialog, the switcher and its highlighted item — each checked to be that variable
-// still), and it is a softer colour than the attention colour of its family (S2 12.4's marks stay
-// the strongest).
+// still); it is no stronger than an ordinary row's title (`--dim`) on --panel and on --sel; and it
+// is a softer colour than the attention colour of its family (S2 12.4's marks stay the strongest).
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
 const TINTS = ['red', 'amber', 'blue', 'green', 'purple'] as const;
 const MIN_CONTRAST = 4.5;
+/**
+ * How much stronger than an ordinary row's title (`--dim`) a tint's text may be, in contrast on the
+ * same background: the owner's condition — "needs you / finished should be still more important" —
+ * so that on an ordinary row a chip is never the brightest thing (ruled).
+ */
+const DIM_MARGIN = 0.1;
 
 /**
  * Where a state's words (a chip, or the words alone) stand beside their own background: the style
@@ -155,6 +161,20 @@ describe('the chip tints of web/style.css (follow-up F4)', () => {
           return `${name} ${ratio.toFixed(2)}`;
         });
         t.diagnostic(`${scheme} --pr-${tint} ${text}: ${measured.join(', ')}`);
+      }
+    });
+
+    test(`${scheme}: no tint's text is stronger than an ordinary row's title (--dim): on --panel and on --sel at most --dim's contrast + ${String(DIM_MARGIN)}`, (t) => {
+      for (const ground of ['--panel', '--sel']) {
+        const limit = contrast(value('--dim'), value(ground)) + DIM_MARGIN;
+        for (const tint of TINTS) {
+          const ratio = contrast(value(`--pr-${tint}`), value(ground));
+          assert.ok(
+            ratio <= limit,
+            `${scheme} --pr-${tint} on ${ground}: ${ratio.toFixed(2)} above --dim's ${(limit - DIM_MARGIN).toFixed(2)} + ${String(DIM_MARGIN)}`,
+          );
+        }
+        t.diagnostic(`${scheme} --dim on ${ground}: ${(limit - DIM_MARGIN).toFixed(2)}`);
       }
     });
 

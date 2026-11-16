@@ -795,10 +795,12 @@ line's chip (design.md 7.3).
 
 The chip has a quiet colour for its state, in both colour schemes: red for `failing` and
 `changes`, amber for `pending`, blue for `review`, green for `approved`, purple for `3 merged`;
-`draft`, `closed`, `not fetched` and `can't read` stay grey. Its `+30` has the chip's colour. The
-header's open pull requests, the state on a line of the pull-request dialog and the quick
-switcher's chip show the state's words in the same colour. Sessions that need you stay the
-strongest in the list: only they have a coloured bar and a bold title.
+`draft`, `closed`, `not fetched` and `can't read` stay grey. Its `+30` has the chip's colour (dim
+on a grey chip). The header's open pull requests, the state on a line of the pull-request dialog
+and the quick switcher's chip show the state's words in the same colour. Sessions that need you
+stay the strongest in the list: only they have a coloured bar at the left and their reason's line
+in its colour, and their titles are the boldest (a running session's title is semibold, any other
+row's regular); no chip's text is brighter than an ordinary row's title.
 
 #### The ticket link
 
