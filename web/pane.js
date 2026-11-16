@@ -17,6 +17,16 @@
 const ENDED = new Set(['ended', 'lost', 'not-started']);
 
 /**
+ * The terminal states in which a terminal may still come to hold a session (S2 7.5): ENDED's exact
+ * complement. A COPY OF THE SERVER'S SET (`MAY_START`, src/window/view/sections.ts), held equal to
+ * it, and with ENDED parting every state, by test/web/pane.test.ts; a change of one is a change of
+ * the other. web/list.js reads it to tell which line ← and `×n` say on a block that an unreported
+ * terminal holds open (F6).
+ * @type {ReadonlySet<string>}
+ */
+export const MAY_START = new Set(['starting', 'running', 'reconnecting', 'newer-keeper']);
+
+/**
  * @param {TerminalPayload} term
  * @returns {boolean}
  */

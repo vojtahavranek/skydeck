@@ -2,8 +2,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import type { TerminalState } from '../../src/window/hub.ts';
 import type { ListMessage, RowPayload, TerminalPayload } from '../../src/window/protocol.ts';
-import { isEnded, paneFor, sessionRow } from '../../web/pane.js';
+import { MAY_START as SERVER_MAY_START } from '../../src/window/view/sections.ts';
+import { isEnded, MAY_START, paneFor, sessionRow } from '../../web/pane.js';
 import { S1, S2, S3 } from '../helpers/platform.ts';
 
 function row(id: string, more: Partial<RowPayload> = {}): RowPayload {
@@ -243,4 +245,33 @@ test("paneFor: with no row at all, stage A's answer — a terminal whose session
   assert.deepEqual(paneFor(S3, [], [], false), { kind: 'none' });
   // The new form still wins.
   assert.deepEqual(paneFor(S1, [], [terminal], true, row(S1, { terminal: T1 })), { kind: 'new' });
+});
+
+// F6 (ruled 2026-11-16, review 2's S1): the page's copy of the server's `MAY_START`.
+
+/** Every terminal state, held by the compiler: a Record over the type must name each one once. */
+const STATES: Record<TerminalState, true> = {
+  starting: true,
+  running: true,
+  ended: true,
+  lost: true,
+  'not-started': true,
+  reconnecting: true,
+  'newer-keeper': true,
+};
+
+test("MAY_START: the page's copy is the server's set, state for state", () => {
+  assert.deepEqual([...MAY_START].sort(), [...SERVER_MAY_START].sort());
+});
+
+test('MAY_START and the ended states part the terminal states: each state in exactly one', () => {
+  for (const state of Object.keys(STATES)) {
+    const term = { state } as TerminalPayload;
+    assert.notEqual(MAY_START.has(state), isEnded(term), state);
+  }
+  assert.equal(
+    MAY_START.size +
+      Object.keys(STATES).filter((state) => isEnded({ state } as TerminalPayload)).length,
+    Object.keys(STATES).length,
+  );
 });

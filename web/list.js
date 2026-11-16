@@ -31,6 +31,7 @@ import { needYouText } from './attention-text.js';
 import { createChips } from './chips.js';
 import { serverNow } from './format.js';
 import { countsText, footerText, rowText, sectionText } from './list-text.js';
+import { MAY_START } from './pane.js';
 import { moreNeedText, moreText, stackBadge } from './search-text.js';
 
 /**
@@ -64,16 +65,10 @@ const MAX_CLOSED = 64;
 const HOLDS_SELECTED = 'this block holds the selected session; it stays open';
 /** Ruled 2026-11-16 (review 2 of F3): what ← and `×n` say on a block a start holds open. */
 const HOLDS_STARTING = 'this block holds a session that is still starting; it stays open';
-/** F6 (L1): what they say on a block that a terminal which ended before its session was known
- *  holds open — waiting never frees it; closing that terminal (the ended bar's Close) does. */
-const HOLDS_ENDED =
-  'this block holds a terminal that ended before its session was known; close that terminal to close the block';
-/**
- * The terminal states in which a terminal may still come to hold a session (S2 7.5). A COPY OF THE
- * SERVER'S SET (`MAY_START`, src/window/view/sections.ts): a change of one is a change of the
- * other. It tells HOLDS_STARTING from HOLDS_ENDED.
- */
-const MAY_START = new Set(['starting', 'running', 'reconnecting', 'newer-keeper']);
+/** F6 (L1, worded by the lead): what they say on a block that a terminal which ended before its
+ *  session was known holds open — waiting never frees it; closing that terminal (the ended bar's
+ *  Close) does. Short, so that the key bar shows it on one line at the window's usual widths. */
+const HOLDS_ENDED = 'this block holds a terminal that ended at its start; close it first';
 /** S2 8.2.3: a text of a view is at most 1,024 bytes of UTF-8 and well formed. */
 const TEXT_BYTES = 1024;
 const utf8 = new TextEncoder();
@@ -572,7 +567,7 @@ export function createList(root, hooks) {
       hooks.say?.(HOLDS_SELECTED);
       return;
     }
-    const held = holdsStart(place.section, stack.group);
+    const held = heldLine(place.section, stack.group);
     if (held !== null) {
       hooks.say?.(held); // the server keeps it open: nothing moves
       return;
@@ -614,7 +609,7 @@ export function createList(root, hooks) {
    * it reported. A COPY OF THE SERVER'S RULE (`src/window/view/build.ts`, `stacked`'s
    * `unreported`; ruled 2026-11-16): the server draws a closed block open while one of its members
    * is such a row, and this page forgets that it closed it (render) and refuses to close it
-   * (`holdsStart`, which tells the two lines apart by MAY_START, a copy too). A change of one is a
+   * (`heldLine`, which tells the two lines apart by MAY_START, a copy too). A change of one is a
    * change of the other.
    * @param {RowPayload} row
    */
@@ -632,7 +627,7 @@ export function createList(root, hooks) {
    * @param {string} group
    * @returns {string | null}
    */
-  const holdsStart = (section, group) => {
+  const heldLine = (section, group) => {
     let held = null;
     for (const row of current?.sections.find((candidate) => candidate.name === section)?.rows ??
       []) {
@@ -952,7 +947,7 @@ export function createList(root, hooks) {
         const place = placeOf(selected);
         const stack = place?.row.stack ?? null;
         if (place !== undefined && stack !== null && (stack.open || stack.role === 'member')) {
-          const held = holdsStart(place.section, stack.group);
+          const held = heldLine(place.section, stack.group);
           if (held !== null) {
             hooks.say?.(held); // the server keeps it open: nothing moves
           } else {
