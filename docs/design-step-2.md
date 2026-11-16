@@ -2788,10 +2788,11 @@ lines — `this block holds a session that is still starting; it stays open`, or
 terminal that ended at its start; close it first` —, and → on a closed head opens it (a click on
 `×n` that would close a block says first `this block holds the selected session; it stays open`
 when a member other than the head is selected, and only else one of those two lines; ruled on
-2026-11-16); on any other row — and ← on a closed head, → on an open head or on a member — ← and → fold and unfold
-Earlier. Ctrl+Shift+1–9 select the session of that slot also while a closed block hides it, and
-its block opens (12.2); a member whose terminal has not reported a session is never hidden (its
-block is drawn open, 12.2), so its slot chord finds its row as any drawn row's. Ctrl+Tab skips a member of a closed block
+2026-11-16); on any other row — and ← on a closed head, → on an open head or on a member — ← and →
+fold and unfold Earlier. Ctrl+Shift+1–9 select the session of that slot also while a closed block
+hides it, and its block opens (12.2); a member whose terminal has not reported a session is never
+hidden (its block is drawn open, 12.2), so its slot chord finds its row as any drawn row's. Ctrl+Tab
+skips a member of a closed block
 that no terminal of the window holds (the page never knows a closed block's members), as it skips
 a row a filter or a folded Earlier hides; a member that a terminal of the window holds it selects,
 and its block opens, as for every other selection of a hidden member (ruled on 2026-11-16). While
@@ -3005,7 +3006,8 @@ installed app's shortcut would hold no launch token (5.1).
   session, or while a dialog is shown says `close the edit first (Esc)` and selects nothing. A
   session that this page's list does not show (the filter, the folded Earlier) and that has no
   terminal of the window is not selected either: the key bar says `that session is hidden by the
-  filter, the fold or a closed block` (the closed block named from follow-up F6), and the selection, the right side and what the page reports stay as they
+  filter, the fold or a closed block` (the closed block named from follow-up F6), and the selection,
+  the right side and what the page reports stay as they
   were — the pane would be empty, and a focused page's selection is seen after 1.5 s, which would
   clear a mark the user never saw (ruled on review 2 of plan B task 55; showing a selected session
   the list hides is stage E's). A session a closed block hides is selected, also without a terminal
