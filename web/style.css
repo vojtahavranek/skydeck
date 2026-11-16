@@ -9,6 +9,9 @@
   --panel2: #f8f9fb;
   --line: #e3e5e9;
   --line2: #d3d7dd;
+  /* The lines that frame the terminal (F2): softer than --line, against the terminal and its
+     neighbours. */
+  --edge: #eceef1;
   --text: #1d2127;
   --dim: #5d6470;
   --faint: #8b929c;
@@ -33,6 +36,7 @@
     --panel2: #22262c;
     --line: #2c3037;
     --line2: #3a3f47;
+    --edge: #262a30;
     --text: #e4e6ea;
     --dim: #a3a9b2;
     --faint: #6f7680;
@@ -165,7 +169,7 @@ kbd {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--edge);
 }
 .list {
   flex: 1;
@@ -207,7 +211,7 @@ kbd {
   font-size: 12px;
   color: var(--dim);
   background: var(--panel2);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--edge);
 }
 .focus-zone {
   color: var(--selline);

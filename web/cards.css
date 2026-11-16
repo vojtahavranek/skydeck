@@ -8,7 +8,8 @@
 .card-header {
   padding: 7px 14px 6px;
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  /* A line that frames the terminal under it (F2, style.css). */
+  border-bottom: 1px solid var(--edge);
   min-width: 0;
 }
 .card-header [hidden] {
@@ -306,13 +307,15 @@
   border-radius: 12px;
   padding: 18px 22px;
 }
-/* Above a terminal the card is the ended bar: one line, full width. */
+/* Above a terminal the card is the ended bar: one line, full width; its line frames the terminal
+   (F2, style.css). */
 .right-zone[data-pane='terminal'] .card {
   margin: 0;
   max-width: none;
   width: auto;
   border-radius: 0;
   border-width: 0 0 1px;
+  border-color: var(--edge);
   padding: 6px 14px;
   background: var(--panel2);
 }
