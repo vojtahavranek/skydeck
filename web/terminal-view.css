@@ -22,6 +22,14 @@
   --tv-bright-white: #8c959f;
   --tv-selection: #b6d3fb;
   --tv-overlay: rgba(255, 255, 255, 0.94);
+  /* The room between the terminal's text and its box (F2), in CSS pixels and only in px:
+     terminal-view.js reads these four (`padding`) and counts them out of every size it proposes,
+     so they are the one place to change it. The right one lies between the text and the scroll
+     bar's room, which stays at the box's right edge: it is room the view leaves, not padding. */
+  --tv-pad-top: 8px;
+  --tv-pad-right: 10px;
+  --tv-pad-bottom: 8px;
+  --tv-pad-left: 10px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -68,9 +76,15 @@
      resize per two columns (review 2 of task 28). */
   contain: size;
 }
-/* On xterm.js's element, not its parent: the fit addon counts this padding out. */
+/* On xterm.js's element, not its parent: the view measures its parent (`propose`). No padding at
+   the right, so that the scroll bar stays at the box's edge (the right room is counted, above). */
 .tv-screen .xterm {
-  padding: 2px 0 0 4px;
+  padding: var(--tv-pad-top) 0 var(--tv-pad-bottom) var(--tv-pad-left);
+}
+/* xterm.css paints this element black, and it lies under the padding: the margin is the inside
+   of the terminal, in its own background (F2). */
+.tv-screen .xterm .xterm-viewport {
+  background-color: var(--term-bg);
 }
 /* S2 7.8: an ended terminal's last screen, dimmed. */
 .tv-term.over .tv-screen {

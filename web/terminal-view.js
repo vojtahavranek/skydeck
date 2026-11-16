@@ -54,10 +54,9 @@ const PARSE_AHEAD = 4_000_000;
 const WAITING_MAX = 32_000_000;
 /** S2 9.6: the server opens a URL of at most this many characters. */
 const URL_MAX = 2048;
-/** The padding of xterm.js's element (terminal-view.css) and the room its scroll bar takes (the
- *  fit addon's 14 px with a scrollback): what every proposal and `fits` count out. */
-const PAD_X = 4;
-const PAD_Y = 2;
+/** The room xterm.js's scroll bar takes at the box's right edge (the fit addon's 14 px with a
+ *  scrollback): what every proposal and `fits` count out, with the style sheet's room around the
+ *  text (`padding`). */
 const SCROLL_BAR = 14;
 /** The terminal states whose program is over (hub.ts). */
 const OVER = new Set(['ended', 'lost', 'not-started']);
@@ -683,7 +682,8 @@ export function createTerminalView(root, deps) {
   /**
    * What the terminal's area holds at its font, or null when it cannot be measured (not shown):
    * its box measured as the fit addon measures it (the element xterm.js is in, whole pixels),
-   * then `fitIn` — a function of the box, the pixel ratio and the cell only. The terminal takes
+   * then `fitInside` — a function of the box, the pixel ratio, the cell and the style sheet's
+   * room around the text only. The terminal takes
    * the page's font size first (style.css `--term-font-size`), so that the proposal and its
    * screen are measured at the same font, also after the size changed. Nothing in stage A
    * changes it; a font-size setting, if one ever comes, needs its own trigger and must reach
@@ -707,7 +707,7 @@ export function createTerminalView(root, deps) {
     if (!(width > 0) || !(height > 0) || cell === null) {
       return null; // hidden, or no font yet
     }
-    return fitIn(width - PAD_X - SCROLL_BAR, height - PAD_Y, cell);
+    return fitInside(width, height, cell);
   };
 
   /**
@@ -1137,8 +1137,8 @@ export function createTerminalView(root, deps) {
     /**
      * What fits (an optional member of contract 2.9, for app.js's `area()`): the columns and
      * rows a terminal of this view shows in a terminal area (`#terminal`'s box) of `width` ×
-     * `height` CSS pixels — by the same rule as every proposal of the view (`fitIn`, xterm.js's
-     * padding and the scroll bar counted out), so that a terminal opened at it is not resized
+     * `height` CSS pixels — by the same rule as every proposal of the view (`fitInside`: the
+     * room around the text and the scroll bar counted out), so that a terminal opened at it is not resized
      * after its start — or null while no cell can be measured
      * or for an area that is not a positive size. The numbers are always whole and at least 1
      * (app.js sends them to the server, which takes nothing else), whatever it is given.
@@ -1154,9 +1154,41 @@ export function createTerminalView(root, deps) {
       if (cell === null) {
         return null;
       }
-      return fitIn(Math.floor(width) - PAD_X - SCROLL_BAR, Math.floor(height) - PAD_Y, cell);
+      return fitInside(Math.floor(width), Math.floor(height), cell);
     },
   };
+}
+
+/**
+ * What a terminal box of `width` × `height` CSS pixels holds (`propose` and `fits`, so that the two
+ * cannot count differently): `fitIn` for the area inside the room the style sheet keeps around
+ * the text (`padding`) and the scroll bar's room.
+ * @param {number} width
+ * @param {number} height
+ * @param {{ width: number, height: number, ratio: number }} cell
+ * @returns {{ cols: number, rows: number }}
+ */
+function fitInside(width, height, cell) {
+  const room = padding();
+  return fitIn(width - room.left - room.right - SCROLL_BAR, height - room.top - room.bottom, cell);
+}
+
+/**
+ * The room between the terminal's text and its box (F2): terminal-view.css's `--tv-pad-top`,
+ * `--tv-pad-right`, `--tv-pad-bottom` and `--tv-pad-left`, read from the style sheet at every
+ * measure, so that it and the size the view proposes cannot drift apart (one source). The top,
+ * left and bottom ones are the padding of xterm.js's element; the right one is room left between
+ * the text and the scroll bar's. A value that is not a number of CSS pixels counts as 0.
+ * @returns {{ top: number, right: number, bottom: number, left: number }}
+ */
+function padding() {
+  const style = getComputedStyle(document.documentElement);
+  /** @param {string} side */
+  const px = (side) => {
+    const match = /^\s*(\d+(?:\.\d+)?)px\s*$/.exec(style.getPropertyValue(`--tv-pad-${side}`));
+    return match === null ? 0 : Number(match[1]);
+  };
+  return { top: px('top'), right: px('right'), bottom: px('bottom'), left: px('left') };
 }
 
 /**
