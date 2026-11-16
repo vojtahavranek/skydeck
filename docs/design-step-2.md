@@ -1696,32 +1696,37 @@ terminal can write to the clipboard but not read it).
 ### 9.6 Links
 
 Ctrl+click on a URL in a terminal (an OSC 8 link, or plain text that looks like `http://` or
-`https://` followed by URL characters) and a click on a pull-request link in the list or header
-send `act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so
-for one whose text is not its URL the page first shows the target and opens it only on a second
-click. The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme
-`http` or `https`, and is still at most 2,048 characters once the WHATWG URL parser has
-re-serialised it (so it cannot start with `-`; percent-encoding can make it several times longer,
-and the re-serialised URL is what the Windows program gets), and holds no `"` and no backslash: it
-becomes one argument of a Windows program, and either can change how that program splits its
-command line. Asked for by the user on 2026-11-15, ruled by the lead that day: the server opens it
-in the user's **Windows default browser**, where they are logged in, by running
-`/mnt/c/Windows/System32/rundll32.exe` with exactly two arguments, `url.dll,FileProtocolHandler`
-and the re-serialised URL (`explorer.exe <url>` is not used). `FileProtocolHandler` takes the rest
-of the command line as it is, and WSL's interop quotes an argument only when it must, so the URL
-must be one unquoted word: the re-serialised URL holds no white space and no control character,
-whatever the page sent — the parser removes tab and line breaks everywhere and the C0 controls and
-spaces around the address, percent-encodes every other white space and control character (and
-everything beyond ASCII) in the user name, password, path, query and fragment, and fails a host or
-a port that would keep one (IDNA maps most Unicode spaces in a host to a space, and drops U+FEFF
-and U+200B). With `window.links` `"edge"` (16.4) it runs `window.edge` with that URL as its only
-argument instead (no profile folder): it opens in the user's own Edge profile, not in the window's
-profile. When the program cannot be started the action is refused with `the link could not be
-opened: the default browser could not be started (window.links "edge" opens links in Edge)`, or,
-with `"edge"`, with `the link could not be opened: Edge could not be started`. The page itself
-never navigates away: it cancels drag and drop over the window, which would otherwise open a
-dropped file in place of the page. Whether a link opens in the user's default browser, logged in,
-is check W12.
+`https://` followed by URL characters) and a click on a pull-request link in the list or header send
+`act open-link` with the URL. An OSC 8 link's visible text can differ from where it leads, so for
+one whose text is not its URL the page first shows the target and opens it only on a second click.
+The server opens a URL only when it is at most 2,048 characters, parses as a URL with scheme `http`
+or `https`, and is still at most 2,048 characters once the WHATWG URL parser has re-serialised it
+(so it cannot start with `-`; percent-encoding can make it several times longer, and the
+re-serialised URL is what the Windows program gets), and holds no `"` and no backslash: it becomes
+one argument of a Windows program, and either can change how that program splits its command line.
+Asked for by the user on 2026-11-15, ruled by the lead that day: the server opens it in the user's
+**Windows default browser**, where they are logged in, by running
+`/mnt/c/Windows/System32/rundll32.exe` with exactly two arguments, `url.dll,FileProtocolHandler` and
+the re-serialised URL (`explorer.exe <url>` is not used). That entry point opens what it is given as
+the Windows shell would, a program or a `file:` address included, so the `http` and `https` check is
+also what keeps a link from starting a program on the Windows side (15.5). `FileProtocolHandler`
+takes the rest of the command line as it is, and WSL's interop quotes an argument only when it must,
+so the URL must be one unquoted word: the re-serialised URL holds no white space and no control
+character, whatever the page sent — the parser removes tab and line breaks everywhere and the C0
+controls and spaces around the address, percent-encodes every other white space and control
+character (and everything beyond ASCII) in the user name, password, path, query and fragment, and
+fails a host (also once its escapes are decoded) or a port that would keep one (IDNA maps most
+Unicode spaces in a host to a space, and drops U+FEFF and U+200B). With `window.links` `"edge"`
+(16.4) it runs `window.edge` with that URL as its only argument instead (no profile folder): it
+opens in the user's own Edge profile, not in the window's profile. When the program cannot be
+started the action is refused with `the link could not be opened: the default browser could not be
+started (window.links "edge" opens links in Edge)`, or, with `"edge"`, with `the link could not be
+opened: Edge could not be started`. That covers only a start that fails on the WSL side (the
+program is not there, interop is off): once interop has started it, what Windows does is not seen,
+so a start that Windows refuses afterwards (privilege management) or a browser that opens nothing
+leaves the action done and the key bar empty. The page itself never navigates away: it cancels drag and drop
+over the window, which would otherwise open a dropped file in place of the page. Whether a link
+opens in the user's default browser, logged in, is check W12.
 
 ### 9.7 Find
 
@@ -3072,8 +3077,13 @@ A program's output is untrusted (it may print a hostile file):
 The keeper runs the launch the server gives it: `claudeCommand` and the arguments design 7.6 and
 7.7 build. The server runs `rundll32.exe` (links, 9.6), `window.edge` (links with `window.links`
 `"edge"`), `wsl.exe` (the keep-alive) and `python3` (keepers), each with an argument list; `skydeck
-window` runs `window.edge` (the window). No input from a page becomes a program name or a
-shell string; a page's `new` flags become `claude` arguments only after design 7.7's refusals.
+window` runs `window.edge` (the window). `rundll32.exe url.dll,FileProtocolHandler` opens what it is
+given as the Windows shell would, a program or a `file:` address included: 9.6's check (`http` or
+`https` only, re-serialised) is what keeps a page's text, a program's output or a pull request's
+data from starting anything but the browser. `openLink` applies it itself, whatever its caller
+checked, and it is not widened (another scheme) without this in mind. No input from a page
+becomes a program name or a shell string; a page's `new` flags become `claude` arguments only after
+design 7.7's refusals.
 
 ## 16. Install, uninstall, doctor, configuration, updating
 
@@ -3513,7 +3523,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W17 | **Real claude**, `/tui fullscreen`: the alternate screen and the mouse mode come back after `skydeck window --restart`. | A | 7.2 |
 | W18 | **Real claude**: a terminal query answered late (the server stopped for a few seconds while Claude Code starts) — does the answer leak into the prompt? | A | 7.1, 14 |
 | W19 | **Real claude**: does `waitingFor` tell a permission prompt from a question? | B | 12.4 |
-| W20 | Privilege management does not block or prompt for `msedge.exe`, `wsl.exe` and `rundll32.exe` (with `window.links` `"default"` the server starts it for every link) started through interop. | A | 2, 5.3, 6.1, 9.6 |
+| W20 | Privilege management does not block or prompt for `msedge.exe`, `wsl.exe` and `rundll32.exe` (with `window.links` `"default"` the server starts it for every link) started through interop; a silent block of `rundll32.exe` shows as a link that opens nowhere with an empty key bar. | A | 2, 5.3, 6.1, 9.6 |
 | W21 | **Real claude**: a turn that ends in a session that is not selected shows "finished · not seen"; selecting it for 1.5 s clears it; a permission dialog shows "asks". | B | 10.3, 12.4 |
 | W22 | **Real claude**: a session started in a WSL terminal shows "running in another terminal", Resume is refused with the guard's message, and after `/exit` it resumes into the window. | A | 7.9 |
 | W23 | **Real claude**: which `CLAUDE*` variables Claude Code sets for the programs it runs — print the variable names (never their values) in a session's `!env` against a plain shell's — to confirm 7.4's list. And `skydeck window` run from a session's `!` command refuses (5.1). | A | 5.1, 7.4 |

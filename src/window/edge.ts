@@ -15,7 +15,13 @@ import { describeError } from '../sessions/problems.ts';
 import { driveC } from './drive.ts';
 import { deriveProfileDirUnder, edgeArgs, linkToOpen } from './windows.ts';
 
-/** S2 9.6: what opens a link in the Windows default browser (`window.links` "default"). */
+/**
+ * S2 9.6: what opens a link in the Windows default browser (`window.links` "default"). With
+ * FILE_PROTOCOL_HANDLER it opens what it is given as the Windows shell would, a program or a
+ * `file:` address included (S2 15.5): only what linkToOpen allows, http or https re-serialised, may
+ * reach it, and openLink checks that itself whatever its caller did. Widening linkToOpen (another
+ * scheme) would let text a program printed start a program on the Windows side.
+ */
 const RUNDLL32_EXE = '/mnt/c/Windows/System32/rundll32.exe';
 /** Its first argument: hands the rest of the command line, the address, to the shell. */
 const FILE_PROTOCOL_HANDLER = 'url.dll,FileProtocolHandler';

@@ -404,13 +404,16 @@ for (const links of ['default', 'edge'] as const) {
 }
 
 /**
- * D4 of follow-up F1: hostile addresses — white space, control characters and Unicode spaces in
- * every part of a URL (scheme, user info, host, port, path, query, fragment, around it). WSL's
- * interop quotes an argument only when it must and FileProtocolHandler takes the rest of the
- * command line raw, so the address handed to rundll32.exe must be one unquoted word: printable
- * ASCII only (U+0021–U+007E), no white space and no control character. The parser removes tab, LF
- * and CR anywhere and strips C0 controls and spaces around the address; it percent-encodes the
- * others in the user info, path, query and fragment; a host or a port that keeps one fails.
+ * D4 of follow-up F1: hostile addresses — white space, control characters, Unicode spaces and
+ * characters beyond ASCII (among them ones that Windows' best-fit mapping turns into '"' or a
+ * backslash) — in every part of a URL: scheme, user info, host (raw and percent-encoded), port,
+ * path, query, fragment, around it. WSL's interop quotes an argument only when it must, and
+ * FileProtocolHandler takes the rest of the command line raw (an ANSI one, perhaps, where best-fit
+ * mapping applies), so the address handed to rundll32.exe must be one unquoted word: printable
+ * ASCII (U+0021–U+007E) with no '"' and no backslash. The parser removes tab, LF and CR anywhere
+ * and strips C0 controls and spaces around the address; it percent-encodes the others, and all
+ * beyond ASCII, in the user info, path, query and fragment; it writes a host beyond ASCII as
+ * punycode; a host (also once its escapes are decoded) or a port that keeps one fails.
  */
 const HOSTILE_CHARACTERS: readonly string[] = [
   ' ',
@@ -437,6 +440,10 @@ const HOSTILE_CHARACTERS: readonly string[] = [
   '\u205f', // medium mathematical space
   '\u3000', // ideographic space
   '\ufeff', // byte order mark
+  '\u00fc', // beyond ASCII, not a space
+  '\uff02', // fullwidth quotation mark: '"' after best-fit mapping
+  '\uff3c', // fullwidth reverse solidus: a backslash after best-fit mapping
+  '\u00a5', // yen sign: a backslash on a Japanese code page
 ];
 const HOSTILE_PLACES: readonly ((c: string) => string)[] = [
   (c) => `${c}https://example.com/a${c}`,
@@ -445,6 +452,7 @@ const HOSTILE_PLACES: readonly ((c: string) => string)[] = [
   (c) => `https://us${c}er:pa${c}ss@example.com/`,
   (c) => `https://${c}example.com/`,
   (c) => `https://exa${c}mple.com/`,
+  (c) => `https://exa${encodeURIComponent(c)}mple.com/`, // the host is the one part decoded
   (c) => `https://example.com${c}/`,
   (c) => `https://[::1${c}]/`,
   (c) => `https://1.2.3${c}.4/`,
@@ -457,8 +465,8 @@ const HOSTILE_PLACES: readonly ((c: string) => string)[] = [
   (c) => `https://example.com/%${c}20`,
   (c) => `HTTP://Example.COM/${c}${c}${c}?${c}${c}#${c}${c}`,
 ];
-/** One word of the Windows command line: printable ASCII, no space. */
-const ONE_WORD = /^[\x21-\x7e]+$/;
+/** One word of the Windows command line: an http(s) address in printable ASCII, no space. */
+const ONE_WORD = /^https?:\/\/[\x21-\x7e]+$/;
 
 test('openLink hands rundll32.exe an address with no white space and no control character, whatever the page sent (D4)', async (t) => {
   const { platform, processes } = setup(t);
@@ -476,14 +484,17 @@ test('openLink hands rundll32.exe an address with no white space and no control 
       const [handler, address, ...more] = call.args;
       assert.equal(handler, HANDLER);
       assert.deepEqual(more, []);
-      assert.match(address ?? '', ONE_WORD, `${JSON.stringify(url)} → ${JSON.stringify(address)}`);
+      const shown = `${JSON.stringify(url)} → ${JSON.stringify(address)}`;
+      assert.match(address ?? '', ONE_WORD, shown);
+      assert.doesNotMatch(address ?? '', /["\\]/, shown);
     }
   }
-  // Not vacuous: most of the table is opened (percent-encoded or with the character removed).
-  assert.ok(opened > HOSTILE_PLACES.length * 8, `${opened} opened`);
+  // Not vacuous: more than half of the table is opened (encoded, removed, or as punycode).
+  const all = HOSTILE_PLACES.length * HOSTILE_CHARACTERS.length;
+  assert.ok(opened > all / 2, `${opened} of ${all} opened`);
 });
 
-test('the parser percent-encodes white space and controls in the user info, path, query and fragment, removes tab and line breaks, and fails a host or port that keeps one (D4)', async (t) => {
+test('the parser percent-encodes white space, controls and what is beyond ASCII in the user info, path, query and fragment, removes tab and line breaks, and fails a host (also percent-encoded) or port that keeps one (D4)', async (t) => {
   const { platform, processes } = setup(t);
   const cases: [url: string, opened: string | null][] = [
     ['https://example.com/a b', 'https://example.com/a%20b'],
@@ -499,6 +510,19 @@ test('the parser percent-encodes white space and controls in the user info, path
     ['https://exa\x1fmple.com/', null],
     ['https://example.com:4 43/', null],
     ['https://example.com:4\u3000/', null],
+    ['https://exa%20mple.com/', null], // the host's escapes are decoded first
+    ['https://exa%0Ample.com/', null],
+    ['https://exa%C2%A0mple.com/', null],
+    ['https://exa%22mple.com/', null],
+    ['https://exa%5Cmple.com/', null],
+    ['https://exa%EF%BC%82mple.com/', null], // IDNA maps U+FF02 to '"'
+    ['https://exa\uff02mple.com/', null],
+    ['https://exa\uff3cmple.com/', null],
+    ['https://exa\u00fcmple.com/', 'https://xn--example-p2a.com/'],
+    [
+      'https://example.com/\uff02\uff3c?\u00a5#\u00fc',
+      'https://example.com/%EF%BC%82%EF%BC%BC?%C2%A5#%C3%BC',
+    ],
   ];
   for (const [url, address] of cases) {
     const before = processes.calls.length;

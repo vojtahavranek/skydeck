@@ -545,9 +545,22 @@ Code asks for anything all the same (to run a command, to write a file), answer 
 the address in the terminal. Expected: it opens in your default browser (the one Windows opens
 links in), where you are logged in, not in skydeck's window and not in a new Edge window unless
 Edge is your default browser. A link whose text is not its address shows the address at the first
-Ctrl+click and opens at the second. When it opens nowhere, the key bar says `the link could not be
-opened: the default browser could not be started (window.links "edge" opens links in Edge)`: write
-that down, and any prompt of the PC's privilege management for `rundll32.exe` (W20).
+Ctrl+click and opens at the second. When it opens nowhere: if the key bar says `the link could not
+be opened: the default browser could not be started (window.links "edge" opens links in Edge)`,
+`rundll32.exe` could not be started from WSL; if it says nothing, Windows did not open the link (the
+PC's privilege management may have blocked `rundll32.exe`, W20). Write down which, and any prompt of
+the privilege management; `window.links` `"edge"` (part 2) is the way round.
+
+Then, the same way (the throwaway session selected, `Focus: terminal`), type `print the address
+https://example.com/?q=%OS%&r=1%2C2#a,b and nothing else; reply in this chat, with no tool and no
+file` and press Enter; answer **No** to anything Claude Code asks for. Look that the terminal shows
+the address as typed; if not, stop and write down what it shows. Ctrl+click it. Expected: one tab in
+your default browser whose address (click into the address bar to see it whole) reads
+`example.com/?q=%OS%&r=1%2C2#a,b`: `%OS%` as typed, not `Windows_NT`; `%2C` not turned into a
+comma; the parts after `&` and `#` there; no second window, no dialog, no other program. If `%OS%`
+became `Windows_NT`, something on the Windows side expanded it: write that down, and report it
+(`example.com` is IANA's page; it would only have received the word `Windows_NT`). Part 2 shows how
+to set `"edge"` meanwhile, if you want to.
 
 **Part 2, `"edge"` (only if you want to try it).** The paths below are the default ones: with
 `XDG_CONFIG_HOME` set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME`
@@ -635,8 +648,8 @@ skydeck window --restart
    Then `skydeck window --restart`, and Ctrl+click the address once more. Expected: it opens in your
    default browser again, as in part 1.
 
-Write down where the link opened in part 1 (which browser, logged in or not) and, if you did part
-2, in part 2.
+Write down where the link opened in part 1 (which browser, logged in or not), the address the
+browser showed for the second link, and, if you did part 2, where it opened in part 2.
 
 ## W13. What the company's Edge policy does to the window
 
@@ -794,7 +807,8 @@ The PC's privilege management (BeyondTrust on the development PC) must neither b
 `msedge.exe` started by `skydeck window` (W1), for the keep-alive's `wsl.exe`, which the server
 starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`), or for `rundll32.exe`,
 which the server starts for every link the window opens with `window.links` `"default"` (W12).
-Watch for a dialog during W1, right after a `skydeck window --restart`, and at W12's first link.
+Watch for a dialog during W1, right after a `skydeck window --restart`, and at W12's first link. A
+silent block of `rundll32.exe` shows as a link that opens nowhere with an empty key bar.
 
 Write down: any dialog's exact text, and what you chose.
 
