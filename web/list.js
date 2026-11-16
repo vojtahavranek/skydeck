@@ -248,6 +248,8 @@ function paintRow(row, text, done) {
   setTip(row.chip, chip?.tip ?? '');
   setData(row.chip, 'dotted', String(chip?.dotted ?? false));
   setData(row.chip, 'dim', String(chip?.dim ?? false));
+  // F4: the state it names, for its tint (style.css); '' for one the page does not know.
+  setData(row.chip, 'level', chip?.level ?? '');
   setText(row.note, text.note === null ? '' : '✎');
   setTip(row.note, text.note === null ? '' : text.note === '' ? 'has a note' : text.note);
   setText(row.age, text.age);

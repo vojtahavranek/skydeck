@@ -174,18 +174,10 @@
   padding: 0 6px;
   line-height: 16px;
   border: 1px solid var(--line2);
-  color: var(--dim);
+  /* F4: the tint of the state it names (style.css), as the list's chip; else grey. */
+  background-color: var(--tint-bg, transparent);
+  color: var(--tint, var(--dim));
   white-space: nowrap;
-}
-.header-chip[data-level='checks-failing'] {
-  color: var(--crash);
-  border-color: var(--crash);
-  background: var(--crash-bg);
-}
-.header-chip[data-level='changes-requested'],
-.header-chip[data-level='checks-pending'] {
-  color: var(--wait);
-  border-color: var(--wait);
 }
 .header-chip[data-level='cant-read'] {
   border-style: dotted;
@@ -194,10 +186,11 @@
 .header-chip[data-level='unfetched'] {
   border-style: dashed;
 }
-/* S2 12.3: the merged ones beside open ones (`+30`), and a chip with none open, are dim. */
+/* S2 12.3: the merged ones beside open ones (`+30`), and a chip with none open, are dim — but a
+   tinted chip's `+30` keeps its tint (F4), and `3 merged` is purple. */
 .header-chip-merged,
 .header-chip[data-dim='true'] {
-  color: var(--faint);
+  color: var(--tint, var(--faint));
 }
 /* The open pull requests as far as they fit: one that does not fit goes to a second row of the
    box, which is not shown; one wider than the box alone is cut with an ellipsis. */

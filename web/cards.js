@@ -476,7 +476,8 @@ export function createCards(root, deps) {
     setText(chipWords, shown?.text ?? '');
     setText(chipMerged, shown === null || shown.merged === '' ? '' : ` ${shown.merged}`);
     setTip(chip, shown?.tip ?? '');
-    setData(chip, 'level', row.chip?.level ?? '');
+    // F4: the state it names, for its tint (style.css); '' for one the page does not know.
+    setData(chip, 'level', shown?.level ?? '');
     setData(chip, 'dim', String(shown?.dim ?? false));
     const open = splitPrs(Array.isArray(row.prs) ? row.prs : []).open;
     open.forEach((pr, at) => {

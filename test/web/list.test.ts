@@ -225,6 +225,7 @@ describe('rowText: a row that is not running has one line', () => {
       tip: 'o/r #7 · failing',
       dotted: false,
       dim: false,
+      level: 'checks-failing',
     });
     assert.equal(text.note, 'first line');
   });
@@ -286,6 +287,8 @@ describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
       assert.equal(text.chip?.merged, '');
       assert.equal(text.chip?.dotted, level === 'cant-read');
       assert.equal(text.chip?.dim, false);
+      // F4: the state the chip names, for its tint.
+      assert.equal(text.chip?.level, level);
     });
   }
 
@@ -302,7 +305,14 @@ describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
       '1 open, review required',
       [pr('review-required', 7)],
       chip('review-required', 1),
-      { text: 'PR · review', merged: '', tip: 'o/r #7 · review', dotted: false, dim: false },
+      {
+        text: 'PR · review',
+        merged: '',
+        tip: 'o/r #7 · review',
+        dotted: false,
+        dim: false,
+        level: 'review-required',
+      },
     ],
     [
       '1 open, checks failing; 30 merged',
@@ -314,6 +324,7 @@ describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
         tip: 'o/r #7 · failing\n30 merged',
         dotted: false,
         dim: false,
+        level: 'checks-failing',
       },
     ],
     [
@@ -326,6 +337,7 @@ describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
         tip: 'o/r #1 · approved\no/r #2 · draft',
         dotted: false,
         dim: false,
+        level: 'draft',
       },
     ],
     [
@@ -342,6 +354,7 @@ describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
         tip: "o/r #3 · can't read · last read 3h ago · gh: HTTP 502\no/r #5 · changes\n4 merged",
         dotted: true,
         dim: false,
+        level: 'cant-read',
       },
     ],
     [
@@ -359,19 +372,27 @@ describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
         tip: 'o/r #1 · pending\no/r #2 · failing\no/r #3 · draft\n30 merged',
         dotted: false,
         dim: false,
+        level: 'checks-failing',
       },
     ],
     [
       'none open; 3 merged, 1 closed',
       [...many(3, 'merged', 1), pr('closed', 9)],
       chip('merged', 0, 3),
-      { text: '3 merged', merged: '', tip: '3 merged · 1 closed', dotted: false, dim: true },
+      {
+        text: '3 merged',
+        merged: '',
+        tip: '3 merged · 1 closed',
+        dotted: false,
+        dim: true,
+        level: 'merged',
+      },
     ],
     [
       'none open; 1 closed',
       [pr('closed', 9)],
       chip('closed', 0),
-      { text: 'closed', merged: '', tip: '1 closed', dotted: false, dim: true },
+      { text: 'closed', merged: '', tip: '1 closed', dotted: false, dim: true, level: 'closed' },
     ],
   ];
   for (const [name, prs, given, expected] of table) {
@@ -433,6 +454,16 @@ describe("rowText: the chip (S2 12.3's rule and words, plan D4)", () => {
     );
     assert.equal(text.chip?.text, 'PR · later-level');
     assert.equal(text.chip?.tip, 'o/r #1 · later-level');
+    // F4: a level the page does not know names no state, so the chip keeps today's grey; nothing
+    // of the server's text reaches the chip's attribute.
+    assert.equal(text.chip?.level, '');
+    for (const foreign of ['<b>x</b>', 'merged ', 'Merged', 'constructor', '__proto__', '']) {
+      assert.equal(
+        rowText(row({ prs: [pr(foreign, 1)], chip: chip(foreign, 1) }), now, null).chip?.level,
+        '',
+        foreign,
+      );
+    }
   });
 
   test('no chip without a pull request', () => {

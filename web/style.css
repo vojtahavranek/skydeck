@@ -19,6 +19,20 @@
   --wait-bg: #fdf3dc;
   --crash: #c93c37;
   --crash-bg: #fbe3e1;
+  /* The pull-request chips' quiet tints (S2 12.3; follow-up F4): a text colour and a faint
+     background of the same hue per tint, softer than the attention marks' colours (S2 12.4),
+     each text at least 4.5 : 1 against its background, --panel, --panel2 and --sel
+     (test/web/pr-tints.test.ts). */
+  --pr-red: #a8433d;
+  --pr-red-bg: #fbefee;
+  --pr-amber: #7f5f1a;
+  --pr-amber-bg: #faf3e3;
+  --pr-blue: #3a64a6;
+  --pr-blue-bg: #edf2fb;
+  --pr-green: #2f7448;
+  --pr-green-bg: #eaf5ee;
+  --pr-purple: #73559e;
+  --pr-purple-bg: #f3eff9;
   --kbd: #e9ebef;
   --term-bg: #fbfbf9;
   --term-fg: #24292f;
@@ -43,6 +57,16 @@
     --wait-bg: #3a2f14;
     --crash: #f2665f;
     --crash-bg: #3d1d1c;
+    --pr-red: #e3938c;
+    --pr-red-bg: #33262a;
+    --pr-amber: #d9b56e;
+    --pr-amber-bg: #312c22;
+    --pr-blue: #93b3ea;
+    --pr-blue-bg: #222b3a;
+    --pr-green: #86c79c;
+    --pr-green-bg: #212e28;
+    --pr-purple: #bba3e3;
+    --pr-purple-bg: #2b2839;
     --kbd: #30353d;
     --term-bg: #121417;
     --term-fg: #d6d9de;
@@ -86,6 +110,32 @@ kbd {
 }
 [hidden] {
   display: none !important;
+}
+/* A pull request's state names its quiet tint (S2 12.3; follow-up F4). An element that shows a
+   state carries it in `data-level` — a level of design 7.3, the page's own name for it
+   (list-text.js's knownLevel), never a text of the server's — and its own style sheet draws
+   `--tint` (the text) and `--tint-bg` (the faint background) where it wants them. A level not
+   named here (draft, closed, not fetched, can't read) or none sets neither: it stays grey. */
+[data-level='checks-failing'],
+[data-level='changes-requested'] {
+  --tint: var(--pr-red);
+  --tint-bg: var(--pr-red-bg);
+}
+[data-level='checks-pending'] {
+  --tint: var(--pr-amber);
+  --tint-bg: var(--pr-amber-bg);
+}
+[data-level='review-required'] {
+  --tint: var(--pr-blue);
+  --tint-bg: var(--pr-blue-bg);
+}
+[data-level='approved-green'] {
+  --tint: var(--pr-green);
+  --tint-bg: var(--pr-green-bg);
+}
+[data-level='merged'] {
+  --tint: var(--pr-purple);
+  --tint-bg: var(--pr-purple-bg);
 }
 
 .app {

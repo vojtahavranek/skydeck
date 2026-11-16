@@ -178,7 +178,9 @@
   padding: 0 6px;
   border: 1px solid var(--line2);
   border-radius: 9px;
-  color: var(--dim);
+  /* F4: the tint of the state it names (style.css), else grey. */
+  background-color: var(--tint-bg, transparent);
+  color: var(--tint, var(--dim));
   font-size: 11px;
   line-height: 16px;
 }
@@ -187,10 +189,10 @@
   color: var(--faint);
 }
 /* S2 12.3: the merged ones beside open ones (`+30`), and a chip with none open (`3 merged`,
-   `closed`), are dim. */
+   `closed`), are dim — but a tinted chip's `+30` keeps its tint (F4), and `3 merged` is purple. */
 .row-chip-merged,
 .row-chip[data-dim='true'] {
-  color: var(--faint);
+  color: var(--tint, var(--faint));
 }
 .row-chip[data-dim='true'] {
   border-color: var(--line);

@@ -56,6 +56,8 @@ function clean(text) {
  * @property {string} tip each open one with its own state, then the merged and closed counts
  * @property {boolean} dotted its state is `can't read`
  * @property {boolean} dim none is open: the chip is `3 merged` or `closed`
+ * @property {string} level the state the chip names, one of design 7.3's levels, for its tint
+ *   (follow-up F4); '' for a level the page does not know, which keeps the chip grey
  * @typedef {object} RowText
  * @property {RowIcon} icon the state icon
  * @property {string} slot the slot number, '' when the row's terminal has none
@@ -137,6 +139,16 @@ const LEVEL_WORDS = /** @type {Record<string, string>} */ ({
   merged: 'merged',
   closed: 'closed',
 });
+
+/**
+ * The state a chip or a pull request names, for its tint (follow-up F4): `level` when it is one
+ * of design 7.3's levels, else '' (no state: grey). Only the page's own names reach the markup.
+ * @param {string} level
+ * @returns {string}
+ */
+export function knownLevel(level) {
+  return Object.hasOwn(LEVEL_WORDS, level) ? level : '';
+}
 
 /**
  * @param {string} level
@@ -228,6 +240,7 @@ function chipOf(row, nowNs) {
     tip,
     dotted: row.chip.level === 'cant-read',
     dim: row.chip.open === 0,
+    level: knownLevel(row.chip.level),
   };
 }
 
