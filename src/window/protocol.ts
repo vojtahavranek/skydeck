@@ -35,8 +35,8 @@ export interface KeepAlivePayload {
 // are measured in UTF-8 bytes — paths and URLs at most 4096, other text 1024, `input.data` 64 KiB,
 // a note's `text` and `base` 64 KiB each (plan D5); every string must be well formed (no lone
 // surrogate). A restore names 1–1,000 distinct session ids (plan C 2.2). A view's `chips` are
-// distinct chips, its `opened` at most MAX_OPENED distinct texts, its `switcher` null or a text
-// (plan E 2.3).
+// distinct chips, its `closed` at most MAX_CLOSED distinct entries (a section and a text), its
+// `switcher` null or a text (plan E 2.3; `closed`: follow-up F3, ruled 2026-11-16).
 
 /** The page's first message (S2 8.2.2). Any `protocol` number is read; the server closes with 4426
  *  for one it does not speak. `nonce`, `proof`: base64url, checked by the server's authentication. */
@@ -62,8 +62,8 @@ export interface PingMessage {
   n: number;
 }
 /** `unfolded`: section names ('earlier'), each once. `selected`: a session id (lower-case UUID) or
- *  null. Stage E's fields (plan E 2.3) are each optional, as a page before stage E sends none:
- *  absent `chips` is none, absent `opened` is no stacks at all (E6), absent `switcher` is closed. */
+ *  null. Stage E's fields (plan E 2.3) are each optional: absent `chips` is none, absent `closed`
+ *  is no block closed (E6 as ruled 2026-11-16: every block open), absent `switcher` is closed. */
 export interface ViewMessage {
   t: 'view';
   filter: string;
@@ -72,13 +72,20 @@ export interface ViewMessage {
   selected: string | null;
   /** E4: each once. */
   chips?: SearchChip[];
-  /** E6: the groups whose stacks the user opened; at most MAX_OPENED, each a text, each once. */
-  opened?: string[];
+  /** E6 (ruled 2026-11-16): the blocks the user closed, each its section and its group; at most
+   *  MAX_CLOSED, each once. */
+  closed?: ClosedBlock[];
   /** E8: the switcher's text while it is shown; null while it is not. */
   switcher?: string | null;
 }
-/** E6: the most groups view.opened names. */
-export const MAX_OPENED = 64;
+/** E6 (ruled 2026-11-16): a block the user closed — the rows of `group` in `section` (S2 12.2). */
+export interface ClosedBlock {
+  section: SectionPayload['name'];
+  /** The rows' group as the list sends it (sanitised), a text. */
+  group: string;
+}
+/** E6: the most entries view.closed holds. */
+export const MAX_CLOSED = 64;
 /** Window focus, selection and the terminal area at the page's font (S2 8.2.3, 8.2.6). */
 export interface FocusMessage {
   t: 'focus';
@@ -237,8 +244,8 @@ export interface RowPayload {
   starting: boolean;
   /** S2 12.4: why the row needs you, null when it needs nothing (stage B, plan B 2.3). */
   attention: AttentionPayload | null;
-  /** S2 12.2's stack the row is drawn in (plan E6), null in none (always while filtering, in Open,
-   *  and for a view without `opened`). */
+  /** S2 12.2's block the row is drawn in (plan E6; the code calls a block a stack), null in none
+   *  (always while filtering). */
   stack: StackPayload | null;
 }
 export interface SectionPayload {
@@ -323,17 +330,21 @@ export interface ListMessage {
 
 /** E4: the chips that narrow the list (S2 12.8); Show done is `view.showDone`. */
 export type SearchChip = 'running' | 'open-pr' | 'note';
-/** RowPayload.stack (E6). */
+/** RowPayload.stack (E6): the block of one group in one section (S2 12.2). */
 export interface StackPayload {
-  /** The group the stack is of (the rows' group, as sanitised). */
+  /** The group the block is of (the rows' group, as sanitised). */
   group: string;
   /** Its rows, the head included: at least 2. */
   size: number;
-  /** E6: `opened` names the group, or a member other than the head is selected. */
+  /** E6 (ruled 2026-11-16): `view.closed` does not name its section and group, or a member other
+   *  than the head is selected. */
   open: boolean;
   role: 'head' | 'member';
   /** The head's session id. */
   head: string;
+  /** G5: how many of the members a closed block hides need you (12.4), the head not counted; 0
+   *  while the block is open. */
+  hiddenNeedYou: number;
 }
 export type SwitchRank = 'need' | 'open' | 'not-running' | 'done';
 /** E10: what the page changes so that its list shows the row, in this order of meaning:
@@ -679,7 +690,24 @@ const CHIP: Check = (value, where) => {
   return Object.hasOwn(CHIPS, value) ? null : `${where}: wrong value`;
 };
 const VIEW_CHIPS = list(CHIP, false, true, Object.keys(CHIPS).length);
-const OPENED = list(TEXT, false, true, MAX_OPENED);
+const CLOSED_ENTRY = object({ section: oneOf('open', 'week', 'earlier'), group: TEXT });
+/** E6 (ruled 2026-11-16): at most MAX_CLOSED entries, each exactly a section and a text, each
+ *  section and group once. */
+const CLOSED: Check = (value, where) => {
+  if (!Array.isArray(value)) return `${where}: wrong type`;
+  if (value.length > MAX_CLOSED) return `${where}: too long`;
+  const seen = new Map<string, Set<string>>();
+  for (const one of value as unknown[]) {
+    const problem = CLOSED_ENTRY(one, where);
+    if (problem !== null) return problem;
+    const { section, group } = one as ClosedBlock;
+    const groups = seen.get(section) ?? new Set<string>();
+    if (groups.has(group)) return `${where}: wrong value`;
+    groups.add(group);
+    seen.set(section, groups);
+  }
+  return null;
+};
 
 const AREA = object({ cols: SIZE, rows: SIZE });
 
@@ -742,10 +770,10 @@ const MESSAGES: Readonly<Record<string, Check>> = {
       selected: nullable(SESSION),
       // Stage E (plan E 2.3), each optional: a page before stage E sends none of them.
       chips: VIEW_CHIPS,
-      opened: OPENED,
+      closed: CLOSED,
       switcher: nullable(TEXT),
     },
-    ['chips', 'opened', 'switcher'],
+    ['chips', 'closed', 'switcher'],
   ),
   focus: object({ t: ANY, focused: BOOLEAN, selected: nullable(SESSION), area: AREA }),
   attach: object({ t: ANY, term: TERM, cols: SIZE, rows: SIZE }),

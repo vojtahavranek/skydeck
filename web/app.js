@@ -32,7 +32,7 @@
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
-/** @import { ExitMessage, ListMessage, ResultMessage, RowPayload, SearchChip, SectionPayload, ServerMessage, SwitchItem, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
+/** @import { ClosedBlock, ExitMessage, ListMessage, ResultMessage, RowPayload, SearchChip, SectionPayload, ServerMessage, SwitchItem, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
 /** @import { EditWhat, ListAction, WindowChord, Zone } from './keys.js' */
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
@@ -141,7 +141,7 @@ const state = {
     unfolded: /** @type {string[]} */ ([]),
     showDone: false,
     chips: /** @type {SearchChip[]} */ ([]),
-    opened: /** @type {string[]} */ ([]),
+    closed: /** @type {ClosedBlock[]} */ ([]),
     /** E8: the switcher's text while it is shown, null while it is not. @type {string | null} */
     switcher: /** @type {string | null} */ (null),
   },
@@ -211,6 +211,7 @@ const list = createList(dom.list, {
   select: (id, how) => select(id, how),
   activate: (id) => activate(id),
   view: (change) => changeView(change),
+  say: (text) => say(text),
 });
 const terminalView = createTerminalView(dom.terminal, {
   send: (message) => {
@@ -259,13 +260,17 @@ const editor = createEditor(dom.editor, {
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
 // session this page's list does not show (its filter, the folded Earlier) and that has no terminal
 // of the window is not selected (ruled on review 2): the pane would be empty, and a focused page's
-// selection is seen after 1.5 s (S2 12.4), which would clear a mark of a session never shown.
+// selection is seen after 1.5 s (S2 12.4), which would clear a mark of a session never shown. One
+// that a closed block hides is selected (F3, G5): `needYou.order` holds it — it holds the rows the
+// list shows and those closed blocks hide, never one a filter, the fold or done hidden leaves out —,
+// and the server opens its block for the selection.
 const notifications = createNotifications(dom.notifyOn, {
   select: (id) => {
     if (!windowChordGate('notification')) {
       return;
     }
-    if (rowOf(id) === undefined && !hasTerminal(id)) {
+    const inBlock = state.list?.needYou?.order?.includes(id) ?? false;
+    if (rowOf(id) === undefined && !hasTerminal(id) && !inBlock) {
       say('that session is hidden by the filter or the fold');
       return;
     }
@@ -581,7 +586,7 @@ function cutTo(text, bytes) {
  * connection for it), and to E3's 16 words: a longer one is cut to its first 1,024 bytes, then
  * after its 16th word (`cutWords`, as the server reads it). The key bar says so for the filter
  * (`the filter is cut to its first 1,024 bytes`, `… 16 words`); for the switcher its footer does.
- * @param {{ filter?: string, unfolded?: string[], showDone?: boolean, chips?: SearchChip[], opened?: string[], switcher?: string | null }} change
+ * @param {{ filter?: string, unfolded?: string[], showDone?: boolean, chips?: SearchChip[], closed?: ClosedBlock[], switcher?: string | null }} change
  */
 function changeView(change) {
   let next = change;
@@ -926,8 +931,8 @@ function switcherClosed() {
  * the filter was cleared; then the row is selected and gets what Enter on it in the list does —
  * stage A's `activate`, applied to the switcher's row, since the sections may not hold it yet: a
  * terminal of the window or a session elsewhere is shown, one that is not running is resumed into
- * the window (a refusal shows on its card). A closed stack needs nothing (E6: the server opens it
- * for its selected member).
+ * the window (a refusal shows on its card). A closed block needs nothing (G5: the server opens it
+ * for its selected member, and the list then forgets that the user closed it).
  * @param {SwitchItem} item
  */
 function switcherPick(item) {

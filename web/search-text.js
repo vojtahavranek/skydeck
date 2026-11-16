@@ -1,6 +1,6 @@
 // The page's texts of search (S2 12.2, 12.8; plan task 93, E3, E7, E9): the cut of a search text
-// after its 16th word, a stack's badge and its `+3 more in ORB-2107` line, a title's parts with the
-// words found in it, the switcher's headings and its footer. web/list.js and web/switcher.js draw
+// after its 16th word, a block's badge and its `+3 more in ORB-2107 · 1 needs you` line, a title's
+// parts with the words found in it, the switcher's headings and its footer. web/list.js and web/switcher.js draw
 // them. Pure: no DOM, no clock, nothing logged, so that node:test and the root type check load it
 // (test/web/search-text.test.ts).
 //
@@ -56,6 +56,20 @@ export function stackBadge(size) {
  */
 export function moreText(size, group) {
   return `+${size - 1} more in ${sanitize(group)}`;
+}
+
+/**
+ * G5 (ruled 2026-11-16): what the `+n more` line of a closed block adds when members it hides need
+ * you — ` · 1 needs you`, ` · 2 need you` (the server's `hiddenNeedYou`, taken from the same fact
+ * as a row's own mark); '' for none, so that the line is as before. Drawn in the needs-you colour.
+ * @param {number} count the block's `hiddenNeedYou`
+ * @returns {string}
+ */
+export function moreNeedText(count) {
+  if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) {
+    return '';
+  }
+  return ` · ${count} ${count === 1 ? 'needs' : 'need'} you`;
 }
 
 /**

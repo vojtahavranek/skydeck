@@ -16,6 +16,7 @@ import { sanitize } from '../../text/sanitize.ts';
 import type { TerminalInfo } from '../hub.ts';
 import type {
   AttentionPayload,
+  ClosedBlock,
   HiddenBy,
   ListMessage,
   RowPayload,
@@ -50,10 +51,10 @@ export interface ViewInput {
     showDone: boolean;
     selected: string | null;
     /** Stage E (plan E 2.4), each optional so that every caller of stages A–D compiles unchanged:
-     *  absent `chips` is none (E4); absent `opened` is no stacks at all (E6); `switcher` is the
-     *  switcher's text while it is shown, null or absent while it is not (E8). */
+     *  absent `chips` is none (E4); absent `closed` closes no block (E6 as ruled 2026-11-16);
+     *  `switcher` is the switcher's text while it is shown, null or absent while it is not (E8). */
     chips?: readonly SearchChip[];
-    opened?: readonly string[];
+    closed?: readonly ClosedBlock[];
     switcher?: string | null;
   };
   /** The resume card of the selected row (task 32's selectedPayload). */
@@ -251,22 +252,29 @@ function sectionPayload(
 }
 
 /**
- * E6 for This week or Earlier: the rows drawn, each head and open member with its `stack`. A row
- * that a terminal of the window holds or that needs you is `held` and never stacks; `opened` is
- * `view.opened` as it comes (absent: no stacks at all).
+ * E6 for one section (ruled 2026-11-16): the rows drawn, each head and open member with its
+ * `stack`; every row of a group is in its block (G2), `closed` is `view.closed` as it comes
+ * (absent: every block open); a closed block is drawn open while a member's row is drawn with a
+ * terminal that has not reported a session.
  */
 function stacked(
+  name: SectionName,
   entries: readonly Entry[],
-  opened: readonly string[] | undefined,
+  closed: readonly ClosedBlock[] | undefined,
   selected: string | null,
 ): RowPayload[] {
-  const stackable = entries.map(({ payload }) => ({
+  const stackable = entries.map(({ payload, terminal }) => ({
     id: payload.id,
     group: payload.group,
-    held: payload.terminal !== null || payload.attention !== null,
+    needsYou: payload.attention !== null,
+    // Ruled 2026-11-16 (review 2): its row's terminal has not reported a session (S2 7.5), so the
+    // terminal's slot names no session for the page: the row stays on screen. THE PAGE COPIES THIS
+    // RULE (web/list.js, `unreported`: the same terminal's `sessionId` null in `list.terminals`)
+    // to forget the closing and refuse ← and `×n` there; a change of one is a change of the other.
+    unreported: terminal !== null && terminal.sessionId === null,
     payload,
   }));
-  return stackRows(stackable, opened, selected).map(({ entry, stack }) =>
+  return stackRows(stackable, name, closed, selected).map(({ entry, stack }) =>
     stack === null ? entry.payload : { ...entry.payload, stack },
   );
 }
@@ -286,9 +294,10 @@ function stacked(
  *   their done mark), `doneHidden` is 0, no section is folded and no stack is formed. `counts` are
  *   the title bar's: every row listed without the filter once, by state, the starting ones and
  *   those running elsewhere apart, whatever the filter or the chips list.
- * - Stacks (S2 12.2, plan E6): in This week and Earlier while not filtering, `stackRows` over the
- *   section's rows with `view.opened` as it comes; a section's `count` and time span are all its
- *   rows', its `rows` the drawn ones.
+ * - Blocks (S2 12.2, plan E6 as ruled 2026-11-16): in every section while not filtering,
+ *   `stackRows` over the section's rows with `view.closed` as it comes (absent: every block open); a
+ *   section's `count` and time span are all its rows', a closed block's hidden members too, its
+ *   `rows` the drawn ones.
  * - The switcher (S2 12.8, plan E8, E9): while `view.switcher` is a string, `switcherPayload` over
  *   every row listed with done ones shown (Open's in Open's order, then the others most recent
  *   first), each with what hides it from this page's list; else null. Its `restore` is null here.
@@ -300,9 +309,11 @@ function stacked(
  * - Attention (S2 12.4, plan B7): a row's `attention` is `attentionOf` over `input.attention`.
  *   `needYou.count` counts the rows listed without the filter that need you, whatever the filter
  *   or the fold, and such a row is in no field of `counts` (the title bar's parts add up);
- *   `needYou.order` holds the ids of the rows the sections carry that need you, in B6's order
- *   (`attentionOrder`) — also a done one a filter lists, which `needYou.count` does not count
- *   (E5: the title bar does not move with the filter).
+ *   `needYou.order` holds the ids of the rows of the sections that are not folded that need you —
+ *   those the sections carry and those a closed block hides (G5: Ctrl+Shift+J reaches them, and
+ *   the block opens for the selection) —, in B6's order (`attentionOrder`); also a done one a
+ *   filter lists, which `needYou.count` does not count (E5: the title bar does not move with the
+ *   filter).
  */
 export function buildListMessage(
   input: ViewInput,
@@ -404,25 +415,25 @@ export function buildListMessage(
     }
   }
 
+  const needing: { id: string; attention: AttentionPayload }[] = [];
   const sections = SECTIONS.map((name) => {
     const entries = shown.get(name) ?? [];
     entries.sort(name === 'open' ? compareOpen : compareRecent);
     const folded = name === 'earlier' && !filtering && earlierFolded;
-    // S2 12.2: running sessions never stack, and a filter flattens every stack.
-    const drawn =
-      name === 'open' || filtering
-        ? () => entries.map((entry) => entry.payload)
-        : () => stacked(entries, view.opened, view.selected);
-    return sectionPayload(name, entries, folded, drawn);
-  });
-  const needing: { id: string; attention: AttentionPayload }[] = [];
-  for (const section of sections) {
-    for (const row of section.rows) {
-      if (row.attention !== null) {
-        needing.push({ id: row.id, attention: row.attention });
+    if (!folded) {
+      // G5: also a row a closed block hides, so that `needYou` does not move with the blocks.
+      for (const { payload } of entries) {
+        if (payload.attention !== null) {
+          needing.push({ id: payload.id, attention: payload.attention });
+        }
       }
     }
-  }
+    // S2 12.2: a filter flattens every block.
+    const drawn = filtering
+      ? () => entries.map((entry) => entry.payload)
+      : () => stacked(name, entries, view.closed, view.selected);
+    return sectionPayload(name, entries, folded, drawn);
+  });
 
   return {
     t: 'list',

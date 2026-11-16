@@ -16,7 +16,7 @@ restart the window offers to restore the sessions that were open, into the windo
 resume --window`, `skydeck new --window` (or `"terminal": "window"` in `config.json`) start
 sessions there from any terminal. The list's filter finds a session by several words or the first
 characters of its short id, chips narrow the list to the running sessions, those with an open pull
-request or those with a note, the sessions of one group stack in the history, and Ctrl+Shift+P
+request or those with a note, the sessions of one group sit together as a block in every section (open until you close it), and Ctrl+Shift+P
 opens a quick switcher over every session. The window's sessions run in terminals of skydeck's own
 inside WSL, so they keep running when the window or its server is closed or restarted
 ([docs/install.md](docs/install.md), "The window (step 2)"; design in

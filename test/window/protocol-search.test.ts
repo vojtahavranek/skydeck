@@ -1,14 +1,15 @@
 /**
- * Stage E's fields of `view` and `list` (plan E 2.3): `view.chips`, `view.opened` and
- * `view.switcher` with the limits `parsePageMessage` applies, a view of stage A's page without
- * them, and the types every side codes against (`RowPayload.stack`, `list.filtering`,
+ * Stage E's fields of `view` and `list` (plan E 2.3): `view.chips`, `view.closed` (E6 as ruled
+ * 2026-11-16, which replaced `view.opened`) and `view.switcher` with the limits `parsePageMessage`
+ * applies, a view without them, and the types every side codes against (`RowPayload.stack`, `list.filtering`,
  * `list.switcher`).
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { MAX_OPENED, parsePageMessage } from '../../src/window/protocol.ts';
+import { MAX_CLOSED, parsePageMessage } from '../../src/window/protocol.ts';
 import type {
+  ClosedBlock,
   HiddenBy,
   ListMessage,
   RestoreOffer,
@@ -58,29 +59,32 @@ function withLone(view: Record<string, unknown>): string {
 }
 
 describe('view: a view without the fields of stage E is taken (a page of stage A)', () => {
-  test('none of chips, opened and switcher', () => {
+  test('none of chips, closed and switcher', () => {
     taken({ ...VIEW });
   });
 
   test('each one alone, the others absent', () => {
     taken({ ...VIEW, chips: ['note'] });
-    taken({ ...VIEW, opened: ['ORB-2107'] });
+    taken({ ...VIEW, closed: [{ section: 'week', group: 'ORB-2107' }] });
     taken({ ...VIEW, switcher: 'orb' });
     taken({ ...VIEW, switcher: null });
   });
 
   test('all three at once, each at its limit', () => {
-    const opened = Array.from({ length: MAX_OPENED }, (_, i) => bytesLong(1024, `G${i}-`));
+    const closed = Array.from({ length: MAX_CLOSED }, (_, i) => ({
+      section: 'open',
+      group: bytesLong(1024, `G${i}-`),
+    }));
     taken({
       ...VIEW,
       chips: ['running', 'open-pr', 'note'],
-      opened,
+      closed,
       switcher: bytesLong(1024, '>'),
     });
   });
 
   test('an unknown field is still refused beside them', () => {
-    refused(page({ ...VIEW, chips: [], opened: [], switcher: null, [MARKER]: 1 }));
+    refused(page({ ...VIEW, chips: [], closed: [], switcher: null, [MARKER]: 1 }));
     refused(page({ ...VIEW, stacks: [] }));
     refused(page({ ...VIEW, chip: [] }));
   });
@@ -145,47 +149,123 @@ describe('view.chips: distinct values of SearchChip (E4)', () => {
   });
 });
 
-describe(`view.opened: at most MAX_OPENED (${MAX_OPENED}) distinct texts (E6)`, () => {
-  test('MAX_OPENED is 64', () => {
-    assert.equal(MAX_OPENED, 64);
+/** `view.closed`'s entries: each group closed in `section`. */
+function closedIn(section: string, ...groups: string[]): { section: string; group: string }[] {
+  return groups.map((group) => ({ section, group }));
+}
+
+describe(`view.closed: at most MAX_CLOSED (${MAX_CLOSED}) distinct entries, each a section and a text (E6, ruled 2026-11-16)`, () => {
+  test('MAX_CLOSED is 64', () => {
+    assert.equal(MAX_CLOSED, 64);
   });
 
-  test('[] is taken (stacks, all closed), and so are 64 groups; a 65th is refused', () => {
-    taken({ ...VIEW, opened: [] });
-    const groups = Array.from({ length: MAX_OPENED }, (_, i) => `ORB-${i}`);
-    taken({ ...VIEW, opened: groups });
-    refused(page({ ...VIEW, opened: [...groups, `${MARKER}-65`] }));
-    refused(page({ ...VIEW, opened: Array.from({ length: 1000 }, (_, i) => `${MARKER}${i}`) }));
+  test('[] is taken (no block closed), and so are 64 entries; a 65th is refused', () => {
+    taken({ ...VIEW, closed: [] });
+    const entries = closedIn('week', ...Array.from({ length: MAX_CLOSED }, (_, i) => `ORB-${i}`));
+    taken({ ...VIEW, closed: entries });
+    refused(page({ ...VIEW, closed: [...entries, { section: 'week', group: `${MARKER}-65` }] }));
+    refused(
+      page({
+        ...VIEW,
+        closed: closedIn('open', ...Array.from({ length: 1000 }, (_, i) => `${MARKER}${i}`)),
+      }),
+    );
+    // The limit is over all sections together.
+    const mixed = Array.from({ length: MAX_CLOSED + 1 }, (_, i) => ({
+      section: ['open', 'week', 'earlier'][i % 3],
+      group: `G${i}`,
+    }));
+    taken({ ...VIEW, closed: mixed.slice(0, MAX_CLOSED) });
+    refused(page({ ...VIEW, closed: mixed }));
   });
 
-  test('a group named twice is refused; groups that differ in case or space are distinct', () => {
-    refused(page({ ...VIEW, opened: [MARKER, 'x', MARKER] }));
-    taken({ ...VIEW, opened: ['ORB-1', 'orb-1', 'ORB-1 ', ''] });
+  test('each of the three sections is taken; any other name is refused', () => {
+    for (const section of ['open', 'week', 'earlier']) {
+      taken({ ...VIEW, closed: closedIn(section, 'ORB-1') });
+    }
+    for (const section of [
+      MARKER,
+      'Open',
+      'WEEK',
+      'this week',
+      'Earlier',
+      '',
+      'done',
+      '__proto__',
+      'constructor',
+    ]) {
+      refused(page({ ...VIEW, closed: closedIn(section, 'ORB-1') }));
+    }
+  });
+
+  test('an entry named twice is refused; the same group in two sections, or groups that differ in case or space, are distinct', () => {
+    refused(page({ ...VIEW, closed: closedIn('week', MARKER, 'x', MARKER) }));
+    refused(
+      page({ ...VIEW, closed: [...closedIn('open', MARKER), { group: MARKER, section: 'open' }] }),
+    );
+    taken({
+      ...VIEW,
+      closed: [
+        ...closedIn('open', 'ORB-1'),
+        ...closedIn('week', 'ORB-1'),
+        ...closedIn('earlier', 'ORB-1'),
+      ],
+    });
+    taken({ ...VIEW, closed: closedIn('week', 'ORB-1', 'orb-1', 'ORB-1 ', '') });
+    // A group that spells another entry's JSON is still its own text.
+    taken({
+      ...VIEW,
+      closed: [...closedIn('open', 'a'), ...closedIn('open', '{"section":"open","group":"a"}')],
+    });
   });
 
   test('a group is a text: 1,024 bytes of UTF-8 are taken, one more is refused', () => {
-    taken({ ...VIEW, opened: [bytesLong(1024)] });
-    refused(page({ ...VIEW, opened: [bytesLong(1025, MARKER)] }));
-    taken({ ...VIEW, opened: ['é'.repeat(512)] });
-    refused(page({ ...VIEW, opened: ['é'.repeat(513)] }));
-    taken({ ...VIEW, opened: ['🙂'.repeat(256)] });
-    refused(page({ ...VIEW, opened: [`${'🙂'.repeat(256)}a`] }));
+    taken({ ...VIEW, closed: closedIn('open', bytesLong(1024)) });
+    refused(page({ ...VIEW, closed: closedIn('open', bytesLong(1025, MARKER)) }));
+    taken({ ...VIEW, closed: closedIn('week', 'é'.repeat(512)) });
+    refused(page({ ...VIEW, closed: closedIn('week', 'é'.repeat(513)) }));
+    taken({ ...VIEW, closed: closedIn('earlier', '🙂'.repeat(256)) });
+    refused(page({ ...VIEW, closed: closedIn('earlier', `${'🙂'.repeat(256)}a`) }));
     // The limit is per group, not over all of them.
-    taken({ ...VIEW, opened: [bytesLong(1024, 'a'), bytesLong(1024, 'b')] });
+    taken({ ...VIEW, closed: closedIn('open', bytesLong(1024, 'a'), bytesLong(1024, 'b')) });
   });
 
   test('a group that is not well formed (a lone surrogate) is refused', () => {
-    refused(parsePageMessage(withLone({ ...VIEW, opened: ['ORB-1', 'LONE'] })));
+    refused(parsePageMessage(withLone({ ...VIEW, closed: closedIn('week', 'ORB-1', 'LONE') })));
     assert.equal(
-      parsePageMessage(withLone({ ...VIEW, opened: ['ORB-1', 'LONE'] }).replace('\\ud800', 'x')).ok,
+      parsePageMessage(
+        withLone({ ...VIEW, closed: closedIn('week', 'ORB-1', 'LONE') }).replace('\\ud800', 'x'),
+      ).ok,
       true,
     );
   });
 
-  test('what is not an array of strings is refused, null too (it would read as stacks, all closed)', () => {
-    for (const opened of [null, 'ORB-1', { 0: 'ORB-1' }, 1, false, [1], [null], [['ORB-1']]]) {
-      refused(page({ ...VIEW, opened }));
+  test('what is not an array of entries with exactly a section and a group is refused, null too', () => {
+    for (const closed of [
+      null,
+      'ORB-1',
+      ['ORB-1'],
+      { 0: { section: 'open', group: 'ORB-1' } },
+      1,
+      false,
+      [null],
+      [[]],
+      [{ section: 'open' }],
+      [{ group: 'ORB-1' }],
+      [{ section: 'open', group: null }],
+      [{ section: 'open', group: 1 }],
+      [{ section: null, group: 'ORB-1' }],
+      [{ section: ['open'], group: 'ORB-1' }],
+      [{ section: 'open', group: 'ORB-1', open: false }],
+      [{ section: 'open', group: 'ORB-1', [MARKER]: 1 }],
+    ]) {
+      refused(page({ ...VIEW, closed }));
     }
+  });
+
+  test('`opened`, the field it replaced, is refused (the page and the server are one build)', () => {
+    refused(page({ ...VIEW, opened: [] }));
+    refused(page({ ...VIEW, opened: ['ORB-1'], closed: [] }));
   });
 });
 
@@ -221,9 +301,12 @@ describe('a refusal never quotes what it refused', () => {
   test('a marker in a chip, in a group, in a switcher text', () => {
     refused(page({ ...VIEW, chips: [MARKER] }));
     refused(page({ ...VIEW, chips: [`running${MARKER}`] }));
-    refused(page({ ...VIEW, opened: [MARKER, MARKER] }));
-    refused(page({ ...VIEW, opened: [MARKER.repeat(100)] }));
-    refused(page({ ...VIEW, opened: [1, MARKER] }));
+    refused(page({ ...VIEW, closed: closedIn('open', MARKER, MARKER) }));
+    refused(page({ ...VIEW, closed: closedIn('open', MARKER.repeat(100)) }));
+    refused(page({ ...VIEW, closed: closedIn(MARKER, 'ORB-1') }));
+    refused(
+      page({ ...VIEW, closed: [{ section: 'open', group: 1 }, ...closedIn('open', MARKER)] }),
+    );
     refused(page({ ...VIEW, switcher: MARKER.repeat(100) }));
     refused(page({ ...VIEW, switcher: [MARKER] }));
   });
@@ -238,7 +321,7 @@ describe('the types of stage E (plan E 2.3) compile', () => {
       showDone: false,
       selected: null,
       chips: ['running', 'note'],
-      opened: ['ORB-2107'],
+      closed: [{ section: 'earlier', group: 'ORB-2107' }],
       switcher: '>rest',
     };
     assert.equal(page(view).ok, true);
@@ -255,7 +338,19 @@ describe('the types of stage E (plan E 2.3) compile', () => {
   });
 
   test('a row in a stack, and the list with filtering and the switcher', () => {
-    const stack: StackPayload = { group: 'ORB-2107', size: 3, open: false, role: 'head', head: S1 };
+    const stack: StackPayload = {
+      group: 'ORB-2107',
+      size: 3,
+      open: false,
+      role: 'head',
+      head: S1,
+      hiddenNeedYou: 1,
+    };
+    const shut: ClosedBlock = { section: 'open', group: 'ORB-2107' };
+    // @ts-expect-error a closed block's section is one of the three
+    const wrong: ClosedBlock = { section: 'done', group: 'ORB-2107' };
+    refused(page({ ...VIEW, closed: [wrong] }));
+    taken({ ...VIEW, closed: [shut] });
     const row = { stack } satisfies Pick<RowPayload, 'stack'>;
     const rank: SwitchRank = 'not-running';
     const hiddenBy: HiddenBy[] = ['filter', 'done', 'folded'];

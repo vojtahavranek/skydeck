@@ -1558,7 +1558,7 @@ and restore them or not, as you like.
 ## The window (step 2, stage E)
 
 The checks of the design's section 18 (design-step-2.md) that stage E needs: W30 and W31, search,
-the chips, stacks and the quick switcher ([install.md](install.md), "Search, the chips and stacks
+the chips, blocks and the quick switcher ([install.md](install.md), "Search, the chips and blocks
 (stage E)" and "The quick switcher (stage E)"), and the icon's part of W3. Each check says what to
 set up, what to type, what to look at and what to write down.
 
@@ -1586,16 +1586,18 @@ Setup:
   Enter: Enter gives the keyboard to the list, where the next letter is a list key. No step
   presses Enter in the switcher on a session whose short id you have not looked at.
 - **One click on a row, on its title.** A double click on a session that is not running resumes
-  it. These checks click only rows inside a stack, which never need you (a session that needs
-  you and stays selected for 1.5 seconds is marked seen), and the throwaway session's row. A
-  session's resume card shows `Resume here`: never click it in these checks.
+  it. These checks click only the head of a block none of whose rows has a coloured bar at its
+  left (a session that needs you and stays selected for 1.5 seconds is marked seen), and the
+  throwaway session's row. A session's resume card shows `Resume here`: never click it in these
+  checks.
 - **Leave the window as you found it.** Write down at the start what the filter holds, which
-  chips are on (`Show done` among them), which stacks are open, whether Earlier is unfolded, and
-  your keyboard layout. Each check starts from an empty filter (Esc in its field) and no chip on
-  (a click on each chip that is on). At the end put back what you wrote down: the filter's text
-  typed again into its field (look for the caret first), each chip that was on clicked on again,
-  the stacks you opened closed and those that were open opened again, Earlier folded or unfolded
-  as it was, and your own layout (Win+Space). Fold Earlier only while the selected session is not
+  chips are on (`Show done` among them), which blocks are closed (a row with `×<n>` followed by a
+  line `+… more in <group>`), whether Earlier is unfolded, and your keyboard layout. Each check
+  starts from an empty filter (Esc in its field) and no chip on (a click on each chip that is on).
+  At the end put back what you wrote down: the filter's text typed again into its field (look for
+  the caret first), each chip that was on clicked on again, each block you closed opened again and
+  each that was closed closed again (a click on its `×<n>`), Earlier folded or unfolded as it was,
+  and your own layout (Win+Space). Fold Earlier only while the selected session is not
   in Earlier (a fold with the selection inside it selects the row above it, which may be a real
   session); when the throwaway session's row is in Earlier, leave Earlier unfolded and write that
   down.
@@ -1609,7 +1611,7 @@ chip on. Write down how many sessions the title bar counts.
    `login` below). Click into the filter's field: its caret blinks. Type `orb-2107 login`, in lower
    case. Expected: the list follows each keystroke; at the end it lists only the sessions that
    have both words (in their title, group, note, directory or a pull request), done ones too with
-   their `done` mark; every section is unfolded, no stack is drawn, and the footer of done
+   their `done` mark; every section is unfolded, no block is drawn, and the footer of done
    sessions is gone. The title bar's counts did not change. Then Ctrl+A (in the field: it selects
    the field's text) and type `login orb-2107`: the same sessions. Press Esc: the field is empty,
    the list as before, and the key bar says `Focus: list`.
@@ -1626,18 +1628,30 @@ chip on. Write down how many sessions the title bar counts.
    (`No session matches the filter.` when none has one); click both off. Then `Show done`: the
    done sessions show with their `done` mark and the footer says `done sessions shown · hide`;
    click it again, and the footer is `<n> done hidden · show` again (or gone when none is done).
-4. **A stack.** Look in This week, and in Earlier, for a line `+<n> more in <group>`. When
-   Earlier is folded (none of its rows shows), a click on its header unfolds it; when its rows
-   show, do not click its header (that click folds it). When there is none, write that down and go on with step 5. Click that
-   stack's head once, on its title (the row just above the line). Expected: the head is selected,
-   its resume card shows, the key bar says `Focus: list`. That is a real session: from here to
-   the end of this step press only ← and →, never Enter (Enter would resume it). Press →: the
-   stack opens, its other sessions follow the head, indented, and the `+… more` line is gone.
-   Press ←: it closes again. Press →, click the first indented session once, then press ←.
-   Expected: the head is selected again and the stack is closed. Then click the `×<n>` after the
-   head's key: the stack opens; wait a moment (two quick clicks are a double click, which acts
-   once) and click it again: it closes; neither click moved the selection or the keyboard. Then
-   click the throwaway session's row once (look at the short id): the next steps start from it.
+4. **A block.** Blocks are open by default: a head with `×<n>` after its key, its other sessions
+   indented under it, and no line `+… more in <group>` after it. Look in This week, and in
+   Earlier, for an open one. When Earlier is folded (none of its rows shows), a click on its header
+   unfolds it; when its rows show, do not click its header (that click folds it). Take an open
+   block none of whose rows has a coloured bar at its left (a session that needs you). Skip a
+   closed one (a head followed by a `+… more` line): ← on a closed head folds Earlier, which with
+   the selection inside Earlier selects the row above it, a real session. When there is no such
+   open block, write that down and go on with step 5. Click that block's head once, on its title
+   (the row with `×<n>`). Expected: the head is selected. Look at the key bar: it must say `Focus:
+   list`. When it says `Focus: terminal` (the head has a terminal in the window), press
+   Ctrl+Shift+L once and look again; until it says `Focus: list` press nothing else, and leave
+   this step out if it does not. That is a real session: from here to the end of this step press
+   only ← and →, never Enter (Enter would resume it), and press ← only while you see that the
+   selected row is that head with its sessions indented under it (the block open); when it is
+   not, press nothing more and write down what you see. Press ←. Expected: the block closes — its
+   indented sessions are gone, the line `+<n−1> more in <group>` follows the head, and the head
+   stays selected. Press →. Expected: it opens again, its sessions indented under the head, the
+   line gone, the head still selected. Look again that the head is selected with its sessions
+   indented under it, then press ← once more: it closes as before. Click the `+… more` line once.
+   Expected: the block opens, the head stays selected and the key bar still says `Focus: list`.
+   Then click the `×<n>` after the head's key: the block closes; wait a moment (two quick clicks
+   are a double click, which acts once) and click it again: it opens; neither click moved the
+   selection or the keyboard. The block is open again, as you found it. Then click the throwaway
+   session's row once (look at the short id): the next steps start from it.
    When you unfolded Earlier in this step and the throwaway session's row is not in Earlier, fold
    Earlier again now, with a click on its header. When its row is in Earlier, leave Earlier
    unfolded until the end of step 6 (folding Earlier with the selection inside it selects the
@@ -1674,7 +1688,7 @@ chip on. Write down how many sessions the title bar counts.
    Earlier unfolded and write that down.
 
 Write down: whether any answer of the list came late enough to notice (the filter as you typed,
-the chips, the stack, the switcher); whether the switcher's order — those that need you, then
+the chips, the block, the switcher); whether the switcher's order — those that need you, then
 Open, then the ones not running, then the done ones — is the one you want; what Enter did in
 step 6; every step that showed something else than described.
 

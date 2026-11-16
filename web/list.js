@@ -9,28 +9,29 @@
 // and bold title are list.css's) and the reason's line as its second line (list-text.js), and the
 // counts start with `3 need you` on an element `data-state="need-you"`, whose dot list.css draws.
 //
-// Stage E (plan E task 97, E4–E7): the chips under the filter field (web/chips.js) and the stacks
-// of This week and Earlier as the server sends them — a head with its `×4`, a closed stack's
-// `+3 more in ORB-2107` line (no row: never selected, no `data-id`), an open stack's members
-// indented after it —, ← and → on a stack, and done sessions while filtering. The list keeps the
-// chips and the stacks the user opened as it keeps `showDone`: its own state, sent whole in the
-// page's `view`, `opened` in every view (E6: a view without it gets no stacks). Which rows match,
-// which stack, and whether the list is filtering are the server's (`list.filtering`); the page
-// decides no rule.
+// Stage E (plan E task 97, E4–E7): the chips under the filter field (web/chips.js) and the blocks
+// of every section as the server sends them (E6 as ruled 2026-11-16; the protocol calls a block a
+// stack) — a head with its `×4`, an open block's members indented after it, a closed block's
+// `+3 more in ORB-2107` line (no row: never selected, no `data-id`), with ` · 1 needs you` in the
+// needs-you colour while members it hides need you —, ← and → on a block, and done sessions while
+// filtering. The list keeps the chips and the blocks the user closed as it keeps `showDone`: its
+// own state, sent whole in the page's `view` (`closed`, each entry a section and a group; a block
+// is open unless named there). Which rows match, which form a block, and whether the list is
+// filtering are the server's (`list.filtering`); the page decides no rule.
 //
 // A render never loses a click (contract 2.9): app.js renders when a list arrives and when only
 // the zone changed — the focus a mousedown moves, before its mouseup —, so every element the list
 // draws is made once and kept: a row keeps its element and every element inside it across
 // renders, and a render only changes texts and `hidden`. Lines no longer drawn are removed.
 
-/** @import { HiddenBy, ListMessage, RowPayload, SearchChip, SectionPayload, StackPayload, TerminalPayload } from '../src/window/protocol.ts' */
+/** @import { ClosedBlock, HiddenBy, ListMessage, RowPayload, SearchChip, SectionPayload, StackPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { ListAction, Zone } from './keys.js' */
 /** @import { RowText } from './list-text.js' */
 import { needYouText } from './attention-text.js';
 import { createChips } from './chips.js';
 import { serverNow } from './format.js';
 import { countsText, footerText, rowText, sectionText } from './list-text.js';
-import { moreText, stackBadge } from './search-text.js';
+import { moreNeedText, moreText, stackBadge } from './search-text.js';
 
 /**
  * @typedef {object} ViewChange
@@ -38,13 +39,14 @@ import { moreText, stackBadge } from './search-text.js';
  * @property {string[]} [unfolded]
  * @property {boolean} [showDone]
  * @property {SearchChip[]} [chips] E4: the chips set, each once
- * @property {string[]} [opened] E6: the groups whose stacks the user opened
+ * @property {ClosedBlock[]} [closed] E6: the blocks the user closed, each its section and group
  */
 /**
  * @typedef {object} ListHooks
  * @property {(id: string, how: 'click' | 'key') => void} select
  * @property {(id: string) => void} activate
  * @property {(change: ViewChange) => void} view
+ * @property {(text: string) => void} [say] a line for the key bar (a refused click, F3)
  */
 
 /** The marks a row can show, each in an element of its own (list-text.js's kinds). */
@@ -55,17 +57,21 @@ const AGE_TICK_MS = 1000;
 const ROW_PX = 28;
 /** E4: the chips that narrow the list, in the order a view names them (`Show done` is `showDone`). */
 const SEARCH_CHIPS = /** @type {const} */ (['running', 'open-pr', 'note']);
-/** E6: the most groups a view's `opened` names (the parser's MAX_OPENED; web/ imports only types
+/** E6: the most entries a view's `closed` holds (the parser's MAX_CLOSED; web/ imports only types
  *  from src/, so the page holds the number itself). */
-const MAX_OPENED = 64;
+const MAX_CLOSED = 64;
+/** Ruled 2026-11-16 (review 2 of F3): what a click on `×n` that would move the selection says. */
+const HOLDS_SELECTED = 'this block holds the selected session; it stays open';
+/** Ruled 2026-11-16 (review 2 of F3): what ← and `×n` say on a block a start holds open. */
+const HOLDS_STARTING = 'this block holds a session that is still starting; it stays open';
 /** S2 8.2.3: a text of a view is at most 1,024 bytes of UTF-8 and well formed. */
 const TEXT_BYTES = 1024;
 const utf8 = new TextEncoder();
 
 /**
- * Whether the server takes `group` in a view's `opened`: one it would refuse would close the
- * connection, so such a group is never sent and its stack opens only while a member is selected
- * (a named limit).
+ * Whether the server takes `group` in a view's `closed`: one it would refuse would close the
+ * connection, so such a group is never sent and its block cannot be closed: it stays open (a named
+ * limit).
  * @param {string} group
  */
 function sendable(group) {
@@ -132,8 +138,8 @@ function setTip(target, tip) {
  * clicks would otherwise resume a session the user clicked once (S2 12.6: nothing resumes but on
  * purpose). Then they are two single clicks: each selects the row it landed on.
  *
- * A stack's head shows `×4` after its ticket key (or group) (E7): a click on it opens or closes
- * the stack (`toggleStack`) and does nothing else — it selects no row and, its mousedown
+ * A block's head shows `×4` after its ticket key (or group) (E7): a click on it opens or closes
+ * the block (`toggleStack`) and does nothing else — it selects no row and, its mousedown
  * cancelled, takes no keyboard.
  * @param {string} id
  * @param {ListHooks} hooks
@@ -259,8 +265,8 @@ function paintRow(row, text, done) {
 }
 
 /**
- * Draws a row's place in a stack (E7): `data-stack="head"` with its `×4`, `data-stack="member"`
- * (indented by search.css), nothing for a row in no stack.
+ * Draws a row's place in a block (E7): `data-stack="head"` with its `×4`, `data-stack="member"`
+ * (indented by search.css), nothing for a row in no block.
  * @param {RowElements} row
  * @param {StackPayload | null} stack
  */
@@ -274,7 +280,7 @@ function paintStack(row, stack) {
   }
   const head = stack !== null && stack.role === 'head';
   setText(row.stack, head ? stackBadge(stack.size) : '');
-  setTip(row.stack, head ? (stack.open ? 'close the stack' : 'open the stack') : '');
+  setTip(row.stack, head ? (stack.open ? 'close the block' : 'open the block') : '');
 }
 
 /** A section header's elements, made once (S2 12.1). @param {SectionPayload['name']} name */
@@ -310,8 +316,8 @@ export function createList(root, hooks) {
   filterBar.append(filter, chipsRow);
   /** E4: the chips set, in SEARCH_CHIPS's order. @type {SearchChip[]} */
   let chips = [];
-  /** E6: the groups whose stacks the user opened, the oldest first. @type {string[]} */
-  let opened = [];
+  /** E6: the blocks the user closed, the oldest first. @type {ClosedBlock[]} */
+  let closed = [];
   const chipsView = createChips(chipsRow, {
     toggle: (chip) => (chip === 'done' ? toggleDone() : toggleChip(chip)),
   });
@@ -360,10 +366,10 @@ export function createList(root, hooks) {
    */
   const clicks = { first: /** @type {string | null} */ (null) };
   /**
-   * The current click sequence began on a stack's `×4` or `+3 more` line (E7, ruled on review 2):
-   * its first click opened or closed the stack, so the list may have moved under the pointer, and
+   * The current click sequence began on a block's `×4` or `+3 more` line (E7, ruled on review 2):
+   * its first click opened or closed the block, so the list may have moved under the pointer, and
    * the later clicks of the sequence (`detail` above 1) are not acted on anywhere in the list —
-   * their press takes no keyboard, their click selects no row and toggles no stack, a double click
+   * their press takes no keyboard, their click selects no row and toggles no block, a double click
    * resumes nothing (task 38's rule for the header's buttons). Set at each sequence's first press.
    */
   let onStack = false;
@@ -444,94 +450,180 @@ export function createList(root, hooks) {
   const rowElements = new Map();
   /** @type {Map<string, ReturnType<typeof makeHeader>>} */
   const headers = new Map();
-  /** A closed stack's `+3 more in ORB-2107` line, by its head's session id (E7). @type {Map<string, HTMLElement>} */
+  /**
+   * A closed block's `+3 more in ORB-2107` line, by its head's session id (E7): the line, its text,
+   * and its part ` · 1 needs you` (G5).
+   * @type {Map<string, { root: HTMLElement, text: HTMLElement, need: HTMLElement }>}
+   */
   const moreLines = new Map();
 
   /** @returns {RowPayload[]} the rows drawn, in order */
   const rows = () => current?.sections.flatMap((section) => section.rows) ?? [];
 
-  /** The selected session's row, when the list draws it. */
-  const selectedRow = () =>
-    selected === null ? undefined : rows().find((row) => row.id === selected);
+  /**
+   * The row of `id` the list draws and its section's name, or undefined.
+   * @param {string | null} id
+   * @returns {{ row: RowPayload, section: SectionPayload['name'] } | undefined}
+   */
+  const placeOf = (id) => {
+    for (const section of current?.sections ?? []) {
+      const row = id === null ? undefined : section.rows.find((candidate) => candidate.id === id);
+      if (row !== undefined) {
+        return { row, section: section.name };
+      }
+    }
+    return undefined;
+  };
 
   /** Whether the list is filtering (E5): the server's answer; a list without it, stage A's rule. */
   const filtering = () =>
     typeof current?.filtering === 'boolean' ? current.filtering : filter.value !== '';
 
-  /** @param {string[]} next */
-  const sendOpened = (next) => {
-    opened = next;
-    hooks.view({ opened: [...opened] });
+  /**
+   * Whether the user closed the block of `group` in `section` (E6).
+   * @param {SectionPayload['name']} section
+   * @param {string} group
+   */
+  const isClosed = (section, group) =>
+    closed.some((one) => one.section === section && one.group === group);
+
+  /** @param {ClosedBlock[]} next */
+  const sendClosed = (next) => {
+    closed = next;
+    hooks.view({ closed: closed.map((one) => ({ section: one.section, group: one.group })) });
   };
 
   /**
-   * Opens the stacks of `group` (E6): adds it to `opened`, the oldest dropped past MAX_OPENED.
-   * A group the server would refuse is never sent. False when nothing was sent.
+   * Opens the block of `group` in `section` (E6): the page forgets that the user closed it.
+   * @param {SectionPayload['name']} section
    * @param {string} group
-   * @returns {boolean}
    */
-  const openStack = (group) => {
-    if (opened.includes(group) || !sendable(group)) {
-      return false;
+  const openBlock = (section, group) => {
+    if (isClosed(section, group)) {
+      sendClosed(closed.filter((one) => one.section !== section || one.group !== group));
     }
-    sendOpened([...opened, group].slice(-MAX_OPENED));
-    return true;
   };
 
   /**
-   * Closes the stacks of `group` (E7). With one of their members selected the head is selected
-   * first, as ← on a member does: a selected member keeps its stack open (E6), and the page's
-   * memory would add the group again at the next list.
+   * Closes the block of `group` in `section` (E7): adds it to `closed`, the oldest dropped past
+   * MAX_CLOSED (that block opens again). With one of its members selected the head is selected
+   * first, as ← on a member does: a selected member keeps its block open (G5), and the page would
+   * forget the closing at the next list. A group the server would refuse is never sent: its block
+   * cannot be closed, and nothing happens (it stays open).
+   * @param {SectionPayload['name']} section
    * @param {string} group
    */
-  const closeStack = (group) => {
-    const stack = selectedRow()?.stack ?? null;
-    if (stack !== null && stack.role === 'member' && stack.group === group) {
+  const closeBlock = (section, group) => {
+    if (!sendable(group)) {
+      return;
+    }
+    const place = placeOf(selected);
+    const stack = place?.row.stack ?? null;
+    if (
+      stack !== null &&
+      place?.section === section &&
+      stack.role === 'member' &&
+      stack.group === group
+    ) {
       hooks.select(stack.head, 'key');
     }
-    if (opened.includes(group)) {
-      sendOpened(opened.filter((other) => other !== group));
+    if (!isClosed(section, group)) {
+      sendClosed([...closed, { section, group }].slice(-MAX_CLOSED));
     }
   };
 
   /**
-   * A click on a head's `×4` or on its `+3 more` line (E7): opens the stack, or closes it.
+   * A click on a head's `×4` or on its `+3 more` line (E7): opens the block, or closes it. A click
+   * never moves the selection (ruled 2026-11-16): while a member other than the head is selected —
+   * as the page selects and draws it now —, a click that would close the block leaves it open and
+   * the key bar says why (closing would select the head, and from the terminal zone the head's
+   * terminal would take the keyboard); ← in the list still selects the head and closes (E7).
    * @param {string} head the head's session id
    */
   const toggleStack = (head) => {
-    const stack = rows().find((row) => row.id === head)?.stack ?? null;
-    if (stack === null || stack.role !== 'head') {
+    const place = placeOf(head);
+    const stack = place?.row.stack ?? null;
+    if (place === undefined || stack === null || stack.role !== 'head') {
       return;
     }
-    if (stack.open) {
-      closeStack(stack.group);
-    } else {
-      openStack(stack.group);
+    if (!stack.open) {
+      openBlock(place.section, stack.group);
+      return;
     }
+    const chosen = placeOf(selected);
+    const member = chosen?.row.stack ?? null;
+    if (
+      chosen?.section === place.section &&
+      member !== null &&
+      member.role === 'member' &&
+      member.group === stack.group
+    ) {
+      hooks.say?.(HOLDS_SELECTED);
+      return;
+    }
+    if (holdsStart(place.section, stack.group)) {
+      hooks.say?.(HOLDS_STARTING); // the server keeps it open: nothing moves
+      return;
+    }
+    closeBlock(place.section, stack.group);
   };
 
   /**
-   * The line after a closed stack's head, made once (E7): no row — no `data-id`, never selected —,
-   * and a click on it opens the stack and, its mousedown cancelled, takes no keyboard.
+   * The line after a closed block's head, made once (E7): no row — no `data-id`, never selected —,
+   * and a click on it opens the block and, its mousedown cancelled, takes no keyboard. Its part
+   * ` · 1 needs you` (G5) is an element of its own, in the needs-you colour (search.css).
    * @param {string} head the head's session id
    */
   const moreFor = (head) => {
     let line = moreLines.get(head);
     if (line === undefined) {
-      const made = element('list-more', 'div');
-      made.dataset.head = head;
-      made.title = 'open the stack';
-      made.addEventListener('mousedown', (event) => event.preventDefault());
-      made.addEventListener('click', (event) => {
+      const root = element('list-more', 'div');
+      root.dataset.head = head;
+      root.title = 'open the block';
+      const text = element('more-text');
+      const need = element('more-need');
+      need.hidden = true;
+      root.append(text, need);
+      root.addEventListener('mousedown', (event) => event.preventDefault());
+      root.addEventListener('click', (event) => {
         if (event.detail <= 1) {
           toggleStack(head); // the first click of a sequence only (task 38's rule)
         }
       });
-      moreLines.set(head, made);
-      line = made;
+      line = { root, text, need };
+      moreLines.set(head, line);
     }
     return line;
   };
+
+  /**
+   * Whether `row` is drawn with a terminal of the window that has not reported a session (its
+   * `sessionId` is null in the list's `terminals`, S2 7.5): a start, or a program that ended before
+   * it reported. A COPY OF THE SERVER'S RULE (`src/window/view/build.ts`, `stacked`'s
+   * `unreported`; ruled 2026-11-16): the server draws a closed block open while one of its members
+   * is such a row, and this page forgets that it closed it (render) and refuses to close it
+   * (`holdsStart`). A change of one is a change of the other.
+   * @param {RowPayload} row
+   */
+  const unreported = (row) =>
+    row.terminal !== null &&
+    current?.terminals.find((candidate) => candidate.id === row.terminal)?.sessionId === null;
+
+  /**
+   * Whether the drawn block of `group` in `section` holds a member that `unreported` names: the
+   * server keeps it open, so ← and `×n` say so and do nothing.
+   * @param {SectionPayload['name']} section
+   * @param {string} group
+   */
+  const holdsStart = (section, group) =>
+    (current?.sections.find((candidate) => candidate.name === section)?.rows ?? []).some(
+      (row) =>
+        row.stack !== null &&
+        row.stack !== undefined &&
+        row.stack.role === 'member' &&
+        row.stack.group === group &&
+        unreported(row),
+    );
 
   /** The server's time now: the list's, counted on by the time since it came (`serverNow`). */
   const nowNs = () =>
@@ -677,8 +769,9 @@ export function createList(root, hooks) {
         lines.push(drawn.root);
         if (stack !== null && stack.role === 'head' && !stack.open) {
           const more = moreFor(row.id);
-          setText(more, moreText(stack.size, stack.group));
-          lines.push(more);
+          setText(more.text, moreText(stack.size, stack.group));
+          setText(more.need, moreNeedText(stack.hiddenNeedYou));
+          lines.push(more.root);
         }
       }
     }
@@ -697,8 +790,8 @@ export function createList(root, hooks) {
       }
     }
     for (const [head, more] of moreLines) {
-      if (!keep.has(more)) {
-        more.remove();
+      if (!keep.has(more.root)) {
+        more.root.remove();
         moreLines.delete(head);
       }
     }
@@ -726,11 +819,23 @@ export function createList(root, hooks) {
     }
     selectedSection = sectionNow;
 
-    // E6's memory (ruled): a stack that the selection opened — a member of it is selected, however
-    // it got there — stays open once the selection leaves, until the user closes it.
-    const stack = selectedRow()?.stack ?? null;
-    if (stack !== null && stack.role === 'member' && !opened.includes(stack.group)) {
-      openStack(stack.group);
+    // G5 (ruled 2026-11-16): a closed block that the selection opened — a member of it is
+    // selected, however it got there (a slot chord, Ctrl+Shift+J, Ctrl+Tab, a notification, the
+    // switcher, a resume's answer) — is forgotten as closed, so that it stays open once the
+    // selection leaves, until the user closes it again. So is one that a member's unreported
+    // terminal opened (the server's rule, copied in `unreported`), so that it stays open after the
+    // report.
+    for (const section of sections) {
+      for (const row of section.rows) {
+        const stack = row.stack ?? null;
+        if (
+          stack !== null &&
+          stack.role === 'member' &&
+          (row.id === selectedId || unreported(row))
+        ) {
+          openBlock(section.name, stack.group);
+        }
+      }
     }
   };
 
@@ -816,22 +921,28 @@ export function createList(root, hooks) {
         return;
       }
       case 'fold': {
-        // E7: ← on an open head closes its stack, ← on a member selects the head and closes it;
-        // otherwise ← folds Earlier, as in stage A.
-        const stack = selectedRow()?.stack ?? null;
-        if (stack !== null && (stack.open || stack.role === 'member')) {
-          closeStack(stack.group);
+        // E7: ← on an open head closes its block, ← on a member selects the head and closes it (a
+        // group the server would refuse: nothing, the block stays open); otherwise ← folds
+        // Earlier, as in stage A.
+        const place = placeOf(selected);
+        const stack = place?.row.stack ?? null;
+        if (place !== undefined && stack !== null && (stack.open || stack.role === 'member')) {
+          if (holdsStart(place.section, stack.group)) {
+            hooks.say?.(HOLDS_STARTING); // the server keeps it open: nothing moves
+          } else {
+            closeBlock(place.section, stack.group);
+          }
         } else {
           fold(true);
         }
         return;
       }
       case 'unfold': {
-        // E7: → on a closed head opens its stack (a group the server would refuse: nothing);
-        // otherwise → unfolds Earlier, as in stage A.
-        const stack = selectedRow()?.stack ?? null;
-        if (stack !== null && stack.role === 'head' && !stack.open) {
-          openStack(stack.group);
+        // E7: → on a closed head opens its block; otherwise → unfolds Earlier, as in stage A.
+        const place = placeOf(selected);
+        const stack = place?.row.stack ?? null;
+        if (place !== undefined && stack !== null && stack.role === 'head' && !stack.open) {
+          openBlock(place.section, stack.group);
         } else {
           fold(false);
         }

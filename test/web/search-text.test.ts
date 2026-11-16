@@ -18,6 +18,7 @@ import {
   MAX_WORDS,
   cutWords,
   highlightParts,
+  moreNeedText,
   moreText,
   rankHeading,
   stackBadge,
@@ -261,6 +262,25 @@ describe('stackBadge and moreText (E7)', () => {
 
   test('the group stays text: nothing in it is made markup or escaped', () => {
     assert.equal(moreText(2, '<b>ORB</b> & <img src=x>'), '+1 more in <b>ORB</b> & <img src=x>');
+  });
+});
+
+describe('moreNeedText (G5, ruled 2026-11-16): what a closed block says of its hidden members that need you', () => {
+  test('none: nothing, so the line is as before', () => {
+    assert.equal(moreNeedText(0), '');
+  });
+
+  test('one and more: ` · 1 needs you`, ` · 2 need you`', () => {
+    assert.equal(moreNeedText(1), ' · 1 needs you');
+    assert.equal(moreNeedText(2), ' · 2 need you');
+    assert.equal(moreNeedText(17), ' · 17 need you');
+    assert.equal(`${moreText(3, 'test')}${moreNeedText(1)}`, '+2 more in test · 1 needs you');
+  });
+
+  test('what is no count is none (a list from before the field, or a bad value)', () => {
+    for (const bad of [undefined, null, -1, 1.5, Number.NaN, Infinity, '2']) {
+      assert.equal(moreNeedText(bad as number), '', String(bad));
+    }
   });
 });
 

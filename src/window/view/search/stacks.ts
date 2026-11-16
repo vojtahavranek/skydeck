@@ -1,54 +1,63 @@
 /**
- * Stacks (S2 12.2, plan E6): in This week and in Earlier, each on its own, the rows of one group
- * stack under the newest. Pure.
+ * Blocks (S2 12.2, plan E6 as ruled 2026-11-16; the code calls a block a stack): in every section —
+ * Open, This week, Earlier —, each on its own, the rows of one group sit together, open unless the
+ * page closed the block. Pure.
  *
- * Which rows reach this rule is the caller's (`build.ts`, task 96): only This week's and Earlier's
- * (running sessions never stack), and none while filtering (S2 12.8: a filter flattens every
- * stack; the caller then gives every row `stack: null`). A view without `opened` is this rule's own
- * (ruled by the plan owner): `view.opened` is passed as it comes, and `undefined` gives no stacks
- * at all, so that a page which cannot draw stacks never has a session hidden in one.
+ * Which rows reach this rule is the caller's (`build.ts`): a section's rows, and none while
+ * filtering (S2 12.8: a filter flattens every block; the caller then gives every row `stack: null`).
+ * A view without `closed` closes nothing: the page and the server are one build, and an open block
+ * hides no row.
  *
  * Imports (plan 2.1): types only, from `protocol.ts`.
  */
-import type { StackPayload } from '../../protocol.ts';
+import type { ClosedBlock, SectionPayload, StackPayload } from '../../protocol.ts';
 
 export interface StackEntry {
   readonly id: string;
   readonly group: string | null;
-  /** E6: a terminal of the window holds the row (its `terminal` is not null), or it needs you
-   *  (its `attention` is not null, stage B): it never stacks. */
-  readonly held: boolean;
+  /** The row needs you (its `attention` is not null, stage B): a closed block counts it (G5). */
+  readonly needsYou: boolean;
+  /** The row is drawn with a terminal of the window that has not reported a session (S2 7.5: a
+   *  start, or a program that ended before it reported): a closed block that holds it as a member
+   *  is drawn open, so that the row, and its slot, are on screen (ruled 2026-11-16, review 2). */
+  readonly unreported: boolean;
 }
 
 /**
- * E6 for the rows of one section (This week or Earlier), in the section's order (most recent
- * first). Returns the rows to draw, in order: every row that is in no stack, at its place; each
- * head at its own place (the first of its group's rows that are not held); right after an open
- * stack's head, its other members in their order; a closed stack's other members left out. A
- * group with one row that is not held is no stack. `stack` is null for a row in no stack.
+ * E6 for the rows of one section, in the section's order. Returns the rows to draw, in order: every
+ * row that is in no block, at its place; each block at the place of its first row, the head; right
+ * after an open block's head, its other members in the section's order; a closed block's other
+ * members left out. A group with one row is no block. `stack` is null for a row in no block.
  *
- * `opened` is `view.opened` as it comes (ruled by the plan owner): `undefined` (a page that cannot
- * draw stacks) → no stacks, every row as it is with `stack: null`; an array, an empty one too →
- * stacks, those of the groups it names open.
+ * Every row of a group belongs to its block, one that a terminal of the window holds or that needs
+ * you too (G2). A block is open unless `closed` holds an entry of `section` with its group; and it
+ * is open, whatever `closed` says, while the selected session is one of its members other than the
+ * head (G5: the page then forgets that it closed it, so that the selection is never on a row the
+ * list does not show, however it got there) or while one of those members is `unreported` (its
+ * terminal has not reported a session, so its slot names none: the row stays on screen). A closed
+ * block's `hiddenNeedYou` counts the members it hides that need you.
  *
- * Groups are compared as the text the entries carry (the row's group is sanitised when step 1's
- * list model is built). The rule keeps no state: a stack stays open after the selection left it
- * only because the page has added its group to `opened` (ruled).
+ * `closed` is `view.closed` as it comes: absent or empty, every block is open. Groups are compared
+ * as the text the entries carry (the row's group is sanitised when step 1's list model is built).
+ * The rule keeps no state: a block stays closed only while the page names it.
  */
 export function stackRows<T extends StackEntry>(
   rows: readonly T[],
-  opened: readonly string[] | undefined,
+  section: SectionPayload['name'],
+  closed: readonly ClosedBlock[] | undefined,
   selected: string | null,
 ): { entry: T; stack: StackPayload | null }[] {
-  if (opened === undefined) {
-    return rows.map((entry) => ({ entry, stack: null }));
+  const shut = new Set<string>();
+  for (const one of closed ?? []) {
+    if (one.section === section) {
+      shut.add(one.group);
+    }
   }
-  const open = new Set(opened);
 
-  // Each group's rows that are not held, in the section's order, and the place of the first.
+  // Each group's rows, in the section's order, and the place of the first.
   const kin = new Map<string, { headAt: number; rows: T[] }>();
   for (const [index, row] of rows.entries()) {
-    if (row.group === null || row.held) {
+    if (row.group === null) {
       continue;
     }
     const known = kin.get(row.group);
@@ -61,24 +70,25 @@ export function stackRows<T extends StackEntry>(
 
   const drawn: { entry: T; stack: StackPayload | null }[] = [];
   for (const [index, row] of rows.entries()) {
-    const group = row.held ? null : row.group;
-    const stack = group === null ? undefined : kin.get(group);
-    if (group === null || stack === undefined || stack.rows.length < 2) {
+    const group = row.group;
+    const block = group === null ? undefined : kin.get(group);
+    if (group === null || block === undefined || block.rows.length < 2) {
       drawn.push({ entry: row, stack: null });
       continue;
     }
-    if (index !== stack.headAt) {
-      // A member: drawn right after its head when the stack is open, else left out.
-      continue;
+    if (index !== block.headAt) {
+      continue; // a member: drawn right after its head while the block is open, else left out
     }
-    const members = stack.rows.slice(1);
-    const isOpen = open.has(group) || members.some((member) => member.id === selected);
+    const members = block.rows.slice(1);
+    const isOpen =
+      !shut.has(group) || members.some((member) => member.id === selected || member.unreported);
     const payload = (role: StackPayload['role']): StackPayload => ({
       group,
-      size: stack.rows.length,
+      size: block.rows.length,
       open: isOpen,
       role,
       head: row.id,
+      hiddenNeedYou: isOpen ? 0 : members.filter((member) => member.needsYou).length,
     });
     drawn.push({ entry: row, stack: payload('head') });
     if (isOpen) {

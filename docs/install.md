@@ -458,7 +458,7 @@ the list, the terminals, resume and new (A); editing in the window — the label
 mark and pull requests, and the ticket link (D); which sessions need you, with desktop
 notifications (B); restore in the window after a restart, with `--window` and `"terminal":
 "window"` for the commands (C); and search — several words and the short id in the filter, the
-chips, stacks and the quick switcher — with the page's own icon (E). The commands of step 1 stay
+chips, the blocks of one group and the quick switcher — with the page's own icon (E). The commands of step 1 stay
 as they are, also while the window runs: `skydeck resume`, `new` and `restore` start `claude` in
 the terminal you type them in, not in the window — unless you give `resume` or `new` the option
 `--window`, or set `"terminal": "window"` ("Starting sessions in the window from a terminal (stage
@@ -919,7 +919,8 @@ one, and the page closes a session's notification once that session no longer ne
 on one brings the window to the front and selects the session. While a dialog is open it only
 brings the window to the front, and the key bar says `close the edit first (Esc)`. A session the
 list does not show (the filter, the folded Earlier) and that has no terminal in the window is not
-selected: the key bar says `that session is hidden by the filter or the fold`. Whether a
+selected: the key bar says `that session is hidden by the filter or the fold`. A session that a
+closed block hides is selected, terminal or not, and its block opens. Whether a
 notification pops up is also Windows' own business (its Do not disturb, its settings for Edge),
 which skydeck does not touch.
 
@@ -1074,7 +1075,7 @@ started`.
 under it: `holder:    pid 4242 since 2026-11-12T08:58:00.000Z (in the skydeck window)`. It needs no
 running server and asks it nothing; `--json` is unchanged.
 
-#### Search, the chips and stacks (stage E)
+#### Search, the chips and blocks (stage E)
 
 **The filter** is the field at the top of the list, `Filter: title, group, note, PR, directory,
 short id   /` while it is empty. A click into it, or `/` while the list has the keyboard
@@ -1095,7 +1096,7 @@ terminal.
   the whole id. A shorter word is looked for in the fields only, so that `fix 2` does not list
   nearly every session through the digits of its id.
 - **While filtering** — a word in the field, or one of the chips below but `Show done` — done
-  sessions are listed too, with their `done` mark; every section is unfolded and every stack flat
+  sessions are listed too, with their `done` mark; every section is unfolded and every block flat
   (below); the footer `17 done hidden · show` is not shown; and nothing folds: ← and → do nothing,
   nor does a click on Earlier's header. A filter that leaves no session says `No session matches
   the filter.` A text of white space only is no filter. The title bar's counts, the `need you`
@@ -1113,37 +1114,57 @@ clicked again, the page reloads, or the switcher (below) clears it to show a ses
 The chips are buttons: Tab from the field reaches them, Enter or Space presses the one that has
 the keyboard, and while one has it no list key acts.
 
-**Stacks.** In This week and in Earlier, each on its own, the sessions of one group stack under
-the newest when there are at least two. The newest, the stack's head, shows `×4` after its ticket
-key (or its group); while the stack is closed the line `+3 more in ORB-2107` follows it, which is
-no row: it is never selected, and ↑ ↓ pass over it and the sessions it hides. An open stack's
-other sessions follow the head, indented. A group is its exact text: `ORB-1` and `orb-1` are two.
-Never in a stack: the sessions under Open, a session that has a terminal of the window (an ended
-one too), and a session that needs you, so that no session that needs you ever hides in a
-closed stack. A section's
-count counts every session in it, those of a closed stack too.
+**Blocks.** In every section — Open, This week and Earlier —, each on its own, the sessions of one
+group sit together as a block when there are at least two: under Open only running ones, under
+This week only this week's, so a group with sessions in two sections is two blocks. Every session
+of the group is in its block, one that has a terminal of the window and one that needs you too. A
+block sits where its first session sits in the section's order (under Open: by slot), and the
+others follow it in that order, indented, so the slot numbers under Open can run `1 3 2`. That
+first session is the block's head: it shows `×4` after its ticket key (or its group). A block is
+open until you close it. Closed, it shows only its head and the line `+3 more in ORB-2107`, which
+is no row: it is never selected, and ↑ ↓ pass over it and the sessions it hides. When sessions it
+hides need you the line says so, `+3 more in ORB-2107 · 1 needs you`, that part in the colour of
+the title bar's `need you` count; the head's own mark is on its row, and the title bar counts the
+same whether a block is open or closed. A group is its exact text: `ORB-1` and `orb-1` are two. A
+session whose group no other session of its section has, or that has no group, is listed as
+before. A section's count counts every session in it, those of a closed block too.
 
-- A click on `×4` or on the `+3 more` line opens or closes the stack. It selects nothing and
-  leaves the keyboard where it was, but a click on `×4` that closes the stack while one of its
-  members is selected selects the head first. A double click on either acts once.
-- In the list (`Focus: list`): → on a closed head opens the stack, ← on an open head closes it,
-  and ← on a member selects the head and closes the stack. Otherwise ← and → fold and unfold
-  Earlier as before: on a session in no stack, and also ← on a closed head and → on an open head
-  or on a member.
-- A stack whose member becomes the selected session opens, however that happens (the switcher,
-  or a newer session of its group that makes the selected one a member), and stays open when the
-  selection leaves, until you close it. Ctrl+Tab skips a member of a stack you closed (the page
-  does not know a closed stack's members), as it skips a session that the filter or the folded
-  Earlier hides and that no terminal of the window holds.
-- `d` on a closed stack's head marks that session only: the next one becomes the head (or the
-  last one stands alone), and the selection goes to the row after the stack (stage D's rule takes
-  the row after it among those the list drew, and the stack's other sessions were not drawn).
+- A click on `×4` closes or opens the block, and a click on the `+3 more` line opens it. A click
+  selects nothing and leaves the keyboard where it was. While a session of the block other than
+  its head is selected, a click on `×4` does not close it: the selection, the keyboard and the
+  right side stay, and the key bar says `this block holds the selected session; it stays open`
+  (← in the list closes it, selecting the head first). A double click on either acts once.
+- In the list (`Focus: list`): ← on the head or on another session of an open block closes it (on
+  another session it selects the head first), → on a closed head opens it. Otherwise ← and → fold
+  and unfold Earlier as before: on a session in no block, and also ← on a closed head and → on an
+  open head or on another session of a block.
+- A block you closed stays closed until you open it or reload the page, also when its sessions
+  leave and the block forms again later.
+- A closed block opens by itself while one of its sessions has a terminal of the window whose
+  program has not reported its session yet (a start, or a program that ended before it reported,
+  until you close its terminal), so that its row and its slot number show and its slot chord
+  reaches it; it then stays open. While such a start holds it open, ← and a click on `×n` do
+  nothing, and the key bar says `this block holds a session that is still starting; it stays open`.
+- Whatever selects a session that a closed block hides opens the block, and it stays open when
+  the selection leaves, until you close it again: Ctrl+Shift+1–9 on its slot, Ctrl+Shift+J when it
+  needs you, a click on its notification, a pick in the switcher, a resume that brings it, or a
+  newer session of its group that makes the selected one a hidden member. Ctrl+Tab skips a session
+  a closed block hides when no terminal of the window holds it (the page does not know a closed
+  block's sessions), as it skips a session that the filter or the folded Earlier hides and that no
+  terminal of the window holds; one that a terminal of the window holds it selects, and its block
+  opens.
+- `d` on a closed block's head marks that session only: the next one becomes the head (or the
+  last one stands alone), and the selection goes to the row after the block (stage D's rule takes
+  the row after it among those the list drew, and the block's other sessions were not drawn).
   With done sessions shown the session stays listed, still the head, and stays selected.
 - While filtering, every session stands alone.
 
-Each window has its own filter, chips, open stacks, folded Earlier and done shown. A reload (F5)
+(Until 2026-11-16 only This week and Earlier stacked, closed by default, and running sessions
+never did; the owner asked for blocks in every section, open by default.)
+
+Each window has its own filter, chips, closed blocks, folded Earlier and done shown. A reload (F5)
 forgets all of them: the page starts again with an empty filter, no chip on, Earlier folded, done
-sessions hidden and no stack opened. What a window shows of a session is the same in every
+sessions hidden and every block open. What a window shows of a session is the same in every
 window.
 
 #### The quick switcher (stage E)
@@ -1152,7 +1173,7 @@ window.
 switch`), opens the quick switcher over the window: a field with the keyboard in it, `Switch to a
 session…  (title, group, note, PR, directory, short id)` while it is empty, and under it every
 session the list lists with done ones shown — also those that the filter, the chips, the folded
-Earlier or a closed stack leave out of the list — under those of four headings that have a
+Earlier or a closed block leave out of the list — under those of four headings that have a
 session: `Needs you` (in Ctrl+Shift+J's order), `Open` (in Open's order, the slots first), `Not
 running` (the most recent first) and `Done` (the done sessions that are not running, the most
 recent first). Each session
@@ -1184,8 +1205,8 @@ does:
 
 When the list does not show that session, the list first changes so that it does, by what hides
 it: the filter's field and the chips are cleared (the key bar says `the filter was cleared to
-show <short id>`), done sessions are shown, Earlier is unfolded; a closed stack opens by itself
-for its selected member.
+show <short id>`), done sessions are shown, Earlier is unfolded; a closed block opens by itself
+for its selected session.
 
 Enter acts only on the answer to what you typed: pressed right after a keystroke, it waits for that
 answer (usually a fraction of a second) and then acts on the highlighted session of it, the first
@@ -1401,14 +1422,19 @@ manifest names no start address).
   too few for each such session.
 - **`d` while filtering.** The toast says `Marked done: hidden from the list. It comes back on new
   activity.` while the filter still lists the session, with its `done` mark.
-- **Stacks the window cannot remember.** A group over 1,024 bytes (of UTF-8) opens its stack only
-  while one of its members is selected. A window remembers at most 64 open stacks: opening
-  another closes the one opened first.
+- **Blocks the window cannot close.** A block whose group is over 1,024 bytes (of UTF-8) cannot
+  be closed: ← and its `×n` do nothing on it, and it stays open. A window remembers at most 64
+  closed blocks: closing another opens the one closed first again.
+- **A long group's `×n`.** The group before a head's title is not shortened, so with a group of
+  about 46 characters or more the head's `×n` lies past the list's edge, where it cannot be
+  clicked. ← and → in the list, and a click on the `+n more` line, still close and open the block;
+  the line's ` · 1 needs you` always shows (the group is what gets shortened there).
 - **The automatic pull-request refresh** (design.md 7.3) follows the sessions the list's
   sections show, and a selected session the list does not show while a terminal of the window
-  holds it (its header shows its pull requests). So it leaves out the sessions inside a closed
-  stack and the switcher's, as it leaves out those of a folded Earlier: open the stack, or use `↻`
-  in the session's pull-request dialog.
+  holds it (its header shows its pull requests). So the sessions a closed block hides — under
+  Open too — get no automatic refresh until you open the block (its head does), nor do the
+  switcher's, as those of a folded Earlier never did: open the block, or use `↻` in the
+  session's pull-request dialog.
 - **A session that a terminal of the window went on in, and that ended before its first
   prompt**, has no transcript, so the list does not list it once its program has ended — for
   one, `/clear` in a resumed terminal (Claude Code goes on in a new session there), then `/exit`

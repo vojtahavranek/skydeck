@@ -201,7 +201,7 @@ async function lastView(page: Page): Promise<Row> {
 }
 
 /** The view fields the list owns, which a pick changes only as the item's `hiddenBy` says. */
-const STABLE = ['filter', 'unfolded', 'showDone', 'chips', 'opened'] as const;
+const STABLE = ['filter', 'unfolded', 'showDone', 'chips', 'closed'] as const;
 
 /** Where, from `baseline` on, one of STABLE changed from a view to the next: the view's index and field. */
 function transitions(baseline: Row, views: Row[]): { at: number; field: string }[] {
@@ -2515,22 +2515,24 @@ const HOSTILE_TYPED = '<u data-hostile="typed"><img src=t onerror="window.pwned=
 
 async function textCases(t: TestContext, chromium: Browser): Promise<void> {
   await t.test(
-    'a hostile title, group and directory in an item, and a hostile text typed, create no element; the server logs no marker typed into the filter or the switcher, nor one in a group of `opened`',
+    'a hostile title, group and directory in an item, and a hostile text typed, create no element; the server logs no marker typed into the filter or the switcher, nor one in a group of `closed`',
     async (t) => {
       const l = await launchedSent(t, chromium);
       const { page, d } = l;
       const markers = ['FILTERMARK-5b7d', 'SWITCHMARK-3e9a', 'GRPMARK-91c2'];
       session(d, S1, 1n * MIN, HOSTILE_TITLE, join(d.s.home, HOSTILE_DIR));
       setGroup(d.deck, S1, HOSTILE_GROUP);
-      session(d, S2, 2n * MIN, 'stack one');
-      session(d, S3, 3n * MIN, 'stack two');
+      session(d, S2, 2n * MIN, 'block one');
+      session(d, S3, 3n * MIN, 'block two');
       setGroup(d.deck, S2, markers[2] as string);
       setGroup(d.deck, S3, markers[2] as string);
       await until(async () => (await listRows(page)).length >= 2, 'the sessions listed');
-      await page.locator(`#list .list-more[data-head="${S2}"]`).click(); // opens the stack
+      await page.locator(`#list [data-id="${S2}"] .row-stack`).click(); // closes the block
       await until(
-        async () => JSON.stringify((await lastView(page))['opened']) === `["${markers[2]}"]`,
-        'a view that opens the stack',
+        async () =>
+          JSON.stringify((await lastView(page))['closed']) ===
+          JSON.stringify([{ section: 'week', group: markers[2] }]),
+        'a view that closes the block',
       );
       await toZone(page, 'list');
       await page.keyboard.press('/');
